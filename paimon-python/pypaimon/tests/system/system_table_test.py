@@ -194,16 +194,9 @@ class SystemTableFilterTest(unittest.TestCase):
         self.assertEqual(table.column_names, ["name"])
         self.assertEqual(table.column("name").to_pylist(), ["c"])
 
-    def test_string_match_filter_still_raises(self):
-        # starts_with / ends_with / contains / like are not safe as final
-        # Arrow row filters, so they still surface a clear NotImplementedError.
-        pred = self._predicate_builder().contains("name", "b")
-        sys_table = _DataSystemTable(_fake_base())
-        rb = sys_table.new_read_builder().with_filter(pred)
-        splits = rb.new_scan().plan().splits()
-        read = rb.new_read()
-        with self.assertRaises(NotImplementedError):
-            read.to_arrow(splits)
+    def test_string_match_filter_selects_matching_rows(self):
+        table = self._read(self._predicate_builder().contains("name", "b"))
+        self.assertEqual(table.column("id").to_pylist(), [2])
 
     def test_comparison_on_array_column_raises(self):
         # PyArrow's ArrowNotImplementedError (a NotImplementedError subclass)

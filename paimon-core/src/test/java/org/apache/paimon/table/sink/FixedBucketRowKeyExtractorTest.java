@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.bucket.DefaultBucketFunction;
+import org.apache.paimon.bucket.TestBucketFunctionFactory;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -41,6 +42,7 @@ import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_FUNCTION_PROVIDER;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -69,6 +71,33 @@ public class FixedBucketRowKeyExtractorTest {
         assertThat(bucket(extractor("a,b", "a,b"), row)).isEqualTo(27);
         assertThat(bucket(extractor("a,b,c", ""), row)).isEqualTo(40);
         assertThat(bucket(extractor("", "a,b,c"), row)).isEqualTo(40);
+    }
+
+    @Test
+    public void testCustomBucketFunctionProvider() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new IntType()),
+                                new DataField(2, "c", new IntType())));
+        List<DataField> fields = TableSchema.newFields(rowType);
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET_KEY.key(), "a");
+        options.put(BUCKET.key(), "100");
+        options.put(BUCKET_FUNCTION_PROVIDER.key(), TestBucketFunctionFactory.IDENTIFIER);
+        FixedBucketRowKeyExtractor extractor =
+                new FixedBucketRowKeyExtractor(
+                        new TableSchema(
+                                0,
+                                fields,
+                                RowType.currentHighestFieldId(fields),
+                                Collections.emptyList(),
+                                Collections.singletonList("a"),
+                                options,
+                                ""));
+
+        assertThat(bucket(extractor, GenericRow.of(5, 6, 7))).isEqualTo(99);
     }
 
     @Test

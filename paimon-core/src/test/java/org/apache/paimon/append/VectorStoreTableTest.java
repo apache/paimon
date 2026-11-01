@@ -65,6 +65,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -475,6 +476,240 @@ public class VectorStoreTableTest extends DataEvolutionTestBase {
         // Row 4 is selected and must be NULL-filled.
         builder.withRowRanges(Arrays.asList(new Range(1, 1), new Range(4, 4), new Range(7, 7)));
         assertThat(readIdAndVector(builder)).containsExactly("1=200.0", "4=null", "7=300.0");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"json", "parquet"})
+    public void testCompactVectorFilesKeepsLatestColumnValues(String format) throws Exception {
+        catalog.createTable(
+                identifier(),
+                vectorSchema(format)
+                        .column("embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))
+                        .build(),
+                false);
+        write(
+                getTableDefault(),
+                GenericRow.of(0, vector(1), vector(10)),
+                GenericRow.of(1, vector(1), vector(10)));
+        write(
+                getTableDefault(),
+                GenericRow.of(2, vector(1), vector(10)),
+                GenericRow.of(3, vector(1), vector(10)));
+        updateVectors(
+                2,
+                Collections.singletonList("embedding_v2"),
+                GenericRow.of(vector(100)),
+                GenericRow.of(vector(100)));
+        updateVectors(
+                2,
+                Arrays.asList("embedding", "embedding_v2"),
+                GenericRow.of(vector(2), vector(200)),
+                GenericRow.of(vector(2), vector(200)));
+        updateVectors(
+                0,
+                Collections.singletonList("embedding_v2"),
+                GenericRow.of(vector(300)),
+                GenericRow.of(vector(300)));
+        List<String> expected = readAllVectors(getTableDefault());
+        assertThat(expected)
+                .containsExactly("0|1.0|300.0", "1|1.0|300.0", "2|2.0|200.0", "3|2.0|200.0");
+        assertThat(vectorFiles(getTableDefault())).hasSize(5);
+
+        compactVectorFiles();
+
+        List<DataFileMeta> vectorFiles = vectorFiles(getTableDefault());
+        assertThat(vectorFiles).hasSize(1);
+        assertThat(vectorFiles.get(0).nonNullRowIdRange()).isEqualTo(new Range(0, 3));
+        assertThat(vectorFiles.get(0).writeCols()).containsExactly("embedding", "embedding_v2");
+        assertThat(readAllVectors(getTableDefault())).isEqualTo(expected);
+        assertThat(read(getTableDefault(), new int[] {2}))
+                .extracting(row -> row.getVector(0).toFloatArray()[0])
+                .containsExactly(300F, 300F, 200F, 200F);
+
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.renameColumn("embedding_v2", "query_embedding")),
+                false);
+        assertThat(readAllVectors(getTableDefault())).isEqualTo(expected);
+    }
+
+    @Test
+    public void testCompactVectorFilesSkipsPartiallyPopulatedColumn() throws Exception {
+        catalog.createTable(identifier(), vectorSchema("json").build(), false);
+        write(getTableDefault(), GenericRow.of(0, vector(1)), GenericRow.of(1, vector(1)));
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))),
+                false);
+        write(
+                getTableDefault(),
+                GenericRow.of(2, vector(1), vector(10)),
+                GenericRow.of(3, vector(1), vector(10)));
+        updateVectors(
+                2,
+                Collections.singletonList("embedding_v2"),
+                GenericRow.of(vector(200)),
+                GenericRow.of(vector(200)));
+        List<String> expected = readAllVectors(getTableDefault());
+        assertThat(expected)
+                .containsExactly("0|1.0|null", "1|1.0|null", "2|1.0|200.0", "3|1.0|200.0");
+
+        compactVectorFiles();
+
+        // embedding_v2 is missing for rows [0, 1], so the merged normal range keeps the vector
+        // file of [0, 1] and only the two vector files of [2, 3] are compacted.
+        List<DataFileMeta> vectorFiles = vectorFiles(getTableDefault());
+        assertThat(vectorFiles)
+                .extracting(DataFileMeta::nonNullRowIdRange)
+                .containsExactlyInAnyOrder(new Range(0, 1), new Range(2, 3));
+        assertThat(readAllVectors(getTableDefault())).isEqualTo(expected);
+    }
+
+    @Test
+    public void testCompactVectorFilesIgnoresDroppedColumn() throws Exception {
+        catalog.createTable(identifier(), vectorSchema("json").build(), false);
+        write(getTableDefault(), GenericRow.of(0, vector(1)), GenericRow.of(1, vector(1)));
+        write(getTableDefault(), GenericRow.of(2, vector(2)), GenericRow.of(3, vector(2)));
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))),
+                false);
+        updateVectors(
+                2,
+                Collections.singletonList("embedding_v2"),
+                GenericRow.of(vector(200)),
+                GenericRow.of(vector(200)));
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(SchemaChange.dropColumn("embedding_v2")),
+                false);
+        List<String> expected = readAllVectors(getTableDefault());
+        assertThat(expected).containsExactly("0|1.0", "1|1.0", "2|2.0", "3|2.0");
+
+        compactVectorFiles();
+
+        List<DataFileMeta> vectorFiles = vectorFiles(getTableDefault());
+        assertThat(vectorFiles).hasSize(1);
+        assertThat(vectorFiles.get(0).nonNullRowIdRange()).isEqualTo(new Range(0, 3));
+        assertThat(vectorFiles.get(0).writeCols()).containsExactly("embedding");
+        assertThat(readAllVectors(getTableDefault())).isEqualTo(expected);
+    }
+
+    @Test
+    public void testCompactVectorFilesKeepsColumnSequencesWhenIgnoringIndexUpdates()
+            throws Exception {
+        catalog.createTable(
+                identifier(),
+                vectorSchema("json")
+                        .column("embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))
+                        .option(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(), "IGNORE")
+                        .build(),
+                false);
+        write(getTableDefault(), GenericRow.of(0, vector(1), vector(10)));
+        write(getTableDefault(), GenericRow.of(1, vector(1), vector(10)));
+        updateVectors(0, Collections.singletonList("embedding_v2"), GenericRow.of(vector(100)));
+        long embeddingSequence =
+                vectorFiles(getTableDefault()).stream()
+                        .filter(file -> file.writeCols().contains("embedding"))
+                        .mapToLong(DataFileMeta::maxSequenceNumber)
+                        .max()
+                        .getAsLong();
+        long updateSequence =
+                vectorFiles(getTableDefault()).stream()
+                        .mapToLong(DataFileMeta::maxSequenceNumber)
+                        .max()
+                        .getAsLong();
+        assertThat(embeddingSequence).isLessThan(updateSequence);
+        List<String> expected = readAllVectors(getTableDefault());
+
+        compactVectorFiles();
+
+        List<DataFileMeta> vectorFiles = vectorFiles(getTableDefault());
+        assertThat(vectorFiles).hasSize(1);
+        assertThat(vectorFiles.get(0).writeCols()).containsExactly("embedding", "embedding_v2");
+        assertThat(vectorFiles.get(0).maxSequenceNumber()).isEqualTo(updateSequence);
+        assertThat(vectorFiles.get(0).writeColsSequences())
+                .containsExactly(embeddingSequence, updateSequence);
+        assertThat(readAllVectors(getTableDefault())).isEqualTo(expected);
+    }
+
+    @Test
+    public void testCompactVectorFilesRollsByVectorTargetSize() throws Exception {
+        catalog.createTable(identifier(), vectorSchema("parquet").build(), false);
+        int rowsPerWrite = 1250;
+        for (int write = 0; write < 2; write++) {
+            InternalRow[] rows = new InternalRow[rowsPerWrite];
+            for (int i = 0; i < rowsPerWrite; i++) {
+                int id = write * rowsPerWrite + i;
+                rows[i] = GenericRow.of(id, vector(id));
+            }
+            write(getTableDefault(), rows);
+        }
+        // Non-overlapping files are only rewritten when small; overlap them with an update.
+        updateVectors(0, Collections.singletonList("embedding"), vectorRows(rowsPerWrite, 7));
+        List<String> expected = readAllVectors(getTableDefault());
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.setOption(CoreOptions.VECTOR_TARGET_FILE_SIZE.key(), "1 b")),
+                false);
+
+        compactVectorFiles();
+
+        // The rolling writer checks the target size every 1000 rows.
+        List<DataFileMeta> vectorFiles = vectorFiles(getTableDefault());
+        vectorFiles.sort(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId));
+        assertThat(vectorFiles)
+                .extracting(DataFileMeta::nonNullRowIdRange)
+                .containsExactly(new Range(0, 999), new Range(1000, 1999), new Range(2000, 2499));
+        assertThat(readAllVectors(getTableDefault())).isEqualTo(expected);
+
+        FileStoreTable table = getTableDefault();
+        assertThat(
+                        new DataEvolutionCompactCoordinator(
+                                        table, false, true, table.latestSnapshot().get())
+                                .plan())
+                .isEmpty();
+    }
+
+    private List<String> readAllVectors(FileStoreTable table) throws Exception {
+        List<String> result = new ArrayList<>();
+        for (InternalRow row : read(table)) {
+            StringBuilder builder = new StringBuilder().append(row.getInt(0));
+            for (int i = 1; i < row.getFieldCount(); i++) {
+                builder.append('|')
+                        .append(row.isNullAt(i) ? null : row.getVector(i).toFloatArray()[0]);
+            }
+            result.add(builder.toString());
+        }
+        return result;
+    }
+
+    private static List<DataFileMeta> vectorFiles(FileStoreTable table) {
+        return table.store().newScan().plan().files().stream()
+                .map(ManifestEntry::file)
+                .filter(file -> file.fileName().contains(".vector."))
+                .collect(Collectors.toList());
+    }
+
+    private void compactVectorFiles() throws Exception {
+        FileStoreTable table = getTableDefault();
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = new ArrayList<>();
+        for (DataEvolutionCompactTask task :
+                new DataEvolutionCompactCoordinator(table, false, true, snapshot).plan()) {
+            messages.add(task.doCompact(table, commitUser));
+        }
+        messages.addAll(
+                new DataEvolutionCompactionCommitPreparation(table, snapshot).prepare(messages));
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(messages);
+        }
     }
 
     private static List<String> readIdAndVector(ReadBuilder builder) throws IOException {

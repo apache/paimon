@@ -21,7 +21,7 @@ import unittest
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.scanner.data_evolution_split_generator import DataEvolutionSplitGenerator
+from pypaimon.execution.python.read.scanner.data_evolution_split_generator import (DataEvolutionSplitGenerator)
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 from pypaimon.utils.range import Range

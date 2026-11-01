@@ -21,6 +21,8 @@ from unittest.mock import Mock
 
 from parameterized import parameterized
 
+from pypaimon.write.backend_dispatch import python_commit
+from pypaimon.execution.python.write.table_commit import PythonTableCommit
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit
@@ -68,14 +70,14 @@ class TestTableCommit(unittest.TestCase):
                         tuple(entry.partition.values), entry.bucket, entry.index_file)
                         for message in messages for entry in message.index_adds)
                 self.assertTrue(paths)
-                publish = commit.file_store_commit.commit
+                publish = python_commit(commit).file_store_commit.commit
 
                 def fail_commit(*args, **kwargs):
                     if published:
                         publish(*args, **kwargs)
                     raise OSError('Commit outcome is unknown')
 
-                with patch.object(commit.file_store_commit, 'commit', side_effect=fail_commit):
+                with patch.object(python_commit(commit).file_store_commit, 'commit', side_effect=fail_commit):
                     with self.assertRaisesRegex(OSError, 'Commit outcome is unknown'):
                         commit.commit(messages, 1) if stream else commit.commit(messages)
                 # An unknown commit outcome must never trigger explicit commit abort.
@@ -96,6 +98,7 @@ class TestTableCommit(unittest.TestCase):
     def test_empty_append_snapshot_is_opt_in_and_can_be_tagged(self):
         import pyarrow as pa
         import pypaimon.multimodal as pmm
+        from pypaimon.schema.arrow_schema import read_arrow_schema
 
         with TemporaryDirectory(prefix="paimon-empty-commit-") as warehouse:
             connection = pmm.connect(options={"warehouse": warehouse})
@@ -126,7 +129,7 @@ class TestTableCommit(unittest.TestCase):
             table.raw_table.create_tag("empty")
             tagged = table.scan(tag_name="empty").to_arrow()
             self.assertEqual(0, tagged.num_rows)
-            self.assertEqual(schema, tagged.schema)
+            self.assertEqual(read_arrow_schema(table.raw_table.fields), tagged.schema)
 
             table.add([{"feature": "state_imu_body"}])
             table.add(empty)
@@ -146,11 +149,11 @@ class TestTableCommit(unittest.TestCase):
         commit.table.options.native_commit_enabled.return_value = False
         commit.commit_user = 'test_user'
         commit.overwrite_partition = overwrite_partition
-        commit.file_store_commit = Mock()
-        commit.batch_committed = False
+        commit._python_commit = PythonTableCommit(Mock(), overwrite_partition)
+        commit._batch_committed = False
         commit._commit_callbacks = []
         commit._native_commit = None
-        return commit, commit.file_store_commit
+        return commit, python_commit(commit).file_store_commit
 
     # -- Overwrite mode: should always call overwrite(), even with empty messages --
 

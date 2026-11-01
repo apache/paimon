@@ -146,9 +146,11 @@ def test_properties_survive_publication_response_loss(tmp_path, native_rest_cata
     proxy.commit.side_effect = publish_then_fail
     commit = builder.new_commit()
     try:
-        with patch('pypaimon.write.native_commit.create_native_commit', return_value=proxy), \
+        with patch('pypaimon.execution.native.write.native_commit.create_native_commit', return_value=proxy), \
                 native_commit_test._must_not_fallback(commit, 'overwrite' if overwrite else 'commit'), \
-                patch.object(commit.file_store_commit, 'abort', side_effect=AssertionError('abort')):
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.abort',
+                      side_effect=AssertionError('abort')):
             with pytest.raises(OSError, match='response lost'):
                 commit.commit(messages, snapshot_properties={'source': 'published'})
         snapshot = table.snapshot_manager().get_latest_snapshot()

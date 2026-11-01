@@ -24,11 +24,12 @@ from unittest.mock import Mock, patch
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.read.datasource.split_provider import (
     CatalogSplitProvider, PreResolvedSplitProvider)
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.read.stream_read_builder import StreamReadBuilder
-from pypaimon.read.table_read import _RemainingRows
+from pypaimon.execution.python.read.table_read import _RemainingRows
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
 
 
@@ -320,7 +321,7 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         self.assertEqual(
             expected, read.to_arrow_batch_reader(
                 splits, parallelism=1).read_all().to_pydict())
-        batches = read._read_one_split_to_batches(
+        batches = PythonTableRead(read)._read_one_split_to_batches(
             splits[0], read._output_arrow_schema(), _RemainingRows(None))
         self.assertEqual(expected, pa.Table.from_batches(batches).to_pydict())
 

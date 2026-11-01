@@ -25,6 +25,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.migrate.CopiedDataFiles;
 import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -70,6 +71,12 @@ public class CopyFilesCommitOperator extends CopyFilesOperator {
         // deserialize index file meta
         Map<Tuple2<BinaryRow, Integer>, IndexFileInfo> indexFileMetaMap =
                 deserializeIndexFileMeta(indexCopyFileInfoRdd);
+
+        // the copied files keep the row ids and sequence numbers of the source: adapt them to the
+        // target before committing them
+        List<List<DataFileMeta>> copiedFiles = new ArrayList<>();
+        dataFileMetaMap.values().forEach(info -> copiedFiles.add(info.dataFileMetas()));
+        CopiedDataFiles.adaptToTarget(targetTable, copiedFiles);
 
         // construct commit messages
         List<CommitMessage> commitMessages = new ArrayList<>();

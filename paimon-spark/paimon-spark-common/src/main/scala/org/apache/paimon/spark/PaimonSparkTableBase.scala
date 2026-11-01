@@ -54,6 +54,7 @@ abstract class PaimonSparkTableBase(val table: Table)
   }
 
   private def supportsV2Write: Boolean = {
+    !coreOptions.bucketFunctionProvider().isPresent &&
     coreOptions.bucketFunctionType() == BucketFunctionType.DEFAULT && {
       table match {
         case storeTable: FileStoreTable =>
@@ -193,7 +194,11 @@ abstract class PaimonSparkTableBase(val table: Table)
 
   def truncateTable: Boolean = {
     val commit = table.newBatchWriteBuilder().newCommit()
-    commit.truncateTable()
+    try {
+      commit.truncateTable()
+    } finally {
+      commit.close()
+    }
     true
   }
 }

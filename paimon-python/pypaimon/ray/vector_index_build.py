@@ -17,16 +17,14 @@
 
 """Ray shard construction with one driver-side global-index commit."""
 
-from pypaimon.globalindex.build_plan import split_by_global_index_shard
-from pypaimon.globalindex.index_file_utils import new_global_index_file_name
-from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import VINDEX_IDENTIFIERS
-from pypaimon.ray.vector_search import _execution_options
+from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS
+from pypaimon.ray.search_execution import execution_options
 
 
 def validate_build_options(builder, concurrency, ray_remote_args):
     if builder._index_type not in VINDEX_IDENTIFIERS:
         raise ValueError("Ray index building supports only native vector indexes.")
-    concurrency, options = _execution_options(concurrency, ray_remote_args)
+    concurrency, options = execution_options(concurrency, ray_remote_args)
     # Retrying a write task can race with a lost worker writing the same file.
     # A failed build can instead be rerun after its uncommitted outputs close.
     if options.get("max_retries", 0) != 0 or options.get("retry_exceptions", False):
@@ -37,45 +35,41 @@ def validate_build_options(builder, concurrency, ray_remote_args):
     return concurrency, options
 
 
-def build_vector_index(builder, splits, unindexed_ranges, index_field, table_read,
-                       index_path, concurrency, remote_args):
+def build_native_vector_index(table, plan, concurrency, remote_args):
+    """Schedule immutable Core tasks; all publication remains with the caller."""
     import ray
 
-    shards = split_by_global_index_shard(
-        splits, builder._core_options.global_index_row_count_per_shard(), unindexed_ranges)
-    # Allocate names before dispatch, so failed/lost result delivery cannot hide
-    # files from cleanup. Workers never publish index manifests or snapshots.
-    names = [new_global_index_file_name("vindex-" + builder._index_type) for _ in shards]
-    context = ray.put((builder, index_field, table_read, index_path))
-    remote = ray.remote(_build_shard).options(**remote_args)
-    pending = {}
-    results = {}
+    shards = plan.shards()
+    if not shards:
+        return []
+    context = ray.put(table)
+    remote = ray.remote(_build_native_shard).options(**remote_args)
+    pending, results = {}, {}
     next_shard = 0
     try:
         while pending or next_shard < len(shards):
             while len(pending) < concurrency and next_shard < len(shards):
-                ref = remote.remote(context, shards[next_shard], names[next_shard])
+                ref = remote.remote(context, shards[next_shard])
                 pending[ref] = next_shard
                 next_shard += 1
             ready, _ = ray.wait(list(pending), num_returns=1)
             ref = ready[0]
-            results[pending.pop(ref)] = ray.get(ref)
-        return [results[i] for i in range(len(shards)) if results[i] is not None]
+            ordinal = pending[ref]
+            results[ordinal] = ray.get(ref)
+            del pending[ref]
+        return [message for ordinal in range(len(shards)) for message in results[ordinal]]
     except BaseException:
-        # Do not delete a file while another worker may still be writing it.
-        # Stop submissions and drain every dispatched task before cleanup.
+        # A worker may have completed even when result delivery failed. Wait
+        # for dispatched tasks, but retain every output: its commit ownership
+        # is unknown and another attempt may already hold the messages.
         for ref in pending:
             try:
                 ray.get(ref)
             except BaseException:
                 pass
-        for name in names:
-            builder._table.file_io.delete_quietly(index_path.rstrip("/") + "/" + name)
         raise
 
 
-def _build_shard(context, shard, file_name):
-    builder, index_field, table_read, index_path = context
-    index_split, index_range = shard
-    return builder._build_generic_shard(
-        index_split, index_range, index_field, table_read, index_path, file_name=file_name)
+def _build_native_shard(table, shard):
+    from pypaimon.globalindex.index_dispatch import build_native_vector_index_shard
+    return build_native_vector_index_shard(table, shard)

@@ -18,7 +18,10 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.schema.SchemaChange
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.plans.logical.Aggregate
@@ -224,6 +227,51 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
         "SELECT COUNT(*), MIN(c4), MAX(c4) FROM T",
         Row(5, date1, date2) :: Nil,
         2)
+    }
+  }
+
+  test("Push down aggregate - column without min/max statistics") {
+    // A column whose stats-mode is `counts` carries a null count but no min/max, which must not
+    // be mistaken for a column that is all null.
+    Seq("'fields.c1.stats-mode' = 'counts'", "'metadata.stats-mode' = 'counts'").foreach {
+      statsMode =>
+        withTable("T") {
+          spark.sql(s"CREATE TABLE T (c1 INT, c2 INT) TBLPROPERTIES($statsMode)")
+          spark.sql("INSERT INTO T VALUES (1, 10), (2, 20), (3, null)")
+          runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 0)
+          runAndCheckAggregate("SELECT MIN(c1), MAX(c1) FROM T", Row(1, 3) :: Nil, 2)
+          runAndCheckAggregate("SELECT MIN(c1), MAX(c2) FROM T", Row(1, 20) :: Nil, 2)
+        }
+    }
+
+    withTable("T") {
+      spark.sql("CREATE TABLE T (c1 INT, c2 INT) TBLPROPERTIES('fields.c1.stats-mode' = 'counts')")
+      spark.sql("INSERT INTO T VALUES (1, 10), (2, 20), (3, null)")
+      // c2 still has full statistics
+      runAndCheckAggregate("SELECT MIN(c2), MAX(c2) FROM T", Row(10, 20) :: Nil, 0)
+      // A column added after the data was written is null in every existing file
+      spark.sql("ALTER TABLE T ADD COLUMN c3 INT")
+      spark.sql("INSERT INTO T VALUES (4, 40, 400)")
+      runAndCheckAggregate("SELECT MIN(c3), MAX(c3) FROM T", Row(400, 400) :: Nil, 0)
+    }
+  }
+
+  test("Push down aggregate - column type change that breaks ordering") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (c1 STRING, c2 INT)")
+      // one file holds '100' and '2', so as strings its min is '100' and its max is '2'
+      spark.sql("INSERT INTO T SELECT /*+ COALESCE(1) */ * FROM VALUES ('100', 1), ('2', 2)")
+      // Spark only up-casts in ALTER TABLE, so change the type as Flink or the Java API would
+      paimonCatalog.alterTable(
+        Identifier.create(dbName0, "T"),
+        SchemaChange.updateColumnType("c1", DataTypes.INT()),
+        false)
+      spark.sql("INSERT INTO T VALUES (50, 3)")
+      runAndCheckAggregate("SELECT MIN(c1), MAX(c1) FROM T", Row(2, 100) :: Nil, 2)
+
+      // a widening keeps the order of values, so the aggregate is still pushed down
+      spark.sql("ALTER TABLE T ALTER COLUMN c2 TYPE BIGINT")
+      runAndCheckAggregate("SELECT MIN(c2), MAX(c2) FROM T", Row(1L, 3L) :: Nil, 0)
     }
   }
 

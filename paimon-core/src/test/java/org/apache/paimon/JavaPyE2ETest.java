@@ -179,13 +179,73 @@ public class JavaPyE2ETest {
             FileStoreTable fileStoreTable = (FileStoreTable) table;
             List<Split> splits =
                     new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
-            TableRead read = fileStoreTable.newRead();
             List<String> res =
                     getResult(
-                            read,
+                            fileStoreTable.newRead(),
                             splits,
                             row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+            assertThat(res).hasSize(6);
+            for (String prefix :
+                    Arrays.asList(
+                            "1, Apple, Fruit, 1.5, ",
+                            "2, Banana, Fruit, 0.8, ",
+                            "3, Carrot, Vegetable, 0.6, ",
+                            "4, Broccoli, Vegetable, 1.2, ",
+                            "5, Chicken, Meat, 5.0, ",
+                            "6, Beef, Meat, 8.0, ")) {
+                assertThat(res).anySatisfy(row -> assertThat(row).startsWith(prefix));
+            }
             LOG.info("Read append table: {} row(s)", res.size());
+        }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteReadAppendTable() throws Exception {
+        for (String format : Arrays.asList("parquet", "orc", "avro")) {
+            Identifier identifier = identifier("mixed_test_append_tablej_" + format);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("name", DataTypes.STRING())
+                            .column("category", DataTypes.STRING())
+                            .column("value", DataTypes.DOUBLE())
+                            .partitionKeys("category")
+                            .option("file.format", format)
+                            .build();
+            catalog.dropTable(identifier, true);
+            catalog.createTable(identifier, schema, false);
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            String[] names = {"Apple", "Banana", "Carrot", "Broccoli", "Chicken", "Beef"};
+            String[] categories = {"Fruit", "Fruit", "Vegetable", "Vegetable", "Meat", "Meat"};
+            double[] values = {1.5, 0.8, 0.6, 1.2, 5.0, 8.0};
+            try (StreamTableWrite write = table.newWrite(commitUser);
+                    InnerTableCommit commit = table.newCommit(commitUser)) {
+                for (int i = 0; i < names.length; i++) {
+                    write.write(
+                            GenericRow.of(
+                                    i + 1,
+                                    BinaryString.fromString(names[i]),
+                                    BinaryString.fromString(categories[i]),
+                                    values[i]));
+                }
+                commit.commit(0, write.prepareCommit(true, 0));
+            }
+            List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+            assertThat(
+                            getResult(
+                                    table.newRead(),
+                                    splits,
+                                    row ->
+                                            DataFormatTestUtil.toStringNoRowKind(
+                                                    row, table.rowType())))
+                    .containsExactlyInAnyOrder(
+                            "1, Apple, Fruit, 1.5",
+                            "2, Banana, Fruit, 0.8",
+                            "3, Carrot, Vegetable, 0.6",
+                            "4, Broccoli, Vegetable, 1.2",
+                            "5, Chicken, Meat, 5.0",
+                            "6, Beef, Meat, 8.0");
         }
     }
 

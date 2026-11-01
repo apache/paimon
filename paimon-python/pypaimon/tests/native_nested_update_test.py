@@ -17,7 +17,8 @@
 
 """Nested Native update dispatch and parity with the Python implementation."""
 
-from contextlib import ExitStack
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -26,9 +27,8 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 
 
 pytestmark = pytest.mark.native_plan
@@ -66,15 +66,16 @@ def _table(tmp_path, data_type, native):
     return table, schema
 
 
+@contextmanager
 def _native_only(native):
-    stack = ExitStack()
-    if native:
-        for cls, method in [(TableUpdateByRowId, '_load_existing_files_info'),
-                            (TableUpdate, '_build_predicate_update_table'),
-                            (TableUpsertByKey, '_upsert_partition'),
-                            (TableUpsertByKey, '_upsert_row_partition')]:
-            stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python fallback')))
-    return stack
+    with ExitStack() as stack:
+        if native:
+            for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
+                                (PythonTableUpdate, '_build_predicate_update_table'),
+                                (PythonTableUpsert, '_upsert_partition'),
+                                (PythonTableUpsert, '_upsert_row_partition')]:
+                stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python fallback')))
+        yield
 
 
 def _commit(builder, messages, stream):
@@ -93,8 +94,10 @@ def _check_rows(table, values):
         read = builder.new_read()
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(read, '_create_split_read',
-                                                 side_effect=AssertionError('Python read fallback')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                    side_effect=AssertionError('Python read fallback')
+                ))
             actual = read.to_arrow(builder.new_scan().plan().splits()).sort_by('id')
         assert actual['value'].to_pylist() == values
         assert actual['untouched'].to_pylist() == list(range(10, 10 + len(values)))
@@ -199,7 +202,7 @@ def test_nested_row_id_coercion_matches_python(tmp_path, native, input_values, t
     data = pa.table({'_ROW_ID': list(range(len(input_values))), 'value': input_values})
     before = set(tmp_path.rglob('*.parquet'))
     try:
-        expected = TableUpdateByRowId._coerce_column(input_values, target).to_pylist()
+        expected = PythonTableUpdateByRowId._coerce_column(input_values, target).to_pylist()
     except (ValueError, TypeError, pa.ArrowException):
         with _native_only(native), pytest.raises((ValueError, TypeError, pa.ArrowException)):
             update.update_by_arrow_with_row_id(data)

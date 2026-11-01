@@ -18,13 +18,24 @@
 
 package org.apache.paimon.lumina.index;
 
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for Lumina global indexer factory identifiers. */
+/** Tests for Lumina global indexer factory identifiers and the indexer metric. */
 public class LuminaVectorGlobalIndexerFactoryTest {
 
     @Test
@@ -40,5 +51,70 @@ public class LuminaVectorGlobalIndexerFactoryTest {
                 .isExactlyInstanceOf(LuminaVectorGlobalIndexerFactory.class);
         assertThat(GlobalIndexerFactoryUtils.load("lumina-vector-ann"))
                 .isExactlyInstanceOf(LegacyLuminaVectorGlobalIndexerFactory.class);
+    }
+
+    @Test
+    public void testMetricBeforeReaderUsesConfiguration() {
+        LuminaVectorGlobalIndexer indexer = newIndexer();
+        assertThat(indexer.metric()).isEqualTo(configuredMetric());
+    }
+
+    @Test
+    public void testMetricFollowsPersistedIndexMeta() throws Exception {
+        LuminaVectorGlobalIndexer indexer = newIndexer();
+        readShard(indexer, metaBytes(LuminaVectorMetric.L2));
+        assertThat(indexer.metric()).isEqualTo(LuminaVectorMetric.L2.getLuminaName());
+    }
+
+    @Test
+    public void testConflictingShardMetricsKeepConfiguredMetric() throws Exception {
+        LuminaVectorGlobalIndexer indexer = newIndexer();
+        readShard(indexer, metaBytes(LuminaVectorMetric.L2));
+        readShard(indexer, metaBytes(LuminaVectorMetric.COSINE));
+        assertThat(indexer.metric()).isEqualTo(configuredMetric());
+
+        readShard(indexer, metaBytes(LuminaVectorMetric.L2));
+        assertThat(indexer.metric()).isEqualTo(configuredMetric());
+    }
+
+    @Test
+    public void testCorruptMetaKeepsConfiguredMetric() throws Exception {
+        LuminaVectorGlobalIndexer indexer = newIndexer();
+        readShard(indexer, "not json".getBytes(StandardCharsets.UTF_8));
+        assertThat(indexer.metric()).isEqualTo(configuredMetric());
+
+        Map<String, String> unknownMetric = new HashMap<>();
+        unknownMetric.put("index.dimension", "2");
+        unknownMetric.put("distance.metric", "unknown");
+        readShard(indexer, new LuminaIndexMeta(unknownMetric).serialize());
+        assertThat(indexer.metric()).isEqualTo(configuredMetric());
+    }
+
+    private static LuminaVectorGlobalIndexer newIndexer() {
+        return new LuminaVectorGlobalIndexer(DataTypes.ARRAY(DataTypes.FLOAT()), new Options());
+    }
+
+    private static String configuredMetric() {
+        return LuminaVectorMetric.INNER_PRODUCT.getLuminaName();
+    }
+
+    private static byte[] metaBytes(LuminaVectorMetric metric) throws Exception {
+        Map<String, String> meta = new HashMap<>();
+        meta.put("index.dimension", "2");
+        meta.put("distance.metric", metric.getLuminaName());
+        return new LuminaIndexMeta(meta).serialize();
+    }
+
+    private static void readShard(LuminaVectorGlobalIndexer indexer, byte[] metadata)
+            throws Exception {
+        GlobalIndexFileReader fileReader =
+                meta -> {
+                    throw new AssertionError("Index file should not be opened");
+                };
+        GlobalIndexIOMeta file = new GlobalIndexIOMeta(new Path("/shard.index"), 1L, metadata);
+        try (GlobalIndexReader reader =
+                indexer.createReader(fileReader, Collections.singletonList(file), 1L, null, null)) {
+            assertThat(reader).isInstanceOf(LuminaVectorGlobalIndexReader.class);
+        }
     }
 }

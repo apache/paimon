@@ -17,6 +17,7 @@
 
 """Deletion-vector locations must survive writes, further deletes and time travel."""
 
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
 import os
 import subprocess
 import sys
@@ -32,14 +33,14 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
-from pypaimon.read.native_plan import native_plan, native_version_at_least
+from pypaimon.execution.native.read.plan import (native_plan)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 _PLANNERS = ['python', pytest.param('native', marks=[pytest.mark.native_plan, pytest.mark.skipif(
-    not native_version_at_least(0, 4, 0),
+    not native_runtime_available(),
     reason='pypaimon-rust>=0.4.0 required for native DV paths')])]
 
 
@@ -473,7 +474,7 @@ def test_multiple_dv_index_files_in_one_bucket_keep_all_deletions(tmp_path, plan
         commit.close()
     _delete(table, [0, 4])
     old = _entries(table, 3)[0]
-    deleter = TableDeleteByRowId(table)
+    deleter = PythonTableDeleteByRowId().initialize(table)
     _, vectors = deleter._read_existing_deletion_vectors(old.partition, old.bucket, 3)
     assert len(vectors) == 2
     # Java rolls DV index files by target size, so one bucket can legitimately

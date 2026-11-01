@@ -23,6 +23,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionUtils;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -32,6 +33,7 @@ import org.apache.spark.sql.catalyst.expressions.Expression;
 import org.apache.spark.sql.catalyst.expressions.Literal;
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan;
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
+import org.apache.spark.sql.types.StringType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -88,7 +90,8 @@ public class SparkProcedureUtils {
         // `dt=2024-01-01,hh=0;dt=2024-01-02,hh=1`, not a SQL expression.
         // Values that are valid Spark SQL literals are normalized with Spark's parser, so quoted
         // partition values follow Spark partition spec behavior. Values that are not literals are
-        // kept as path-style typed strings for backward compatibility.
+        // kept as path-style typed strings for backward compatibility. For string partitions only
+        // quoted values are unquoted; other values are kept as written (e.g. `hh=08`).
         //
         // Invalid partition keys are rejected explicitly here so procedures can fail with a clear
         // error message before converting values to Paimon internal literals.
@@ -105,7 +108,8 @@ public class SparkProcedureUtils {
         List<Map<String, String>> partitionSpecs =
                 ParameterUtils.getPartitions(partitions.split(";"));
         validatePartitionKeys(partitionSpecs, partitionKeys);
-        partitionSpecs = normalizePartitionValuesWithSparkParser(spark, partitionSpecs);
+        partitionSpecs =
+                normalizePartitionValuesWithSparkParser(spark, partitionSpecs, partitionType);
 
         Predicate predicate =
                 PredicateBuilder.partitions(
@@ -132,9 +136,11 @@ public class SparkProcedureUtils {
     }
 
     private static List<Map<String, String>> normalizePartitionValuesWithSparkParser(
-            SparkSession spark, List<Map<String, String>> partitionSpecs) {
+            SparkSession spark, List<Map<String, String>> partitionSpecs, RowType partitionType) {
         return partitionSpecs.stream()
-                .map(partitionSpec -> parsePartitionSpec(spark, partitionSpec, false))
+                .map(
+                        partitionSpec ->
+                                parsePartitionSpec(spark, partitionSpec, false, partitionType))
                 .collect(java.util.stream.Collectors.toList());
     }
 
@@ -149,21 +155,32 @@ public class SparkProcedureUtils {
      */
     public static Map<String, String> parseStaticPartition(
             SparkSession spark, Map<String, String> partitionSpec) {
-        return parsePartitionSpec(spark, partitionSpec, true);
+        return parsePartitionSpec(spark, partitionSpec, true, null);
     }
 
     private static Map<String, String> parsePartitionSpec(
-            SparkSession spark, Map<String, String> partitionSpec, boolean requireLiteral) {
+            SparkSession spark,
+            Map<String, String> partitionSpec,
+            boolean requireLiteral,
+            @Nullable RowType partitionType) {
         Map<String, String> staticPartition = new LinkedHashMap<>();
         for (Map.Entry<String, String> entry : partitionSpec.entrySet()) {
+            boolean isStringPartition =
+                    partitionType != null
+                            && partitionType
+                                    .getField(entry.getKey())
+                                    .type()
+                                    .is(DataTypeFamily.CHARACTER_STRING);
             staticPartition.put(
-                    entry.getKey(), parsePartitionValue(spark, entry.getValue(), requireLiteral));
+                    entry.getKey(),
+                    parsePartitionValue(
+                            spark, entry.getValue(), requireLiteral, isStringPartition));
         }
         return staticPartition;
     }
 
     private static String parsePartitionValue(
-            SparkSession spark, String value, boolean requireLiteral) {
+            SparkSession spark, String value, boolean requireLiteral, boolean isStringPartition) {
         Expression expr;
         try {
             expr = spark.sessionState().sqlParser().parseExpression(value);
@@ -181,9 +198,15 @@ public class SparkProcedureUtils {
             return value;
         }
 
-        Object literalValue = ((Literal) expr).value();
+        Literal literal = (Literal) expr;
+        Object literalValue = literal.value();
         if (literalValue == null) {
             checkArgument(!requireLiteral, "Partition value cannot be null");
+            return value;
+        }
+        if (isStringPartition && !(literal.dataType() instanceof StringType)) {
+            // Keep the raw text of a string partition value: parsing `08` as a numeric literal
+            // would turn it into `8` and target another partition.
             return value;
         }
         return literalValue.toString();

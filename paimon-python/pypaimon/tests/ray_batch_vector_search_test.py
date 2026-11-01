@@ -24,13 +24,16 @@ import pytest
 
 pytest.importorskip("ray")
 
+from pypaimon.ray.search_execution import RaySearchTaskExecutor
+from pypaimon.tests.search_execution_test_helpers import task_parts
+
 import pypaimon.multimodal as pm
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.multimodal.query import ScanQuery
-from pypaimon.ray import batch_vector_search as search_module
-from pypaimon.table.source.vector_search_read import BatchVectorSearchReadImpl
-from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
+from pypaimon.execution.python.read.search import distributed_vector_search as search_module
+from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl
+from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
 from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
 from pypaimon.tests import ray_vector_search_test as fixtures
 from pypaimon.tests.ray_vector_search_test import VECTORS, add_rows, build_index, ids
@@ -57,15 +60,16 @@ def test_raw_batch_shares_split_tasks(table, ray_cluster, metric, concurrency):
         else:
             scores = vectors.dot(vector)
         expected.append(sorted(sorted(range(len(VECTORS)), key=lambda i: (-scores[i], i))[:3]))
-    original = search_module._map_tasks
+    original = RaySearchTaskExecutor.map
     dispatched = []
 
-    def record(worker, context, items, *args):
+    def record(executor, tasks, ordered=False):
+        worker, context, items = task_parts(tasks)
         if worker is search_module._search_batch_raw_split:
             dispatched.append(len(items))
-        return original(worker, context, items, *args)
+        return original(executor, tasks, ordered=ordered)
 
-    with patch.object(search_module, "_map_tasks", record):
+    with patch.object(RaySearchTaskExecutor, "map", record):
         actual = query.to_arrow(execution="ray", concurrency=concurrency)
     assert [ids(result) for result in actual] == expected
     assert dispatched == [2]
@@ -80,14 +84,15 @@ def test_indexed_batch_and_raw_fallback_use_persisted_metric(table, ray_cluster,
     options = {"refine_factor": "2"} if refine else {}
     query = table.search_vectors(QUERIES, options=options).select(["id"]).limit(3)
     expected = query.to_list()
-    original = search_module._map_tasks
+    original = RaySearchTaskExecutor.map
     dispatched = []
 
-    def record(worker, context, items, *args):
+    def record(executor, tasks, ordered=False):
+        worker, context, items = task_parts(tasks)
         dispatched.append((worker.__name__, len(items)))
-        return original(worker, context, items, *args)
+        return original(executor, tasks, ordered=ordered)
 
-    with patch.object(search_module, "_map_tasks", record):
+    with patch.object(RaySearchTaskExecutor, "map", record):
         actual = query.to_arrow(execution="ray", concurrency=2)
     assert [result.to_pylist() for result in actual] == expected
     assert ("_search_batch_index_split", 2) in dispatched
@@ -186,16 +191,16 @@ def test_whole_batch_pins_snapshot_and_can_be_reused(table, ray_cluster, stage):
     add_rows(table, VECTORS)
     query = table.search_vectors(QUERIES).select(["id", "category"]).limit(1)
     expected = query.to_list()
-    target = search_module if stage == "dispatch" else ScanQuery
-    name = "_map_tasks" if stage == "dispatch" else "_read_global_index_result"
+    target = RaySearchTaskExecutor if stage == "dispatch" else ScanQuery
+    name = "map" if stage == "dispatch" else "_read_global_index_result"
     original = getattr(target, name)
     changed = []
 
-    def commit(*args):
+    def commit(*args, **kwargs):
         if not changed:
             table.update("id = 0", {"category": "changed"})
             changed.append(True)
-        return original(*args)
+        return original(*args, **kwargs)
 
     with patch.object(target, name, commit):
         assert [result.to_pylist() for result in query.to_arrow(execution="ray")] == expected
@@ -230,7 +235,7 @@ def test_empty_snapshot_does_not_follow_first_commit(table, ray_cluster):
         return scan(search_scan)
 
     with patch.object(DataEvolutionVectorScan, "scan", append_before_scan), \
-            patch.object(search_module, "_map_tasks", side_effect=AssertionError("empty task")):
+            patch.object(RaySearchTaskExecutor, "map", side_effect=AssertionError("empty task")):
         results = query.to_arrow(execution="ray")
     assert len(results) == 3
     assert all(result.schema.names == ["id"] and result.num_rows == 0 for result in results)
@@ -241,22 +246,23 @@ def test_global_candidates_and_duplicate_precedence(table):
     add_rows(table, [[0., 1.], [10., 1.], [20., 1.], [1., 1.]])
     query = table.search_vectors([[1., 1.], [20., 1.]], options={"refine_factor": "2"}).limit(1)._for_execution()
     reader = query._batch_vector_search_builder(query).new_batch_vector_search_read()
-    distributed = search_module._RayBatchVectorSearchRead(reader, 2, {})
+    distributed = search_module.DistributedBatchVectorSearchRead(reader, RaySearchTaskExecutor(2, {}))
     index_file = IndexFileMeta("ivf-flat", "fake", 1, 2)
     splits = [IndexVectorSearchSplit(0, 1, [index_file]), IndexVectorSearchSplit(0, 3, [index_file])]
 
-    def completed(worker, context, items, *args):
+    def completed(executor, tasks, ordered=False):
+        worker, context, items = task_parts(tasks)
         if worker is search_module._search_batch_refine_split:
             for ordinal, split in enumerate(items):
                 yield ordinal, worker(context, split)
             return
         # First query must exclude exact nearest row 3; second query has its own candidates.
         # Duplicate row 0 must retain the earlier split's score for the second query.
-        assert args[2] is True
+        assert ordered is True
         yield 0, ("l2", [{0: 10., 1: 9.}, {0: 1., 1: 9.}])
         yield 1, ("l2", [{2: 8., 3: 7.}, {0: 100., 2: 8., 3: 7.}])
 
-    with patch.object(search_module, "_map_tasks", completed):
+    with patch.object(RaySearchTaskExecutor, "map", completed):
         results = distributed._read_batch(splits, query._table._read_snapshot)
     assert [list(result.results()) for result in results] == [[0], [2]]
     assert results[0].score_getter()(0) == 0.5
@@ -265,17 +271,17 @@ def test_global_candidates_and_duplicate_precedence(table):
 def test_metric_mismatch_in_empty_shard_closes_tasks(table):
     query = table.search_vectors(QUERIES)
     reader = query._batch_vector_search_builder(query).new_batch_vector_search_read()
-    distributed = search_module._RayBatchVectorSearchRead(reader, 2, {})
+    distributed = search_module.DistributedBatchVectorSearchRead(reader, RaySearchTaskExecutor(2, {}))
     closed = []
 
-    def completed(*args):
+    def completed(executor, tasks, ordered=False):
         try:
             yield 0, ("l2", [{}, {}, {}])
             yield 1, ("inner_product", [{1: 10.}] * 3)
         finally:
             closed.append(True)
 
-    with patch.object(search_module, "_map_tasks", completed), \
+    with patch.object(RaySearchTaskExecutor, "map", completed), \
             pytest.raises(ValueError, match="different metrics"):
         list(distributed._search_index_splits([None, None], QUERIES, 1, None, batch=True))
     assert closed == [True]

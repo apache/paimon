@@ -90,6 +90,66 @@ TBLPROPERTIES ('primary-key' = 'dt,hh,user_id');
 Omit `primary-key` to create an append table. For storage layout and table options, see
 [Primary Key Tables](../primary-key-table/) and [Append Tables](../append-table/).
 
+### Generated Columns
+
+On Spark 3.5 and Spark 4 with `org.apache.paimon.spark.SparkCatalog`, define physical top-level columns
+with `GENERATED ALWAYS AS`:
+
+```sql
+CREATE TABLE events (
+    id BIGINT,
+    name STRING,
+    event_time TIMESTAMP_NTZ,
+    dt DATE GENERATED ALWAYS AS (CAST(event_time AS DATE)),
+    event_year INT GENERATED ALWAYS AS (YEAR(event_time)),
+    label STRING GENERATED ALWAYS AS (UPPER(name))
+) USING paimon PARTITIONED BY (dt);
+
+INSERT INTO events (id, name, event_time)
+VALUES (1, 'event', TIMESTAMP_NTZ '2026-10-30 12:00:00');
+```
+
+The writer fills omitted generated columns before partition routing. Explicitly supplied values,
+including NULL, are preserved without evaluating or checking the expression. Normal type and
+NOT NULL constraints still apply. Although Spark uses `GENERATED ALWAYS AS` syntax, Paimon
+provides automatic filling of omitted columns, not a strict computed-column constraint: stored
+values need not match the expression, and changing a source does not recompute a supplied column.
+Expressions are stored in the column's schema definition and evaluated with Paimon transforms.
+Spark uses the same evaluator as the core writer for omitted columns, applying source-column
+defaults first. CAST formatting, conversion errors, and argument bounds follow Paimon transforms
+rather than session-dependent Spark rules. The two-argument TRIM/LTRIM/RTRIM form takes
+`(characters, string)`.
+Ordinary append inserts, all primary-key merge engines, and Data Evolution partial-column updates
+are supported; existing primary-key, partition, and merge-engine rules still apply. Generated
+values are filled before primary-key merging and are not recomputed after the merge. A partial
+update preserves unselected generated columns, even when their source columns change.
+
+Supported calls include `CAST`, `YEAR`, `MONTH`, `DAY`/`DAYOFMONTH`, `HOUR`, `MINUTE`, `SECOND`,
+`QUARTER`, `DAYOFWEEK`, `DAYOFYEAR`, `WEEKDAY`, `WEEKOFYEAR`, `DATE_ADD`, `DATEDIFF`/`DATE_DIFF`,
+`TRUNC`, `UPPER`, `LOWER`, `CONCAT`, `CONCAT_WS`, `SUBSTRING`/`SUBSTR`, `LENGTH`/`CHAR_LENGTH`,
+`BIT_LENGTH`, `TRANSLATE`, `OVERLAY`, `LPAD`, `RPAD`, `TRIM`, `LTRIM`, and `RTRIM`.
+Calls use comma-separated arguments; CAST uses `CAST(expression AS type)`. String and integer
+literals, NULL arguments, DATE literals, and nested calls are supported. Only ordinary top-level
+columns may be referenced. The result type must match the declared column type. Nested field
+references, generated-column dependencies, nondeterministic functions, and `TIMESTAMP_LTZ`
+inputs or cast targets are not supported. A generated column cannot be used as `rowkind.field`.
+Spark also rejects automatic generation when the result contains a TIMESTAMP with precision
+greater than 6, including inside a top-level complex column, because Spark cannot preserve its
+nanoseconds. Automatic generation of BLOB results is also rejected because the Spark row
+representation cannot preserve the distinction between a BLOB descriptor and inline content
+through this evaluator.
+
+The Java schema builder exposes `generatedColumn(name, type, expression)`. Java writers can call
+`withWriteType` with all ordinary fields to omit generated fields from input rows. The
+writer fills in the generated fields and writes the full table schema. If ordinary fields are
+also omitted, `withWriteType` uses the underlying writer's partial-column behavior and generates
+no omitted columns. For Data Evolution partial updates, this preserves unselected column files.
+Flink's existing virtual computed columns retain their original semantics; this feature does not
+add Flink SQL syntax for physical generated columns.
+
+Generated definitions and the names and types of their dependencies cannot be changed after
+creation. Use writers that understand this schema attribute; older writers may ignore it.
+
 ### Manage Format Table Partitions
 
 See [Format Table Partitions](./format-table) for partition registration, custom locations,

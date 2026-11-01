@@ -253,10 +253,9 @@ public abstract class DelegateCatalog implements Catalog {
             Identifier identifier,
             @Nullable String tableUuid,
             Instant instant,
-            @Nullable Long fromSnapshot,
-            @Nullable String commitUser)
+            @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException {
-        wrapped.rollbackTo(identifier, tableUuid, instant, fromSnapshot, commitUser);
+        wrapped.rollbackTo(identifier, tableUuid, instant, fromSnapshot);
     }
 
     @Override

@@ -23,6 +23,7 @@ import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN, VectorSearch}
 import org.apache.paimon.predicate.FullTextSearch
+import org.apache.paimon.spark.schema.PaimonMetadataColumn.BUCKET_COLUMN
 import org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking
 import org.apache.paimon.table.Table
 import org.apache.paimon.types.RowType
@@ -51,6 +52,7 @@ abstract class PaimonBaseScanBuilder
 
   protected var pushedPartitionFilters: Array[PartitionPredicate] = Array.empty
   protected var pushedDataFilters: Array[Predicate] = Array.empty
+  protected var pushedBucketFilters: Array[Predicate] = Array.empty
   protected var pushedLimit: Option[Int] = None
   protected var pushedTopN: Option[TopN] = None
   protected var pushedVectorSearch: Option[VectorSearch] = None
@@ -72,6 +74,8 @@ abstract class PaimonBaseScanBuilder
     val pushablePartitionDataFilters = mutable.ArrayBuffer.empty[Predicate]
     val pushableDataFilters = mutable.ArrayBuffer.empty[Predicate]
     val postScan = mutable.ArrayBuffer.empty[Filter]
+    val bucketFilters = mutable.ArrayBuffer.empty[Predicate]
+    val bucketConverter = new SparkFilterConverter(PhysicalBucketFilter.rowType)
 
     var newRowType = rowType
     if (coreOptions.rowTrackingEnabled() && coreOptions.dataEvolutionEnabled()) {
@@ -79,22 +83,39 @@ abstract class PaimonBaseScanBuilder
     }
     val converter = new SparkFilterConverter(newRowType)
     val partitionPredicateVisitor = new PartitionPredicateVisitor(partitionKeys)
+    val canPushBucketFilters = PhysicalBucketFilter.supports(table)
     filters.foreach {
       filter =>
-        val predicate = converter.convertIgnoreFailure(filter)
-        if (predicate == null) {
+        val bucketPredicate =
+          if (
+            canPushBucketFilters &&
+            filter.references.nonEmpty && filter.references.forall(_ == BUCKET_COLUMN)
+          ) {
+            bucketConverter.convertIgnoreFailure(filter)
+          } else {
+            null
+          }
+        if (bucketPredicate != null) {
+          bucketFilters.append(bucketPredicate)
+          pushable.append(filter)
           postScan.append(filter)
         } else {
-          pushable.append(filter)
-          if (predicate.visit(partitionPredicateVisitor)) {
-            pushablePartitionDataFilters.append(predicate)
-          } else {
-            pushableDataFilters.append(predicate)
+          val predicate = converter.convertIgnoreFailure(filter)
+          if (predicate == null) {
             postScan.append(filter)
+          } else {
+            pushable.append(filter)
+            if (predicate.visit(partitionPredicateVisitor)) {
+              pushablePartitionDataFilters.append(predicate)
+            } else {
+              pushableDataFilters.append(predicate)
+              postScan.append(filter)
+            }
           }
         }
     }
 
+    this.pushedBucketFilters = bucketFilters.toArray
     if (pushable.nonEmpty) {
       this.pushedSparkFilters = pushable.toArray
     }

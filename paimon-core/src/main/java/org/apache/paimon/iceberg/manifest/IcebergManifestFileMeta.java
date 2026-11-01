@@ -162,6 +162,10 @@ public class IcebergManifestFileMeta {
         return deletedRowsCount;
     }
 
+    public long liveFilesCount() {
+        return addedFilesCount + existingFilesCount;
+    }
+
     public long liveRowsCount() {
         return addedRowsCount + existingRowsCount;
     }

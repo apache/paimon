@@ -24,7 +24,8 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import SchemaChange
 
 
 class SimpleTableTest(unittest.TestCase):
@@ -492,106 +493,58 @@ class SimpleTableTest(unittest.TestCase):
         self.assertEqual(result_sorted.column('v').to_pylist(), expected.column('v').to_pylist())
 
     def test_schema_evolution_tag_read(self):
-        # schema 0
         pa_schema = pa.schema([
             ('user_id', pa.int64()),
             ('item_id', pa.int64()),
             ('dt', pa.string())
         ])
         schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
-        self.catalog.create_table('default.test_0', schema, False)
-        table1 = self.catalog.get_table('default.test_0')
-        write_builder = table1.new_batch_write_builder()
-        # write 1
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        data1 = {
-            'user_id': [1, 2, 3, 4],
-            'item_id': [1001, 1002, 1003, 1004],
-            'dt': ['p1', 'p1', 'p2', 'p1'],
-        }
-        pa_table = pa.Table.from_pydict(data1, schema=pa_schema)
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-        # write 2
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        data1 = {
-            'user_id': [11, 22, 33, 44],
-            'item_id': [1001, 1002, 1003, 1004],
-            'dt': ['p1', 'p1', 'p2', 'p1'],
-        }
-        pa_table = pa.Table.from_pydict(data1, schema=pa_schema)
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-        # schema 1  add behavior column
-        pa_schema = pa.schema([
-            ('user_id', pa.int64()),
-            ('item_id', pa.int64()),
-            ('dt', pa.string()),
-            ('behavior', pa.string())
-        ])
-        schema2 = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
-        self.catalog.create_table('default.test_1', schema2, False)
-        table2 = self.catalog.get_table('default.test_1')
-        write_builder = table2.new_batch_write_builder()
-        # write 1
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        data2 = {
-            'user_id': [5, 6, 7, 8],
-            'item_id': [1005, 1006, 1007, 1008],
-            'dt': ['p2', 'p1', 'p2', 'p2'],
-            'behavior': ['e', 'f', 'g', 'h'],
-        }
-        pa_table = pa.Table.from_pydict(data2, schema=pa_schema)
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-        # write 2
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        data2 = {
-            'user_id': [55, 66, 77, 88],
-            'item_id': [1005, 1006, 1007, 1008],
-            'dt': ['p2', 'p1', 'p2', 'p2'],
-            'behavior': ['e', 'f', 'g', 'h'],
-        }
-        pa_table = pa.Table.from_pydict(data2, schema=pa_schema)
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
+        name = 'default.test_schema_evolution'
+        self.catalog.create_table(name, schema, False)
+        table = self.catalog.get_table(name)
+        expected = pa.Table.from_pydict({
+            'user_id': [5, 6, 7, 8, 55, 66, 77, 88],
+            'item_id': [1005, 1006, 1007, 1008, 1005, 1006, 1007, 1008],
+            'dt': ["p2", "p1", "p2", "p2", "p2", "p1", "p2", "p2"]
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        for data in (expected.slice(0, 4), expected.slice(4)):
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            try:
+                table_write.write_arrow(data)
+                table_commit.commit(table_write.prepare_commit())
+            finally:
+                table_write.close()
+                table_commit.close()
+        table.create_tag("tag2", snapshot_id=2)
 
-        # Create tag at snapshot 2
-        table1.create_tag("tag2", snapshot_id=2)
-        table2.create_tag("tag2", snapshot_id=2)
-        # When table2 read tag2, it will access table1's schema
-        table2.schema_manager = SchemaManager(table2.file_io, table1.table_path)
-        table_with_tag = table2.copy({CoreOptions.SCAN_TAG_NAME.key(): "tag2"})
+        # Evolve the same table and write newer data beyond the tagged snapshot.
+        self.catalog.alter_table(name, [SchemaChange.add_column('behavior', AtomicType('STRING'))])
+        table = self.catalog.get_table(name)
+        self.assertEqual(table.table_schema.id, 1)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        try:
+            table_write.write_arrow(pa.Table.from_pydict({
+                'user_id': [99],
+                'item_id': [1009],
+                'dt': ['p3'],
+                'behavior': ['new'],
+            }, schema=pa_schema.append(pa.field('behavior', pa.string()))))
+            table_commit.commit(table_write.prepare_commit())
+        finally:
+            table_write.close()
+            table_commit.close()
+
+        table_with_tag = table.copy({CoreOptions.SCAN_TAG_NAME.key(): "tag2"})
+        self.assertEqual(table_with_tag.table_schema.id, 0)
         read_builder = table_with_tag.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
 
         result = table_read.to_arrow(table_scan.plan().splits())
-
-        self.assertEqual(result.num_rows, 8)
-
-        expected_schema = pa.schema([
-            ('user_id', pa.int64()),
-            ('item_id', pa.int64()),
-            ('dt', pa.string())
-        ])
-        expected = pa.Table.from_pydict({
-            'user_id': [5, 6, 7, 8, 55, 66, 77, 88],
-            'item_id': [1005, 1006, 1007, 1008, 1005, 1006, 1007, 1008],
-            'dt': ["p2", "p1", "p2", "p2", "p2", "p1", "p2", "p2"]
-        }, schema=expected_schema)
 
         self.assertEqual(expected, result.sort_by('user_id'))
 

@@ -34,6 +34,8 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.object.ObjectTable;
@@ -56,6 +58,8 @@ import org.apache.thrift.TException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -303,6 +307,56 @@ public class HiveCatalogTest extends CatalogTestBase {
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testAlterAndDropTableWithInvalidOptions(boolean external) throws Exception {
+        String database = "legacy_options_db";
+        Identifier identifier = Identifier.create(database, "legacy_table");
+        catalog.createDatabase(database, false);
+        Path externalPath = new Path(warehouse, "external-data");
+        fileIO.mkdirs(externalPath);
+        fileIO.overwriteFileUtf8(new Path(externalPath, "data"), "data");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option("EXTERNAL", Boolean.toString(external))
+                        .option(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), externalPath.toString())
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = table.schemaManager();
+        TableSchema schema = schemaManager.latest().get();
+        Map<String, String> invalidOptions = new HashMap<>(schema.options());
+        invalidOptions.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "missing");
+        // Simulate options persisted before the corresponding runtime validation was added.
+        fileIO.overwriteFileUtf8(
+                schemaManager.toSchemaPath(schema.id()), schema.copy(invalidOptions).toString());
+
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("missing");
+        catalog.alterTable(
+                identifier,
+                SchemaChange.removeOption(CoreOptions.RECORD_LEVEL_TIME_FIELD.key()),
+                false);
+        assertThat(catalog.getTable(identifier).options())
+                .doesNotContainKey(CoreOptions.RECORD_LEVEL_TIME_FIELD.key());
+        TableSchema repairedSchema = schemaManager.latest().get();
+        assertThat(repairedSchema.id()).isEqualTo(schema.id() + 1);
+
+        fileIO.overwriteFileUtf8(
+                schemaManager.toSchemaPath(repairedSchema.id()),
+                repairedSchema.copy(invalidOptions).toString());
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(IllegalArgumentException.class);
+        catalog.dropTable(identifier, false);
+
+        assertThat(catalog.listTables(database)).doesNotContain(identifier.getTableName());
+        assertThat(fileIO.exists(table.location())).isEqualTo(external);
+        assertThat(fileIO.exists(externalPath)).isEqualTo(external);
     }
 
     @Test
@@ -1017,6 +1071,59 @@ public class HiveCatalogTest extends CatalogTestBase {
                                 catalog.alterPartitions(
                                         Identifier.create(databaseName, "non_existing_table"),
                                         Collections.singletonList(partition)));
+    }
+
+    @Test
+    public void testAlterPartitionsOnBranchUpdatesHmsUnderBareTableName() throws Exception {
+        // alterPartitions must call HMS with the bare table name (getTableName), not the
+        // branch-suffixed getObjectName(). A branch identifier's object name is
+        // "tableName$branch_<name>", while the partition is registered in HMS under the bare
+        // table name, so handing the suffixed name to getPartition/alter_partition throws
+        // NoSuchObjectException (swallowed) and the branch partition's statistics are never
+        // updated in HMS.
+        String databaseName = "testAlterPartitionsBranch";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        String tableName = "t";
+        Identifier mainId = Identifier.create(databaseName, tableName);
+        catalog.createTable(
+                mainId,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+
+        Map<String, String> spec = Collections.singletonMap("dt", "20250101");
+        catalog.createPartitions(mainId, Collections.singletonList(spec));
+
+        // Create the branch so loadTableSchema can resolve its schema.
+        ((FileStoreTable) catalog.getTable(mainId)).createBranch("dev");
+
+        // The branch identifier carries the "$branch_<name>" suffix that used to be handed
+        // straight to HMS.
+        Identifier branchId = new Identifier(databaseName, tableName, "dev");
+        assertThat(branchId.getObjectName()).isEqualTo(tableName + "$branch_dev");
+
+        long fileCreationTime = System.currentTimeMillis();
+        PartitionStatistics stats = new PartitionStatistics(spec, 11, 22, 3, fileCreationTime, 4);
+        catalog.alterPartitions(branchId, Collections.singletonList(stats));
+
+        org.apache.hadoop.hive.metastore.api.Partition hmsPartition =
+                ((HiveCatalog) catalog)
+                        .getHmsClient()
+                        .getPartition(
+                                databaseName, tableName, Collections.singletonList("20250101"));
+        Map<String, String> params = hmsPartition.getParameters();
+        // numFiles/totalSize are recomputed by HMS from the (empty) storage descriptor, so assert
+        // the parameters HMS does NOT recompute: numRows and totalBuckets. Before the fix the
+        // branch-suffixed name made getPartition throw NoSuchObjectException (swallowed), so none
+        // of these parameters were ever written.
+        assertThat(params).containsEntry("numRows", "11");
+        assertThat(params).containsEntry("totalBuckets", "4");
+        assertThat(params).containsEntry("lastUpdateTime", String.valueOf(fileCreationTime / 1000));
     }
 
     @Override

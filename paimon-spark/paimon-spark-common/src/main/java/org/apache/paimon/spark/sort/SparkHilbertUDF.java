@@ -43,6 +43,7 @@ import org.apache.spark.sql.types.TimestampType;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.Serializable;
+import java.sql.Date;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 
@@ -149,7 +150,7 @@ public class SparkHilbertUDF implements Serializable {
                                     if (value == null) {
                                         return PRIMITIVE_EMPTY;
                                     }
-                                    return Double.doubleToLongBits((double) value);
+                                    return HilbertIndexer.doubleToOrderedLong(value);
                                 },
                                 DataTypes.LongType)
                         .withName("FLOAT_ORDERED_BYTES");
@@ -165,7 +166,7 @@ public class SparkHilbertUDF implements Serializable {
                                     if (value == null) {
                                         return PRIMITIVE_EMPTY;
                                     }
-                                    return Double.doubleToLongBits(value);
+                                    return HilbertIndexer.doubleToOrderedLong(value);
                                 },
                                 DataTypes.LongType)
                         .withName("DOUBLE_ORDERED_BYTES");
@@ -247,7 +248,10 @@ public class SparkHilbertUDF implements Serializable {
         } else if (type instanceof DecimalType) {
             return longToOrderedLongUDF().apply(column.cast(DataTypes.LongType));
         } else if (type instanceof DateType) {
-            return longToOrderedLongUDF().apply(column.cast(DataTypes.LongType));
+            // A date does not cast to bigint: ANSI mode rejects the cast and legacy mode turns
+            // every date into null. Take the days since epoch instead, as the indexer does.
+            Column epochDay = functions.datediff(column, functions.lit(Date.valueOf("1970-01-01")));
+            return longToOrderedLongUDF().apply(epochDay.cast(DataTypes.LongType));
         } else {
             throw new IllegalArgumentException(
                     String.format(

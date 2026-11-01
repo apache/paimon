@@ -25,7 +25,7 @@ from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         RowType)
 from pypaimon.table.system.files_table import _render_partition
-from pypaimon.table.system.system_table import SystemTable
+from pypaimon.table.system.system_table import SystemTable, metadata_snapshot
 
 
 _DV_RANGE_ROW_TYPE = RowType(False, [
@@ -73,8 +73,9 @@ class TableIndexesTable(SystemTable):
         return ["file_name"]
 
     def _build_arrow_table(self) -> pyarrow.Table:
-        snapshot = self.base_table.snapshot_manager().get_latest_snapshot()
-        entries = IndexFileHandler(self.base_table).scan(snapshot)
+        snapshot = metadata_snapshot(self.base_table)
+        # scan(None) means latest; a resolved empty view must stay empty.
+        entries = [] if snapshot is None else IndexFileHandler(self.base_table).scan(snapshot)
 
         rows = {
             "partition": [],
@@ -139,7 +140,7 @@ class TableIndexesTable(SystemTable):
 
 
 def _render_dv_ranges(dv_ranges) -> Optional[List[Dict[str, object]]]:
-    if not dv_ranges:
+    if dv_ranges is None:
         return None
     rendered = []
     for meta in dv_ranges.values():

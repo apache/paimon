@@ -18,7 +18,8 @@
 """Read and write the cross-language ``SplitSerializer`` v1 binary format.
 
 This is the stable bridge between Java, PyPaimon and ``pypaimon_rust``. It
-supports DataSplit and IndexedSplit (including scores on the Python side) and
+supports DataSplit, IndexedSplit (including scores on the Python side),
+QueryAuthSplit with the captured rules, and
 the current DataSplit v9/DataFileMeta v21 layout. The reader remains compatible
 with DataSplit v8.
 """
@@ -31,6 +32,7 @@ from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.split import DataSplit, Split
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.generic_row import (
@@ -44,6 +46,7 @@ _SPLIT_SER_MAGIC = 0x53504C49545F5631  # "SPLIT_V1"
 _SPLIT_SER_VERSION = 1
 _TYPE_DATA_SPLIT = 1
 _TYPE_INDEXED_SPLIT = 3
+_TYPE_QUERY_AUTH_SPLIT = 5
 _INDEXED_SPLIT_MAGIC = -938472394838495695
 _INDEXED_SPLIT_VERSION = 1
 _SPLIT_MAGIC = -2394839472490812314
@@ -290,7 +293,11 @@ def serialize_split_v1(split: Split, include_scores: bool = True) -> bytes:
     writer = _Writer()
     writer.i64(_SPLIT_SER_MAGIC)
     writer.i32(_SPLIT_SER_VERSION)
-    if isinstance(split, IndexedSplit):
+    if isinstance(split, QueryAuthSplit):
+        writer.i32(_TYPE_QUERY_AUTH_SPLIT)
+        writer.take(serialize_split_v1(split.split, include_scores))
+        _write_auth_result(writer, split.auth_result)
+    elif isinstance(split, IndexedSplit):
         data_split = split.data_split()
         if not isinstance(data_split, DataSplit):
             raise TypeError(
@@ -324,6 +331,32 @@ def serialize_split_v1(split: Split, include_scores: bool = True) -> bytes:
             "SplitSerializer v1 supports DataSplit and IndexedSplit, got %s"
             % type(split).__name__)
     return writer.finish()
+
+
+def _write_auth_result(writer, result):
+    writer.u8(result is not None)
+    if result is None:
+        return
+
+    def string(value):
+        if value is None:
+            writer.i32(-1)
+        else:
+            encoded = value.encode('utf-8')
+            writer.i32(len(encoded))
+            writer.take(encoded)
+
+    writer.u8(result.filter is not None)
+    if result.filter is not None:
+        writer.i32(len(result.filter))
+        for rule in result.filter:
+            string(rule)
+    writer.u8(result.column_masking is not None)
+    if result.column_masking is not None:
+        writer.i32(len(result.column_masking))
+        for column in sorted(result.column_masking, key=lambda name: name.encode('utf-16-be')):
+            string(column)
+            string(result.column_masking[column])
 
 
 def _serialized_row(row) -> bytes:
@@ -527,6 +560,14 @@ def deserialize_split_v1(data: bytes, partition_fields: List[DataField],
     merge-on-read; None for append tables.
     """
     r = _Reader(data)
+    split = _read_split_frame(r, partition_fields, key_fields)
+    r.finish()
+    return split
+
+
+def _read_split_frame(r, partition_fields, key_fields, depth=0):
+    if depth >= 32:
+        raise ValueError('QueryAuthSplit nesting exceeds 32')
     magic = r.i64()
     if magic != _SPLIT_SER_MAGIC:
         raise ValueError("bad SplitSerializer magic %d" % magic)
@@ -535,7 +576,11 @@ def deserialize_split_v1(data: bytes, partition_fields: List[DataField],
         raise ValueError(
             "unsupported SplitSerializer version %d (expected %d)" % (version, _SPLIT_SER_VERSION))
     type_id = r.i32()
-    if type_id == _TYPE_DATA_SPLIT:
+    if type_id == _TYPE_QUERY_AUTH_SPLIT:
+        split = QueryAuthSplit(
+            _read_split_frame(r, partition_fields, key_fields, depth + 1),
+            _read_auth_result(r))
+    elif type_id == _TYPE_DATA_SPLIT:
         split = _read_datasplit_body(r, partition_fields, key_fields)
     elif type_id == _TYPE_INDEXED_SPLIT:
         imagic = r.i64()
@@ -562,8 +607,36 @@ def deserialize_split_v1(data: bytes, partition_fields: List[DataField],
         split = IndexedSplit(data_split, row_ranges, scores)
     else:
         raise ValueError("unsupported split type id %d" % type_id)
-    r.finish()
     return split
+
+
+def _read_auth_result(reader):
+    from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+
+    if reader.u8() == 0:
+        return None
+
+    def count(multiplier):
+        size = reader.i32()
+        if size < 0 or size > (len(reader.d) - reader.p) // (4 * multiplier):
+            raise ValueError('invalid QueryAuthSplit rule count')
+        return size
+
+    def string():
+        size = reader.i32()
+        if size < 0:
+            raise ValueError('NULL authorization rule in QueryAuthSplit')
+        return reader.take(size).decode('utf-8')
+
+    filters = [string() for _ in range(count(1))] if reader.u8() else None
+    masks = None
+    if reader.u8():
+        masks = {}
+        for _ in range(count(2)):
+            # Python 3.6/3.7 dict comprehensions evaluate values before keys.
+            column = string()
+            masks[column] = string()
+    return TableQueryAuthResult(filters, masks)
 
 
 def _read_scores(r: '_Reader') -> Optional[List[float]]:

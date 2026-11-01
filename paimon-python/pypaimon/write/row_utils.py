@@ -26,6 +26,19 @@ from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.vector import Vector
 
 
+def validate_write_columns(write_cols):
+    """Validate field selections before changing a live writer's configuration."""
+    names = list(write_cols)
+    if not names:
+        raise ValueError('write columns must not be empty')
+    seen = set()
+    for name in names:
+        if name in seen:
+            raise ValueError("Duplicate write column '%s'" % name)
+        seen.add(name)
+    return names
+
+
 def row_to_named_values(
         row: InternalRow, table_fields: List[DataField]) -> Dict[str, Any]:
     if hasattr(row, 'fields') and getattr(row, 'fields') is not None:

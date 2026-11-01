@@ -18,15 +18,13 @@
 """Builder to build batch vector search over multiple query vectors."""
 
 from abc import ABC, abstractmethod
+from copy import copy
 
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.table.source.vector_search_builder import (
     AbstractVectorSearchBuilderImpl,
 )
-from pypaimon.table.source.vector_search_read import (
-    BatchVectorSearchReadImpl,
-)
-from pypaimon.table.source.vector_search_read import BatchVectorSearchRead  # noqa: F401
+from pypaimon.table.source.search_types import BatchVectorSearchRead  # noqa: F401
 
 
 class BatchVectorSearchBuilder(ABC):
@@ -100,6 +98,8 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
                                    BatchVectorSearchBuilder):
     """Implementation for BatchVectorSearchBuilder."""
 
+    _native_batch_search = True
+
     def __init__(self, table):
         super().__init__(table)
         self._query_vectors = None
@@ -110,11 +110,8 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         return self
 
     def execute_batch_local(self):
-        from pypaimon.table.source.native_vector_search import try_native_vector_search
-        results = try_native_vector_search(self, self._query_vectors, batch=True)
-        if results is not None:
-            return results
-        return super().execute_batch_local()
+        from pypaimon.table.source.search_dispatch import execute_vector_search
+        return execute_vector_search(self, self._query_vectors, batch=True)
 
     def new_batch_vector_search_read(self):
         # type: () -> BatchVectorSearchRead
@@ -126,12 +123,8 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         if not self._query_vectors:
             raise ValueError(
                 "Query vectors must be set via with_query_vectors()")
-        return BatchVectorSearchReadImpl(
-            self._table,
-            self._limit,
-            self._vector_column,
-            self._query_vectors,
-            filter_=self._filter,
-            partition_filter=self._partition_filter,
-            options=self._options,
-        )
+        from pypaimon.table.source.search_dispatch import create_vector_read
+        execution = copy(self)
+        execution._options = dict(self._options)
+        execution._query_vectors = [copy(vector) for vector in self._query_vectors]
+        return create_vector_read(execution, batch=True)

@@ -19,15 +19,19 @@
 package org.apache.paimon.data.variant;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
 import java.time.ZoneOffset;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.buildVariantSchema;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.castShredded;
@@ -62,5 +66,28 @@ public class BaseVariantReaderTest {
         shredded = castShredded(GenericVariant.fromJson("{\"a\": 27}"), schema);
         assertThat(reader.read(shredded, shredded.getBinary(schema.topLevelMetadataIdx)))
                 .isEqualTo(GenericRow.of(27, null));
+    }
+
+    @Test
+    void testMapReaderWithNotNullStringKey() {
+        // The file shreds the object, so the map has to be read from the typed fields.
+        RowType shreddedType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"a", "b"});
+        VariantSchema schema = buildVariantSchema(variantShreddingSchema(shreddedType));
+        MapType targetType = new MapType(DataTypes.STRING().notNull(), DataTypes.INT());
+        InternalRow shredded =
+                castShredded(GenericVariant.fromJson("{\"a\": 1, \"b\": 2}"), schema);
+
+        Map<BinaryString, Integer> expected = new HashMap<>();
+        expected.put(BinaryString.fromString("a"), 1);
+        expected.put(BinaryString.fromString("b"), 2);
+        for (boolean failOnError : new boolean[] {false, true}) {
+            VariantCastArgs castArgs = new VariantCastArgs(failOnError, ZoneOffset.UTC);
+            BaseVariantReader reader =
+                    BaseVariantReader.create(schema, targetType, castArgs, false);
+            assertThat(reader.read(shredded, shredded.getBinary(schema.topLevelMetadataIdx)))
+                    .isEqualTo(new GenericMap(expected));
+        }
     }
 }

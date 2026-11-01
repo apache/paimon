@@ -25,7 +25,7 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 
@@ -86,7 +86,10 @@ def _rows(table, native=True, merge_on_read=True, predicate=None, projection=Non
         builder.with_projection(projection)
     read = builder.new_read()
     if native:
-        with patch.object(read, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python read fallback')
+        ):
             result = read.to_arrow(builder.new_scan().plan().splits())
     else:
         result = read.to_arrow(builder.new_scan().plan().splits())

@@ -28,8 +28,8 @@ from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.manifest_sidecar import read_sidecar, SUFFIX
 from pypaimon.utils.range import Range
-from pypaimon.write.native_commit import native_messages_supported
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_commit import native_messages_supported
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 
@@ -60,8 +60,9 @@ def _prepare(builder, ids, partition='a', identifier=None):
 def _commit(builder, messages, identifier=None, overwrite=False):
     commit = builder.new_commit()
     try:
-        with patch.object(commit.file_store_commit, 'overwrite' if overwrite else 'commit',
-                          side_effect=AssertionError('Python commit fallback')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.' + ('overwrite' if overwrite else 'commit'),
+                   side_effect=AssertionError('Python commit fallback')):
             if identifier is None:
                 commit.commit(messages)
             else:
@@ -79,8 +80,10 @@ def _read(table, native=False, metadata=False):
     read = builder.new_read()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(
-                read, '_create_split_read', side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         return read.to_arrow(builder.new_scan().plan().splits()).sort_by('id').to_pydict()
 
 
@@ -240,8 +243,9 @@ def test_stream_abort_preserves_published_row_ids(native_rest_catalog):
     assert pending_paths and all(table.file_io.exists(path) for path in pending_paths)
     commit = builder.new_commit()
     try:
-        with patch.object(commit.file_store_commit, 'abort',
-                          side_effect=AssertionError('Python abort fallback')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.abort',
+                   side_effect=AssertionError('Python abort fallback')):
             commit.abort(pending)
     finally:
         commit.close()
@@ -365,7 +369,7 @@ def test_native_blob_update_rejects_stale_range_before_publication(native_rest_c
 def test_native_update_honors_java_global_index_policy(native_rest_catalog, action):
     from pypaimon.tests.global_index_update_action_test import _index_entry
     from pypaimon.write.commit_message import CommitMessage
-    from pypaimon.write.global_index_update_checker import scan_global_index_entries
+    from pypaimon.execution.python.write.global_index_update_checker import scan_global_index_entries
 
     table = _table(native_rest_catalog, {'global-index.column-update-action': action})
     seed = table.new_batch_write_builder()

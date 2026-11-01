@@ -20,7 +20,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
-from pypaimon.read.reader.shard_batch_reader import ShardBatchReader
+from pypaimon.execution.python.read.reader.shard_batch_reader import (ShardBatchReader)
 
 
 class _BatchReader(RecordBatchReader):

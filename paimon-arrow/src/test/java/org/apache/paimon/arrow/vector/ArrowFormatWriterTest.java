@@ -75,6 +75,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -459,6 +460,52 @@ public class ArrowFormatWriterTest {
                     .isEqualTo(variant.value());
             assertThat(((VarBinaryVector) variantVector.getChild(Variant.METADATA)).getObject(0))
                     .isEqualTo(variant.metadata());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testColumnStringSlicesAvoidMaterializingByteArrays(boolean selected) {
+        HeapBytesVector values =
+                new HeapBytesVector(5) {
+                    @Override
+                    public Bytes getBytes(int row) {
+                        Bytes bytes = super.getBytes(row);
+                        return new Bytes(bytes.data, bytes.offset, bytes.len) {
+                            @Override
+                            public byte[] getBytes() {
+                                throw new AssertionError("String slices must not be materialized");
+                            }
+                        };
+                    }
+                };
+        String[] strings = {"prefix", "alpha", null, "gamma", ""};
+        for (int i = 0; i < strings.length; i++) {
+            if (strings[i] == null) {
+                values.setNullAt(i);
+            } else {
+                byte[] bytes = strings[i].getBytes(StandardCharsets.UTF_8);
+                values.putByteArray(i, bytes, 0, bytes.length);
+            }
+        }
+        RowType rowType = RowType.builder().field("s", DataTypes.STRING()).build();
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(
+                    new ColumnVector[] {values},
+                    selected ? new int[] {0, 3, 1, 3, 2, 4} : null,
+                    1,
+                    selected ? 5 : 4);
+            writer.flush();
+            List<String> actual = new ArrayList<>();
+            for (InternalRow row :
+                    new ArrowBatchReader(rowType, true).readBatch(writer.getVectorSchemaRoot())) {
+                actual.add(row.isNullAt(0) ? null : row.getString(0).toString());
+            }
+            if (selected) {
+                assertThat(actual).containsExactly("gamma", "alpha", "gamma", null, "");
+            } else {
+                assertThat(actual).containsExactly("alpha", null, "gamma", "");
+            }
         }
     }
 

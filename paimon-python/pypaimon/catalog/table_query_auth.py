@@ -17,17 +17,15 @@
 ################################################################################
 
 import json
+from dataclasses import replace
 from typing import Callable, Dict, List, Optional
 
 import pyarrow as pa
-import pyarrow.compute as pc
 
 from pypaimon.common.predicate_json_parser import (
     _collect_all_field_refs_from_transform,
     extract_referenced_fields,
-    parse_predicate_to_batch_filter,
 )
-from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.schema.data_types import DataField
 from pypaimon.table.special_fields import SpecialFields
@@ -133,21 +131,20 @@ class TableQueryAuthResult:
         if not self.has_restrictions:
             return plan
         auth_splits = [QueryAuthSplit(split, self) for split in plan.splits()]
-        return Plan(auth_splits, snapshot_id=plan.snapshot_id)
+        return replace(plan, _splits=auth_splits)
 
     def extract_row_filter(self) -> Optional[Callable[[pa.RecordBatch], pa.Array]]:
         if not self.filter:
             return None
-        filters = [parse_predicate_to_batch_filter(json_str) for json_str in self.filter]
-        if len(filters) == 1:
-            return filters[0]
+        from pypaimon.common.arrow_predicate import parse_predicate_to_batch_filter
 
-        def combined(batch: pa.RecordBatch) -> pa.Array:
-            result = filters[0](batch)
-            for f in filters[1:]:
-                result = pc.and_(result, f(batch))
-            return result
-        return combined
+        if len(self.filter) == 1:
+            return parse_predicate_to_batch_filter(self.filter[0])
+        # Java PredicateBuilder.and evaluates entries in their original order.
+        return parse_predicate_to_batch_filter(json.dumps({
+            'kind': 'COMPOUND', 'function': 'AND',
+            'children': [json.loads(rule) for rule in self.filter],
+        }))
 
     def parsed_column_masking(self) -> Dict[str, dict]:
         if not self.column_masking:

@@ -104,8 +104,7 @@ case class PaimonPartitionReader(
         if (currentRow != null) {
           stop = true
         } else {
-          totalReadBatchTimeMs += currentRecordReader.readBatchTimeMs
-          currentRecordReader.close()
+          closeCurrentReader()
           currentRecordReader = readSplit()
           if (currentRecordReader == null) {
             stop = true
@@ -135,15 +134,24 @@ case class PaimonPartitionReader(
   }
 
   override def currentMetricsValues(): Array[CustomTaskMetric] = {
-    partitionMetrics ++ Array(PaimonReadBatchTimeTaskMetric(totalReadBatchTimeMs))
+    val currentReadBatchTimeMs =
+      if (currentRecordReader == null) 0L else currentRecordReader.readBatchTimeMs
+    partitionMetrics ++ Array(
+      PaimonReadBatchTimeTaskMetric(totalReadBatchTimeMs + currentReadBatchTimeMs))
+  }
+
+  private def closeCurrentReader(): Unit = {
+    if (currentRecordReader != null) {
+      val reader = currentRecordReader
+      reader.close()
+      totalReadBatchTimeMs += reader.readBatchTimeMs
+      currentRecordReader = null
+    }
   }
 
   override def close(): Unit = {
     try {
-      if (currentRecordReader != null) {
-        totalReadBatchTimeMs += currentRecordReader.readBatchTimeMs
-        currentRecordReader.close()
-      }
+      closeCurrentReader()
     } finally {
       ioManager.close()
     }

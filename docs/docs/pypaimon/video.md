@@ -24,7 +24,48 @@ under the License.
 
 # Video Frames
 
-Store complete encoded videos and read their logical frame rows for training. First create a multimodal `conn` as shown in [Multimodal Tables](./multimodal-tables#connect). Provide your own video files and frame metadata for the examples below.
+Store encoded videos in `.video` and read individual frames for training.
+
+## Import a Video
+
+With Python 3.10 or newer, install `pypaimon[video]`:
+
+```shell
+pip install 'pypaimon[video]'
+```
+
+```python
+import pyarrow as pa
+import pypaimon.multimodal as pm
+
+conn = pm.connect(options={"warehouse": "file:///tmp/video_lake"})
+frames = conn.create_table(
+    "auto_frames",
+    schema=pa.schema([
+        pa.field("frame_index", pa.int64()),
+        pa.field("timestamp", pa.float64()),
+        pa.field("episode_id", pa.int64()),
+        pa.field("video", pa.large_binary()),
+    ]),
+    options={"video-frame-field": "video"},
+)
+frames.add_video("/data/example.mp4")
+frames.add_video("oss://source-bucket/episode-42.mp4", metadata={"episode_id": 42})
+# Raw HEVC: explicitly supply a fixed frame rate.
+frames.add_video("oss://source-bucket/episode-42.h265", source_fps=30)
+```
+
+Generates zero-based `frame_index` and `timestamp` in seconds from the first
+frame. `metadata` supplies per-video constants. Containerized videos retain
+original bytes and variable frame timing; require one decodable video stream
+with strictly increasing PTS.
+
+Raw HEVC is remuxed to MP4 without re-encoding. `source_fps` generates fixed-rate
+timestamps, not original capture times. Temporary raw/MP4 files are cleaned up
+after import, including failures. Omit `source_fps` for containerized videos.
+
+Configure remote credentials on the connection and keep the source unchanged
+during import. To supply frame metadata yourself, pass `frames` as shown below.
 
 ## Video Frame Storage
 
@@ -115,8 +156,9 @@ video = pm.BlobDescriptor(
 frames.add_video(video, episode_43_rows)
 ```
 
-With PyAV, PyPaimon builds keyframe indexes for supported ISO BMFF videos (such
-as MP4); other decodable videos use the scan fallback.
+PyAV indexes supported ISO BMFF videos (e.g. MP4); other decodable videos fall back
+to scanning. Index generation uses temporary disk; readers cache up to 1 MiB of
+entry pages per index and 4,096 ordinal lookups per search view.
 
 The writer deduplicates exact payload descriptor identity inside each `.video`
 file. Its video grouping policy coordinates normal, BLOB, and vector rolling
@@ -269,3 +311,30 @@ Define the decoder class and function at module scope when DataLoader uses the
 `shuffle=False`; row-buffer shuffle can turn monotonic frame access into seeks
 and require more open decoder sessions. Paimon's worker sharding is split-level,
 so it does not duplicate a split across workers.
+
+### Read video training windows
+
+`ContiguousWindowDataset` decodes `video-frame-field` columns directly. It
+keeps descriptors through row selection, groups overlapping requests by
+physical video, and decodes each selected row once before assembling windows:
+
+```python
+video_windows = frames.scan().to_contiguous_window_dataset(
+    columns=["state", "video", "action"],
+    frame_offsets={"video": [-2, -1, 0], "action": list(range(16))},
+    group_key="episode_id",
+    order_key="frame_index",
+    boundary="pad",
+    column_transforms={"video": torch.stack},
+    video_backend="pyav",
+)
+
+loader = DataLoader(video_windows, batch_size=32, num_workers=4)
+for batch in loader:
+    # video is [N, T, C, H, W].
+    train(batch["video"], batch["state"], batch["action"])
+```
+
+Install `pypaimon[torch,video]` for the PyAV path, or install TorchCodec
+separately. Omit `video_backend` to select an available decoder. The decoder
+and range cache stay local to each DataLoader worker.

@@ -37,7 +37,10 @@ public class FieldCollectAggFactory implements FieldAggregatorFactory {
                 "Data type for collect column must be 'Array' but was '%s'.",
                 fieldType);
         return new FieldCollectAgg(
-                identifier(), (ArrayType) fieldType, options.fieldCollectAggDistinct(field));
+                identifier(),
+                (ArrayType) fieldType,
+                options.fieldCollectAggDistinct(field),
+                options.fieldCollectAggCountLimit(field));
     }
 
     @Override

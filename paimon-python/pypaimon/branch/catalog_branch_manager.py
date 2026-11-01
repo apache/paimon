@@ -85,11 +85,11 @@ class CatalogBranchManager(BranchManager):
         ignore_if_exists: bool = False
     ) -> None:
         """
-        Create a branch from the current state or from a tag.
+        Create an empty branch or initialize it from a tag.
 
         Args:
             branch_name: Name of the branch to create
-            tag_name: Optional tag name to create branch from, None for current state
+            tag_name: Optional tag name to create branch from, None for an empty branch
             ignore_if_exists: If true, do nothing when branch already exists
 
         Raises:
@@ -97,10 +97,7 @@ class CatalogBranchManager(BranchManager):
         """
         def _create(catalog: Catalog):
             BranchManager.validate_branch(branch_name)
-            existing_branches = catalog.list_branches(self.identifier)
-            if branch_name in existing_branches:
-                if not ignore_if_exists:
-                    raise ValueError(f"Branch name '{branch_name}' already exists.")
+            if ignore_if_exists and branch_name in catalog.list_branches(self.identifier):
                 return
             catalog.create_branch(self.identifier, branch_name, tag_name)
 

@@ -25,13 +25,13 @@ from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.offset_row import OffsetRow
-from pypaimon.write.commit.commit_scanner import CommitScanner
+from pypaimon.execution.python.write.commit.commit_scanner import CommitScanner
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_commit import FileStoreCommit
+from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
 
 PARTITION_FIELDS = [
     DataField(0, 'dt', AtomicType('STRING')),
@@ -108,8 +108,8 @@ def _index_manifest_entry(partition_values, index_type):
     )
 
 
-@patch('pypaimon.read.scanner.file_scanner.ManifestFileManager')
-@patch('pypaimon.read.scanner.file_scanner.ManifestListManager')
+@patch('pypaimon.execution.python.read.scanner.file_scanner.ManifestFileManager')
+@patch('pypaimon.execution.python.read.scanner.file_scanner.ManifestListManager')
 class TestFileScannerPartitionPredicate(unittest.TestCase):
 
     def _scanner(self, predicate=None, partition_predicate=None):
@@ -234,8 +234,8 @@ class TestFileScannerPartitionPredicate(unittest.TestCase):
             _manifest_entry(['2024-01-15', 'us-west-2'])))
 
 
-@patch('pypaimon.write.file_store_commit.ManifestFileManager')
-@patch('pypaimon.write.file_store_commit.ManifestListManager')
+@patch('pypaimon.execution.python.write.file_store_commit.ManifestFileManager')
+@patch('pypaimon.execution.python.write.file_store_commit.ManifestListManager')
 class TestOverwritePartitionPredicate(unittest.TestCase):
 
     _TARGET = {'dt': '2024-01-15', 'region': 'us-east-1'}
@@ -255,10 +255,10 @@ class TestOverwritePartitionPredicate(unittest.TestCase):
 
     def _extract_partition_predicate(self, commit):
         entries_plan = commit._try_commit.call_args[1]['commit_entries_plan']
-        with patch('pypaimon.write.commit.overwrite_changes_provider.FileScanner') as mock_cls:
+        with patch('pypaimon.execution.python.write.commit.overwrite_changes_provider.FileScanner') as mock_cls:
             mock_cls.return_value.read_manifest_entries.return_value = []
             commit.manifest_list_manager.read_all.return_value = []
-            entries_plan(Mock(id=1))
+            entries_plan(Mock(id=1, index_manifest=None))
             return mock_cls.call_args[1]['partition_predicate']
 
     def test_overwrite_rejects_mismatched_partition(self, *_):
@@ -419,7 +419,7 @@ class TestCommitScannerPartitionPredicate(unittest.TestCase):
             [_manifest_entry(['2024-01-15', 'us-east-1'])])
         self.assertIsNone(pred)
 
-    @patch('pypaimon.write.commit.commit_scanner.FileScanner')
+    @patch('pypaimon.execution.python.write.commit.commit_scanner.FileScanner')
     def test_passes_partition_predicate_to_file_scanner(self, mock_scanner_cls):
         mock_scanner_cls.return_value.read_manifest_entries.return_value = []
         entries = [_manifest_entry(['2024-01-15', 'us-east-1'])]
@@ -440,7 +440,7 @@ class TestCommitScannerPartitionPredicate(unittest.TestCase):
                 self.assertIsNotNone(kwargs['partition_predicate'])
                 self.assertNotIn('predicate', kwargs)
 
-    @patch('pypaimon.write.commit.commit_scanner.ManifestFileManager')
+    @patch('pypaimon.execution.python.write.commit.commit_scanner.ManifestFileManager')
     def test_raw_entries_preserve_delete_kind(self, mock_mfm_cls):
         added = ManifestEntry(
             kind=0, partition=GenericRow(['p1', 'us'], PARTITION_FIELDS),
@@ -457,7 +457,7 @@ class TestCommitScannerPartitionPredicate(unittest.TestCase):
 
         self.assertEqual([e.kind for e in result], [0, 1])
 
-    @patch('pypaimon.write.commit.commit_scanner.ManifestFileManager')
+    @patch('pypaimon.execution.python.write.commit.commit_scanner.ManifestFileManager')
     def test_raw_entries_filter_unmatched_partition(self, mock_mfm_cls):
         in_part = ManifestEntry(
             kind=1, partition=GenericRow(['p1', 'us'], PARTITION_FIELDS),
@@ -474,3 +474,25 @@ class TestCommitScannerPartitionPredicate(unittest.TestCase):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(tuple(result[0].partition.values), ('p1', 'us'))
+
+
+class ReadBuilderPartitionFilterTest(unittest.TestCase):
+    def test_public_selector_rejects_non_partition_fields_without_changing_state(self):
+        from types import SimpleNamespace
+        from pypaimon.read.read_builder import ReadBuilder
+
+        builder = ReadBuilder(SimpleNamespace(partition_keys=['dt', 'region']))
+        predicates = PredicateBuilder(TABLE_FIELDS)
+        selector = predicates.equal('region', 'us-east-1')
+        builder.with_partition_filter(selector)
+        for invalid in [predicates.equal('name', 'x'),
+                        predicates.and_predicates([selector, predicates.equal('name', 'x')]),
+                        predicates.or_predicates([selector, predicates.equal('name', 'x')])]:
+            with self.assertRaisesRegex(ValueError, 'only partition keys'):
+                builder.with_partition_filter(invalid)
+            self.assertIs(builder._partition_filter, selector)
+        self.assertIs(builder.with_partition_filter(None), builder)
+        self.assertIsNone(builder._partition_filter)
+        unpartitioned = ReadBuilder(SimpleNamespace(partition_keys=[]))
+        with self.assertRaisesRegex(ValueError, 'partitioned table'):
+            unpartitioned.with_partition_filter(selector)

@@ -24,11 +24,11 @@ from decimal import Decimal
 import pyarrow as pa
 import pytest
 
-from pypaimon.read.reader.format_row_reader import FOOTER_SIZE, FormatRowReader
+from pypaimon.execution.python.read.reader.format_row_reader import (FOOTER_SIZE, FormatRowReader)
 from pypaimon.schema.data_types import (
     ArrayType, AtomicType, DataField, MapType, RowType
 )
-from pypaimon.write.writer.format_row_writer import FormatRowWriter
+from pypaimon.execution.python.write.writer.format_row_writer import FormatRowWriter
 
 
 class SimpleFileIO:
@@ -132,7 +132,7 @@ class TestFormatRowReaderWriter:
         # sequence (the row-file wire form shared with the Java implementation) and
         # assert the exact Decimal, so a symmetric writer+reader scaling mistake
         # cannot round-trip undetected.
-        from pypaimon.read.reader.format_row_reader import _read_field, _RowDecoder
+        from pypaimon.execution.python.read.reader.format_row_reader import (_read_field, _RowDecoder)
 
         def _varint(x):
             out = bytearray()
@@ -192,7 +192,7 @@ class TestFormatRowReaderWriter:
         # sub-millisecond nanoseconds). The Python writer only emits multiples of
         # 1000, so decode a hand-built wire buffer to exercise the ns formula with a
         # non-multiple-of-1000 nano_of_milli directly.
-        from pypaimon.read.reader.format_row_reader import _read_field, _RowDecoder
+        from pypaimon.execution.python.read.reader.format_row_reader import (_read_field, _RowDecoder)
 
         def _varint(n):
             out = bytearray()

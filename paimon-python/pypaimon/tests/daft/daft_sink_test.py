@@ -408,7 +408,7 @@ def test_write_paimon_pk_table(pk_table):
 def test_dedicated_close_failure_preserves_prepared_files(local_paimon_catalog, grouped):
     from unittest.mock import patch
     from pypaimon.daft.daft_datasink import make_group_write_udf
-    from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+    from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
 
     catalog, _ = local_paimon_catalog
     arrow_schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
@@ -548,7 +548,6 @@ class TestBlobType:
         paimon_schema = pypaimon.Schema.from_pyarrow_schema(
             pa_schema,
             options={
-                "bucket": "1",
                 "file.format": "parquet",
                 "row-tracking.enabled": "true",
                 "data-evolution.enabled": "true",
@@ -588,7 +587,6 @@ class TestBlobType:
         paimon_schema = pypaimon.Schema.from_pyarrow_schema(
             pa_schema,
             options={
-                "bucket": "1",
                 "file.format": "parquet",
                 "row-tracking.enabled": "true",
                 "data-evolution.enabled": "true",
@@ -641,7 +639,6 @@ class TestBlobType:
         paimon_schema = pypaimon.Schema.from_pyarrow_schema(
             pa_schema,
             options={
-                "bucket": "1",
                 "file.format": "parquet",
                 "row-tracking.enabled": "true",
                 "data-evolution.enabled": "true",

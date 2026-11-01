@@ -22,9 +22,10 @@ from unittest.mock import Mock, patch
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.native_write import NativePostponeFixedBucketTableWrite
+from pypaimon.write.write_dispatch import NativePostponeFixedBucketTableWrite
 from pypaimon.write.postpone_bucket import PostponeBucketPlan, PostponeBucketPlanner
 
 pytestmark = pytest.mark.native_plan
@@ -95,8 +96,9 @@ def test_fixed_buckets_are_visible_to_both_readers(
             assert message.check_from_snapshot == 0
         writer.close()
         if native_commit:
-            with patch.object(commit.file_store_commit, 'commit',
-                              side_effect=AssertionError('Python commit fallback')):
+            with patch('pypaimon.execution.python.write.file_store_commit.'
+                       'FileStoreCommit.commit',
+                       side_effect=AssertionError('Python commit fallback')):
                 commit.commit(messages)
         else:
             commit.commit(messages)
@@ -241,12 +243,10 @@ def test_python_fallback_retains_specialized_writer_and_plan(tmp_path):
 
     table = _table(tmp_path)
     plan = PostponeBucketPlan({('a',): 7})
-    writer = table.new_postpone_fixed_bucket_write_builder().with_bucket_plan(plan).new_write()
-    assert isinstance(writer, NativePostponeFixedBucketTableWrite)
+    with patch('pypaimon.execution.native.write.native_write.create_native_write', return_value=None):
+        writer = table.new_postpone_fixed_bucket_write_builder().with_bucket_plan(plan).new_write()
+    assert isinstance(writer, PostponeFixedBucketBatchTableWrite)
     try:
-        # Distributed coordinators and advanced methods may select Python before data.
-        writer.file_store_write
-        assert isinstance(writer._python_writer, PostponeFixedBucketBatchTableWrite)
         writer.write_row(GenericRow([1, 'a', 10], table.fields))
         messages = writer.prepare_commit()
         assert {message.total_buckets for message in messages} == {7}
@@ -263,17 +263,16 @@ def test_python_fallback_retains_uri_reader_factory_and_bucket_plan(tmp_path, cl
     factory = UriReaderFactory.from_file_io(table.file_io)
     plan = PostponeBucketPlan({('a',): 7})
     builder = table.new_postpone_fixed_bucket_write_builder().with_bucket_plan(plan)
-    writer, commit = builder.new_write(), builder.new_commit()
+    with patch('pypaimon.execution.native.write.native_write.create_native_write', return_value=None):
+        writer = builder.new_write()
+    commit = builder.new_commit()
     try:
-        assert isinstance(writer, NativePostponeFixedBucketTableWrite)
+        assert isinstance(writer, PostponeFixedBucketBatchTableWrite)
         writer.with_blob_uri_reader_factory(factory)
         if clear_factory:
             writer.with_blob_uri_reader_factory(None)
-        # Coordinators select Python planning before receiving data.
-        writer.file_store_write
         writer.write_row(GenericRow([1, 'a', 10], table.fields))
-        assert isinstance(writer._python_writer, PostponeFixedBucketBatchTableWrite)
-        assert writer._python_writer.file_store_write.blob_uri_reader_factory is (
+        assert writer._execution.file_store_write.blob_uri_reader_factory is (
             None if clear_factory else factory)
         messages = writer.prepare_commit()
         assert {message.total_buckets for message in messages} == {7}
@@ -284,21 +283,27 @@ def test_python_fallback_retains_uri_reader_factory_and_bucket_plan(tmp_path, cl
         commit.close()
 
 
-def test_cannot_fallback_after_native_data(tmp_path):
+@pytest.mark.parametrize('write_first', [False, True])
+def test_native_writer_does_not_expose_python_diagnostics(tmp_path, write_first):
     table = _table(tmp_path)
     writer = table.new_postpone_fixed_bucket_write_builder().new_write()
     try:
-        writer.write_arrow_batch(_batch([(1, 'a', 10)]))
-        with pytest.raises(RuntimeError, match='Cannot switch'):
-            writer.file_store_write
+        if write_first:
+            writer.write_arrow_batch(_batch([(1, 'a', 10)]))
+        for name in ('file_store_write', 'row_key_extractor', 'table_pyarrow_schema', 'restore_snapshot_id'):
+            with pytest.raises(AttributeError, match=name):
+                getattr(writer, name)
         assert writer._python_writer is None
+        if not write_first:
+            writer.write_arrow_batch(_batch([(1, 'a', 10)]))
+        assert writer.prepare_commit()
     finally:
         writer.abort()
 
 
 def test_distributed_worker_uses_pickled_plan_without_python_routing(tmp_path):
     from pypaimon.write.ray_datasink import PaimonDatasink
-    from pypaimon.write.row_key_extractor import PostponeFixedBucketRowKeyExtractor
+    from pypaimon.execution.python.write.row_key_extractor import PostponeFixedBucketRowKeyExtractor
 
     table = _table(tmp_path)
     plan = pickle.loads(pickle.dumps(PostponeBucketPlan({('a',): 3})))
@@ -398,7 +403,7 @@ def test_concurrent_bucket_owners_cannot_silently_lose_update(
 
 @pytest.mark.parametrize('native_commit', [False, True])
 def test_disjoint_bucket_owners_can_commit_concurrently(tmp_path, native_rest_catalog, native_commit):
-    from pypaimon.write.row_key_extractor import PostponeFixedBucketRowKeyExtractor
+    from pypaimon.execution.python.write.row_key_extractor import PostponeFixedBucketRowKeyExtractor
 
     table = _table(tmp_path, {'commit.native.enabled': str(native_commit).lower()}, native_rest_catalog)
     extractor = PostponeFixedBucketRowKeyExtractor(table, PostponeBucketPlan({('a',): 3}))
@@ -456,7 +461,7 @@ def test_pending_and_real_buckets_coexist_without_rewriting_history(
                 assert table.file_io.exists(file.file_path)
         # Ordinary reads expose real buckets; committed pending rows await assignment.
         assert _rows(table) == [dict(id=1, p='a', v=10)]
-        scanner = table.new_read_builder().new_scan().file_scanner
+        scanner = PythonTableScan(table.new_read_builder().new_scan())._file_scanner()
         manifests, _ = scanner.manifest_scanner()
         entries = scanner.with_all_buckets().read_manifest_entries(manifests)
         assert {entry.bucket for entry in entries} == {-2, fixed_messages[0].bucket}
@@ -591,7 +596,8 @@ def test_reused_python_committer_drops_prior_fixed_bucket_baseline(tmp_path, nat
         writer.write_arrow_batch(_batch([(1, 'a', 10)]))
         messages = writer.prepare_commit()
         # Exercise FileStoreCommit reuse directly: the public batch facade is one-shot.
-        commit = first.new_commit().file_store_commit
+        from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
+        commit = FileStoreCommit(table.new_snapshot_commit(), table, first.commit_user)
         commit.commit(messages, 1)
         pending = table.new_batch_write_builder().new_write()
         try:

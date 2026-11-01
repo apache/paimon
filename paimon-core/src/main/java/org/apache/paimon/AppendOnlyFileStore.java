@@ -74,6 +74,15 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 schemaManager,
                 schema,
                 rowType,
+                dataSchema -> {
+                    if (options.rowTrackingEnabled()) {
+                        // The row id and sequence number may be in the manifest entry.
+                        return SpecialFields.rowTypeWithRowTracking(
+                                        dataSchema.logicalRowType(), true, true)
+                                .getFields();
+                    }
+                    return dataSchema.fields();
+                },
                 FileFormatDiscover.of(options),
                 pathFactory(),
                 options);
@@ -137,11 +146,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     public AppendOnlyFileStoreScan newScan() {
         BucketSelectConverter bucketSelectConverter =
                 new BucketSelectConverter(
-                        bucketMode(),
-                        options.bucketFunctionType(),
-                        rowType,
-                        partitionType,
-                        bucketKeyType);
+                        bucketMode(), options, rowType, partitionType, bucketKeyType);
 
         if (options().dataEvolutionEnabled()) {
             return new DataEvolutionFileStoreScan(
@@ -164,6 +169,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 manifestFileFactory(),
                 options.scanManifestParallelism(),
                 options.fileIndexReadEnabled(),
+                options.fileIndexReadIgnoreUnknownType(),
                 options.deletionVectorsEnabled(),
                 options.dataEvolutionEnabled());
     }

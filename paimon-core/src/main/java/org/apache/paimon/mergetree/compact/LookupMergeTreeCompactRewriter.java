@@ -32,6 +32,7 @@ import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.mergetree.lookup.RemoteLookupFileManager;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
@@ -98,7 +99,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         this.lookupLevels = lookupLevels;
         this.wrapperFactory = wrapperFactory;
         this.noSequenceField = options.sequenceField().isEmpty();
-        this.forceRewriteLevelZeroForVectorIndex = options.primaryKeyVectorIndexEnabled();
+        this.forceRewriteLevelZeroForVectorIndex =
+                !VectorIndexOptions.columns(options.toConfiguration()).isEmpty();
         String fileFormat = options.fileFormatString();
         Map<Integer, String> fileFormatPerLevel = options.fileFormatPerLevel();
         this.level2FileFormat = level -> fileFormatPerLevel.getOrDefault(level, fileFormat);

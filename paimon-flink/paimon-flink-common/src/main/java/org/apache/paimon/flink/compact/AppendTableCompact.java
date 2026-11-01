@@ -101,8 +101,11 @@ public class AppendTableCompact {
             SingleOutputStreamOperator<AppendCompactTask> filterStream =
                     source.filter(
                             task -> {
-                                BinaryRow partition = task.partition();
-                                return partitionInfo.get(partition) <= historyMilli;
+                                // a partition missing from the map was first written after the job
+                                // was built
+                                Long lastFileCreationTime = partitionInfo.get(task.partition());
+                                return lastFileCreationTime != null
+                                        && lastFileCreationTime <= historyMilli;
                             });
             source = new DataStreamSource<>(filterStream);
         }

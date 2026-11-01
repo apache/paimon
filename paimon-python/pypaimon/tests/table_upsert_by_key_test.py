@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.write.backend_dispatch import python_commit
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 import os
 from contextlib import contextmanager
 import unittest
@@ -24,9 +26,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.write.table_update_by_row_id import _RowIdUpdateFileWriter
+from pypaimon.execution.python.write.table_update_by_row_id import (
+    _RowIdUpdateFileWriter,
+)
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
@@ -292,7 +297,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         read_builder = table.new_read_builder().with_projection(
             list(table.field_names) + [SpecialFields.ROW_ID.name]
         )
-        plan = read_builder.new_scan().plan_for_write()
+        plan = read_builder.new_scan().plan_all()
         old_files = [
             file
             for split in plan.splits()
@@ -314,7 +319,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         messages[0].deleted_files.extend(old_files)
 
         commit = wb.new_commit()
-        file_store_commit = commit.file_store_commit
+        file_store_commit = python_commit(commit).file_store_commit
         original_try_commit = file_store_commit._try_commit
         file_store_commit._try_commit = (
             lambda commit_kind, *args, **kwargs:
@@ -746,8 +751,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         )
         self._compact_all_data_files(table)
 
-        from pypaimon.write.row_id_file_index import RowIdFileIndex
-        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+        from pypaimon.execution.python.write.row_id_file_index import RowIdFileIndex
 
         original_build = RowIdFileIndex.from_entries
         advanced = [False]
@@ -766,7 +770,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             return original_build(current_table, snapshot_id, entries)
 
         with mock.patch.object(
-                TableUpdateByRowId,
+                PythonTableUpdateByRowId,
                 '_load_existing_files_info',
                 side_effect=AssertionError("unexpected snapshot scan"),
         ), mock.patch.object(
@@ -1270,7 +1274,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             schema.field('score'),
             pa.array([0, 1, 99, 3], type=pa.int32()),
         )
-        self.assertTrue(self._read_all(table).equals(expected))
+        self.assertTrue(self._read_all(table).equals(expected.cast(read_arrow_schema(table.fields))))
         files = [file for message in messages for file in message.new_files]
         self.assertEqual(len(files), 1)
         self.assertFalse(pq.read_schema(files[0].file_path).field('score').nullable)

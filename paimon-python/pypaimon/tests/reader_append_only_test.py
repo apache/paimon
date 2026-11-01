@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.write.backend_dispatch import python_commit
 import os
 import shutil
 import sys
@@ -32,7 +33,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.file_store_commit import CommitFailRetryResult
+from pypaimon.execution.python.write.file_store_commit import CommitFailRetryResult
 
 
 class AoReaderTest(unittest.TestCase):
@@ -137,16 +138,6 @@ class AoReaderTest(unittest.TestCase):
 
         self.assertEqual(
             sorted(result.column('user_id').to_pylist()), list(range(2500, n)))
-
-    def test_lance_ao_reader(self):
-        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
-        self.catalog.create_table('default.test_append_only_lance', schema, False)
-        table = self.catalog.get_table('default.test_append_only_lance')
-        self._write_test_table(table)
-
-        read_builder = table.new_read_builder()
-        actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.expected)
 
     def test_isnull_partition_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
@@ -315,315 +306,6 @@ class AoReaderTest(unittest.TestCase):
         actual = pa.concat_tables(shard_tables).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
-    def test_lance_ao_reader_with_filter(self):
-        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
-        self.catalog.create_table('default.test_append_only_lance_filter', schema, False)
-        table = self.catalog.get_table('default.test_append_only_lance_filter')
-        self._write_test_table(table)
-
-        predicate_builder = table.new_read_builder().new_predicate_builder()
-        p1 = predicate_builder.less_than('user_id', 7)
-        p2 = predicate_builder.greater_or_equal('user_id', 2)
-        p3 = predicate_builder.between('user_id', 0, 6)  # [2/b, 3/c, 4/d, 5/e, 6/f] left
-        p4 = predicate_builder.is_not_in('behavior', ['b', 'e'])  # [3/c, 4/d, 6/f] left
-        p5 = predicate_builder.is_in('dt', ['p1'])  # exclude 3/c
-        p6 = predicate_builder.is_not_null('behavior')  # exclude 4/d
-        g1 = predicate_builder.and_predicates([p1, p2, p3, p4, p5, p6])
-        read_builder = table.new_read_builder().with_filter(g1)
-        actual = self._read_test_table(read_builder)
-        expected = pa.concat_tables([
-            self.expected.slice(5, 1)  # 6/f
-        ])
-        self.assertEqual(actual.sort_by('user_id'), expected)
-
-    def test_lance_ao_reader_with_shard(self):
-        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
-        self.catalog.create_table('default.test_append_only_lance_shard', schema, False)
-        table = self.catalog.get_table('default.test_append_only_lance_shard')
-        self._write_test_table(table)
-
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-
-        shard_tables = []
-        total_shards = 3
-        for i in range(total_shards):
-            splits = read_builder.new_scan().with_shard(i, total_shards).plan().splits()
-            shard_tables.append(table_read.to_arrow(splits))
-
-        actual = pa.concat_tables(shard_tables).sort_by('user_id')
-        self.assertEqual(actual, self.expected)
-
-    def test_lance_sliced_split_row_range_pushdown(self):
-        """
-        SlicedSplit with Lance format calls read_range() instead of read_all(),
-        reading only the requested row slice from disk rather than the full file.
-        """
-        import unittest.mock as mock
-        try:
-            import lance as _lance
-            import lance.file  # ensure submodule is loaded before write_lance uses it
-        except ImportError:
-            self.skipTest("lance not installed")
-
-        schema = Schema.from_pyarrow_schema(
-            pa.schema([('id', pa.int64()), ('value', pa.string())]),
-            options={'file.format': 'lance'})
-        self.catalog.create_table('default.test_lance_sliced_split', schema, False)
-        table = self.catalog.get_table('default.test_lance_sliced_split')
-
-        # Write 1000 rows in a single shot so they land in one file
-        n = 1000
-        pa_table = pa.table({'id': list(range(n)), 'value': [f'v{i}' for i in range(n)]})
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-        scan = table.new_read_builder().new_scan()
-        splits = scan.plan().splits()
-        self.assertEqual(len(splits), 1, "Expected single split (no partition, single bucket)")
-        data_split = splits[0]
-        self.assertEqual(len(data_split.files), 1, "Expected single file in split")
-
-        file_name = data_split.files[0].file_name
-        slice_start, slice_end = 200, 700  # request 500 of 1000 rows
-
-        from pypaimon.read.sliced_split import SlicedSplit
-        sliced = SlicedSplit(data_split, {file_name: (slice_start, slice_end)})
-
-        # Spy on lance.file.LanceFileReader to verify read_range is used
-        OrigReader = _lance.file.LanceFileReader
-        read_all_calls = []
-        read_range_calls = []
-
-        class SpyLanceFileReader:
-            def __init__(self, *args, **kwargs):
-                self._r = OrigReader(*args, **kwargs)
-
-            def read_all(self, *args, **kwargs):
-                read_all_calls.append(())
-                return self._r.read_all(*args, **kwargs)
-
-            def read_range(self, start, count, **kwargs):
-                read_range_calls.append((start, count))
-                return self._r.read_range(start, count, **kwargs)
-
-            def __getattr__(self, name):
-                return getattr(self._r, name)
-
-        table_read = table.new_read_builder().new_read()
-        with mock.patch.object(_lance.file, 'LanceFileReader', SpyLanceFileReader):
-            result = table_read.to_arrow([sliced])
-
-        # Verify that read_range was used, not read_all
-        self.assertEqual(len(read_all_calls), 0,
-                         "read_all() must not be called when SlicedSplit row range is available")
-        self.assertEqual(len(read_range_calls), 1)
-        actual_start, actual_count = read_range_calls[0]
-        self.assertEqual(actual_start, slice_start)
-        self.assertEqual(actual_count, slice_end - slice_start,
-                         f"read_range should request exactly {slice_end - slice_start} rows, "
-                         f"not the full {n} rows of the file")
-
-        # Verify functional correctness: correct rows returned
-        self.assertEqual(result.num_rows, slice_end - slice_start)
-        result_ids = sorted(result.column('id').to_pylist())
-        self.assertEqual(result_ids, list(range(slice_start, slice_end)))
-
-    def test_lance_shard_row_id_correctness(self):
-        """
-        with_shard splits a file into contiguous ranges via SlicedSplit.
-        _ROW_ID across all shards must equal the full table's _ROW_ID.
-        """
-        try:
-            import lance  # noqa: F401
-        except ImportError:
-            self.skipTest("lance not installed")
-
-        schema = Schema.from_pyarrow_schema(
-            pa.schema([('id', pa.int64()), ('value', pa.string())]),
-            options={'file.format': 'lance',
-                     'row-tracking.enabled': 'true',
-                     'data-evolution.enabled': 'true'})
-        self.catalog.create_table('default.test_lance_shard_row_id', schema, False)
-        table = self.catalog.get_table('default.test_lance_shard_row_id')
-
-        n = 1000
-        pa_table = pa.table({'id': list(range(n)), 'value': [f'v{i}' for i in range(n)]})
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-        # Read full table _ROW_ID as ground truth
-        read_builder = table.new_read_builder().with_projection(['id', '_ROW_ID'])
-        full_splits = read_builder.new_scan().plan().splits()
-        table_read = read_builder.new_read()
-        full_result = table_read.to_arrow(full_splits)
-        expected_row_ids = sorted(full_result.column('_ROW_ID').to_pylist())
-
-        # Read via with_shard and collect _ROW_ID from all shards
-        total_shards = 3
-        all_row_ids = []
-        for i in range(total_shards):
-            shard_splits = read_builder.new_scan().with_shard(i, total_shards).plan().splits()
-            shard_result = table_read.to_arrow(shard_splits)
-            all_row_ids.extend(shard_result.column('_ROW_ID').to_pylist())
-
-        self.assertEqual(sorted(all_row_ids), expected_row_ids)
-
-    def test_lance_indexed_split_take_rows_pushdown(self):
-        """
-        IndexedSplit row ranges (from ANN global index results) are converted to
-        local file indices and pushed down to lance.file.LanceFileReader.take_rows(),
-        so only the matched rows are physically read instead of the full file.
-        """
-        import unittest.mock as mock
-        try:
-            import lance as _lance
-            import lance.file
-        except ImportError:
-            self.skipTest("lance not installed")
-
-        schema = Schema.from_pyarrow_schema(
-            pa.schema([('id', pa.int64()), ('value', pa.string())]),
-            options={'file.format': 'lance',
-                     'row-tracking.enabled': 'true',
-                     'data-evolution.enabled': 'true'})
-        self.catalog.create_table('default.test_lance_indexed_split', schema, False)
-        table = self.catalog.get_table('default.test_lance_indexed_split')
-
-        n = 1000
-        pa_table = pa.table({'id': list(range(n)), 'value': [f'v{i}' for i in range(n)]})
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-        splits = table.new_read_builder().new_scan().plan().splits()
-        self.assertEqual(len(splits), 1)
-        data_split = splits[0]
-        self.assertEqual(len(data_split.files), 1)
-
-        file_meta = data_split.files[0]
-        self.assertIsNotNone(file_meta.first_row_id, "row tracking must assign first_row_id")
-        first_row_id = file_meta.first_row_id
-
-        # Simulate ANN result: 3 scattered global row IDs
-        from pypaimon.globalindex.indexed_split import IndexedSplit
-        from pypaimon.utils.range import Range
-        target_global_ids = [first_row_id + 50, first_row_id + 300, first_row_id + 700]
-        row_ranges = [Range(g, g) for g in target_global_ids]
-        indexed = IndexedSplit(data_split, row_ranges)
-
-        OrigReader = _lance.file.LanceFileReader
-        take_rows_calls = []
-        read_all_calls = []
-
-        class SpyLanceFileReader:
-            def __init__(self, *args, **kwargs):
-                self._r = OrigReader(*args, **kwargs)
-
-            def take_rows(self, indices, **kwargs):
-                take_rows_calls.append(list(indices))
-                return self._r.take_rows(indices, **kwargs)
-
-            def read_all(self, *args, **kwargs):
-                read_all_calls.append(())
-                return self._r.read_all(*args, **kwargs)
-
-            def read_range(self, *args, **kwargs):
-                return self._r.read_range(*args, **kwargs)
-
-            def __getattr__(self, name):
-                return getattr(self._r, name)
-
-        table_read = table.new_read_builder().new_read()
-        with mock.patch.object(_lance.file, 'LanceFileReader', SpyLanceFileReader):
-            result = table_read.to_arrow([indexed])
-
-        self.assertEqual(len(read_all_calls), 0,
-                         "read_all() must not be called when IndexedSplit row ranges are available")
-        self.assertEqual(len(take_rows_calls), 1)
-        # local indices = global_ids - first_row_id
-        expected_local = [g - first_row_id for g in target_global_ids]
-        self.assertEqual(sorted(take_rows_calls[0]), sorted(expected_local),
-                         f"take_rows should request local indices {expected_local}, "
-                         f"not read the full {n} rows")
-
-        self.assertEqual(result.num_rows, len(target_global_ids))
-        result_ids = sorted(result.column('id').to_pylist())
-        self.assertEqual(result_ids, [50, 300, 700])
-
-    def test_lance_indexed_split_row_id_correctness(self):
-        """
-        IndexedSplit (ANN vector search) with native take_rows pushdown must
-        return correct _ROW_ID values matching the original global row IDs.
-        """
-        try:
-            import lance  # noqa: F401
-        except ImportError:
-            self.skipTest("lance not installed")
-
-        schema = Schema.from_pyarrow_schema(
-            pa.schema([('id', pa.int64()), ('value', pa.string())]),
-            options={'file.format': 'lance',
-                     'row-tracking.enabled': 'true',
-                     'data-evolution.enabled': 'true'})
-        self.catalog.create_table('default.test_lance_indexed_row_id', schema, False)
-        table = self.catalog.get_table('default.test_lance_indexed_row_id')
-
-        n = 1000
-        pa_table = pa.table({'id': list(range(n)), 'value': [f'v{i}' for i in range(n)]})
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-        # Read full table to get ground-truth _ROW_ID for specific rows
-        read_builder = table.new_read_builder().with_projection(['id', '_ROW_ID'])
-        full_splits = read_builder.new_scan().plan().splits()
-        table_read = read_builder.new_read()
-        full_result = table_read.to_arrow(full_splits)
-        # Build id -> _ROW_ID mapping from full scan
-        id_to_row_id = dict(zip(
-            full_result.column('id').to_pylist(),
-            full_result.column('_ROW_ID').to_pylist()))
-
-        # Construct IndexedSplit targeting specific rows
-        data_split = full_splits[0]
-        file_meta = data_split.files[0]
-        first_row_id = file_meta.first_row_id
-
-        from pypaimon.globalindex.indexed_split import IndexedSplit
-        from pypaimon.utils.range import Range
-        target_local_offsets = [50, 300, 700]
-        target_global_ids = [first_row_id + o for o in target_local_offsets]
-        row_ranges = [Range(g, g) for g in target_global_ids]
-        indexed = IndexedSplit(data_split, row_ranges)
-
-        result = table_read.to_arrow([indexed])
-
-        self.assertEqual(result.num_rows, len(target_global_ids))
-        for i in range(result.num_rows):
-            row_id = result.column('_ROW_ID')[i].as_py()
-            data_id = result.column('id')[i].as_py()
-            self.assertEqual(row_id, id_to_row_id[data_id],
-                             f"row id={data_id}: _ROW_ID should be {id_to_row_id[data_id]}, got {row_id}")
-
     def test_append_only_multi_write_once_commit(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_append_only_multi_once_commit', schema, False)
@@ -702,7 +384,7 @@ class AoReaderTest(unittest.TestCase):
                     file=file
                 ))
         # mock retry
-        success = table_commit.file_store_commit._try_commit_once(
+        success = python_commit(table_commit).file_store_commit._try_commit_once(
             CommitFailRetryResult(None),
             "APPEND",
             commit_entries,

@@ -24,7 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType, PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests import native_plan_rest_test

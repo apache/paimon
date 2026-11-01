@@ -43,7 +43,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.schema.manifest_file_meta import MANIFEST_FILE_META_SCHEMA
-from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.tests.manifest import manifest_entry_identifier_test as existing
 from pypaimon.schema.schema import Schema
@@ -484,7 +484,7 @@ class ManifestSidecarScanTest(existing.ManifestEntryIdentifierTest):
         self.table.options.options.set(CoreOptions.DATA_EVOLUTION_ENABLED, False)
         self.table.options.options.set(CoreOptions.BUCKET, 4)
         from pypaimon.common.predicate import Predicate
-        from pypaimon.read.scanner.bucket_select_converter import create_bucket_selector
+        from pypaimon.execution.python.read.scanner.bucket_select_converter import (create_bucket_selector)
         selector = create_bucket_selector(Predicate('equal', 0, 'id', [7]), self.table.fields[:1])
         self.assertIsNotNone(selector)
         entries = [replace(self.entry('%s-%s-%s.parquet' % (total, bucket, i), None),
@@ -568,6 +568,7 @@ class ManifestSidecarScanTest(existing.ManifestEntryIdentifierTest):
             pa.schema([('p', pa.int32()), ('q', pa.string()), ('value', pa.string())]),
             partition_keys=['p', 'q'],
             options={'manifest.sidecar.enabled': 'true',
+                     'row-tracking.enabled': 'true',
                      'data-evolution.enabled': 'true'})
         self.catalog.create_table('default.explain_sidecar', schema, False)
         self.table = self.catalog.get_table('default.explain_sidecar')

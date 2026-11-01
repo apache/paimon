@@ -157,8 +157,12 @@ public class LeafPredicate implements Predicate {
 
         Object min = get(minValues, index, type);
         Object max = get(maxValues, index, type);
-        Long nullCount = nullCounts.isNullAt(index) ? null : nullCounts.getLong(index);
+        Long nullCount =
+                nullCounts.size() == 0 || nullCounts.isNullAt(index)
+                        ? null
+                        : nullCounts.getLong(index);
         if (nullCount == null || rowCount != nullCount) {
+            // missing null counts
             // not all null
             // min or max is null
             // unknown stats

@@ -83,6 +83,30 @@ class OptionsTableTest(unittest.TestCase):
         self.assertEqual(["key"], arrow_table.schema.names)
         self.assertIn("bucket", arrow_table.column("key").to_pylist())
 
+    def test_prefix_filter_before_projection_and_limit(self):
+        table = self.catalog.get_table("db.t$options")
+        rb = table.new_read_builder()
+        predicate = rb.new_predicate_builder().startswith("key", "user-")
+        rb.with_filter(predicate).with_projection(["value"]).with_limit(1)
+        result = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual(result.to_pylist(), [{"value": "alpha"}])
+
+    def test_prefix_filter_preserves_null_comparison_semantics(self):
+        table = self.catalog.get_table("db.t$options")
+        rb = table.new_read_builder()
+        pb = rb.new_predicate_builder()
+        for method in ("equal", "not_equal", "less_than", "less_or_equal", "greater_than", "greater_or_equal"):
+            with self.subTest(method=method):
+                comparison = getattr(pb, method)("value", None)
+                rb.with_filter(comparison)
+                self.assertEqual(rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist(), [])
+                rb.with_filter(pb.and_predicates([pb.startswith("key", "user-"), comparison]))
+                self.assertEqual(rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist(), [])
+                rb.with_filter(pb.or_predicates([comparison, pb.startswith("key", "user-")]))
+                self.assertEqual(rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist(), [
+                    {"key": "user-flag", "value": "alpha"},
+                ])
+
 
 if __name__ == "__main__":
     unittest.main()

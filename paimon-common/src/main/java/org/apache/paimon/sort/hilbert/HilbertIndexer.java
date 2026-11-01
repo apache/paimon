@@ -93,6 +93,18 @@ public class HilbertIndexer implements Serializable {
         functionSet.forEach(RowProcessor::open);
     }
 
+    /**
+     * Maps a double to the curve's 63-bit unsigned domain, keeping its order. The curve only reads
+     * the low 63 bits of each coordinate, so the raw bits would drop the sign and put {@code x} and
+     * {@code -x} on the same point. Floats widen to double without changing their order.
+     */
+    public static long doubleToOrderedLong(double value) {
+        long bits = Double.doubleToLongBits(value);
+        // flip all bits of negatives and only the sign bit of positives, as in z-order
+        bits ^= (bits >> (Long.SIZE - 1)) | Long.MIN_VALUE;
+        return bits >>> 1;
+    }
+
     public byte[] index(InternalRow row) {
         Long[] columnLongs = new Long[fieldsIndex.length];
 
@@ -221,7 +233,7 @@ public class HilbertIndexer implements Serializable {
             return (row) ->
                     row.isNullAt(fieldIndex)
                             ? PRIMITIVE_EMPTY
-                            : Double.doubleToLongBits(row.getFloat(fieldIndex));
+                            : doubleToOrderedLong(row.getFloat(fieldIndex));
         }
 
         @Override
@@ -229,7 +241,7 @@ public class HilbertIndexer implements Serializable {
             return (row) ->
                     row.isNullAt(fieldIndex)
                             ? PRIMITIVE_EMPTY
-                            : Double.doubleToLongBits(row.getDouble(fieldIndex));
+                            : doubleToOrderedLong(row.getDouble(fieldIndex));
         }
 
         @Override

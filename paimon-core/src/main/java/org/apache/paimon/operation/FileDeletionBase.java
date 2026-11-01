@@ -23,20 +23,20 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.BinaryIndexManifestEntry;
 import org.apache.paimon.manifest.BucketFilter;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileEntry.Identifier;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestBucketFilter;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileOperationThreadPool;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -51,6 +51,7 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -310,24 +311,33 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     private void collectUnusedIndexManifests(
             Snapshot snapshot,
             Set<String> skippingSet,
-            Set<IndexManifestEntry> indexFiles,
+            Set<Path> indexFiles,
             Set<String> indexManifests) {
         // clean index manifests
         String indexManifest = snapshot.indexManifest();
         // check exists, it may have been deleted by other snapshots
         if (indexManifest != null) {
-            List<IndexManifestEntry> indexManifestEntries;
+            CloseableIterator<BinaryIndexManifestEntry> entries;
             try {
-                indexManifestEntries = indexFileHandler.readManifestWithIOException(indexManifest);
-            } catch (FileNotFoundException e) {
-                return;
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            for (IndexManifestEntry entry : indexManifestEntries) {
-                if (skippingSet.add(entry.indexFile().fileName())) {
-                    indexFiles.add(entry);
+                entries =
+                        indexFileHandler.scan(
+                                snapshot, BinaryIndexManifestEntry.FILE_PATH_PROJECTION);
+            } catch (UncheckedIOException e) {
+                if (e.getCause() instanceof FileNotFoundException) {
+                    return;
                 }
+                throw e;
+            }
+            try (CloseableIterator<BinaryIndexManifestEntry> iterator = entries) {
+                while (iterator.hasNext()) {
+                    BinaryIndexManifestEntry entry = iterator.next();
+                    if (skippingSet.add(entry.fileName())) {
+                        indexFiles.add(indexFileHandler.filePath(entry));
+                    }
+                }
+            } catch (Exception e) {
+                // A missing manifest is only safe to ignore before scanning starts.
+                throw new RuntimeException("Failed to scan index manifest " + indexManifest, e);
             }
 
             if (skippingSet.add(indexManifest)) {
@@ -363,7 +373,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             boolean deleteDataManifestLists,
             boolean deleteChangelog) {
         Set<String> manifests = new LinkedHashSet<>();
-        Set<IndexManifestEntry> indexFiles = new LinkedHashSet<>();
+        Set<Path> indexFiles = new LinkedHashSet<>();
         Set<String> indexManifests = new LinkedHashSet<>();
         Set<String> statistics = new LinkedHashSet<>();
         if (deleteDataManifestLists) {
@@ -392,8 +402,8 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         for (String manifest : manifests) {
             tasks.add(() -> manifestFile.delete(manifest));
         }
-        for (IndexManifestEntry indexFile : indexFiles) {
-            tasks.add(() -> indexFileHandler.deleteIndexFile(indexFile));
+        for (Path indexFile : indexFiles) {
+            tasks.add(() -> fileIO.deleteQuietly(indexFile));
         }
         for (String indexManifest : indexManifests) {
             tasks.add(() -> indexFileHandler.deleteManifest(indexManifest));
@@ -618,10 +628,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         String indexManifest = skippingSnapshot.indexManifest();
         if (indexManifest != null) {
             skippingSet.add(indexManifest);
-            indexFileHandler.readManifest(indexManifest).stream()
-                    .map(IndexManifestEntry::indexFile)
-                    .map(IndexFileMeta::fileName)
-                    .forEach(skippingSet::add);
+            addIndexFilesToSkippingSet(skippingSnapshot, skippingSet);
         }
 
         String reassignPlan = planFile(skippingSnapshot);
@@ -635,6 +642,18 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         }
 
         return skippingSet;
+    }
+
+    protected void addIndexFilesToSkippingSet(Snapshot snapshot, Set<String> skippingSet) {
+        try (CloseableIterator<BinaryIndexManifestEntry> entries =
+                indexFileHandler.scan(snapshot, BinaryIndexManifestEntry.FILE_NAME_PROJECTION)) {
+            while (entries.hasNext()) {
+                skippingSet.add(entries.next().fileName());
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to scan index manifest " + snapshot.indexManifest(), e);
+        }
     }
 
     protected static void addManifestToSkippingSet(

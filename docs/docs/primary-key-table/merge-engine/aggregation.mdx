@@ -181,6 +181,14 @@ count of distinct event IDs.
   The collect function collects elements into an Array. You can set `fields.<field-name>.distinct=true` to deduplicate elements.
   It only supports ARRAY type.
 
+  Use `fields.<field-name>.count-limit=<Integer>` to limit the number of collected elements. There is no limit by default.
+  A positive value `N` keeps the first `N` elements in aggregation order; a negative value `-N` keeps the last `N` elements.
+
+  With `distinct=true`, the limit counts distinct elements: positive limits retain the first occurrence of each element,
+  while negative limits retain the last occurrence. The retained elements keep their original order.
+  For example, collecting `[1, 2, 1, 3]` with `distinct=true` produces `[1, 2]` for `count-limit=2`
+  and `[1, 3]` for `count-limit=-2`.
+
 ### merge_map
   The merge_map function merge input maps. It only supports MAP type.
 

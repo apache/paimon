@@ -97,6 +97,12 @@ class Catalog(ABC):
     def get_table(self, identifier: Union[str, Identifier]) -> Table:
         """Get paimon table identified by the given Identifier."""
 
+    def get_table_by_id(self, table_id: str) -> Table:
+        """Get paimon table identified by the given table id."""
+        raise NotImplementedError(
+            "get_table_by_id is not supported by this catalog."
+        )
+
     @abstractmethod
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
         """Create table with schema."""
@@ -186,7 +192,8 @@ class Catalog(ABC):
         """
 
     def rollback_to(self, identifier: Union[str, Identifier], instant: Instant,
-                    from_snapshot: Optional[int] = None) -> None:
+                    from_snapshot: Optional[int] = None, *,
+                    table_uuid: Optional[str] = None) -> None:
         """Rollback table by the given identifier and instant.
 
         Args:
@@ -194,6 +201,9 @@ class Catalog(ABC):
             instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
             from_snapshot: Optional snapshot ID. Success only occurs when the
                 latest snapshot is this snapshot.
+            table_uuid: Expected table or branch UUID from the loaded table view.
+                Omit only when its UUID is unavailable. Implementations must not
+                discard a supplied UUID or reload it by name before rollback.
 
         Raises:
             TableNotExistException: If the table does not exist.

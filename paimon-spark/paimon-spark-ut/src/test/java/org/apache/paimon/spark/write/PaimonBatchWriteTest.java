@@ -26,8 +26,11 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 
+import org.apache.spark.sql.connector.metric.CustomTaskMetric;
+import org.apache.spark.sql.connector.write.WriterCommitMessage;
 import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 
@@ -35,12 +38,47 @@ import java.util.Collections;
 
 import scala.Option;
 
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests for {@link PaimonBatchWrite}. */
 public class PaimonBatchWriteTest {
+
+    @Test
+    public void testCommitFailureStillPropagatesAndClosesCommit() throws Exception {
+        FileStoreTable table = mock(FileStoreTable.class);
+        when(table.coreOptions()).thenReturn(CoreOptions.fromMap(Collections.emptyMap()));
+        BatchWriteBuilder builder = mock(BatchWriteBuilder.class);
+        when(table.newBatchWriteBuilder()).thenReturn(builder);
+        BatchTableCommit commit = mock(BatchTableCommit.class);
+        when(builder.newCommit()).thenReturn(commit);
+        IllegalStateException failure = new IllegalStateException("commit failed");
+        doThrow(failure).when(commit).commit(anyList());
+
+        StructType schema = new StructType();
+        PaimonBatchWrite batchWrite =
+                new PaimonBatchWrite(
+                        table, schema, schema, Option.empty(), Option.empty(), Option.empty()) {
+                    @Override
+                    public void postDriverMetrics(CustomTaskMetric[] metrics) {
+                        throw new AssertionError("Metrics must not be posted after commit failure");
+                    }
+                };
+
+        WriterCommitMessage[] messages = new WriterCommitMessage[0];
+        assertSame(
+                failure,
+                assertThrows(IllegalStateException.class, () -> batchWrite.commit(messages)));
+        verify(commit).close();
+        batchWrite.abort(messages);
+        verify(commit, never()).abort(anyList());
+    }
 
     @Test
     public void testResolveBlobDescriptorSourceBeforeCreatingTaskWriters() throws Exception {

@@ -44,6 +44,7 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -666,6 +667,77 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
         assertThat(result.get(0).getVector(1).toFloatArray()).isEqualTo(values);
     }
 
+    @Test
+    public void testReadNumericDecimalKeepsPrecision() throws IOException {
+        // DECIMAL maps to a JSON number, but Paimon's own writer emits DECIMAL as a string, so
+        // numeric literals only come from external writers.
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.DECIMAL(20, 2),
+                            DataTypes.DECIMAL(38, 18),
+                            DataTypes.ARRAY(DataTypes.DECIMAL(20, 2)),
+                            DataTypes.MAP(DataTypes.STRING(), DataTypes.DECIMAL(20, 2)),
+                            DataTypes.ROW(DataTypes.FIELD(0, "d", DataTypes.DECIMAL(20, 2)))
+                        },
+                        new String[] {"d1", "d2", "arr", "m", "r"});
+        String json =
+                "{\"d1\":12345678901234567.89,\"d2\":123456789.123456789,"
+                        + "\"arr\":[12345678901234567.89],\"m\":{\"k\":12345678901234567.89},"
+                        + "\"r\":{\"d\":12345678901234567.89}}";
+
+        List<InternalRow> result = readRawJson(rowType, json);
+
+        assertThat(result).hasSize(1);
+        InternalRow row = result.get(0);
+        BigDecimal expected = new BigDecimal("12345678901234567.89");
+        assertThat(row.getDecimal(0, 20, 2).toBigDecimal()).isEqualTo(expected);
+        assertThat(row.getDecimal(1, 38, 18).toBigDecimal())
+                .isEqualTo(new BigDecimal("123456789.123456789").setScale(18));
+        assertThat(row.getArray(2).getDecimal(0, 20, 2).toBigDecimal()).isEqualTo(expected);
+        assertThat(row.getMap(3).valueArray().getDecimal(0, 20, 2).toBigDecimal())
+                .isEqualTo(expected);
+        assertThat(row.getRow(4, 1).getDecimal(0, 20, 2).toBigDecimal()).isEqualTo(expected);
+    }
+
+    @Test
+    public void testReadNumericNonDecimalFieldsInDecimalRowUnchanged() throws IOException {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.DECIMAL(20, 2),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.DOUBLE()
+                        },
+                        new String[] {"d", "s1", "s2", "dbl"});
+        String json = "{\"d\":1.5,\"s1\":1e20,\"s2\":1000.0,\"dbl\":1000.0}";
+
+        List<InternalRow> result = readRawJson(rowType, json);
+
+        assertThat(result).hasSize(1);
+        InternalRow row = result.get(0);
+        assertThat(row.getDecimal(0, 20, 2).toBigDecimal()).isEqualTo(new BigDecimal("1.50"));
+        assertThat(row.getString(1).toString()).isEqualTo("1.0E20");
+        assertThat(row.getString(2).toString()).isEqualTo("1000.0");
+        assertThat(row.getDouble(3)).isEqualTo(1000.0d);
+    }
+
+    @Test
+    public void testReadNegativeZeroDoubleWithoutDecimal() throws IOException {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.DOUBLE(), DataTypes.STRING()},
+                        new String[] {"dbl", "s"});
+
+        List<InternalRow> result = readRawJson(rowType, "{\"dbl\":-0.0,\"s\":-0.0}");
+
+        assertThat(result).hasSize(1);
+        assertThat(Double.doubleToRawLongBits(result.get(0).getDouble(0)))
+                .isEqualTo(Double.doubleToRawLongBits(-0.0d));
+        assertThat(result.get(0).getString(1).toString()).isEqualTo("-0.0");
+    }
+
     @Override
     public boolean supportDataFileWithoutExtension() {
         return true;
@@ -711,6 +783,29 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
             writer.addElement(row);
         }
         return new String(Files.readAllBytes(Paths.get(testFile.toUri())), StandardCharsets.UTF_8);
+    }
+
+    private List<InternalRow> readRawJson(RowType rowType, String jsonLine) throws IOException {
+        FileFormat format =
+                new JsonFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        Path testFile = new Path(parent, "raw_json_" + UUID.randomUUID() + ".json");
+        try (PositionOutputStream out = fileIO.newOutputStream(testFile, false)) {
+            out.write((jsonLine + "\n").getBytes(StandardCharsets.UTF_8));
+        }
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null))) {
+            InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+            List<InternalRow> result = new ArrayList<>();
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+            return result;
+        }
     }
 
     private List<InternalRow> writeThenRead(

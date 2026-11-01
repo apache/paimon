@@ -179,6 +179,34 @@ public class FileIOTest {
     }
 
     @Test
+    public void testGetKeepsUncheckedFailuresOfLoaders() {
+        RuntimeException preferFailure =
+                new RuntimeException(
+                        new ClassNotFoundException(
+                                "Class org.apache.hadoop.fs.s3a.S3AFileSystem not found"));
+        IOException fallbackFailure = new IOException("The specified bucket does not exist");
+        CatalogContext context =
+                CatalogContext.create(
+                        new Options(),
+                        new FailingFileIOLoader(preferFailure),
+                        new FailingFileIOLoader(fallbackFailure));
+
+        assertThatThrownBy(() -> FileIO.get(new Path("failing-scheme://bucket/path"), context))
+                .isInstanceOf(UnsupportedSchemeException.class)
+                .hasMessageContaining(
+                        "First error: java.lang.ClassNotFoundException: "
+                                + "Class org.apache.hadoop.fs.s3a.S3AFileSystem not found")
+                .satisfies(
+                        e -> {
+                            assertThat(e.getSuppressed()[0])
+                                    .isInstanceOf(IOException.class)
+                                    .hasMessageContaining("FailingFileIOLoader cannot access path")
+                                    .hasCause(preferFailure);
+                            assertThat(e.getSuppressed()).contains(fallbackFailure);
+                        });
+    }
+
+    @Test
     public void testCopy() throws Exception {
         Path srcFile = new Path(tempDir.resolve("src.txt").toUri());
         Path dstFile = new Path(tempDir.resolve("dst.txt").toUri());
@@ -443,6 +471,36 @@ public class FileIOTest {
             }
 
             return new File(localPath);
+        }
+    }
+
+    /** A {@link FileIOLoader} whose {@link FileIO} fails the access check with a given failure. */
+    private static class FailingFileIOLoader implements FileIOLoader {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Exception failure;
+
+        private FailingFileIOLoader(Exception failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public String getScheme() {
+            return "failing-scheme";
+        }
+
+        @Override
+        public FileIO load(Path path) {
+            return new LocalFileIO() {
+                @Override
+                public boolean exists(Path path) throws IOException {
+                    if (failure instanceof IOException) {
+                        throw (IOException) failure;
+                    }
+                    throw (RuntimeException) failure;
+                }
+            };
         }
     }
 }

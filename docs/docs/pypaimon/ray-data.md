@@ -278,6 +278,12 @@ including the default dynamic-bucket primary-key table (`bucket = -1`).
 Ray write tasks create independent Paimon writers, which can assign
 overlapping buckets or sequence numbers for those modes.
 
+With `write.native.enabled=true`, fixed and postpone input bucket routing runs
+in Rust, including POSTPONE per-partition input statistics and bucket-count
+inference. Ray still materializes, groups, and schedules the input; workers
+reconstruct native routing state from the shared plan. The grouping and
+single-writer ownership rules above remain the same.
+
 **Parameters:**
 - `dataset`: the Ray Dataset to write.
 - `table_identifier`: full table name, e.g. `"db_name.table_name"`.

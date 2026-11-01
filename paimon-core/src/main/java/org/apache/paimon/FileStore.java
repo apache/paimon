@@ -30,7 +30,6 @@ import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.SplitRead;
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFileHandler;
@@ -99,8 +98,6 @@ public interface FileStore<T> {
     ChangelogDeletion newChangelogDeletion();
 
     TagManager newTagManager();
-
-    TagDeletion newTagDeletion();
 
     @Nullable
     PartitionExpire newPartitionExpire(String commitUser, FileStoreTable table);

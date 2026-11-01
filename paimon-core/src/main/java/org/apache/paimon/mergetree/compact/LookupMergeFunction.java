@@ -22,12 +22,15 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 
 /**
  * A {@link MergeFunction} for lookup, this wrapper only considers the latest high level record,
@@ -185,8 +188,27 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable RowType readType) {
+            RowType bufferType = valueType;
+            if (readType != null) {
+                // PR #9978(https://github.com/apache/paimon/pull/9978) makes some fields nullable
+                // in valueType so deletes can omit their values,
+                // while readType may still mark them NOT NULL. Keep the read layout, but preserve
+                // this nullability so buffered deletes can be serialized safely when spilling.
+                List<DataField> bufferFields = new ArrayList<>();
+                for (DataField readField : readType.getFields()) {
+                    bufferFields.add(
+                            valueType.containsField(readField.id())
+                                            && valueType
+                                                    .getField(readField.id())
+                                                    .type()
+                                                    .isNullable()
+                                    ? readField.copy(true)
+                                    : readField);
+                }
+                bufferType = readType.copy(bufferFields);
+            }
             return new LookupMergeFunction(
-                    wrapped.create(readType), options, keyType, valueType, ioManager);
+                    wrapped.create(readType), options, keyType, bufferType, ioManager);
         }
 
         @Override

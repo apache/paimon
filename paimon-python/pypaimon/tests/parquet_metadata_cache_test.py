@@ -33,8 +33,8 @@ from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.read.reader import format_pyarrow_reader as reader_module
-from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
+from pypaimon.execution.python.read.reader import format_pyarrow_reader as reader_module
+from pypaimon.execution.python.read.reader.format_pyarrow_reader import (FormatPyArrowReader)
 from pypaimon.schema.data_types import AtomicType, DataField
 
 

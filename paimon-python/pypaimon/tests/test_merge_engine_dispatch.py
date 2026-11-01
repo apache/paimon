@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Unit tests for ``pypaimon.common.merge_engine_dispatch``.
+"""Unit tests for ``pypaimon.execution.python.merge_engine_dispatch``.
 
 Pins down the table-option parsing the dispatch uses to decide whether
 ``partial-update`` should run or be rejected. The key contract: strict
@@ -28,14 +28,13 @@ here.
 
 import unittest
 
-from pypaimon.common.merge_engine_dispatch import (
+from pypaimon.execution.python.merge_engine_dispatch import (
     _option_is_truthy,
     build_merge_function,
     partial_update_unsupported_options,
 )
 from pypaimon.common.options.core_options import MergeEngine
-from pypaimon.read.reader.partial_update_merge_function import \
-    PartialUpdateMergeFunction
+from pypaimon.execution.python.read.reader.partial_update_merge_function import (PartialUpdateMergeFunction)
 
 
 class OptionIsTruthyTest(unittest.TestCase):

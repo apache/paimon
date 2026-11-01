@@ -118,6 +118,8 @@ public class SparkFilterConverter {
             int index = fieldIndex(eq.attribute());
             if (eq.value() == null) {
                 return builder.isNull(index);
+            } else if (isNaN(eq.value())) {
+                return builder.isNaN(index);
             } else {
                 Object literal = convertLiteral(index, eq.value());
                 return builder.equal(index, literal);

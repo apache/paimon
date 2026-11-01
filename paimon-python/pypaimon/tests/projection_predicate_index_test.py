@@ -347,7 +347,7 @@ class RewritePredicateIndicesUnitTest(unittest.TestCase):
         self.assertTrue(predicate_supports_arrow_filter(large_in))
 
     def test_missing_first_row_id_materializes_null_row_ids(self):
-        from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
+        from pypaimon.execution.python.read.reader.data_file_batch_reader import (DataFileBatchReader)
         from pypaimon.table.special_fields import SpecialFields
 
         reader = object.__new__(DataFileBatchReader)

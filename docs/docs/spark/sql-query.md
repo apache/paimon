@@ -61,6 +61,25 @@ For example:
 SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket, __paimon_row_index FROM t;
 ```
 
+Supported equality, membership and range predicates on `__paimon_bucket` are pushed down to
+select physical buckets before reading data files. For example, to read only buckets 0 and 1:
+
+```sql
+SELECT * FROM t WHERE __paimon_bucket IN (0, 1);
+```
+
+Bucket IDs refer to the physical buckets of the stored files, including historical buckets
+from partitions written with a different bucket count. Other predicates can be combined with
+the bucket condition as usual. A supported bucket predicate combined with other conditions
+using `AND` can still be pushed down. An `OR` expression that mixes bucket and business
+columns, such as `__paimon_bucket = 1 OR id = 42`, is evaluated by Spark and does not itself
+enable bucket pruning. Unsupported bucket expressions, such as `__paimon_bucket % 2 = 0`,
+are also evaluated by Spark.
+
+Bucket predicate pushdown reduces the data files selected for reading. Membership and range
+predicates may still require reading manifests to identify matching files; they do not
+guarantee that manifest files are skipped.
+
 ### Scan Layout and Storage Partition Joins
 
 By default, Paimon plans batch read tasks using its regular split packing. It does not report
@@ -166,6 +185,55 @@ In Batch SQL, the `DELETE` records are not allowed to be returned, so records of
 To inspect row kinds, including deletes, query the [`audit_log` system table](../concepts/system-tables#audit-log-table).
 
 ## Query Optimization
+
+### Repartition Oversized Scan Output
+
+This optimization is disabled by default. Enable it for the Spark session with:
+
+```sql
+SET spark.paimon.read.repartition-large-blob-scan.enabled = true;
+```
+
+Set it to `false` to disable `RepartitionLargeBlobScan`. When disabled, the rule
+returns the plan unchanged without planning scan splits or input partitions.
+
+This rule only applies to tables whose full schema contains a `BLOB`, `ARRAY<BLOB>`,
+or `MAP<..., BLOB>` column, even if that column is pruned from the scan. Other tables
+are skipped without planning scan splits or input partitions.
+
+When an eligible Paimon batch scan has an input partition larger than twice `filesMaxPartitionBytes`,
+the optimizer inserts a shuffle immediately after the scan. The trigger threshold and
+output partition count are calculated separately:
+
+```text
+threshold = 2 * filesMaxPartitionBytes
+output partition count = ceil(total input partition bytes / filesMaxPartitionBytes)
+```
+
+If the computed output partition count is less than or equal to the existing input partition
+count, the rule keeps the scan unchanged without adding a shuffle. A shuffle is inserted only
+when the computed count increases parallelism.
+
+`filesMaxPartitionBytes` uses Paimon's `source.split.target-size`, falling back to an explicitly
+configured `spark.sql.files.maxPartitionBytes`, then Paimon's default split size.
+All input partitions contribute to the total bytes. An input partition exactly at the
+threshold does not trigger repartitioning. File-open costs and minimum partition counts
+do not affect this rule's threshold or output partition count.
+
+Sizes are the sum of data file sizes reported by the splits in each input partition,
+including Blob file sizes. They are metadata estimates, not decoded row sizes or
+measured shuffle bytes. The rule increases parallelism for downstream operators;
+it does not split source scan tasks. It leaves streaming scans and an existing
+shuffle directly above the scan unchanged. Runtime filtering can subsequently
+reduce the scan input without changing this statically planned repartition count.
+
+The shuffle is placed above an existing dynamic partition pruning filter, keeping the
+filter adjacent to its scan operation so Spark can pass runtime filters to Paimon.
+Scans below expressions using `input_file_name()`, `input_file_block_start()`, or
+`input_file_block_length()` are skipped: these functions need the source reader's
+task-local file context, which is not carried through a shuffle.
+
+### Filter Pushdown
 
 It is highly recommended to specify partition and primary key filters
 along with the query, which will speed up the data skipping of the query.

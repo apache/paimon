@@ -87,6 +87,13 @@ class StartupMode(str, Enum):
     INCREMENTAL = "incremental"
 
 
+class IncrementalBetweenScanMode(str, Enum):
+    AUTO = "auto"
+    DELTA = "delta"
+    CHANGELOG = "changelog"
+    DIFF = "diff"
+
+
 class GlobalIndexColumnUpdateAction(str, Enum):
     THROW_ERROR = "THROW_ERROR"
     DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
@@ -116,6 +123,7 @@ class CoreOptions:
         "type",
         "bucket-key",
         "bucket-function.type",
+        "bucket-function.provider",
         "data-file.path-directory",
         "merge-engine",
         "sequence.snapshot-ordering",
@@ -144,7 +152,6 @@ class CoreOptions:
     FILE_FORMAT_PARQUET: str = "parquet"
     FILE_FORMAT_BLOB: str = "blob"
     FILE_FORMAT_VIDEO: str = "video"
-    FILE_FORMAT_LANCE: str = "lance"
     FILE_FORMAT_VORTEX: str = "vortex"
     FILE_FORMAT_ROW: str = "row"
     FILE_FORMAT_MOSAIC: str = "mosaic"
@@ -560,11 +567,45 @@ class CoreOptions:
         .with_description("The fallback branch for scanning.")
     )
 
+    INCREMENTAL_BETWEEN: ConfigOption[str] = (
+        ConfigOptions.key("incremental-between")
+        .string_type()
+        .no_default_value()
+        .with_description("Read changes between start snapshot (exclusive) and end snapshot (inclusive).")
+    )
+
+    INCREMENTAL_BETWEEN_SCAN_MODE: ConfigOption[IncrementalBetweenScanMode] = (
+        ConfigOptions.key("incremental-between-scan-mode")
+        .enum_type(IncrementalBetweenScanMode)
+        .default_value(IncrementalBetweenScanMode.AUTO)
+        .with_description("Scan mode for incremental changes between snapshots.")
+    )
+
     INCREMENTAL_BETWEEN_TIMESTAMP: ConfigOption[str] = (
         ConfigOptions.key("incremental-between-timestamp")
         .string_type()
         .no_default_value()
         .with_description("The timestamp range for incremental reading.")
+    )
+
+    INCREMENTAL_TO_AUTO_TAG: ConfigOption[str] = (
+        ConfigOptions.key("incremental-to-auto-tag")
+        .string_type()
+        .no_default_value()
+        .with_description("Read changes between an earlier auto-created tag and the specified end tag (inclusive).")
+    )
+
+    INCREMENTAL_SCAN_KEYS = [
+        INCREMENTAL_BETWEEN.key(),
+        INCREMENTAL_BETWEEN_TIMESTAMP.key(),
+        INCREMENTAL_TO_AUTO_TAG.key(),
+    ]
+
+    INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT: ConfigOption[bool] = (
+        ConfigOptions.key("incremental-between-tag-to-snapshot")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Read incremental changes between the snapshots corresponding to the tags.")
     )
 
     SCAN_TAG_NAME: ConfigOption[str] = (
@@ -997,34 +1038,6 @@ class CoreOptions:
         )
     )
 
-    PK_VECTOR_INDEX_COLUMNS: ConfigOption[str] = (
-        ConfigOptions.key("pk-vector.index.columns")
-        .string_type()
-        .no_default_value()
-        .with_description("Comma-separated VECTOR columns indexed by primary-key vector indexes.")
-    )
-
-    PK_BTREE_INDEX_COLUMNS: ConfigOption[str] = (
-        ConfigOptions.key("pk-btree.index.columns")
-        .string_type()
-        .no_default_value()
-        .with_description("Comma-separated columns indexed by primary-key BTree indexes.")
-    )
-
-    PK_BITMAP_INDEX_COLUMNS: ConfigOption[str] = (
-        ConfigOptions.key("pk-bitmap.index.columns")
-        .string_type()
-        .no_default_value()
-        .with_description("Comma-separated columns indexed by primary-key Bitmap indexes.")
-    )
-
-    PK_FULL_TEXT_INDEX_COLUMNS: ConfigOption[str] = (
-        ConfigOptions.key("pk-full-text.index.columns")
-        .string_type()
-        .no_default_value()
-        .with_description("Comma-separated character columns indexed by primary-key full-text indexes.")
-    )
-
     GLOBAL_INDEX_COLUMN_UPDATE_ACTION: ConfigOption[GlobalIndexColumnUpdateAction] = (
         ConfigOptions.key("global-index.column-update-action")
         .enum_type(GlobalIndexColumnUpdateAction)
@@ -1151,8 +1164,8 @@ class CoreOptions:
         .default_value("meta,global-index")
         .with_description(
             "Comma-separated list of file types to cache. "
-            "Supported values: meta, global-index, bucket-index, data, file-index, "
-            "or * for all of them."
+            "Supported values: meta, global-index, bucket-index, data, "
+            "structured-data, file-index, or * for all of them."
         )
     )
 
@@ -1170,6 +1183,33 @@ class CoreOptions:
         .with_description(
             "Maximum cached video decoders per video feature in a PyPaimon "
             "LeRobot DataLoader worker.")
+    )
+
+    READ_VIDEO_DECODE_PARALLELISM: ConfigOption[int] = (
+        ConfigOptions.key("read.video.decode-parallelism")
+        .int_type()
+        .default_value(16)
+        .with_description(
+            "Maximum concurrent video payload decodes shared by all cameras in a "
+            "PyPaimon LeRobot Dataset worker.")
+    )
+
+    READ_VIDEO_CODEC_THREADS: ConfigOption[int] = (
+        ConfigOptions.key("read.video.codec-threads")
+        .int_type()
+        .default_value(1)
+        .with_description(
+            "FFmpeg threads per PyAV video decoder in a LeRobot worker. "
+            "0 keeps automatic selection; 1 avoids nested codec parallelism.")
+    )
+
+    READ_VIDEO_DECODERS_PER_PAYLOAD: ConfigOption[int] = (
+        ConfigOptions.key("read.video.decoders-per-payload")
+        .int_type()
+        .default_value(4)
+        .with_description(
+            "Maximum independent decoders for single-payload LeRobot video windows, "
+            "bounded by read.video.decode-parallelism and read.video.max-open-decoders.")
     )
 
     PARQUET_COLUMN_INDEX_ENABLED: ConfigOption[bool] = (
@@ -1515,12 +1555,12 @@ class CoreOptions:
                   or self.options.contains(CoreOptions.SCAN_WATERMARK)
                   or self.options.contains(CoreOptions.SCAN_VERSION)):
                 return StartupMode.FROM_SNAPSHOT
-            elif self.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
-                return StartupMode.INCREMENTAL
             elif self.options.contains(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS):
                 return StartupMode.FROM_FILE_CREATION_TIME
             elif self.options.contains(CoreOptions.SCAN_CREATION_TIME_MILLIS):
                 return StartupMode.FROM_CREATION_TIMESTAMP
+            elif any(self.options.contains_key(key) for key in CoreOptions.INCREMENTAL_SCAN_KEYS):
+                return StartupMode.INCREMENTAL
             else:
                 return StartupMode.LATEST_FULL
         elif mode == StartupMode.FULL:
@@ -1538,6 +1578,23 @@ class CoreOptions:
 
     def incremental_between_timestamp(self, default=None):
         return self.options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP, default)
+
+    def incremental_between(self):
+        value = self.options.get(CoreOptions.INCREMENTAL_BETWEEN)
+        # Java String.split discards trailing empty strings.
+        parts = value.rstrip(',').split(',')
+        if len(parts) != 2:
+            raise ValueError(
+                "The incremental-between must specific start(exclusive) and end snapshot,"
+                " for example, 'incremental-between'='5,10' means changes between snapshot 5 and snapshot 10. But is: "
+                + value)
+        return parts[0], parts[1]
+
+    def incremental_between_scan_mode(self):
+        return self.options.get(CoreOptions.INCREMENTAL_BETWEEN_SCAN_MODE)
+
+    def incremental_between_tag_to_snapshot(self):
+        return self.options.get(CoreOptions.INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT)
 
     def scan_tag_name(self, default=None):
         return self.options.get(CoreOptions.SCAN_TAG_NAME, default)
@@ -1774,112 +1831,104 @@ class CoreOptions:
     def global_index_build_parallelism(self) -> int:
         return self.options.get(CoreOptions.GLOBAL_INDEX_BUILD_PARALLELISM)
 
-    def primary_key_btree_index_columns(self) -> List[str]:
-        return self._primary_key_index_columns(CoreOptions.PK_BTREE_INDEX_COLUMNS)
+    def btree_index_columns(self) -> List[str]:
+        return self.global_index_columns("btree")
 
-    def primary_key_bitmap_index_columns(self) -> List[str]:
-        return self._primary_key_index_columns(CoreOptions.PK_BITMAP_INDEX_COLUMNS)
+    def bitmap_index_columns(self) -> List[str]:
+        return self.global_index_columns("bitmap")
 
-    def primary_key_vector_index_columns(self) -> List[str]:
-        return self._primary_key_index_columns(CoreOptions.PK_VECTOR_INDEX_COLUMNS)
+    def full_text_index_columns(self) -> List[str]:
+        return self.global_index_columns("full-text")
 
-    def primary_key_full_text_index_columns(self) -> List[str]:
-        return self._primary_key_index_columns(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS)
+    def vector_index_columns(self, index_type: str) -> List[str]:
+        from pypaimon.common.options.vector_index_options import VectorIndexOptions
+        return VectorIndexOptions.columns(self.options, index_type)
 
-    def primary_key_vector_index_type(self, column: str):
-        return self.options.to_map().get(
-            "fields.%s.pk-vector.index.type" % column)
+    def global_index_types(self) -> List[str]:
+        prefix = "global-index."
+        return sorted({key[len(prefix):key.rfind('.')]
+                       for key in self.options.to_map()
+                       if key.startswith(prefix) and key.endswith((".index-columns", ".index-column"))
+                       and key.rfind('.') >= len(prefix)})
 
-    def primary_key_vector_index_options(self, column: str) -> Options:
-        index_type = self.primary_key_vector_index_type(column)
-        if index_type is None or not str(index_type).strip():
-            raise ValueError(
-                "fields.%s.pk-vector.index.type must be configured before "
-                "resolving index options." % column)
-        option_key = "fields.%s.pk-vector.index.options" % column
+    @staticmethod
+    def _is_vector_index_type(index_type: str) -> bool:
+        return index_type not in ("btree", "bitmap", "multivalue", "fm", "full-text")
+
+    def global_index_columns(self, index_type: str) -> List[str]:
+        values = self.options.to_map()
+        columns = values.get("global-index.%s.index-columns" % index_type)
+        if columns is None:
+            columns = values.get("global-index.%s.index-column" % index_type)
+        if columns is None:
+            columns = values.get("pk-%s.index.columns" % index_type)
+        return self._index_columns(columns)
+
+    def global_index_columns_option_key(self, index_type: str) -> str:
+        values = self.options.to_map()
+        for suffix in ("index-columns", "index-column"):
+            key = "global-index.%s.%s" % (index_type, suffix)
+            if values.get(key) is not None:
+                return key
+        legacy = "pk-%s.index.columns" % index_type
+        return legacy if values.get(legacy) is not None else "global-index.%s.index-columns" % index_type
+
+    @staticmethod
+    def _index_columns(columns) -> List[str]:
+        return [] if columns is None else [column.strip() for column in str(columns).split(',')]
+
+    def global_index_options(self, index_type: Optional[str], column: str) -> Options:
+        """Resolve the same implementation and field options for either table mode."""
+        values = dict(self.options.to_map())
+        if index_type is None:
+            return Options(values)
+        vector = self._is_vector_index_type(index_type)
+        prefix = index_type + ("." if vector or index_type == "full-text" else "-index.")
         field_prefix = "fields.%s." % column
-        resolved = self._primary_key_json_options(
-            option_key,
-            lambda key: (key.startswith(str(index_type) + ".")
-                         or (key.startswith(field_prefix)
-                             and not key.startswith(field_prefix + "pk-vector."))),
-            str(index_type) + ".")
-        values = dict(resolved.to_map())
-        values[str(index_type) + ".metric"] = \
-            self.primary_key_vector_distance_metric(column)
+        shared_key = field_prefix + "index-options"
+        shared = values.get(shared_key) is not None
+        option_key = shared_key if shared else field_prefix + "pk-" + (
+            "vector" if vector else index_type) + ".index.options"
+        serialized = values.get(option_key)
+        if serialized is not None and str(serialized).strip():
+            try:
+                parsed = json.loads(serialized)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("%s must be a JSON object of option key-value pairs." % option_key) from exc
+            if not isinstance(parsed, dict):
+                raise ValueError("%s must be a JSON object of option key-value pairs." % option_key)
+            for key, value in parsed.items():
+                if not key.strip() or value is None:
+                    raise ValueError("%s contains an invalid option." % option_key)
+                if isinstance(value, bool):
+                    value = str(value).lower()
+                elif index_type == 'full-text' and isinstance(value, list):
+                    value = ';'.join(str(item) for item in value)
+                qualified = key if key.startswith((prefix, "fields.")) else prefix + key
+                previous = values.get(qualified)
+                if not shared and previous is not None and previous != str(value):
+                    raise ValueError("%s defines conflicting values for %s." % (option_key, qualified))
+                values[qualified] = str(value)
+                if vector and qualified.startswith(prefix):
+                    short_key = qualified[len(prefix):]
+                    if shared:
+                        values[field_prefix + short_key] = str(value)
         return Options(values)
 
-    def primary_key_vector_distance_metric(self, column: str) -> str:
-        value = self.options.to_map().get(
-            "fields.%s.pk-vector.distance.metric" % column,
-            "inner_product")
-        return str(value).lower().replace('-', '_')
+    def full_text_index_options(self, column: str) -> Options:
+        return Options({key: value for key, value in self.global_index_options(
+            "full-text", column).to_map().items() if key.startswith("full-text.")})
 
-    def primary_key_full_text_index_options(self, column: str) -> Options:
-        return self._primary_key_json_options(
-            "fields.%s.pk-full-text.index.options" % column,
-            lambda key: key.startswith("full-text."),
-            "full-text.")
+    def btree_index_options(self, column: str) -> Options:
+        return self._sorted_index_options(column, "btree")
 
-    def primary_key_btree_index_options(self, column: str) -> Options:
-        return self._primary_key_sorted_index_options(column, "pk-btree", "btree-index.")
+    def bitmap_index_options(self, column: str) -> Options:
+        return self._sorted_index_options(column, "bitmap")
 
-    def primary_key_bitmap_index_options(self, column: str) -> Options:
-        return self._primary_key_sorted_index_options(column, "pk-bitmap", "bitmap-index.")
-
-    def _primary_key_index_columns(self, option: ConfigOption[str]) -> List[str]:
-        columns = self.options.get(option)
-        if columns is None:
-            return []
-        return [column.strip() for column in columns.split(',')]
-
-    def _primary_key_sorted_index_options(
-            self, column: str, option_family: str, algorithm_prefix: str) -> Options:
-        resolved = dict(self.options.to_map())
+    def _sorted_index_options(self, column: str, index_type: str) -> Options:
+        resolved = self.global_index_options(index_type, column).to_map()
         resolved.pop("sorted-index.records-per-file", None)
         resolved.pop("sorted-index.records-per-range", None)
-        option_key = "fields.%s.%s.index.options" % (column, option_family)
-        serialized = self.options.to_map().get(option_key)
-        if serialized is None or not str(serialized).strip():
-            return Options(resolved)
-        try:
-            parsed = json.loads(serialized)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key) from exc
-        if not isinstance(parsed, dict):
-            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key)
-        for key, value in parsed.items():
-            if not key or value is None:
-                raise ValueError("%s contains an invalid option." % option_key)
-            qualified = key if key.startswith((algorithm_prefix, "fields.")) \
-                else algorithm_prefix + key
-            previous = resolved.get(qualified)
-            if previous is not None and previous != value:
-                raise ValueError("%s defines conflicting values for %s." % (option_key, qualified))
-            resolved[qualified] = value
-        return Options(resolved)
-
-    def _primary_key_json_options(self, option_key, include, prefix):
-        resolved = {key: value for key, value in self.options.to_map().items()
-                    if include(key) and not key.startswith(option_key)}
-        serialized = self.options.to_map().get(option_key)
-        if serialized is None or not str(serialized).strip():
-            return Options(resolved)
-        try:
-            parsed = json.loads(serialized)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key) from exc
-        if not isinstance(parsed, dict):
-            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key)
-        for key, value in parsed.items():
-            if not key or value is None:
-                raise ValueError("%s contains an invalid option." % option_key)
-            qualified = key if (prefix is None
-                                or key.startswith((prefix, "fields."))) else prefix + key
-            previous = resolved.get(qualified)
-            if previous is not None and previous != str(value):
-                raise ValueError("%s defines conflicting values for %s." % (option_key, qualified))
-            resolved[qualified] = str(value)
         return Options(resolved)
 
     def btree_index_fallback_scan_max_size(self) -> int:
@@ -1937,7 +1986,27 @@ class CoreOptions:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
 
     def read_video_max_open_decoders(self) -> int:
-        option = CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS
+        return self._positive_video_option(CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS)
+
+    def read_video_decode_parallelism(self) -> int:
+        return self._positive_video_option(CoreOptions.READ_VIDEO_DECODE_PARALLELISM)
+
+    def read_video_decoders_per_payload(self) -> int:
+        return self._positive_video_option(CoreOptions.READ_VIDEO_DECODERS_PER_PAYLOAD)
+
+    def read_video_codec_threads(self) -> int:
+        option = CoreOptions.READ_VIDEO_CODEC_THREADS
+        raw = self.options.to_map().get(option.key())
+        try:
+            value = self.options.get(option)
+            if isinstance(raw, (bool, float)) or value < 0:
+                raise ValueError()
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "%s must be a non-negative integer." % option.key()) from error
+        return value
+
+    def _positive_video_option(self, option) -> int:
         raw = self.options.to_map().get(option.key())
         if isinstance(raw, (bool, float)):
             raise ValueError("%s must be a positive integer." % option.key())

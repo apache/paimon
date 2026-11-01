@@ -28,8 +28,8 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.uri_reader import FileUriReader
 from pypaimon.table.row.blob import Blob, BlobDescriptor, VideoFrameDescriptor
-from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
-from pypaimon.write.writer.video_group import VideoGroupRollingPolicy
+from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
+from pypaimon.execution.python.write.writer.video_group import VideoGroupRollingPolicy
 
 
 class DataEvolutionRowRollingTest(unittest.TestCase):

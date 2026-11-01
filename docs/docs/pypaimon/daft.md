@@ -174,6 +174,13 @@ write_paimon(
 `write_paimon` opens its own catalog, resolves the table, and commits the
 write through Daft's DataSink API.
 
+With `write.native.enabled=true`, primary-key writes use Rust for fixed-bucket
+routing and for both stages of dynamic-bucket assignment: input hashing and
+restoring HASH indexes from the captured writer snapshot. Daft still schedules
+and groups the input so one writer owns each partition/bucket. Overwrite starts
+with an empty bucket-assignment state; append restores the snapshot captured
+before dispatch. These write-side operations do not request SELECT permission.
+
 **Overwrite mode:**
 
 ```python

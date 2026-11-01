@@ -32,6 +32,7 @@ Start with [Multimodal Tables](./multimodal-tables) to connect, define a schema,
 | --- | --- |
 | Create or change rows | [Multimodal tables](./multimodal-tables) |
 | Read payloads and coordinate jobs | [Multimodal reads and row IDs](./multimodal-reading) |
+| Export a snapshot to Lance | [Export to Lance](./multimodal-reading#export-to-lance) |
 | Retrieve text and vector candidates | [Search](./multimodal-search) |
 | Store media | [BLOB storage](./blob), [object API](./blob-store), [video frames](./video) |
 | Import robotics datasets | [HDF5 and ROSBag](./dataset-ingestion), [LeRobot](./lerobot) |
@@ -56,12 +57,13 @@ Connect to a catalog, define scalar and payload columns, add rows, and apply ove
 ## Read rows and payloads
 
 <span id="scan"></span>
+<span id="export-to-lance"></span>
 <span id="reading-blob-columns"></span>
 <span id="contiguous-windows-for-pytorch"></span>
 <span id="distributed-blob-processing-with-ray"></span>
 <span id="row-ids"></span>
 
-Filter and project rows, read BLOBs in batches, build training windows, and pass row IDs between retrieval and processing stages.
+Filter and project rows, export independent Lance datasets, read BLOBs in batches, build training windows, and pass row IDs between retrieval and processing stages.
 
 [Read the guide](./multimodal-reading).
 

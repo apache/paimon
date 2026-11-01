@@ -22,7 +22,7 @@ import struct
 
 import pytest
 
-from pypaimon.casting.numeric_utils import java_double_decimal_text
+from pypaimon.utils.numeric_utils import java_double_decimal_text
 
 
 @pytest.mark.parametrize('bits,expected', [

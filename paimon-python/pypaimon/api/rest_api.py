@@ -27,7 +27,7 @@ from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest
                                       CreateTableRequest, CreateTagRequest,
                                       DropPolicyRequest, ForwardBranchRequest,
                                       GrantPermissionRequest, PolicyRequest,
-                                      RenameBranchRequest, RenameTableRequest,
+                                      RenameTableRequest,
                                       RevokePermissionRequest,
                                       RollbackTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
@@ -138,11 +138,11 @@ class RESTApi:
         if max_results is not None and max_results > 0:
             query_params[RESTApi.MAX_RESULTS] = str(max_results)
 
-        if page_token is not None and page_token.strip():
+        if page_token is not None:
             query_params[RESTApi.PAGE_TOKEN] = page_token
 
         for key, value in name_patterns.items():
-            if key and value and key.strip() and value.strip():
+            if key and value:
                 query_params[key] = value
 
         return query_params
@@ -313,6 +313,16 @@ class RESTApi:
             self.rest_auth_function,
         )
 
+    def get_table_by_id(self, table_id: str) -> GetTableResponse:
+        if not table_id or not table_id.strip():
+            raise ValueError("Table id cannot be empty")
+
+        return self.client.get(
+            self.resource_paths.table_by_id(table_id),
+            GetTableResponse,
+            self.rest_auth_function,
+        )
+
     def drop_table(self, identifier: Identifier) -> GetTableResponse:
         database_name, table_name = self.__validate_identifier(identifier)
 
@@ -405,7 +415,7 @@ class RESTApi:
         )
         return response.is_success()
 
-    def rollback_to(self, identifier, instant, from_snapshot=None):
+    def rollback_to(self, identifier, instant, from_snapshot=None, *, table_uuid=None):
         """Rollback table to the given instant.
 
         Args:
@@ -413,13 +423,15 @@ class RESTApi:
             instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
             from_snapshot: Optional snapshot ID. Success only occurs when the
                 latest snapshot is this snapshot.
+            table_uuid: Expected table or branch UUID from the loaded table view.
 
         Raises:
             NoSuchResourceException: If the table, snapshot or tag does not exist.
             ForbiddenException: If no permission to access this table.
         """
-        database_name, table_name = self.__validate_identifier(identifier)
-        request = RollbackTableRequest(instant=instant, from_snapshot=from_snapshot)
+        database_name, table_name = self._validate_resource_path(identifier)
+        request = RollbackTableRequest(
+            instant=instant, from_snapshot=from_snapshot, table_id=table_uuid)
         self.client.post(
             self.resource_paths.rollback_table(database_name, table_name),
             request,
@@ -435,7 +447,7 @@ class RESTApi:
         Returns:
             TableSnapshot instance or None if snapshot not found.
         """
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier)
         response = self.client.get(
             self.resource_paths.table_snapshot(database_name, table_name),
             GetTableSnapshotResponse,
@@ -494,7 +506,7 @@ class RESTApi:
             snapshot_id: Optional[int] = None,
             time_retained: Optional[str] = None,
     ) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier)
         request = CreateTagRequest(
             tag_name=tag_name,
             snapshot_id=snapshot_id,
@@ -507,7 +519,7 @@ class RESTApi:
         )
 
     def get_tag(self, identifier: Identifier, tag_name: str) -> GetTagResponse:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier, tag_name)
         return self.client.get(
             self.resource_paths.tag(database_name, table_name, tag_name),
             GetTagResponse,
@@ -521,7 +533,7 @@ class RESTApi:
             page_token: Optional[str] = None,
             tag_name_prefix: Optional[str] = None,
     ) -> PagedList[str]:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier)
         response = self.client.get_with_params(
             self.resource_paths.tags(database_name, table_name),
             self.__build_paged_query_params(
@@ -532,24 +544,35 @@ class RESTApi:
             ListTagsResponse,
             self.rest_auth_function,
         )
-        tags = response.data() or []
-        return PagedList(tags, response.get_next_page_token())
+        tags = response.data()
+        return PagedList([], None) if tags is None else PagedList(tags, response.get_next_page_token())
 
     def delete_tag(self, identifier: Identifier, tag_name: str) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier, tag_name)
         self.client.delete(
             self.resource_paths.tag(database_name, table_name, tag_name),
             self.rest_auth_function,
         )
 
     # Branch CRUD wrappers — mirror Java RESTApi branch methods.
+    @staticmethod
+    def _validate_resource_path(identifier, resource_name=None):
+        database_name, table_name = RESTApi.__validate_identifier(identifier)
+        components = [(database_name, 'Database name'), (table_name, 'Table name')]
+        if resource_name is not None:
+            components.append((resource_name, 'Resource name'))
+        for value, label in components:
+            if not value or not value.strip() or value in ('.', '..'):
+                raise ValueError('{} must be a non-empty resource path component'.format(label))
+        return database_name, table_name
+
     def create_branch(
             self,
             identifier: Identifier,
             branch_name: str,
             tag_name: Optional[str] = None,
     ) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier)
         if not branch_name or not branch_name.strip():
             raise ValueError("Branch name cannot be empty")
         request = CreateBranchRequest(branch=branch_name, from_tag=tag_name)
@@ -560,30 +583,14 @@ class RESTApi:
         )
 
     def drop_branch(self, identifier: Identifier, branch_name: str) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier, branch_name)
         self.client.delete(
             self.resource_paths.branch(database_name, table_name, branch_name),
             self.rest_auth_function,
         )
 
-    def rename_branch(
-            self,
-            identifier: Identifier,
-            from_branch: str,
-            to_branch: str,
-    ) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
-        if not to_branch or not to_branch.strip():
-            raise ValueError("Target branch name cannot be empty")
-        request = RenameBranchRequest(to_branch=to_branch)
-        self.client.post(
-            self.resource_paths.rename_branch(database_name, table_name, from_branch),
-            request,
-            self.rest_auth_function,
-        )
-
     def fast_forward(self, identifier: Identifier, branch_name: str) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier, branch_name)
         self.client.post(
             self.resource_paths.forward_branch(database_name, table_name, branch_name),
             ForwardBranchRequest(),
@@ -591,7 +598,7 @@ class RESTApi:
         )
 
     def list_branches(self, identifier: Identifier) -> List[str]:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier)
         response = self.client.get(
             self.resource_paths.branches(database_name, table_name),
             ListBranchesResponse,

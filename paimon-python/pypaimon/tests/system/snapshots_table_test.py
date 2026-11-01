@@ -27,6 +27,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.common.json_util import JSON
 from pypaimon.schema.data_types import DataField
 from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.table.system.system_table import metadata_local_millis
 from pypaimon.table.system.snapshots_table import SnapshotsTable
 
 
@@ -161,7 +162,7 @@ class SnapshotsTableTest(unittest.TestCase):
         self.assertIsInstance(times[0], datetime.datetime)
         as_ms = [int(t.replace(tzinfo=datetime.timezone.utc).timestamp() * 1000)
                  for t in times]
-        self.assertEqual([_T0, _T1], as_ms)
+        self.assertEqual([metadata_local_millis(_T0), metadata_local_millis(_T1)], as_ms)
 
 
 if __name__ == "__main__":

@@ -25,11 +25,11 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_plan
+from pypaimon.execution.native.read.plan import (native_plan)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.blob import Blob, BlobDescriptor
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 _SCHEMA = pa.schema([('id', pa.int32()), ('large', pa.large_binary()), ('small', pa.large_binary())])
@@ -63,8 +63,10 @@ def _read(table, planner, reader):
     read = builder.new_read()
     with ExitStack() as stack:
         if reader:
-            stack.enter_context(patch.object(read, '_create_split_read',
-                                             side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         return sorted(read.to_arrow(plan.splits()).to_pylist(), key=lambda row: row['id'])
 
 
@@ -236,14 +238,18 @@ def test_native_blob_abort_preserves_files_after_commit_exception(tmp_path, publ
         writer.write_arrow(_data())
         messages = writer.prepare_commit()
         prepared = _physical_files(tmp_path)
-        original_commit = commit.file_store_commit.commit
+        from pypaimon.execution.python.write.table_commit import create_python_commit
+        commit._python_commit = create_python_commit(commit)
+        original_commit = commit._python_commit.file_store_commit.commit
 
         def fail_commit(**kwargs):
             if published:
                 original_commit(**kwargs)
             raise RuntimeError('Commit outcome is unknown')
 
-        with patch.object(commit.file_store_commit, 'commit', side_effect=fail_commit):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.commit',
+                   side_effect=fail_commit):
             with pytest.raises(RuntimeError, match='Commit outcome is unknown'):
                 commit.commit(messages)
         writer.abort()

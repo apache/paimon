@@ -51,34 +51,21 @@ public class RollbackTableRequest implements RESTRequest {
     @Nullable
     private final String tableId;
 
-    @JsonProperty("commitUser")
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @Nullable
-    private final String commitUser;
-
     @JsonCreator
-    @ConstructorProperties({"instant", "fromSnapshot", "tableId", "commitUser"})
+    @ConstructorProperties({"instant", "fromSnapshot", "tableId"})
     public RollbackTableRequest(
             @JsonProperty(FIELD_INSTANT) Instant instant,
             @JsonProperty(FIELD_FROM_SNAPSHOT) @Nullable Long fromSnapshot,
-            @JsonProperty("tableId") @Nullable String tableId,
-            @JsonProperty("commitUser") @Nullable String commitUser) {
+            @JsonProperty("tableId") @Nullable String tableId) {
         this.instant = instant;
         this.fromSnapshot = fromSnapshot;
         this.tableId = tableId;
-        this.commitUser = commitUser;
     }
 
     @JsonGetter("tableId")
     @Nullable
     public String getTableId() {
         return tableId;
-    }
-
-    @JsonGetter("commitUser")
-    @Nullable
-    public String getCommitUser() {
-        return commitUser;
     }
 
     @JsonGetter(FIELD_INSTANT)

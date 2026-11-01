@@ -25,12 +25,12 @@ import unittest
 from parameterized import parameterized
 
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.globalindex.bitmap.bitmap_index_reader import BitmapIndexReader
-from pypaimon.globalindex.bitmap.bitmap_index_writer import BitmapIndexWriter
-from pypaimon.globalindex.btree.btree_index_reader import BTreeIndexReader
-from pypaimon.globalindex.btree.btree_index_writer import BTreeIndexWriter
+from pypaimon.execution.python.globalindex.bitmap.bitmap_index_reader import BitmapIndexReader
+from pypaimon.execution.python.globalindex.bitmap.bitmap_index_writer import BitmapIndexWriter
+from pypaimon.execution.python.globalindex.btree.btree_index_reader import BTreeIndexReader
+from pypaimon.execution.python.globalindex.btree.btree_index_writer import BTreeIndexWriter
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
-from pypaimon.globalindex.key_serializer import create_serializer
+from pypaimon.execution.python.globalindex.key_serializer import create_serializer
 from pypaimon.schema.data_types import AtomicType
 
 

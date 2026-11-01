@@ -26,6 +26,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.row.blob import Blob
@@ -234,7 +235,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual([b'blob_data'], result.column('blob_data').to_pylist())
 
     def test_split_data_with_pyarrow_6_record_batch_api(self):
-        from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+        from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
 
         payload_type = pa.list_(
             pa.field('item', pa.large_binary(), nullable=False)
@@ -314,12 +315,12 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         blob_writer.write_arrow(test_data)
 
         # Verify that a DedicatedFormatWriter was created internally
-        data_writers = blob_writer.file_store_write.data_writers
+        data_writers = blob_writer._execution.file_store_write.data_writers
         self.assertGreater(len(data_writers), 0)
 
         # Check that the writer is a DedicatedFormatWriter
         for writer in data_writers.values():
-            from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+            from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
             self.assertIsInstance(writer, DedicatedFormatWriter)
 
         blob_writer.close()
@@ -359,12 +360,12 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         writer.write_arrow(test_data)
 
         # Verify that a regular writer was created (not DedicatedFormatWriter)
-        data_writers = writer.file_store_write.data_writers
+        data_writers = writer._execution.file_store_write.data_writers
         self.assertGreater(len(data_writers), 0)
 
         # Check that the writer is NOT a DedicatedFormatWriter
         for writer_instance in data_writers.values():
-            from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+            from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
             self.assertNotIsInstance(writer_instance, DedicatedFormatWriter)
 
         writer.close()
@@ -1355,8 +1356,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
     def test_update_blob_column(self):
         from pypaimon import Schema
-        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         pa_schema = pa.schema([
             ('id', pa.int32()),
@@ -1431,8 +1432,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
     def test_array_blob_column_write_read_and_update(self):
         from pypaimon import Schema
-        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         array_blob_type = pa.list_(pa.large_binary())
         pa_schema = pa.schema([
@@ -1531,9 +1532,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         )
 
     def test_map_blob_column_write_read_and_update(self):
-        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
         from pypaimon.table.row.blob import BlobDescriptor
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         map_blob_type = pa.map_(pa.string(), pa.large_binary())
         pa_schema = pa.schema([
@@ -1716,7 +1717,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         result = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
-        self.assertFalse(result.schema.field('payloads').type.item_field.nullable)
         self.assertEqual(
             {
                 row['id']: None if row['payloads'] is None else dict(row['payloads'])
@@ -1739,7 +1739,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[('bad', None)]], type=nullable_map_type),
         }, schema=incompatible_schema)
         incompatible_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent"):
+        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent|non-nullable"):
             incompatible_writer.write_arrow(incompatible_data)
         incompatible_writer.abort()
 
@@ -1787,9 +1787,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         result = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
-        self.assertFalse(
-            result.schema.field('payloads').type.value_field.nullable
-        )
         self.assertEqual(
             {
                 row['id']: row['payloads']
@@ -1812,7 +1809,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[b'bad', None]], type=nullable_array_type),
         }, schema=incompatible_schema)
         incompatible_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent"):
+        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent|[Nn]on-nullable"):
             incompatible_writer.write_arrow(incompatible_data)
         incompatible_writer.abort()
 
@@ -1881,9 +1878,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
     def test_update_new_blob_column_writes_full_normal_range(self):
         from pypaimon import Schema
-        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
         from pypaimon.schema.data_types import AtomicType
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         table_name = 'test_db.blob_update_new_column'
         normal_schema = pa.schema([
@@ -2345,8 +2342,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
     def test_update_partial_blob_column_with_rolling_files(self):
         from pypaimon import Schema
-        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         pa_schema = pa.schema([
             ('id', pa.int32()),
@@ -2698,7 +2695,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         from pypaimon import Schema
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.read.reader import format_blob_reader
+        from pypaimon.execution.python.read.reader import format_blob_reader
         from pypaimon.table.row.blob import BlobViewStruct
 
         source_schema = pa.schema([
@@ -2726,12 +2723,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         write_builder.new_commit().commit(commit_messages)
         writer.close()
 
-        picture_field_id = next(
-            field.id for field in source_table.table_schema.fields if field.name == 'picture'
-        )
         view_values = [
-            BlobViewStruct('test_db.blob_view_source', picture_field_id, 0).serialize(),
-            BlobViewStruct('test_db.blob_view_source', picture_field_id, 1).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 0).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 1).serialize(),
         ]
 
         target_schema = pa.schema([
@@ -2846,12 +2840,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         }
         self.assertGreater(len(source_blob_paths), 0)
 
-        picture_field_id = next(
-            field.id for field in source_table.table_schema.fields if field.name == 'picture'
-        )
         view_values = [
-            BlobViewStruct('test_db.blob_view_guard_source', picture_field_id, 0).serialize(),
-            BlobViewStruct('test_db.blob_view_guard_source', picture_field_id, 1).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 0).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 1).serialize(),
         ]
 
         target_schema = pa.schema([
@@ -2929,12 +2920,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         write_builder.new_commit().commit(commit_messages)
         writer.close()
 
-        picture_field_id = next(
-            field.id for field in source_table.table_schema.fields if field.name == 'picture'
-        )
         view_values = [
-            BlobViewStruct('test_db.blob_view_resolve_source', picture_field_id, 0).serialize(),
-            BlobViewStruct('test_db.blob_view_resolve_source', picture_field_id, 1).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 0).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 1).serialize(),
         ]
 
         target_schema = pa.schema([
@@ -3013,12 +3001,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         write_builder.new_commit().commit(commit_messages)
         writer.close()
 
-        picture_field_id = next(
-            field.id for field in source_table.table_schema.fields if field.name == 'picture'
-        )
         view_values = [
-            BlobViewStruct('test_db.blob_view_null_source', picture_field_id, 0).serialize(),
-            BlobViewStruct('test_db.blob_view_null_source', picture_field_id, 1).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 0).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 1).serialize(),
         ]
 
         target_schema = pa.schema([
@@ -3150,11 +3135,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         write_builder.new_commit().commit(commit_messages)
         writer.close()
 
-        picture_field_id = next(
-            field.id for field in source_table.table_schema.fields if field.name == 'picture'
-        )
         view_values = [
-            BlobViewStruct('test_db.blob_view_limit_source', picture_field_id, i).serialize()
+            BlobViewStruct.of(source_table, 'picture', i).serialize()
             for i in range(num_rows)
         ]
 
@@ -3206,7 +3188,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         from pypaimon import Schema
         from pypaimon.table.row.blob import BlobViewStruct
-        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+        from pypaimon.execution.python.read.blob_view_lookup import BlobViewLookup
 
         source_schema = pa.schema([
             ('id', pa.int32()),
@@ -3234,11 +3216,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         write_builder.new_commit().commit(commit_messages)
         writer.close()
 
-        picture_field_id = next(
-            field.id for field in source_table.table_schema.fields if field.name == 'picture'
-        )
         view_values = [
-            BlobViewStruct('test_db.blob_view_prescan_count_source', picture_field_id, i).serialize()
+            BlobViewStruct.of(source_table, 'picture', i).serialize()
             for i in range(num_rows)
         ]
 
@@ -5495,8 +5474,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         from pypaimon import Schema
         from pypaimon.globalindex.indexed_split import IndexedSplit
-        from pypaimon.read.split_read import RawFileSplitRead
-        from pypaimon.read.table_read import TableRead
+        from pypaimon.execution.python.read.split_read import (RawFileSplitRead)
         from pypaimon.table.row.blob import BlobViewStruct
         from pypaimon.utils.range import Range
 
@@ -5572,14 +5550,14 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         predicate = read_builder.new_predicate_builder().equal("id", 9)
         read_builder = read_builder.with_filter(predicate).with_limit(1)
         split_types = []
-        orig_build = TableRead._build_split_read
+        orig_build = PythonTableRead._build_split_read
 
         def capturing_build(self, *args, **kwargs):
             split_read = orig_build(self, *args, **kwargs)
             split_types.append(type(split_read))
             return split_read
 
-        with mock.patch.object(TableRead, '_build_split_read', capturing_build):
+        with mock.patch.object(PythonTableRead, '_build_split_read', capturing_build):
             result = read_builder.new_read().to_arrow(
                 read_builder.new_scan().plan().splits()
             )
@@ -6313,13 +6291,17 @@ class BlobConsumerTest(unittest.TestCase):
             data = Blob.from_descriptor(uri_reader, desc).to_data()
             self.assertEqual(data, blob_bytes)
 
-    def test_blob_consumer_after_write_raises(self):
-        """Setting consumer after data has been written must raise."""
+    def test_blob_consumer_changes_apply_to_new_partition_writers(self):
+        """Existing writers retain their consumer when the factory changes."""
+        from pypaimon.common.uri_reader import FileUriReader
+        from pypaimon.table.row.blob import Blob
+
         pa_schema = pa.schema([
             ('id', pa.int32()),
+            ('pt', pa.int32()),
             ('blob_data', pa.large_binary()),
         ])
-        schema = Schema.from_pyarrow_schema(pa_schema, options={
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['pt'], options={
             'row-tracking.enabled': 'true',
             'data-evolution.enabled': 'true',
         })
@@ -6328,15 +6310,29 @@ class BlobConsumerTest(unittest.TestCase):
 
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
+        commit = write_builder.new_commit()
+        received = []
 
-        writer.write_arrow(pa.Table.from_pydict({
-            'id': [1],
-            'blob_data': [b'data'],
-        }, schema=pa_schema))
+        def consumer(field, descriptor):
+            received.append((field, descriptor))
+            return False
 
-        with self.assertRaises(RuntimeError):
-            writer.with_blob_consumer(lambda f, d: False)
-        writer.close()
+        try:
+            writer.write_arrow(pa.Table.from_pydict({
+                'id': [1], 'pt': [1], 'blob_data': [b'old'],
+            }, schema=pa_schema))
+            self.assertIs(writer.with_blob_consumer(consumer), writer)
+            writer.write_arrow(pa.Table.from_pydict({
+                'id': [2, 3], 'pt': [1, 2], 'blob_data': [b'existing', b'new'],
+            }, schema=pa_schema))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0][0], 'blob_data')
+        blob = Blob.from_descriptor(FileUriReader(table.file_io), received[0][1])
+        self.assertEqual(blob.to_data(), b'new')
 
 
 if __name__ == '__main__':

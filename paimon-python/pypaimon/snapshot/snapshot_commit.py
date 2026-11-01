@@ -63,7 +63,8 @@ class PartitionStatistics:
             record_count=record_count,
             file_count=file_count,
             file_size_in_bytes=file_size_in_bytes,
-            last_file_creation_time=last_file_creation_time or int(time.time() * 1000),
+            last_file_creation_time=(int(time.time() * 1000)
+                                     if last_file_creation_time is None else last_file_creation_time),
             total_buckets=total_buckets
         )
 

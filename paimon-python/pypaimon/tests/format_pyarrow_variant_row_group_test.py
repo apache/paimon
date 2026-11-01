@@ -31,12 +31,9 @@ from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.data.variant_shredding import (
     parse_shredding_schema_option,
     shredding_schema_to_arrow_type,
-    shred_variant_column,
 )
-from pypaimon.read.reader.format_pyarrow_reader import (
-    FormatPyArrowReader,
-    _normalized_offsets,
-)
+from pypaimon.execution.python.read.variant_shredding import shred_variant_column
+from pypaimon.execution.python.read.reader.format_pyarrow_reader import (FormatPyArrowReader, _normalized_offsets)
 from pypaimon.schema.data_types import (
     ArrayType,
     AtomicType,

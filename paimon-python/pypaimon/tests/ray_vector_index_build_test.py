@@ -31,7 +31,7 @@ pytest.importorskip("paimon_vindex")
 
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.ray import vector_index_build
+from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
 from pypaimon.tests import ray_vector_search_test as fixtures
 from pypaimon.tests.ray_vector_search_test import add_rows, VECTORS
 
@@ -88,7 +88,8 @@ def test_build_messages_do_not_publish_or_include_later_appends(table, ray_clust
 def _write_then_fail(context, shard, name):
     if shard[1].from_:
         time.sleep(0.3)
-    message = vector_index_build._build_shard(context, shard, name)
+    from pypaimon.execution.python.globalindex.ray_index_build import _build_shard
+    message = _build_shard(context, shard, name)
     if not shard[1].from_:
         raise RuntimeError("failed after writing an index file")
     return message
@@ -154,6 +155,7 @@ def _inspect_jindo_context(context_refs):
     # the SDK stand-in. Only Config/connect are replaced, not serialization.
     with _jindo_sdk_stub():
         builder, field, table_read, index_path = ray.get(context_refs[0])
+        assert isinstance(builder, PythonGlobalIndexBuilder)
         handler = builder._table.file_io.filesystem.handler
         assert table_read.table.file_io is builder._table.file_io
         assert field.name == "embedding"
@@ -182,7 +184,7 @@ def test_jindo_build_context_reconstructs_on_worker(table, ray_cluster):
     original.register_file_size("object", 123)
     with patch.object(table.raw_table, "file_io", file_io):
         # This is the exact tuple broadcast by build_vector_index.
-        context = ray.put((builder, field, reader, "oss://bucket/index"))
+        context = ray.put((PythonGlobalIndexBuilder(builder), field, reader, "oss://bucket/index"))
         result = ray.get(ray.remote(_inspect_jindo_context).remote([context]))
     worker_pid, client_pid, size, root, token, index_path = result
     assert worker_pid != os.getpid()

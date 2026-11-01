@@ -432,8 +432,8 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
         val ts1 = System.currentTimeMillis()
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
           prepareTableAndGetLocation(3, true)
-        // timestamp that is after this table is created and data is written.
-        val ts2 = System.currentTimeMillis()
+        // Streaming reads include snapshots at the start timestamp, so exclude the last snapshot.
+        val ts2 = loadTable("T").snapshotManager().latestSnapshot().timeMillis() + 1
 
         val query1 = spark.readStream
           .format("paimon")

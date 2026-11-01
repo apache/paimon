@@ -35,16 +35,20 @@ import org.apache.paimon.flink.sorter.SortOperator;
 import org.apache.paimon.flink.utils.FlinkCalciteClasses;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.table.BlobDescriptorReaderFactory;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.functions.RichMapFunction;
@@ -680,8 +684,30 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         // 1. sort data by row id
         InternalTypeInfo<InternalRow> typeInfo = InternalTypeInfo.fromRowType(rowType);
         RowType sortType = rowType.project(SpecialFields.ROW_ID.name());
+        FileStoreTable storeTable = (FileStoreTable) table;
+        UriReaderFactory blobDescriptorReaderFactory =
+                BlobDescriptorReaderFactory.create(storeTable);
+        boolean nullOnMissingFile = coreOptions.blobWriteNullOnMissingFile();
+        boolean nullOnFetchFailure = coreOptions.blobWriteNullOnFetchFailure();
+        Set<Integer> blobFields =
+                nullOnMissingFile
+                        ? FlinkRowWrapper.blobFieldIndexes(rowType)
+                        : Collections.emptySet();
+        Set<Integer> materializedBlobFields = materializedBlobFieldIndexes(rowType);
+        // Carry descriptor bytes through the sort. Resolving the URI here throws before the blob
+        // writer can apply blob-write-null-on-fetch-failure.
         DataStream<InternalRow> sorted =
-                shuffled.map(t -> new FlinkRowWrapper(t.f1), typeInfo)
+                shuffled.map(
+                                t ->
+                                        FlinkRowWrapper.fromUriReaderFactory(
+                                                t.f1,
+                                                blobDescriptorReaderFactory,
+                                                nullOnMissingFile,
+                                                nullOnFetchFailure,
+                                                blobFields,
+                                                materializedBlobFields,
+                                                true),
+                                typeInfo)
                         .setParallelism(sinkParallelism)
                         .transform(
                                 "SORT BY _ROW_ID",
@@ -702,7 +728,11 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                         "PARTIAL WRITE COLUMNS",
                         new CommittableTypeInfo(),
                         new DataEvolutionPartialWriteOperator(
-                                (FileStoreTable) table, rowType, writePaths, baseSnapshotId))
+                                storeTable,
+                                rowType,
+                                writePaths,
+                                baseSnapshotId,
+                                blobDescriptorReaderFactory))
                 .setParallelism(sinkParallelism);
     }
 
@@ -811,8 +841,10 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                         .collect(Collectors.toMap(DataField::name, Function.identity()));
         List<String> partitionKeys = ((FileStoreTable) table).schema().partitionKeys();
 
-        // Get updatable BLOB fields (descriptor-based fields that support partial updates)
-        Set<String> updatableBlobFields = coreOptions.updatableBlobFields();
+        // Inline descriptor and view fields are rewritten as ordinary bytes. Managed raw BLOB
+        // fields are rewritten into a blob file, with placeholders for unchanged rows.
+        Set<String> inlineBlobFields = coreOptions.blobInlineField();
+        Set<String> videoFrameFields = coreOptions.videoFrameFields();
 
         List<Column> flinkColumns = source.getResolvedSchema().getColumns();
         boolean foundRowIdColumn = false;
@@ -833,31 +865,36 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                     throw new IllegalStateException(
                             "Column not found in target table: " + flinkColumn.getName());
                 }
-                if (BlobType.isBlobFileField(targetField.type())
-                        && !updatableBlobFields.contains(flinkColumn.getName())) {
+                if (videoFrameFields.contains(flinkColumn.getName())) {
                     throw new IllegalStateException(
-                            "Should not append/update raw-data BLOB, ARRAY<BLOB> or MAP<X, BLOB> column '"
-                                    + flinkColumn.getName()
-                                    + "' through MERGE INTO. "
-                                    + "Only descriptor-based BLOB columns (configured via '"
-                                    + CoreOptions.BLOB_DESCRIPTOR_FIELD.key()
-                                    + "' or '"
-                                    + CoreOptions.BLOB_VIEW_FIELD.key()
-                                    + "') can be updated.");
+                            String.format(
+                                    "Cannot update video-frame field '%s' through data-evolution MERGE INTO. "
+                                            + "Video fields require a VideoFrameDescriptor, and BYTES input is not a video frame. "
+                                            + "The field is configured by '%s'.",
+                                    flinkColumn.getName(), CoreOptions.VIDEO_FRAME_FIELD.key()));
                 }
-
                 DataType paimonType =
                         LogicalTypeConversion.toDataType(
                                 flinkColumn.getDataType().getLogicalType());
-                // For descriptor-based BLOB fields, allow BYTES (VARBINARY/BINARY) source
-                // since BLOB is represented as BYTES in Flink SQL
-                boolean blobCompatible =
-                        targetField.type().getTypeRoot() == DataTypeRoot.BLOB
-                                && updatableBlobFields.contains(flinkColumn.getName())
-                                && paimonType
-                                        .getTypeRoot()
-                                        .getFamilies()
-                                        .contains(DataTypeFamily.BINARY_STRING);
+                boolean inlineBlob = inlineBlobFields.contains(flinkColumn.getName());
+                boolean rawBlob = BlobType.isBlobFileField(targetField.type()) && !inlineBlob;
+                // Flink SQL exposes BLOB as BYTES. Descriptor and view fields accept binary
+                // input. Managed raw fields also accept BYTES, ARRAY<BYTES>, and MAP<K, BYTES>.
+                boolean blobCompatible = false;
+                if (inlineBlob && targetField.type().getTypeRoot() == DataTypeRoot.BLOB) {
+                    blobCompatible = isBinaryType(paimonType);
+                } else if (rawBlob) {
+                    blobCompatible = isRawBlobSourceCompatible(paimonType, targetField.type());
+                    if (!blobCompatible) {
+                        throw new IllegalStateException(
+                                String.format(
+                                        "Cannot update managed BLOB column '%s' through MERGE INTO: "
+                                                + "source type %s is not compatible with %s. "
+                                                + "Use BYTES for BLOB, ARRAY<BYTES> for ARRAY<BLOB>, "
+                                                + "or MAP<K, BYTES> for MAP<K, BLOB>.",
+                                        flinkColumn.getName(), paimonType, targetField.type()));
+                    }
+                }
                 // Struct columns need a structural compatibility check: DataTypeCasts does not
                 // support ROW-to-ROW casts. For a sub-field write (dotted paths like nest.a) the
                 // source is a partial (subset) struct carrying only the updated sub-fields, so a
@@ -888,6 +925,48 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         if (!foundRowIdColumn) {
             throw new IllegalStateException("_ROW_ID column not found in generated source.");
         }
+    }
+
+    /**
+     * Managed raw BLOB columns copy descriptor payloads in the blob writer. Skip the wrapper's
+     * existence preflight for those columns so an HTTP descriptor is fetched once, by the writer.
+     * Inline descriptor and view columns stay in the preflight.
+     */
+    private Set<Integer> materializedBlobFieldIndexes(RowType rowType) {
+        Set<String> inlineBlobFields = coreOptions.blobInlineField();
+        Set<Integer> materializedBlobFields = FlinkRowWrapper.blobFieldIndexes(rowType);
+        materializedBlobFields.removeIf(
+                pos -> inlineBlobFields.contains(rowType.getFields().get(pos).name()));
+        return materializedBlobFields;
+    }
+
+    private static boolean isBinaryType(DataType type) {
+        return type.getTypeRoot().getFamilies().contains(DataTypeFamily.BINARY_STRING);
+    }
+
+    /**
+     * Whether a Flink source value can be written into a managed raw BLOB column. Flink SQL has no
+     * native BLOB type, so payloads arrive as BYTES, ARRAY&lt;BYTES&gt;, or MAP&lt;K, BYTES&gt;.
+     */
+    private static boolean isRawBlobSourceCompatible(DataType source, DataType target) {
+        if (target.getTypeRoot() == DataTypeRoot.BLOB) {
+            return isBinaryType(source);
+        }
+        if (target.getTypeRoot() == DataTypeRoot.ARRAY) {
+            return source.getTypeRoot() == DataTypeRoot.ARRAY
+                    && isBinaryType(((ArrayType) source).getElementType());
+        }
+        if (target.getTypeRoot() == DataTypeRoot.MAP) {
+            if (source.getTypeRoot() != DataTypeRoot.MAP) {
+                return false;
+            }
+            MapType sourceMap = (MapType) source;
+            MapType targetMap = (MapType) target;
+            return DataTypeCasts.supportsCompatibleCast(
+                            sourceMap.getKeyType(), targetMap.getKeyType())
+                    && isBinaryType(sourceMap.getValueType());
+        }
+        return false;
     }
 
     /**

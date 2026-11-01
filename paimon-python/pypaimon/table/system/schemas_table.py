@@ -23,7 +23,7 @@ from typing import Any, List, Optional
 import pyarrow
 
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
-from pypaimon.table.system.system_table import SystemTable
+from pypaimon.table.system.system_table import SystemTable, metadata_local_millis
 
 
 TABLE_TYPE = RowType(False, [
@@ -82,7 +82,7 @@ class SchemasTable(SystemTable):
             primary_keys_jsons.append(_to_json(list(schema.primary_keys)))
             options_jsons.append(_to_json(dict(schema.options)))
             comments.append(schema.comment)
-            update_times.append(int(schema.time_millis))
+            update_times.append(metadata_local_millis(schema.time_millis))
 
         return pyarrow.table({
             "schema_id": pyarrow.array(schema_ids, type=pyarrow.int64()),

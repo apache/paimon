@@ -26,11 +26,14 @@ import pytest
 
 ray = pytest.importorskip("ray")
 
+from pypaimon.ray.search_execution import RaySearchTaskExecutor
+from pypaimon.tests.search_execution_test_helpers import execute_tasks, task_parts
+
 import pypaimon.multimodal as pm
 from pypaimon.multimodal.query import ScanQuery
-from pypaimon.ray import vector_search as search_module
+from pypaimon.execution.python.read.search import distributed_vector_search as search_module
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
-from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
+from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
 
 
 SCHEMA = pa.schema([
@@ -92,14 +95,15 @@ def test_raw_search_matches_exact_top_k(table, ray_cluster, metric, concurrency)
         scores = vectors.dot(query_vector)
     expected = sorted(sorted(range(len(VECTORS)), key=lambda i: (-scores[i], i))[:3])
     assert ids(query.to_arrow()) == expected
-    original = search_module._map_tasks
+    original = RaySearchTaskExecutor.map
     dispatched = []
 
-    def record(worker, context, items, *args):
+    def record(executor, tasks, ordered=False):
+        worker, context, items = task_parts(tasks)
         dispatched.append(len(items))
-        return original(worker, context, items, *args)
+        return original(executor, tasks, ordered=ordered)
 
-    with patch.object(search_module, "_map_tasks", record):
+    with patch.object(RaySearchTaskExecutor, "map", record):
         assert ids(query.to_arrow(execution="ray", concurrency=concurrency)) == expected
     assert dispatched == [2]
 
@@ -117,13 +121,14 @@ def test_indexed_search_and_raw_fallback_use_persisted_metric(table, ray_cluster
     query = table.search([1., 1.], options=options).select(["id"]).limit(3)
     expected = ids(query.to_arrow())
     observed = []
-    original = search_module._map_tasks
+    original = RaySearchTaskExecutor.map
 
-    def record(worker, context, items, *args):
+    def record(executor, tasks, ordered=False):
+        worker, context, items = task_parts(tasks)
         observed.append((worker.__name__, len(items)))
-        return original(worker, context, items, *args)
+        return original(executor, tasks, ordered=ordered)
 
-    with patch.object(search_module, "_map_tasks", record):
+    with patch.object(RaySearchTaskExecutor, "map", record):
         assert ids(query.to_arrow(execution="ray", concurrency=2)) == expected
     assert ("_search_index_split", 2) in observed
     assert any(name == "_search_raw_split" and count > 0 for name, count in observed)
@@ -174,19 +179,19 @@ def test_query_pins_worker_reads_and_lookup_but_can_be_reused(table, ray_cluster
     add_rows(table, [[1., 1.], [10., 1.]])
     query = table.search([1., 1.]).select(["id", "category"]).limit(1)
     expected = query.to_arrow().to_pylist()
-    original = search_module._map_tasks
+    original = RaySearchTaskExecutor.map
     changed = []
 
-    def change_before_dispatch(*args):
+    def change_before_dispatch(executor, tasks, ordered=False):
         if not changed:
             if change == "delete":
                 table.delete("id = 0")
             else:
                 table.update("id = 0", {"category": "changed"})
             changed.append(True)
-        return original(*args)
+        return original(executor, tasks, ordered=ordered)
 
-    with patch.object(search_module, "_map_tasks", change_before_dispatch):
+    with patch.object(RaySearchTaskExecutor, "map", change_before_dispatch):
         assert query.to_arrow(execution="ray").to_pylist() == expected
     latest = query.to_arrow().to_pylist()
     assert latest != expected
@@ -202,7 +207,7 @@ def test_empty_snapshot_does_not_follow_first_commit(table, ray_cluster):
         return scan(search_scan)
 
     with patch.object(DataEvolutionVectorScan, "scan", append_before_scan), \
-            patch.object(search_module, "_map_tasks", side_effect=AssertionError("empty task")):
+            patch.object(RaySearchTaskExecutor, "map", side_effect=AssertionError("empty task")):
         result = query.to_arrow(execution="ray")
     assert result.schema.names == ["id"]
     assert result.num_rows == 0
@@ -248,7 +253,7 @@ def test_warmed_read_context_and_distinct_worker_processes(table, ray_cluster):
         time.sleep(0.2)
         return os.getpid(), TimeTravelUtil.resolve_snapshot(table).id
 
-    results = list(search_module._map_tasks(inspect_context, pinned, [0, 1], 2, {"num_cpus": 1}))
+    results = list(execute_tasks(inspect_context, pinned, [0, 1], 2, {"num_cpus": 1}))
     assert len({result[0] for _, result in results}) == 2
     assert all(pid != os.getpid() and snapshot == 2 for _, (pid, snapshot) in results)
     assert ids(query.to_arrow(execution="ray")) == [0, 1]
@@ -271,7 +276,7 @@ def test_task_retry_keeps_original_snapshot(ordered, table, ray_cluster, tmp_pat
         os.close(fd)
         raise RuntimeError("retry this read")
 
-    assert list(search_module._map_tasks(
+    assert list(execute_tasks(
         retry_once, pinned, [marker], 1,
         {"max_retries": 1, "retry_exceptions": True}, ordered=ordered)) == [(0, (1, [0]))]
 
@@ -286,7 +291,7 @@ def test_failure_cancels_outstanding_tasks(ordered, ray_cluster):
 
     with patch.object(ray, "cancel", wraps=ray.cancel) as cancel:
         with pytest.raises(ValueError, match="injected search failure"):
-            list(search_module._map_tasks(fail, None, [0, 1, 2], 2, {}, ordered=ordered))
+            list(execute_tasks(fail, None, [0, 1, 2], 2, {}, ordered=ordered))
         assert cancel.call_count == 2
 
 
@@ -303,7 +308,7 @@ def test_map_tasks_bounds_submissions_and_cancels_on_early_close(ordered, ray_cl
         return wait(refs, **kwargs)
 
     with patch.object(ray, "wait", record_wait), patch.object(ray, "cancel", wraps=ray.cancel) as cancel:
-        with closing(search_module._map_tasks(echo, None, list(range(10)), 2, {}, ordered=ordered)) as tasks:
+        with closing(execute_tasks(echo, None, list(range(10)), 2, {}, ordered=ordered)) as tasks:
             next(tasks)
         assert counts == [2] or (ordered and counts == [2, 1])
         assert cancel.call_count == 2 - len(counts)
@@ -316,22 +321,23 @@ def test_refinement_uses_global_candidates(table):
     add_rows(table, [[0., 1.], [10., 1.], [20., 1.], [1., 1.]])
     query = table.search([1., 1.], options={"refine_factor": "2"}).limit(1)._for_execution()
     reader = query._vector_search_builder(query).new_vector_search_read()
-    distributed = search_module._RayVectorSearchRead(reader, 2, {})
+    distributed = search_module.DistributedVectorSearchRead(reader, RaySearchTaskExecutor(2, {}))
     index_file = IndexFileMeta("ivf-flat", "fake", 1, 2, None)
     splits = [IndexVectorSearchSplit(0, 1, [index_file]), IndexVectorSearchSplit(2, 3, [index_file])]
 
-    def completed(worker, context, items, *args):
+    def completed(executor, tasks, ordered=False):
+        worker, context, items = task_parts(tasks)
         if worker is search_module._search_raw_split:
             for ordinal, split in enumerate(items):
                 yield ordinal, worker(context, split)
             return
         # Row 3 is the true nearest, but is outside the GLOBAL approximate top-2.
         # Refining independently per shard would incorrectly bring it back in.
-        assert args[2] is True  # Index tasks request plan-ordered results.
+        assert ordered is True  # Index tasks request plan-ordered results.
         yield 0, ("l2", {0: 10., 1: 9.})
         yield 1, ("l2", {2: 8., 3: 7.})
 
-    with patch.object(search_module, "_map_tasks", completed):
+    with patch.object(RaySearchTaskExecutor, "map", completed):
         result = distributed._read_indexed(splits, [1., 1.], query._table._read_snapshot)
     assert list(result.results()) == [0]
     assert result.score_getter()(0) == 0.5  # L2 score is 1 / (1 + squared distance).
@@ -343,16 +349,16 @@ def test_duplicate_scores_keep_plan_order(table):
 
     query = table.search([1., 1.]).limit(2)._for_execution()
     reader = query._vector_search_builder(query).new_vector_search_read()
-    distributed = search_module._RayVectorSearchRead(reader, 2, {})
+    distributed = search_module.DistributedVectorSearchRead(reader, RaySearchTaskExecutor(2, {}))
     index_file = IndexFileMeta("ivf-flat", "fake", 1, 2)
     splits = [IndexVectorSearchSplit(0, 1, [index_file]), IndexVectorSearchSplit(0, 3, [index_file])]
 
-    def completed(*args):
-        assert args[5] is True
+    def completed(executor, tasks, ordered=False):
+        assert ordered is True
         yield 0, ("l2", {0: 1., 1: 2.})
         yield 1, ("l2", {0: 100.})
 
-    with patch.object(search_module, "_map_tasks", completed):
+    with patch.object(RaySearchTaskExecutor, "map", completed):
         result = distributed._read_indexed(splits, [1., 1.], None)
     assert result.score_getter()(0) == 1.
     assert list(result.top_k(1).results()) == [1]
@@ -363,17 +369,17 @@ def test_metric_mismatch_fails_even_when_one_shard_has_no_hits(table):
 
     query = table.search([1., 1.])
     reader = query._vector_search_builder(query).new_vector_search_read()
-    distributed = search_module._RayVectorSearchRead(reader, 2, {})
+    distributed = search_module.DistributedVectorSearchRead(reader, RaySearchTaskExecutor(2, {}))
     closed = []
 
-    def completed(*args):
+    def completed(executor, tasks, ordered=False):
         try:
             yield 0, ("l2", {})
             yield 1, ("inner_product", {1: 10.})
         finally:
             closed.append(True)
 
-    with patch.object(search_module, "_map_tasks", completed), \
+    with patch.object(RaySearchTaskExecutor, "map", completed), \
             pytest.raises(ValueError, match="different metrics"):
         list(distributed._search_index_splits(
             [IndexVectorSearchSplit(0, 1, []), IndexVectorSearchSplit(2, 3, [])], [1., 1.], 1, None))
@@ -419,7 +425,7 @@ def test_nan_scores_fail_before_worker_top_k(table, ray_cluster):
 def test_slow_first_task_bounds_completed_results(ordered, early_close):
     submitted, completed, consumed, cancelled = [], [], [], []
 
-    def submit(context, item):
+    def submit(operation, context, item, *dependencies):
         # A slow prefix must not allow all later tasks/results to accumulate.
         assert len(submitted) - len(consumed) < 3
         submitted.append(item)
@@ -438,7 +444,7 @@ def test_slow_first_task_bounds_completed_results(ordered, early_close):
             patch.object(ray, "wait", side_effect=wait), \
             patch.object(ray, "get", side_effect=lambda ref: ref), \
             patch.object(ray, "cancel", side_effect=cancelled.append):
-        with closing(search_module._map_tasks(None, None, list(range(10)), 3, {}, ordered)) as tasks:
+        with closing(execute_tasks(None, None, list(range(10)), 3, {}, ordered)) as tasks:
             for ordinal, result in tasks:
                 assert ordinal == result
                 consumed.append(ordinal)

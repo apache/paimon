@@ -68,21 +68,26 @@ public class ResourcePaths {
         this.prefix = encodeString(prefix);
     }
 
-    /** Labels attached to one entity, whose canonical name is encoded as a single segment. */
+    /** Label listing; the entity is named in the query, never in the path. */
     @Experimental
-    public String labels(String entityType, String entityName) {
-        checkArgument(
-                entityType != null && !entityType.trim().isEmpty(), "entityType must not be blank");
-        checkArgument(
-                entityName != null && !entityName.trim().isEmpty(), "entityName must not be blank");
-        return SLASH.join(
-                V1, prefix, LABELS, encodePathSegment(entityType), encodePathSegment(entityName));
+    public String labels() {
+        return SLASH.join(V1, prefix, LABELS);
+    }
+
+    /** Single-binding label actions name the entity and key in the request body. */
+    @Experimental
+    public String getLabel() {
+        return SLASH.join(labels(), "get");
     }
 
     @Experimental
-    public String label(String entityType, String entityName, String key) {
-        checkArgument(key != null && !key.trim().isEmpty(), "key must not be blank");
-        return SLASH.join(labels(entityType, entityName), encodePathSegment(key));
+    public String upsertLabel() {
+        return SLASH.join(labels(), "upsert");
+    }
+
+    @Experimental
+    public String deleteLabel() {
+        return SLASH.join(labels(), "delete");
     }
 
     private static String encodePathSegment(String value) {
@@ -194,6 +199,10 @@ public class ResourcePaths {
                 TABLES,
                 encodeString(objectName),
                 "commit");
+    }
+
+    public String commitLock(String databaseName, String objectName) {
+        return table(databaseName, objectName) + "/commit-lock";
     }
 
     public String rollbackTable(String databaseName, String objectName) {

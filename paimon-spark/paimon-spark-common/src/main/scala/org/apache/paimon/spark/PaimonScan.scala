@@ -48,7 +48,8 @@ case class PaimonScan(
     override val pushedFullTextSearch: Option[FullTextSearch] = None,
     override val pushedVariantExtractions: Map[Seq[String], Seq[VariantExtractionInfo]] = Map.empty,
     override val pushedMapSelectedKeys: Map[String, Seq[String]] = Map.empty,
-    preserveDataGrouping: Boolean = false)
+    preserveDataGrouping: Boolean = false,
+    override val pushedBucketFilters: Seq[Predicate] = Seq.empty)
   extends PaimonBaseScan(table)
   with SupportsReportPartitioning
   with SupportsReportOrdering {
@@ -60,7 +61,8 @@ case class PaimonScan(
         val bucketSpec = fileStoreTable.bucketSpec()
         // todo introduce bucket transform for different bucket function type
         if (
-          bucketSpec.getBucketMode != BucketMode.HASH_FIXED || coreOptions
+          bucketSpec.getBucketMode != BucketMode.HASH_FIXED ||
+          coreOptions.bucketFunctionProvider().isPresent || coreOptions
             .bucketFunctionType() != BucketFunctionType.DEFAULT
         ) {
           None
@@ -162,6 +164,7 @@ case class PaimonScan(
     // Multi-primary keys are fine:
     // `Array(a, b)` satisfies the required ordering `Array(a)`
     primaryKeys
+      .map(quote)
       .map(Expressions.identity)
       .map {
         sortExpr =>

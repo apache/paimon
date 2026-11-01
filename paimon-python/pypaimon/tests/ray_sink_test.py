@@ -364,7 +364,7 @@ class RaySinkTest(unittest.TestCase):
 
     @pytest.mark.python_write
     def test_write_failure_preserves_prepared_dedicated_files(self):
-        from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+        from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
 
         pa_schema = pa.schema([
             ('id', pa.int32()),

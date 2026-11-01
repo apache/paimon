@@ -243,10 +243,6 @@ public abstract class E2eTestBase {
         return environment.getContainerByServiceName("hive-server-1").get();
     }
 
-    private static final Pattern JOB_ID_PATTERN =
-            Pattern.compile(
-                    "SQL update statement has been successfully submitted to the cluster:\\s+Job ID: (\\S+)");
-
     protected String runStreamingSql(String sql, String... ddls) throws Exception {
         return runStreamingSql(String.join("\n", ddls) + "\n" + sql);
     }
@@ -271,7 +267,9 @@ public abstract class E2eTestBase {
 
     private String runSql(String sql) throws Exception {
         String fileName = UUID.randomUUID() + ".sql";
-        writeSharedFile(fileName, sql);
+        String completionToken = UUID.randomUUID().toString();
+        writeSharedFile(
+                fileName, FlinkSqlClientResultParser.appendCompletionCheck(sql, completionToken));
         Container.ExecResult execResult =
                 jobManager.execInContainer(
                         "su",
@@ -280,16 +278,11 @@ public abstract class E2eTestBase {
                         "bin/sql-client.sh -f " + TEST_DATA_DIR + "/" + fileName);
         LOG.info(execResult.getStdout());
         LOG.info(execResult.getStderr());
-        if (execResult.getExitCode() != 0) {
-            throw new AssertionError("Failed when submitting the SQL job.");
-        }
-
-        Matcher matcher = JOB_ID_PATTERN.matcher(execResult.getStdout());
-        if (matcher.find()) {
-            return matcher.group(1);
-        } else {
-            return null;
-        }
+        return FlinkSqlClientResultParser.parseJobIdOrThrowOnError(
+                execResult.getExitCode(),
+                execResult.getStdout(),
+                execResult.getStderr(),
+                completionToken);
     }
 
     protected String createResultSink(String sinkName, String schema) {

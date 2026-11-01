@@ -23,7 +23,7 @@ import pyarrow
 
 from pypaimon.common.time_utils import duration_to_iso8601, local_datetime_to_millis
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
-from pypaimon.table.system.system_table import SystemTable
+from pypaimon.table.system.system_table import SystemTable, metadata_local_millis
 
 
 TABLE_TYPE = RowType(False, [
@@ -70,7 +70,7 @@ class TagsTable(SystemTable):
             names.append(name)
             snapshot_ids.append(int(tag.id))
             schema_ids.append(int(tag.schema_id))
-            commit_times.append(int(tag.time_millis))
+            commit_times.append(metadata_local_millis(tag.time_millis))
             record_counts.append(
                 None if tag.total_record_count is None
                 else int(tag.total_record_count))

@@ -24,6 +24,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.schema.TableSchema;
 
@@ -34,6 +35,9 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
+
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 
 /** Utils for copy files. */
 public class CopyFilesUtil {
@@ -49,6 +53,22 @@ public class CopyFilesUtil {
                 PositionOutputStream os = targetFileIO.newOutputStream(targetPath, overwrite)) {
             IOUtils.copy(is, os);
         }
+    }
+
+    /**
+     * A new path for the copy of the data file {@code sourceFileName}. A blob or vector file keeps
+     * its kind in its name: that is how readers and commits tell it from the normal file holding
+     * the same rows.
+     */
+    public static Path newDataFilePath(DataFilePathFactory pathFactory, String sourceFileName) {
+        if (isVectorStoreFile(sourceFileName)) {
+            return pathFactory.newVectorPath(DataFilePathFactory.formatIdentifier(sourceFileName));
+        }
+        if (isBlobFile(sourceFileName)) {
+            return pathFactory.newPathFromExtension(
+                    sourceFileName.substring(sourceFileName.lastIndexOf('.')));
+        }
+        return pathFactory.newPath();
     }
 
     public static DataFileMeta toNewDataFileMeta(

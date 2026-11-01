@@ -72,6 +72,7 @@ public class FlinkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
         if (splits.size() < parallelism * 2L) {
             return super.read(plan);
         }
+        SearchParameters parameters = searchParameters(splits);
 
         List<byte[]> serializedSplits = new ArrayList<>(splits.size());
         for (BucketVectorSearchSplit split : splits) {
@@ -83,12 +84,13 @@ public class FlinkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
         }
 
         List<List<byte[]>> groups = splitGroups(serializedSplits, parallelism);
-        List<byte[]> groupResults = executeBucketSearchGroups(groups, parallelism);
+        List<byte[]> groupResults = executeBucketSearchGroups(groups, parallelism, parameters);
         List<SearchResult> searchResults = new ArrayList<>(groupResults.size());
         for (byte[] groupResult : groupResults) {
             searchResults.add(deserializeSearchResult(groupResult));
         }
-        return createResult(primaryKeyPlan, mergeSearchResults(searchResults));
+        return createResult(
+                primaryKeyPlan, mergeSearchResults(searchResults, parameters), parameters);
     }
 
     protected int flinkParallelism() {
@@ -100,7 +102,8 @@ public class FlinkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
                 : maxParallelism;
     }
 
-    protected List<byte[]> executeBucketSearchGroups(List<List<byte[]>> groups, int parallelism) {
+    protected List<byte[]> executeBucketSearchGroups(
+            List<List<byte[]>> groups, int parallelism, SearchParameters parameters) {
         String operatorName = "Primary-Key Vector Search";
         List<byte[]> serializedGroups = new ArrayList<>(groups.size());
         try {
@@ -121,7 +124,9 @@ public class FlinkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
                         .rebalance()
                         .map(
                                 (MapFunction<byte[], byte[]>)
-                                        bytes -> executeBucketSearchGroup(deserializeGroup(bytes)))
+                                        bytes ->
+                                                executeBucketSearchGroup(
+                                                        deserializeGroup(bytes), parameters))
                         .returns(PrimitiveArrayTypeInfo.BYTE_PRIMITIVE_ARRAY_TYPE_INFO)
                         .name(operatorName)
                         .setParallelism(Math.min(parallelism, groups.size()));
@@ -140,13 +145,13 @@ public class FlinkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
         return "Vector Search - " + operatorName + " : " + table.fullName();
     }
 
-    protected byte[] executeBucketSearchGroup(List<byte[]> group) {
+    protected byte[] executeBucketSearchGroup(List<byte[]> group, SearchParameters parameters) {
         List<BucketVectorSearchSplit> taskSplits = new ArrayList<>(group.size());
         for (byte[] bytes : group) {
             taskSplits.add(deserializeSplit(bytes));
         }
         try {
-            return InstantiationUtil.serializeObject(searchBuckets(taskSplits));
+            return InstantiationUtil.serializeObject(searchBuckets(taskSplits, parameters));
         } catch (IOException e) {
             throw new RuntimeException("Failed to serialize primary-key vector candidates.", e);
         }

@@ -28,8 +28,11 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
-from pypaimon_rust.datafusion import SQLContext
+SQLContext = pytest.importorskip('pypaimon_rust.datafusion').SQLContext
+
+pytestmark = pytest.mark.native_plan
 
 
 WAREHOUSE = os.environ.get("PAIMON_TEST_WAREHOUSE")

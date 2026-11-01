@@ -24,6 +24,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -641,6 +642,51 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 .isEqualTo(Collections.singletonList("1000|10"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("20001|21", "202|22"));
+    }
+
+    @Test
+    public void testBatchProjectionWithLookupSpill() throws Exception {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "pt", DataTypes.INT()),
+                        DataTypes.FIELD(1, "a", DataTypes.INT()),
+                        DataTypes.FIELD(2, "payload", DataTypes.INT()),
+                        DataTypes.FIELD(3, "items", DataTypes.ARRAY(DataTypes.INT())));
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(FILE_FORMAT, "avro");
+                            options.set(CHANGELOG_PRODUCER, LOOKUP);
+                            options.set(CoreOptions.WRITE_ONLY, true);
+                            options.set(CoreOptions.LOOKUP_MERGE_RECORDS_THRESHOLD, 1);
+                        },
+                        rowType);
+
+        try (IOManager ioManager = new IOManagerImpl(tempDir.toString())) {
+            try (StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+                    StreamTableCommit commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, 10, 100, new GenericArray(new int[] {1, 2})));
+                commit.commit(0, write.prepareCommit(true, 0));
+                write.write(GenericRow.of(1, 10, 200, new GenericArray(new int[] {3, 4})));
+                commit.commit(1, write.prepareCommit(true, 1));
+            }
+
+            ReadBuilder readBuilder =
+                    table.newReadBuilder().withReadType(rowType.project("pt", "a", "payload"));
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            assertThat(splits).hasSize(1);
+            assertThat(((DataSplit) splits.get(0)).dataFiles()).hasSize(2);
+
+            List<String> result = new ArrayList<>();
+            try (RecordReader<InternalRow> reader =
+                    readBuilder.newRead().withIOManager(ioManager).createReader(splits.get(0))) {
+                reader.forEachRemaining(
+                        row ->
+                                result.add(
+                                        row.getInt(0) + "|" + row.getInt(1) + "|" + row.getInt(2)));
+            }
+            assertThat(result).containsExactly("1|10|200");
+        }
     }
 
     @ParameterizedTest

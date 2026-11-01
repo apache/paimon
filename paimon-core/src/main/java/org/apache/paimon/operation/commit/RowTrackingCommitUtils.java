@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.SpecialFields;
@@ -43,8 +44,28 @@ public class RowTrackingCommitUtils {
         // assign row id for new files
         List<ManifestEntry> rowIdAssigned = new ArrayList<>();
         long nextRowIdStart =
-                assignRowTrackingMeta(firstRowIdStart, snapshotAssigned, rowIdAssigned);
+                assignRowTrackingMeta(
+                        Math.max(firstRowIdStart, rowIdEnd(deltaFiles)),
+                        snapshotAssigned,
+                        rowIdAssigned);
         return new RowTrackingAssigned(nextRowIdStart, rowIdAssigned);
+    }
+
+    /**
+     * The end of the row ids that files added with a first row id they already have occupy. The
+     * next row id of the table does not cover them when they come from another table, for example
+     * files copied by {@code sys.copy}: new files must be assigned row ids after them, and the next
+     * row id of the table must move past them, or later rows get the same row ids.
+     */
+    private static long rowIdEnd(List<ManifestEntry> deltaFiles) {
+        long end = 0L;
+        for (ManifestEntry entry : deltaFiles) {
+            Long firstRowId = entry.file().firstRowId();
+            if (entry.kind() == FileKind.ADD && firstRowId != null) {
+                end = Math.max(end, firstRowId + entry.file().rowCount());
+            }
+        }
+        return end;
     }
 
     private static void assignSnapshotId(

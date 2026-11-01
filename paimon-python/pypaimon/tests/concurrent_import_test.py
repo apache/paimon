@@ -221,7 +221,7 @@ if errors:
         for module in [
             "pypaimon.index.index_file_meta",
             "pypaimon.manifest.index_manifest_entry",
-            "pypaimon.read.scanner.bucket_select_converter",
+            "pypaimon.execution.python.read.scanner.bucket_select_converter",
             "pypaimon.table.data_evolution_merge_into",
             "pypaimon.write.table_delete",
             "pypaimon.tag.tag_manager",
