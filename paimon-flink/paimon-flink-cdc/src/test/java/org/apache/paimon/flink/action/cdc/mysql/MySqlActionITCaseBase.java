@@ -30,7 +30,6 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -39,6 +38,10 @@ import java.util.stream.Stream;
 public class MySqlActionITCaseBase extends CdcActionITCaseBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlActionITCaseBase.class);
+
+    // Keep the three-hour difference without DST-dependent offsets in MySqlValidator.
+    protected static final String MYSQL_SYSTEM_TIME_ZONE = "Etc/GMT+8";
+    protected static final String MYSQL_SERVER_TIME_ZONE = "Etc/GMT+5";
 
     protected static final MySqlContainer MYSQL_CONTAINER = createMySqlContainer(MySqlVersion.V5_7);
     private static final String USER = "paimonuser";
@@ -57,7 +60,7 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
                         .withConfigurationOverride("mysql/my.cnf")
                         .withUsername(USER)
                         .withPassword(PASSWORD)
-                        .withEnv("TZ", "America/Los_Angeles")
+                        .withEnv("TZ", MYSQL_SYSTEM_TIME_ZONE)
                         .withLogConsumer(new Slf4jLogConsumer(LOG));
     }
 
@@ -83,7 +86,7 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
         config.put("username", USER);
         config.put("password", PASSWORD);
         // see mysql/my.cnf in test resources
-        config.put("server-time-zone", ZoneId.of("America/New_York").toString());
+        config.put("server-time-zone", MYSQL_SERVER_TIME_ZONE);
 
         // TODO When setting the parameter scan.newly-added-table.enabled=true in version 2.4.2, the
         // Insert data inserted after the newly created table cannot be captured. When set to false,
