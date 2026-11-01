@@ -21,6 +21,7 @@ from typing import List, Optional
 
 from pypaimon.branch.branch_manager import BranchManager, BRANCH_PREFIX
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.json_util import JSON
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.tag.tag_manager import TagManager
@@ -120,6 +121,8 @@ class FileSystemBranchManager(BranchManager):
         """
         Create a branch from the current state or from a tag.
 
+        A retained tag can be used even after its snapshot file expires.
+
         Args:
             branch_name: Name of the branch to create
             tag_name: Optional tag name to create branch from, None for current state
@@ -160,11 +163,13 @@ class FileSystemBranchManager(BranchManager):
                     branch_tag_manager.tag_path(tag_name),
                     overwrite=True
                 )
-                self.file_io.copy_file(
-                    self.snapshot_manager.get_snapshot_path(snapshot.id),
-                    branch_snapshot_manager.get_snapshot_path(snapshot.id),
-                    overwrite=True
-                )
+                snapshot_path = self.snapshot_manager.get_snapshot_path(snapshot.id)
+                branch_snapshot_path = branch_snapshot_manager.get_snapshot_path(snapshot.id)
+                if self.file_io.exists(snapshot_path):
+                    self.file_io.copy_file(snapshot_path, branch_snapshot_path, overwrite=True)
+                else:
+                    # The tag retains the snapshot metadata after the original file expires.
+                    self.file_io.write_file(branch_snapshot_path, JSON.to_json(snapshot), overwrite=True)
                 self._copy_schemas_to_branch(branch_name, snapshot.schema_id)
             except Exception as e:
                 raise RuntimeError(
