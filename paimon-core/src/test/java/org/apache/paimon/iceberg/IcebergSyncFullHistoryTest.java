@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
@@ -45,6 +46,7 @@ import org.apache.iceberg.io.CloseableIterable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -444,6 +446,130 @@ public class IcebergSyncFullHistoryTest {
                         "Record(5, 50)");
     }
 
+    @Test
+    public void testHeadPromotionFailureKeepsPublishedHead() throws Exception {
+        HookedFileIO fileIO = new HookedFileIO();
+        createFormatChangeRebuild(fileIO);
+        String publishedBefore = table.fileIO().readFileUtf8(metadataPath(2));
+
+        // the rebuild for snapshot 3 fails while writing the new head into place
+        fileIO.failOverwriteOf = "v3.metadata.json";
+        assertThatThrownBy(() -> writeCommit(3, GenericRow.of(3, 30)))
+                .hasStackTraceContaining("injected failure");
+        fileIO.failOverwriteOf = null;
+
+        // the pointer still names the old head, which is untouched and fully readable
+        assertThat(readVersionHint()).isEqualTo(2);
+        assertThat(table.fileIO().readFileUtf8(metadataPath(2))).isEqualTo(publishedBefore);
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        // the next commit rebuilds and publishes the full history
+        writeCommit(4, GenericRow.of(4, 40));
+        assertThat(readVersionHint()).isEqualTo(4);
+        IcebergMetadata metadata = readMetadata(4);
+        assertThat(metadata.formatVersion()).isEqualTo(IcebergMetadata.FORMAT_VERSION_V3);
+        assertThat(
+                        metadata.snapshots().stream()
+                                .map(IcebergSnapshot::snapshotId)
+                                .collect(Collectors.toList()))
+                .containsExactly(1L, 2L, 3L, 4L);
+    }
+
+    @Test
+    public void testNewerCommitDuringPromotionIsNotRolledBack() throws Exception {
+        HookedFileIO fileIO = new HookedFileIO();
+        createFormatChangeRebuild(fileIO);
+
+        // Without a table lock, another writer commits and publishes snapshot 4 after the
+        // rebuild for snapshot 3 checked that it is the latest, right before its pointer switch.
+        String otherUser = UUID.randomUUID().toString();
+        fileIO.beforeHintWrite =
+                () -> {
+                    try (TableWriteImpl<?> otherWrite = table.newWrite(otherUser);
+                            TableCommitImpl otherCommit = table.newCommit(otherUser)) {
+                        otherWrite.write(GenericRow.of(4, 40));
+                        otherCommit.commit(1, otherWrite.prepareCommit(false, 1));
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                };
+        writeCommit(3, GenericRow.of(3, 30));
+        assertThat(fileIO.beforeHintWrite).isNull();
+
+        // the pointer ends at the newer head, which extends the rebuilt history
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(4);
+        assertThat(readVersionHint()).isEqualTo(4);
+        assertThat(
+                        readMetadata(4).snapshots().stream()
+                                .map(IcebergSnapshot::snapshotId)
+                                .collect(Collectors.toList()))
+                .containsExactly(1L, 2L, 3L, 4L);
+    }
+
+    /**
+     * Two snapshots published as format version 2 with full history sync, then a switch to version
+     * 3, so the next commit replays the whole history from scratch while the pointer still names
+     * the version 2 head of snapshot 2.
+     */
+    private void createFormatChangeRebuild(LocalFileIO fileIO) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.TABLE_LOCATION.toString());
+        options.put(IcebergOptions.SYNC_FULL_HISTORY.key(), "true");
+        options.put(IcebergOptions.METADATA_DELETE_AFTER_COMMIT.key(), "false");
+        createAppendTable(options, fileIO);
+        writeCommit(1, GenericRow.of(1, 10));
+        writeCommit(2, GenericRow.of(2, 20));
+        assertThat(readVersionHint()).isEqualTo(2);
+
+        Map<String, String> upgrade = new HashMap<>();
+        upgrade.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        reopen(upgrade);
+    }
+
+    private Path metadataPath(long snapshotId) {
+        return new Path(table.location(), "metadata/v" + snapshotId + ".metadata.json");
+    }
+
+    private long readVersionHint() throws Exception {
+        return Long.parseLong(
+                table.fileIO()
+                        .readFileUtf8(new Path(table.location(), "metadata/version-hint.text"))
+                        .trim());
+    }
+
+    /** Local file IO with hooks on the writes and renames that place published files. */
+    private static class HookedFileIO extends LocalFileIO {
+
+        private volatile String failOverwriteOf;
+        private volatile Runnable beforeHintWrite;
+
+        @Override
+        public PositionOutputStream newOutputStream(Path path, boolean overwrite)
+                throws IOException {
+            if (overwrite && path.getName().equals(failOverwriteOf)) {
+                throw new IOException("injected failure writing " + path);
+            }
+            if (overwrite && path.getName().equals("version-hint.text")) {
+                Runnable hook = beforeHintWrite;
+                if (hook != null) {
+                    beforeHintWrite = null;
+                    hook.run();
+                }
+            }
+            return super.newOutputStream(path, overwrite);
+        }
+
+        @Override
+        public boolean rename(Path src, Path dst) throws IOException {
+            if (dst.getName().equals(failOverwriteOf)) {
+                throw new IOException("injected failure renaming to " + dst);
+            }
+            return super.rename(src, dst);
+        }
+    }
+
     // ------------------------------------------------------------------------
     //  Utils
     // ------------------------------------------------------------------------
@@ -457,11 +583,15 @@ public class IcebergSyncFullHistoryTest {
     }
 
     private void createAppendTable(Map<String, String> customOptions) throws Exception {
+        createAppendTable(customOptions, LocalFileIO.create());
+    }
+
+    private void createAppendTable(Map<String, String> customOptions, LocalFileIO fileIO)
+            throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
 
-        LocalFileIO fileIO = LocalFileIO.create();
         Path path = new Path(tempDir.toString());
 
         Options options = new Options(customOptions);

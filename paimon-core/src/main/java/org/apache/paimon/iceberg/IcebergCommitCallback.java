@@ -20,6 +20,7 @@ package org.apache.paimon.iceberg;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -138,6 +139,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     private final FileStoreTable table;
     private final String commitUser;
+
+    // created on first publication, owns the table lock that Paimon snapshot commits take
+    private @Nullable SnapshotCommit publishGuard;
 
     private final IcebergPathFactory pathFactory;
     private final @Nullable IcebergMetadataCommitter metadataCommitter;
@@ -271,7 +275,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     @Override
-    public void close() throws Exception {}
+    public void close() throws Exception {
+        if (publishGuard != null) {
+            publishGuard.close();
+            publishGuard = null;
+        }
+    }
 
     @Override
     public void call(Context context) {
@@ -353,33 +362,23 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             if (table.fileIO().exists(pathFactory.toMetadataPath(snapshotId))) {
                 if (metadataMatchesSnapshot(snapshotId, snapshot)) {
                     // a retry repairs hint, pointer and files only while this snapshot is
-                    // still the head; a replay of an older committable must not move them back
-                    Long latestForRepair = table.snapshotManager().latestSnapshotId();
-                    if (latestForRepair == null || latestForRepair != snapshotId) {
+                    // still the head; a replay of an older committable must not move them back.
+                    // The pointer is recommitted before retiring files it may still reference.
+                    Path existingPath = pathFactory.toMetadataPath(snapshotId);
+                    Path basePath = pathFactory.toMetadataPath(snapshotId - 1);
+                    IcebergMetadata base =
+                            metadataCommitter != null && table.fileIO().exists(basePath)
+                                    ? IcebergMetadata.fromPath(table.fileIO(), basePath)
+                                    : null;
+                    if (!publishHead(
+                            snapshotId,
+                            IcebergMetadata.fromPath(table.fileIO(), existingPath),
+                            existingPath,
+                            base,
+                            base == null ? null : basePath,
+                            NO_STEP,
+                            NO_STEP)) {
                         return;
-                    }
-                    if (readVersionHint() != snapshotId) {
-                        table.fileIO()
-                                .overwriteFileUtf8(
-                                        new Path(
-                                                pathFactory.metadataDirectory(),
-                                                VERSION_HINT_FILENAME),
-                                        String.valueOf(snapshotId));
-                    }
-                    if (metadataCommitter != null) {
-                        // recommit the pointer (previous version as base, so a lagging
-                        // catalog advances) before retiring files it may still reference
-                        Path existingPath = pathFactory.toMetadataPath(snapshotId);
-                        Path basePath = pathFactory.toMetadataPath(snapshotId - 1);
-                        IcebergMetadata base =
-                                table.fileIO().exists(basePath)
-                                        ? IcebergMetadata.fromPath(table.fileIO(), basePath)
-                                        : null;
-                        commitToExternalCatalog(
-                                IcebergMetadata.fromPath(table.fileIO(), existingPath),
-                                existingPath,
-                                base,
-                                base == null ? null : basePath);
                     }
                     // a failed earlier attempt skipped the normal post-publication cleanup
                     deleteApplicableMetadataFiles(snapshotId);
@@ -517,7 +516,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         Long earliest = snapshotManager.earliestSnapshotId();
         long startId = earliest == null ? currentSnapshotId : Math.min(earliest, currentSnapshotId);
 
-        deleteStagedLeftovers();
+        deleteStagedLeftovers(currentSnapshotId);
 
         // Resume from the newest existing metadata below the current snapshot, if it is usable.
         // Anything older than the newest existing file is stale by definition: live commits only
@@ -542,7 +541,44 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             }
         }
 
-        String rebuildUuid = UUID.randomUUID().toString();
+        // the head snapshot leads the name, so a later rebuild can tell what it supersedes
+        String rebuildUuid = currentSnapshotId + "-" + UUID.randomUUID();
+        try {
+            replayAndPromote(
+                    currentSnapshotId,
+                    startId,
+                    baseId,
+                    rebuildUuid,
+                    inheritUuid,
+                    lastColumnIdFloor,
+                    nextRowIdFloor);
+        } catch (IOException | RuntimeException e) {
+            Long latest = snapshotManager.latestSnapshotId();
+            if (latest != null && latest > currentSnapshotId) {
+                // a newer commit owns publication now and its own rebuild may have removed
+                // this one's staged files; the result would be discarded anyway
+                LOG.info(
+                        "Full-history rebuild for snapshot {} was superseded by snapshot {} and "
+                                + "stopped.",
+                        currentSnapshotId,
+                        latest,
+                        e);
+                return;
+            }
+            throw e;
+        }
+    }
+
+    private void replayAndPromote(
+            long currentSnapshotId,
+            long startId,
+            long baseId,
+            String rebuildUuid,
+            @Nullable String inheritUuid,
+            int lastColumnIdFloor,
+            long nextRowIdFloor)
+            throws IOException {
+        SnapshotManager snapshotManager = table.snapshotManager();
         long firstStagedId;
         boolean freshRebuild = baseId == -1;
         StaleBuild staleBuild = null;
@@ -630,8 +666,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 String.format("rebuild-%s-v%d.metadata.json", rebuildUuid, snapshotId));
     }
 
-    /** Staged files of crashed or superseded rebuilds; only ever garbage. */
-    private void deleteStagedLeftovers() throws IOException {
+    /**
+     * Staged files of crashed or superseded rebuilds. A rebuild for a newer head snapshot
+     * supersedes every rebuild for an older or the same head, so their files are garbage; staging
+     * of a rebuild for a newer head (still running) is left alone.
+     */
+    private void deleteStagedLeftovers(long currentSnapshotId) throws IOException {
         FileStatus[] statuses;
         try {
             statuses = table.fileIO().listStatus(pathFactory.metadataDirectory());
@@ -640,7 +680,17 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
         for (FileStatus status : statuses) {
             String name = status.getPath().getName();
-            if (name.startsWith("rebuild-") && name.endsWith(".metadata.json")) {
+            if (!name.startsWith("rebuild-") || !name.endsWith(".metadata.json")) {
+                continue;
+            }
+            long headId;
+            try {
+                int start = "rebuild-".length();
+                headId = Long.parseLong(name.substring(start, name.indexOf('-', start)));
+            } catch (RuntimeException e) {
+                headId = -1;
+            }
+            if (headId <= currentSnapshotId) {
                 table.fileIO().deleteQuietly(status.getPath());
             }
         }
@@ -648,19 +698,23 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     /**
      * Switch the published chain to the staged one, then the version hint and the external catalog.
-     * The staged head is durable and validated before any published path is touched; the remaining
-     * window is the per-file replacement of each chain position, ending one below the head, and
-     * every path serves complete metadata again as soon as its replacement lands.
+     * The staged head is durable and validated before any published path is touched.
+     *
+     * <p>Each published position is replaced with an atomic overwrite (see {@link
+     * org.apache.paimon.fs.FileIO#overwriteFileUtf8}), so a reader never finds a position missing,
+     * and the switch runs under {@link #publishHead}'s lock, so a newer commit cannot publish in
+     * between. The position the pointer names when promotion starts is replaced last, after the
+     * switch: until then it keeps the old build, whose manifests are deleted only after a
+     * successful promotion. A crash at any point therefore leaves the pointer at complete metadata.
      *
      * @return false if a newer commit superseded this rebuild; the staged files are discarded and
-     *     the published chain is left for that commit's own rebuild
+     *     the published chain is left for that commit
      */
     private boolean promoteStagedReplay(
             String rebuildUuid, long firstStagedId, long currentSnapshotId, long startId)
             throws IOException {
-        IcebergMetadata head =
-                IcebergMetadata.fromPath(
-                        table.fileIO(), stagedMetadataPath(rebuildUuid, currentSnapshotId));
+        Path stagedHead = stagedMetadataPath(rebuildUuid, currentSnapshotId);
+        IcebergMetadata head = IcebergMetadata.fromPath(table.fileIO(), stagedHead);
         Preconditions.checkState(
                 head.currentSnapshotId() == currentSnapshotId,
                 "Staged replay head is at snapshot %s instead of %s",
@@ -672,37 +726,48 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 "Staged replay head for snapshot %s does not cover the retained history",
                 currentSnapshotId);
 
-        Long latest = table.snapshotManager().latestSnapshotId();
-        if (latest == null || latest != currentSnapshotId) {
+        long[] pointed = {-1};
+        boolean published;
+        try {
+            published =
+                    publishHead(
+                            currentSnapshotId,
+                            head,
+                            pathFactory.toMetadataPath(currentSnapshotId),
+                            null,
+                            null,
+                            () -> {
+                                pointed[0] = readVersionHint();
+                                for (long id = firstStagedId; id <= currentSnapshotId; id++) {
+                                    // the head itself is written here even if the pointer names
+                                    // it (a reused snapshot id): there is no other place for it
+                                    if (id != pointed[0] || id == currentSnapshotId) {
+                                        promotePosition(rebuildUuid, id);
+                                    }
+                                }
+                            },
+                            () -> {
+                                long id = pointed[0];
+                                if (id >= firstStagedId && id < currentSnapshotId) {
+                                    promotePosition(rebuildUuid, id);
+                                }
+                            });
+        } finally {
             for (long id = firstStagedId; id <= currentSnapshotId; id++) {
                 table.fileIO().deleteQuietly(stagedMetadataPath(rebuildUuid, id));
             }
-            return false;
         }
-
-        for (long id = firstStagedId; id <= currentSnapshotId; id++) {
-            Path staged = stagedMetadataPath(rebuildUuid, id);
-            Path published = pathFactory.toMetadataPath(id);
-            if (table.fileIO().exists(published)) {
-                table.fileIO().deleteQuietly(published);
-            }
-            if (!table.fileIO().rename(staged, published)) {
-                table.fileIO().deleteQuietly(published);
-                if (!table.fileIO().rename(staged, published)) {
-                    throw new IllegalStateException(
-                            "Failed to promote staged Iceberg metadata " + staged);
-                }
-            }
+        if (published) {
+            deleteApplicableMetadataFiles(currentSnapshotId);
         }
+        return published;
+    }
 
-        Path headPath = pathFactory.toMetadataPath(currentSnapshotId);
+    private void promotePosition(String rebuildUuid, long snapshotId) throws IOException {
         table.fileIO()
                 .overwriteFileUtf8(
-                        new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
-                        String.valueOf(currentSnapshotId));
-        commitToExternalCatalog(head, headPath, null, null);
-        deleteApplicableMetadataFiles(currentSnapshotId);
-        return true;
+                        pathFactory.toMetadataPath(snapshotId),
+                        table.fileIO().readFileUtf8(stagedMetadataPath(rebuildUuid, snapshotId)));
     }
 
     /** Identity recovered from the newest readable metadata below an unreadable base. */
@@ -1080,13 +1145,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
         // a delayed callback may still write its metadata (a newer commit extends it), but
         // only the current head may move the hint and the external catalog
-        Long latestAtPublish = table.snapshotManager().latestSnapshotId();
-        if (latestAtPublish != null && latestAtPublish == snapshotId) {
-            table.fileIO()
-                    .overwriteFileUtf8(
-                            new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
-                            String.valueOf(snapshotId));
-            commitToExternalCatalog(metadata, metadataPath, null, null);
+        if (publishHead(snapshotId, metadata, metadataPath, null, null, NO_STEP, NO_STEP)) {
             // cleanup only after the catalog serves the new head: a skipped or failed
             // publication must not delete files an external pointer still references
             expireAllBefore(snapshotId);
@@ -1320,6 +1379,132 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     /** The version recorded in the hint file, or -1 when absent or unreadable. */
+    /** A step of a publication that may write files. */
+    private interface PublishStep {
+        void run() throws IOException;
+    }
+
+    private static final PublishStep NO_STEP = () -> {};
+
+    /**
+     * Publish {@code metadata} as the Iceberg head for {@code snapshotId}: switch the version hint
+     * and commit it to the external catalog, if this snapshot is still the latest one.
+     *
+     * <p>The check and the switch run under the table lock that Paimon snapshot commits take, when
+     * one is configured, so no newer snapshot can commit and publish in between. Without a lock a
+     * newer commit can still publish right after the check, and this switch would then move the
+     * pointer back; {@link #restoreNewerHead} hands the pointer forward again afterwards.
+     *
+     * @param beforeSwitch runs after the check and before the switch, under the same lock
+     * @param afterSwitch runs after the switch, under the same lock
+     * @return whether the head was published; false if a newer snapshot exists
+     */
+    private boolean publishHead(
+            long snapshotId,
+            IcebergMetadata metadata,
+            Path metadataPath,
+            @Nullable IcebergMetadata baseMetadata,
+            @Nullable Path baseMetadataPath,
+            PublishStep beforeSwitch,
+            PublishStep afterSwitch)
+            throws IOException {
+        boolean published;
+        try {
+            published =
+                    publishGuard()
+                            .runWithLock(
+                                    () -> {
+                                        Long latest = table.snapshotManager().latestSnapshotId();
+                                        if (latest == null || latest != snapshotId) {
+                                            return false;
+                                        }
+                                        beforeSwitch.run();
+                                        writeVersionHint(snapshotId);
+                                        commitToExternalCatalog(
+                                                metadata,
+                                                metadataPath,
+                                                baseMetadata,
+                                                baseMetadataPath);
+                                        afterSwitch.run();
+                                        return true;
+                                    });
+        } catch (IOException | RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException(
+                    "Failed to publish Iceberg metadata for snapshot " + snapshotId, e);
+        }
+        if (published) {
+            restoreNewerHead(snapshotId);
+        }
+        return published;
+    }
+
+    private SnapshotCommit publishGuard() {
+        if (publishGuard == null) {
+            publishGuard =
+                    table.catalogEnvironment()
+                            .snapshotCommit(
+                                    table.snapshotManager(), table.coreOptions(), commitUser);
+        }
+        return publishGuard;
+    }
+
+    /**
+     * After publishing {@code publishedId}, move the pointer forward to the newest snapshot whose
+     * metadata is already complete, in case a newer commit published before this switch. Every step
+     * moves strictly forward, and with a table lock this normally finds nothing to do.
+     */
+    private void restoreNewerHead(long publishedId) throws IOException {
+        long current = publishedId;
+        while (true) {
+            Long latest = table.snapshotManager().latestSnapshotId();
+            if (latest == null || latest <= current || readVersionHint() >= latest) {
+                return;
+            }
+            Path latestPath = pathFactory.toMetadataPath(latest);
+            if (!table.fileIO().exists(latestPath)
+                    || !metadataMatchesSnapshot(latest, table.snapshotManager().snapshot(latest))) {
+                // its own callback has not written it yet and will publish it
+                return;
+            }
+            LOG.info(
+                    "Iceberg metadata of snapshot {} was published after newer snapshot {}; "
+                            + "moving the pointer forward again.",
+                    current,
+                    latest);
+            switchPointerTo(latest);
+            current = latest;
+        }
+    }
+
+    /** Point the version hint and the external catalog at the existing metadata of a snapshot. */
+    private void switchPointerTo(long snapshotId) throws IOException {
+        writeVersionHint(snapshotId);
+        if (metadataCommitter == null) {
+            return;
+        }
+        // previous version as base, so a lagging catalog advances
+        Path path = pathFactory.toMetadataPath(snapshotId);
+        Path basePath = pathFactory.toMetadataPath(snapshotId - 1);
+        IcebergMetadata base =
+                table.fileIO().exists(basePath)
+                        ? IcebergMetadata.fromPath(table.fileIO(), basePath)
+                        : null;
+        commitToExternalCatalog(
+                IcebergMetadata.fromPath(table.fileIO(), path),
+                path,
+                base,
+                base == null ? null : basePath);
+    }
+
+    private void writeVersionHint(long snapshotId) throws IOException {
+        table.fileIO()
+                .overwriteFileUtf8(
+                        new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
+                        String.valueOf(snapshotId));
+    }
+
     private long readVersionHint() {
         try {
             return Long.parseLong(
@@ -1811,13 +1996,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
         // a delayed callback may still write its metadata (a newer commit extends it), but
         // only the current head may move the hint and the external catalog
-        Long latestAtPublish = table.snapshotManager().latestSnapshotId();
-        if (latestAtPublish != null && latestAtPublish == snapshotId) {
-            table.fileIO()
-                    .overwriteFileUtf8(
-                            new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
-                            String.valueOf(snapshotId));
-            commitToExternalCatalog(metadata, metadataPath, baseMetadata, baseMetadataPath);
+        if (publishHead(
+                snapshotId,
+                metadata,
+                metadataPath,
+                baseMetadata,
+                baseMetadataPath,
+                NO_STEP,
+                NO_STEP)) {
             // cleanup only after the catalog serves the new head: a skipped or failed
             // publication must not delete files an external pointer still references
             deleteApplicableMetadataFiles(snapshotId);
