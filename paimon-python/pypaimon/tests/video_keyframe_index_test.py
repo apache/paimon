@@ -18,6 +18,7 @@
 import io
 import pickle
 from fractions import Fraction
+from pathlib import Path
 import struct
 import sys
 from types import SimpleNamespace
@@ -30,7 +31,8 @@ from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex, _Indexed
 
 def encode_index(entries, count=None, ranges=(), codec=0):
     count = len(entries) if count is None else count
-    header = VideoKeyframeIndex.HEADER.pack(1, VideoKeyframeIndex.MAGIC, len(ranges), count, codec)
+    header = VideoKeyframeIndex.HEADER.pack(
+        VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, len(ranges), count, codec)
     metadata = b''.join(struct.pack('<qq', *v) for v in ranges)
     pages = [entries[i:i + 4096] for i in range(0, len(entries), 4096)]
     offset = len(header) + len(metadata) + len(pages) * 68
@@ -52,6 +54,27 @@ def encode_index(entries, count=None, ranges=(), codec=0):
 
 
 class VideoKeyframeIndexTest(unittest.TestCase):
+
+    def test_published_v1_index_remains_seekable(self):
+        fixture = (Path(__file__).resolve().parents[3]
+                   / 'paimon-format/src/test/resources/org/apache/paimon/format/blob/'
+                   'video-index-v1-zlib.hex')
+        data = bytes.fromhex(''.join(line for line in fixture.read_text().splitlines()
+                                     if not line.startswith('#')))
+        reads = []
+
+        def read(offset, length):
+            reads.append((offset, length))
+            return data[offset:offset + length]
+
+        with VideoKeyframeIndex.open(read, len(data), 3) as index:
+            self.assertEqual(((0, 1),), index.metadata_ranges)
+            self.assertEqual([(0, 0, 0), (12, 36000, 2)], list(index.keyframes))
+            self.assertEqual([0, 0, 1], [index.preceding(i) for i in (0, 11, 12)])
+        self.assertEqual([(0, len(data))], reads)
+        VideoKeyframeIndex.validate(data, 3)
+        with self.assertRaises(ValueError):
+            VideoKeyframeIndex.validate(data[:-1], 3)
 
     def test_keyframes_stay_compact_when_read_and_pickled(self):
         values = ((0, -100, 20), (12, 120, 200))
@@ -228,7 +251,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     VideoKeyframeIndex([], anchors)
         for data in (b'', index.serialize()[:-1], index.serialize() + b'junk',
-                     b'\x02' + index.serialize()[1:]):
+                     b'\x03' + index.serialize()[1:]):
             with self.assertRaises(ValueError):
                 VideoKeyframeIndex.deserialize(data)
         header = index.serialize()[:index.HEADER.size]

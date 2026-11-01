@@ -441,11 +441,21 @@ Run arrays have equal lengths. Non-negative references select a video; `-1` mean
 means a data-evolution placeholder. Row `r` in a run starting at `s` maps to frame
 `run_first_frame + r - s`; gaps start new runs.
 
-Keyframe-index v1 is little endian. Metadata and packet offsets are relative to the video payload.
+Each video has its own keyframe index. Index versions may coexist in one `.video` file;
+the version byte belongs to the index, not the `.video` file header. All fields are
+little endian, and metadata and packet offsets are relative to the video payload.
+
+Keyframe-index v1, written by Paimon 2.1.0, has a 17-byte header: version (`1`, 1 byte),
+magic (`0x564944454F4B4649`, 8 bytes), metadata-range count (4 bytes), and keyframe
+count (4 bytes). It is followed by 16-byte metadata `(offset, length)` pairs and one
+zlib stream of row-major `(frame ordinal, PTS, packet position)` int64 triples. Its
+keyframe count is limited to 65,536 per indexed video.
+
+Keyframe-index v2 adds a page directory and independently encoded pages:
 
 | Field | Size |
 | --- | ---: |
-| Version (`1`) | 1 byte |
+| Version (`2`) | 1 byte |
 | Magic (`0x564944454F4B4649`) | 8 bytes |
 | Metadata-range count | 4 bytes |
 | Keyframe count | 8 bytes |
@@ -470,9 +480,10 @@ Decoded pages must contain exactly `entry_count * 24` bytes; encoded pages canno
 
 Ordinals, PTS and packet positions strictly increase from ordinal zero. The index covers the
 first video stream, using its time base. Metadata ranges are limited to 65,536.
-Readers validate accessed pages against directory endpoints and adjacent records; writers
-validate all supported pages. Unknown versions/codecs use scan fallback and survive rewrite;
-checksum or ordering errors fail.
+Readers validate accessed v2 pages against directory endpoints and adjacent records, and
+also support indexed reads from v1. Writers validate all pages or v1 entries. New indexes
+use v2; copying or compaction preserves each existing index's version and codec. Unknown
+versions/codecs use scan fallback and survive rewrite; checksum or ordering errors fail.
 
 An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
 

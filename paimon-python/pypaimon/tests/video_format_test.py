@@ -186,24 +186,40 @@ class VideoFormatTest(unittest.TestCase):
             with mock.patch.object(VideoKeyframeIndex, 'inspect', return_value=VideoKeyframeIndex(
                     [], [(0, 0, 0), (1, 1, 1)])):
                 writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
+            writer._index_spool.seek(0)
+            self.assertEqual(b'\x02', writer._index_spool.read(1))
             writer._index_spool.seek(21)
             self.assertEqual(bytes([codec]), writer._index_spool.read(1))
             writer.close()
         with self.assertRaises(ValueError):
             CoreOptions(Options({'video.index.compression': 'unknown'})).video_index_compression()
 
-    def test_mixed_codecs_preserved_in_one_video_file(self):
-        target = (self.root / 'mixed-codecs.video').as_uri()
+    def test_mixed_v1_v2_indexes_survive_rewrite(self):
+        target = (self.root / 'mixed-versions.video').as_uri()
         writer = VideoFormatWriter(self.file_io.new_output_stream(target), index_compression='none')
-        mappings = []
+        mappings = [self._fixture_bytes(
+            self.VIDEO_FIXTURE.with_name('video-index-v1-zlib.hex'))]
         for compression in ('none', 'delta-zlib'):
             with VideoKeyframeIndex([], [(0, 0, 0), (1, 1, 1)]) as index:
-                mapping = index.serialize(compression)
-            mappings.append(mapping)
-            blob = self._indexed_frame(compression + '.mp4', b'video', mapping)
+                mappings.append(index.serialize(compression))
+        for ordinal, mapping in enumerate(mappings):
+            blob = self._indexed_frame(str(ordinal) + '.mp4', b'video', mapping)
             writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
         writer.close()
+        rewritten = (self.root / 'mixed-versions-rewritten.video').as_uri()
+        writer = VideoFormatWriter(self.file_io.new_output_stream(rewritten))
         for row, expected in zip(self._read(target), mappings):
+            descriptor = VideoFrameDescriptor.deserialize(row).keyframe_index_descriptor
+            actual = Blob.from_file(self.file_io, descriptor.uri, descriptor.offset, descriptor.length).to_data()
+            self.assertEqual(expected, actual)
+            with VideoKeyframeIndex.deserialize(actual, 5) as index:
+                self.assertEqual((0, 0, 0), index.keyframes[0])
+                self.assertEqual(1 if actual[0] == 2 else 0, index.preceding(1))
+            frame = VideoFrameDescriptor.deserialize(row)
+            blob = Blob.from_descriptor(self.file_io.uri_reader_factory.create(frame.uri), frame)
+            writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
+        writer.close()
+        for row, expected in zip(self._read(rewritten), mappings):
             descriptor = VideoFrameDescriptor.deserialize(row).keyframe_index_descriptor
             actual = Blob.from_file(self.file_io, descriptor.uri, descriptor.offset, descriptor.length).to_data()
             self.assertEqual(expected, actual)
@@ -215,7 +231,7 @@ class VideoFormatTest(unittest.TestCase):
         for codec in ('version', 'codec'):
             with VideoKeyframeIndex([], [(0, 0, 0), (1, 1, 1)]) as index:
                 data = bytearray(index.serialize())
-                data[0 if codec == 'version' else 21] = 2
+                data[0 if codec == 'version' else 21] = 3 if codec == 'version' else 2
                 mappings.append(bytes(data))
             blob = self._indexed_frame(codec + '.mp4', b'video', mappings[-1])
             writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))

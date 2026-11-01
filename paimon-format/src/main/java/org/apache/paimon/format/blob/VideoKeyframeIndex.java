@@ -29,7 +29,7 @@ import java.util.zip.CRC32;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
-/** Streaming validation for paged video seek indexes. */
+/** Validation for versioned video seek indexes. */
 final class VideoKeyframeIndex {
     private static final long MAGIC = 0x564944454F4B4649L;
     private static final int ENTRY_LENGTH = 24;
@@ -58,7 +58,11 @@ final class VideoKeyframeIndex {
         if (magic != MAGIC) {
             throw invalid("magic");
         }
-        if (version != 1) {
+        if (version == 1) {
+            validateV1(source, length, payloadLength);
+            return;
+        }
+        if (version != 2) {
             throw new UnsupportedIndexException("version " + version);
         }
         if (length < 22) {
@@ -78,15 +82,7 @@ final class VideoKeyframeIndex {
         if (count <= 0 || offset >= length || pages > (length - offset) / 69) {
             throw invalid("entries length");
         }
-        long previousEnd = 0;
-        for (long i = 0; i < metadataCount; i++) {
-            long start = Long.reverseBytes(in.readLong());
-            long size = Long.reverseBytes(in.readLong());
-            if (start < previousEnd || size <= 0 || start > payloadLength - size) {
-                throw invalid("metadata range outside video payload");
-            }
-            previousEnd = start + size;
-        }
+        validateMetadataRanges(in, metadataCount, payloadLength);
         byte[] record = new byte[68];
         long nextOffset = offset + pages * record.length;
         long[] previous = null;
@@ -157,6 +153,70 @@ final class VideoKeyframeIndex {
                 }
                 previous = value;
             }
+        }
+    }
+
+    private static void validateV1(SeekableInputStream source, long length, long payloadLength)
+            throws IOException {
+        if (length < 17) {
+            throw invalid("header");
+        }
+        DataInputStream in = new DataInputStream(source);
+        long metadataCount = Integer.toUnsignedLong(Integer.reverseBytes(in.readInt()));
+        if (metadataCount > MAX_METADATA_RANGE_COUNT) {
+            throw invalid("metadata range count exceeds limit");
+        }
+        long count = Integer.toUnsignedLong(Integer.reverseBytes(in.readInt()));
+        long offset = 17 + metadataCount * 16;
+        if (count <= 0
+                || count > 64 * 1024
+                || offset >= length
+                || length - offset > count * ENTRY_LENGTH + 64 * 1024) {
+            throw invalid("compressed entries length");
+        }
+        validateMetadataRanges(in, metadataCount, payloadLength);
+        byte[] encoded = new byte[(int) (length - offset)];
+        in.readFully(encoded);
+        int expected = (int) count * ENTRY_LENGTH;
+        byte[] decoded = new byte[expected + 1];
+        Inflater inflater = new Inflater();
+        try {
+            inflater.setInput(encoded);
+            int total = 0;
+            while (!inflater.finished() && total < decoded.length) {
+                int n = inflater.inflate(decoded, total, decoded.length - total);
+                if (n == 0) {
+                    break;
+                }
+                total += n;
+            }
+            if (total != expected || !inflater.finished() || inflater.getRemaining() != 0) {
+                throw invalid("compressed entries length");
+            }
+        } catch (DataFormatException e) {
+            throw invalid("compressed entries");
+        } finally {
+            inflater.end();
+        }
+        ByteBuffer values = ByteBuffer.wrap(decoded, 0, expected).order(ByteOrder.LITTLE_ENDIAN);
+        long[] previous = null;
+        for (int i = 0; i < count; i++) {
+            long[] value = entry(values);
+            validateEntry(value, previous, i == 0, payloadLength);
+            previous = value;
+        }
+    }
+
+    private static void validateMetadataRanges(
+            DataInputStream in, long metadataCount, long payloadLength) throws IOException {
+        long previousEnd = 0;
+        for (long i = 0; i < metadataCount; i++) {
+            long start = Long.reverseBytes(in.readLong());
+            long size = Long.reverseBytes(in.readLong());
+            if (start < previousEnd || size <= 0 || start > payloadLength - size) {
+                throw invalid("metadata range outside video payload");
+            }
+            previousEnd = start + size;
         }
     }
 

@@ -330,9 +330,10 @@ class UnsupportedVideoIndex(ValueError):
 
 
 class VideoKeyframeIndex:
-    VERSION = 1
+    VERSION = 2
     MAGIC = 0x564944454F4B4649
     HEADER = struct.Struct('<BQIQB')
+    V1_HEADER = struct.Struct('<BQII')
     METADATA_RANGE = struct.Struct('<qq')
     ENTRY = struct.Struct('<qqq')
     MAX_METADATA_RANGE_COUNT = 64 * 1024
@@ -482,6 +483,8 @@ class VideoKeyframeIndex:
         version, magic = struct.unpack_from('<BQ', prefix)
         if magic != cls.MAGIC:
             raise ValueError("Invalid video keyframe index magic.")
+        if version == 1:
+            return cls._open_v1(read, length, payload_length, prefix)
         if version != cls.VERSION:
             raise UnsupportedVideoIndex("Unsupported video keyframe index version: %s." % version)
         if length < cls.HEADER.size:
@@ -507,6 +510,46 @@ class VideoKeyframeIndex:
         result.keyframes._descriptor(pages - 1)
         result.keyframes[0]
         result.keyframes.load_small()
+        return result
+
+    @classmethod
+    def _open_v1(cls, read, length, payload_length, prefix):
+        if length < cls.V1_HEADER.size:
+            raise ValueError("Invalid video keyframe index length.")
+        _, _, metadata_count, count = cls.V1_HEADER.unpack_from(prefix)
+        if metadata_count > cls.MAX_METADATA_RANGE_COUNT:
+            raise ValueError("Video keyframe index exceeds the metadata-range limit.")
+        offset = cls.V1_HEADER.size + metadata_count * cls.METADATA_RANGE.size
+        if not count or count > 64 * 1024 or offset >= length:
+            raise ValueError("Invalid video keyframe index entries length.")
+        expected = count * cls.ENTRY.size
+        if length - offset > expected + 64 * 1024:
+            raise ValueError("Invalid video keyframe index compressed length.")
+        ranges = cls._metadata(cls.METADATA_RANGE.iter_unpack(
+            read(cls.V1_HEADER.size, metadata_count * 16)), payload_length)
+        inflater = zlib.decompressobj()
+        chunks = []
+        decoded = 0
+        try:
+            while offset < length:
+                size = min(64 * 1024, length - offset)
+                block = inflater.decompress(read(offset, size), expected - decoded + 1)
+                chunks.append(block)
+                decoded += len(block)
+                offset += size
+                if decoded > expected or inflater.unused_data or inflater.unconsumed_tail:
+                    raise ValueError("Invalid video keyframe index compressed length.")
+                if inflater.eof:
+                    break
+        except zlib.error as error:
+            raise ValueError("Invalid video keyframe index compressed page.") from error
+        if decoded != expected or not inflater.eof or offset != length:
+            raise ValueError("Invalid video keyframe index compressed length.")
+        raw = b''.join(chunks)
+        _validate_entries(raw, payload_length, initial=True)
+        result = cls.__new__(cls)
+        result.metadata_ranges = ranges
+        result.keyframes = cls.ENTRY.iter_unpack(raw)
         return result
 
     def _validate_all(self):
