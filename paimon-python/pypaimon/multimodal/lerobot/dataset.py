@@ -2140,8 +2140,8 @@ class _PyAVVideoDecoder:
                 raise IndexError(
                     "Video frame index %d is out of range." % index)
             groups.setdefault(preceding, []).append(index)
-            # Prefetch only the target GOP. The range-backed stream fetches
-            # additional decoder dependencies on demand (including B-frames).
+            # Include one PyAV input buffer beyond the GOP for delayed B-frames.
+            # Larger dependencies are still fetched on demand.
             start = mapping.keyframes[preceding][2]
             range_end = preceding + 1
             end = (
@@ -2149,6 +2149,7 @@ class _PyAVVideoDecoder:
                 if range_end < len(mapping.keyframes)
                 else self._video_length()
             )
+            end = min(end + 32 * 1024, self._video_length())
             ranges.append((start, end - start))
         return groups, _merge_video_ranges(ranges)
 
