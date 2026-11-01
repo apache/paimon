@@ -53,6 +53,19 @@ from pypaimon.utils.range import Range
 
 
 class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
+
+    def test_duplicate_columns_report_the_configured_declaration_key(self):
+        for kind in ('btree', 'bitmap', 'full-text'):
+            for key in ('global-index.%s.index-columns' % kind,
+                        'global-index.%s.index-column' % kind, 'pk-%s.index.columns' % kind):
+                with self.subTest(key=key):
+                    schema = TableSchema(fields=[DataField(0, 'name', AtomicType('STRING'))],
+                                         options={key: 'name,name'})
+                    with self.assertRaises(ValueError) as error:
+                        PrimaryKeyIndexDefinitions.create(schema)
+                    self.assertIn(key, str(error.exception))
+                    self.assertIn('duplicate column', str(error.exception))
+
     def test_shared_vector_and_full_text_definitions(self):
         schema = TableSchema(
             fields=[DataField(0, "embedding", AtomicType("VECTOR(3)")),

@@ -3254,42 +3254,6 @@ public class CoreOptions implements Serializable {
                     .withFallbackKeys("global-index.fm.index-column", "pk-fm.index.columns")
                     .withDescription("Comma-separated character columns to index with FM indexes.");
 
-    public static final ConfigOption<String> PK_BTREE_INDEX_COLUMNS =
-            key("pk-btree.index.columns")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Comma-separated columns indexed by primary-key BTree indexes.");
-
-    public static final ConfigOption<String> PK_BITMAP_INDEX_COLUMNS =
-            key("pk-bitmap.index.columns")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Comma-separated columns indexed by primary-key Bitmap indexes.");
-
-    public static final ConfigOption<String> PK_MULTIVALUE_INDEX_COLUMNS =
-            key("pk-multivalue.index.columns")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Comma-separated ARRAY columns indexed by primary-key Multivalue indexes.");
-
-    public static final ConfigOption<String> PK_FULL_TEXT_INDEX_COLUMNS =
-            key("pk-full-text.index.columns")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Comma-separated character columns indexed by primary-key full-text indexes. "
-                                    + "The first release supports exactly one column.");
-
-    public static final ConfigOption<String> PK_FM_INDEX_COLUMNS =
-            key("pk-fm.index.columns")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Comma-separated character columns indexed by primary-key FM indexes.");
-
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
             key("pk-clustering-override")

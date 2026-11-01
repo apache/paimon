@@ -1038,27 +1038,6 @@ class CoreOptions:
         )
     )
 
-    PK_BTREE_INDEX_COLUMNS: ConfigOption[str] = (
-        ConfigOptions.key("pk-btree.index.columns")
-        .string_type()
-        .no_default_value()
-        .with_description("Comma-separated columns indexed by primary-key BTree indexes.")
-    )
-
-    PK_BITMAP_INDEX_COLUMNS: ConfigOption[str] = (
-        ConfigOptions.key("pk-bitmap.index.columns")
-        .string_type()
-        .no_default_value()
-        .with_description("Comma-separated columns indexed by primary-key Bitmap indexes.")
-    )
-
-    PK_FULL_TEXT_INDEX_COLUMNS: ConfigOption[str] = (
-        ConfigOptions.key("pk-full-text.index.columns")
-        .string_type()
-        .no_default_value()
-        .with_description("Comma-separated character columns indexed by primary-key full-text indexes.")
-    )
-
     GLOBAL_INDEX_COLUMN_UPDATE_ACTION: ConfigOption[GlobalIndexColumnUpdateAction] = (
         ConfigOptions.key("global-index.column-update-action")
         .enum_type(GlobalIndexColumnUpdateAction)
@@ -1884,6 +1863,15 @@ class CoreOptions:
         if columns is None:
             columns = values.get("pk-%s.index.columns" % index_type)
         return self._index_columns(columns)
+
+    def global_index_columns_option_key(self, index_type: str) -> str:
+        values = self.options.to_map()
+        for suffix in ("index-columns", "index-column"):
+            key = "global-index.%s.%s" % (index_type, suffix)
+            if values.get(key) is not None:
+                return key
+        legacy = "pk-%s.index.columns" % index_type
+        return legacy if values.get(legacy) is not None else "global-index.%s.index-columns" % index_type
 
     @staticmethod
     def _index_columns(columns) -> List[str]:

@@ -34,10 +34,10 @@ class PrimaryKeyIndexDefinitions:
         bitmap = core.bitmap_index_columns()
         vector = VectorIndexOptions.columns(core.options)
         full_text = core.full_text_index_columns()
-        _validate_columns(btree, CoreOptions.PK_BTREE_INDEX_COLUMNS.key())
-        _validate_columns(bitmap, CoreOptions.PK_BITMAP_INDEX_COLUMNS.key())
+        _validate_columns(btree, core.global_index_columns_option_key("btree"))
+        _validate_columns(bitmap, core.global_index_columns_option_key("bitmap"))
         _validate_columns(vector, VectorIndexOptions.columns_option_key(core.options))
-        _validate_columns(full_text, CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key())
+        _validate_columns(full_text, core.global_index_columns_option_key("full-text"))
         families = (btree, bitmap, vector, full_text)
         owned = set()
         for columns in families:

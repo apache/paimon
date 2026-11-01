@@ -128,10 +128,10 @@ class PrimaryKeyIndexDefinitionsTest {
     @Test
     void testRejectsDuplicateColumnWithinFamily() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "name,name");
+        options.put(CoreOptions.GLOBAL_INDEX_BTREE_INDEX_COLUMNS.key(), "name,name");
 
         assertThatThrownBy(() -> PrimaryKeyIndexDefinitions.create(schema(options)))
-                .hasMessageContaining("pk-btree.index.columns")
+                .hasMessageContaining("global-index.btree.index-columns")
                 .hasMessageContaining("duplicate")
                 .hasMessageContaining("name");
     }
@@ -139,8 +139,8 @@ class PrimaryKeyIndexDefinitionsTest {
     @Test
     void testRejectsColumnConfiguredByMultipleFamilies() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "name");
-        options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "name");
+        options.put(CoreOptions.GLOBAL_INDEX_BTREE_INDEX_COLUMNS.key(), "name");
+        options.put(CoreOptions.GLOBAL_INDEX_BITMAP_INDEX_COLUMNS.key(), "name");
 
         assertThatThrownBy(() -> PrimaryKeyIndexDefinitions.create(schema(options)))
                 .hasMessageContaining("name")

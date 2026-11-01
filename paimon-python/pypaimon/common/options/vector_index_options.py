@@ -41,13 +41,11 @@ class VectorIndexOptions:
 
     @staticmethod
     def columns_option_key(options):
-        types = VectorIndexOptions._index_types(CoreOptions(options))
+        core = CoreOptions(options)
+        types = VectorIndexOptions._index_types(core)
         if not types:
             return 'pk-vector.index.columns'
-        values = options.to_map()
-        return ', '.join('global-index.%s.%s' % (
-            kind, 'index-columns' if 'global-index.%s.index-columns' % kind in values else 'index-column')
-            for kind in types)
+        return ', '.join(core.global_index_columns_option_key(kind) for kind in types)
 
     @staticmethod
     def _index_types(core):

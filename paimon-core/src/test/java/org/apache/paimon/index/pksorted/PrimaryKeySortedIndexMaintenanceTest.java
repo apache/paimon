@@ -326,14 +326,10 @@ class PrimaryKeySortedIndexMaintenanceTest {
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true");
         options.put(
-                sharedOptions
-                        ? "global-index.btree.index-columns"
-                        : CoreOptions.PK_BTREE_INDEX_COLUMNS.key(),
+                sharedOptions ? "global-index.btree.index-columns" : "pk-btree.index.columns",
                 "itemId");
         options.put(
-                sharedOptions
-                        ? "global-index.bitmap.index-columns"
-                        : CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(),
+                sharedOptions ? "global-index.bitmap.index-columns" : "pk-bitmap.index.columns",
                 "comment");
         SchemaManager schemaManager =
                 new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
@@ -368,8 +364,8 @@ class PrimaryKeySortedIndexMaintenanceTest {
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true");
-        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "itemId");
-        options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "comment");
+        options.put("pk-btree.index.columns", "itemId");
+        options.put("pk-bitmap.index.columns", "comment");
         options.put("pk-vector.index.columns", "embedding");
         options.put("fields.embedding.pk-vector.index.type", "test-vector-ann");
         options.put("fields.embedding.pk-vector.distance.metric", "l2");

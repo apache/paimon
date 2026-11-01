@@ -218,7 +218,7 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
                         .primaryKey("id")
                         .option(CoreOptions.BUCKET.key(), "1")
                         .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
-                        .option(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "score")
+                        .option(CoreOptions.GLOBAL_INDEX_BTREE_INDEX_COLUMNS.key(), "score")
                         .option(
                                 "global-index."
                                         + TestVectorGlobalIndexerFactory.IDENTIFIER

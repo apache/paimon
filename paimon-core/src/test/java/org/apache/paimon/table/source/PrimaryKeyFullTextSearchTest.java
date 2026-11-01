@@ -127,7 +127,7 @@ class PrimaryKeyFullTextSearchTest {
     private static FileStoreTable table(boolean dataEvolution) {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "2");
-        options.put(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(), "content");
+        options.put(CoreOptions.GLOBAL_INDEX_FULL_TEXT_INDEX_COLUMNS.key(), "content");
         options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), Boolean.toString(dataEvolution));
         TableSchema schema =
                 new TableSchema(
