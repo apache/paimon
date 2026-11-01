@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
@@ -69,6 +70,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayInputStream;
@@ -528,6 +530,55 @@ public class VectorSearchBuilderTest extends TableTestBase {
         assertThat(TestVectorGlobalIndexer.metricCalls()).isGreaterThan(0);
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "global-index.test-vector-ann.index-columns,true",
+        "global-index.test-vector-ann.index-columns,false",
+        "global-index.test-vector-ann.index-column,true",
+        "global-index.test-vector-ann.index-column,false",
+        "fields.vec.pk-vector.index.type,true",
+        "fields.vec.pk-vector.index.type,false"
+    })
+    public void testConfiguredTypesReachRawSingleAndBatchQueries(String key, boolean tableOption)
+            throws Exception {
+        Identifier identifier = identifier("raw_type_hint_" + key.replace('.', '_') + tableOption);
+        Schema.Builder schema =
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full");
+        String value =
+                key.startsWith("global-index.")
+                        ? VECTOR_FIELD_NAME
+                        : TestVectorGlobalIndexerFactory.IDENTIFIER;
+        if (tableOption) {
+            schema.option(key, value);
+        }
+        catalog.createTable(identifier, schema.build(), false);
+        FileStoreTable table = getTable(identifier);
+        writeVectors(table, new float[][] {{1.0f, 0.0f}, {0.0f, 1.0f}});
+        Map<String, String> queryOptions =
+                tableOption ? Collections.emptyMap() : Collections.singletonMap(key, value);
+        VectorSearchBuilder single =
+                table.newVectorSearchBuilder()
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(1)
+                        .withOptions(queryOptions);
+        RawVectorSearchSplit raw =
+                rawVectorSearchSplits(single.newVectorScan().scan().splits()).get(0);
+        assertThat(raw.indexType()).isEqualTo(TestVectorGlobalIndexerFactory.IDENTIFIER);
+        assertThat(single.executeLocal().results()).containsExactly(0L);
+        List<GlobalIndexResult> batch =
+                table.newBatchVectorSearchBuilder()
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withVectors(new float[][] {{1.0f, 0.0f}, {0.0f, 1.0f}})
+                        .withLimit(1)
+                        .withOptions(queryOptions)
+                        .executeBatchLocal();
+        assertThat(batch).hasSize(2);
+        assertThat(batch.get(0).results()).containsExactly(0L);
+        assertThat(batch.get(1).results()).containsExactly(1L);
+    }
+
     @Test
     public void testVectorSearchFastModeSkipsUnindexedDataByDefault() throws Exception {
         catalog.createTable(
@@ -828,6 +879,66 @@ public class VectorSearchBuilderTest extends TableTestBase {
         assertThat(batchRefined).hasSize(2);
         assertThat(batchRefined.get(0).results()).containsExactly(0L);
         assertThat(batchRefined.get(1).results()).containsExactly(2L);
+
+        FileStoreTable fieldConfigured =
+                table.copy(
+                        Collections.singletonMap(
+                                "fields." + VECTOR_FIELD_NAME + ".index-options",
+                                "{\"refine_factor\":3}"));
+        assertThat(
+                        fieldConfigured
+                                .newVectorSearchBuilder()
+                                .withVector(new float[] {0.0f, 0.0f})
+                                .withLimit(1)
+                                .withVectorColumn(VECTOR_FIELD_NAME)
+                                .executeLocal()
+                                .results())
+                .containsExactly(0L);
+        List<GlobalIndexResult> fieldBatch =
+                fieldConfigured
+                        .newBatchVectorSearchBuilder()
+                        .withVectors(new float[][] {{0.0f, 0.0f}, {20.0f, 0.0f}})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+        assertThat(fieldBatch.get(0).results()).containsExactly(0L);
+        assertThat(fieldBatch.get(1).results()).containsExactly(2L);
+    }
+
+    @Test
+    public void testSharedVectorDeclarationKeepsDataEvolutionReads() throws Exception {
+        catalog.createTable(
+                identifier("declared_vector"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(
+                                "global-index."
+                                        + TestVectorGlobalIndexerFactory.IDENTIFIER
+                                        + ".index-columns",
+                                VECTOR_FIELD_NAME)
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("declared_vector"));
+        float[][] vectors = {{1.0f, 0.0f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        assertThat(
+                        table.newVectorSearchBuilder()
+                                .withVector(new float[] {1.0f, 0.0f})
+                                .withLimit(1)
+                                .withVectorColumn(VECTOR_FIELD_NAME)
+                                .executeLocal()
+                                .results())
+                .containsExactly(0L);
+        assertThat(
+                        table.newBatchVectorSearchBuilder()
+                                .withVectors(new float[][] {{0.0f, 1.0f}})
+                                .withLimit(1)
+                                .withVectorColumn(VECTOR_FIELD_NAME)
+                                .executeBatchLocal()
+                                .get(0)
+                                .results())
+                .containsExactly(1L);
     }
 
     @Test

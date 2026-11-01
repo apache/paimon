@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import unittest
 from datetime import date, datetime
 from decimal import Decimal
@@ -225,6 +226,166 @@ class GlobalIndexBuildTest(
         'bucket': '-1',
         'file.format': 'parquet',
     }
+
+    def test_native_vector_build_preserves_field_option_formats(self):
+        schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32()))])
+        configurations = {
+            'shared': {'fields.embedding.index-options':
+                       '{"dimension":768,"nlist":64,"distance.metric":"cosine","train.sample-ratio":0.5}'},
+            'legacy': {'fields.embedding.pk-vector.index.options':
+                       '{"dimension":768,"nlist":64,"train.sample-ratio":0.5}',
+                       'fields.embedding.pk-vector.distance.metric': 'cosine'},
+            'dlf': {'fields.embedding.dimension': '768', 'fields.embedding.nlist': '64',
+                    'fields.embedding.distance.metric': 'cosine',
+                    'fields.embedding.train.sample-ratio': '0.5'},
+        }
+        for name, field_options in configurations.items():
+            with self.subTest(configuration=name):
+                options = dict(self.table_options, **{
+                    'write.native.enabled': 'true', 'global-index.ivf-pq.index-columns': 'embedding',
+                    'ivf-pq.dimension': '128', 'ivf-pq.nlist': '32'})
+                if name == 'legacy':
+                    options.update({'ivf-pq.dimension': '768', 'ivf-pq.nlist': '64'})
+                options.update(field_options)
+                table = self._create_table(pa_schema=schema, options=options)
+                request = GlobalIndexBuilder(table, 'embedding', 'ivf-pq')
+                actual = self._native_build_options(request)
+                for key, value in options.items():
+                    self.assertEqual(value, actual[key])
+
+    def test_native_scalar_and_full_text_builds_preserve_field_options(self):
+        schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        for kind, key, value in (('btree', 'btree-index.block-size', '4 kb'),
+                                 ('bitmap', 'bitmap-index.dictionary-block-size', '8 kb'),
+                                 ('full-text', 'full-text.tokenizer', 'raw')):
+            with self.subTest(index_type=kind):
+                short_key = key.split('.', 1)[1]
+                options = dict(self.table_options, **{
+                    'write.native.enabled': 'true',
+                    'global-index.%s.index-columns' % kind: 'name',
+                    'fields.name.index-options': '{"%s":"%s"}' % (short_key, value)})
+                table = self._create_table(pa_schema=schema, options=options)
+                actual = self._native_build_options(GlobalIndexBuilder(table, 'name', kind))
+                for name, configured in options.items():
+                    self.assertEqual(configured, actual[name])
+
+    def test_native_build_keeps_table_and_user_options(self):
+        schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32()))])
+        for kind in ('ivf-pq', 'diskann'):
+            with self.subTest(index_type=kind):
+                values = dict(self.table_options, **{
+                    'write.native.enabled': 'true', 'global-index.' + kind + '.index-columns': 'embedding',
+                    'fields.embedding.index-options': '{"dimension":2,"metric":"COSINE"}',
+                    'opaque.table.option': 'table'})
+                table = self._create_table(pa_schema=schema, options=values)
+                user = {'opaque.user.option': 'user', 'vindex.build.granule.enabled': 'true'}
+                actual = self._native_build_options(GlobalIndexBuilder(table, 'embedding', kind, options=user))
+                for key, value in dict(values, **user).items():
+                    self.assertEqual(value, actual[key])
+
+    def test_native_build_preserves_captured_view_and_applies_overrides(self):
+        from pypaimon.execution.native.write import native_index_build
+        from pypaimon.execution.native.table import _resolved_schema_json
+        from unittest.mock import Mock
+
+        schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32()))])
+        table = self._create_table(pa_schema=schema, options=dict(self.table_options, **{
+            'write.native.enabled': 'true', 'ivf-pq.metric': 'l2'}))._copy_with_snapshot(None)
+        sdk = types.ModuleType('pypaimon_rust.datafusion')
+        sdk.GlobalIndexBuildBuilder = types.SimpleNamespace(supports_index_type=lambda kind: True)
+        for metric in ('cosine', None):
+            with self.subTest(metric=metric):
+                request = GlobalIndexBuilder(table, 'embedding', 'ivf-pq', options={'ivf-pq.metric': metric})
+                native = Mock()
+                native.build.return_value = []
+                proxy = types.SimpleNamespace(new_global_index_build_builder=lambda: native)
+                with patch.dict(sys.modules, {'pypaimon_rust.datafusion': sdk}), \
+                        patch.object(native_index_build, 'native_runtime_available', return_value=True), \
+                        patch.object(native_index_build, '_rest_catalog_supported', return_value=True), \
+                        patch.object(native_index_build, '_native_table', return_value=proxy) as bridge, \
+                        patch.object(native_index_build, 'from_native_commit_messages', return_value=[]):
+                    self.assertEqual([], request.build())
+                captured = bridge.call_args[0][0]
+                self.assertTrue(hasattr(captured, '_read_snapshot'))
+                self.assertIsNone(captured._read_snapshot)
+                schema = json.loads(_resolved_schema_json(captured))
+                for actual in (schema['options'], native.with_options.call_args[0][0]):
+                    if metric is None:
+                        self.assertNotIn('ivf-pq.metric', actual)
+                    else:
+                        self.assertEqual(metric, actual['ivf-pq.metric'])
+                self.assertEqual('l2', table.table_schema.options['ivf-pq.metric'])
+
+    def _native_build_options(self, request):
+        from unittest.mock import Mock
+        from pypaimon.execution.native.write import native_index_build
+
+        native = Mock()
+        native.build.return_value = []
+        sdk = types.ModuleType('pypaimon_rust.datafusion')
+        sdk.GlobalIndexBuildBuilder = types.SimpleNamespace(supports_index_type=lambda kind: True)
+        proxy = types.SimpleNamespace(new_global_index_build_builder=lambda: native)
+        with patch.dict(sys.modules, {'pypaimon_rust.datafusion': sdk}), \
+                patch.object(native_index_build, 'native_runtime_available', return_value=True), \
+                patch.object(native_index_build, '_rest_catalog_supported', return_value=True), \
+                patch.object(native_index_build, '_native_table', return_value=proxy), \
+                patch.object(native_index_build, 'from_native_commit_messages',
+                             side_effect=lambda table, messages: messages):
+            self.assertEqual([], request.build())
+        return native.with_options.call_args[0][0]
+
+    def test_full_text_build_and_raw_fallback_share_field_options(self):
+        from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead
+        from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
+        from pypaimon.table.source.full_text_search_split import RawFullTextSearchSplit
+
+        schema = pa.schema([('id', pa.int32()), ('content', pa.string())])
+        configurations = {
+            'shared': {'fields.content.index-options':
+                       '{"tokenizer":"raw","lower-case":false,"stop-words":["paimon","lake"]}'},
+            'legacy': {'fields.content.pk-full-text.index.options': '{"tokenizer":"raw"}'},
+            'dlf': {'full-text.tokenizer': 'raw'},
+        }
+        for name, field_options in configurations.items():
+            with self.subTest(configuration=name):
+                options = dict(self.table_options, **{'global-index.full-text.index-column': 'content'})
+                options.update(field_options)
+                table = self._create_table(pa_schema=schema, options=options)
+                self._write_arrow(table, pa.table({'id': [1], 'content': ['Raw Text']}, schema=schema))
+                ftindex = _FakeFullTextForBuild()
+                with patch.dict(sys.modules, {'paimon_ftindex': ftindex}):
+                    self.assertEqual(1, table.create_global_index('content', index_type=FULL_TEXT_IDENTIFIER))
+                    self._write_arrow(table, pa.table({'id': [2], 'content': ['Raw Text']}, schema=schema))
+                    read = DataEvolutionFullTextRead(table, 10, table.field_dict['content'], '{}')
+                    with patch('pypaimon.execution.python.read.search.full_text_read._search_raw_full_text',
+                               return_value=DictBasedScoredIndexResult({1: 1.0})) as search:
+                        result = read.read([RawFullTextSearchSplit([Range(1, 1)])])
+                    self.assertEqual([1], list(result.results()))
+                    self.assertEqual(b'fake-ftindex', search.call_args[0][0])
+                expected = {'tokenizer': 'raw'}
+                if name == 'shared':
+                    expected['lower-case'] = 'false'
+                    expected['stop-words'] = 'paimon;lake'
+                self.assertEqual(expected, ftindex.writers[0].options)
+                self.assertEqual(dict(expected, **{'searcher-pool.max-size': '0'}), ftindex.writers[1].options)
+                self.assertTrue(all(writer.closed for writer in ftindex.writers))
+
+    def test_declared_vector_index_keeps_data_evolution_single_and_batch_reads(self):
+        schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32()))])
+        options = dict(self.table_options, **{
+            'global-index.ivf-pq.index-columns': 'embedding', 'ivf-pq.dimension': '2',
+            'ivf-pq.distance.metric': 'l2', 'vector-index.search-mode': 'full',
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
+        table = self._create_table(pa_schema=schema, options=options)
+        self._write_arrow(table, pa.table({'id': [1, 2], 'embedding': [[1.0, 0.0], [0.0, 1.0]]}, schema=schema))
+        single = (table.new_vector_search_builder().with_vector_column('embedding').with_limit(1)
+                  .with_query_vector([1.0, 0.0]))
+        batch = (table.new_batch_vector_search_builder().with_vector_column('embedding').with_limit(1)
+                 .with_query_vectors([[0.0, 1.0]]))
+        self.assertFalse(single._is_primary_key_vector_search())
+        self.assertFalse(batch._is_primary_key_vector_search())
+        self.assertEqual([0], list(single.execute_local().results()))
+        self.assertEqual([1], list(batch.execute_batch_local()[0].results()))
 
     def test_sorted_build_indexes_deleted_physical_rows_like_java(self):
         for kind in (BTREE_IDENTIFIER, BITMAP_IDENTIFIER):
@@ -622,12 +783,25 @@ class GlobalIndexBuildTest(
             self.assertEqual(1, table.create_global_index(column))
 
     def test_create_vindex_global_index_from_python(self):
+        self._check_create_vindex_global_index(False)
+
+    def test_create_vindex_global_index_with_shared_field_options(self):
+        self._check_create_vindex_global_index(True)
+
+    def _check_create_vindex_global_index(self, shared_options):
         schema = pa.schema([
             ('id', pa.int32()),
             ('embedding', pa.list_(pa.float32())),
         ])
-        table = self._create_table(pa_schema=schema, options=dict(
-            self.table_options, **{'read.batch-size': '1'}))
+        table_options = dict(self.table_options, **{'read.batch-size': '1'})
+        if shared_options:
+            table_options.update({
+                'global-index.ivf-flat.index-columns': 'embedding',
+                'ivf-flat.dimension': '2',
+                'ivf-flat.nlist': '32',
+                'fields.embedding.index-options': '{"nlist":1,"distance.metric":"l2"}',
+            })
+        table = self._create_table(pa_schema=schema, options=table_options)
         vectors = pa.array(
             [[1.0, 0.0], [0.0, 1.0], None],
             type=pa.list_(pa.float32()),
@@ -646,7 +820,7 @@ class GlobalIndexBuildTest(
             added = table.create_global_index(
                 'embedding',
                 index_type='ivf-flat',
-                options={
+                options=None if shared_options else {
                     'ivf-flat.dimension': '2',
                     'ivf-flat.distance.metric': 'l2',
                     'ivf-flat.nlist': '1',

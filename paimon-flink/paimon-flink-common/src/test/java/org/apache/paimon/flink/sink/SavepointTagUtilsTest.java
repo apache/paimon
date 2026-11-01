@@ -125,8 +125,6 @@ public class SavepointTagUtilsTest extends CommitterTestBase {
                 table.tagManager(),
                 commitUser,
                 commitIdentifier,
-                table.store().newTagDeletion(),
-                table.snapshotManager(),
                 table.store().createTagCallbacks(table));
     }
 }

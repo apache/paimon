@@ -234,10 +234,10 @@ def test_reader_table_options_apply_to_captured_sources(rest_catalog, family):
 
 @pytest.mark.parametrize('family', ['vector', 'batch'])
 @pytest.mark.parametrize('metric', [None, 'cosine'])
-@pytest.mark.parametrize('index_type', [' IVF-FLAT ', 'lumina', 'lumina-vector-ann'])
+@pytest.mark.parametrize('index_type', ['ivf-flat', 'diskann'])
 def test_raw_native_plans_use_java_configured_indexer_default(rest_catalog, family, metric, index_type):
     options = {
-        'fields.embedding.index-type': index_type, 'write.native.enabled': 'false',
+        'global-index.%s.index-columns' % index_type: 'embedding', 'write.native.enabled': 'false',
         'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false',
         'fields.other.distance.metric': 'l2',
     }

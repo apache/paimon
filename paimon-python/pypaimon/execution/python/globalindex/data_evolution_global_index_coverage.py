@@ -45,11 +45,12 @@ class DataEvolutionGlobalIndexCoverage:
             meta = index_file.global_index_meta
             if meta is None:
                 continue
+            if getattr(index_file, 'index_type', None) == 'btree' and meta.extra_field_ids:
+                continue
             row_range = Range(meta.row_range_start, meta.row_range_end)
             self._add_coverage(meta.index_field_id, row_range)
-            if meta.extra_field_ids is not None:
-                for extra_field_id in meta.extra_field_ids:
-                    self._add_coverage(extra_field_id, row_range)
+            for field_id in meta.extra_field_ids or []:
+                self._add_coverage(field_id, row_range)
 
     def unindexed_ranges(
         self,
@@ -70,6 +71,12 @@ class DataEvolutionGlobalIndexCoverage:
                     field_ids.add(field.id)
         return self._unindexed_ranges(field_ids, search_mode)
 
+    def indexed_ranges(self, field_ids):
+        return self._indexed_ranges(field_ids)
+
+    def unindexed_ranges_from_indexed(self, indexed_ranges, search_mode=None):
+        return self._unindexed_ranges((), search_mode, indexed_ranges)
+
     def _add_coverage(self, field_id: int, row_range: Range) -> None:
         self._coverage_by_field.setdefault(field_id, []).append(row_range)
 
@@ -89,6 +96,7 @@ class DataEvolutionGlobalIndexCoverage:
         self,
         field_ids: Collection[int],
         search_mode: Optional[GlobalIndexSearchMode] = None,
+        indexed_ranges=None,
     ) -> List[Range]:
         if search_mode is None:
             search_mode = _scalar_index_search_mode(self._table)
@@ -106,7 +114,8 @@ class DataEvolutionGlobalIndexCoverage:
             data_ranges = [Range(0, next_row_id - 1)]
 
         indexed_ranges = Range.sort_and_merge_overlap(
-            self._indexed_ranges(field_ids), True)
+            self._indexed_ranges(field_ids) if indexed_ranges is None
+            else indexed_ranges, True)
         unindexed = []
         for data_range in Range.sort_and_merge_overlap(data_ranges, True):
             unindexed.extend(data_range.exclude(indexed_ranges))

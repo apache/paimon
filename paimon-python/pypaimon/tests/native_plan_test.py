@@ -1359,6 +1359,19 @@ class NativePlanTest(unittest.TestCase):
         self.assertNotIn('incremental_range', native.call_args[1])
         fs.scan.assert_not_called()
 
+    def test_incremental_selectors_use_python_planning(self):
+        for options in ({'incremental-between': '1,2'},
+                        {'incremental-between-timestamp': '100,200', 'incremental-between-scan-mode': 'changelog'},
+                        {'incremental-to-auto-tag': 'tag2'}):
+            with self.subTest(options=options):
+                fs = Mock(partition_key_predicate=None)
+                scan = _scan(True, fs)
+                scan.table.options.options = Options(options)
+                with patch('pypaimon.execution.native.read.plan.native_plan') as native:
+                    scan.plan()
+                native.assert_not_called()
+                fs.scan.assert_called_once()
+
     def test_native_plan_forwards_explicit_incremental_mode(self):
         table = _scan(True, Mock()).table
         table.table_schema = Mock(fields=[], partition_keys=[])

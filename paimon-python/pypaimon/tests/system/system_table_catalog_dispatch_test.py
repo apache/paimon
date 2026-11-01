@@ -31,6 +31,7 @@ import unittest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_exception import TableNotExistException
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.data_types import DataField
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.system import system_table_loader
@@ -107,6 +108,21 @@ class FilesystemCatalogSystemTableDispatchTest(unittest.TestCase):
         with self.assertRaises(TableNotExistException):
             self.catalog.get_table("db.does_not_exist$snapshots")
 
+    def test_query_auth_rejects_physical_metadata_tables(self):
+        fields = self.catalog.get_table("db.t").fields
+        self.catalog.create_table(
+            "db.auth", Schema(fields=fields, options={"query-auth.enabled": "true"}), False)
+        for name in ("files", "file_key_ranges", "binlog", "statistics", "FILES"):
+            with self.subTest(name=name):
+                with self.assertRaises(NotImplementedError) as cm:
+                    self.catalog.get_table("db.auth$" + name)
+                self.assertEqual(
+                    "System table '{}' is not supported on a query-auth table: it reports "
+                    "raw file statistics, which column masking cannot be applied to.".format(name.lower()),
+                    str(cm.exception))
+        self.assertEqual("snapshots", self.catalog.get_table("db.auth$snapshots").system_table_name())
+        self.assertEqual("files", self.catalog.get_table("db.t$files").system_table_name())
+
 
 class RestCatalogSystemTableDispatchTest(unittest.TestCase):
     """Tests that RESTCatalog.get_table dispatches identically to FileSystem.
@@ -117,7 +133,7 @@ class RestCatalogSystemTableDispatchTest(unittest.TestCase):
     Stubbing it lets these tests stay fast and focused on the new branch.
     """
 
-    def _build_catalog(self):
+    def _build_catalog(self, options=None):
         from pypaimon.catalog.rest.rest_catalog import RESTCatalog
         catalog = RESTCatalog.__new__(RESTCatalog)
 
@@ -139,6 +155,7 @@ class RestCatalogSystemTableDispatchTest(unittest.TestCase):
 
             base = _FakeBaseTable()
             base.identifier = identifier
+            base.options = CoreOptions.from_dict(options or {})
             return base
 
         catalog._load_data_table = fake_load_data_table
@@ -188,6 +205,13 @@ class RestCatalogSystemTableDispatchTest(unittest.TestCase):
         catalog, _ = self._build_catalog()
         with self.assertRaises(TableNotExistException):
             catalog.get_table("db.t$definitely_not_a_system_table")
+
+    def test_query_auth_rejects_physical_metadata_tables(self):
+        catalog, _ = self._build_catalog({"query-auth.enabled": "true"})
+        for name in ("files", "file_key_ranges", "binlog", "statistics"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(NotImplementedError, "not supported on a query-auth table"):
+                    catalog.get_table("db.t$" + name)
 
 
 if __name__ == "__main__":

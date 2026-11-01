@@ -18,9 +18,9 @@
 
 from copy import copy
 
+from pypaimon.common.options.vector_index_options import VectorIndexOptions
 from pypaimon.table.source.search_types import (PrimaryKeyVectorSearchSplit, PrimaryKeyVectorScanPlan)
 
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
@@ -83,9 +83,9 @@ class PrimaryKeyVectorScan(VectorSearchScan):
 
         index_type = self._index_type
         if index_type is None:
-            index_type = CoreOptions(
-                Options(dict(scan_table.table_schema.options))
-            ).primary_key_vector_index_type(self._vector_column.name)
+            index_type = VectorIndexOptions.resolve(
+                Options(dict(scan_table.table_schema.options)), None,
+                self._vector_column.name, default_metric=False).index_type
         entries = IndexFileHandler(table=scan_table).scan(
             snapshot,
             lambda entry: _matches(entry, self._vector_column.id, index_type,

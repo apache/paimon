@@ -107,7 +107,7 @@ class TableRead:
         in order. Close the iterator when stopping before exhaustion.
 
         Named columns and nested paths retain their projection order. Named
-        VARIANT extraction expressions require the Arrow APIs.
+        VARIANT extraction expressions require native reading.
         """
         from pypaimon.read.read_dispatch import to_iterator
         return to_iterator(self, splits)
@@ -483,9 +483,12 @@ class TableRead:
                 eligible data-evolution reads fetch map-style batches lazily
                 by row ID.
             prefetch_concurrency: Reader threads per DataLoader worker in row
-                format.
+                format. Binding limits read serially to preserve the selected
+                prefix.
             batch_format: ``"row"``, ``"pyarrow"``, or ``"torch"``. Batch
-                formats require streaming.
+                formats require streaming. Streaming row format also supports
+                named columns, paths and float32 VARIANT extractions through
+                native reading.
             batch_size: Rows per batch; ``None`` preserves reader batches when
                 unshuffled, or emits shuffle blocks of at most buffer_size rows.
             to_tensor_fn: Optional RecordBatch converter for Torch batches.
@@ -513,7 +516,7 @@ class TableRead:
         ):
             raise ValueError("batch_size must be a positive int or None")
         if batch_format == "row":
-            if self.output_projection is not None and self.output_projection.named:
+            if not streaming and self.output_projection is not None and self.output_projection.named:
                 raise RuntimeError(
                     "Projection expressions are not supported by Torch row format; "
                     "use streaming=True with batch_format='pyarrow' or 'torch'")

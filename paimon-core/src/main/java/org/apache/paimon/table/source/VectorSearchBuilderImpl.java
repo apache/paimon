@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -132,12 +133,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
         rejectUnderQueryAuth();
         if (isPrimaryKeyVectorSearch()) {
             return new PrimaryKeyVectorScan(
-                    table,
-                    vectorColumn.id(),
-                    table.coreOptions().primaryKeyVectorIndexType(vectorColumn.name()),
-                    partitionFilter,
-                    filter,
-                    pinnedSnapshot);
+                    table, vectorColumn.id(), partitionFilter, filter, pinnedSnapshot);
         }
         return new DataEvolutionVectorScan(
                 table, partitionFilter, filter, vectorColumn, options, pinnedSnapshot);
@@ -155,8 +151,10 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     }
 
     protected boolean isPrimaryKeyVectorSearch() {
-        return vectorColumn != null
-                && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn.name());
+        return !table.schema().primaryKeys().isEmpty()
+                && vectorColumn != null
+                && VectorIndexOptions.columns(table.coreOptions().toConfiguration())
+                        .contains(vectorColumn.name());
     }
 
     public VectorSearchBuilderImpl withSnapshot(Snapshot snapshot) {

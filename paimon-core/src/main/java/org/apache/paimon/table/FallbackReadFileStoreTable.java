@@ -718,6 +718,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         private final InnerTableRead mainRead;
         private final InnerTableRead fallbackRead;
+        private final InnerTableRead wrappedRead;
         private final boolean fallbackReadFailFast;
 
         private Read() {
@@ -725,6 +726,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             FileStoreTable second = wrappedFirst ? other : wrapped;
             this.mainRead = first.newRead();
             this.fallbackRead = second.newRead();
+            this.wrappedRead = wrappedFirst ? mainRead : fallbackRead;
             this.fallbackReadFailFast =
                     wrapped.coreOptions()
                             .toConfiguration()
@@ -800,7 +802,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 }
                 return mainRead.createReader(wrappedSplit);
             }
-            return mainRead.createReader(split);
+            // Plain splits come from newSnapshotReader(), which plans the wrapped table.
+            return wrappedRead.createReader(split);
         }
     }
 }

@@ -146,11 +146,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     public AppendOnlyFileStoreScan newScan() {
         BucketSelectConverter bucketSelectConverter =
                 new BucketSelectConverter(
-                        bucketMode(),
-                        options.bucketFunctionType(),
-                        rowType,
-                        partitionType,
-                        bucketKeyType);
+                        bucketMode(), options, rowType, partitionType, bucketKeyType);
 
         if (options().dataEvolutionEnabled()) {
             return new DataEvolutionFileStoreScan(

@@ -562,6 +562,7 @@ class FileScanner:
                 partition_filter=self.partition_key_predicate,
                 predicate=predicate,
                 snapshot=snapshot,
+                allow_composite=True,
             )
             if scanner is None:
                 return None
@@ -570,6 +571,9 @@ class FileScanner:
                 if evaluation is None:
                     return None
                 scalar_mode = self.table.options.scalar_index_search_mode()
+                coverage_args = {}
+                if evaluation.indexed_ranges is not None:
+                    coverage_args["indexed_ranges"] = evaluation.indexed_ranges
                 return _GlobalIndexPlanningResult(
                     evaluation.result,
                     scanner.unindexed_ranges(
@@ -577,9 +581,15 @@ class FileScanner:
                         search_mode=scalar_mode,
                         contributing_field_ids=(
                             evaluation.contributing_field_ids),
+                        **coverage_args,
                     ),
                 )
-        except Exception:
+        except Exception as error:
+            from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+                CompositeIndexReadError,
+            )
+            if isinstance(error, CompositeIndexReadError):
+                raise
             return None
 
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta],

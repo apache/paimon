@@ -26,6 +26,7 @@ the delegate FileIO.
 """
 
 import hashlib
+import io
 import os
 import threading
 import uuid
@@ -262,7 +263,7 @@ class LocalDiskCacheManager:
         self._file_size_cache[file_path] = size
 
 
-class CachingInputStream:
+class CachingInputStream(io.RawIOBase):
     """Wraps a remote stream with block-level caching."""
 
     def __init__(self, file_io, file_path: str, cache, file_size=None):
@@ -274,6 +275,18 @@ class CachingInputStream:
         self._pos = 0
         self._io_lock = threading.Lock()
         self._remote_supports_pread = None
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def readinto(self, buffer):
+        view = memoryview(buffer).cast('B')
+        data = self.read(len(view))
+        view[:len(data)] = data
+        return len(data)
 
     def _get_file_size(self) -> int:
         if self._file_size == -1:
@@ -320,14 +333,14 @@ class CachingInputStream:
         first_block = offset // block_size
         last_block = (end - 1) // block_size
 
-        result = bytearray()
+        parts = []
         for bi, block_data in self._read_blocks(first_block, last_block):
             block_start = bi * block_size
             start_in_block = max(offset - block_start, 0)
             end_in_block = min(end - block_start, len(block_data))
-            result.extend(block_data[start_in_block:end_in_block])
+            parts.append(block_data[start_in_block:end_in_block])
 
-        return bytes(result)
+        return b''.join(parts)
 
     def _read_blocks(self, first: int, last: int):
         block_size = self._cache.block_size
@@ -393,6 +406,7 @@ class CachingInputStream:
         if self._stream is not None:
             self._stream.close()
             self._stream = None
+        super().close()
 
     def __enter__(self):
         return self
@@ -471,12 +485,17 @@ class CachingFileIO(FileIO):
     def properties(self):
         return self._delegate.properties
 
+    def _is_cacheable(self, path: str):
+        file_type = FileType.classify(path)
+        return (self._cache is not None
+                and file_type in self._whitelist
+                and not FileType.is_mutable(path))
+
     def new_input_stream(self, path: str):
         return self._new_input_stream_with_known_size(path, None)
 
     def _new_input_stream_with_known_size(self, path: str, file_size):
-        file_type = FileType.classify(path)
-        if self._cache is None or file_type not in self._whitelist or FileType.is_mutable(path):
+        if not self._is_cacheable(path):
             return self._delegate.new_input_stream(path)
         return CachingInputStream(self._delegate, path, self._cache, file_size)
 

@@ -50,8 +50,8 @@ import org.apache.paimon.operation.commit.CommitResult;
 import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
+import org.apache.paimon.operation.commit.DataEvolutionChangesProvider;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
-import org.apache.paimon.operation.commit.ReassignCompactChangesProvider;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
@@ -381,10 +381,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
                 attempts +=
                         tryCommit(
-                                CommitChangesProvider.provider(
-                                        changes.appendTableFiles,
-                                        changes.appendChangelog,
-                                        changes.appendIndexFiles),
+                                dataEvolutionChangesProvider(
+                                        new CommitChanges(
+                                                changes.appendTableFiles,
+                                                changes.appendChangelog,
+                                                changes.appendIndexFiles),
+                                        commitKind,
+                                        Collections.emptySet()),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -400,11 +403,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.compactIndexFiles.isEmpty()) {
                 attempts +=
                         tryCommit(
-                                compactChangesProvider(
+                                dataEvolutionChangesProvider(
                                         new CommitChanges(
                                                 changes.compactTableFiles,
                                                 changes.compactChangelog,
                                                 changes.compactIndexFiles),
+                                        CommitKind.COMPACT,
                                         materializedBuckets),
                                 committable.identifier(),
                                 committable.watermark(),
@@ -589,11 +593,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (withCompact) {
                 attempts +=
                         tryCommit(
-                                compactChangesProvider(
+                                dataEvolutionChangesProvider(
                                         new CommitChanges(
                                                 changes.compactTableFiles,
                                                 emptyList(),
                                                 changes.compactIndexFiles),
+                                        CommitKind.COMPACT,
                                         Collections.emptySet()),
                                 committable.identifier(),
                                 committable.watermark(),
@@ -858,15 +863,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @VisibleForTesting
-    CommitChangesProvider compactChangesProvider(
-            CommitChanges changes, Set<Pair<BinaryRow, Integer>> materializedBuckets) {
+    CommitChangesProvider dataEvolutionChangesProvider(
+            CommitChanges changes,
+            CommitKind commitKind,
+            Set<Pair<BinaryRow, Integer>> materializedBuckets) {
         if (materializedBuckets.isEmpty()) {
             Long lastSafeSnapshot = options.commitLastSafeSnapshot().orElse(null);
             if (options.dataEvolutionEnabled()
+                    && (commitKind == CommitKind.COMPACT
+                            || (commitKind == CommitKind.APPEND
+                                    && changes.tableFiles.isEmpty()
+                                    && changes.changelogFiles.isEmpty()
+                                    && !changes.indexFiles.isEmpty()))
                     && !conflictDetection.shouldCheckRowIdFromSnapshot(CommitKind.COMPACT)
                     && lastSafeSnapshot != null
                     && lastSafeSnapshot >= 0) {
-                return new ReassignCompactChangesProvider(
+                return new DataEvolutionChangesProvider(
                         fileIO, pathFactory, snapshotManager, lastSafeSnapshot, changes);
             }
             return CommitChangesProvider.provider(

@@ -25,8 +25,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
-import org.apache.paimon.manifest.ExpireFileEntry;
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.tag.TagPeriodHandler;
@@ -46,7 +44,6 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.function.Predicate;
@@ -210,31 +207,19 @@ public class TagManager {
         }
     }
 
-    /** Make sure the tagNames are ALL tags of one snapshot. */
-    public void deleteAllTagsOfOneSnapshot(
-            List<String> tagNames, TagDeletion tagDeletion, SnapshotManager snapshotManager) {
-        Snapshot taggedSnapshot = getOrThrow(tagNames.get(0)).trimToSnapshot();
-        List<Snapshot> taggedSnapshots;
-
-        // skip file deletion if snapshot exists
-        if (snapshotManager.snapshotExists(taggedSnapshot.id())) {
-            tagNames.forEach(tagName -> fileIO.deleteQuietly(tagPath(tagName)));
-            return;
-        } else {
-            // FileIO discovers tags by tag file, so we should read all tags before we delete tag
-            taggedSnapshots = taggedSnapshots();
-            tagNames.forEach(tagName -> fileIO.deleteQuietly(tagPath(tagName)));
-        }
-
-        doClean(taggedSnapshot, taggedSnapshots, snapshotManager, tagDeletion);
+    /**
+     * Delete only tag files, leaving referenced files to orphan file cleanup. Make sure the
+     * tagNames are ALL tags of one snapshot.
+     */
+    public void deleteAllTagsOfOneSnapshot(List<String> tagNames) {
+        tagNames.forEach(tagName -> fileIO.deleteQuietly(tagPath(tagName)));
     }
 
-    /** Ignore errors if the tag doesn't exist. */
-    public void deleteTag(
-            String tagName,
-            TagDeletion tagDeletion,
-            SnapshotManager snapshotManager,
-            List<TagCallback> callbacks) {
+    /**
+     * Delete only the tag file, leaving referenced files to orphan file cleanup. Ignore errors if
+     * the tag doesn't exist.
+     */
+    public void deleteTag(String tagName, List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name shouldn't be blank.");
         Optional<Tag> tag = get(tagName);
         if (!tag.isPresent()) {
@@ -242,25 +227,7 @@ public class TagManager {
             return;
         }
 
-        Snapshot taggedSnapshot = tag.get().trimToSnapshot();
-        List<Snapshot> taggedSnapshots;
-
-        // skip file deletion if snapshot exists
-        if (snapshotManager.copyWithBranch(branch).snapshotExists(taggedSnapshot.id())) {
-            deleteTagMetaFile(tagName, callbacks);
-            return;
-        } else {
-            // FileIO discovers tags by tag file, so we should read all tags before we delete tag
-            SortedMap<Snapshot, List<String>> tags = tags();
-            deleteTagMetaFile(tagName, callbacks);
-            // skip data file clean if more than 1 tags are created based on this snapshot
-            if (tags.get(taggedSnapshot).size() > 1) {
-                return;
-            }
-            taggedSnapshots = new ArrayList<>(tags.keySet());
-        }
-
-        doClean(taggedSnapshot, taggedSnapshots, snapshotManager, tagDeletion);
+        deleteTagMetaFile(tagName, callbacks);
     }
 
     private void deleteTagMetaFile(String tagName, List<TagCallback> callbacks) {
@@ -271,64 +238,6 @@ public class TagManager {
             for (TagCallback tagCallback : callbacks) {
                 IOUtils.closeQuietly(tagCallback);
             }
-        }
-    }
-
-    private void doClean(
-            Snapshot taggedSnapshot,
-            List<Snapshot> taggedSnapshots,
-            SnapshotManager snapshotManager,
-            TagDeletion tagDeletion) {
-        // collect skipping sets from the left neighbor tag and the nearest right neighbor (either
-        // the earliest snapshot or right neighbor tag)
-        List<Snapshot> skippedSnapshots = new ArrayList<>();
-
-        int index = findIndex(taggedSnapshot, taggedSnapshots);
-        // the left neighbor tag
-        if (index - 1 >= 0) {
-            skippedSnapshots.add(taggedSnapshots.get(index - 1));
-        }
-        // the nearest right neighbor
-        Snapshot right = snapshotManager.copyWithBranch(branch).earliestSnapshot();
-        if (index + 1 < taggedSnapshots.size()) {
-            Snapshot rightTag = taggedSnapshots.get(index + 1);
-            right = right.id() < rightTag.id() ? right : rightTag;
-        }
-        skippedSnapshots.add(right);
-
-        // delete data files and empty directories
-        Predicate<ExpireFileEntry> dataFileSkipper = null;
-        boolean success = true;
-        try {
-            dataFileSkipper = tagDeletion.dataFileSkipper(skippedSnapshots);
-        } catch (Exception e) {
-            LOG.info(
-                    String.format(
-                            "Skip cleaning data files for tag of snapshot %s due to failed to build skipping set.",
-                            taggedSnapshot.id()),
-                    e);
-            success = false;
-        }
-        if (success) {
-            tagDeletion.cleanUnusedDataFiles(taggedSnapshot, dataFileSkipper);
-            tagDeletion.cleanEmptyDirectories();
-        }
-
-        // delete manifests
-        success = true;
-        Set<String> manifestSkippingSet = null;
-        try {
-            manifestSkippingSet = tagDeletion.manifestSkippingSet(skippedSnapshots);
-        } catch (Exception e) {
-            LOG.info(
-                    String.format(
-                            "Skip cleaning manifest files for tag of snapshot %s due to failed to build skipping set.",
-                            taggedSnapshot.id()),
-                    e);
-            success = false;
-        }
-        if (success) {
-            tagDeletion.cleanUnusedManifests(taggedSnapshot, manifestSkippingSet);
         }
     }
 
@@ -465,18 +374,6 @@ public class TagManager {
     @VisibleForTesting
     public List<String> allTagNames() {
         return tags().values().stream().flatMap(Collection::stream).collect(Collectors.toList());
-    }
-
-    private int findIndex(Snapshot taggedSnapshot, List<Snapshot> taggedSnapshots) {
-        for (int i = 0; i < taggedSnapshots.size(); i++) {
-            if (taggedSnapshot.id() == taggedSnapshots.get(i).id()) {
-                return i;
-            }
-        }
-        throw new RuntimeException(
-                String.format(
-                        "Didn't find tag with snapshot id '%s'. This is unexpected.",
-                        taggedSnapshot.id()));
     }
 
     private void validateNoAutoTag(String tagName, Snapshot snapshot) {

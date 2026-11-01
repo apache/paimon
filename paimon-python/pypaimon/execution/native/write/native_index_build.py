@@ -17,7 +17,7 @@
 
 """Global-index builds delegated to Rust, retaining Python's commit API."""
 
-from pypaimon.execution.native.table import (_native_table, _option_value_to_string)
+from pypaimon.execution.native.table import (_native_table, _options_to_native)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.execution.native.write.native_commit import _rest_catalog_supported, from_native_commit_messages
@@ -43,38 +43,12 @@ def build_native_global_index(builder, partition_filter, *, execution="local", c
     from pypaimon_rust.datafusion import GlobalIndexBuildBuilder
     if not GlobalIndexBuildBuilder.supports_index_type(builder._index_type):
         return None
-    native = _native_table(table).new_global_index_build_builder()
+    options = dict(table.options.options.to_map())
+    options.update(builder._user_options)
+    native_table = table.copy_without_time_travel(builder._user_options)
+    native = _native_table(native_table).new_global_index_build_builder()
     native.with_index_column(builder._index_columns[0]).with_index_type(builder._index_type)
-    options = {str(key): _option_value_to_string(value)
-               for key, value in builder._user_options.items() if value is not None}
-    if builder._index_type == 'full-text':
-        from pypaimon.globalindex.full_text_options import NativeFullTextIndexOptions
-        options.update({'full-text.' + key: value for key, value in
-                        NativeFullTextIndexOptions.from_options(builder._options.to_map()).to_native_options().items()})
-    elif builder._index_type in VINDEX_IDENTIFIERS:
-        from pypaimon.globalindex.vindex_options import native_options, train_sample_ratio
-        column = builder._index_columns[0]
-        # Reuse the Java-compatible option mapping; Rust's low-level builder also
-        # accepts native aliases which Python's public API deliberately ignores.
-        mapped = native_options(table.field_dict[column].type, table.options.options.to_map(),
-                                builder._index_type, column, builder._user_options)
-        options = {key: value for key, value in options.items()
-                   if key in ('global-index.row-count-per-shard', 'global-index.build.parallelism',
-                              'vindex.build.granule.enabled')
-                   and (key != 'vindex.build.granule.enabled' or builder._index_type != 'diskann')}
-        options.update({'fields.' + column + '.' + key: value for key, value in mapped.items()
-                        if key != 'index.type'})
-        options['fields.' + column + '.train.sample-ratio'] = str(train_sample_ratio(
-            table.options.options.to_map(), builder._index_type, column, builder._user_options))
-    if builder._index_type == 'full-text' or builder._index_type in VINDEX_IDENTIFIERS:
-        # Resolve typed values and explicit default overrides through the same
-        # ConfigOption conversion as the local builder before crossing the FFI.
-        try:
-            parallelism = int(builder._core_options.global_index_build_parallelism())
-        except (TypeError, ValueError, OverflowError) as error:
-            raise ValueError('Invalid global-index.build.parallelism: %s' % error) from error
-        options['global-index.build.parallelism'] = str(parallelism)
-    native.with_options(options)
+    native.with_options(_options_to_native(options))
     if partition_filter is not None:
         native.with_partition_filter(_predicate_to_native(partition_filter))
     if execution == "ray":

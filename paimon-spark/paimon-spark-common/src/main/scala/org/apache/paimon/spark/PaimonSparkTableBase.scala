@@ -54,6 +54,7 @@ abstract class PaimonSparkTableBase(val table: Table)
   }
 
   private def supportsV2Write: Boolean = {
+    !coreOptions.bucketFunctionProvider().isPresent &&
     coreOptions.bucketFunctionType() == BucketFunctionType.DEFAULT && {
       table match {
         case storeTable: FileStoreTable =>

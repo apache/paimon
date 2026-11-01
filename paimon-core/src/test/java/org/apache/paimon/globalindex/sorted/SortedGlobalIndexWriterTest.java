@@ -22,6 +22,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
@@ -44,6 +45,27 @@ import static org.mockito.Mockito.when;
 
 /** Tests for {@link SortedGlobalIndexWriter}. */
 public class SortedGlobalIndexWriterTest extends TableTestBase {
+
+    @Test
+    public void testFieldOptionsControlFileRotationAndBuildSettings() throws Exception {
+        createTableDefault();
+        Options options = new Options();
+        options.setString(
+                "fields.f0.index-options", "{\"records-per-range\":2,\"build.max-parallelism\":1}");
+        SortedGlobalIndexWriter writer =
+                new SortedGlobalIndexWriter(getTableDefault(), "btree", options)
+                        .withIndexFields(Collections.singletonList("f0"));
+        assertThat(writer.recordsPerRange()).isEqualTo(2);
+        assertThat(writer.indexOptions().get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM))
+                .isEqualTo(1);
+        try (SortedSingleColumnIndexWriter task = writer.createTaskWriter(new Range(0, 2))) {
+            task.write(10, 0);
+            task.write(20, 1);
+            task.write(30, 2);
+            assertThat(task.finish()).hasSize(2);
+        }
+        assertThat(options.get("btree-index.records-per-range")).isNull();
+    }
 
     @Test
     public void testSingleColumnWriterRotationPreservesResultGroups() throws Exception {

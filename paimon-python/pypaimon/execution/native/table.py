@@ -66,7 +66,15 @@ def _option_value_to_string(value) -> str:
     """
     if isinstance(value, bool):
         return 'true' if value else 'false'
+    if isinstance(value, (list, tuple, dict)):
+        return json.dumps(value)
     return OptionsUtils.convert_to_string(value)
+
+
+def _options_to_native(options) -> dict:
+    """Encode all effective options for Rust; None represents an unset option."""
+    return {str(key): _option_value_to_string(value)
+            for key, value in options.items() if value is not None}
 
 
 def _catalog_options(table) -> dict:
@@ -137,8 +145,7 @@ def _resolved_schema_file_io_options(table) -> Optional[dict]:
 def _resolved_schema_json(table) -> str:
     """Preserve all effective table options as strings for Rust."""
     from pypaimon.common.json_util import JSON
-    options = {str(key): _option_value_to_string(value)
-               for key, value in table.table_schema.options.items() if value is not None}
+    options = _options_to_native(table.table_schema.options)
     if 'query-auth.enabled' in options:
         # Preserve Python's effective policy. Forwarding an enabled spelling
         # such as "on" unchanged would disable authorization in Rust.

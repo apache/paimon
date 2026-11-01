@@ -33,6 +33,7 @@ import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -42,7 +43,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.commit.CommitChanges;
-import org.apache.paimon.operation.commit.ReassignCompactChangesProvider;
+import org.apache.paimon.operation.commit.DataEvolutionChangesProvider;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -82,6 +83,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -158,19 +160,44 @@ public class CompactReassignReuseTest extends TableTestBase {
         return message;
     }
 
-    private CommitMessageImpl compactIndex(FileStoreTable table) throws Exception {
+    private List<CommitMessage> buildIndex(FileStoreTable table, String field, String partition)
+            throws Exception {
+        return buildIndex(table, "btree", field, partition);
+    }
+
+    private List<CommitMessage> buildIndex(
+            FileStoreTable table, String indexType, String field, String partition)
+            throws Exception {
+        return buildIndex(table, indexType, Collections.singletonList(field), partition);
+    }
+
+    private List<CommitMessage> buildIndex(
+            FileStoreTable table, String indexType, List<String> fields, String partition)
+            throws Exception {
         List<CommitMessage> builds = new ArrayList<>();
         for (DataSplit split :
                 GlobalIndexBuilderUtils.splitByContiguousRowRange(
-                        new SortedGlobalIndexScanner(table, "btree")
-                                .withIndexFields(Collections.singletonList("id"))
+                        new SortedGlobalIndexScanner(table, indexType)
+                                .withIndexFields(fields)
                                 .scan()
                                 .get()
                                 .entries())) {
-            builds.addAll(SortedGlobalIndexTestUtils.buildIndex(table, "btree", "id", split, 4));
+            if (partition == null || split.partition().getString(0).toString().equals(partition)) {
+                builds.addAll(
+                        SortedGlobalIndexTestUtils.buildIndex(
+                                table,
+                                indexType,
+                                fields,
+                                split,
+                                table.snapshotManager().latestSnapshotId()));
+            }
         }
+        return builds;
+    }
+
+    private CommitMessageImpl compactIndex(FileStoreTable table) throws Exception {
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-            commit.commit(builds);
+            commit.commit(buildIndex(table, "id", null));
         }
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         List<IndexManifestEntry> inputs =
@@ -258,6 +285,148 @@ public class CompactReassignReuseTest extends TableTestBase {
     }
 
     @ParameterizedTest
+    @CsvSource({
+        "btree,false,after-scan", "btree,true,after-scan",
+        "bitmap,false,after-scan", "bitmap,true,after-scan",
+        "composite,false,after-scan", "composite,true,after-scan",
+        "btree,false,before-scan", "btree,true,before-scan",
+        "bitmap,false,before-scan", "bitmap,true,before-scan",
+        "composite,false,before-scan", "composite,true,before-scan",
+        "btree,false,index-first", "btree,true,index-first",
+        "bitmap,false,index-first", "bitmap,true,index-first",
+        "composite,false,index-first", "composite,true,index-first"
+    })
+    void testIndexBuildAcrossReassignment(String indexType, boolean strict, String order)
+            throws Exception {
+        FileStoreTable table = prepare();
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(buildIndex(table, "pt", null));
+        }
+        long lastSafeSnapshot = table.snapshotManager().latestSnapshotId();
+        boolean reassignBeforeScan = order.equals("before-scan");
+        if (reassignBeforeScan) {
+            assertThat(new DataEvolutionRowIdReassigner(table).reassign().reassigned).isTrue();
+        }
+        long scanSnapshot = table.snapshotManager().latestSnapshotId();
+        boolean composite = indexType.equals("composite");
+        List<CommitMessage> messages =
+                buildIndex(
+                        table,
+                        composite ? "btree" : indexType,
+                        composite ? Arrays.asList("id", "pt") : Collections.singletonList("id"),
+                        null);
+        List<String> files =
+                messages.stream()
+                        .flatMap(
+                                m ->
+                                        ((CommitMessageImpl) m)
+                                                .newFilesIncrement().newIndexFiles().stream())
+                        .map(IndexFileMeta::fileName)
+                        .collect(Collectors.toList());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.COMMIT_STRICT_MODE_ENABLED.key(), Boolean.toString(strict));
+        options.put(CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(), Long.toString(lastSafeSnapshot));
+        FileStoreTable committingTable = table.copy(options);
+        AtomicBoolean indexCommitted = new AtomicBoolean();
+        Runnable commitIndex =
+                () -> {
+                    if (indexCommitted.compareAndSet(false, true)) {
+                        try (BatchTableCommit commit =
+                                committingTable.newBatchWriteBuilder().newCommit()) {
+                            commit.commit(messages);
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                };
+        boolean indexFirst = order.equals("index-first");
+        if (indexFirst) {
+            DataEvolutionRowIdReassigner.Result result =
+                    new DataEvolutionRowIdReassigner(table, null, commitIndex).reassign();
+            assertThat(result.reassigned).isTrue();
+            assertThat(result.previousSnapshotId).isEqualTo(scanSnapshot + 1);
+        } else {
+            if (!reassignBeforeScan) {
+                assertThat(new DataEvolutionRowIdReassigner(table).reassign().reassigned).isTrue();
+            }
+            commitIndex.run();
+        }
+        assertThat(indexCommitted).isTrue();
+        assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(indexFirst ? Snapshot.CommitKind.OVERWRITE : Snapshot.CommitKind.APPEND);
+        List<IndexManifestEntry> current =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(e -> e.indexFile().globalIndexMeta().indexFieldId() == 1)
+                        .collect(Collectors.toList());
+        assertThat(current)
+                .extracting(e -> e.indexFile().fileName())
+                .containsExactlyInAnyOrderElementsOf(files);
+        for (IndexManifestEntry entry : current) {
+            assertThat(
+                            DataEvolutionIndexSourceMeta.fromIndexFile(entry.indexFile())
+                                    .scanSnapshotId())
+                    .isEqualTo(scanSnapshot);
+        }
+        long[] rowIds = {4, 5, 2, 6};
+        for (int id = 0; id < rowIds.length; id++) {
+            PredicateBuilder builder = new PredicateBuilder(table.rowType());
+            Predicate predicate = builder.equal(1, id);
+            if (composite) {
+                predicate =
+                        PredicateBuilder.and(
+                                predicate,
+                                builder.equal(0, BinaryString.fromString(id == 2 ? "b" : "a")));
+            }
+            try (DataEvolutionGlobalIndexScanner scanner =
+                    DataEvolutionGlobalIndexScanner.create(table, null, predicate).get()) {
+                GlobalIndexResult result = scanner.scan(predicate).get();
+                assertThat(result.results().getLongCardinality()).isEqualTo(1);
+                assertThat(result.results().contains(rowIds[id])).isTrue();
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testIndexBuildKeepsExistingColumnUpdateBehavior(boolean reassign) throws Exception {
+        FileStoreTable table = prepare();
+        long scanSnapshot = table.snapshotManager().latestSnapshotId();
+        List<CommitMessage> messages = buildIndex(table, "id", null);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        builder.newWrite()
+                                .withWriteType(table.rowType().project(Arrays.asList("pt", "id")));
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(BinaryString.fromString("a"), 100));
+            List<CommitMessage> updates = write.prepareCommit();
+            for (CommitMessage update : updates) {
+                ((CommitMessageImpl) update)
+                        .newFilesIncrement()
+                        .newFiles()
+                        .replaceAll(file -> file.assignFirstRowId(0L));
+            }
+            commit.commit(updates);
+        }
+        if (reassign) {
+            new DataEvolutionRowIdReassigner(table).reassign();
+        }
+        long snapshot = table.snapshotManager().latestSnapshotId();
+        try (BatchTableCommit commit =
+                table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(),
+                                        Long.toString(scanSnapshot)))
+                        .newBatchWriteBuilder()
+                        .newCommit()) {
+            commit.commit(messages);
+        }
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshot + 1);
+        assertThat(read(table))
+                .extracting(row -> row.getInt(1))
+                .containsExactlyInAnyOrder(100, 1, 2, 3);
+    }
+
+    @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void testReuseNormalAndBlobAcrossRepeatedReassignments(boolean blob) throws Exception {
         FileStoreTable table = prepare();
@@ -291,12 +460,32 @@ public class CompactReassignReuseTest extends TableTestBase {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void testIndexReplacementKeepsPhysicalFilesAndPointLookup(boolean loseSuccessfulResponse)
-            throws Exception {
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void testIndexReplacementKeepsPhysicalFilesAndPointLookup(
+            boolean indexBuild, boolean loseSuccessfulResponse) throws Exception {
         FileStoreTable table = prepare();
         CommitMessageImpl message = compactIndex(table);
         List<IndexFileMeta> outputs = message.compactIncrement().newIndexFiles();
+        List<String> replacedFiles =
+                message.compactIncrement().deletedIndexFiles().stream()
+                        .map(IndexFileMeta::fileName)
+                        .collect(Collectors.toList());
+        long scanSnapshot = lastSafeSnapshots.get(message);
+        if (indexBuild) {
+            message =
+                    new CommitMessageImpl(
+                            message.partition(),
+                            message.bucket(),
+                            message.totalBuckets(),
+                            new DataIncrement(
+                                    Collections.emptyList(),
+                                    Collections.emptyList(),
+                                    Collections.emptyList(),
+                                    outputs,
+                                    message.compactIncrement().deletedIndexFiles()),
+                            CompactIncrement.emptyIncrement());
+            lastSafeSnapshots.put(message, scanSnapshot);
+        }
         assertThat(new DataEvolutionRowIdReassigner(table).reassign().reassigned).isTrue();
         long reassignedSnapshot = table.snapshotManager().latestSnapshotId();
         AtomicInteger attempts = new AtomicInteger();
@@ -316,7 +505,10 @@ public class CompactReassignReuseTest extends TableTestBase {
                                     throws Exception {
                                 boolean committed =
                                         delegate.commit(baseUuid, snapshot, branch, statistics);
-                                if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+                                if (snapshot.commitKind()
+                                        == (indexBuild
+                                                ? Snapshot.CommitKind.APPEND
+                                                : Snapshot.CommitKind.COMPACT)) {
                                     attempts.incrementAndGet();
                                     return committed && !loseSuccessfulResponse;
                                 }
@@ -333,6 +525,16 @@ public class CompactReassignReuseTest extends TableTestBase {
         FileStoreTable committingTable =
                 FileStoreTableFactory.create(
                         table.fileIO(), table.location(), table.schema(), environment);
+        if (indexBuild) {
+            // A replaced index's source baseline predates this refresh's planning snapshot.
+            assertThat(
+                            table.fileIO()
+                                    .delete(
+                                            table.snapshotManager().snapshotPath(scanSnapshot),
+                                            false))
+                    .isTrue();
+            table.snapshotManager().invalidateCache();
+        }
         commit(committingTable, message, false);
         assertThat(attempts).hasValue(1);
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(reassignedSnapshot + 1);
@@ -343,7 +545,8 @@ public class CompactReassignReuseTest extends TableTestBase {
                         .read(table.snapshotManager().latestSnapshot().indexManifest());
         assertThat(current.stream().map(e -> e.indexFile().fileName()))
                 .containsAll(
-                        outputs.stream().map(IndexFileMeta::fileName).collect(Collectors.toList()));
+                        outputs.stream().map(IndexFileMeta::fileName).collect(Collectors.toList()))
+                .doesNotContainAnyElementsOf(replacedFiles);
         Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, 1);
         try (DataEvolutionGlobalIndexScanner scanner =
                 DataEvolutionGlobalIndexScanner.create(table, null, predicate).get()) {
@@ -544,10 +747,15 @@ public class CompactReassignReuseTest extends TableTestBase {
         checkRows(table, 0, 1, 2, 3);
     }
 
-    @Test
-    void testMissingPlanFailsClosed() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testMissingPlanFailsClosed(boolean indexBuild) throws Exception {
         FileStoreTable table = prepare();
-        CommitMessageImpl message = compact(table, false);
+        CommitMessageImpl message =
+                indexBuild
+                        ? (CommitMessageImpl) buildIndex(table, "id", "a").get(0)
+                        : compact(table, false);
+        lastSafeSnapshots.put(message, table.snapshotManager().latestSnapshotId());
         new DataEvolutionRowIdReassigner(table).reassign();
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         Path plan =
@@ -561,10 +769,15 @@ public class CompactReassignReuseTest extends TableTestBase {
         checkRows(table, 0, 1, 2, 3);
     }
 
-    @Test
-    void testCorruptPlanFailsClosed() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testCorruptPlanFailsClosed(boolean indexBuild) throws Exception {
         FileStoreTable table = prepare();
-        CommitMessageImpl message = compact(table, false);
+        CommitMessageImpl message =
+                indexBuild
+                        ? (CommitMessageImpl) buildIndex(table, "id", "a").get(0)
+                        : compact(table, false);
+        lastSafeSnapshots.put(message, table.snapshotManager().latestSnapshotId());
         new DataEvolutionRowIdReassigner(table).reassign();
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         Path path =
@@ -579,18 +792,54 @@ public class CompactReassignReuseTest extends TableTestBase {
         checkRows(table, 0, 1, 2, 3);
     }
 
-    @Test
-    void testNoBoundaryKeepsExistingConflictCheck() throws Exception {
+    @ParameterizedTest
+    @CsvSource({"false,", "true,", "false,-1", "true,-1"})
+    void testNoBoundaryKeepsExistingConflictCheck(boolean indexBuild, Long lastSafeSnapshot)
+            throws Exception {
         FileStoreTable table = prepare();
-        CommitMessageImpl message = compact(table, false);
+        CommitMessageImpl message =
+                indexBuild
+                        ? (CommitMessageImpl) buildIndex(table, "id", "a").get(0)
+                        : compact(table, false);
         new DataEvolutionRowIdReassigner(table).reassign();
         long snapshot = table.snapshotManager().latestSnapshotId();
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.COMMIT_STRICT_MODE_ENABLED.key(), "false");
+        if (lastSafeSnapshot != null) {
+            options.put(CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(), lastSafeSnapshot.toString());
+        }
+        try (BatchTableCommit commit = table.copy(options).newBatchWriteBuilder().newCommit()) {
             assertThatThrownBy(() -> commit.commit(Collections.singletonList(message)))
-                    .hasStackTraceContaining("conflict");
+                    .hasStackTraceContaining(
+                            indexBuild
+                                    ? "Global index row ID existence conflict"
+                                    : "Row ID existence conflict");
         }
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshot);
         checkRows(table, 0, 1, 2, 3);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"snapshot", "manifest-list"})
+    void testIndexBuildMissingMetadataFailsClosed(String missing) throws Exception {
+        FileStoreTable table = prepare();
+        CommitMessageImpl message = (CommitMessageImpl) buildIndex(table, "id", "a").get(0);
+        long boundary = table.snapshotManager().latestSnapshotId();
+        lastSafeSnapshots.put(message, boundary);
+        write(table, "b", 4, false);
+        new DataEvolutionRowIdReassigner(table).reassign();
+        Snapshot latest = table.snapshotManager().latestSnapshot();
+        boolean snapshotMissing = missing.equals("snapshot");
+        Path path =
+                snapshotMissing
+                        ? table.snapshotManager().snapshotPath(boundary + 1)
+                        : table.store().pathFactory().toManifestListPath(latest.baseManifestList());
+        assertThat(table.fileIO().delete(path, false)).isTrue();
+        assertThatThrownBy(() -> commit(table, message, false))
+                .hasStackTraceContaining(
+                        snapshotMissing ? "missing snapshot" : latest.baseManifestList());
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(latest.id());
+        assertThat(table.snapshotManager().snapshotExists(latest.id() + 1)).isFalse();
     }
 
     @Test
@@ -606,10 +855,15 @@ public class CompactReassignReuseTest extends TableTestBase {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void testReassignDuringCommitRetries(boolean loseSuccessfulResponse) throws Exception {
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void testReassignDuringCommitRetries(boolean indexBuild, boolean loseSuccessfulResponse)
+            throws Exception {
         FileStoreTable original = prepare();
-        CommitMessageImpl message = compact(original, false);
+        CommitMessageImpl message =
+                indexBuild
+                        ? (CommitMessageImpl) buildIndex(original, "id", "a").get(0)
+                        : compact(original, false);
+        lastSafeSnapshots.put(message, original.snapshotManager().latestSnapshotId());
         AtomicInteger attempts = new AtomicInteger();
         CatalogEnvironment environment =
                 new CatalogEnvironment(null, null, null, null, null, null, false, false) {
@@ -625,7 +879,10 @@ public class CompactReassignReuseTest extends TableTestBase {
                                     String branch,
                                     List<PartitionStatistics> statistics)
                                     throws Exception {
-                                if (snapshot.commitKind() != Snapshot.CommitKind.COMPACT) {
+                                if (snapshot.commitKind()
+                                        != (indexBuild
+                                                ? Snapshot.CommitKind.APPEND
+                                                : Snapshot.CommitKind.COMPACT)) {
                                     return delegate.commit(baseUuid, snapshot, branch, statistics);
                                 }
                                 int attempt = attempts.getAndIncrement();
@@ -663,7 +920,22 @@ public class CompactReassignReuseTest extends TableTestBase {
         assertThat(attempts).hasValue(3);
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(9);
         checkRows(table, 0, 1, 2, 3, 4, 5);
-        assertThat(message.compactIncrement().compactAfter().get(0).nonNullFirstRowId()).isZero();
+        if (indexBuild) {
+            IndexFileMeta built = message.newFilesIncrement().newIndexFiles().get(0);
+            assertThat(built.globalIndexMeta().rowRange()).isEqualTo(new Range(0, 1));
+            assertThat(table.store().newIndexFileHandler().scanEntries())
+                    .singleElement()
+                    .satisfies(
+                            entry -> {
+                                assertThat(entry.indexFile().fileName())
+                                        .isEqualTo(built.fileName());
+                                assertThat(entry.indexFile().globalIndexMeta().rowRange())
+                                        .isEqualTo(new Range(9, 10));
+                            });
+        } else {
+            assertThat(message.compactIncrement().compactAfter().get(0).nonNullFirstRowId())
+                    .isZero();
+        }
     }
 
     @Test
@@ -682,8 +954,8 @@ public class CompactReassignReuseTest extends TableTestBase {
                         Collections.emptyList(),
                         Collections.emptyList(),
                         Collections.singletonList(unsupported));
-        ReassignCompactChangesProvider provider =
-                new ReassignCompactChangesProvider(
+        DataEvolutionChangesProvider provider =
+                new DataEvolutionChangesProvider(
                         table.fileIO(),
                         table.store().pathFactory(),
                         table.snapshotManager(),

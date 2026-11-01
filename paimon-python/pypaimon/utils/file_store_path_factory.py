@@ -181,7 +181,11 @@ class FileStorePathFactory:
                 text = str((value - date(1970, 1, 1)).days)
             elif self.legacy_partition_name and type_name.startswith('TIMESTAMP'):
                 text = value.isoformat(timespec='minutes')
-                if value.second or value.microsecond:
+                nanos = getattr(value, 'nanosecond', 0)
+                if nanos:
+                    text = '{}.{:09d}'.format(
+                        value.isoformat(timespec='seconds'), value.microsecond * 1000 + nanos)
+                elif value.second or value.microsecond:
                     text = value.isoformat(timespec='microseconds' if value.microsecond else 'seconds')
                     if value.microsecond and value.microsecond % 1000 == 0:
                         text = text[:-3]

@@ -69,7 +69,7 @@ class PrimaryKeySortedIndexReadTest extends TableTestBase {
                 .primaryKey("id")
                 .option(CoreOptions.BUCKET.key(), "1")
                 .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
-                .option(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "score")
+                .option(CoreOptions.GLOBAL_INDEX_BTREE_INDEX_COLUMNS.key(), "score")
                 .build();
     }
 
@@ -169,7 +169,7 @@ class PrimaryKeySortedIndexReadTest extends TableTestBase {
                         .option(CoreOptions.BUCKET.key(), "1")
                         .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
                         .option(CoreOptions.TARGET_FILE_SIZE.key(), "1 b")
-                        .option(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "score")
+                        .option(CoreOptions.GLOBAL_INDEX_BTREE_INDEX_COLUMNS.key(), "score")
                         .build();
         catalog.createTable(identifier(), schema, false);
         FileStoreTable table = getTableDefault();
@@ -319,7 +319,7 @@ class PrimaryKeySortedIndexReadTest extends TableTestBase {
                         .primaryKey("id")
                         .option(CoreOptions.BUCKET.key(), "1")
                         .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
-                        .option(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "tags")
+                        .option(CoreOptions.GLOBAL_INDEX_MULTIVALUE_INDEX_COLUMNS.key(), "tags")
                         .build();
         catalog.createTable(identifier(), schema, false);
         FileStoreTable table = getTableDefault();

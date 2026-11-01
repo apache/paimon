@@ -18,8 +18,8 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
+import org.apache.paimon.options.VectorIndexOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
@@ -148,9 +148,8 @@ class PaimonScanBuilder(val table: InnerTable)
 
         if (
           vectorSearch.isDefined &&
-          !CoreOptions
-            .fromMap(actualTable.options)
-            .primaryKeyVectorIndexColumns()
+          !VectorIndexOptions
+            .columns(Options.fromMap(actualTable.options))
             .contains(vectorSearch.get.fieldName()) &&
           VectorSearchResultUtils.isVectorSearchMetaOnly(requiredSchema.fieldNames.toSeq)
         ) {

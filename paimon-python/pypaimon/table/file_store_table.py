@@ -493,8 +493,7 @@ class FileStoreTable(Table):
     def _copy_with_snapshot(self, snapshot):
         """Keep one resolved read view, including tag metadata and empty tables."""
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
-        selectors = SCAN_KEYS + [
-            CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(),
+        selectors = SCAN_KEYS + CoreOptions.INCREMENTAL_SCAN_KEYS + [
             CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(),
             CoreOptions.SCAN_CREATION_TIME_MILLIS.key(),
         ]
@@ -529,9 +528,8 @@ class FileStoreTable(Table):
 
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         preserve_snapshot = hasattr(self, "_read_snapshot") and not any(
-            key in options for key in SCAN_KEYS + [
-                CoreOptions.SCAN_MODE.key(), CoreOptions.BRANCH.key(),
-                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()])
+            key in options for key in SCAN_KEYS + CoreOptions.INCREMENTAL_SCAN_KEYS + [
+                CoreOptions.SCAN_MODE.key(), CoreOptions.BRANCH.key()])
 
         # Re-encode the branch into the identifier when the option changes, so
         # current_branch() and any catalog-routed snapshot commit see the

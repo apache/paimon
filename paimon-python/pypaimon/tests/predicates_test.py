@@ -442,6 +442,98 @@ class PredicateTest(unittest.TestCase):
         predicate = predicate_builder.like('f1', '%bc')
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:2])
 
+    @pytest.mark.python_plan
+    def test_like_newline_pk_merge(self):
+        pa_schema = pa.schema([('f0', pa.int64()), ('f1', pa.string())])
+        self.catalog.create_table('default.test_like_newline', Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['f0'], options={
+                'bucket': '1', 'file.format': 'parquet',
+                'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
+            }), False)
+        table = self.catalog.get_table('default.test_like_newline')
+        df = pd.DataFrame({
+            'f0': [1, 2, 3, 4, 5],
+            'f1': ['a\nc', 'abc', 'a\r\nc', 'ac', None],
+        })
+        # A second commit overlaps the first file and requires row-by-row filtering.
+        for data in (df, df.loc[[0]]):
+            builder = table.new_batch_write_builder()
+            write, commit = builder.new_write(), builder.new_commit()
+            try:
+                write.write_pandas(data)
+                commit.commit(write.prepare_commit())
+            finally:
+                write.close()
+                commit.close()
+            read_builder = table.new_read_builder()
+            predicate = read_builder.new_predicate_builder().like('f1', 'a_c')
+            _check_filtered_result(read_builder.with_filter(predicate), df.loc[[0, 1]])
+
+    def test_null_literal_matches_nothing(self):
+        pa_schema = pa.schema([('f0', pa.int64()), ('f1', pa.string())])
+        # without stats no file is pruned, so the Arrow filter decides
+        self.catalog.create_table('default.test_append_no_stats', Schema.from_pyarrow_schema(
+            pa_schema, options={'metadata.stats-mode': 'none'}), False)
+        # two commits to one bucket, so the read merges and filters row by row
+        self.catalog.create_table('default.test_pk_merge', Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['f0'], options={'bucket': '1'}), False)
+        for table_name, dfs in (('default.test_append_no_stats', [self.df]),
+                                ('default.test_pk_merge', [self.df, self.df.loc[[0]]])):
+            table = self.catalog.get_table(table_name)
+            for df in dfs:
+                write_builder = table.new_batch_write_builder()
+                write = write_builder.new_write()
+                commit = write_builder.new_commit()
+                write.write_pandas(df)
+                commit.commit(write.prepare_commit())
+                write.close()
+                commit.close()
+
+        for table_name in ('default.test_append', 'default.test_append_no_stats',
+                           'default.test_pk', 'default.test_pk_merge'):
+            table = self.catalog.get_table(table_name)
+            predicate_builder = table.new_read_builder().new_predicate_builder()
+            predicates = [
+                predicate_builder.equal('f1', None),
+                predicate_builder.not_equal('f1', None),
+                predicate_builder.less_than('f1', None),
+                predicate_builder.less_or_equal('f1', None),
+                predicate_builder.greater_than('f1', None),
+                predicate_builder.greater_or_equal('f1', None),
+                predicate_builder.between('f1', None, 'b'),
+                predicate_builder.not_between('f1', 'b', None),
+                predicate_builder.startswith('f1', None),
+                predicate_builder.endswith('f1', None),
+                predicate_builder.contains('f1', None),
+                predicate_builder.like('f1', None),
+            ]
+            for predicate in predicates:
+                with self.subTest(table=table_name, method=predicate.method):
+                    _check_filtered_result(
+                        table.new_read_builder().with_filter(predicate), self.df.iloc[0:0])
+
+    def test_null_literal_by_value_stats_and_arrow(self):
+        fields = [DataField(0, 'f0', 'STRING')]
+        record = GenericRow(['None'], fields)
+        stats = SimpleStats(
+            min_values=GenericRow(['a'], fields),
+            max_values=GenericRow(['z'], fields),
+            null_counts=[0],
+        )
+        batch = pa.table({'f0': ['None', 'a', 'z', None]})
+        for method, literals in (('equal', [None]), ('notEqual', [None]), ('lessThan', [None]),
+                                 ('lessOrEqual', [None]), ('greaterThan', [None]),
+                                 ('greaterOrEqual', [None]), ('between', [None, 'z']),
+                                 ('notBetween', ['a', None]), ('startsWith', [None]),
+                                 ('endsWith', [None]), ('contains', [None]), ('like', [None])):
+            predicate = Predicate(method=method, index=0, field='f0', literals=literals)
+            with self.subTest(method=method):
+                # like must not read a null pattern as the string 'None'
+                self.assertFalse(predicate.test(record))
+                self.assertFalse(predicate.test_by_simple_stats(stats, 10))
+                self.assertEqual(0, ds.dataset(batch).to_table(
+                    filter=predicate.to_arrow(batch.schema)).num_rows)
+
     def test_and_predicates(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
@@ -581,6 +673,19 @@ class PredicateTest(unittest.TestCase):
         underscore_pred = Predicate(method='like', index=0, field='name', literals=['a_c'])
         self.assertTrue(underscore_pred.test(OffsetRow(['abc'], 0, 1)))
         self.assertFalse(underscore_pred.test(OffsetRow(['aXYc'], 0, 1)))
+
+    def test_like_single_character_wildcard_matches_line_terminators(self):
+        predicate = Predicate(method='like', index=0, field='name', literals=['a_c'])
+        for terminator in ('\n', '\r', '\u0085', '\u2028', '\u2029'):
+            with self.subTest(terminator=terminator):
+                self.assertTrue(predicate.test(OffsetRow(['a' + terminator + 'c'], 0, 1)))
+
+        self.assertFalse(predicate.test(OffsetRow(['a\r\nc'], 0, 1)))
+        two_characters = predicate.new_literals(['a__c'])
+        self.assertTrue(two_characters.test(OffsetRow(['a\r\nc'], 0, 1)))
+        escaped = predicate.new_literals([r'a\_c'])
+        self.assertTrue(escaped.test(OffsetRow(['a_c'], 0, 1)))
+        self.assertFalse(escaped.test(OffsetRow(['a\nc'], 0, 1)))
 
     def test_not_between_value(self):
         predicate = Predicate(method='notBetween', index=0, field='val', literals=[3, 7])

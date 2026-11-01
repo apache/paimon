@@ -546,7 +546,6 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
                         table.coreOptions(),
                         table.snapshotManager(),
                         table.store().newTagManager(),
-                        table.store().newTagDeletion(),
                         Collections.emptyList());
 
         // threshold = tagTime + 2 days (nextTag + 1 period)

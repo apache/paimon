@@ -49,7 +49,11 @@ from pypaimon.filesystem import oss_user_agent
 
 _JINDO_CONFIG_PREFIXES = ("fs.", "logger.")
 _PYPAIMON_ONLY_JINDO_CONFIG_KEYS = {
-    OssOptions.OSS_IMPL.key(), OssOptions.OSS_PYTHON_IMPL.key()}
+    OssOptions.OSS_IMPL.key(), OssOptions.OSS_PYTHON_IMPL.key(),
+    OssOptions.OSS_JINDO_PREAD_MAX_SIZE.key()}
+_DEFAULT_PREAD_MAX_SIZE = OssOptions.OSS_JINDO_PREAD_MAX_SIZE.default_value().get_bytes()
+# Forward skips up to Jindo's read-ahead buffer stay on the stream, which likely holds them.
+_STREAM_FORWARD_SKIP = 1024 * 1024
 _CASE_SENSITIVE_JINDO_CONFIG_KEYS = {
     OssOptions.OSS_ACCESS_KEY_ID.key().lower(): OssOptions.OSS_ACCESS_KEY_ID.key(),
     OssOptions.OSS_ACCESS_KEY_SECRET.key().lower(): OssOptions.OSS_ACCESS_KEY_SECRET.key(),
@@ -167,13 +171,21 @@ def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
 
 
 class JindoInputFile:
-    def __init__(self, jindo_stream, file_size=None, *, owner):
+    def __init__(self, jindo_stream, file_size=None, *, owner,
+                 pread_max_size=_DEFAULT_PREAD_MAX_SIZE):
         self._stream = jindo_stream
         self._file_size = file_size
         # The stream does not own its native store: pin the jindo filesystem (not the
         # handler) so evicting the handler's FileIO from a cache cannot free it.
         self._owner = owner
         self._closed = False
+        # PyArrow's ReadAt is seek + read: when enabled, small reads after a long or
+        # backward jump use pread to skip the stream's read-ahead.
+        self._pread_max_size = pread_max_size
+        if pread_max_size > 0:
+            self._position = jindo_stream.tell() if hasattr(jindo_stream, 'tell') else 0
+            self._stream_position = self._position
+            self._last_read_end = None
         _StreamStats.opened()
 
     def __del__(self):
@@ -196,11 +208,48 @@ class JindoInputFile:
     def read(self, nbytes: int = -1):
         if self.closed:
             raise ValueError("I/O operation on closed file")
+        if self._pread_max_size <= 0:
+            if nbytes is None or nbytes < 0:
+                if self._file_size is None:
+                    return self._stream.read()
+                nbytes = max(0, self._file_size - self.tell())
+            return self._stream.read(nbytes)
         if nbytes is None or nbytes < 0:
             if self._file_size is None:
-                return self._stream.read()
-            nbytes = max(0, self._file_size - self.tell())
-        return self._stream.read(nbytes)
+                self._sync_stream()
+                return self._advance(self._stream.read())
+            nbytes = max(0, self._file_size - self._position)
+        elif self._file_size is not None:
+            nbytes = max(0, min(nbytes, self._file_size - self._position))
+        if nbytes == 0:
+            return b""
+        if self._use_pread(nbytes):
+            data = self._stream.pread(nbytes, self._position)
+            self._position += len(data)
+            self._last_read_end = self._position
+            return data
+        self._sync_stream()
+        return self._advance(self._stream.read(nbytes))
+
+    def _use_pread(self, nbytes):
+        if (self._position == self._stream_position
+                or nbytes > self._pread_max_size
+                or not hasattr(self._stream, 'pread')):
+            return False
+        if self._last_read_end is None:
+            return True
+        return not 0 <= self._position - self._last_read_end <= _STREAM_FORWARD_SKIP
+
+    def _sync_stream(self):
+        if self._stream_position != self._position:
+            self._stream.seek(self._position, os.SEEK_SET)
+            self._stream_position = self._position
+
+    def _advance(self, data):
+        self._position += len(data)
+        self._stream_position = self._position
+        self._last_read_end = self._position
+        return data
 
     def seek(self, position: int, whence: int = 0):
         if self.closed:
@@ -208,13 +257,29 @@ class JindoInputFile:
         if whence == os.SEEK_END and self._file_size is not None:
             position = self._file_size + position
             whence = os.SEEK_SET
-        self._stream.seek(position, whence)
-        return self._stream.tell()
+        if self._pread_max_size <= 0:
+            self._stream.seek(position, whence)
+            return self._stream.tell()
+        if whence == os.SEEK_CUR:
+            position = self._position + position
+        elif whence == os.SEEK_END:
+            # Size unknown: let the native stream resolve SEEK_END.
+            self._stream.seek(position, whence)
+            self._stream_position = self._stream.tell()
+            position = self._stream_position
+        elif whence != os.SEEK_SET:
+            raise ValueError("Invalid whence: {}".format(whence))
+        if position < 0:
+            raise ValueError("Negative seek position {}".format(position))
+        self._position = position
+        return self._position
 
     def tell(self) -> int:
         if self.closed:
             raise ValueError("I/O operation on closed file")
-        return self._stream.tell()
+        if self._pread_max_size <= 0:
+            return self._stream.tell()
+        return self._position
 
     def read_at(self, nbytes: int, offset: int):
         if self.closed:
@@ -303,6 +368,8 @@ class JindoFileSystemHandler(FileSystemHandler):
         self.properties = catalog_options
         self._known_file_sizes = OrderedDict()
         self._known_file_sizes_lock = threading.Lock()
+        self._pread_max_size = catalog_options.get(
+            OssOptions.OSS_JINDO_PREAD_MAX_SIZE).get_bytes()
 
         config = build_jindo_config(catalog_options)
         self._jindo_fs = jfs.connect(self.root_path, "root", config)
@@ -445,7 +512,7 @@ class JindoFileSystemHandler(FileSystemHandler):
         jindo_stream = self._jindo_fs.open(normalized, "rb")
         return PythonFile(
             JindoInputFile(jindo_stream, self._known_file_size(normalized),
-                           owner=self._jindo_fs),
+                           owner=self._jindo_fs, pread_max_size=self._pread_max_size),
             mode="r")
 
     def open_input_file(self, path: str):
@@ -453,7 +520,7 @@ class JindoFileSystemHandler(FileSystemHandler):
         jindo_stream = self._jindo_fs.open(normalized, "rb")
         return PythonFile(
             JindoInputFile(jindo_stream, self._known_file_size(normalized),
-                           owner=self._jindo_fs),
+                           owner=self._jindo_fs, pread_max_size=self._pread_max_size),
             mode="r")
 
     def open_output_stream(self, path: str, metadata):
