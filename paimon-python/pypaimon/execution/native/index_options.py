@@ -37,17 +37,12 @@ def native_search_options(options):
 
 
 def configure_vector_index_type(native, options, column):
-    """Use the explicit native API, qualifying SDK support before execution."""
+    """Use the required native API and propagate missing-method errors."""
     if column is None:
-        return True
+        return
     index_type = VectorIndexOptions.index_type(Options(options), column)
-    if index_type is None:
-        return True
-    configure = getattr(native, 'with_vector_index_type', None)
-    if not callable(configure):
-        return False
-    configure(column, index_type)
-    return True
+    if index_type is not None:
+        native.with_vector_index_type(column, index_type)
 
 
 def native_scalar_index_read_supported(table):

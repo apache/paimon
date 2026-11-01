@@ -66,8 +66,8 @@ def _native_builder(builder, executor=None):
         table = table.copy(full_text_options)
     native = _native_table(table).new_hybrid_search_builder()
     for route, options in zip(builder._routes, route_options):
-        if route.is_vector() and not configure_vector_index_type(native, options, route.field_name):
-            return None
+        if route.is_vector():
+            configure_vector_index_type(native, options, route.field_name)
     native.with_limit(builder._limit).with_ranker(builder._ranker)
     for route, options in zip(builder._routes, route_options):
         if route.is_vector():

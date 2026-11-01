@@ -52,9 +52,7 @@ def _native_vector_builder(builder, batch=False):
     native_table = _native_table(table.copy(options))
     native = (native_table.new_batch_vector_search_builder() if batch else
               native_table.new_vector_search_builder())
-    if not configure_vector_index_type(native, options,
-                                       builder._vector_column.name if builder._vector_column else None):
-        return None
+    configure_vector_index_type(native, options, builder._vector_column.name if builder._vector_column else None)
     if builder._vector_column is not None:
         native.with_vector_column(builder._vector_column.name)
     native.with_limit(builder._limit).with_options(native_search_options(builder._options))

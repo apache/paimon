@@ -62,10 +62,10 @@ legacy PK key `fields.<column>.pk-vector.index.type`. It strips the four removed
 aliases before transferring schema or query options to older SDKs.
 
 When an implementation is configured and this method is unavailable, Python
-returns to its own execution path before planning, reading, executing, or
-capturing hybrid routes. SDK configuration and execution errors propagate;
-there is no retry after execution. Queries with no configured implementation
-can continue to use older SDKs and persisted index metadata.
+raises `AttributeError` before planning, reading, executing, or capturing hybrid
+routes. It does not fall back to Python execution. SDK configuration and execution
+errors propagate; there is no retry after execution. Queries with no configured
+implementation can continue to use older SDKs and persisted index metadata.
 
 ## Rust verification
 
@@ -73,5 +73,5 @@ Cover single, batch, hybrid, scan/read, captured routes, and serialized workers
 with both canonical and legacy PK declarations. Test raw searches without index
 files with and without a metric, metadata taking precedence over the explicit
 value, and independent columns in a hybrid query. The Python adapter contract
-and old-SDK fallback are covered in `lazy_search_execution_test.py`; native
+and missing-SDK-method errors are covered in `lazy_search_execution_test.py`; native
 integration coverage is in `native_search_plan_test.py` and requires this API.
