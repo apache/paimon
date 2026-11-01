@@ -23,6 +23,7 @@ from collections import defaultdict
 
 from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
 from pypaimon.common.options.options import Options
+from pypaimon.common.options.vector_index_options import VectorIndexOptions
 from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
     is_supported_scalar_index,
@@ -244,4 +245,4 @@ def _configured_vector_index_type(table, vector_column, options):
     table_options = getattr(getattr(table, "options", None), "options", None)
     values = dict(table_options.to_map()) if table_options is not None else {}
     values.update(options)
-    return CoreOptions(Options(values)).vector_index_type(vector_column.name)
+    return VectorIndexOptions.index_type(Options(values), vector_column.name)

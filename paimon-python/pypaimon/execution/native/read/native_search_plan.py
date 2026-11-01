@@ -48,7 +48,7 @@ def _index_search_options(table, column, index_type=None, overrides=None, scalar
         return values
     core = CoreOptions(Options(values))
     if index_type is None:
-        index_type = core.vector_index_type(column)
+        index_type = VectorIndexOptions.index_type(Options(values), column)
         if index_type is None:
             # The Python reader can resolve field options once persisted index metadata is known.
             if any(values.get(key) is not None for key in (

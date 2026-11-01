@@ -783,7 +783,8 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         String fieldPrefix = "fields." + vectorColumn.name() + ".";
         if (options.containsKey(fieldPrefix + "index-options")) {
             CoreOptions configured = new CoreOptions(new Options(table.options(), options));
-            String type = configured.primaryKeyVectorIndexType(vectorColumn.name());
+            String type =
+                    VectorIndexOptions.indexType(configured.toConfiguration(), vectorColumn.name());
             if (type == null) {
                 type = "vector";
             }

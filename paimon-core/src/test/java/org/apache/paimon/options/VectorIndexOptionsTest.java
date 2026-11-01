@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -32,6 +33,41 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for vector parameter resolution shared by both table modes. */
 class VectorIndexOptionsTest {
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "fields.embedding.pk-vector.index.type",
+                "index_type",
+                "index-type",
+                "vector.index-type",
+                "fields.embedding.index-type"
+            })
+    void testLegacyTypeAliasesResolveFieldParameters(String key) {
+        Map<String, String> values = new HashMap<>();
+        values.put(key, " IVF-PQ ");
+        values.put("ivf-pq.dimension", "768");
+        values.put("fields.embedding.index-options", "{\"nlist\":64,\"metric\":\"COSINE\"}");
+        Options input = new Options(values);
+        assertThat(VectorIndexOptions.indexType(input, "embedding")).isEqualTo("ivf-pq");
+        assertThat(new CoreOptions(input).vectorIndexType("embedding")).isEqualTo("ivf-pq");
+        Options resolved = VectorIndexOptions.resolve(input, null, "embedding", false);
+        assertMetric(resolved, "cosine");
+        assertThat(resolved.get("ivf-pq.dimension")).isEqualTo("768");
+        assertThat(resolved.get("ivf-pq.nlist")).isEqualTo("64");
+        assertThat(VectorIndexOptions.resolve(resolved, null, "embedding", false).toMap())
+                .isEqualTo(resolved.toMap());
+        assertThat(input.toMap()).isEqualTo(values);
+    }
+
+    @Test
+    void testAmbiguousDeclarationsDoNotFallBackToHistoricalHint() {
+        Options options = new Options();
+        options.setString("global-index.ivf-pq.index-columns", "embedding");
+        options.setString("global-index.diskann.index-column", "embedding");
+        options.setString("index_type", "ivf-flat");
+        assertThat(VectorIndexOptions.indexType(options, "embedding")).isNull();
+    }
 
     @ParameterizedTest
     @CsvSource({

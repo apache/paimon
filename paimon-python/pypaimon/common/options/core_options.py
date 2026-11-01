@@ -1910,9 +1910,7 @@ class CoreOptions:
         """Resolve the same implementation and field options for either table mode."""
         values = dict(self.options.to_map())
         if index_type is None:
-            index_type = self.vector_index_type(column)
-            if index_type is None:
-                return Options(values)
+            return Options(values)
         vector = self._is_vector_index_type(index_type)
         prefix = index_type + ("." if vector or index_type == "full-text" else "-index.")
         field_prefix = "fields.%s." % column
@@ -1950,16 +1948,8 @@ class CoreOptions:
         return self.vector_index_type(column)
 
     def vector_index_type(self, column: str):
-        declared = [index_type for index_type in self._vector_index_types()
-                    if column in self.global_index_columns(index_type)]
-        if declared:
-            return declared[0] if len(declared) == 1 else None
-        for key in ("fields.%s.pk-vector.index.type" % column, "index_type", "index-type",
-                    "vector.index-type", "fields.%s.index-type" % column):
-            value = self.options.to_map().get(key)
-            if value is not None:
-                return str(value).lower().strip()
-        return None
+        from pypaimon.common.options.vector_index_options import VectorIndexOptions
+        return VectorIndexOptions.index_type(self.options, column)
 
     def primary_key_vector_index_options(self, column: str) -> Options:
         from pypaimon.common.options.vector_index_options import VectorIndexOptions

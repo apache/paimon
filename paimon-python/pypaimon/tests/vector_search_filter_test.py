@@ -1832,6 +1832,7 @@ class VectorSearchFilterTest(unittest.TestCase):
 
     def test_scan_threads_builder_options_to_raw_split_index_type(self):
         from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+        from pypaimon.table.source.batch_vector_search_builder import BatchVectorSearchBuilderImpl
 
         class _Snapshots:
             def get_latest_snapshot(self_inner):
@@ -1846,20 +1847,16 @@ class VectorSearchFilterTest(unittest.TestCase):
         _patch_snapshot(self, [])
         self._travel_patch.stop()
 
-        splits = (
-            VectorSearchBuilderImpl(table)
-            .with_vector_column("embedding")
-            .with_query_vector([1.0, 0.0, 0.0, 0.0])
-            .with_limit(3)
-            .with_option("index-type", "ivf-flat")
-            .new_vector_search_scan()
-            .scan()
-            .splits()
-        )
-
-        raw = [s for s in splits if isinstance(s, RawVectorSearchSplit)]
-        self.assertEqual(1, len(raw))
-        self.assertEqual("ivf-flat", raw[0].index_type)
+        for key in ('index_type', 'index-type', 'vector.index-type', 'fields.embedding.index-type'):
+            for batch in (False, True):
+                with self.subTest(key=key, batch=batch):
+                    builder = (BatchVectorSearchBuilderImpl(table).with_query_vectors([[1.0, 0.0, 0.0, 0.0]])
+                               if batch else VectorSearchBuilderImpl(table).with_query_vector([1.0, 0.0, 0.0, 0.0]))
+                    splits = (builder.with_vector_column("embedding").with_limit(3).with_option(key, "ivf-flat")
+                              .new_vector_search_scan().scan().splits())
+                    raw = [s for s in splits if isinstance(s, RawVectorSearchSplit)]
+                    self.assertEqual(1, len(raw))
+                    self.assertEqual("ivf-flat", raw[0].index_type)
 
     def test_scan_excludes_composite_btree_when_filter_hits_extra_field(self):
         id_name_index = _entry(None, field_id=2, index_type="btree",

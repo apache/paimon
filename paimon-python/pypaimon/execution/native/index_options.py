@@ -53,7 +53,7 @@ def _resolve(schema):
     definitions += [(kind, core.global_index_columns(kind)) for kind in declarations
                     if kind not in families]
     if primary_key and not any(kind not in families for kind in declarations):
-        definitions += [(core.vector_index_type(column), [column])
+        definitions += [(VectorIndexOptions.index_type(core.options, column), [column])
                         for column in core.primary_key_vector_index_columns()]
     known_columns = set()
     native_columns = {}

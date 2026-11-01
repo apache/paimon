@@ -47,6 +47,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Configuration contracts shared by primary-key and Data Evolution indexes. */
 class GlobalIndexOptionsTest {
 
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "index_type",
+                "index-type",
+                "vector.index-type",
+                "fields.embedding.index-type"
+            })
+    void testGenericMergeDoesNotInferHistoricalVectorTypes(String key) {
+        Map<String, String> values = new HashMap<>();
+        values.put(key, "ivf-pq");
+        values.put("fields.embedding.index-options", "{\"nlist\":64}");
+        assertThat(new CoreOptions(values).globalIndexOptions(null, "embedding").toMap())
+                .isEqualTo(values);
+    }
+
     @Test
     void testGenericMergeDoesNotInterpretVectorParameters() {
         Map<String, String> values = new HashMap<>();

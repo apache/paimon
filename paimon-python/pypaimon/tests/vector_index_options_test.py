@@ -30,6 +30,34 @@ def _assert_metric(options, expected):
         assert options.to_map()[key] == expected
 
 
+@pytest.mark.parametrize('key', ['index_type', 'index-type', 'vector.index-type', 'fields.embedding.index-type'])
+def test_generic_merge_does_not_infer_historical_vector_types(key):
+    values = {key: 'ivf-pq', 'fields.embedding.index-options': '{"nlist":64}'}
+    assert CoreOptions(Options(values)).global_index_options(None, 'embedding').to_map() == values
+
+
+@pytest.mark.parametrize('key', ['fields.embedding.pk-vector.index.type', 'index_type', 'index-type',
+                                 'vector.index-type', 'fields.embedding.index-type'])
+def test_legacy_type_aliases_resolve_field_parameters(key):
+    values = {key: ' IVF-PQ ', 'ivf-pq.dimension': '768',
+              'fields.embedding.index-options': '{"nlist":64,"metric":"COSINE"}'}
+    options = Options(values)
+    assert VectorIndexOptions.index_type(options, 'embedding') == 'ivf-pq'
+    assert CoreOptions(options).vector_index_type('embedding') == 'ivf-pq'
+    resolved = VectorIndexOptions.resolve(options, None, 'embedding', default_metric=False)
+    _assert_metric(resolved, 'cosine')
+    assert resolved.to_map()['ivf-pq.dimension'] == '768'
+    assert resolved.to_map()['ivf-pq.nlist'] == '64'
+    assert VectorIndexOptions.resolve(resolved, None, 'embedding', default_metric=False).to_map() == resolved.to_map()
+    assert options.to_map() == values
+
+
+def test_ambiguous_declarations_do_not_fall_back_to_historical_hint():
+    options = Options({'global-index.ivf-pq.index-columns': 'embedding',
+                       'global-index.diskann.index-column': 'embedding', 'index_type': 'ivf-flat'})
+    assert VectorIndexOptions.index_type(options, 'embedding') is None
+
+
 @pytest.mark.parametrize('key,value,expected', [
     ('fields.embedding.pk-vector.distance.metric', 'COSINE', 'cosine'),
     ('fields.embedding.distance.metric', 'COSINE', 'cosine'),

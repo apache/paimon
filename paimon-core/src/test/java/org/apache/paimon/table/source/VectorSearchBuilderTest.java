@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
@@ -69,6 +70,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayInputStream;
@@ -526,6 +528,51 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
         assertThat(result.results()).containsExactlyInAnyOrder(2L, 3L);
         assertThat(TestVectorGlobalIndexer.metricCalls()).isGreaterThan(0);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "index_type,true", "index_type,false",
+        "index-type,true", "index-type,false",
+        "vector.index-type,true", "vector.index-type,false",
+        "fields.vec.index-type,true", "fields.vec.index-type,false"
+    })
+    public void testHistoricalTypeHintsReachRawSingleAndBatchQueries(
+            String key, boolean tableOption) throws Exception {
+        Identifier identifier = identifier("raw_type_hint_" + key.replace('.', '_') + tableOption);
+        Schema.Builder schema =
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full");
+        if (tableOption) {
+            schema.option(key, TestVectorGlobalIndexerFactory.IDENTIFIER);
+        }
+        catalog.createTable(identifier, schema.build(), false);
+        FileStoreTable table = getTable(identifier);
+        writeVectors(table, new float[][] {{1.0f, 0.0f}, {0.0f, 1.0f}});
+        Map<String, String> queryOptions =
+                tableOption
+                        ? Collections.emptyMap()
+                        : Collections.singletonMap(key, TestVectorGlobalIndexerFactory.IDENTIFIER);
+        VectorSearchBuilder single =
+                table.newVectorSearchBuilder()
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(1)
+                        .withOptions(queryOptions);
+        RawVectorSearchSplit raw =
+                rawVectorSearchSplits(single.newVectorScan().scan().splits()).get(0);
+        assertThat(raw.indexType()).isEqualTo(TestVectorGlobalIndexerFactory.IDENTIFIER);
+        assertThat(single.executeLocal().results()).containsExactly(0L);
+        List<GlobalIndexResult> batch =
+                table.newBatchVectorSearchBuilder()
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withVectors(new float[][] {{1.0f, 0.0f}, {0.0f, 1.0f}})
+                        .withLimit(1)
+                        .withOptions(queryOptions)
+                        .executeBatchLocal();
+        assertThat(batch).hasSize(2);
+        assertThat(batch.get(0).results()).containsExactly(0L);
+        assertThat(batch.get(1).results()).containsExactly(1L);
     }
 
     @Test

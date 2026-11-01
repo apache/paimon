@@ -27,6 +27,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -293,8 +294,8 @@ public class DataEvolutionVectorScan implements VectorScan {
 
     @Nullable
     private String configuredVectorIndexType() {
-        return new CoreOptions(new Options(table.options(), options))
-                .vectorIndexType(vectorColumn.name());
+        return VectorIndexOptions.indexType(
+                new Options(table.options(), options), vectorColumn.name());
     }
 
     private static boolean containsField(GlobalIndexMeta meta, int fieldId) {

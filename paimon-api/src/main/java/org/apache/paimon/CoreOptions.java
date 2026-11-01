@@ -5218,10 +5218,7 @@ public class CoreOptions implements Serializable {
     public Options globalIndexOptions(@Nullable String type, String column) {
         Options resolved = new Options(options.toMap(), options);
         if (type == null) {
-            type = vectorIndexType(column);
-            if (type == null) {
-                return resolved;
-            }
+            return resolved;
         }
         boolean vector = isVectorIndexType(type);
         String prefix = vector || "full-text".equals(type) ? type + "." : type + "-index.";
@@ -5355,26 +5352,7 @@ public class CoreOptions implements Serializable {
 
     @Nullable
     public String vectorIndexType(String column) {
-        List<String> declared =
-                vectorIndexTypes().stream()
-                        .filter(type -> globalIndexColumns(type).contains(column))
-                        .collect(Collectors.toList());
-        if (!declared.isEmpty()) {
-            return declared.size() == 1 ? declared.get(0) : null;
-        }
-        for (String key :
-                Arrays.asList(
-                        "fields." + column + ".pk-vector.index.type",
-                        "index_type",
-                        "index-type",
-                        "vector.index-type",
-                        "fields." + column + ".index-type")) {
-            String type = options.get(key);
-            if (type != null) {
-                return type.toLowerCase(Locale.ROOT).trim();
-            }
-        }
-        return null;
+        return VectorIndexOptions.indexType(options, column);
     }
 
     /** Compatibility delegate to the vector resolver shared by both table modes. */

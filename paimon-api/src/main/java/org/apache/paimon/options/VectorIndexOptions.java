@@ -25,11 +25,38 @@ import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Collectors;
 
 /** Vector parameter resolution shared by primary-key and Data Evolution indexes. */
 public final class VectorIndexOptions {
 
     private VectorIndexOptions() {}
+
+    @Nullable
+    public static String indexType(Options options, String column) {
+        CoreOptions core = new CoreOptions(options);
+        List<String> declared =
+                core.globalIndexTypes().stream()
+                        .filter(CoreOptions::isVectorIndexType)
+                        .filter(type -> core.globalIndexColumns(type).contains(column))
+                        .collect(Collectors.toList());
+        if (!declared.isEmpty()) {
+            return declared.size() == 1 ? declared.get(0) : null;
+        }
+        for (String key :
+                Arrays.asList(
+                        "fields." + column + ".pk-vector.index.type",
+                        "index_type",
+                        "index-type",
+                        "vector.index-type",
+                        "fields." + column + ".index-type")) {
+            String type = options.get(key);
+            if (type != null) {
+                return type.toLowerCase(Locale.ROOT).trim();
+            }
+        }
+        return null;
+    }
 
     public static Options resolve(Options options, @Nullable String type, String column) {
         return resolve(options, type, column, true);
@@ -39,7 +66,7 @@ public final class VectorIndexOptions {
     public static Options resolve(
             Options options, @Nullable String type, String column, boolean defaultMetric) {
         if (type == null) {
-            type = new CoreOptions(options).vectorIndexType(column);
+            type = indexType(options, column);
             if (type == null) {
                 return new Options(options.toMap(), options);
             }
@@ -87,7 +114,7 @@ public final class VectorIndexOptions {
 
     public static String metric(Options options, @Nullable String type, String column) {
         if (type == null) {
-            type = new CoreOptions(options).vectorIndexType(column);
+            type = indexType(options, column);
         }
         return type == null
                 ? normalizeMetric(options.get("fields." + column + ".pk-vector.distance.metric"))

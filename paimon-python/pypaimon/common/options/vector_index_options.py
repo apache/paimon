@@ -23,10 +23,24 @@ from pypaimon.common.options.options import Options
 
 class VectorIndexOptions:
     @staticmethod
+    def index_type(options, column):
+        core = CoreOptions(options)
+        declared = [kind for kind in core.global_index_types()
+                    if CoreOptions._is_vector_index_type(kind) and column in core.global_index_columns(kind)]
+        if declared:
+            return declared[0] if len(declared) == 1 else None
+        for key in ('fields.%s.pk-vector.index.type' % column, 'index_type', 'index-type',
+                    'vector.index-type', 'fields.%s.index-type' % column):
+            value = options.to_map().get(key)
+            if value is not None:
+                return str(value).lower().strip()
+        return None
+
+    @staticmethod
     def resolve(options, index_type, column, *, default_metric=True):
         values = dict(options.to_map())
         if index_type is None:
-            index_type = CoreOptions(options).vector_index_type(column)
+            index_type = VectorIndexOptions.index_type(options, column)
             if index_type is None:
                 return Options(values)
         prefix = index_type + '.'
@@ -52,7 +66,7 @@ class VectorIndexOptions:
     @staticmethod
     def metric(options, index_type, column):
         if index_type is None:
-            index_type = CoreOptions(options).vector_index_type(column)
+            index_type = VectorIndexOptions.index_type(options, column)
         if index_type is None:
             return _normalize_metric(options.to_map().get('fields.%s.pk-vector.distance.metric' % column))
         return VectorIndexOptions.resolve(options, index_type, column).to_map()[index_type + '.metric']

@@ -994,7 +994,7 @@ def _configured_vector_metric(options, vector_column, index_type=None):
     field_prefix = "fields.%s." % vector_column.name
     if field_prefix + "index-options" in options:
         core = CoreOptions(Options(options))
-        selected_type = index_type or core.primary_key_vector_index_type(vector_column.name) or "vector"
+        selected_type = index_type or VectorIndexOptions.index_type(core.options, vector_column.name) or "vector"
         metric = VectorIndexOptions.resolve(Options(options), selected_type, vector_column.name,
                                             default_metric=False).to_map().get(selected_type + ".metric")
         if metric is not None:
