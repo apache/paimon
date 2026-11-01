@@ -36,10 +36,20 @@ def test_generic_merge_does_not_infer_historical_vector_types(key):
     assert CoreOptions(Options(values)).global_index_options(None, 'embedding').to_map() == values
 
 
-@pytest.mark.parametrize('key', ['fields.embedding.pk-vector.index.type', 'index_type', 'index-type',
-                                 'vector.index-type', 'fields.embedding.index-type'])
-def test_legacy_type_aliases_resolve_field_parameters(key):
-    values = {key: ' IVF-PQ ', 'ivf-pq.dimension': '768',
+@pytest.mark.parametrize('key', ['index_type', 'index-type', 'vector.index-type', 'fields.embedding.index-type'])
+def test_removed_type_aliases_are_ignored(key):
+    options = Options({key: 'ivf-pq'})
+    assert VectorIndexOptions.index_type(options, 'embedding') is None
+    assert CoreOptions(options).vector_index_type('embedding') is None
+    assert VectorIndexOptions.resolve(options, None, 'embedding').to_map() == options.to_map()
+    options.to_map()['fields.embedding.pk-vector.index.type'] = 'diskann'
+    assert VectorIndexOptions.index_type(options, 'embedding') == 'diskann'
+    options.to_map()['global-index.ivf-flat.index-columns'] = 'embedding'
+    assert VectorIndexOptions.index_type(options, 'embedding') == 'ivf-flat'
+
+
+def test_legacy_primary_key_type_resolves_field_parameters():
+    values = {'fields.embedding.pk-vector.index.type': ' IVF-PQ ', 'ivf-pq.dimension': '768',
               'fields.embedding.index-options': '{"nlist":64,"metric":"COSINE"}'}
     options = Options(values)
     assert VectorIndexOptions.index_type(options, 'embedding') == 'ivf-pq'

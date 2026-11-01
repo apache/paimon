@@ -37,15 +37,27 @@ class VectorIndexOptionsTest {
     @ParameterizedTest
     @ValueSource(
             strings = {
-                "fields.embedding.pk-vector.index.type",
                 "index_type",
                 "index-type",
                 "vector.index-type",
                 "fields.embedding.index-type"
             })
-    void testLegacyTypeAliasesResolveFieldParameters(String key) {
+    void testRemovedTypeAliasesAreIgnored(String key) {
+        Options input = Options.fromMap(Collections.singletonMap(key, "ivf-pq"));
+        assertThat(VectorIndexOptions.indexType(input, "embedding")).isNull();
+        assertThat(new CoreOptions(input).vectorIndexType("embedding")).isNull();
+        assertThat(VectorIndexOptions.resolve(input, null, "embedding", false).toMap())
+                .isEqualTo(input.toMap());
+        input.setString("fields.embedding.pk-vector.index.type", "diskann");
+        assertThat(VectorIndexOptions.indexType(input, "embedding")).isEqualTo("diskann");
+        input.setString("global-index.ivf-flat.index-columns", "embedding");
+        assertThat(VectorIndexOptions.indexType(input, "embedding")).isEqualTo("ivf-flat");
+    }
+
+    @Test
+    void testLegacyPrimaryKeyTypeResolvesFieldParameters() {
         Map<String, String> values = new HashMap<>();
-        values.put(key, " IVF-PQ ");
+        values.put("fields.embedding.pk-vector.index.type", " IVF-PQ ");
         values.put("ivf-pq.dimension", "768");
         values.put("fields.embedding.index-options", "{\"nlist\":64,\"metric\":\"COSINE\"}");
         Options input = new Options(values);

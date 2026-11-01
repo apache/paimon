@@ -29,12 +29,8 @@ class VectorIndexOptions:
                     if CoreOptions._is_vector_index_type(kind) and column in core.global_index_columns(kind)]
         if declared:
             return declared[0] if len(declared) == 1 else None
-        for key in ('fields.%s.pk-vector.index.type' % column, 'index_type', 'index-type',
-                    'vector.index-type', 'fields.%s.index-type' % column):
-            value = options.to_map().get(key)
-            if value is not None:
-                return str(value).lower().strip()
-        return None
+        value = options.to_map().get('fields.%s.pk-vector.index.type' % column)
+        return None if value is None else str(value).lower().strip()
 
     @staticmethod
     def resolve(options, index_type, column, *, default_metric=True):

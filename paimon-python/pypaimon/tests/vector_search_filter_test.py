@@ -1847,12 +1847,15 @@ class VectorSearchFilterTest(unittest.TestCase):
         _patch_snapshot(self, [])
         self._travel_patch.stop()
 
-        for key in ('index_type', 'index-type', 'vector.index-type', 'fields.embedding.index-type'):
+        for key, value in (
+                ('global-index.ivf-flat.index-columns', 'embedding'),
+                ('global-index.ivf-flat.index-column', 'embedding'),
+                ('fields.embedding.pk-vector.index.type', 'ivf-flat')):
             for batch in (False, True):
                 with self.subTest(key=key, batch=batch):
                     builder = (BatchVectorSearchBuilderImpl(table).with_query_vectors([[1.0, 0.0, 0.0, 0.0]])
                                if batch else VectorSearchBuilderImpl(table).with_query_vector([1.0, 0.0, 0.0, 0.0]))
-                    splits = (builder.with_vector_column("embedding").with_limit(3).with_option(key, "ivf-flat")
+                    splits = (builder.with_vector_column("embedding").with_limit(3).with_option(key, value)
                               .new_vector_search_scan().scan().splits())
                     raw = [s for s in splits if isinstance(s, RawVectorSearchSplit)]
                     self.assertEqual(1, len(raw))

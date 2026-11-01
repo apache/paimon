@@ -75,6 +75,12 @@ ivf-pq.dimension=768
 fields.embedding.index-options={"nlist":64,"distance.metric":"cosine"}
 ```
 
+For raw vector searches without existing index files, declare the implementation
+with `global-index.<type>.index-columns` (or singular `index-column`). The former
+`index_type`, `index-type`, `vector.index-type`, and `fields.<column>.index-type`
+table/query option aliases are no longer interpreted. Legacy primary-key index
+configuration remains supported, including `fields.<column>.pk-vector.index.type`.
+
 Use the actual implementation identifier, such as `ivf-pq`, in the declaration.
 Each listed column declares an independent index. The singular `index-column`
 spelling remains an alias; `index-columns` takes precedence. Field JSON options

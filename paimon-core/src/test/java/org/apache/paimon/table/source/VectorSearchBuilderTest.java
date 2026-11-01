@@ -532,27 +532,31 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
     @ParameterizedTest
     @CsvSource({
-        "index_type,true", "index_type,false",
-        "index-type,true", "index-type,false",
-        "vector.index-type,true", "vector.index-type,false",
-        "fields.vec.index-type,true", "fields.vec.index-type,false"
+        "global-index.test-vector-ann.index-columns,true",
+        "global-index.test-vector-ann.index-columns,false",
+        "global-index.test-vector-ann.index-column,true",
+        "global-index.test-vector-ann.index-column,false",
+        "fields.vec.pk-vector.index.type,true",
+        "fields.vec.pk-vector.index.type,false"
     })
-    public void testHistoricalTypeHintsReachRawSingleAndBatchQueries(
-            String key, boolean tableOption) throws Exception {
+    public void testConfiguredTypesReachRawSingleAndBatchQueries(String key, boolean tableOption)
+            throws Exception {
         Identifier identifier = identifier("raw_type_hint_" + key.replace('.', '_') + tableOption);
         Schema.Builder schema =
                 vectorSchemaBuilder(VECTOR_FIELD_NAME)
                         .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full");
+        String value =
+                key.startsWith("global-index.")
+                        ? VECTOR_FIELD_NAME
+                        : TestVectorGlobalIndexerFactory.IDENTIFIER;
         if (tableOption) {
-            schema.option(key, TestVectorGlobalIndexerFactory.IDENTIFIER);
+            schema.option(key, value);
         }
         catalog.createTable(identifier, schema.build(), false);
         FileStoreTable table = getTable(identifier);
         writeVectors(table, new float[][] {{1.0f, 0.0f}, {0.0f, 1.0f}});
         Map<String, String> queryOptions =
-                tableOption
-                        ? Collections.emptyMap()
-                        : Collections.singletonMap(key, TestVectorGlobalIndexerFactory.IDENTIFIER);
+                tableOption ? Collections.emptyMap() : Collections.singletonMap(key, value);
         VectorSearchBuilder single =
                 table.newVectorSearchBuilder()
                         .withVectorColumn(VECTOR_FIELD_NAME)

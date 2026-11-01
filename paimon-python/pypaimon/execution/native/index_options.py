@@ -29,6 +29,27 @@ def native_index_options(schema):
     return _resolve(schema)[0]
 
 
+def native_search_options(options):
+    """Do not let an older SDK interpret removed external type hints."""
+    return {key: value for key, value in options.items()
+            if key not in ('index_type', 'index-type', 'vector.index-type')
+            and not (key.startswith('fields.') and key.endswith('.index-type'))}
+
+
+def configure_vector_index_type(native, options, column):
+    """Use the explicit native API, qualifying SDK support before execution."""
+    if column is None:
+        return True
+    index_type = VectorIndexOptions.index_type(Options(options), column)
+    if index_type is None:
+        return True
+    configure = getattr(native, 'with_vector_index_type', None)
+    if not callable(configure):
+        return False
+    configure(column, index_type)
+    return True
+
+
 def native_scalar_index_read_supported(table):
     if not table.options.global_index_enabled():
         return True
@@ -38,7 +59,7 @@ def native_scalar_index_read_supported(table):
 def _resolve(schema):
     if not isinstance(getattr(schema, 'options', None), Mapping):
         return {}, True
-    values = dict(schema.options)
+    values = native_search_options(schema.options)
     core = CoreOptions(Options(values))
     result = dict(values)
     declarations = core.global_index_types()
@@ -72,13 +93,15 @@ def _resolve(schema):
             known_columns.add(column)
             resolved = (VectorIndexOptions.resolve(core.options, kind, column, default_metric=False).to_map()
                         if vector else core.global_index_options(kind, column).to_map())
+            resolved = native_search_options(resolved)
             profile = {key: value for key, value in resolved.items()
                        if key.startswith(prefix) and value is not None}
             field_prefix = 'fields.%s.' % column
             if primary_key:
                 if vector:
                     result[field_prefix + 'pk-vector.index.type'] = kind
-                    result[field_prefix + 'pk-vector.distance.metric'] = VectorIndexOptions.metric(core.options, kind, column)
+                    result[field_prefix + 'pk-vector.distance.metric'] = VectorIndexOptions.metric(
+                        core.options, kind, column)
                     profile.update({key: value for key, value in resolved.items()
                                     if key.startswith(field_prefix) and not key.startswith(field_prefix + 'pk-')
                                     and key != field_prefix + 'index-options' and value is not None})
@@ -88,7 +111,6 @@ def _resolve(schema):
                 result[field_prefix + 'pk-%s.index.options' % family] = json.dumps(profile)
                 result.pop(field_prefix + 'index-options', None)
             elif vector:
-                result[field_prefix + 'index-type'] = kind
                 result.update({key: value for key, value in resolved.items()
                                if key.startswith(field_prefix) and key != field_prefix + 'index-options'})
             elif kind != 'full-text':

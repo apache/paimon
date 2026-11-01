@@ -130,7 +130,8 @@ class NativeVectorMetricTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
             if indexed:
                 self._build(table)
             for batch in (False, True):
-                builder = self._builder(table, batch).with_option('index-type', 'ivf-flat').with_limit(1)
+                builder = (self._builder(table, batch)
+                           .with_option('global-index.ivf-flat.index-columns', 'embedding').with_limit(1))
                 for result in self._execute(builder, batch):
                     self.assertEqual({1: 3.0}, _scores(result))
 

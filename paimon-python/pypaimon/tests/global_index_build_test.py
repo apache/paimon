@@ -261,7 +261,8 @@ class GlobalIndexBuildTest(
                                  ('full-text', 'full-text.tokenizer', 'raw')):
             with self.subTest(index_type=kind):
                 short_key = key.split('.', 1)[1]
-                options = dict(self.table_options, **{'write.native.enabled': 'true',
+                options = dict(self.table_options, **{
+                    'write.native.enabled': 'true',
                     'global-index.%s.index-columns' % kind: 'name',
                     'fields.name.index-options': '{"%s":"%s"}' % (short_key, value)})
                 table = self._create_table(pa_schema=schema, options=options)
@@ -293,7 +294,8 @@ class GlobalIndexBuildTest(
 
         schema = pa.schema([('id', pa.int32()), ('content', pa.string())])
         configurations = {
-            'shared': {'fields.content.index-options': '{"tokenizer":"raw","lower-case":false,"stop-words":["paimon","lake"]}'},
+            'shared': {'fields.content.index-options':
+                       '{"tokenizer":"raw","lower-case":false,"stop-words":["paimon","lake"]}'},
             'legacy': {'fields.content.pk-full-text.index.options': '{"tokenizer":"raw"}'},
             'dlf': {'full-text.tokenizer': 'raw'},
         }
@@ -329,8 +331,10 @@ class GlobalIndexBuildTest(
             'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         table = self._create_table(pa_schema=schema, options=options)
         self._write_arrow(table, pa.table({'id': [1, 2], 'embedding': [[1.0, 0.0], [0.0, 1.0]]}, schema=schema))
-        single = table.new_vector_search_builder().with_vector_column('embedding').with_limit(1).with_query_vector([1.0, 0.0])
-        batch = table.new_batch_vector_search_builder().with_vector_column('embedding').with_limit(1).with_query_vectors([[0.0, 1.0]])
+        single = (table.new_vector_search_builder().with_vector_column('embedding').with_limit(1)
+                  .with_query_vector([1.0, 0.0]))
+        batch = (table.new_batch_vector_search_builder().with_vector_column('embedding').with_limit(1)
+                 .with_query_vectors([[0.0, 1.0]]))
         self.assertFalse(single._is_primary_key_vector_search())
         self.assertFalse(batch._is_primary_key_vector_search())
         self.assertEqual([0], list(single.execute_local().results()))

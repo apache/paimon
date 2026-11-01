@@ -23,7 +23,7 @@ from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.common.options.vector_index_options import VectorIndexOptions
-from pypaimon.execution.native.index_options import native_scalar_index_read_supported
+from pypaimon.execution.native.index_options import native_scalar_index_read_supported, native_search_options
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
 from pypaimon.execution.native.table import (_partition_fields)
@@ -42,6 +42,7 @@ def _index_search_options(table, column, index_type=None, overrides=None, scalar
     """Use the common resolver before transferring search options to Core."""
     values = dict(table.options.options.to_map())
     values.update(overrides or {})
+    values = native_search_options(values)
     if scalar_filter is not None and not native_scalar_index_read_supported(table.copy(values)):
         return None
     if column is None:
@@ -56,9 +57,10 @@ def _index_search_options(table, column, index_type=None, overrides=None, scalar
                 return None
             return values
     # Keep an unspecified metric absent so readers can use persisted index metadata.
-    return (VectorIndexOptions.resolve(Options(values), index_type, column, default_metric=False).to_map()
-            if CoreOptions._is_vector_index_type(index_type) else
-            core.global_index_options(index_type, column).to_map())
+    resolved = (VectorIndexOptions.resolve(Options(values), index_type, column, default_metric=False).to_map()
+                if CoreOptions._is_vector_index_type(index_type) else
+                core.global_index_options(index_type, column).to_map())
+    return native_search_options(resolved)
 
 
 def _range(value):

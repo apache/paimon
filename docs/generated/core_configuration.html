@@ -873,6 +873,18 @@ under the License.
             <td>Search mode for full-text index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>global-index.bitmap.index-columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated columns to index with Bitmap indexes.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.btree.index-columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated columns to index with BTree indexes.</td>
+        </tr>
+        <tr>
             <td><h5>global-index.build.max-parallelism</h5></td>
             <td style="word-wrap: break-word;">4096</td>
             <td>Integer</td>
@@ -907,6 +919,24 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether a vector, hybrid or full-text search may read the filter columns of candidate rows to verify a row filter that the scalar global index can only answer with a superset, such as contains, ends-with or like on a BTree index or a conjunction with a member no index can evaluate. When false, such candidates are excluded from the search, which never returns a non-matching row but may return fewer than the requested top-k. When true, the read runs on the caller and may cover every candidate row.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.fm.index-columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated character columns to index with FM indexes.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.full-text.index-columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated character columns to index with full-text indexes.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.multivalue.index-columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated ARRAY columns to index with Multivalue indexes.</td>
         </tr>
         <tr>
             <td><h5>global-index.query-in-reader.enabled</h5></td>

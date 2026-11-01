@@ -45,9 +45,8 @@ def _table(tmp_path, primary_key, extra=None):
               DataField(2, 'other', AtomicType('INT')),
               DataField(3, 'embedding', VectorType(True, AtomicType('FLOAT'), 2)),
               DataField(4, 'body', AtomicType('STRING'))]
-    catalog.create_table('default.search', Schema(fields=fields,
-                                                primary_keys=['id'] if primary_key else [],
-                                                options=options), False)
+    catalog.create_table('default.search', Schema(
+        fields=fields, primary_keys=['id'] if primary_key else [], options=options), False)
     return catalog.get_table('default.search')
 
 
@@ -92,7 +91,7 @@ def test_native_read_and_write_schemas_share_resolved_index_contract(tmp_path, p
             assert by_type['full-text'].options.to_map()['full-text.lower-case'] == 'false'
         else:
             assert not any(key.startswith('pk-') for key in options)
-            assert options['fields.embedding.index-type'] == 'ivf-pq'
+            assert 'fields.embedding.index-type' not in options
             assert options['fields.embedding.nlist'] == '64'
             assert options['fields.embedding.metric'] == 'cosine'
             assert options['btree-index.fallback-scan-max-size'] == '1 kb'
@@ -142,9 +141,40 @@ def test_native_data_evolution_does_not_invent_a_vector_metric(tmp_path):
     })
     options = json.loads(_resolved_schema_json(table))['options']
     assert options['fields.embedding.nlist'] == '64'
-    assert options['fields.embedding.index-type'] == 'ivf-pq'
+    assert 'fields.embedding.index-type' not in options
     assert 'fields.embedding.metric' not in options
     assert 'ivf-pq.metric' not in options
+
+
+@pytest.mark.parametrize('primary_key', [False, True])
+@pytest.mark.parametrize('key', ['index_type', 'index-type', 'vector.index-type', 'fields.embedding.index-type'])
+def test_native_schema_drops_removed_type_aliases(tmp_path, primary_key, key):
+    table = _table(tmp_path, primary_key, {
+        'global-index.ivf-pq.index-columns': 'embedding', key: 'diskann',
+        'fields.embedding.index-options': '{"nlist":64}',
+    })
+    original = dict(table.table_schema.options)
+    options = json.loads(_resolved_schema_json(table))['options']
+    assert key not in options
+    assert 'fields.embedding.index-type' not in options
+    if primary_key:
+        assert options['fields.embedding.pk-vector.index.type'] == 'ivf-pq'
+        assert key not in json.loads(options['fields.embedding.pk-vector.index.options'])
+    assert table.table_schema.options == original
+
+
+@pytest.mark.parametrize('primary_key', [False, True])
+@pytest.mark.parametrize('suffix', ['index-options', 'pk-vector.index.options'])
+def test_field_json_cannot_restore_removed_native_type_hint(tmp_path, primary_key, suffix):
+    table = _table(tmp_path, primary_key, {
+        'global-index.ivf-pq.index-columns': 'embedding',
+        'fields.embedding.' + suffix: '{"index-type":"diskann","nlist":64}',
+    })
+    options = json.loads(_resolved_schema_json(table))['options']
+    assert 'fields.embedding.index-type' not in options
+    if primary_key:
+        assert 'fields.embedding.index-type' not in json.loads(options['fields.embedding.pk-vector.index.options'])
+        assert options['fields.embedding.pk-vector.index.type'] == 'ivf-pq'
 
 
 def test_native_qualifies_distinct_scalar_field_options_before_reading(tmp_path):

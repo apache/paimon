@@ -43,19 +43,8 @@ public final class VectorIndexOptions {
         if (!declared.isEmpty()) {
             return declared.size() == 1 ? declared.get(0) : null;
         }
-        for (String key :
-                Arrays.asList(
-                        "fields." + column + ".pk-vector.index.type",
-                        "index_type",
-                        "index-type",
-                        "vector.index-type",
-                        "fields." + column + ".index-type")) {
-            String type = options.get(key);
-            if (type != null) {
-                return type.toLowerCase(Locale.ROOT).trim();
-            }
-        }
-        return null;
+        String type = options.get("fields." + column + ".pk-vector.index.type");
+        return type == null ? null : type.toLowerCase(Locale.ROOT).trim();
     }
 
     public static Options resolve(Options options, @Nullable String type, String column) {

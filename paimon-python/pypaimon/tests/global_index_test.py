@@ -84,9 +84,9 @@ class GlobalIndexTest(unittest.TestCase):
 
     def test_shared_field_options_override_type_defaults(self):
         for index_type, prefix, key in (("btree", "btree-index.", "block-size"),
-                                         ("bitmap", "bitmap-index.", "dictionary-block-size"),
-                                         ("full-text", "full-text.", "tokenizer"),
-                                         ("ivf-pq", "ivf-pq.", "nlist")):
+                                        ("bitmap", "bitmap-index.", "dictionary-block-size"),
+                                        ("full-text", "full-text.", "tokenizer"),
+                                        ("ivf-pq", "ivf-pq.", "nlist")):
             with self.subTest(index_type=index_type):
                 values = {prefix + key: "old",
                           "fields.payload.index-options": '{"%s":"new"}' % key,
