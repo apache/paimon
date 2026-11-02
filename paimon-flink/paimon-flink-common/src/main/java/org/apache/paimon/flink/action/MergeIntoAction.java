@@ -48,6 +48,7 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
+import static org.apache.paimon.CoreOptions.SCAN_REWRITE_OPERATION;
 import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
 import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
 
@@ -80,6 +81,10 @@ public class MergeIntoAction extends TableActionBase {
     private static final Logger LOG = LoggerFactory.getLogger(MergeIntoAction.class);
 
     public static final String IDENTIFIER_QUOTE = "`";
+
+    // checks query auth again when the job reads the target
+    private static final String TARGET_SCAN_HINT =
+            String.format("/*+ OPTIONS('%s'='MERGE INTO') */", SCAN_REWRITE_OPERATION.key());
 
     // primary keys of target table
     private final List<String> primaryKeys;
@@ -282,7 +287,14 @@ public class MergeIntoAction extends TableActionBase {
             // create a view 'targetAlias' in the path of target table, then we can find it with the
             // qualified name
             batchTEnv.createTemporaryView(
-                    escapedTargetName(), batchTEnv.from(identifier.getFullName()));
+                    escapedTargetName(),
+                    batchTEnv.sqlQuery(
+                            String.format(
+                                    "SELECT * FROM `%s`.`%s`.`%s` %s",
+                                    catalogName,
+                                    identifier.getDatabaseName(),
+                                    identifier.getObjectName(),
+                                    TARGET_SCAN_HINT)));
         }
     }
 
@@ -339,7 +351,7 @@ public class MergeIntoAction extends TableActionBase {
                 String.format(
                         "SELECT %s FROM %s INNER JOIN %s ON %s %s",
                         String.join(",", normalizeFieldName(project)),
-                        escapedTargetName(),
+                        targetScan(),
                         escapedSourceName(),
                         mergeCondition,
                         matchedUpsertCondition == null ? "" : "WHERE " + matchedUpsertCondition);
@@ -383,7 +395,7 @@ public class MergeIntoAction extends TableActionBase {
                 String.format(
                         "SELECT %s FROM %s WHERE NOT EXISTS (SELECT * FROM %s WHERE %s) %s",
                         String.join(",", normalizeFieldName(project)),
-                        escapedTargetName(),
+                        targetScan(),
                         escapedSourceName(),
                         mergeCondition,
                         notMatchedBySourceUpsertCondition == null
@@ -414,7 +426,7 @@ public class MergeIntoAction extends TableActionBase {
                 String.format(
                         "SELECT %s FROM %s INNER JOIN %s ON %s %s",
                         String.join(",", normalizeFieldName(project)),
-                        escapedTargetName(),
+                        targetScan(),
                         escapedSourceName(),
                         mergeCondition,
                         matchedDeleteCondition == null ? "" : "WHERE " + matchedDeleteCondition);
@@ -436,7 +448,7 @@ public class MergeIntoAction extends TableActionBase {
                 String.format(
                         "SELECT %s FROM %s WHERE NOT EXISTS (SELECT * FROM %s WHERE %s) %s",
                         String.join(",", normalizeFieldName(targetFieldNames)),
-                        escapedTargetName(),
+                        targetScan(),
                         escapedSourceName(),
                         mergeCondition,
                         notMatchedBySourceDeleteCondition == null
@@ -461,7 +473,7 @@ public class MergeIntoAction extends TableActionBase {
                         "SELECT %s FROM %s WHERE NOT EXISTS (SELECT * FROM %s WHERE %s) %s",
                         notMatchedInsertValues,
                         escapedSourceName(),
-                        escapedTargetName(),
+                        targetScan(),
                         mergeCondition,
                         notMatchedInsertCondition == null
                                 ? ""
@@ -517,6 +529,13 @@ public class MergeIntoAction extends TableActionBase {
     private String escapedTargetName() {
         return String.format(
                 "`%s`.`%s`.`%s`", catalogName, identifier.getDatabaseName(), targetTableName());
+    }
+
+    // the alias view reads the target with the hint already
+    private String targetScan() {
+        return targetAlias == null
+                ? escapedTargetName() + " " + TARGET_SCAN_HINT
+                : escapedTargetName();
     }
 
     private String escapedSourceName() {

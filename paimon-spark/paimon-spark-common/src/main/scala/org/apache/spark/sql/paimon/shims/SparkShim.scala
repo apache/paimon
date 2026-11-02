@@ -197,6 +197,10 @@ trait SparkShim {
       table: Table,
       output: Seq[AttributeReference]): DataSourceV2Relation
 
+  def copyDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      options: CaseInsensitiveStringMap): DataSourceV2Relation
+
   // Per-version shim: Spark 4.1 added a 5th `timeTravelSpec` parameter with a default. A 4-arg call
   // site compiled against 4.1 emits a `create$default$5()` lookup absent on 4.0.
   def createDataSourceV2Relation(

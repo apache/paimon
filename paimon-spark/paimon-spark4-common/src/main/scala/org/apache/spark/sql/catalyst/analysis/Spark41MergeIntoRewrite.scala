@@ -140,6 +140,11 @@ object Spark41MergeIntoRewrite
     }
   }
 
+  // The insert-only plans append without a row-level operation, so their scan of the target
+  // checks query auth.
+  private def rewriteRead(r: DataSourceV2Relation): DataSourceV2Relation =
+    PaimonRelation.withRewriteOperation(r, "MERGE")
+
   // Fast-path #1: single NOT MATCHED InsertAction. Append over a left-anti join.
   private def buildSingleInsertAppendPlan(
       r: DataSourceV2Relation,
@@ -151,7 +156,7 @@ object Spark41MergeIntoRewrite
       case Some(insertCond) => Filter(insertCond, source)
       case None => source
     }
-    val joinPlan = Join(filteredSource, r, LeftAnti, Some(cond), JoinHint.NONE)
+    val joinPlan = Join(filteredSource, rewriteRead(r), LeftAnti, Some(cond), JoinHint.NONE)
     val output = insertAction.assignments.map(_.value)
     val outputColNames = r.output.map(_.name)
     val projectList = output.zip(outputColNames).map { case (expr, name) => Alias(expr, name)() }
@@ -165,7 +170,7 @@ object Spark41MergeIntoRewrite
       source: LogicalPlan,
       cond: Expression,
       notMatchedActions: Seq[MergeAction]): LogicalPlan = {
-    val joinPlan = Join(source, r, LeftAnti, Some(cond), JoinHint.NONE)
+    val joinPlan = Join(source, rewriteRead(r), LeftAnti, Some(cond), JoinHint.NONE)
     val notMatchedInstructions = notMatchedActions.map {
       case InsertAction(cond, assignments) =>
         Keep(Insert, cond.getOrElse(TrueLiteral), assignments.map(_.value))

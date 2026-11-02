@@ -87,6 +87,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.SCAN_REWRITE_OPERATION;
 import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
@@ -307,12 +308,13 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
             query =
                     String.format(
                             "SELECT %s, %s FROM %s INNER JOIN %s "
-                                    + "/*+ OPTIONS('%s'='full') */ AS RT ON %s",
+                                    + "/*+ OPTIONS('%s'='full', '%s'='MERGE INTO') */ AS RT ON %s",
                             "`RT`.`_ROW_ID` as `_ROW_ID`",
                             String.join(",", project),
                             escapedSourceName(),
                             escapedRowTrackingTargetName(),
                             CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(),
+                            SCAN_REWRITE_OPERATION.key(),
                             rewriteMergeCondition(mergeCondition));
         }
 

@@ -74,6 +74,7 @@ import static org.apache.flink.configuration.ExecutionOptions.RUNTIME_MODE;
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
+import static org.apache.paimon.CoreOptions.SCAN_REWRITE_OPERATION;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC_THREAD_NUMBER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
@@ -208,6 +209,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                         .limit(limit)
                         .watermarkStrategy(watermarkStrategy)
                         .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields());
+        options.getOptional(SCAN_REWRITE_OPERATION).ifPresent(sourceBuilder::withRewriteOperation);
         return new PaimonDataStreamScanProvider(
                 !unbounded,
                 env ->

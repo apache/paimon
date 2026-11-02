@@ -67,7 +67,6 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
-import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
@@ -291,9 +290,6 @@ public class FlinkSourceBuilder {
 
     private @Nullable DataStream<RowData> buildPostponeMergeSource() {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
-        if (rewriteOperation != null) {
-            rejectRewriteUnderQueryAuth(table, rewriteOperation);
-        }
         if (fileStoreTable.coreOptions().startupMode() == CoreOptions.StartupMode.COMPACTED_FULL) {
             return null;
         }
