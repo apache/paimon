@@ -91,3 +91,10 @@ class RollbackHelper:
         if not self._file_io.exists(snapshot_path):
             self._file_io.write_file(
                 snapshot_path, JSON.to_json(tagged_snapshot), overwrite=False)
+            # The snapshot file is missing because it was expired, so EARLIEST
+            # still points past it. Move the hint back to the restored snapshot,
+            # as the Java RollbackHelper does: otherwise, once new commits reach
+            # the old EARLIEST id, readers treat that id as the earliest snapshot
+            # and skip the restored snapshot and the commits after it.
+            earliest_file = "{}/EARLIEST".format(self._snapshot_manager.snapshot_dir)
+            self._file_io.overwrite_file_utf8(earliest_file, str(tagged_snapshot.id))
