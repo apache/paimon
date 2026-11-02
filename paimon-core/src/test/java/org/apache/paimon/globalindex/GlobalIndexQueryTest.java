@@ -756,6 +756,48 @@ class GlobalIndexQueryTest {
         assertThat(complete.coveredRanges()).containsExactly(new Range(0, 99));
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "index-options,1 gb,true",
+        "index-options,0 bytes,false",
+        "pk-btree.index.options,1 gb,true"
+    })
+    void testCompositePlanningUsesResolvedLeadingFieldOptions(
+            String suffix, String budget, boolean eligible) {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"amount", "category"});
+        IndexFileMeta composite =
+                new IndexFileMeta(
+                        "btree",
+                        "composite",
+                        300L * 1024 * 1024,
+                        100,
+                        new GlobalIndexMeta(0, 99, 0, new int[] {1}, null),
+                        null);
+        Options options =
+                new Options(
+                        Collections.singletonMap(
+                                "fields.amount." + suffix,
+                                "{\"fallback-scan-max-size\":\"" + budget + "\"}"));
+        IndexPathFactory paths = mock(IndexPathFactory.class);
+        when(paths.toPath(any(IndexFileMeta.class))).thenReturn(new Path("index"));
+        GlobalIndexQuery query =
+                GlobalIndexQuery.create(
+                        rowType,
+                        new PredicateBuilder(rowType).equal(0, 7),
+                        Collections.singletonList(composite),
+                        paths,
+                        options);
+        if (eligible) {
+            assertThat(query).isNotNull();
+            assertThat(query.hasCompositeQuery()).isTrue();
+        } else {
+            assertThat(query).isNull();
+        }
+    }
+
     private IndexFileMeta indexFile(
             String type, String name, long start, long end, int fieldId, int[] extraFields) {
         return new IndexFileMeta(

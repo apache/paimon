@@ -28,10 +28,13 @@ from pypaimon.api.rest_exception import (NoSuchResourceException, AlreadyExistsE
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
+from pypaimon.catalog.catalog_utils import check_not_branch, check_not_system_database, check_not_system_table
 from pypaimon.catalog.catalog_exception import (
+    ColumnAlreadyExistException, ColumnNotExistException,
     TableNotExistException, DatabaseAlreadyExistException,
     TableAlreadyExistException, DatabaseNotExistException,
     TableNoPermissionException, DatabaseNoPermissionException,
+    TableIdNotExistException, TableIdNoPermissionException,
     FunctionNotExistException, FunctionAlreadyExistException,
     DefinitionAlreadyExistException, DefinitionNotExistException,
     TagNotExistException, TagAlreadyExistException,
@@ -161,6 +164,7 @@ class RESTCatalog(Catalog):
 
     def create_database(self, name: str, ignore_if_exists: bool,
                         properties: Optional[Dict[str, str]] = None) -> None:
+        check_not_system_database(name)
         try:
             self.rest_api.create_database(name, properties)
         except AlreadyExistsException as e:
@@ -184,6 +188,7 @@ class RESTCatalog(Catalog):
             raise DatabaseNoPermissionException(name) from e
 
     def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
+        check_not_system_database(name)
         if not cascade:
             try:
                 tables = self.list_tables(name)
@@ -206,6 +211,7 @@ class RESTCatalog(Catalog):
             raise DatabaseNoPermissionException(name) from e
 
     def alter_database(self, name: str, changes: List[PropertyChange]) -> None:
+        check_not_system_database(name)
         try:
             set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
             self.rest_api.alter_database(name, list(remove_keys), set_properties)
@@ -250,6 +256,22 @@ class RESTCatalog(Catalog):
             return self._load_system_table(identifier)
         return self._load_data_table(identifier)
 
+    def get_table_by_id(self, table_id: str) -> Table:
+        try:
+            response = self.rest_api.get_table_by_id(table_id)
+        except NoSuchResourceException as e:
+            raise TableIdNotExistException(table_id) from e
+        except ForbiddenException as e:
+            raise TableIdNoPermissionException(table_id) from e
+        database = response.get_database()
+        identifier = Identifier.create(database, response.get_name())
+        return self.load_table(
+            identifier,
+            lambda path: self.file_io_for_data(path, identifier),
+            self.file_io_from_options,
+            lambda _: self.to_table_metadata(database, response),
+        )
+
     def _load_data_table(self, identifier: Identifier) -> Union[FormatTable, IcebergTable, ObjectTable, FileStoreTable]:
         return self.load_table(
             identifier,
@@ -277,11 +299,15 @@ class RESTCatalog(Catalog):
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        check_not_branch(identifier, "create_table")
+        check_not_system_table(identifier, "create_table")
         try:
             self.rest_api.create_table(identifier, schema)
         except AlreadyExistsException as e:
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier) from e
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(identifier.get_database_name()) from e
 
     def rename_table(self, source_identifier: Union[str, Identifier],
                      target_identifier: Union[str, Identifier]) -> None:
@@ -289,6 +315,10 @@ class RESTCatalog(Catalog):
             source_identifier = Identifier.from_string(source_identifier)
         if not isinstance(target_identifier, Identifier):
             target_identifier = Identifier.from_string(target_identifier)
+        check_not_branch(source_identifier, "rename_table")
+        check_not_branch(target_identifier, "rename_table")
+        check_not_system_table(source_identifier, "rename_table")
+        check_not_system_table(target_identifier, "rename_table")
         try:
             self.rest_api.rename_table(source_identifier, target_identifier)
         except NoSuchResourceException as e:
@@ -301,6 +331,8 @@ class RESTCatalog(Catalog):
     def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        check_not_branch(identifier, "drop_table")
+        check_not_system_table(identifier, "drop_table")
         try:
             self.rest_api.drop_table(identifier)
         except NoSuchResourceException as e:
@@ -403,11 +435,18 @@ class RESTCatalog(Catalog):
     ) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        check_not_system_table(identifier, "alter_table")
         try:
             self.rest_api.alter_table(identifier, changes)
         except NoSuchResourceException as e:
             if not ignore_if_not_exists:
+                if e.resource_type == ErrorResponse.RESOURCE_TYPE_COLUMN:
+                    raise ColumnNotExistException(e.resource_name) from e
                 raise TableNotExistException(identifier) from e
+        except AlreadyExistsException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_COLUMN:
+                raise ColumnAlreadyExistException(e.resource_name) from e
+            raise
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 

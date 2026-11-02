@@ -222,6 +222,12 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     @Override
+    public InnerTableScan withInternalPartitionFilter(PartitionPredicate partitionPredicate) {
+        batchScan.withInternalPartitionFilter(partitionPredicate);
+        return this;
+    }
+
+    @Override
     public InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
         batchScan.withBucketFilter(bucketFilter);
         return this;

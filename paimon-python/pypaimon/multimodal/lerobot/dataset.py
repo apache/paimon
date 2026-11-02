@@ -2006,7 +2006,7 @@ class _PyAVVideoDecoder:
         self._keyframe_index = keyframe_index
         self._thread_count = thread_count
         self._anchor_ordinals = (
-            [entry[0] for entry in keyframe_index.keyframes]
+            keyframe_index.ordinals
             if keyframe_index is not None else [])
         self._container = None
         self._stream = None

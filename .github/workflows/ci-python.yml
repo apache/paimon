@@ -228,12 +228,16 @@ jobs:
           import importlib.metadata as metadata
           import json
 
+          import pypaimon_rust
           import pypaimon_rust.datafusion
 
           distribution = metadata.distribution('pypaimon-rust')
           source = json.loads(distribution.read_text('direct_url.json'))
           print('pypaimon-rust', distribution.version,
                 'commit', source['vcs_info']['commit_id'])
+          assert source['vcs_info']['requested_revision'] == 'main'
+          assert callable(getattr(pypaimon_rust, 'temporal_match', None)), (
+              'Native CI requires the real temporal_match kernel')
           PY
 
       - name: Run Python tests with native planning, reading, writing, updating and committing

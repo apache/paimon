@@ -588,7 +588,8 @@ class TorchIterDataset(_BaseTorchIterDataset):
         worker_info = torch.utils.data.get_worker_info()
         splits_to_process = self._worker_splits(worker_info)
 
-        if self.prefetch_concurrency > 1:
+        # A binding limit needs one reader quota across all selected splits.
+        if self.prefetch_concurrency > 1 and self._limit_covers_all_splits():
             yield from self._iter_rows(splits_to_process)
             return
 
@@ -1004,7 +1005,8 @@ class TorchShuffledIterDataset(_TorchShuffleMixin, _BaseTorchIterDataset):
         worker_id = worker_info.id if worker_info is not None else 0
         splits_to_process = self._worker_splits(worker_info)
 
-        if self.max_buffer_input_splits == 1:
+        # Select the limited prefix before shuffling, as in the batch dataset.
+        if self.max_buffer_input_splits == 1 or not self._limit_covers_all_splits():
             rows = self._iter_ordered_rows(splits_to_process)
         else:
             rows = self._iter_interleaved_rows(splits_to_process)

@@ -78,10 +78,11 @@ case class PaimonRecordReaderIterator(
   private val joinedRow: JoinedRow = JoinedRow.join(null, metadataRow)
 
   private var lastFilePath: Path = _
+  // Initialize before readBatch() so the first batch's elapsed time is not reset to zero.
+  private var readBatchTimeNs: Long = 0L
   private var currentIterator: RecordReader.RecordIterator[PaimonInternalRow] = readBatch()
   private var advanced = false
   private var currentResult: PaimonInternalRow = _
-  private var readBatchTimeNs: Long = 0L
 
   override def hasNext: Boolean = {
     if (currentIterator == null) {

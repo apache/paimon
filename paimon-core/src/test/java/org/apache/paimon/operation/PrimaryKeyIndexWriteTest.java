@@ -74,8 +74,8 @@ class PrimaryKeyIndexWriteTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "10");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "itemId");
-        options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "comment");
+        options.put(CoreOptions.GLOBAL_INDEX_BTREE_INDEX_COLUMNS.key(), "itemId");
+        options.put(CoreOptions.GLOBAL_INDEX_BITMAP_INDEX_COLUMNS.key(), "comment");
         TestFileStore store = createStore(options);
         KeyValueFileStoreWrite write = (KeyValueFileStoreWrite) store.newWrite();
         write.withIOManager(ioManager);
@@ -95,7 +95,7 @@ class PrimaryKeyIndexWriteTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "10");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "tags");
+        options.put(CoreOptions.GLOBAL_INDEX_MULTIVALUE_INDEX_COLUMNS.key(), "tags");
         List<DataField> fields =
                 new ArrayList<>(TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields());
         fields.add(new DataField(7, "tags", DataTypes.ARRAY(DataTypes.STRING())));
@@ -119,9 +119,9 @@ class PrimaryKeyIndexWriteTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "10");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "itemId,score");
-        options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "comment,state");
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put(CoreOptions.GLOBAL_INDEX_BTREE_INDEX_COLUMNS.key(), "itemId,score");
+        options.put(CoreOptions.GLOBAL_INDEX_BITMAP_INDEX_COLUMNS.key(), "comment,state");
+        options.put("pk-vector.index.columns", "embedding");
         options.put("fields.embedding.pk-vector.index.type", "hnsw");
 
         List<DataField> fields =
@@ -158,7 +158,7 @@ class PrimaryKeyIndexWriteTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "10");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(), "comment");
+        options.put(CoreOptions.GLOBAL_INDEX_FULL_TEXT_INDEX_COLUMNS.key(), "comment");
         TestFileStore store = createStore(options);
         KeyValueFileStoreWrite write = (KeyValueFileStoreWrite) store.newWrite();
         write.withIOManager(ioManager);
@@ -181,8 +181,8 @@ class PrimaryKeyIndexWriteTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), String.valueOf(BucketMode.POSTPONE_BUCKET));
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "itemId");
-        options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "comment");
+        options.put(CoreOptions.GLOBAL_INDEX_BTREE_INDEX_COLUMNS.key(), "itemId");
+        options.put(CoreOptions.GLOBAL_INDEX_BITMAP_INDEX_COLUMNS.key(), "comment");
         TableSchema schema = createSchema(options, TestKeyValueGenerator.DEFAULT_ROW_TYPE);
         TestKeyValueGenerator generator = new TestKeyValueGenerator();
         KeyValue record = generator.next();

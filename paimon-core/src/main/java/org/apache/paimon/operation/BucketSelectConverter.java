@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.BucketFunctionType;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.predicate.Predicate;
@@ -25,6 +26,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TriFilter;
 
+import java.util.Collections;
 import java.util.Optional;
 import java.util.Set;
 
@@ -34,19 +36,41 @@ import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 public class BucketSelectConverter {
 
     private final BucketMode bucketMode;
-    private final BucketFunctionType bucketFunctionType;
+    private final CoreOptions coreOptions;
     private final RowType rowType;
     private final RowType partitionType;
     private final RowType bucketKeyType;
 
+    /**
+     * @deprecated Use {@link #BucketSelectConverter(BucketMode, CoreOptions, RowType, RowType,
+     *     RowType)} so custom bucket function providers are preserved.
+     */
+    @Deprecated
     public BucketSelectConverter(
             BucketMode bucketMode,
             BucketFunctionType bucketFunctionType,
             RowType rowType,
             RowType partitionType,
             RowType bucketKeyType) {
+        this(
+                bucketMode,
+                new CoreOptions(
+                        Collections.singletonMap(
+                                CoreOptions.BUCKET_FUNCTION_TYPE.key(),
+                                bucketFunctionType.toString())),
+                rowType,
+                partitionType,
+                bucketKeyType);
+    }
+
+    public BucketSelectConverter(
+            BucketMode bucketMode,
+            CoreOptions coreOptions,
+            RowType rowType,
+            RowType partitionType,
+            RowType bucketKeyType) {
         this.bucketMode = bucketMode;
-        this.bucketFunctionType = bucketFunctionType;
+        this.coreOptions = coreOptions;
         this.rowType = rowType;
         this.partitionType = partitionType;
         this.bucketKeyType = bucketKeyType;
@@ -67,7 +91,6 @@ public class BucketSelectConverter {
         }
 
         return Optional.of(
-                new BucketSelector(
-                        predicate, bucketFunctionType, rowType, partitionType, bucketKeyType));
+                new BucketSelector(predicate, coreOptions, rowType, partitionType, bucketKeyType));
     }
 }

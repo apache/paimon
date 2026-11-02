@@ -128,6 +128,8 @@ class RayDatasource(Datasource):
         output_projection = self._split_provider.output_projection()
         splits = self._split_provider.splits()
         limit = self._split_provider.limit()
+        if per_task_row_limit is not None:
+            limit = per_task_row_limit if limit is None else min(limit, per_task_row_limit)
         include_row_kind = self._split_provider.include_row_kind()
         if not splits:
             return []
@@ -239,6 +241,8 @@ class RayDatasource(Datasource):
                 num_rows = None  # Can't estimate with predicate filtering
             else:
                 num_rows = total_rows
+            if num_rows is not None and limit is not None:
+                num_rows = min(num_rows, limit)
             size_bytes = total_size if total_size > 0 else None
 
             metadata_kwargs = {

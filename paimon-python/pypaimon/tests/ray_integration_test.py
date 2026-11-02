@@ -358,18 +358,7 @@ class RayIntegrationTest(unittest.TestCase):
         self.assertEqual(set(df['category'].tolist()), {'A'})
 
     def test_read_paimon_with_limit(self):
-        """``read_paimon(limit=N)`` propagates the limit into the scan plan.
-
-        Writes 10 rows across two partitions (5 + 5) so the scan produces two
-        raw-convertible splits. ``limit=3`` causes ``FileScanner`` to drop the
-        second split once the first already covers the limit, so the Ray
-        Dataset contains strictly fewer than the full 10 rows.
-
-        We assert ``< 10`` (not ``== N``) because Paimon's scan-time limit is
-        a per-split cap — whole-split granularity at this layer — not a
-        row-exact hard limit. Row-exact short-circuiting in the reader is a
-        separate follow-up.
-        """
+        """Limits remain exact before and after materialization across tasks."""
         from pypaimon.ray import read_paimon
 
         pa_schema = pa.schema([
@@ -391,12 +380,13 @@ class RayIntegrationTest(unittest.TestCase):
         ds_full = read_paimon(identifier, self.catalog_options)
         self.assertEqual(ds_full.count(), 10)
 
-        # With limit=3, the scan plan drops the second partition's split
-        # once the first split's row count already covers the limit.
-        ds = read_paimon(identifier, self.catalog_options, limit=3)
-        limited_count = ds.count()
-        self.assertGreater(limited_count, 0)
-        self.assertLess(limited_count, 10)
+        for limit in (0, 3, 7, 20):
+            with self.subTest(limit=limit):
+                ds = read_paimon(
+                    identifier, self.catalog_options, limit=limit,
+                    override_num_blocks=2)
+                self.assertEqual(ds.count(), min(limit, 10))
+                self.assertEqual(ds.materialize().count(), min(limit, 10))
 
     def test_read_paimon_empty_table(self):
         """read_paimon() on an empty table preserves the table schema."""

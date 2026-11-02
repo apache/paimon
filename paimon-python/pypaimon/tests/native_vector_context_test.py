@@ -24,20 +24,30 @@ import pytest
 
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
 from pypaimon.execution.native.read import native_vector_search
 
 
 @pytest.mark.parametrize('option', ['hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'])
 @pytest.mark.parametrize('batch', [False, True], ids=['single', 'batch'])
-def test_unused_context_attributes_preserve_native_vector_execution(option, batch):
+@pytest.mark.parametrize('declaration', [None, 'legacy', 'dlf'])
+def test_unused_context_attributes_preserve_native_vector_execution(option, batch, declaration):
     context = CatalogContext.create_from_options({'metastore': 'rest', 'uri': 'http://unused'})
     unused = Mock(side_effect=AssertionError('An unused IO loader was invoked'))
     setattr(context, option, {'unused': 'value'} if option == 'hadoop_conf' else unused)
     loader = RESTCatalogLoader(context)
-    table = SimpleNamespace(
-        options=SimpleNamespace(native_read_enabled=lambda: True, query_auth_enabled=False),
-        catalog_environment=SimpleNamespace(catalog_loader=loader))
+    values = {'read.native.enabled': 'true', 'global-index.enabled': 'false'}
+    if declaration == 'legacy':
+        values.update({'pk-vector.index.columns': 'embedding',
+                       'fields.embedding.pk-vector.index.type': 'ivf-flat',
+                       'fields.embedding.pk-vector.index.options': '{"nlist":64}'})
+    elif declaration == 'dlf':
+        values.update({'global-index.ivf-flat.index-columns': 'embedding',
+                       'fields.embedding.index-options': '{"nlist":64}'})
+    environment = SimpleNamespace(catalog_loader=loader)
+    table = SimpleNamespace(options=CoreOptions(Options(values)), catalog_environment=environment)
     builder = SimpleNamespace(
         _table=table, _vector_column=SimpleNamespace(name='embedding'), _limit=2,
         _options={'ivf-flat.metric': 'l2'}, _filter=Predicate('equal', 0, 'id', [7]),
@@ -57,9 +67,13 @@ def test_unused_context_attributes_preserve_native_vector_execution(option, batc
             patch.object(native_vector_search, '_native_table', return_value=native_table) as resolve:
         result = native_vector_search.try_native_vector_search(builder, queries, batch=batch)
     assert result is not None
-    resolve.assert_called_once_with(table)
+    resolve.assert_called_once()
+    resolved_table = resolve.call_args[0][0]
+    assert resolved_table.catalog_environment is environment
     core.with_vector_column.assert_called_once_with('embedding')
     core.with_limit.assert_called_once_with(2)
+    assert resolved_table is table
+    assert resolved_table.options.options.to_map() == values
     core.with_options.assert_called_once_with({'ivf-flat.metric': 'l2'})
     core.with_filter.assert_called_once_with({'method': 'equal', 'field': 'id', 'literals': [7]})
     core.with_partition_filter.assert_called_once_with({'method': 'equal', 'field': 'pt', 'literals': [1]})

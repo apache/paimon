@@ -101,7 +101,7 @@ try:
     schema = pa.schema([('id', pa.int32()), ('pt', pa.string())])
     catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, partition_keys=['pt'], options={
         'write.native.enabled': 'false', 'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false',
-        'commit.native.enabled': sys.argv[2]}), False)
+        'commit.native.enabled': sys.argv[2], 'write-only': 'true'}), False)
     table = catalog.get_table('default.t')
     captured = []
     original = server._table_commit_handle

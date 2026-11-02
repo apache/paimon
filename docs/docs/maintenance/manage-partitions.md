@@ -100,6 +100,23 @@ insert into t values('pk', 'par-1');
 
 ```
 
+### Retaining the Latest Partition
+
+Set `'partition.expiration-retain-latest' = 'true'` (default: `false`) to retain the latest
+partition when all partitions have expired. It remains available until a newer partition
+is committed, after which the previous partition can expire normally.
+
+```sql
+CREATE TABLE t (...) PARTITIONED BY (dt) WITH (
+    'partition.expiration-time' = '7 d',
+    'partition.timestamp-formatter' = 'yyyyMMdd',
+    'partition.expiration-retain-latest' = 'true'
+);
+```
+
+This option applies to normal tables. The latest partition is determined by the parsed
+partition timestamp for `values-time`, or the last file creation time for `update-time`.
+
 More options:
 
 <table class="table table-bordered">
@@ -134,6 +151,12 @@ More options:
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>The expiration interval of a partition. A partition will be expired if it's lifetime is over this value. Partition time is extracted from the partition value.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.expiration-retain-latest</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Retain the latest partition when all partitions are expired. Applies to one partition across the whole table with the built-in expiration strategies on normal tables.</td>
         </tr>
         <tr>
             <td><h5>partition.timestamp-formatter</h5></td>

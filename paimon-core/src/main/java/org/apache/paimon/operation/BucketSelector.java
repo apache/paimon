@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.BucketFunctionType;
 import org.apache.paimon.bucket.BucketFunction;
 import org.apache.paimon.data.BinaryRow;
@@ -38,6 +39,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableSet;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -59,7 +61,7 @@ public class BucketSelector implements ManifestBucketFilter {
 
     public static final int MAX_VALUES = 1000;
 
-    private final BucketFunctionType bucketFunctionType;
+    private final CoreOptions coreOptions;
     private final RowType rowType;
     private final RowType partitionType;
     private final RowType bucketKeyType;
@@ -67,14 +69,36 @@ public class BucketSelector implements ManifestBucketFilter {
     private final Map<BinaryRow, Optional<PartitionSelector>> partitionSelectors;
     private final Optional<PartitionSelector> manifestSelector;
 
+    /**
+     * @deprecated Use {@link #BucketSelector(Predicate, CoreOptions, RowType, RowType, RowType)} so
+     *     custom bucket function providers are preserved.
+     */
+    @Deprecated
     public BucketSelector(
             Predicate predicate,
             BucketFunctionType bucketFunctionType,
             RowType rowType,
             RowType partitionType,
             RowType bucketKeyType) {
+        this(
+                predicate,
+                new CoreOptions(
+                        Collections.singletonMap(
+                                CoreOptions.BUCKET_FUNCTION_TYPE.key(),
+                                bucketFunctionType.toString())),
+                rowType,
+                partitionType,
+                bucketKeyType);
+    }
+
+    public BucketSelector(
+            Predicate predicate,
+            CoreOptions coreOptions,
+            RowType rowType,
+            RowType partitionType,
+            RowType bucketKeyType) {
         this.predicate = predicate;
-        this.bucketFunctionType = bucketFunctionType;
+        this.coreOptions = coreOptions;
         this.rowType = rowType;
         this.partitionType = partitionType;
         this.bucketKeyType = bucketKeyType;
@@ -136,7 +160,9 @@ public class BucketSelector implements ManifestBucketFilter {
         @SuppressWarnings("unchecked")
         List<Object>[] bucketValues = new List[bucketKeyType.getFieldCount()];
 
-        BucketFunction bucketFunction = BucketFunction.create(bucketFunctionType, bucketKeyType);
+        // Factory discovery is cached by ClassLoader; functions need not be safe to share
+        // across concurrent partition selectors.
+        BucketFunction bucketFunction = BucketFunction.create(coreOptions, bucketKeyType);
 
         nextAnd:
         for (Predicate andPredicate : splitAnd(bucketPredicate)) {
@@ -243,7 +269,9 @@ public class BucketSelector implements ManifestBucketFilter {
                     .contains(bucket);
         }
 
-        private Set<Integer> createBucketSet(int numBucket) {
+        // Different bucket counts can miss the cache concurrently. The provider function is
+        // confined to this selector, but is not required to support overlapping calls.
+        private synchronized Set<Integer> createBucketSet(int numBucket) {
             ImmutableSet.Builder<Integer> builder = new ImmutableSet.Builder<>();
             for (BinaryRow key : bucketKeys) {
                 builder.add(bucketFunction.bucket(key, numBucket));

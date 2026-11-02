@@ -50,6 +50,7 @@ The cache classifies files by path. Set `local-cache.whitelist` to select the fi
 | GLOBAL_INDEX | global-index | BTree and full-text index files | Yes |
 | BUCKET_INDEX | bucket-index | Hash, deletion vector index files | No |
 | DATA | data | Data files (ORC, Parquet, etc.) | No |
+| STRUCTURED_DATA | structured-data | Parquet, ORC, Avro, ROW, Mosaic (PyPaimon/Rust) | No |
 | FILE_INDEX | file-index | Data-file level bloom filter, bitmap | No |
 
 The default whitelist is `meta,global-index`, and `*` selects every file type. Files rewritten in
@@ -128,11 +129,14 @@ The Java snippet is a method-body fragment; declare or handle the catalog except
 | `local-cache.dir` | String | (none) | Directory for storing cached blocks on disk. If not configured, memory cache is used. |
 | `local-cache.max-size` | MemorySize | See below | Maximum cached block bytes per cache manager. Least recently used blocks are evicted when the limit is exceeded. |
 | `local-cache.block-size` | MemorySize | 1 mb | Block size for caching. Files are logically divided into fixed-size blocks and cached independently. |
-| `local-cache.whitelist` | String | meta,global-index | Comma-separated list of file types to cache. Supported values: `meta`, `global-index`, `bucket-index`, `data`, `file-index`, or `*` for all of them. |
+| `local-cache.whitelist` | String | meta,global-index | File types to cache (see [Cached File Types](#cached-file-types)); `*` selects all. |
 
 When `local-cache.max-size` is omitted, Java has no configured size limit. PyPaimon uses a 256 MiB
 memory limit or a 10 GiB disk limit. Set the option explicitly when you want the same limit across
 clients. The limit accounts for cached block bytes, not all reader buffers or process memory.
+
+Use `local-cache.whitelist=meta,global-index,structured-data` to cache structured files without
+BLOB or video bodies. PyPaimon's Vortex and Lance readers bypass this cache.
 
 ## How It Works
 

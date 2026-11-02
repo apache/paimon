@@ -30,8 +30,11 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.partition.PartitionUpdateTimeExpireStrategy;
 import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 import org.apache.paimon.partition.actions.AddDonePartitionAction;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -61,12 +64,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -85,6 +90,7 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL;
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_RETAIN_LATEST;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.PARTITION_TIMESTAMP_FORMATTER;
 import static org.apache.paimon.CoreOptions.PATH;
@@ -94,6 +100,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** Test for {@link NormalPartitionExpire}. */
 public class PartitionExpireTest {
@@ -692,6 +700,205 @@ public class PartitionExpireTest {
         assertThat(expired).hasSize(1);
         assertThat(expired.get(0)).containsExactly(entry("f0", "us,ca"));
         assertThat(read()).containsExactlyInAnyOrder("us:fresh");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "true,false", "false,true", "true,true"})
+    public void testRetainLatestPartitionLifecycle(boolean primaryKey, boolean metastore)
+            throws Exception {
+        newRetainLatestTable(primaryKey);
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                METASTORE_PARTITIONED_TABLE.key(), String.valueOf(metastore)));
+        NormalPartitionExpire expire =
+                (NormalPartitionExpire) table.store().newPartitionExpire("expire", table);
+        assertThat(expire.expire(date(10), Long.MAX_VALUE)).isEmpty();
+
+        write("20230101", "old");
+        assertThat(expire.expire(date(10), Long.MAX_VALUE)).isEmpty();
+        write("20230103", "latest");
+        if (metastore) {
+            AddDonePartitionAction doneAction =
+                    new AddDonePartitionAction(table.catalogEnvironment().partitionModification());
+            doneAction.markDone("f0=20230101");
+            doneAction.markDone("f0=20230103");
+        }
+        assertThat(expire.expire(date(10), Long.MAX_VALUE))
+                .containsExactly(Collections.singletonMap("f0", "20230101"));
+        assertThat(read()).containsExactly("20230103:latest");
+        long snapshotId = table.snapshotManager().latestSnapshotId();
+        assertThat(expire.expire(date(20), Long.MAX_VALUE)).isEmpty();
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId);
+        if (metastore) {
+            assertThat(createdPartitions)
+                    .containsExactlyInAnyOrder(
+                            Collections.singletonMap("f0", "20230103"),
+                            Collections.singletonMap("f0", "20230103.done"));
+            assertThat(deletedPartitions)
+                    .containsExactlyInAnyOrder(
+                            Collections.singletonMap("f0", "20230101"),
+                            Collections.singletonMap("f0", "20230101.done"));
+        }
+
+        // Prepared files are not a replacement until their commit becomes visible.
+        try (StreamTableWrite write = table.newWrite("replacement");
+                TableCommitImpl commit = table.newCommit("replacement")) {
+            write.write(
+                    GenericRow.of(
+                            BinaryString.fromString("20230121"), BinaryString.fromString("new")));
+            List<CommitMessage> messages = write.prepareCommit(true, 0);
+            assertThat(expire.expire(date(22), Long.MAX_VALUE)).isEmpty();
+            assertThat(read()).containsExactly("20230103:latest");
+            commit.commit(0, messages);
+        }
+        assertThat(expire.expire(date(22), Long.MAX_VALUE))
+                .containsExactly(Collections.singletonMap("f0", "20230103"));
+        assertThat(expire.expire(date(30), Long.MAX_VALUE)).isEmpty();
+        assertThat(read()).containsExactly("20230121:new");
+        if (metastore) {
+            assertThat(createdPartitions)
+                    .containsExactly(Collections.singletonMap("f0", "20230121"));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1,1", "100,1", "100,0"})
+    public void testRetainLatestWithLimitsAndBatches(int limit, int batchSize) throws Exception {
+        newRetainLatestTable(false);
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(), String.valueOf(limit));
+        options.put(CoreOptions.PARTITION_EXPIRATION_BATCH_SIZE.key(), String.valueOf(batchSize));
+        options.put(PARTITION_TIMESTAMP_FORMATTER.key(), "ddMMyyyy");
+        table = table.copy(options);
+        write("12012023", "old");
+        write("15012023", "old");
+        // Lexical order differs from timestamp order.
+        write("02022023", "latest");
+        NormalPartitionExpire expire =
+                (NormalPartitionExpire) table.store().newPartitionExpire("expire", table);
+        for (int i = 0; i < 4; i++) {
+            assertThat(expire.expire(LocalDateTime.of(2023, 3, 1, 0, 0), Long.MAX_VALUE))
+                    .hasSizeLessThanOrEqualTo(limit);
+        }
+        assertThat(read()).containsExactly("02022023:latest");
+    }
+
+    @Test
+    public void testRetainLatestDoesNotKeepExtraPartitionWhenUnparseablePartitionRemains()
+            throws Exception {
+        newRetainLatestTable(false);
+        write("20230101", "old");
+        write("invalid", "retained");
+        NormalPartitionExpire expire =
+                (NormalPartitionExpire) table.store().newPartitionExpire("expire", table);
+        assertThat(expire.expire(date(10), Long.MAX_VALUE)).hasSize(1);
+        assertThat(read()).containsExactly("invalid:retained");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testWriterTriggeredExpirationRetainsLatest(boolean primaryKey) throws Exception {
+        newRetainLatestTable(primaryKey);
+        table = table.copy(Collections.singletonMap(WRITE_ONLY.key(), "false"));
+        write("20230101", "old");
+        assertThat(read()).containsExactly("20230101:old");
+        write("20230103", "latest");
+        assertThat(read()).containsExactly("20230103:latest");
+    }
+
+    @Test
+    public void testRetainLatestDoesNotPreventExplicitDeletion() throws Exception {
+        newRetainLatestTable(false);
+        write("20230101", "old");
+        try (FileStoreCommit commit = table.store().newCommit("drop", table)) {
+            commit.dropPartitions(singletonList(Collections.singletonMap("f0", "20230101")), 0);
+            assertThat(read()).isEmpty();
+            write("20230103", "latest");
+            commit.truncateTable(1);
+            assertThat(read()).isEmpty();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"values-time", "update-time"})
+    public void testRetainLatestOrderingAndStableTies(String expirationStrategy) {
+        RowType type = RowType.of(DataTypes.DATE(), DataTypes.STRING());
+        Options options = new Options();
+        options.set(PARTITION_EXPIRATION_RETAIN_LATEST, true);
+        boolean updateTime = "update-time".equals(expirationStrategy);
+        PartitionExpireStrategy strategy =
+                updateTime
+                        ? new PartitionUpdateTimeExpireStrategy(new CoreOptions(options), type)
+                        : new PartitionValuesTimeExpireStrategy(new CoreOptions(options), type);
+        InternalRowSerializer serializer = new InternalRowSerializer(type);
+        // For update-time, the latest partition may have an older partition timestamp.
+        PartitionEntry old = partitionEntry(serializer, updateTime ? 5 : 1, "z", 1);
+        PartitionEntry recent = partitionEntry(serializer, 3, "a", 3);
+        PartitionEntry tie = partitionEntry(serializer, 3, "b", 3);
+        FileStoreScan scan = mock(FileStoreScan.class);
+        when(scan.readPartitionEntries()).thenReturn(Arrays.asList(old, recent, tie));
+        List<PartitionEntry> expired = strategy.selectExpiredPartitions(scan, date(10));
+        assertThat(expired).hasSize(2).contains(old);
+        when(scan.readPartitionEntries()).thenReturn(Arrays.asList(tie, recent, old));
+        assertThat(strategy.selectExpiredPartitions(scan, date(10)))
+                .containsExactlyInAnyOrderElementsOf(expired);
+        when(scan.readPartitionEntries()).thenReturn(singletonList(recent));
+        assertThat(strategy.selectExpiredPartitions(scan, date(10))).isEmpty();
+
+        // Any live partition means there is no need to protect an expired one.
+        PartitionEntry live =
+                partitionEntry(
+                        serializer,
+                        20,
+                        "live",
+                        date(20).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli());
+        when(scan.readPartitionEntries()).thenReturn(Arrays.asList(old, recent, live));
+        assertThat(strategy.selectExpiredPartitions(scan, date(10))).containsExactly(old, recent);
+        if (!updateTime) {
+            PartitionEntry nullTime = partitionEntry(serializer, null, "null", 1);
+            when(scan.readPartitionEntries()).thenReturn(Arrays.asList(old, recent, nullTime));
+            assertThat(strategy.selectExpiredPartitions(scan, date(10)))
+                    .containsExactly(old, recent);
+        }
+        when(scan.readPartitionEntries()).thenReturn(emptyList());
+        assertThat(strategy.selectExpiredPartitions(scan, date(10))).isEmpty();
+    }
+
+    private PartitionEntry partitionEntry(
+            InternalRowSerializer serializer, Integer day, String group, long fileCreationTime) {
+        BinaryRow partition =
+                serializer
+                        .toBinaryRow(
+                                GenericRow.of(
+                                        day == null
+                                                ? null
+                                                : (int) date(day).toLocalDate().toEpochDay(),
+                                        BinaryString.fromString(group)))
+                        .copy();
+        return new PartitionEntry(partition, 1, 1, 1, fileCreationTime, 1);
+    }
+
+    private void newRetainLatestTable(boolean primaryKey) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(PARTITION_EXPIRATION_RETAIN_LATEST.key(), "true");
+        options.put(PARTITION_EXPIRATION_TIME.key(), "2 d");
+        options.put(PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "0 s");
+        options.put(PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
+        options.put(WRITE_ONLY.key(), "true");
+        if (primaryKey) {
+            options.put(CoreOptions.BUCKET.key(), "1");
+        }
+        new FileSystemSchemaManager(LocalFileIO.create(), path)
+                .createTable(
+                        new Schema(
+                                RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE)
+                                        .getFields(),
+                                singletonList("f0"),
+                                primaryKey ? Arrays.asList("f0", "f1") : emptyList(),
+                                options,
+                                ""));
+        newTable();
     }
 
     private List<String> read() throws IOException {

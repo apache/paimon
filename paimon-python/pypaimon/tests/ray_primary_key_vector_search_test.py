@@ -397,6 +397,33 @@ def batch_builder(table, queries=None, limit=2, options=None):
             .with_options(options or {}))
 
 
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("raw", [False, True])
+def test_unified_index_options_match_legacy_search(table, ray_cluster, batch, raw):
+    overrides = {key: None for key in table.options.options.to_map()
+                 if key.startswith("pk-vector.") or ".pk-vector." in key}
+    overrides.update({"global-index.ivf-flat.index-columns": "embedding",
+                      "fields.embedding.index-options": '{"refine_factor":2,"metric":"l2"}'})
+    unified = table.copy(overrides)
+
+    def search(source, options, executor=None):
+        request = (batch_builder(source, limit=3, options=options) if batch
+                   else builder(source, limit=3, options=options))
+        plan = request.new_vector_search_scan().scan()
+        if raw:
+            plan = PrimaryKeyVectorScanPlan(plan.snapshot_id, [replace(
+                split, payloads=(), uncovered_data_files=tuple(file.file_name for file in split.data_split.files))
+                for split in plan.splits()], plan.snapshot())
+        if batch:
+            return [result.positions for result in request.new_batch_vector_search_read().read_batch_plan(
+                plan, executor=executor)]
+        return [request.new_vector_search_read().read_plan(plan, executor=executor).positions]
+
+    expected = search(table, {"ivf.refine_factor": "2"})
+    assert search(unified, {}) == expected
+    assert search(unified, {}, RaySearchTaskExecutor(concurrency=2)) == expected
+
+
 @pytest.mark.parametrize("refine", [False, True])
 @pytest.mark.parametrize("pre_filter", [None, "id >= 3", "id = 999"])
 def test_batch_public_api_matches_independent_queries(table, ray_cluster, refine, pre_filter):

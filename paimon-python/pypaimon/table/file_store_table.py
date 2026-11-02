@@ -493,8 +493,7 @@ class FileStoreTable(Table):
     def _copy_with_snapshot(self, snapshot):
         """Keep one resolved read view, including tag metadata and empty tables."""
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
-        selectors = SCAN_KEYS + [
-            CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(),
+        selectors = SCAN_KEYS + CoreOptions.INCREMENTAL_SCAN_KEYS + [
             CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(),
             CoreOptions.SCAN_CREATION_TIME_MILLIS.key(),
         ]
@@ -507,6 +506,14 @@ class FileStoreTable(Table):
         return table
 
     def _copy(self, options: dict, resolve_time_travel: bool) -> 'FileStoreTable':
+        query_auth_key = CoreOptions.QUERY_AUTH_ENABLED.key()
+        if query_auth_key in options and CoreOptions.from_dict(self.table_schema.options).query_auth_enabled:
+            try:
+                enabled = CoreOptions.from_dict(options).query_auth_enabled
+            except ValueError:
+                enabled = False
+            if not enabled:
+                raise ValueError(f"Option '{query_auth_key}' is not allowed to be disabled dynamically")
         video_key = CoreOptions.VIDEO_FRAME_FIELD.key()
         if video_key in options and options[video_key] != self.table_schema.options.get(video_key):
             raise ValueError("Cannot change immutable option " + video_key)
@@ -529,13 +536,8 @@ class FileStoreTable(Table):
 
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         preserve_snapshot = hasattr(self, "_read_snapshot") and not any(
-            key in options for key in SCAN_KEYS + [
-                CoreOptions.SCAN_MODE.key(), CoreOptions.BRANCH.key(),
-                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()])
-        if resolve_time_travel and not preserve_snapshot:
-            time_travel_schema = self._try_time_travel(Options(new_options), set(applied_options))
-            if time_travel_schema is not None:
-                new_table_schema = time_travel_schema
+            key in options for key in SCAN_KEYS + CoreOptions.INCREMENTAL_SCAN_KEYS + [
+                CoreOptions.SCAN_MODE.key(), CoreOptions.BRANCH.key()])
 
         # Re-encode the branch into the identifier when the option changes, so
         # current_branch() and any catalog-routed snapshot commit see the
@@ -554,6 +556,13 @@ class FileStoreTable(Table):
 
         new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
                                    new_table_schema, catalog_env)
+        if resolve_time_travel and not preserve_snapshot:
+            # Resolve snapshots, tags and schemas in the target branch.
+            time_travel_schema = new_table._try_time_travel(Options(new_options), set(applied_options))
+            if time_travel_schema is not None:
+                new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
+                                           time_travel_schema, catalog_env)
+
         new_table._applied_dynamic_options = applied_options
         if preserve_snapshot:
             new_table._read_snapshot = self._read_snapshot

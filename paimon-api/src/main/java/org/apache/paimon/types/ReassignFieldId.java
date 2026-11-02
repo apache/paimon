@@ -70,7 +70,8 @@ public class ReassignFieldId extends DataTypeDefaultVisitor<DataType> {
                                         f.name(),
                                         f.type().accept(this),
                                         f.description(),
-                                        f.defaultValue()));
+                                        f.defaultValue(),
+                                        f.generationExpression()));
         return builder.build();
     }
 

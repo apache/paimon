@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner.IndexMetaFileGroup;
@@ -228,7 +229,6 @@ class GlobalIndexQuery {
             Predicate predicate, Map<Integer, List<IndexGroup>> groups, Options options) {
         CompositeCandidate selected = null;
         Set<List<DataField>> seen = new HashSet<>();
-        long budget = options.get(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE).getBytes();
         for (List<IndexGroup> fieldGroups : groups.values()) {
             for (IndexGroup group : fieldGroups) {
                 if (!group.isCompositeBTree() || !seen.add(group.indexFields())) {
@@ -239,6 +239,11 @@ class GlobalIndexQuery {
                 if (!planned.isPresent()) {
                     continue;
                 }
+                long budget =
+                        new CoreOptions(options)
+                                .globalIndexOptions(group.type, group.field.name())
+                                .get(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE)
+                                .getBytes();
                 CompositeBTreePredicate.Plan plan = planned.get();
                 List<IndexGroup> definition =
                         groups.get(group.field.id()).stream()
@@ -532,8 +537,7 @@ class GlobalIndexQuery {
                 supported = true;
                 continue;
             }
-            GlobalIndexer indexer =
-                    GlobalIndexerFactoryUtils.load(group.type).create(group.indexFields(), options);
+            GlobalIndexer indexer = GlobalIndexer.create(group.type, group.indexFields(), options);
             try (GlobalIndexReader reader =
                     indexer.createReader(
                             meta -> fileIO.newInputStream(meta.filePath()),

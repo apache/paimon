@@ -23,6 +23,7 @@ from itertools import chain
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import GlobalIndexSearchMode
+from pypaimon.common.options.vector_index_options import VectorIndexOptions
 from pypaimon.execution.python.read.search.primary_key_vector_read import (
     PrimaryKeyVectorRead, _deleted_positions, _include_row_ids, _localized_candidates, _top_k,
 )
@@ -67,7 +68,8 @@ class BatchPrimaryKeyVectorRead(PrimaryKeyVectorRead, BatchVectorSearchRead):
         if not isinstance(plan, PrimaryKeyVectorScanPlan):
             raise ValueError("Primary-key vector read requires a PrimaryKeyVectorScanPlan.")
         self._index_metric = None
-        index_type = self._table.options.primary_key_vector_index_type(self._vector_column.name)
+        index_type = VectorIndexOptions.resolve(
+            self._table.options.options, None, self._vector_column.name, default_metric=False).index_type
         indexed_limit = self._indexed_search_limit(index_type)
         if indexed_limit > 2147483647:
             raise ValueError("Vector search limit overflow: limit=%d" % self._limit)
@@ -115,7 +117,9 @@ class BatchPrimaryKeyVectorRead(PrimaryKeyVectorRead, BatchVectorSearchRead):
 
     def _search_exact_candidates(self, plan):
         candidates = [[] for _ in self._query_vectors]
-        metric = self._search_metric(self._table.options.primary_key_vector_index_type(self._vector_column.name))
+        metric = self._search_metric(
+            VectorIndexOptions.resolve(
+                self._table.options.options, None, self._vector_column.name, default_metric=False).index_type)
         for split, data_file, positions, vectors in self._raw_batches(plan):
             partition = _partition_bytes(split.data_split.partition)
             for start, query_index, scores in _iter_arrow_batch_scores(vectors, self._query_vectors, metric):

@@ -26,6 +26,7 @@ from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.file_store_path_factory import _escape_partition_component
 from pypaimon.utils.range import Range
 from pypaimon.utils.range_helper import RangeHelper
 from pypaimon.write.row_id_conflict import RowIdExistenceConflict
@@ -226,8 +227,9 @@ class ConflictDetection:
             if entry.kind == 1:
                 return RuntimeError(
                     "File deletion conflicts detected! Give up committing. "
-                    "Trying to delete file {} which is not previously added.".format(
-                        entry.file.file_name))
+                    "Trying to delete file {} which is not previously added "
+                    "(partition={}, bucket={}).".format(
+                        entry.file.file_name, self._partition_to_string(entry.partition), entry.bucket))
 
         conflict = self.check_bucket_num_conflicts(merged_entries)
         if conflict is not None:
@@ -278,6 +280,21 @@ class ConflictDetection:
             return conflict
 
         return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
+
+    def _partition_to_string(self, partition):
+        values = tuple(partition.values)
+        if not values:
+            return "<non-partitioned>"
+        try:
+            path_factory = self.table.path_factory()
+            partition_values = path_factory._canonical_partition(values)
+            return "/".join(
+                "{}={}".format(_escape_partition_component(key), _escape_partition_component(partition_values[i]))
+                for i, key in enumerate(path_factory.partition_keys)
+            )
+        except Exception:
+            # Formatting diagnostics must not hide the original commit conflict.
+            return str(values)
 
     @staticmethod
     def check_bucket_num_conflicts(entries):

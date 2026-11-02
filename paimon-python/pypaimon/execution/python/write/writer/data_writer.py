@@ -378,8 +378,9 @@ class DataWriter(ABC):
             # PK files can contain a deduplicated or split subset of the
             # buffer. Java records the range of the rows actually written.
             sequences = data.column('_SEQUENCE_NUMBER')
-            min_seq = pc.min(sequences).as_py()
-            max_seq = pc.max(sequences).as_py()
+            minmax = pc.min_max(sequences)
+            min_seq = minmax["min"].as_py()
+            max_seq = minmax["max"].as_py()
         else:
             min_seq = self.sequence_generator.start
             max_seq = self.sequence_generator.current
@@ -604,8 +605,9 @@ class DataWriter(ABC):
                 "null_counts": column_array.null_count,
             }
         
-        min_values = pc.min(column_array).as_py()
-        max_values = pc.max(column_array).as_py()
+        minmax = pc.min_max(column_array)
+        min_values = minmax["min"].as_py()
+        max_values = minmax["max"].as_py()
         null_counts = column_array.null_count
         return {
             "min_values": min_values,

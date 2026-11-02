@@ -19,6 +19,7 @@ from concurrent.futures import wait
 from heapq import nsmallest
 from itertools import islice
 
+from pypaimon.common.options.vector_index_options import VectorIndexOptions
 from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
 from pypaimon.table.source.primary_key_scored_result import (
@@ -52,8 +53,8 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
         if not isinstance(plan, PrimaryKeyVectorScanPlan):
             raise ValueError("Primary-key vector read requires a PrimaryKeyVectorScanPlan.")
         self._index_metric = None
-        index_type = self._table.options.primary_key_vector_index_type(
-            self._vector_column.name)
+        index_type = VectorIndexOptions.resolve(
+            self._table.options.options, None, self._vector_column.name, default_metric=False).index_type
         indexed_limit = self._indexed_search_limit(index_type)
         if indexed_limit > 2147483647:
             raise ValueError(
@@ -173,8 +174,8 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
 
     def _raw_candidates(self, plan):
         metric = self._search_metric(
-            self._table.options.primary_key_vector_index_type(
-                self._vector_column.name))
+            VectorIndexOptions.resolve(
+                self._table.options.options, None, self._vector_column.name, default_metric=False).index_type)
         for split, data_file, positions, vectors in self._raw_batches(plan):
             for position, score in zip(positions, _iter_arrow_scores(vectors, self._query_vector, metric)):
                 if score is not None:

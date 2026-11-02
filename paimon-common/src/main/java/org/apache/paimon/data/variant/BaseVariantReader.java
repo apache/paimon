@@ -154,12 +154,8 @@ public class BaseVariantReader {
         } else if (targetType instanceof ArrayType) {
             return new ArrayReader(schema, (ArrayType) targetType, castArgs);
         } else if (targetType instanceof MapType
-                && ((MapType) targetType).getKeyType().equals(DataTypes.STRING())) {
-            if (((MapType) targetType).getKeyType().equals(DataTypes.STRING())) {
-                return new MapReader(schema, (MapType) targetType, castArgs);
-            } else {
-                throw new UnsupportedOperationException();
-            }
+                && ((MapType) targetType).getKeyType().equalsIgnoreNullable(DataTypes.STRING())) {
+            return new MapReader(schema, (MapType) targetType, castArgs);
         } else if (targetType instanceof VariantType) {
             return new VariantReader(
                     schema, (VariantType) targetType, castArgs, isTopLevelUnshredded);

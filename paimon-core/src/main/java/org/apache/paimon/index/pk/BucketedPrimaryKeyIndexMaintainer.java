@@ -38,6 +38,7 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 
@@ -370,8 +371,11 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                                                 handler,
                                                 readerFactoryBuilder,
                                                 field,
-                                                coreOptions.primaryKeyVectorDistanceMetric(
-                                                        definition.column()),
+                                                VectorIndexOptions.resolve(
+                                                                definition.options(),
+                                                                definition.indexType(),
+                                                                definition.column())
+                                                        .metric(),
                                                 definition.indexType())
                                         .withIndexOptions(definition.options());
                         break;

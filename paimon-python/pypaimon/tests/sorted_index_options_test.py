@@ -43,7 +43,7 @@ def test_primary_key_options_exclude_global_index_file_size(index_type):
         "write-buffer-size": "8 mb",
     })
 
-    resolve_options = getattr(core_options, "primary_key_%s_index_options" % index_type)
+    resolve_options = getattr(core_options, "%s_index_options" % index_type)
     options = resolve_options("name").to_map()
 
     assert "sorted-index.records-per-file" not in options

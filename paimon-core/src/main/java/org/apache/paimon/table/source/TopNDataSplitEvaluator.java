@@ -40,6 +40,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
+import static org.apache.paimon.table.source.PushDownUtils.evolvedMinMaxAvailable;
 import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 import static org.apache.paimon.table.source.PushDownUtils.tightBoundsAvailable;
 
@@ -85,7 +86,8 @@ public class TopNDataSplitEvaluator {
             if (!stats.usableForPruning()) {
                 // Some file of the split lacks min/max/null-count statistics for the sort
                 // column (stats.mode=counts/none, or files written before the column was
-                // added). The aggregate bound is then not a true bound, so ordering the
+                // added), or wrote them before an order-breaking change of the column type.
+                // The aggregate bound is then not a true bound, so ordering the
                 // split against the others could drop a split holding a top row — read it.
                 results.add(dataSplit);
                 continue;
@@ -149,6 +151,13 @@ public class TopNDataSplitEvaluator {
                 // nothing to min/max (all-null column, or file written before the column
                 // was added)
                 nullCount = nullCount == null ? fileNullCount : nullCount + fileNullCount;
+                continue;
+            }
+
+            if (!evolvedMinMaxAvailable(evolution, field)) {
+                // the column type changed in a way that breaks the order of values since
+                // this file was written, so its cast min/max bound nothing
+                complete = false;
                 continue;
             }
 

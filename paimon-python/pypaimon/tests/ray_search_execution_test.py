@@ -215,11 +215,12 @@ def test_python_primary_key_full_text_rejects_unsupported_executor_explicitly():
 
 def test_python_primary_key_vector_read_accepts_executor():
     from pypaimon.common.options.core_options import GlobalIndexSearchMode
+    from pypaimon.common.options.options import Options
     from pypaimon.execution.python.read.search.primary_key_vector_read import PrimaryKeyVectorRead
     from pypaimon.table.source.search_types import PrimaryKeyVectorScanPlan
 
     table = SimpleNamespace(options=SimpleNamespace(
-        primary_key_vector_index_type=lambda column: 'ivf-flat',
+        options=Options({'global-index.ivf-flat.index-columns': 'embedding'}),
         vector_index_search_mode=lambda: GlobalIndexSearchMode.FAST))
     reader = PrimaryKeyVectorRead(table, 1, SimpleNamespace(name='embedding'), [1.])
     result = reader.read_plan(PrimaryKeyVectorScanPlan(0, []), executor=RaySearchTaskExecutor(2))

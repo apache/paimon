@@ -18,16 +18,25 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.bucket.ConcurrentBucketFunctionFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -59,6 +68,53 @@ public class BucketFilterScanTest extends TableTestBase {
     @Test
     public void testCompositeBucketFilterWithCompoundPredicateOnPkTable() throws Exception {
         testCompositeBucketFilterWithCompoundPredicate(true);
+    }
+
+    @Test
+    public void testProviderIsConfinedWhenScanningOverwriteHistory() throws Exception {
+        Identifier tableId = identifier("provider_overwrite_history");
+        catalog.createTable(
+                tableId,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(BUCKET.key(), "2")
+                        .option(BUCKET_KEY.key(), "id")
+                        .option(
+                                "bucket-function.provider",
+                                ConcurrentBucketFunctionFactory.IDENTIFIER)
+                        .option("manifest.merge-min-count", "100")
+                        .option("scan.manifest.parallelism", "4")
+                        .build(),
+                false);
+
+        // Committed DELETE manifests retain the old bucket counts during a filtered scan.
+        for (int buckets = 2; buckets <= 4; buckets++) {
+            catalog.alterTable(
+                    tableId,
+                    Collections.singletonList(SchemaChange.setOption(BUCKET.key(), "" + buckets)),
+                    false);
+            Table table = catalog.getTable(tableId);
+            BatchWriteBuilder builder = table.newBatchWriteBuilder().withOverwrite();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                write.write(GenericRow.of(17));
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        Table table =
+                catalog.getTable(tableId)
+                        .copy(
+                                Collections.singletonMap(
+                                        ConcurrentBucketFunctionFactory.CHECK_CONCURRENCY, "true"));
+        ReadBuilder read =
+                table.newReadBuilder()
+                        .withFilter(new PredicateBuilder(table.rowType()).equal(0, 17));
+        List<Integer> ids = new ArrayList<>();
+        read.newRead()
+                .createReader(read.newScan().plan())
+                .forEachRemaining(row -> ids.add(row.getInt(0)));
+        assertThat(ids).containsExactly(17);
     }
 
     /**

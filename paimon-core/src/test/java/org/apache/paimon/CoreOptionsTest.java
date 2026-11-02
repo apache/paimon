@@ -167,6 +167,15 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testChangelogRowDeduplicateIgnoreFieldsTrim() {
+        Options conf = new Options();
+        conf.set(CoreOptions.CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS, " f1 ,f2 ,  f3  ");
+
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.changelogRowDeduplicateIgnoreFields()).containsExactly("f1", "f2", "f3");
+    }
+
+    @Test
     public void testIgnoreGlobalIndexColumnUpdateAction() {
         Options conf = new Options();
         conf.setString(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(), "IGNORE");

@@ -50,6 +50,7 @@ from pypaimon.write.merge_transform import (
     WhenNotMatched,
     _NormalizedClause,
 )
+from pypaimon.write.update_validation import _authorize_update
 from pypaimon.ray.partitioning import (
     _default_hash_shuffle_parallelism,
     _estimate_dataset_size_bytes,
@@ -183,6 +184,7 @@ def _prepare(
 
     catalog = CatalogFactory.create(catalog_options)
     table = catalog.get_table(target)
+    _authorize_update(table)
     if not table.options.data_evolution_enabled():
         raise ValueError(
             f"merge_into requires 'data-evolution.enabled' = 'true' on '{target}'."
@@ -289,6 +291,7 @@ def _prepare(
         source_read_projection = None
         if isinstance(source, str):
             source_table = catalog.get_table(source)
+            _authorize_update(source_table)
             source_read_projection = _resolve_source_projection(
                 matched_specs + not_matched_specs,
                 source_on_cols,

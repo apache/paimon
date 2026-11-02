@@ -19,7 +19,6 @@
 package org.apache.paimon.tag;
 
 import org.apache.paimon.fs.FileStatus;
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Pair;
@@ -42,19 +41,14 @@ public class TagTimeExpire {
 
     private final SnapshotManager snapshotManager;
     private final TagManager tagManager;
-    private final TagDeletion tagDeletion;
     private final List<TagCallback> callbacks;
 
     private LocalDateTime olderThanTime;
 
     private TagTimeExpire(
-            SnapshotManager snapshotManager,
-            TagManager tagManager,
-            TagDeletion tagDeletion,
-            List<TagCallback> callbacks) {
+            SnapshotManager snapshotManager, TagManager tagManager, List<TagCallback> callbacks) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
-        this.tagDeletion = tagDeletion;
         this.callbacks = callbacks;
     }
 
@@ -95,7 +89,7 @@ public class TagTimeExpire {
                         timeRetained,
                         createTime,
                         olderThanTime);
-                tagManager.deleteTag(tagName, tagDeletion, snapshotManager, callbacks);
+                tagManager.deleteTag(tagName, callbacks);
                 expired.add(tagName);
             }
         }
@@ -108,10 +102,7 @@ public class TagTimeExpire {
     }
 
     public static TagTimeExpire create(
-            SnapshotManager snapshotManager,
-            TagManager tagManager,
-            TagDeletion tagDeletion,
-            List<TagCallback> callbacks) {
-        return new TagTimeExpire(snapshotManager, tagManager, tagDeletion, callbacks);
+            SnapshotManager snapshotManager, TagManager tagManager, List<TagCallback> callbacks) {
+        return new TagTimeExpire(snapshotManager, tagManager, callbacks);
     }
 }

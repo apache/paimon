@@ -36,8 +36,12 @@ class FormatAvroReader(RecordBatchReader):
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str], full_fields: List[DataField],
                  push_down_predicate: Any, batch_size: int = 1024,
                  nested_name_paths: Optional[List[List[str]]] = None):
-        file_path_for_io = file_io.to_filesystem_path(file_path)
-        self._file = file_io.filesystem.open_input_file(file_path_for_io)
+        from pypaimon.filesystem.caching_file_io import CachingFileIO
+        if isinstance(file_io, CachingFileIO) and file_io._is_cacheable(file_path):
+            self._file = file_io.new_input_stream(file_path)
+        else:
+            file_path_for_io = file_io.to_filesystem_path(file_path)
+            self._file = file_io.filesystem.open_input_file(file_path_for_io)
         self._avro_reader = fastavro.reader(self._file)
         self._batch_size = batch_size
         self._push_down_predicate = push_down_predicate

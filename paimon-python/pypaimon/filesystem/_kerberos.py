@@ -39,6 +39,8 @@ def get_ticket_cache_path() -> Optional[str]:
         if cc.startswith('FILE:'):
             return cc[5:]
         return cc
+    if not hasattr(os, 'getuid'):
+        return None
     default_path = f'/tmp/krb5cc_{os.getuid()}'
     if os.path.exists(default_path):
         return default_path

@@ -81,7 +81,8 @@ def _rows(read, splits):
 
 
 @pytest.mark.parametrize('mode', ['append', 'de', 'pk'])
-@pytest.mark.parametrize('projection', [None, ['v', 'id'], ['id', 'id'], []])
+@pytest.mark.parametrize('projection', [
+    None, ['v', 'id'], ['id', 'id'], [], {'value': 'v', 'key': 'id', 'copy': 'id'}])
 @pytest.mark.parametrize('limit', [None, 0, 1, 5])
 def test_iterator_uses_native_read(tmp_path, mode, projection, limit):
     table, _ = _table(tmp_path, mode)
@@ -184,9 +185,9 @@ def _batch(ids, kinds=None):
         pa.array(kinds or ['+I'] * len(ids)), pa.array(ids, type=pa.int32())], names=['rowkind', 'id'])
 
 
-def _planned_read(tmp_path, limit=None):
+def _planned_read(tmp_path, limit=None, projection=None):
     table, _ = _table(tmp_path)
-    builder = table.new_read_builder().with_projection(['id'])
+    builder = table.new_read_builder().with_projection(['id'] if projection is None else projection)
     if limit is not None:
         builder.with_limit(limit)
     splits = builder.new_scan().plan().splits()
@@ -198,8 +199,9 @@ def _planned_read(tmp_path, limit=None):
 
 
 @pytest.mark.parametrize('consume', [False, True])
-def test_iterator_is_lazy_and_close_stops_native_input(tmp_path, consume):
-    read, splits = _planned_read(tmp_path)
+@pytest.mark.parametrize('projection', [['id'], {'identifier': 'id'}])
+def test_iterator_is_lazy_and_close_stops_native_input(tmp_path, consume, projection):
+    read, splits = _planned_read(tmp_path, projection=projection)
     batches = _Batches([_batch([1, 2]), RuntimeError('must not fetch next batch')])
     with patch('pypaimon.execution.native.read.table_read.native_read', return_value=batches) as prepare, \
             patch(
@@ -219,8 +221,9 @@ def test_iterator_is_lazy_and_close_stops_native_input(tmp_path, consume):
 
 
 @pytest.mark.parametrize('failure', ['read', 'schema', 'kind'])
-def test_iterator_closes_native_input_on_failure_without_replaying_python(tmp_path, failure):
-    read, splits = _planned_read(tmp_path)
+@pytest.mark.parametrize('projection', [['id'], {'identifier': 'id'}])
+def test_iterator_closes_native_input_on_failure_without_replaying_python(tmp_path, failure, projection):
+    read, splits = _planned_read(tmp_path, projection=projection)
     bad = (RuntimeError('native read failed') if failure == 'read' else
            pa.record_batch([pa.array(['+I']), pa.array(['wrong type'])], names=['rowkind', 'id'])
            if failure == 'schema' else _batch([2], ['invalid']))
@@ -237,8 +240,9 @@ def test_iterator_closes_native_input_on_failure_without_replaying_python(tmp_pa
     assert batches.closed
 
 
-def test_iterator_delegates_ordered_global_limit_in_one_native_read(tmp_path):
-    read, splits = _planned_read(tmp_path, limit=3)
+@pytest.mark.parametrize('projection', [['id'], {'identifier': 'id'}])
+def test_iterator_delegates_ordered_global_limit_in_one_native_read(tmp_path, projection):
+    read, splits = _planned_read(tmp_path, limit=3, projection=projection)
     assert len(splits) >= 2
     batches = _Batches([_batch([1, 2]), _batch([3])])
     with patch('pypaimon.execution.native.read.table_read.native_read', return_value=batches) as native, \
@@ -280,8 +284,9 @@ def test_iterator_qualifies_every_split_before_starting_native(tmp_path):
 
 
 @pytest.mark.parametrize('limit', [0, 1, None])
-def test_iterator_preserves_all_row_kinds_and_hides_transport_column(tmp_path, limit):
-    read, splits = _planned_read(tmp_path, limit)
+@pytest.mark.parametrize('projection', [['id'], {'identifier': 'id'}, {'rowkind': 'id'}])
+def test_iterator_preserves_all_row_kinds_and_hides_transport_column(tmp_path, limit, projection):
+    read, splits = _planned_read(tmp_path, limit, projection)
     kinds = ['+I', '-U', '+U', '-D']
     count = 4 if limit is None else limit
     batches = _Batches([_batch([1, 2, 3, 4][:count], kinds[:count])])
@@ -294,7 +299,10 @@ def test_iterator_preserves_all_row_kinds_and_hides_transport_column(tmp_path, l
 
 @pytest.mark.parametrize('mode', ['append', 'pk'])
 @pytest.mark.parametrize('projection', [
-    ['profile.score', 'id'], ["attrs['a']", 'id'], ['profile', 'profile.score', 'id']])
+    ['profile.score', 'id'], ["attrs['a']", 'id'], ['profile', 'profile.score', 'id'],
+    {'score': 'profile.score'}, {'value': "attrs['a']"},
+    {'score': 'profile.score', 'key': 'id', 'value': "attrs['a']", 'copy': 'profile.score'},
+    {'v': 'id', 'id': 'v', 'score': 'profile.score'}])
 def test_iterator_nested_projection_and_filter_only_inputs(tmp_path, mode, projection):
     table, _ = _table(tmp_path, mode)
     predicate = table.new_read_builder().new_predicate_builder().greater_than('v', 10)
@@ -310,6 +318,22 @@ def test_iterator_nested_projection_and_filter_only_inputs(tmp_path, mode, proje
         actual = _rows(read, splits)
     assert actual == expected
     assert actual and all(len(values) == len(projection) for values, _ in actual)
+
+
+@pytest.mark.parametrize('mode', ['append', 'pk'])
+@pytest.mark.parametrize('first', [None, 42])
+def test_named_iterator_map_key_preserves_first_match(tmp_path, mode, first):
+    table, schema = _table(tmp_path, mode)
+    _write(table, [{'id': 4, 'p': 'c', 'attrs': [('a', first), ('a', 99)]}], schema)
+    builder = table.new_read_builder().with_projection({
+        'value': "attrs['a']", 'copy': "attrs['a']", 'key': 'id',
+    }).with_filter(table.new_read_builder().new_predicate_builder().equal('id', 4))
+    read, splits = builder.new_read(), builder.new_scan().plan().splits()
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
+        assert _rows(read, splits) == [((first, first, 4), RowKind.INSERT)]
 
 
 @pytest.mark.parametrize('mode', ['append', 'de', 'pk'])
@@ -410,7 +434,7 @@ def test_iterator_pk_blob_respects_payload_mode_and_limit(tmp_path, descriptors)
 
 
 @pytest.mark.parametrize('native_write', [False, True])
-@pytest.mark.parametrize('projection', [['value', 'key'], []])
+@pytest.mark.parametrize('projection', [['value', 'key'], [], {'amount': 'value', 'identifier': 'key'}])
 def test_iterator_reads_actual_incremental_changelog_kinds(tmp_path, native_write, projection):
     from pypaimon.tests.native_changelog_batch_test import _table as changelog_table, _write as write
 
