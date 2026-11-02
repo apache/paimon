@@ -142,6 +142,71 @@ trait CopyIntoOnErrorTest { self: CopyIntoTestBase =>
     spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_skipfile_mixed")
   }
 
+  test("COPY INTO: ON_ERROR = SKIP_FILE with file names that contain spaces") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_skipfile_spaces")
+    spark.sql(s"CREATE TABLE $dbName0.copy_skipfile_spaces (id INT, name STRING)")
+
+    withCsvDir {
+      dir =>
+        createCsvFile(dir, "good data.csv", "1,Alice\n2,Bob\n")
+        createCsvFile(dir, "bad data.csv", "abc,Charlie\n")
+
+        def copyInto(): Array[Row] =
+          spark
+            .sql(s"""COPY INTO $dbName0.copy_skipfile_spaces
+                    |FROM '${dir.getAbsolutePath}'
+                    |FILE_FORMAT = (TYPE = CSV)
+                    |ON_ERROR = SKIP_FILE
+                    |""".stripMargin)
+            .collect()
+
+        val rows = copyInto()
+        val loaded = rows.filter(_.getString(1) == "LOADED")
+        val failed = rows.filter(_.getString(1) == "LOAD_FAILED")
+        assert(loaded.map(_.getString(0)).toSeq == Seq("good data.csv"), rows.toSeq)
+        assert(loaded(0).getLong(2) == 2L, rows.toSeq)
+        assert(failed.map(_.getString(0)).toSeq == Seq("bad data.csv"), rows.toSeq)
+
+        // the failed file is not recorded as loaded, so a rerun tries it again
+        val rerun = copyInto()
+        assert(
+          rerun.filter(_.getString(0) == "bad data.csv").map(_.getString(1)).toSeq ==
+            Seq("LOAD_FAILED"))
+        assert(
+          rerun.filter(_.getString(0) == "good data.csv").map(_.getString(1)).toSeq ==
+            Seq("SKIPPED"))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_skipfile_spaces")
+  }
+
+  test("COPY INTO: ON_ERROR = CONTINUE with a failed file name that contains a space") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_continue_spaces")
+    spark.sql(s"CREATE TABLE $dbName0.copy_continue_spaces (id INT, name STRING)")
+
+    withCsvDir {
+      dir =>
+        createCsvFile(dir, "bad data.csv", "abc,Alice\nxyz,Bob\n")
+
+        def copyInto(): Array[Row] =
+          spark
+            .sql(s"""COPY INTO $dbName0.copy_continue_spaces
+                    |FROM '${dir.getAbsolutePath}'
+                    |FILE_FORMAT = (TYPE = CSV)
+                    |ON_ERROR = CONTINUE
+                    |""".stripMargin)
+            .collect()
+
+        val rows = copyInto()
+        assert(rows.length == 1)
+        assert(rows(0).getString(1) == "LOAD_FAILED", rows.toSeq)
+        assert(rows(0).getLong(4) == 2L, rows.toSeq)
+        assert(copyInto()(0).getString(1) == "LOAD_FAILED")
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_continue_spaces")
+  }
+
   test("COPY INTO: ON_ERROR = SKIP_FILE with all good files") {
     spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_skipfile_ok")
     spark.sql(s"CREATE TABLE $dbName0.copy_skipfile_ok (id INT, name STRING)")

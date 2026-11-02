@@ -22,7 +22,7 @@ from decimal import Decimal, localcontext
 from concurrent.futures import ThreadPoolExecutor
 
 from pypaimon.common.predicate import Predicate
-from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluator
+from pypaimon.execution.python.globalindex.global_index_evaluator import GlobalIndexEvaluator
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.schema.data_types import DataField, AtomicType

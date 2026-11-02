@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{FullTextSearch, HybridSearch, Predicate, TopN, VectorSearch}
 import org.apache.paimon.spark.read.{BinPackingSplits, VariantExtractionInfo}
@@ -51,7 +52,11 @@ case class PaimonScan(
     table match {
       case fileStoreTable: FileStoreTable =>
         val bucketSpec = fileStoreTable.bucketSpec()
-        if (bucketSpec.getBucketMode != BucketMode.HASH_FIXED) {
+        if (
+          bucketSpec.getBucketMode != BucketMode.HASH_FIXED ||
+          coreOptions.bucketFunctionProvider().isPresent ||
+          coreOptions.bucketFunctionType() != BucketFunctionType.DEFAULT
+        ) {
           None
         } else if (bucketSpec.getBucketKeys.size() > 1) {
           None

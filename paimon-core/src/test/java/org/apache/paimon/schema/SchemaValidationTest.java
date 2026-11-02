@@ -970,6 +970,43 @@ class SchemaValidationTest {
     }
 
     @ParameterizedTest
+    @CsvSource({"aggregation, k1", "aggregation, k2", "partial-update, k1", "partial-update, k2"})
+    void testPrimaryKeyIgnoreRetract(String mergeEngine, String primaryKey) {
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", mergeEngine);
+        options.put("fields.v.aggregate-function", "last_non_null_value");
+        options.put("fields.v.ignore-retract", "true");
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        Arrays.asList(
+                                new DataField(0, "k1", DataTypes.INT()),
+                                new DataField(1, "k2", DataTypes.INT()),
+                                new DataField(2, "v", DataTypes.INT())),
+                        2,
+                        singletonList("k1"),
+                        Arrays.asList("k1", "k2"),
+                        options,
+                        "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+
+        String option = "fields." + primaryKey + ".ignore-retract";
+        options.put(option, "true");
+        assertThatThrownBy(() -> validateTableSchema(schema.copy(options)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Primary key field '"
+                                + primaryKey
+                                + "' cannot be configured with '"
+                                + option
+                                + "=true'.");
+
+        options.put(option, "false");
+        assertThatCode(() -> validateTableSchema(schema.copy(options))).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
     @CsvSource({
         "aggregation, fields.data.num.aggregate-function, sum",
         "partial-update, fields.data.num.sequence-group.sort-order, descending"
@@ -1843,35 +1880,18 @@ class SchemaValidationTest {
                                                 emptyList(),
                                                 new HashMap<>())));
 
-        Map<String, String> avroOptions = new HashMap<>();
-        avroOptions.put(CoreOptions.FILE_FORMAT.key(), "avro");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        geospatialSchema(
-                                                fields, emptyList(), emptyList(), avroOptions)))
-                .hasMessageContaining("require 'file.format'='parquet'");
-
-        Map<String, String> perLevelOptions = new HashMap<>();
-        perLevelOptions.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:orc");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        geospatialSchema(
-                                                fields, emptyList(), emptyList(), perLevelOptions)))
-                .hasMessageContaining("require parquet at every level");
-
-        Map<String, String> changelogOptions = new HashMap<>();
-        changelogOptions.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "orc");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        geospatialSchema(
-                                                fields,
-                                                emptyList(),
-                                                emptyList(),
-                                                changelogOptions)))
-                .hasMessageContaining("require 'changelog-file.format' to be parquet");
+        for (String format : Arrays.asList("parquet", "row")) {
+            Map<String, String> options = new HashMap<>();
+            options.put(CoreOptions.FILE_FORMAT.key(), format);
+            options.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:orc,1:avro");
+            options.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "orc");
+            assertThatNoException()
+                    .isThrownBy(
+                            () ->
+                                    validateTableSchema(
+                                            geospatialSchema(
+                                                    fields, emptyList(), emptyList(), options)));
+        }
 
         Map<String, String> icebergV2Options = new HashMap<>();
         icebergV2Options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
@@ -2013,9 +2033,9 @@ class SchemaValidationTest {
                         "Geometry and geography columns cannot be clustering columns: [nested].");
     }
 
-    @Test
-    public void testVariantTypeValidation() {
-        // a top-level variant and one nested inside a struct
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "row"})
+    public void testVariantTypeValidation(String format) {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "id", DataTypes.INT()),
@@ -2024,7 +2044,11 @@ class SchemaValidationTest {
                                 2,
                                 "nested",
                                 DataTypes.ROW(DataTypes.FIELD(3, "inner", DataTypes.VARIANT()))));
-
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_FORMAT.key(), format);
+        options.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:orc,1:avro");
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
+        options.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "avro");
         assertThatNoException()
                 .isThrownBy(
                         () ->
@@ -2032,48 +2056,8 @@ class SchemaValidationTest {
                                         geospatialSchema(
                                                 fields,
                                                 emptyList(),
-                                                emptyList(),
-                                                new HashMap<>())));
-
-        // the main format used to be caught by the format's own type converter, with a bare
-        // "Unsupported type: VARIANT" that named neither the column nor the option
-        Map<String, String> orcOptions = new HashMap<>();
-        orcOptions.put(CoreOptions.FILE_FORMAT.key(), "orc");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        geospatialSchema(
-                                                fields, emptyList(), emptyList(), orcOptions)))
-                .hasMessageContaining(
-                        "Variant columns [v, nested] require 'file.format'='parquet', but was 'orc'");
-
-        // these two used to pass DDL and fail on the first row written with that format
-        Map<String, String> perLevelOptions = new HashMap<>();
-        perLevelOptions.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:orc");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        geospatialSchema(
-                                                fields,
-                                                emptyList(),
                                                 singletonList("id"),
-                                                perLevelOptions)))
-                .hasMessageContaining(
-                        "Variant columns [v, nested] require parquet at every level, but 'file.format.per.level' contains '0:orc'");
-
-        Map<String, String> changelogOptions = new HashMap<>();
-        changelogOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
-        changelogOptions.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "avro");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        geospatialSchema(
-                                                fields,
-                                                emptyList(),
-                                                singletonList("id"),
-                                                changelogOptions)))
-                .hasMessageContaining(
-                        "Variant columns [v, nested] require 'changelog-file.format' to be parquet, but was 'avro'");
+                                                options)));
     }
 
     private TableSchema geospatialSchema(

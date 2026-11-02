@@ -83,9 +83,18 @@ class FileTypeClassifyTest(unittest.TestCase):
         self.assertEqual(FileType.BUCKET_INDEX, FileType.classify("index-uuid-1"))
 
     def test_data_files(self):
-        self.assertEqual(FileType.DATA, FileType.classify("data-abc.orc"))
-        self.assertEqual(FileType.DATA, FileType.classify("data-abc.parquet"))
+        for name in ("data-abc.parquet", "data-abc.ORC", "data-abc.avro",
+                     "data-abc.row", "data-abc.mosaic"):
+            self.assertEqual(FileType.STRUCTURED_DATA, FileType.classify(name))
+        for name in ("data-abc.blob", "data-abc.video", "data-abc.vortex",
+                     "data-abc.lance"):
+            self.assertEqual(FileType.DATA, FileType.classify(name))
         self.assertEqual(FileType.DATA, FileType.classify("unknown-file"))
+
+    def test_structured_data_keeps_metadata_and_indexes_separate(self):
+        self.assertEqual(FileType.META, FileType.classify("manifest-1.avro"))
+        self.assertEqual(FileType.META, FileType.classify("snapshot-1.parquet"))
+        self.assertEqual(FileType.FILE_INDEX, FileType.classify("data.parquet.index"))
 
     def test_temp_file_unwrap(self):
         # .{originalName}.{UUID}.tmp -> originalName
@@ -94,7 +103,7 @@ class FileTypeClassifyTest(unittest.TestCase):
         self.assertEqual(FileType.META, FileType.classify(temp_name))
 
         temp_data = f".data-abc.orc.{uuid}.tmp"
-        self.assertEqual(FileType.DATA, FileType.classify(temp_data))
+        self.assertEqual(FileType.STRUCTURED_DATA, FileType.classify(temp_data))
 
     def test_temp_file_not_matching_pattern(self):
         self.assertEqual(FileType.DATA, FileType.classify(".short.tmp"))
@@ -106,6 +115,16 @@ class FileTypeClassifyTest(unittest.TestCase):
         self.assertTrue(FileType.FILE_INDEX.is_index())
         self.assertFalse(FileType.META.is_index())
         self.assertFalse(FileType.DATA.is_index())
+        self.assertFalse(FileType.STRUCTURED_DATA.is_index())
+
+    def test_parse_whitelist(self):
+        self.assertEqual(
+            {FileType.STRUCTURED_DATA},
+            FileType.parse_whitelist("structured-data"))
+        self.assertEqual(
+            {FileType.DATA, FileType.STRUCTURED_DATA},
+            FileType.parse_whitelist("data"))
+        self.assertEqual(set(FileType), FileType.parse_whitelist("*"))
 
 
 class FileTypeMutableTest(unittest.TestCase):
@@ -162,13 +181,14 @@ class FileTypeMutableTest(unittest.TestCase):
 
 class FileTypeParseWhitelistTest(unittest.TestCase):
 
-    ALL = {FileType.META, FileType.DATA, FileType.BUCKET_INDEX,
-           FileType.GLOBAL_INDEX, FileType.FILE_INDEX}
+    ALL = {FileType.META, FileType.DATA, FileType.STRUCTURED_DATA,
+           FileType.BUCKET_INDEX, FileType.GLOBAL_INDEX, FileType.FILE_INDEX}
 
     def test_named_values(self):
         self.assertEqual({FileType.META, FileType.GLOBAL_INDEX},
                          FileType.parse_whitelist("meta,global-index"))
-        self.assertEqual({FileType.BUCKET_INDEX, FileType.DATA, FileType.FILE_INDEX},
+        self.assertEqual({FileType.BUCKET_INDEX, FileType.DATA,
+                          FileType.STRUCTURED_DATA, FileType.FILE_INDEX},
                          FileType.parse_whitelist(" bucket-index , data,file-index "))
 
     def test_wildcard(self):

@@ -26,8 +26,8 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 from pypaimon.schema.data_types import PyarrowFieldParser
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
 pytestmark = pytest.mark.native_plan
@@ -67,7 +67,7 @@ def _upsert(table, source, native, stream, columns=('value',)):
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch.object(
-                TableUpsertByKey, '_upsert_partition',
+                PythonTableUpsert, '_upsert_partition',
                 side_effect=AssertionError('upsert fell back to Python')))
         update = builder.new_update().with_update_type(list(columns))
         messages = (update.upsert_by_arrow_with_key(source, ['key'], 17) if stream

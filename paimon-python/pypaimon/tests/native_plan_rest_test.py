@@ -23,7 +23,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.api.api_response import ConfigResponse, ErrorResponse, GetTableSnapshotResponse
 from pypaimon.api.auth import BearTokenAuthProvider
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.table.row.blob import BlobViewStruct
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
@@ -82,7 +82,7 @@ def test_catalog_snapshot_controls_native_plan(rest_source, response):
 
 @pytest.mark.parametrize('code', [403, 404, 500, 501, 503])
 def test_catalog_snapshot_failure_never_reads_disk(rest_source, code):
-    from pypaimon.read.native_plan import native_plan
+    from pypaimon.execution.native.read.plan import (native_plan)
     table, server, _ = rest_source
     reply = ErrorResponse('TABLE', 't', 'snapshot unavailable', code)
     with patch.object(server, '_table_snapshot_handle', return_value=server._mock_response(reply, code)):
@@ -112,7 +112,8 @@ def test_rest_branch_keeps_catalog_snapshot_and_schema(rest_source, rest_catalog
 
 @pytest.mark.parametrize('from_tag', [False, True], ids=['empty-branch', 'tagged-branch'])
 def test_dynamic_branch_uses_native_catalog(rest_source, rest_catalog, from_tag):
-    from pypaimon.read.native_plan import _resolved_rest_table_response, native_plan
+    from pypaimon.execution.native.table import (_resolved_rest_table_response)
+    from pypaimon.execution.native.read.plan import (native_plan)
     table, _, _ = rest_source
     catalog, _ = rest_catalog
     if from_tag:
@@ -123,7 +124,7 @@ def test_dynamic_branch_uses_native_catalog(rest_source, rest_catalog, from_tag)
     assert _resolved_rest_table_response(branch) is None
     plan = native_plan(branch)
     assert plan.snapshot_id == (1 if from_tag else None)
-    with patch('pypaimon.read.table_read.TableRead._create_split_read',
+    with patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                side_effect=AssertionError('native read fell back')):
         rows = branch.new_read_builder().new_read().to_arrow(plan.splits()).to_pylist()
     assert rows == ([{'id': 1, 'value': 'old'}] if from_tag else [])
@@ -131,7 +132,7 @@ def test_dynamic_branch_uses_native_catalog(rest_source, rest_catalog, from_tag)
 
 def test_resolved_rest_table_keeps_refreshable_file_io(rest_source, rest_catalog):
     from pypaimon.api.api_response import GetTableTokenResponse
-    from pypaimon.read.native_plan import _resolved_schema_json
+    from pypaimon.execution.native.table import (_resolved_schema_json)
     from pypaimon_rust.datafusion import PaimonCatalog
     table, server, _ = rest_source
     catalog, _ = rest_catalog
@@ -159,7 +160,7 @@ def test_native_rest_reuses_python_data_token(
     from pypaimon.catalog.rest.rest_token import RESTToken
     from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
     from pypaimon.filesystem.caching_file_io import CachingFileIO
-    from pypaimon.read.native_plan import _catalog_options, _resolved_rest_table_response
+    from pypaimon.execution.native.table import (_catalog_options, _resolved_rest_table_response)
     from pypaimon_rust.datafusion import Table as NativeTable
 
     source, server, _ = rest_source
@@ -207,8 +208,8 @@ def test_native_rest_reuses_python_data_token(
             assert load.call_count == 1
 
 
-@pytest.mark.parametrize('branch', [None, 'dev'])
-def test_rest_dotted_database_and_table_keep_identity(rest_catalog, branch):
+@pytest.mark.parametrize('branch,by_id', [(None, False), ('dev', False), (None, True)])
+def test_rest_dotted_database_and_table_keep_identity(rest_catalog, branch, by_id):
     from pypaimon.common.identifier import Identifier
     from pypaimon.tests.native_plan_resolved_schema_test import _assert_parity, _write
     catalog, server = rest_catalog
@@ -218,6 +219,8 @@ def test_rest_dotted_database_and_table_keep_identity(rest_catalog, branch):
         pa.schema([('id', pa.int64()), ('value', pa.string())])), False)
     table = catalog.get_table(identifier)
     _write(table, [{'id': 1, 'value': 'old'}])
+    if by_id:
+        table = catalog.get_table_by_id(table.catalog_environment.uuid)
     if branch:
         catalog.create_tag(identifier, 'first', 1)
         catalog.create_branch(identifier, branch, tag_name='first')
@@ -264,12 +267,13 @@ def test_rest_blob_view_limit_filters_before_resolving_unselected_view(rest_cata
     builder = views.new_read_builder().with_limit(1)
     builder.with_filter(builder.new_predicate_builder().equal('id', 11))
     scan = builder.new_scan()
-    with patch.object(scan.file_scanner, 'scan',
-                      side_effect=AssertionError('native view plan fell back')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+            side_effect=AssertionError('native view plan fell back')):
         plan = scan.plan()
     assert all(getattr(split, '_native_split', None) is not None
                for split in plan.splits())
-    with patch('pypaimon.read.table_read.TableRead._create_split_read',
+    with patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                side_effect=AssertionError('native view read fell back')):
         assert builder.new_read().to_arrow(plan.splits()).to_pylist() == [
             {'id': 11, 'payload': b'selected'}]
@@ -298,7 +302,7 @@ def test_repeated_plans_reuse_remote_file_sizes(rest_source, tmp_path):
     from pypaimon.catalog.catalog_environment import CatalogEnvironment
     from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
     from pypaimon.common.options.options import Options
-    from pypaimon.read.native_plan import native_plan
+    from pypaimon.execution.native.read.plan import (native_plan)
 
     table, _, _ = rest_source
     root = Path(urlparse(table.table_path).path)
@@ -432,7 +436,7 @@ def test_rest_blob_view_dependency_read_via(rest_blob_views, native, nested):
     guard, requests = _require_blob_view_read_via(server, root.identifier)
     with guard, ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
+            stack.enter_context(patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                                       side_effect=AssertionError('native Blob view read fell back')))
         builder = root.new_read_builder()
         rows = builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id').to_pylist()
@@ -464,7 +468,7 @@ def test_rest_blob_view_merge_source_keeps_dependency_context(rest_blob_views, n
     guard, requests = _require_blob_view_read_via(server, root.identifier)
     with guard, ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._normalize_source',
                                       side_effect=AssertionError('Python MERGE source materialization')))
         messages = builder.new_update().merge_into(root, on=['id'], when_not_matched=[WhenNotMatched('*')])
         builder.new_commit().commit(messages)
@@ -581,8 +585,9 @@ def test_rest_blob_view_payload_uses_upstream_token(rest_blob_views, native):
             guard, dependency_requests = _require_blob_view_read_via(rest_server, view.identifier)
             with guard, ExitStack() as stack:
                 if native:
-                    stack.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
-                                              side_effect=AssertionError('token view read fell back')))
+                    stack.enter_context(patch(
+                        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                        side_effect=AssertionError('token view read fell back')))
                 builder = view.new_read_builder()
                 result = builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id')
             assert result.to_pylist() == [dict(id=0, payload=b'actual'), dict(id=1, payload=None)]
@@ -634,7 +639,7 @@ def test_native_rest_blob_views_group_upstream_fields_by_id(rest_catalog):
     # Drop an ordinary column so BLOB field IDs differ from their positions.
     catalog.alter_table('default.upstream', [SchemaChange.drop_column('id')])
     guard, requests = _require_blob_view_read_via(server, view.identifier)
-    with guard, patch('pypaimon.read.table_read.TableRead._create_split_read',
+    with guard, patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                       side_effect=AssertionError('multi-field view read fell back')):
         builder = view.new_read_builder()
         rows = builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id').to_pylist()
@@ -673,7 +678,7 @@ def test_rest_blob_view_keeps_branch_and_explicit_outer_context(rest_blob_views,
     guard, requests = _require_blob_view_read_via(server, expected)
     with guard, ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
+            stack.enter_context(patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                                       side_effect=AssertionError('branch view read fell back')))
         builder = view.new_read_builder()
         result = builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id')
@@ -694,7 +699,7 @@ def test_native_rest_blob_view_does_not_bypass_denied_dependency(rest_blob_views
         return route(method, path, parameters, data, headers)
 
     with patch.object(server, '_route_request', side_effect=deny_upstream), \
-            patch('pypaimon.read.table_read.TableRead._create_split_read',
+            patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                   side_effect=AssertionError('denied dependency fell back')):
         builder = root.new_read_builder()
         with pytest.raises(Exception, match='upstream denied'):

@@ -64,10 +64,10 @@ cd .. && mvn -pl paimon-docs -am package -DskipTests
    ```yaml
    ---
    title: "Page Title"
-   sidebar_position: 5
    ---
    ```
-3. The page will automatically appear in the sidebar based on `sidebar_position`
+3. Add the page's document ID to the appropriate category in `sidebars.js`.
+   Sidebar entries and their order are configured explicitly.
 
 ## Using Tabs
 

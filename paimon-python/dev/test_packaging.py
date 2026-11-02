@@ -116,12 +116,155 @@ class PackagingTest(unittest.TestCase):
     def test_distribution_contents(self):
         names, metadata, _ = wheel_contents(self.wheel)
         self.assertEqual(">=3.6", metadata["Requires-Python"])
-        self.assertFalse(any(name.startswith(("pypaimon/tests/", "pypaimon/acceptance/"))
+        self.assertFalse(any(name.startswith("pypaimon/tests/")
                              for name in names))
         self.assertFalse(any(name.endswith((".so", ".pyd", ".jar")) for name in names))
-        for name in ("pypaimon/sample/data/data.jsonl", "pypaimon/_version.py",
-                     "pypaimon/benchmark/act/default_experiment.json"):
+        self.assertIn("pypaimon/_version.py", names)
+        execution_files = (
+            "pypaimon/common/transform_schema.py",
+            "pypaimon/filesystem/vortex_utils.py",
+            "pypaimon/execution/python/write/format_file_writer.py",
+            "pypaimon/table/source/search_execution.py",
+            "pypaimon/ray/search_execution.py",
+            "pypaimon/execution/native/read/search_execution.py",
+            "pypaimon/execution/python/read/search/distributed_search.py",
+            "pypaimon/execution/python/read/search/distributed_vector_search.py",
+            "pypaimon/execution/python/read/search/distributed_full_text_search.py",
+            "pypaimon/execution/python/map_blob_key_serializer.py",
+            "pypaimon/execution/python/globalindex/ray_index_build.py",
+            "pypaimon/common/external_path_provider.py",
+            "pypaimon/common/arrow_predicate.py",
+            "pypaimon/execution/python/read/blob_view_lookup.py",
+            "pypaimon/execution/python/read/interval_partition.py",
+            "pypaimon/execution/python/read/map_shared_shredding.py",
+            "pypaimon/execution/python/read/variant_shredding.py",
+            "pypaimon/execution/python/write/dynamic_bucket.py",
+            "pypaimon/execution/python/write/merge_transform.py",
+            "pypaimon/schema/data_type_casts.py",
+            "pypaimon/utils/numeric_utils.py",
+            "pypaimon/utils/temporal_utils.py",
+            "pypaimon/utils/temporal_string.py",
+            "pypaimon/utils/row_to_string.py",
+            "pypaimon/execution/python/casting/__init__.py",
+            "pypaimon/execution/python/casting/schema_evolution.py",
+            "pypaimon/execution/python/casting/decimal_cast.py",
+            "pypaimon/execution/python/casting/temporal_cast.py",
+            "pypaimon/execution/python/casting/temporal_string.py",
+            "pypaimon/execution/python/write/partition_spec.py",
+            "pypaimon/execution/python/deletionvectors/__init__.py",
+            "pypaimon/execution/python/deletionvectors/deletion_vector.py",
+            "pypaimon/execution/python/deletionvectors/bitmap_deletion_vector.py",
+            "pypaimon/execution/python/deletionvectors/apply_deletion_vector_reader.py",
+            "pypaimon/write/backend_dispatch.py",
+            "pypaimon/read/read_dispatch.py",
+            "pypaimon/read/read_support.py",
+            "pypaimon/read/read_explain.py",
+            "pypaimon/globalindex/index_dispatch.py",
+            "pypaimon/table/source/search_dispatch.py",
+            "pypaimon/write/update_dispatch.py",
+            "pypaimon/write/write_dispatch.py",
+            "pypaimon/globalindex/vindex_input.py",
+            "pypaimon/write/input_adapter.py",
+            "pypaimon/write/merge_condition.py",
+            "pypaimon/write/merge_transform.py",
+            "pypaimon/read/datasource/torch_dataset.py",
+            "pypaimon/read/datasource/ray_datasource.py",
+            "pypaimon/read/datasource/split_provider.py",
+            "pypaimon/write/ray_datasink.py",
+            "pypaimon/execution/python/read/table_read.py",
+            "pypaimon/execution/python/read/table_scan.py",
+            "pypaimon/execution/python/read/auth_support.py",
+            "pypaimon/execution/python/read/scan_distribution.py",
+            "pypaimon/execution/python/read/format_table_read.py",
+            "pypaimon/execution/python/read/format_table_scan.py",
+            "pypaimon/execution/python/read/object_table_read.py",
+            "pypaimon/execution/python/read/object_table_scan.py",
+            "pypaimon/table/system/system_table_read.py",
+            "pypaimon/table/system/system_table_scan.py",
+            "pypaimon/execution/python/merge_engine_dispatch.py",
+            "pypaimon/execution/python/read/search/vector_search_read.py",
+            "pypaimon/execution/python/read/search/factories.py",
+            "pypaimon/execution/python/read/search/hybrid_search.py",
+            "pypaimon/ray/vector_index_build.py",
+            "pypaimon/execution/python/globalindex/btree/btree_index_reader.py",
+            "pypaimon/execution/python/globalindex/btree/block_handle.py",
+            "pypaimon/execution/python/globalindex/block_compression.py",
+            "pypaimon/execution/python/globalindex/key_serializer.py",
+            "pypaimon/execution/python/index/pk/primary_key_index_source_policy.py",
+            "pypaimon/execution/python/index/pksorted/pk_sorted_bucket_index_state.py",
+            "pypaimon/execution/python/index/pksorted/pk_sorted_index_group.py",
+            "pypaimon/execution/python/globalindex/vindex/vindex_vector_global_index_reader.py",
+            "pypaimon/execution/python/write/table_write.py",
+            "pypaimon/execution/python/write/table_commit.py",
+            "pypaimon/execution/python/write/format_table_write.py",
+            "pypaimon/execution/python/write/format_table_commit.py",
+            "pypaimon/execution/python/write/bucket_metadata.py",
+            "pypaimon/execution/native/read/table_read.py",
+            "pypaimon/execution/native/read/plan.py",
+            "pypaimon/execution/native/read/system_table.py",
+            "pypaimon/execution/native/read/vindex_reader.py",
+            "pypaimon/execution/native/write/native_write.py",
+            "pypaimon/execution/native/write/native_commit.py",
+            "pypaimon/execution/native/write/postpone_bucket.py",
+            "pypaimon/read/blob_read_support.py",
+            "pypaimon/read/scan_request.py",
+            "pypaimon/table/source/search_types.py",
+            "pypaimon/globalindex/vindex_reader.py",
+            "pypaimon/write/bucket_planning.py",
+            "pypaimon/write/commit_options.py",
+            "pypaimon/execution/python/write/input_routing.py",
+        )
+        for name in execution_files:
             self.assertIn(name, names)
+        for name in names:
+            if name.startswith("pypaimon/execution/") and name.endswith(".py"):
+                self.assertIn(name.split("/")[2], ("python", "native", "__init__.py"))
+        internal_aliases = (
+            "pypaimon/execution/python/write/external_path_provider.py",
+            "pypaimon/execution/python/read/predicate_json_parser.py",
+            "pypaimon/execution/python/write/merge_condition.py",
+            "pypaimon/common/map_blob_key_serializer.py",
+            "pypaimon/utils/blob_view_lookup.py",
+            "pypaimon/read/interval_partition.py",
+            "pypaimon/casting/__init__.py",
+            "pypaimon/casting/data_type_casts.py",
+            "pypaimon/casting/schema_evolution.py",
+            "pypaimon/casting/decimal_cast.py",
+            "pypaimon/casting/temporal_cast.py",
+            "pypaimon/casting/temporal_string.py",
+            "pypaimon/casting/numeric_utils.py",
+            "pypaimon/casting/temporal_utils.py",
+            "pypaimon/casting/row_to_string.py",
+            "pypaimon/write/partition_spec.py",
+            "pypaimon/deletionvectors/__init__.py",
+            "pypaimon/deletionvectors/deletion_vector.py",
+            "pypaimon/deletionvectors/bitmap_deletion_vector.py",
+            "pypaimon/deletionvectors/apply_deletion_vector_reader.py",
+            "pypaimon/execution/python/globalindex/ray_build.py",
+            "pypaimon/execution/python/read/system_table_read.py",
+            "pypaimon/execution/python/read/system_table_scan.py",
+            "pypaimon/common/merge_engine_dispatch.py",
+            "pypaimon/read/native_plan.py",
+            "pypaimon/read/native_row_iterator.py",
+            "pypaimon/table/source/full_text_read.py",
+            "pypaimon/table/source/vector_search_scan.py",
+            "pypaimon/table/source/native_search_plan.py",
+            "pypaimon/table/system/native_system_table.py",
+            "pypaimon/globalindex/bitmap/__init__.py",
+            "pypaimon/globalindex/btree/__init__.py",
+            "pypaimon/globalindex/full_text/__init__.py",
+            "pypaimon/globalindex/lumina/__init__.py",
+            "pypaimon/globalindex/vindex/__init__.py",
+            "pypaimon/globalindex/btree/block_reader.py",
+            "pypaimon/globalindex/btree_format/block_handle.py",
+            "pypaimon/globalindex/bitmap/bitmap_index_writer.py",
+            "pypaimon/globalindex/block_compression.py",
+            "pypaimon/index/pk/primary_key_index_source_policy.py",
+            "pypaimon/index/pksorted/pk_sorted_bucket_index_state.py",
+            "pypaimon/index/pksorted/pk_sorted_index_group.py",
+        )
+        for name in internal_aliases:
+            self.assertNotIn(name, names)
         for suffix in ("/LICENSE", "/NOTICE"):
             self.assertTrue(any(".dist-info/" in name and name.endswith(suffix)
                                 for name in names))
@@ -130,9 +273,12 @@ class PackagingTest(unittest.TestCase):
             prefix = "pypaimon-{}/".format(self.version)
             for name in ("pyproject.toml", "setup.py", "LICENSE", "NOTICE", "README.md"):
                 self.assertIn(prefix + name, names)
+            for name in execution_files:
+                self.assertIn(prefix + name, names)
+            for name in internal_aliases:
+                self.assertNotIn(prefix + name, names)
             self.assertFalse(any("requirements.txt" in name or "requirements-dev.txt" in name
-                                 or name.startswith((prefix + "pypaimon/tests/",
-                                                     prefix + "pypaimon/acceptance/"))
+                                 or name.startswith(prefix + "pypaimon/tests/")
                                  for name in names))
 
     @staticmethod

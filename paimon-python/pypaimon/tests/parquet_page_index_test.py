@@ -28,8 +28,8 @@ import pytest
 from pypaimon.common.options import Options
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.read.reader import format_pyarrow_reader as reader_module
-from pypaimon.read.reader import parquet_page_index_reader as page_module
+from pypaimon.execution.python.read.reader import format_pyarrow_reader as reader_module
+from pypaimon.execution.python.read.reader import parquet_page_index_reader as page_module
 from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
 from pypaimon.tests.parquet_metadata_cache_test import _CountingLocalFileSystem
 

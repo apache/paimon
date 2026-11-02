@@ -22,6 +22,9 @@ These exercise the duck-typed surface so callers can reach for
 exactly as they would on a regular data table.
 """
 
+import subprocess
+import sys
+import textwrap
 import types
 import unittest
 
@@ -153,6 +156,54 @@ class SystemReadPipelineTest(unittest.TestCase):
     def test_new_read_returns_system_table_read(self):
         rb = self.table.new_read_builder()
         self.assertIsInstance(rb.new_read(), SystemTableRead)
+
+    def test_arrow_result_adaptation_needs_neither_execution_backend(self):
+        result = subprocess.run(
+            [sys.executable, "-c", textwrap.dedent("""
+                import importlib.abc
+                import pickle
+                import sys
+                from types import SimpleNamespace
+
+                class NoExecutionBackend(importlib.abc.MetaPathFinder):
+                    def find_spec(self, fullname, path=None, target=None):
+                        if fullname.startswith((
+                            'pypaimon.execution.python', 'pypaimon.execution.native',
+                        )):
+                            raise AssertionError('Unexpected execution backend: ' + fullname)
+
+                sys.meta_path.insert(0, NoExecutionBackend())
+                import pyarrow as pa
+                from pypaimon.common.predicate_builder import PredicateBuilder
+                from pypaimon.schema.data_types import AtomicType, DataField, RowType
+                from pypaimon.table.system.system_table_read import SystemTableRead
+                from pypaimon.table.system.system_table_scan import SystemTableScan
+
+                fields = [
+                    DataField(0, 'name', AtomicType('STRING', nullable=False)),
+                    DataField(1, 'id', AtomicType('BIGINT', nullable=False)),
+                ]
+                table = SimpleNamespace(
+                    row_type=lambda: RowType(False, fields),
+                    _build_arrow_table=lambda: pa.table({
+                        'name': ['first', 'second', 'third'], 'id': [1, 2, 3],
+                    }),
+                )
+                splits = pickle.loads(pickle.dumps(SystemTableScan(table).plan().splits()))
+                predicate = PredicateBuilder(fields).greater_than('id', 1)
+                reader = SystemTableRead(table, [fields[0]], predicate, 1)
+                assert reader.to_arrow(splits).to_pylist() == [{'name': 'second'}]
+                assert list(reader.to_iterator(splits)) == [{'name': 'second'}]
+                batches = list(reader.to_record_batch_iterator(splits))
+                assert len(batches) == 1
+                assert batches[0].to_pylist() == [{'name': 'second'}]
+                assert reader.to_arrow([]).num_rows == 0
+                assert 'pypaimon_rust' not in sys.modules
+            """)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
 
 
 if __name__ == "__main__":

@@ -23,10 +23,7 @@ from unittest.mock import patch
 
 import pyarrow as pa
 
-from pypaimon.read.reader.concat_batch_reader import (
-    DataEvolutionMergeReader,
-    MergeAllBatchReader,
-)
+from pypaimon.execution.python.read.reader.concat_batch_reader import (DataEvolutionMergeReader, MergeAllBatchReader)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 
 
@@ -48,8 +45,10 @@ class ConcatBatchReaderTest(unittest.TestCase):
         from pypaimon.common.options import Options
         from pypaimon.common.options.core_options import CoreOptions
         from pypaimon.filesystem.local_file_io import LocalFileIO
-        from pypaimon.read.reader.blob_descriptor_convert_reader import (
-            BlobDataBatchReader, BlobInlineConvertReader)
+        from pypaimon.execution.python.read.reader.blob_descriptor_convert_reader import (
+            BlobDataBatchReader,
+            BlobInlineConvertReader,
+        )
         from pypaimon.table.row.blob import BlobDescriptor
 
         with tempfile.TemporaryDirectory() as root:
@@ -136,7 +135,7 @@ class ConcatBatchReaderTest(unittest.TestCase):
         )
 
         with patch(
-                "pypaimon.read.reader.concat_batch_reader._MAX_ARROW_OFFSET",
+                "pypaimon.execution.python.read.reader.concat_batch_reader._MAX_ARROW_OFFSET",
                 4):
             actual = []
             while True:
@@ -194,7 +193,7 @@ class ConcatBatchReaderTest(unittest.TestCase):
                     batch_size=2,
                 )
                 with patch(
-                        "pypaimon.read.reader.concat_batch_reader."
+                        "pypaimon.execution.python.read.reader.concat_batch_reader."
                         "_MAX_ARROW_OFFSET",
                         3):
                     sizes = []

@@ -70,7 +70,7 @@ def _merge(table, source, native, stream, matched, inserted=()):
     builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                       side_effect=AssertionError('Python MERGE join')))
         update = builder.new_update()
         kwargs = dict(on={'key': 'match_key', 'pt': 'match_pt'}, when_matched=matched, when_not_matched=inserted)

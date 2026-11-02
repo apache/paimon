@@ -51,11 +51,13 @@ def table_mode(request):
 
 @contextmanager
 def native_only():
-    with patch('pypaimon.read.table_read.TableRead._create_split_read',
-               side_effect=AssertionError('Native read fell back')), \
-            patch('pypaimon.common.predicate_json_parser._apply_predicate_transform',
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Native read fell back')
+    ), \
+            patch('pypaimon.common.arrow_predicate._apply_predicate_transform',
                   side_effect=AssertionError('Python executed an authorization transform')), \
-            patch('pypaimon.read.reader.auth_masking_reader._apply_predicate_transform',
+            patch('pypaimon.execution.python.read.reader.auth_masking_reader._apply_predicate_transform',
                   side_effect=AssertionError('Python executed an authorization mask')):
         yield
 
@@ -211,8 +213,7 @@ def test_not_null_mask_adapts_only_output_schema(rest_catalog, table_mode, mask)
     if mask == 'null':
         # Captured rules must still determine output nullability on the existing
         # fallback reader; no additional Python CAST implementation is needed.
-        fallback = table.copy({'query-auth.enabled': 'false', 'read.native.enabled': 'false',
-                               'scan.native-plan.enabled': 'false'})
+        fallback = table.copy({'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         captured = fallback.new_read_builder().with_projection(['masked', 'id'])
         with captured.new_read().to_arrow_batch_reader(splits) as batches:
             batch = batches.read_next_batch()

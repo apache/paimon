@@ -41,7 +41,13 @@ public interface TableWrite extends AutoCloseable {
     /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is set to true. */
     TableWrite withIOManager(IOManager ioManager);
 
-    /** Specified the write rowType. */
+    /**
+     * Specifies the write row type. If all ordinary columns are supplied, omitted generated columns
+     * are materialized before routing and writing. Otherwise, the underlying writer's
+     * partial-column write behavior applies, without generating omitted columns. Supplied generated
+     * values, including nulls, are preserved without evaluating or checking the generation
+     * expression.
+     */
     TableWrite withWriteType(RowType writeType);
 
     /** With a shared {@link MemoryPoolFactory} for the current table write. */

@@ -18,6 +18,7 @@
 
 import numbers
 import sys
+from functools import partial
 from typing import Mapping, Optional
 
 from pypaimon.catalog.catalog_exception import TableAlreadyExistException
@@ -42,6 +43,7 @@ from pypaimon.multimodal.lerobot.schema import (
 from pypaimon.multimodal.lerobot.source import (
     _close_quietly,
     _import_lerobot_dataset,
+    _info_dict,
     _load_hub_info,
     _open_resolved_dataset,
     _resolved_source,
@@ -68,6 +70,7 @@ def load_from_lerobot(
         options: Optional[Mapping[str, object]] = None,
         source_options: Optional[Mapping[str, object]] = None,
         tag_name: Optional[str] = None,
+        parallelism: int = 1,
 ) -> None:
     """Import LeRobot Dataset v3 into a new Paimon table group.
 
@@ -75,7 +78,8 @@ def load_from_lerobot(
     info/stats metadata are stored in companion Paimon tables. If provided,
     ``tag_name`` pins all components to their imported snapshots.
     FileIO URI credentials come only from ``source_options`` and are not
-    inherited from the target Catalog.
+    inherited from the target Catalog. ``parallelism > 1`` distributes Episode
+    groups on an initialized Ray cluster. All workers need source and target access.
     """
     if sys.version_info < (3, 10):
         raise RuntimeError(
@@ -84,6 +88,14 @@ def load_from_lerobot(
     if isinstance(batch_size, bool) or not isinstance(batch_size, int) \
             or batch_size <= 0:
         raise ValueError("batch_size must be a positive integer.")
+
+    if isinstance(parallelism, bool) or not isinstance(parallelism, int) \
+            or parallelism <= 0:
+        raise ValueError("parallelism must be a positive integer.")
+    if parallelism > 1:
+        from pypaimon.multimodal.lerobot.ray_loader import _require_ray, _ray_source_uri
+        _require_ray()
+        source = _ray_source_uri(source)
 
     if tag_name is not None:
         _validate_tag_name(tag_name)
@@ -102,7 +114,8 @@ def load_from_lerobot(
         _validated_counts(local_info, resolved_source.path)
         _validate_v3_required_features(local_info)
         video_fields = _video_feature_names(local_info)
-        LeRobotDataset = _import_lerobot_dataset()
+        LeRobotDataset = (_import_lerobot_dataset()
+                          if parallelism == 1 else None)
         dataset = _open_resolved_dataset(
             LeRobotDataset,
             resolved_source,
@@ -110,15 +123,16 @@ def load_from_lerobot(
             download_videos=bool(video_fields),
         )
         try:
-            info = dict(dataset.meta.info)
+            info = _info_dict(dataset.meta.info)
             _require_v3(info, resolved_source.path)
             _validated_counts(info, resolved_source.path)
             _validate_v3_required_features(info)
             video_fields = _video_feature_names(info)
 
             lerobot_schema = _schema_from_info(info)
+            # Preserve source extensions omitted by LeRobot DatasetInfo.to_dict().
             metadata = _load_dataset_metadata(
-                dataset, info, resolved_source)
+                dataset, local_info, resolved_source)
             _import_dataset(
                 connection,
                 table_name,
@@ -131,6 +145,8 @@ def load_from_lerobot(
                 metadata,
                 tag_name,
                 video_fields,
+                parallelism,
+                validated_source_options,
             )
         finally:
             close = getattr(dataset, "close", None)
@@ -149,7 +165,9 @@ def _import_dataset(
         options,
         metadata,
         tag_name,
-        video_fields):
+        video_fields,
+        parallelism=1,
+        source_options=None):
     table = _create_target_table(
         connection,
         table_name,
@@ -166,7 +184,14 @@ def _import_dataset(
     )
     frames_snapshot_id = None
     if int(info["total_frames"]) > 0:
-        frames_snapshot_id = _write_dataset(
+        if parallelism > 1:
+            from pypaimon.multimodal.lerobot.ray_loader import _write_dataset_ray
+            write_dataset = partial(
+                _write_dataset_ray, parallelism=parallelism,
+                source_options=source_options)
+        else:
+            write_dataset = _write_dataset
+        frames_snapshot_id = write_dataset(
             table,
             dataset,
             info,

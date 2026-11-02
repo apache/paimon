@@ -29,6 +29,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.PartitionPathUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -134,11 +135,12 @@ public class FormatTableFileWriter {
         if (partition.getFieldCount() > 0) {
             LinkedHashMap<String, String> partValues =
                     pathFactory.partitionComputer().generatePartValues(partition);
-            parent =
-                    new Path(
-                            parent,
-                            generatePartitionPathUtil(
-                                    partValues, options.formatTablePartitionOnlyValueInPath()));
+            boolean onlyValueInPath = options.formatTablePartitionOnlyValueInPath();
+            // Reject value-only partition values that scans would hide ('_'/'.') instead of
+            // silently dropping the whole partition on read; the default partition name is exempt.
+            PartitionPathUtils.validatePartitionSpecForWrite(
+                    partValues.values(), onlyValueInPath, options.partitionDefaultName());
+            parent = new Path(parent, generatePartitionPathUtil(partValues, onlyValueInPath));
         }
         return new FormatTableRecordWriter(
                 fileIO,

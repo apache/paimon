@@ -72,6 +72,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
     private final CatalogLoader catalogLoader;
     private final double writeCpuCores;
     private final MemorySize writeHeapMemory;
+    @Nullable private final MemorySize writeManagedMemory;
     private final double commitCpuCores;
     @Nullable private final MemorySize commitHeapMemory;
     private final String commitUser;
@@ -99,6 +100,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
         this.databaseName = null;
         this.writeCpuCores = writeCpuCores;
         this.writeHeapMemory = writeHeapMemory;
+        this.writeManagedMemory = null;
         this.commitCpuCores = commitCpuCores;
         this.commitHeapMemory = commitHeapMemory;
         this.commitUser = commitUser;
@@ -116,10 +118,35 @@ public class FlinkCdcMultiTableSink implements Serializable {
             String commitUser,
             boolean eagerInit,
             TableFilter tableFilter) {
+        this(
+                catalogLoader,
+                databaseName,
+                writeCpuCores,
+                writeHeapMemory,
+                null,
+                commitCpuCores,
+                commitHeapMemory,
+                commitUser,
+                eagerInit,
+                tableFilter);
+    }
+
+    public FlinkCdcMultiTableSink(
+            CatalogLoader catalogLoader,
+            String databaseName,
+            double writeCpuCores,
+            @Nullable MemorySize writeHeapMemory,
+            @Nullable MemorySize writeManagedMemory,
+            double commitCpuCores,
+            @Nullable MemorySize commitHeapMemory,
+            String commitUser,
+            boolean eagerInit,
+            TableFilter tableFilter) {
         this.catalogLoader = catalogLoader;
         this.databaseName = Preconditions.checkNotNull(databaseName);
         this.writeCpuCores = writeCpuCores;
         this.writeHeapMemory = writeHeapMemory;
+        this.writeManagedMemory = writeManagedMemory;
         this.commitCpuCores = commitCpuCores;
         this.commitHeapMemory = commitHeapMemory;
         this.commitUser = commitUser;
@@ -195,7 +222,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                 shuffled.transform(
                         WRITER_NAME, typeInfo, createWriteOperator(sinkProvider, commitUser));
         forwardParallelism(written, shuffled);
-        configureSlotSharingGroup(written, writeCpuCores, writeHeapMemory);
+        configureSlotSharingGroup(written, writeCpuCores, writeHeapMemory, writeManagedMemory);
 
         // shuffle committables by table
         DataStream<MultiTableCommittable> partitioned =

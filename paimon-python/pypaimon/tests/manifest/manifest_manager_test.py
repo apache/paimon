@@ -45,7 +45,7 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema import Schema
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.commit.commit_scanner import CommitScanner
+from pypaimon.execution.python.write.commit.commit_scanner import CommitScanner
 
 _EMPTY_ROW = GenericRow([], [])
 _EMPTY_STATS = SimpleStats(min_values=_EMPTY_ROW, max_values=_EMPTY_ROW, null_counts=[])

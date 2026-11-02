@@ -22,6 +22,8 @@ import sqlite3
 import tempfile
 import unittest
 
+import pyarrow as pa
+
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_exception import (
     DatabaseAlreadyExistException,
@@ -189,6 +191,30 @@ class JdbcCatalogTest(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(table_count, 0)
         self.assertFalse(os.path.exists(os.path.join(self.warehouse, "test_db.db", "test_table")))
+
+    def test_drop_main_branch_preserves_table(self):
+        with CatalogFactory.create(self.options) as catalog:
+            catalog.create_database("test_db", False)
+            data = pa.table({"id": [1]})
+            catalog.create_table("test_db.test_table", Schema.from_pyarrow_schema(data.schema), False)
+            table = catalog.get_table("test_db.test_table")
+            builder = table.new_batch_write_builder()
+            writer = builder.new_write()
+            try:
+                writer.write_arrow(data)
+                builder.new_commit().commit(writer.prepare_commit())
+            finally:
+                writer.close()
+
+            with self.assertRaisesRegex(ValueError, r"^The main branch cannot be deleted\.$"):
+                table.branch_manager().drop_branch("main")
+            self.assertTrue(os.path.isdir(table.table_path))
+            table = catalog.get_table("test_db.test_table")
+            reader = table.new_read_builder()
+            self.assertEqual(
+                reader.new_read().to_arrow(reader.new_scan().plan().splits()).to_pydict(),
+                {"id": [1]},
+            )
 
     def test_rename_table_keeps_metadata_when_file_move_fails(self):
         fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]

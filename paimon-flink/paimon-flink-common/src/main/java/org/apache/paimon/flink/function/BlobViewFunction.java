@@ -26,6 +26,8 @@ import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.flink.FlinkFileIOLoader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
 
 import org.apache.flink.table.functions.FunctionContext;
 import org.apache.flink.table.functions.ScalarFunction;
@@ -104,7 +106,24 @@ public class BlobViewFunction extends ScalarFunction implements CatalogAwareFunc
     private int fieldId(Identifier identifier, String fieldName) {
         try {
             Table table = catalog().getTable(identifier);
-            return BlobViewStruct.resolveBlobFieldId(identifier, table.rowType(), fieldName);
+            if (!table.rowType().containsField(fieldName)) {
+                throw new IllegalArgumentException(
+                        "Cannot find blob field "
+                                + fieldName
+                                + " in upstream table "
+                                + identifier.getFullName()
+                                + ".");
+            }
+            DataField field = table.rowType().getField(fieldName);
+            if (!field.type().is(DataTypeRoot.BLOB)) {
+                throw new IllegalArgumentException(
+                        "Field "
+                                + fieldName
+                                + " in upstream table "
+                                + identifier.getFullName()
+                                + " is not a BLOB field.");
+            }
+            return field.id();
         } catch (Catalog.TableNotExistException e) {
             throw new IllegalArgumentException(
                     "Cannot find upstream table " + identifier.getFullName() + ".", e);

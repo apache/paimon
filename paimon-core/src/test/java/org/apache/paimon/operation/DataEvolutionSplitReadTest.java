@@ -23,15 +23,21 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.Bitmap64DeletionVector;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -39,6 +45,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -47,12 +54,16 @@ import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -196,16 +207,6 @@ class DataEvolutionSplitReadTest {
     }
 
     @Test
-    public void testShouldReadRowSidecarForSparseRowSelection() {
-        DataFileMeta file =
-                createFile("file1.parquet", 10L, 100, 1, Collections.singletonList("file1.row"));
-
-        assertTrue(
-                DataEvolutionSplitRead.shouldReadRowSidecar(
-                        file, Arrays.asList(new Range(10L, 10L), new Range(42L, 42L))));
-    }
-
-    @Test
     public void testShouldReadRowSidecarRequiresSmallCountAndLowRatio() {
         DataFileMeta smallFile =
                 createFile("file1.parquet", 10L, 100, 1, Collections.singletonList("file1.row"));
@@ -215,42 +216,37 @@ class DataEvolutionSplitReadTest {
 
         assertTrue(
                 DataEvolutionSplitRead.shouldReadRowSidecar(
-                        largeFile, Collections.singletonList(new Range(10L, 4105L))));
+                        largeFile, RoaringBitmap32.bitmapOfRange(0L, 4096L), 4096L, 0.05d));
         assertFalse(
                 DataEvolutionSplitRead.shouldReadRowSidecar(
-                        smallFile, Collections.singletonList(new Range(10L, 15L))));
+                        smallFile, RoaringBitmap32.bitmapOfRange(0L, 6L), 4096L, 0.05d));
         assertFalse(
                 DataEvolutionSplitRead.shouldReadRowSidecar(
-                        largeFile, Collections.singletonList(new Range(10L, 4106L))));
+                        largeFile, RoaringBitmap32.bitmapOfRange(0L, 4097L), 4096L, 0.05d));
         assertTrue(
                 DataEvolutionSplitRead.shouldReadRowSidecar(
-                        smallFile, Collections.singletonList(new Range(10L, 15L)), 64L, 0.25d));
+                        smallFile, RoaringBitmap32.bitmapOfRange(0L, 6L), 64L, 0.25d));
     }
 
     @Test
-    public void testShouldReadRowSidecarUsesFinalBitmapSelection() {
+    public void testDeletionVectorOnlyAffectsSidecarSelection() {
         DataFileMeta file =
                 createFile("file1.parquet", 10L, 100, 1, Collections.singletonList("file1.row"));
-        BitmapIndexResult bitmap = new BitmapIndexResult(() -> RoaringBitmap32.bitmapOf(0, 5, 20));
-        BitmapIndexResult singleRowBitmap =
-                new BitmapIndexResult(() -> RoaringBitmap32.bitmapOf(50));
-        List<Range> rowRanges = Collections.singletonList(new Range(10L, 19L));
+        BitmapIndexResult bitmap =
+                new BitmapIndexResult(() -> RoaringBitmap32.bitmapOf(1, 2, 4, 6, 8, 9));
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        deletionVector.delete(14L); // file-local position 4 for anchor range starting at 0
+        deletionVector.delete(18L); // file-local position 8
+        deletionVector.delete(150L); // outside this file
 
-        assertTrue(DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 2L, 0.02d));
-        assertTrue(
-                DataEvolutionSplitRead.shouldReadRowSidecar(
-                        file, null, singleRowBitmap, 1L, 0.01d));
-        assertTrue(
-                DataEvolutionSplitRead.shouldReadRowSidecar(
-                        file,
-                        Collections.singletonList(new Range(10L, 109L)),
-                        singleRowBitmap,
-                        1L,
-                        0.01d));
-        assertFalse(
-                DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 1L, 0.02d));
-        assertFalse(
-                DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 2L, 0.01d));
+        RoaringBitmap32 fileSelection =
+                DataEvolutionSplitRead.fileSelection(
+                        file, Collections.singletonList(new Range(12L, 18L)), bitmap);
+        assertEquals(RoaringBitmap32.bitmapOf(2, 4, 6, 8), fileSelection);
+        assertEquals(
+                RoaringBitmap32.bitmapOf(2, 6),
+                DataEvolutionSplitRead.sidecarSelection(
+                        file, fileSelection, deletionVector, new Range(0L, 199L)));
     }
 
     @Test
@@ -258,32 +254,23 @@ class DataEvolutionSplitReadTest {
         DataFileMeta file =
                 createFile("file1.parquet", 10L, 100, 1, Collections.singletonList("file1.row"));
 
-        assertFalse(DataEvolutionSplitRead.shouldReadRowSidecar(file, null));
-        assertFalse(DataEvolutionSplitRead.shouldReadRowSidecar(file, Collections.emptyList()));
+        assertFalse(DataEvolutionSplitRead.shouldReadRowSidecar(file, null, 4096L, 0.05d));
         assertFalse(
                 DataEvolutionSplitRead.shouldReadRowSidecar(
-                        file, Collections.singletonList(new Range(10L, 109L))));
+                        file, new RoaringBitmap32(), 4096L, 0.05d));
         assertFalse(
                 DataEvolutionSplitRead.shouldReadRowSidecar(
                         createFile("file2.parquet", 10L, 100, 1),
-                        Collections.singletonList(new Range(10L, 10L))));
+                        RoaringBitmap32.bitmapOf(0),
+                        4096L,
+                        0.05d));
         assertFalse(
                 DataEvolutionSplitRead.shouldReadRowSidecar(
                         createFile(
                                 "file3.blob", 10L, 100, 1, Collections.singletonList("file3.row")),
-                        Collections.singletonList(new Range(10L, 10L))));
-    }
-
-    @Test
-    public void testSelectedRowCountMergesOverlappingRanges() {
-        DataFileMeta file = createFile("file1.parquet", 10L, 100, 1);
-
-        assertEquals(
-                12,
-                DataEvolutionSplitRead.selectedRowCount(
-                        file,
-                        Arrays.asList(
-                                new Range(5L, 12L), new Range(12L, 15L), new Range(20L, 25L))));
+                        RoaringBitmap32.bitmapOf(0),
+                        4096L,
+                        0.05d));
     }
 
     @Test
@@ -430,6 +417,180 @@ class DataEvolutionSplitReadTest {
         }
 
         assertEquals(Arrays.asList("1000:[0,1]", "5200:[4200,4201]"), actual);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testDvSelectionNarrowsRowSidecarRead(boolean bitmap64) throws Exception {
+        LocalFileIO fileIO = new LocalFileIO();
+        Path tableRoot = new Path(tempDir.toUri().toString(), "dv-sidecar-" + bitmap64);
+        CoreOptions coreOptions = new CoreOptions(new Options());
+        FileStorePathFactory pathFactory =
+                new FileStorePathFactory(
+                        tableRoot,
+                        RowType.of(),
+                        coreOptions.partitionDefaultName(),
+                        CoreOptions.FILE_FORMAT.defaultValue(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.PARTITION_GENERATE_LEGACY_NAME.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null,
+                        null,
+                        CoreOptions.ExternalPathStrategy.NONE,
+                        null,
+                        false,
+                        null);
+
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.STRING())
+                        .build();
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tableRoot);
+        TableSchema tableSchema = schemaManager.createTable(schema);
+        RowType rowType = tableSchema.logicalRowType();
+
+        Path bucketPath = pathFactory.bucketPath(EMPTY_ROW, 0);
+        fileIO.mkdirs(bucketPath);
+        int rowCount = 60_000;
+        int liveRowCount = 500;
+        String rowSidecarName = "data-0.row";
+        Path rowSidecarPath = new Path(bucketPath, rowSidecarName);
+        Options rowFormatOptions = new Options();
+        rowFormatOptions.set(CoreOptions.FILE_BLOCK_SIZE, MemorySize.ofKibiBytes(4));
+        writeFormatFile(fileIO, rowSidecarPath, rowType, rowCount, "row", rowFormatOptions);
+
+        DeletionVector deletionVector =
+                bitmap64 ? new Bitmap64DeletionVector() : new BitmapDeletionVector();
+        for (int i = 0; i < rowCount - liveRowCount; i++) {
+            deletionVector.delete(i);
+        }
+        Path dvPath = new Path(bucketPath, "data-0.parquet.dv");
+        long dvSize;
+        try (PositionOutputStream out = fileIO.newOutputStream(dvPath, false);
+                DataOutputStream dataOutput = new DataOutputStream(out)) {
+            dvSize = deletionVector.serializeTo(dataOutput);
+        }
+
+        DataFileMeta dataFile =
+                createFile(
+                        "data-0.parquet",
+                        0L,
+                        rowCount,
+                        1,
+                        Collections.singletonList(rowSidecarName));
+        DataSplit split =
+                DataSplit.builder()
+                        .withPartition(EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath(bucketPath.toString())
+                        .withDataFiles(Collections.singletonList(dataFile))
+                        .withDataDeletionFiles(
+                                Collections.singletonList(
+                                        new DeletionFile(
+                                                dvPath.toString(),
+                                                0,
+                                                dvSize,
+                                                (long) (rowCount - liveRowCount))))
+                        .rawConvertible(false)
+                        .build();
+
+        CountingFileIO countingFileIO = new CountingFileIO(fileIO, rowSidecarPath);
+        DataEvolutionSplitRead splitRead =
+                new DataEvolutionSplitRead(
+                        countingFileIO,
+                        schemaManager,
+                        tableSchema,
+                        rowType,
+                        coreOptions,
+                        pathFactory);
+
+        List<Integer> actual = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = splitRead.createReader(split)) {
+            reader.forEachRemaining(row -> actual.add(row.getInt(0)));
+        }
+
+        assertEquals(liveRowCount, actual.size());
+        assertEquals(1000 + rowCount - liveRowCount, (int) actual.get(0));
+        assertEquals(1000 + rowCount - 1, (int) actual.get(actual.size() - 1));
+        long sidecarSize = fileIO.getFileStatus(rowSidecarPath).getLen();
+
+        CountingFileIO fullScanFileIO = new CountingFileIO(fileIO, rowSidecarPath);
+        RecordReader<InternalRow> fullScanReader =
+                FileFormat.fromIdentifier("row", rowFormatOptions)
+                        .createReaderFactory(rowType, rowType, null)
+                        .createReader(
+                                new FormatReaderContext(
+                                        fullScanFileIO, rowSidecarPath, sidecarSize, null, null));
+        fullScanReader.forEachRemaining(ignored -> {});
+
+        assertTrue(
+                countingFileIO.bytesRead() < fullScanFileIO.bytesRead(),
+                "Selection read "
+                        + countingFileIO.bytesRead()
+                        + " sidecar bytes; full scan read "
+                        + fullScanFileIO.bytesRead()
+                        + ".");
+    }
+
+    private static final class CountingFileIO extends LocalFileIO {
+
+        private final LocalFileIO fileIO;
+        private final Path countedPath;
+        private final AtomicLong bytesRead = new AtomicLong();
+
+        private CountingFileIO(LocalFileIO fileIO, Path countedPath) {
+            this.fileIO = fileIO;
+            this.countedPath = countedPath;
+        }
+
+        private long bytesRead() {
+            return bytesRead.get();
+        }
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            SeekableInputStream input = fileIO.newInputStream(path);
+            if (!countedPath.equals(path)) {
+                return input;
+            }
+            return new SeekableInputStream() {
+                @Override
+                public void seek(long desired) throws IOException {
+                    input.seek(desired);
+                }
+
+                @Override
+                public long getPos() throws IOException {
+                    return input.getPos();
+                }
+
+                @Override
+                public int read(byte[] buffer, int offset, int length) throws IOException {
+                    int read = input.read(buffer, offset, length);
+                    if (read > 0) {
+                        bytesRead.addAndGet(read);
+                    }
+                    return read;
+                }
+
+                @Override
+                public int read() throws IOException {
+                    int read = input.read();
+                    if (read >= 0) {
+                        bytesRead.incrementAndGet();
+                    }
+                    return read;
+                }
+
+                @Override
+                public void close() throws IOException {
+                    input.close();
+                }
+            };
+        }
     }
 
     private static void writeNestedParquetFile(

@@ -21,7 +21,7 @@ from typing import List, Optional
 
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
-from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
+from pypaimon.execution.python.read.reader.limited_record_reader import (LimitedRecordReader)
 
 
 class _ListIterator(RecordIterator):

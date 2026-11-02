@@ -24,7 +24,9 @@ import pytest
 
 from pypaimon.globalindex.drop_global_index import GlobalIndexDropper
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_runtime_available
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.read.builder import (_predicate_to_native)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.tests import native_sorted_index_build_test as indexes
 from pypaimon.write.table_commit import BatchTableCommit
 
@@ -44,9 +46,9 @@ def test_preparation_failure_does_not_retry_python_planning():
     native.with_index_type.return_value = native
     native.build.side_effect = OSError('metadata read failed')
     factory = SimpleNamespace(supports_index_type=lambda kind: True)
-    with patch('pypaimon.read.native_plan.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_commit._rest_catalog_supported', return_value=True), \
-            patch('pypaimon.read.native_plan._native_table') as native_table, \
+    with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_commit._rest_catalog_supported', return_value=True), \
+            patch('pypaimon.execution.native.table._native_table') as native_table, \
             patch('pypaimon_rust.datafusion.GlobalIndexDropBuilder', factory, create=True), \
             patch.object(IndexFileHandler, 'scan', side_effect=AssertionError('Python fallback')):
         native_table.return_value.new_global_index_drop_builder.return_value = native

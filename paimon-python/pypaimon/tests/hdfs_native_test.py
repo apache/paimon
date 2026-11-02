@@ -102,9 +102,9 @@ class HdfsNativeFileIORoutingTest(unittest.TestCase):
         self.assertEqual(type(fio).__name__, "PyArrowFileIO")
 
     def test_native_init_failure_falls_back_to_pyarrow(self):
-        # hdfs_native not installed; default fallback enabled.
+        # Simulate the missing optional SDK even when it is installed locally.
         _uninstall_fake_hdfs_native()
-        with patch(
+        with patch.dict(sys.modules, {"hdfs_native": None}), patch(
             "pypaimon.filesystem.pyarrow_file_io.PyArrowFileIO.__init__",
             return_value=None,
         ):
@@ -113,7 +113,7 @@ class HdfsNativeFileIORoutingTest(unittest.TestCase):
 
     def test_native_init_failure_no_fallback_raises(self):
         _uninstall_fake_hdfs_native()
-        with self.assertRaises(ImportError):
+        with patch.dict(sys.modules, {"hdfs_native": None}), self.assertRaises(ImportError):
             FileIO.get(
                 "hdfs://ns/foo",
                 Options({"hdfs.client.fallback-to-pyarrow": "false"}),
@@ -860,10 +860,7 @@ class PickleTest(unittest.TestCase):
 
 
 class HdfsNativeWriteFormatTest(unittest.TestCase):
-    """HdfsNativeFileIO is the default hdfs:// backend, so it must keep the
-    same write surface as the pyarrow backend it replaces — including
-    lance/vortex, which otherwise fall through to FileIO's NotImplementedError.
-    """
+    """The Python Vortex codec uses the shared HDFS location conversion."""
 
     def setUp(self):
         self._fake, self._client_cls, _ = _install_fake_hdfs_native()
@@ -873,31 +870,6 @@ class HdfsNativeWriteFormatTest(unittest.TestCase):
 
     def tearDown(self):
         _uninstall_fake_hdfs_native()
-
-    def test_lance_and_vortex_are_overridden(self):
-        # The regression this guards: with these unimplemented, an HDFS table
-        # using file.format=lance/vortex would hit FileIO's NotImplementedError.
-        from pypaimon.common.file_io import FileIO
-        self.assertIsNot(
-            type(self.fio).write_lance, FileIO.write_lance)
-        self.assertIsNot(
-            type(self.fio).write_vortex, FileIO.write_vortex)
-
-    def test_write_lance_delegates_to_lance_specified(self):
-        import pyarrow
-        table = pyarrow.table({"a": [1, 2]})
-        writer = MagicMock(name="LanceFileWriter")
-        fake_lance = types.ModuleType("lance")
-        fake_lance.file = types.SimpleNamespace(
-            LanceFileWriter=MagicMock(return_value=writer))
-        with patch.dict(sys.modules, {"lance": fake_lance}), \
-                patch("pypaimon.read.reader.lance_utils.to_lance_specified",
-                      return_value=("hdfs://ns/x.lance", {"opt": "v"})) as spec:
-            self.fio.write_lance("hdfs://ns/x.lance", table)
-        spec.assert_called_once()
-        _, kwargs = fake_lance.file.LanceFileWriter.call_args
-        self.assertEqual(kwargs.get("storage_options"), {"opt": "v"})
-        writer.close.assert_called_once()
 
     def test_write_vortex_delegates_to_vortex_specified(self):
         import pyarrow
@@ -914,10 +886,11 @@ class HdfsNativeWriteFormatTest(unittest.TestCase):
             "vortex._lib": fake_lib,
             "vortex._lib.io": fake_io,
         }
+        from pypaimon.execution.python.write.format_file_writer import write_vortex_file
         with patch.dict(sys.modules, fake_modules), \
-                patch("pypaimon.read.reader.vortex_utils.to_vortex_specified",
+                patch("pypaimon.execution.python.write.format_file_writer.to_vortex_specified",
                       return_value=("hdfs://ns/x.vortex", None)):
-            self.fio.write_vortex("hdfs://ns/x.vortex", table)
+            write_vortex_file(self.fio, "hdfs://ns/x.vortex", table)
         fake_io.write.assert_called_once_with("varr", "hdfs://ns/x.vortex")
 
 

@@ -72,7 +72,8 @@ choose a suitable [search mode](./manage-indexes#coverage-and-freshness).
 The [visibility callback](./manage-indexes#wait-for-index-visibility) can wait for
 a separate index-building job to cover committed data; it does not build indexes.
 
-For a primary-key table, configure `pk-fm.index.columns` instead. Primary-key FM indexes follow
+For a primary-key table, declare `global-index.fm.index-columns` to enable index maintenance.
+Primary-key FM indexes follow
 data compaction and scan uncovered files through the ordinary data path, so partial coverage does
 not make `CONTAINS` results incomplete. See [Primary-Key Indexes](../../primary-key-table/global-index).
 
@@ -88,9 +89,10 @@ CALL sys.drop_global_index(
 
 ## Options
 
-Global options can be passed to `create_global_index`. For a primary-key index, place the same
-keys in `fields.<column>.pk-fm.index.options`; the `fm-index.` prefix may be omitted inside that
-JSON object.
+Global options can be passed to `create_global_index`. Both Data Evolution and primary-key
+indexes accept field overrides in `fields.<column>.index-options`; the `fm-index.` prefix may
+be omitted inside that JSON object. The legacy `fields.<column>.pk-fm.index.options` remains
+supported when the shared field option is absent.
 
 | Option | Default | Description |
 |---|---|---|

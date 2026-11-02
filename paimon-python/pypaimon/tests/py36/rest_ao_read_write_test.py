@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
@@ -44,7 +45,7 @@ from pypaimon.table.row.generic_row import (GenericRow, GenericRowDeserializer,
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
-from pypaimon.write.file_store_commit import FileStoreCommit
+from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
 
 
 class RESTAOReadWritePy36Test(RESTBaseTest):
@@ -252,10 +253,11 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
 
         # to test GenericRow ability
         latest_snapshot = table.snapshot_manager().get_latest_snapshot()
-        manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
+        file_scanner = PythonTableScan(table_scan)._file_scanner()
+        manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name,
-            lambda row: table_scan.file_scanner._filter_manifest_entry(row),
+            lambda row: file_scanner._filter_manifest_entry(row),
             drop_stats=False)
         # Python write does not produce value stats
         if stats_enabled:

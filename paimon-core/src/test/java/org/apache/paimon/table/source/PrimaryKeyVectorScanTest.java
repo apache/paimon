@@ -73,7 +73,7 @@ class PrimaryKeyVectorScanTest {
     void testPostponeTableOnlyScansRealBuckets() {
         Options options = new Options();
         options.set(CoreOptions.BUCKET, BucketMode.POSTPONE_BUCKET);
-        options.set(CoreOptions.PK_VECTOR_INDEX_COLUMNS, "embedding");
+        options.setString("pk-vector.index.columns", "embedding");
         options.setString("fields.embedding.pk-vector.index.type", "ivf-pq");
 
         FileStoreTable table = mock(FileStoreTable.class);
@@ -95,7 +95,7 @@ class PrimaryKeyVectorScanTest {
         when(reader.indexFileHandler()).thenReturn(indexFileHandler);
         configureBatchScan(table, reader, snapshot);
 
-        new PrimaryKeyVectorScan(table, 7, "ivf-pq", null, null).scan();
+        new PrimaryKeyVectorScan(table, 7, null, null).scan();
 
         verify(reader).onlyReadRealBuckets();
     }
@@ -124,7 +124,8 @@ class PrimaryKeyVectorScanTest {
                 Arrays.asList(
                         payloadEntry("ivf-pq", 7, "ann-match"),
                         payloadEntry("ivf-pq", 8, "ann-other-field"),
-                        payloadEntry("hnsw", 7, "ann-other-type"));
+                        payloadEntry("hnsw", 7, "ann-other-type"),
+                        payloadEntry("btree", 7, "scalar-index"));
         IndexFileHandler indexFileHandler = mock(IndexFileHandler.class);
         when(indexFileHandler.scan(eq(snapshot), any(Filter.class)))
                 .thenAnswer(
@@ -142,14 +143,14 @@ class PrimaryKeyVectorScanTest {
         configureBatchScan(table, snapshotReader, snapshot);
 
         PrimaryKeyVectorScan.Plan plan =
-                new PrimaryKeyVectorScan(table, 7, "ivf-pq", null, null, snapshot).scan();
+                new PrimaryKeyVectorScan(table, 7, null, null, snapshot).scan();
 
         assertThat(plan.snapshotId()).isEqualTo(11);
         assertThat(plan.splits()).hasSize(1);
         BucketVectorSearchSplit bucketSplit = (BucketVectorSearchSplit) plan.splits().get(0);
         assertThat(bucketSplit.payloadFiles())
                 .extracting(IndexFileMeta::fileName)
-                .containsExactly("ann-match");
+                .containsExactly("ann-match", "ann-other-type");
         verify(table).copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "11"));
     }
 
@@ -252,7 +253,7 @@ class PrimaryKeyVectorScanTest {
 
     private static CoreOptions coreOptions() {
         Options options = new Options();
-        options.set(CoreOptions.PK_VECTOR_INDEX_COLUMNS, "embedding");
+        options.setString("pk-vector.index.columns", "embedding");
         options.setString("fields.embedding.pk-vector.index.type", "ivf-pq");
         return new CoreOptions(options);
     }

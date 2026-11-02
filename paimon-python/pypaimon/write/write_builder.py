@@ -15,19 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import logging
 import uuid
 from abc import ABC
 from typing import Optional
 
+from pypaimon.write.backend_dispatch import create_write
 from pypaimon.write.table_commit import (BatchTableCommit, StreamTableCommit,
                                          TableCommit)
 from pypaimon.write.table_update import (BatchTableUpdate, StreamTableUpdate,
                                          TableUpdate)
 from pypaimon.write.table_write import (BatchTableWrite, StreamTableWrite,
                                         TableWrite)
-
-logger = logging.getLogger(__name__)
 
 
 class WriteBuilder(ABC):
@@ -57,8 +55,14 @@ class WriteBuilder(ABC):
         self.restore_snapshot_id = snapshot_id
         return self
 
-    def _with_commit_user(self, commit_user: str):
-        """Reuse the identity of an existing write or commit operation."""
+    def with_commit_user(self, commit_user: str):
+        """Set the identity shared by new writers, updates and committers.
+
+        The default is a generated UUID. Reuse the same identity when restoring
+        a stream application, and use different identities for independent
+        applications. Configure it before creating operations; existing
+        operations retain the identity they were created with.
+        """
         self.commit_user = commit_user
         return self
 
@@ -68,24 +72,6 @@ class WriteBuilder(ABC):
             return f"{commit_user_prefix}_{uuid.uuid4()}"
         else:
             return str(uuid.uuid4())
-
-    def _native_write(self, static_partition=None, stream=False, **kwargs):
-        from pypaimon.read.merge_engine_support import check_sequence_field_supported
-
-        # Keep invalid configurations outside the native fallback handler and
-        # enforce the same contract regardless of which writer is selected.
-        check_sequence_field_supported(self.table)
-        if not self.table.options.native_write_enabled():
-            return None
-        try:
-            from pypaimon.write.native_write import create_native_write
-            return create_native_write(self.table, self.commit_user,
-                                       static_partition, stream,
-                                       restore_snapshot_id=self.restore_snapshot_id, **kwargs)
-        except Exception as error:
-            # Construction has not written any data; the normal writer is safe.
-            logger.debug('Native writer preparation failed; using Python: %s', error)
-            return None
 
 
 class BatchWriteBuilder(WriteBuilder):
@@ -99,9 +85,9 @@ class BatchWriteBuilder(WriteBuilder):
         return self
 
     def new_write(self) -> BatchTableWrite:
-        return (self._native_write(self.static_partition)
-                or BatchTableWrite(self.table, self.commit_user, self.static_partition,
-                                   restore_snapshot_id=self.restore_snapshot_id))
+        return create_write(
+            self.table, self.commit_user, self.static_partition,
+            restore_snapshot_id=self.restore_snapshot_id)
 
     def new_update(self) -> BatchTableUpdate:
         return BatchTableUpdate(self.table, self.commit_user)
@@ -114,9 +100,9 @@ class BatchWriteBuilder(WriteBuilder):
 class StreamWriteBuilder(WriteBuilder):
 
     def new_write(self) -> StreamTableWrite:
-        return (self._native_write(stream=True)
-                or StreamTableWrite(self.table, self.commit_user,
-                                    restore_snapshot_id=self.restore_snapshot_id))
+        return create_write(
+            self.table, self.commit_user, stream=True,
+            restore_snapshot_id=self.restore_snapshot_id)
 
     def new_update(self) -> StreamTableUpdate:
         return StreamTableUpdate(self.table, self.commit_user)
@@ -134,11 +120,11 @@ def _new_update_by_row_id(
 
     if commit_identifier == BATCH_COMMIT_IDENTIFIER:
         return (table.new_batch_write_builder()
-                ._with_commit_user(commit_user)
+                .with_commit_user(commit_user)
                 .new_update()
                 .new_update_by_row_id(_precomputed_files_info))
     return (table.new_stream_write_builder()
-            ._with_commit_user(commit_user)
+            .with_commit_user(commit_user)
             .new_update()
             .new_update_by_row_id(
                 commit_identifier, _precomputed_files_info))

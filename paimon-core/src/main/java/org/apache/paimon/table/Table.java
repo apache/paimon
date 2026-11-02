@@ -143,7 +143,7 @@ public interface Table extends Serializable {
     @Experimental
     void replaceTag(String tagName, @Nullable Long fromSnapshotId, @Nullable Duration timeRetained);
 
-    /** Delete a tag by name. */
+    /** Delete a tag by name, leaving its referenced files to orphan file cleanup. */
     @Experimental
     void deleteTag(String tagName);
 

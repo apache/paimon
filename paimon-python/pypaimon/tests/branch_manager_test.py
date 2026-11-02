@@ -184,6 +184,25 @@ class FileSystemBranchManagerTest(unittest.TestCase):
         self.assertTrue(manager.branch_exists("feature"))
         self.assertFalse(manager.branch_exists("develop"))
 
+    def test_main_branch_validation_before_file_access(self):
+        from unittest.mock import Mock
+
+        file_io = Mock()
+        manager = FileSystemBranchManager(file_io, self.table_path, None, None, None)
+        for operation, args, message in (
+            (manager.drop_branch, ("main",), "The main branch cannot be deleted."),
+            (manager.create_branch, ("main",),
+             "Branch name 'main' is the default branch and cannot be used."),
+            (manager.create_branch, ("main", "absent"),
+             "Branch name 'main' is the default branch and cannot be used."),
+            (manager.fast_forward, ("main",), "Branch name 'main' do not use in fast-forward."),
+        ):
+            with self.subTest(operation=operation.__name__, args=args):
+                with self.assertRaises(ValueError) as cm:
+                    operation(*args)
+                self.assertEqual(str(cm.exception), message)
+        self.assertEqual(file_io.mock_calls, [])
+
 
 class SnapshotManagerBranchAwarenessTest(unittest.TestCase):
     """Pin down SnapshotManager's branch-aware path computation.

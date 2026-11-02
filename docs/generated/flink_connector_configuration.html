@@ -369,6 +369,12 @@ under the License.
             <td>Sink writer cpu to control cpu cores of writer.</td>
         </tr>
         <tr>
+            <td><h5>sink.writer-managed-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Managed memory resource budget for the writer slot sharing group. Must be positive and requires sink.writer-memory. This does not enable sink.use-managed-memory-allocator or change the allocation weight sink.managed.writer-buffer-memory. The actual writer buffer size depends on the slot's allocated resources and managed memory consumers.</td>
+        </tr>
+        <tr>
             <td><h5>sink.writer-memory</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>

@@ -27,7 +27,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 
 pytestmark = pytest.mark.native_plan
@@ -87,8 +87,10 @@ def _read(table, native, predicate=None, projection=None):
     read = builder.new_read()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(read, '_create_split_read',
-                                             side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         return read.to_arrow(splits).sort_by('id').to_pylist()
 
 

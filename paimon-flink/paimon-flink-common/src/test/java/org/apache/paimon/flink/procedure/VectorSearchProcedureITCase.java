@@ -111,7 +111,10 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
 
     @Test
     public void testVectorSearchKeepsResolvedSchema() throws Exception {
-        createVectorTable("SCHEMA_EVOLUTION_T", "'global-index.search-mode' = 'full'");
+        createVectorTable(
+                "SCHEMA_EVOLUTION_T",
+                "'global-index.search-mode' = 'full', "
+                        + "'global-index.test-vector-ann.index-columns' = 'vec'");
         FileStoreTable table = paimonTable("SCHEMA_EVOLUTION_T");
         float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}};
         writeVectors(table, vectors);

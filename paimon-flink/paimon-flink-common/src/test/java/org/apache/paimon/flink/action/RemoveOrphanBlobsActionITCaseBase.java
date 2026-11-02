@@ -46,6 +46,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -71,6 +72,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -196,6 +198,11 @@ public abstract class RemoveOrphanBlobsActionITCaseBase extends ActionITCaseBase
     @Test
     public void testDistributedMarkReadsSharedMetadataOncePerPass() throws Exception {
         FileStoreTable table = createManagedBlobTable();
+        // Random manifest names can hash to the same key group at every tested
+        // parallelism. Keep the fixture's manifest-reader partitions deterministic.
+        Field uuid = FileStorePathFactory.class.getDeclaredField("uuid");
+        uuid.setAccessible(true);
+        uuid.set(table.store().pathFactory(), "00000000-0000-0000-0000-000000000001");
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
         write = writeBuilder.newWrite();
         commit = writeBuilder.newCommit();

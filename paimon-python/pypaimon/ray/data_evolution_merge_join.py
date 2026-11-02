@@ -21,15 +21,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pyarrow as pa
 
-from pypaimon.ray.data_evolution_merge_transform import (
+from pypaimon.write.merge_transform import (
     SourceColumnRef,
     _NormalizedClause,
     build_delete_schema,
     build_update_schema,
-    cast_to_schema,
-    vectorized_delete_transform,
-    vectorized_insert_transform,
-    vectorized_matched_transform,
 )
 from pypaimon.ray.partitioning import (
     _default_hash_shuffle_parallelism,
@@ -85,6 +81,8 @@ class _SelfMergeUpdatePlan:
     row_id_name: str
     snapshot_id: int
     callable_input_columns: Optional[List[str]]
+    row_id_plan: Any
+    native_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,6 +99,7 @@ class _SelfMergeUpdateContext:
     row_id_name: str
     snapshot_id: int
     callable_input_columns: Optional[List[str]]
+    native_enabled: bool = False
 
 
 def _resolve_source_projection(
@@ -118,7 +117,7 @@ def _resolve_source_projection(
             if isinstance(value, SourceColumnRef):
                 needed.add(value.column)
         if clause.condition is not None:
-            from pypaimon.ray.merge_condition import extract_columns
+            from pypaimon.write.merge_condition import extract_columns
             for ref in extract_columns(clause.condition):
                 prefix, col = ref.split(".", 1)
                 if prefix == "s" and col in source_set:
@@ -135,65 +134,13 @@ def _build_matched_transform(
     row_id_name: str,
     update_schema: pa.Schema,
     callable_input_columns: Optional[Sequence[str]] = None,
+    native_enabled: bool = False,
 ):
-    prepared_clauses = []
-    for clause in clauses:
-        rewritten = None
-        if clause.condition is not None:
-            from pypaimon.ray.merge_condition import (
-                remap_source_on_keys, rewrite_condition,
-            )
-            rewritten = remap_source_on_keys(
-                rewrite_condition(clause.condition), on_map,
-            )
-        prepared_clauses.append((clause.spec, rewritten, clause.delete))
-
-    _filter_batch = None
-    if any(r is not None for _, r, _ in prepared_clauses):
-        from pypaimon.ray.merge_condition import filter_batch as _filter_batch
-
-    def _transform(batch: pa.Table) -> pa.Table:
-        remaining = batch
-        parts = []
-        for spec, rewritten, is_delete in prepared_clauses:
-            if remaining.num_rows == 0:
-                break
-            if rewritten is not None:
-                matched = _filter_batch(
-                    remaining, rewritten, _pre_rewritten=True,
-                )
-            else:
-                matched = remaining
-            if matched.num_rows == 0:
-                continue
-            if not is_delete:
-                callable_input = None
-                if (callable_input_columns is not None
-                        and any(callable(value) and not isinstance(value, type)
-                                for value in spec.values())):
-                    callable_input = pa.Table.from_arrays(
-                        [matched.column(f"t.{col}")
-                         for col in callable_input_columns],
-                        names=list(callable_input_columns),
-                    )
-                parts.append(vectorized_matched_transform(
-                    matched, spec, on_pairs,
-                    update_cols, row_id_name,
-                    update_schema,
-                    callable_input=callable_input,
-                ))
-            if rewritten is not None and matched.num_rows < remaining.num_rows:
-                not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
-                remaining = _filter_batch(
-                    remaining, not_cond, _pre_rewritten=True,
-                )
-            else:
-                remaining = remaining.slice(0, 0)
-        if not parts:
-            return update_schema.empty_table()
-        return pa.concat_tables(parts)
-
-    return _transform
+    from pypaimon.write.backend_dispatch import create_merge_batch_transform
+    return create_merge_batch_transform(
+        'update', clauses, on_map, on_pairs, update_cols, row_id_name,
+        update_schema, callable_input_columns, native_enabled=native_enabled,
+    )
 
 
 def _build_matched_delete_transform(
@@ -201,53 +148,13 @@ def _build_matched_delete_transform(
     on_map: Dict[str, str],
     row_id_name: str,
     delete_schema: pa.Schema,
+    native_enabled: bool = False,
 ):
-    prepared_clauses = []
-    for clause in clauses:
-        rewritten = None
-        if clause.condition is not None:
-            from pypaimon.ray.merge_condition import (
-                remap_source_on_keys, rewrite_condition,
-            )
-            rewritten = remap_source_on_keys(
-                rewrite_condition(clause.condition), on_map,
-            )
-        prepared_clauses.append((rewritten, clause.delete))
-
-    _filter_batch = None
-    if any(r is not None for r, _ in prepared_clauses):
-        from pypaimon.ray.merge_condition import filter_batch as _filter_batch
-
-    def _transform(batch: pa.Table) -> pa.Table:
-        remaining = batch
-        parts = []
-        for rewritten, is_delete in prepared_clauses:
-            if remaining.num_rows == 0:
-                break
-            if rewritten is not None:
-                matched = _filter_batch(
-                    remaining, rewritten, _pre_rewritten=True,
-                )
-            else:
-                matched = remaining
-            if matched.num_rows > 0 and is_delete:
-                parts.append(
-                    vectorized_delete_transform(
-                        matched, row_id_name, delete_schema,
-                    )
-                )
-            if rewritten is not None and matched.num_rows < remaining.num_rows:
-                not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
-                remaining = _filter_batch(
-                    remaining, not_cond, _pre_rewritten=True,
-                )
-            else:
-                remaining = remaining.slice(0, 0)
-        if not parts:
-            return delete_schema.empty_table()
-        return pa.concat_tables(parts)
-
-    return _transform
+    from pypaimon.write.backend_dispatch import create_merge_batch_transform
+    return create_merge_batch_transform(
+        'delete', clauses, on_map, row_id_name, delete_schema,
+        native_enabled=native_enabled,
+    )
 
 
 def build_self_merge_update_plan(
@@ -261,12 +168,13 @@ def build_self_merge_update_plan(
     snapshot_id: Optional[int] = None,
     scan_predicate=None,
     read_columns: Sequence[str] = (),
+    native_enabled: bool = False,
 ) -> _SelfMergeUpdatePlan:
     from pypaimon.common.options.core_options import (
         CoreOptions, GlobalIndexSearchMode,
     )
     from pypaimon.table.special_fields import SpecialFields
-    from pypaimon.write.table_update import TableUpdate
+    from pypaimon.write.row_id_plan import capture_row_id_plan
 
     row_id_name = SpecialFields.ROW_ID.name
     needed_cols = set(resolve_target_projection(
@@ -281,7 +189,7 @@ def build_self_merge_update_plan(
     target_set = set(target_field_names)
     for clause in clauses:
         if clause.condition is not None:
-            from pypaimon.ray.merge_condition import extract_columns
+            from pypaimon.write.merge_condition import extract_columns
             for ref in extract_columns(clause.condition):
                 prefix, col = ref.split(".", 1)
                 if prefix == "s" and col in target_set:
@@ -301,19 +209,20 @@ def build_self_merge_update_plan(
         table.copy_without_time_travel(dynamic_options)
         if dynamic_options else table
     )
+    from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+    scan_table = scan_table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(scan_table))
     read_builder = scan_table.new_read_builder().with_projection(projection)
     if scan_predicate is not None:
         read_builder.with_filter(scan_predicate)
-    scan_plan = read_builder.new_scan().plan_all_files()
+    scan_plan = read_builder.new_scan().plan_all()
     planned_snapshot_id = (
         scan_plan.snapshot_id
         if scan_plan.snapshot_id is not None else -1
     )
     # A packed scan split may contain multiple logical row-id groups. Keep
     # each group intact, but do not materialize unrelated groups together.
-    file_groups = list(TableUpdate._predicate_update_file_groups(
-        scan_plan.splits()
-    ))
+    row_id_plan = capture_row_id_plan(scan_table, scan_plan)
+    file_groups = [split for _, _, split in row_id_plan.groups]
     update_schema = build_update_schema(target_pa_schema, update_cols, row_id_name)
     return _SelfMergeUpdatePlan(
         table=table,
@@ -330,6 +239,8 @@ def build_self_merge_update_plan(
             list(read_columns) + [row_id_name]
             if read_columns else None
         ),
+        row_id_plan=row_id_plan,
+        native_enabled=native_enabled,
     )
 
 
@@ -345,11 +256,11 @@ def _self_merge_aliases(batch: pa.Table, row_id_name: str) -> pa.Table:
     return pa.table(columns, names=names)
 
 
-def _apply_self_merge_update_group(context, file_group, collect_row_ids):
+def _apply_self_merge_update_group(context, group_plan, collect_row_ids):
     """Read, transform, and stage one complete first-row-id file group."""
     from pypaimon.read.table_read import TableRead
-    from pypaimon.write.row_id_file_index import RowIdFileIndex
 
+    file_group = group_plan.plan.splits()[0]
     table_read = TableRead(
         context.scan_table,
         context.predicate,
@@ -363,6 +274,7 @@ def _apply_self_merge_update_group(context, file_group, collect_row_ids):
         row_id_name=context.row_id_name,
         update_schema=context.update_schema,
         callable_input_columns=context.callable_input_columns,
+        native_enabled=context.native_enabled,
     )
     update_parts = []
     batch_reader = table_read.to_arrow_batch_reader([file_group])
@@ -388,11 +300,8 @@ def _apply_self_merge_update_group(context, file_group, collect_row_ids):
         if collect_row_ids else []
     )
 
-    files_info = RowIdFileIndex.from_splits(
-        context.snapshot_id, [file_group],
-    )
     updater = context.table.new_batch_write_builder().new_update().new_update_by_row_id(
-        _precomputed_files_info=files_info)
+        _precomputed_files_info=group_plan)
     try:
         messages = updater.update_columns(updates, context.update_cols)
     except Exception:
@@ -411,8 +320,11 @@ def distributed_self_merge_update_apply(
 ) -> Tuple[list, int, list]:
     """Stage self-merge updates in scan tasks without a routing shuffle."""
     import ray
+    from pypaimon.read.plan import Plan
+    from pypaimon.write.row_id_plan import CapturedRowIdPlan
 
-    if not plan.file_groups:
+    captured = plan.row_id_plan
+    if not captured.groups:
         return [], 0, []
 
     remote_args = dict(ray_remote_args or {})
@@ -431,9 +343,10 @@ def distributed_self_merge_update_apply(
         row_id_name=plan.row_id_name,
         snapshot_id=plan.snapshot_id,
         callable_input_columns=plan.callable_input_columns,
+        native_enabled=plan.native_enabled,
     ))
-    group_iter = iter(plan.file_groups)
-    max_in_flight = max(1, min(num_partitions, len(plan.file_groups)))
+    group_iter = iter(captured.groups)
+    max_in_flight = max(1, min(num_partitions, len(captured.groups)))
     pending = set()
     messages = []
     num_updated = 0
@@ -442,11 +355,15 @@ def distributed_self_merge_update_apply(
 
     def submit_next():
         try:
-            file_group = next(group_iter)
+            group = next(group_iter)
         except StopIteration:
             return False
+        # Transport only this canonical group. Ray deserializes shared Python
+        # objects per task, so broadcasting the full plan repeats all metadata.
+        group_plan = CapturedRowIdPlan(
+            captured.table, Plan([group[2]], captured.plan.snapshot_id), [group])
         pending.add(apply_remote.remote(
-            context, file_group, collect_row_ids
+            context, group_plan, collect_row_ids
         ))
         return True
 
@@ -485,6 +402,7 @@ def build_self_merge_delete_ds(
     snapshot_id: Optional[int] = None,
     scan_predicate=None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    native_enabled: bool = False,
 ) -> Tuple:
     from pypaimon.ray.ray_paimon import read_paimon
     from pypaimon.table.special_fields import SpecialFields
@@ -496,7 +414,7 @@ def build_self_merge_delete_ds(
     target_set = set(target_field_names)
     for clause in clauses:
         if clause.condition is not None:
-            from pypaimon.ray.merge_condition import extract_columns
+            from pypaimon.write.merge_condition import extract_columns
             for ref in extract_columns(clause.condition):
                 prefix, col = ref.split(".", 1)
                 if prefix == "s" and col in target_set:
@@ -550,6 +468,7 @@ def build_self_merge_delete_ds(
         on_map={row_id_name: row_id_name},
         row_id_name=row_id_name,
         delete_schema=delete_schema,
+        native_enabled=native_enabled,
     )
     return aliased.map_batches(_transform, **_map_kwargs(ray_remote_args))
 
@@ -570,6 +489,7 @@ def build_matched_update_ds(
     estimated_size_bytes: Optional[int] = None,
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    native_enabled: bool = False,
 ) -> Tuple:
     from pypaimon.ray.ray_paimon import read_paimon
     from pypaimon.table.special_fields import SpecialFields
@@ -615,6 +535,7 @@ def build_matched_update_ds(
         update_cols=list(update_cols),
         row_id_name=row_id_name,
         update_schema=update_schema,
+        native_enabled=native_enabled,
     )
     return joined.map_batches(_transform, **_map_kwargs(ray_remote_args))
 
@@ -633,6 +554,7 @@ def build_matched_delete_ds(
     estimated_size_bytes: Optional[int] = None,
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    native_enabled: bool = False,
 ) -> Tuple:
     from pypaimon.ray.ray_paimon import read_paimon
     from pypaimon.table.special_fields import SpecialFields
@@ -676,6 +598,7 @@ def build_matched_delete_ds(
         on_map=dict(zip(source_on, target_on)),
         row_id_name=row_id_name,
         delete_schema=delete_schema,
+        native_enabled=native_enabled,
     )
     return joined.map_batches(_transform, **_map_kwargs(ray_remote_args))
 
@@ -694,7 +617,6 @@ def distributed_update_apply(
     data_context=None,
     materialize_before_routing: bool = False,
 ) -> Tuple[list, int, list]:
-    import numpy as np
     import pickle
 
     import pyarrow.compute as pc
@@ -716,11 +638,11 @@ def distributed_update_apply(
     # the delete path).
     from pypaimon.common.options.core_options import CoreOptions
     scan_table = (
-        table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
+        table.copy_without_time_travel({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
         if base_snapshot_id is not None else table
     )
-    from pypaimon.write.row_id_file_index import RowIdFileIndex
-    planner = RowIdFileIndex.from_table(scan_table)
+    from pypaimon.write.row_id_plan import capture_row_id_plan
+    planner = capture_row_id_plan(scan_table)
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return [], 0, []
@@ -736,64 +658,17 @@ def distributed_update_apply(
         # Keep the matched join and file-routing shuffle in separate Ray jobs.
         update_ds = update_ds.materialize()
 
-    # Pin commit-time conflict check to the snapshot the join was built on,
-    # so concurrent commits between read and planner are detected.
-    check_from_snapshot = (
-        base_snapshot_id if base_snapshot_id is not None
-        else planner.snapshot_id
-    )
-
-    # Put file metadata into Ray's object store and pass a single ref to
-    # workers. Avoids per-task manifest re-scans (Jingsong review #6) and
-    # avoids serializing the metadata into every task's closure. Override
-    # snapshot_id with the join's base snapshot so commit-time conflict
-    # detection covers the read→planner window.
-    from dataclasses import replace
-    files_info = replace(
-        planner,
-        snapshot_id=check_from_snapshot,
-    )
+    # Capture files and the resolved snapshot together. Workers must not plan
+    # again after later append/compaction commits.
+    files_info = planner
     precomputed_info_ref = ray.put(files_info)
 
     frid_col = "_FIRST_ROW_ID"
     sentinel_row_id = -1
     captured_sorted = sorted_first_row_ids
-    captured_sorted_arr = np.asarray(captured_sorted, dtype=np.int64)
-    valid_ranges = planner.valid_row_id_ranges
-    range_starts = np.asarray([r.from_ for r in valid_ranges], dtype=np.int64)
-    range_ends = np.asarray([r.to for r in valid_ranges], dtype=np.int64)
 
     def _assign_frid(batch: pa.Table) -> pa.Table:
-        if batch.num_rows == 0:
-            return batch.append_column(
-                frid_col, pa.array([], type=pa.int64())
-            )
-        rid_col = batch.column(row_id_name)
-        if rid_col.null_count:
-            raise ValueError(
-                "_ROW_ID is null; planner snapshot is stale "
-                "or matched rows come from a different table."
-            )
-        rids = rid_col.to_numpy(zero_copy_only=False)
-        # Check each row_id belongs to a valid range (vectorized).
-        in_range = np.zeros(len(rids), dtype=bool)
-        for s, e in zip(range_starts, range_ends):
-            in_range |= (rids >= s) & (rids <= e)
-        if not in_range.all():
-            bad = rids[~in_range][0]
-            raise ValueError(
-                f"_ROW_ID {bad} does not belong to any valid range "
-                f"{[f'[{r.from_}, {r.to}]' for r in valid_ranges]}; "
-                f"planner snapshot is stale or matched rows come "
-                f"from a different table."
-            )
-        idx = np.searchsorted(
-            captured_sorted_arr, rids, side="right"
-        ) - 1
-        frids = captured_sorted_arr[idx]
-        return batch.append_column(
-            frid_col, pa.array(frids, type=pa.int64())
-        )
+        return batch.append_column(frid_col, planner.route(batch.column(row_id_name)))
 
     map_kwargs = _map_kwargs(ray_remote_args)
     with_frid = update_ds.map_batches(_assign_frid, **map_kwargs)
@@ -812,7 +687,7 @@ def distributed_update_apply(
     )
     with_frid = with_frid.union(ray.data.from_arrow(sentinel))
 
-    captured_table = table
+    captured_table = planner.table
     captured_cols = cols
 
     def _apply_group(group: pa.Table) -> pa.Table:
@@ -835,15 +710,15 @@ def distributed_update_apply(
 
         for_update = group.drop_columns([frid_col])
         info = ray.get(precomputed_info_ref)
-        _validate_live_row_ids(
-            captured_table, info, int(group[frid_col][0].as_py()), for_update[row_id_name].to_pylist())
         row_ids = (
             for_update.column(row_id_name).to_pylist()
             if collect_row_ids else []
         )
         update = captured_table.new_batch_write_builder().new_update()
-        worker = update.new_update_by_row_id(
-            _precomputed_files_info=ray.get(precomputed_info_ref))
+        worker = update.new_update_by_row_id(_precomputed_files_info=info)
+        from pypaimon.write.backend_dispatch import validate_row_id_update_rows
+        validate_row_id_update_rows(
+            worker, info, int(group[frid_col][0].as_py()), for_update[row_id_name])
         msgs = worker.update_columns(for_update, list(captured_cols))
         return pa.Table.from_pydict({
             "msgs_blob": [pickle.dumps(msgs)],
@@ -880,7 +755,7 @@ def distributed_update_apply(
 def _read_output_schema(table, read_cols: Sequence[str]) -> "pa.Schema":
     """Result schema: each projected column's type plus int64 ``_ROW_ID``, in
     ``read_cols`` order. Shared by the empty-result paths so they can't drift."""
-    from pypaimon.casting.schema_evolution import read_arrow_schema
+    from pypaimon.schema.arrow_schema import read_arrow_schema
     from pypaimon.table.special_fields import SpecialFields
 
     full = read_arrow_schema(table.table_schema.fields + [SpecialFields.ROW_ID])
@@ -904,13 +779,9 @@ def distributed_read_by_row_id(
     ``ray.data.Dataset`` of ``(*projection, _ROW_ID)``, or ``None`` if the target
     is empty. Read-side mirror of ``distributed_update_apply``.
     """
-    import numpy as np
-
     import ray
 
-    from pypaimon.globalindex.indexed_split import IndexedSplit
     from pypaimon.table.special_fields import SpecialFields
-    from pypaimon.utils.range import Range
 
     row_id_name = SpecialFields.ROW_ID.name
     read_cols = list(projection)
@@ -921,8 +792,8 @@ def distributed_read_by_row_id(
     empty_out = _read_output_schema(table, read_cols).empty_table()
 
     # The caller pinned the resolved snapshot, including any retained tag metadata.
-    from pypaimon.write.row_id_file_index import RowIdFileIndex
-    planner = RowIdFileIndex.from_table(table)
+    from pypaimon.write.row_id_plan import capture_row_id_plan
+    planner = capture_row_id_plan(table)
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return None
@@ -937,61 +808,23 @@ def distributed_read_by_row_id(
 
     precomputed_info_ref = ray.put(planner)
     frid_col = "_FIRST_ROW_ID"
-    sorted_arr = np.asarray(sorted_first_row_ids, dtype=np.int64)
-    valid_ranges = planner.valid_row_id_ranges
-    range_starts = np.asarray([r.from_ for r in valid_ranges], dtype=np.int64)
-    range_ends = np.asarray([r.to for r in valid_ranges], dtype=np.int64)
 
     def _assign_frid(batch: pa.Table) -> pa.Table:
-        if batch.num_rows == 0:
-            return batch.append_column(frid_col, pa.array([], type=pa.int64()))
-        rid_col = batch.column(row_id_name)
-        if rid_col.null_count:
-            raise ValueError(
-                "_ROW_ID is null; the planner snapshot is stale or the row ids "
-                "come from a different table."
-            )
-        rids = rid_col.to_numpy(zero_copy_only=False)
-        # Foreign-id check: valid_ranges are sorted+merged, so one searchsorted finds
-        # the candidate range (O(rows log ranges), like distributed_delete_apply).
-        ridx = np.searchsorted(range_starts, rids, side="right") - 1
-        safe = np.clip(ridx, 0, len(range_starts) - 1)
-        in_range = (
-            (ridx >= 0)
-            & (rids >= range_starts[safe])
-            & (rids <= range_ends[safe])
-        )
-        if not in_range.all():
-            bad = rids[~in_range][0]
-            raise ValueError(
-                f"_ROW_ID {bad} does not belong to any valid range "
-                f"{[f'[{r.from_}, {r.to}]' for r in valid_ranges]}; the planner "
-                f"snapshot is stale or the row ids come from a different table."
-            )
-        idx = np.searchsorted(sorted_arr, rids, side="right") - 1
-        return batch.append_column(
-            frid_col, pa.array(sorted_arr[idx], type=pa.int64())
-        )
+        return batch.append_column(frid_col, planner.route(batch.column(row_id_name)))
 
-    captured_table = table  # read at the same pinned snapshot the planner routed on
+    captured_table = planner.table  # read the captured view used for routing
     captured_read_cols = read_cols
     captured_empty = empty_out
 
     def _read_group(group: pa.Table) -> pa.Table:
         if group.num_rows == 0:
             return captured_empty
-        frid = int(group.column(frid_col)[0].as_py())
         info = ray.get(precomputed_info_ref)
-        owning_split, target_files = info.first_row_id_index[frid]
-        target_names = {file.file_name for file in target_files}
-        origin_split = owning_split.filter_file(lambda file: file.file_name in target_names)
-        # Only matched rows (deduped, contiguous ids -> ranges); blob gets row-index pushdown.
-        wanted = set(group.column(row_id_name).to_pylist())
-        indexed = IndexedSplit(origin_split, Range.to_ranges(list(wanted)))
+        selected = info.select(group.column(row_id_name))
         read = captured_table.new_read_builder().with_projection(
             captured_read_cols
         ).new_read()
-        return read.to_arrow([indexed])
+        return read.to_arrow(selected.splits())
 
     map_kwargs = _map_kwargs(ray_remote_args)
     with_frid = row_ids_ds.map_batches(_assign_frid, **map_kwargs)
@@ -1011,8 +844,6 @@ def distributed_delete_apply(
     collect_row_ids: bool = False,
     materialize_before_routing: bool = False,
 ) -> Tuple[list, int, list]:
-    import base64
-    import numpy as np
     import pickle
 
     import pyarrow.compute as pc
@@ -1024,12 +855,12 @@ def distributed_delete_apply(
 
     row_id_name = SpecialFields.ROW_ID.name
     scan_table = (
-        table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
+        table.copy_without_time_travel({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
         if base_snapshot_id is not None else table
     )
 
-    planner = TableDeleteByRowId(scan_table)
-    anchor_info = planner._snapshot_anchor_ranges()
+    from pypaimon.write.row_id_plan import capture_row_id_plan
+    anchor_info = capture_row_id_plan(scan_table)
     if not anchor_info.anchors:
         return [], 0, []
 
@@ -1039,62 +870,16 @@ def distributed_delete_apply(
 
     precomputed_info_ref = ray.put(anchor_info)
 
-    starts = np.asarray(
-        [a.row_range.from_ for a in anchor_info.anchors], dtype=np.int64
-    )
-    ends = np.asarray(
-        [a.row_range.to for a in anchor_info.anchors], dtype=np.int64
-    )
-
-    def _group_key(anchor) -> str:
-        partition_blob = base64.b64encode(
-            pickle.dumps(tuple(anchor.partition.values))
-        ).decode("ascii")
-        return f"{anchor.bucket}:{partition_blob}"
-
-    group_keys = [_group_key(a) for a in anchor_info.anchors]
-    unique_group_count = len(set(group_keys))
+    bucket_owners = anchor_info.route_by_bucket(pa.array(anchor_info.first_row_ids, type=pa.int64()))
+    unique_group_count = len(set(bucket_owners.to_pylist()))
     group_col = "_DELETE_GROUP_KEY"
-    valid_ranges = [
-        f"[{a.row_range.from_}, {a.row_range.to}]"
-        for a in anchor_info.anchors
-    ]
 
     def _assign_group(batch: pa.Table) -> pa.Table:
-        if batch.num_rows == 0:
-            return batch.append_column(
-                group_col, pa.array([], type=pa.string())
-            )
-        rid_col = batch.column(row_id_name)
-        if rid_col.null_count:
-            raise ValueError(
-                "_ROW_ID is null; planner snapshot is stale "
-                "or matched rows come from a different table."
-            )
-        rids = rid_col.to_numpy(zero_copy_only=False)
-        idx = np.searchsorted(starts, rids, side="right") - 1
-        safe_idx = np.clip(idx, 0, len(starts) - 1)
-        in_range = (
-            (idx >= 0)
-            & (idx < len(starts))
-            & (rids >= starts[safe_idx])
-            & (rids <= ends[safe_idx])
-        )
-        if not in_range.all():
-            bad = rids[~in_range][0]
-            raise ValueError(
-                f"_ROW_ID {bad} does not belong to any valid range "
-                f"{valid_ranges}; planner snapshot is stale or matched "
-                f"rows come from a different table."
-            )
-        return batch.append_column(
-            group_col,
-            pa.array([group_keys[i] for i in safe_idx], type=pa.string()),
-        )
+        return batch.append_column(group_col, anchor_info.route_by_bucket(batch.column(row_id_name)))
 
     map_kwargs = _map_kwargs(ray_remote_args)
     with_group = delete_ds.map_batches(_assign_group, **map_kwargs)
-    captured_table = scan_table
+    captured_table = anchor_info.table
 
     def _apply_group(group: pa.Table) -> pa.Table:
         if group.num_rows == 0:
@@ -1114,7 +899,7 @@ def distributed_delete_apply(
                 "merging."
             )
 
-        row_ids = group.column(row_id_name).to_pylist()
+        row_ids = group.column(row_id_name)
         worker = TableDeleteByRowId(
             captured_table,
             _precomputed_anchor_ranges=ray.get(precomputed_info_ref),
@@ -1124,7 +909,7 @@ def distributed_delete_apply(
             "msgs_blob": pa.array([pickle.dumps(msgs)], type=pa.binary()),
             "n_deleted": pa.array([len(row_ids)], type=pa.int64()),
             "row_ids_blob": pa.array(
-                [pickle.dumps(row_ids if collect_row_ids else [])],
+                [pickle.dumps(row_ids.to_pylist() if collect_row_ids else [])],
                 type=pa.binary(),
             ),
         })
@@ -1162,6 +947,7 @@ def build_not_matched_insert_ds(
     target_empty: bool = False,
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    native_enabled: bool = False,
 ):
     from pypaimon.ray.ray_paimon import read_paimon
 
@@ -1194,47 +980,12 @@ def build_not_matched_insert_ds(
             right_on=tuple(f"t.{c}" for c in target_on),
         )
 
-    prepared_clauses = []
-    for clause in clauses:
-        rewritten = None
-        if clause.condition is not None:
-            from pypaimon.ray.merge_condition import rewrite_condition
-            rewritten = rewrite_condition(clause.condition)
-        prepared_clauses.append((clause.spec, rewritten))
+    from pypaimon.write.backend_dispatch import create_merge_batch_transform
 
-    _filter_batch_nm = None
-    if any(r is not None for _, r in prepared_clauses):
-        from pypaimon.ray.merge_condition import filter_batch as _filter_batch_nm
-
-    def _transform(batch: pa.Table) -> pa.Table:
-        remaining = batch
-        parts = []
-        for spec, rewritten in prepared_clauses:
-            if remaining.num_rows == 0:
-                break
-            if rewritten is not None:
-                matched = _filter_batch_nm(
-                    remaining, rewritten, _pre_rewritten=True,
-                )
-                if matched.num_rows > 0:
-                    parts.append(vectorized_insert_transform(
-                        matched, spec, captured_field_names, out_schema
-                    ))
-                if matched.num_rows < remaining.num_rows:
-                    not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
-                    remaining = _filter_batch_nm(
-                        remaining, not_cond, _pre_rewritten=True,
-                    )
-                else:
-                    remaining = remaining.slice(0, 0)
-            else:
-                parts.append(vectorized_insert_transform(
-                    remaining, spec, captured_field_names, out_schema
-                ))
-                remaining = remaining.slice(0, 0)
-        if not parts:
-            return out_schema.empty_table()
-        return cast_to_schema(pa.concat_tables(parts), out_schema)
+    _transform = create_merge_batch_transform(
+        'insert', clauses, captured_field_names, out_schema,
+        native_enabled=native_enabled,
+    )
 
     return unmatched.map_batches(
         _transform, **_map_kwargs(ray_remote_args)
@@ -1271,24 +1022,3 @@ def distributed_write_collect_msgs(
         write_kwargs["concurrency"] = concurrency
     insert_ds.write_datasink(sink, **write_kwargs)
     return sink.collected
-
-
-def _validate_live_row_ids(table, info, first_row_id, row_ids):
-    """Reject deleted updates using only the routed snapshot's DV files.
-
-    The writer must still merge physical rows, including tombstones, to preserve
-    row-id offsets. Filtering the writer's original data would shift those offsets.
-    """
-    from pypaimon.deletionvectors.deletion_vector import DeletionVector
-
-    split, files = info.first_row_id_index[first_row_id]
-    if split.data_deletion_files is None:
-        return
-    target_names = {file.file_name for file in files}
-    for file, deletion in zip(split.files, split.data_deletion_files):
-        if deletion is None or file.file_name not in target_names:
-            continue
-        vector = DeletionVector.read(table.file_io, deletion)
-        for row_id in row_ids:
-            if file.row_id_range().contains(row_id) and vector.is_deleted(row_id - file.first_row_id):
-                raise ValueError("Cannot update deleted _ROW_ID {}.".format(row_id))

@@ -32,6 +32,7 @@ import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerialization;
 import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 import org.apache.flink.runtime.jobgraph.OperatorID;
+import org.apache.flink.runtime.operators.coordination.ComponentClosingUtils;
 import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.apache.flink.runtime.operators.coordination.OperatorEvent;
 import org.apache.flink.runtime.operators.coordination.RecreateOnResetOperatorCoordinator;
@@ -42,6 +43,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -74,6 +76,10 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(CommittingWriteOperatorCoordinator.class);
+
+    // Must stay well below the 60s that RecreateOnResetOperatorCoordinator gives close(), after
+    // which Flink interrupts the closing thread and fails the job.
+    private static final Duration DRAIN_TIMEOUT = Duration.ofSeconds(30);
 
     private final OperatorCoordinator.Context context;
     private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
@@ -154,10 +160,16 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
 
     @Override
     public void close() throws Exception {
-        transitionState(State.CLOSED);
-        if (commitExecutor != null) {
-            commitExecutor.shutdownNow();
+        // Let actions already queued run before closing, e.g. the commit and savepoint tag queued
+        // by the notifyCheckpointComplete of a stop-with-savepoint right before the job finishes.
+        // They require RUNNING, so the state changes only after draining.
+        if (!ComponentClosingUtils.tryShutdownExecutorElegantly(commitExecutor, DRAIN_TIMEOUT)) {
+            LOG.warn(
+                    "Commit executor did not finish queued actions within {}. A pending commit or"
+                            + " savepoint tag may be lost.",
+                    DRAIN_TIMEOUT);
         }
+        transitionState(State.CLOSED);
         if (committer != null) {
             committer.close();
             committer = null;
@@ -600,6 +612,11 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     @VisibleForTesting
     State getCurrentState() {
         return state;
+    }
+
+    @VisibleForTesting
+    boolean isCommitExecutorShutdown() {
+        return commitExecutor.isShutdown();
     }
 
     @VisibleForTesting

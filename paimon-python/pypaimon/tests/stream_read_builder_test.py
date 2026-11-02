@@ -24,7 +24,8 @@ import pytest
 from pypaimon.read.read_type import OutputProjection
 
 from pypaimon.read.stream_read_builder import StreamReadBuilder
-from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan as PythonStreamScan
+from pypaimon.read.streaming_table_scan import StreamTableScan
 from pypaimon.schema.data_types import AtomicType, DataField
 
 
@@ -41,6 +42,8 @@ def mock_table():
     table = MagicMock()
     table.fields = []
     table.options.row_tracking_enabled.return_value = False
+    table.options.native_plan_enabled.return_value = False
+    table.options.native_read_enabled.return_value = False
     return table
 
 
@@ -59,6 +62,9 @@ def mock_scan_table():
     table.table_path = "/tmp/test"
     table.fields = []
     table.options.row_tracking_enabled.return_value = False
+    table.options.native_plan_enabled.return_value = False
+    table.options.native_read_enabled.return_value = False
+    table.catalog_environment.table_query_auth.return_value = None
     return table
 
 
@@ -126,7 +132,7 @@ class TestAsyncStreamingTableScanFiltering:
 
     def test_filter_with_bucket_filter(self, mock_scan_table):
         """Test _filter_entries_for_shard with custom bucket filter."""
-        scan = AsyncStreamingTableScan(
+        scan = PythonStreamScan(
             table=mock_scan_table,
             bucket_filter=lambda b: b % 2 == 0
         )
@@ -136,7 +142,7 @@ class TestAsyncStreamingTableScanFiltering:
 
     def test_filter_no_filter_returns_all(self, mock_scan_table):
         """Test _filter_entries_for_shard with no filter returns all entries."""
-        scan = AsyncStreamingTableScan(table=mock_scan_table)
+        scan = PythonStreamScan(table=mock_scan_table)
         entries = [MockEntry(b) for b in range(8)]
         filtered = scan._filter_entries_for_shard(entries)
         assert [e.bucket for e in filtered] == list(range(8))
@@ -153,7 +159,7 @@ class TestConsumerIdPassthrough:
         scan = builder.new_streaming_scan()
 
         assert scan._consumer_id == "test-consumer"
-        assert scan._consumer_manager is not None
+        assert scan._execution._consumer_manager is not None
 
     def test_new_streaming_scan_no_consumer_by_default(self, mock_scan_table):
         """Without with_consumer_id(), scan should have no consumer."""
@@ -162,7 +168,7 @@ class TestConsumerIdPassthrough:
         scan = builder.new_streaming_scan()
 
         assert scan._consumer_id is None
-        assert scan._consumer_manager is None
+        assert scan._execution._consumer_manager is None
 
 
 if __name__ == '__main__':
@@ -173,18 +179,21 @@ class TestNativeStreamFactory:
     def test_optional_native_initialization_falls_back(self, mock_scan_table):
         mock_scan_table.options.native_plan_enabled.return_value = True
         builder = StreamReadBuilder(mock_scan_table)
-        with patch('pypaimon.read.stream_read_builder.StreamTableScan',
+        with patch('pypaimon.execution.native.read.streaming_table_scan.StreamTableScan',
                    side_effect=ImportError('optional native runtime unavailable')):
-            assert isinstance(builder.new_streaming_scan(), AsyncStreamingTableScan)
+            scan = builder.new_streaming_scan()
+            assert isinstance(scan, StreamTableScan)
+            assert isinstance(scan._execution, PythonStreamScan)
 
     def test_native_planning_failure_is_not_retried_with_python(self, mock_scan_table):
         from pypaimon.read.streaming_table_scan import StreamTableScan
         failure = LookupError('native planning failed')
+        mock_scan_table.options.native_plan_enabled.return_value = True
         native = MagicMock()
         native.plan.side_effect = failure
-        with patch('pypaimon.read.native_plan.native_stream_scan', return_value=native):
+        with patch('pypaimon.execution.native.read.streaming_table_scan.native_stream_scan', return_value=native):
             scan = StreamTableScan(mock_scan_table)
-        with patch('pypaimon.read.streaming_table_scan.FileScanner') as python_planner:
+        with patch('pypaimon.execution.python.read.streaming_table_scan.FileScanner') as python_planner:
             with pytest.raises(LookupError) as caught:
                 scan.plan()
         assert caught.value is failure

@@ -36,6 +36,7 @@ import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.RESTToken;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -56,6 +57,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -102,6 +106,7 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of("1", 11.0D), Row.of("2", 22.0D));
     }
 
+    @Test
     public void testExpiredDataToken() {
         Identifier identifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
         RESTToken expiredDataToken =
@@ -714,6 +719,63 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                                 String.format(
                                         "SELECT COUNT(*) FROM %s.%s", DATABASE_NAME, filterTable)))
                 .containsExactlyInAnyOrder(Row.of(4L));
+    }
+
+    @Test
+    public void testAlignedStreamingReadWithRowFilterOnEmptyTable() throws Exception {
+        checkAlignedStreamingReadWithRowFilter("aligned_row_filter_empty", false);
+    }
+
+    @Test
+    public void testAlignedStreamingReadWithRowFilter() throws Exception {
+        checkAlignedStreamingReadWithRowFilter("aligned_row_filter", true);
+    }
+
+    private void checkAlignedStreamingReadWithRowFilter(String table, boolean writeFirst)
+            throws Exception {
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (id INT, name STRING) WITH ('query-auth.enabled' = 'true')",
+                        DATABASE_NAME, table));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, table),
+                Collections.singletonList(
+                        LeafPredicate.of(
+                                new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                                GreaterThan.INSTANCE,
+                                Collections.singletonList(0))));
+        String insert = "INSERT INTO %s.%s VALUES (%s)";
+        if (writeFirst) {
+            batchSql(String.format(insert, DATABASE_NAME, table, "1, 'a'"));
+        }
+
+        BlockingIterator<Row, Row> iter =
+                streamSqlBlockIter(
+                        "SELECT * FROM %s.%s /*+ OPTIONS('source.checkpoint-align.enabled' = 'true', "
+                                + "'continuous.discovery-interval' = '100 ms') */",
+                        DATABASE_NAME, table);
+        CompletableFuture<List<Row>> result =
+                CompletableFuture.supplyAsync(
+                        () -> {
+                            try {
+                                return iter.collect(1, 60, TimeUnit.SECONDS);
+                            } catch (Exception e) {
+                                throw new CompletionException(e);
+                            }
+                        });
+        try {
+            if (!writeFirst) {
+                batchSql(String.format(insert, DATABASE_NAME, table, "1, 'a'"));
+            }
+            // an aligned checkpoint waits for a new snapshot, so keep committing rows the row
+            // filter drops
+            while (!result.isDone()) {
+                batchSql(String.format(insert, DATABASE_NAME, table, "0, 'z'"));
+            }
+            assertThat(result.get()).containsExactly(Row.of(1, "a"));
+        } finally {
+            iter.close();
+        }
     }
 
     @Test

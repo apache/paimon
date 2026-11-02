@@ -48,7 +48,7 @@ catalog_options = {
 catalog = CatalogFactory.create(catalog_options)
 ```
 
-For an S3 warehouse, pass S3 authentication options with the filesystem catalog options:
+For an S3 warehouse, install `pypaimon[s3]` and pass S3 authentication options with the filesystem catalog options:
 
 ```python
 from pypaimon import CatalogFactory
@@ -264,6 +264,9 @@ catalog.create_table(
 
 # Get Table
 table = catalog.get_table('database_name.table_name')
+
+# Get Table by id (REST catalog only)
+table = catalog.get_table_by_id('table_id')
 ```
 
 ## Alter Table

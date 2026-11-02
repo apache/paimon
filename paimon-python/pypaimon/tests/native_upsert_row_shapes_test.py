@@ -25,7 +25,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.native_write import native_runtime_available
+from pypaimon.execution.native.write.native_write import native_runtime_available
 
 
 @pytest.fixture(params=[False, pytest.param(True, marks=[
@@ -83,10 +83,10 @@ def _upsert(table, native, stream, rows, columns=('value',)):
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch(
-                'pypaimon.write.table_upsert_by_key.TableUpsertByKey._upsert_row_partition',
+                'pypaimon.execution.python.write.table_upsert_by_key.PythonTableUpsert._upsert_row_partition',
                 side_effect=AssertionError('named-row upsert fell back to Python')))
             stack.enter_context(patch(
-                'pypaimon.write.table_upsert_by_key.TableUpsertByKey._build_key_to_row_ids_map',
+                'pypaimon.execution.python.write.table_upsert_by_key.PythonTableUpsert._build_key_to_row_ids_map',
                 side_effect=AssertionError('upsert keys were matched in Python')))
         messages = (update.upsert_by_key(rows, ['id'], 101) if stream
                     else update.upsert_by_key(rows, ['id']))

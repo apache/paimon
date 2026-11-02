@@ -28,11 +28,6 @@ from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
-from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
-                                              FixedBucketRowKeyExtractor,
-                                              PostponeBucketRowKeyExtractor,
-                                              RowKeyExtractor,
-                                              UnawareBucketRowKeyExtractor)
 from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 
 
@@ -488,30 +483,6 @@ class FileStoreTable(Table):
             dry_run=dry_run,
         )
 
-    def create_row_key_extractor(
-        self, ignore_existing: bool = False
-    ) -> RowKeyExtractor:
-        bucket_mode = self.bucket_mode()
-        if bucket_mode == BucketMode.HASH_FIXED:
-            return FixedBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.BUCKET_UNAWARE:
-            return UnawareBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.POSTPONE_MODE:
-            return PostponeBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.HASH_DYNAMIC:
-            return DynamicBucketRowKeyExtractor(
-                self.table_schema,
-                table=self,
-                ignore_existing=ignore_existing,
-            )
-        elif bucket_mode == BucketMode.CROSS_PARTITION:
-            raise ValueError(
-                "CROSS_PARTITION primary-key writes require a persistent "
-                "global primary-key index, which PyPaimon does not yet support"
-            )
-        else:
-            raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
-
     def copy(self, options: dict) -> 'FileStoreTable':
         return self._copy(options, resolve_time_travel=True)
 
@@ -522,8 +493,7 @@ class FileStoreTable(Table):
     def _copy_with_snapshot(self, snapshot):
         """Keep one resolved read view, including tag metadata and empty tables."""
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
-        selectors = SCAN_KEYS + [
-            CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(),
+        selectors = SCAN_KEYS + CoreOptions.INCREMENTAL_SCAN_KEYS + [
             CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(),
             CoreOptions.SCAN_CREATION_TIME_MILLIS.key(),
         ]
@@ -536,6 +506,14 @@ class FileStoreTable(Table):
         return table
 
     def _copy(self, options: dict, resolve_time_travel: bool) -> 'FileStoreTable':
+        query_auth_key = CoreOptions.QUERY_AUTH_ENABLED.key()
+        if query_auth_key in options and CoreOptions.from_dict(self.table_schema.options).query_auth_enabled:
+            try:
+                enabled = CoreOptions.from_dict(options).query_auth_enabled
+            except ValueError:
+                enabled = False
+            if not enabled:
+                raise ValueError(f"Option '{query_auth_key}' is not allowed to be disabled dynamically")
         video_key = CoreOptions.VIDEO_FRAME_FIELD.key()
         if video_key in options and options[video_key] != self.table_schema.options.get(video_key):
             raise ValueError("Cannot change immutable option " + video_key)
@@ -558,13 +536,8 @@ class FileStoreTable(Table):
 
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         preserve_snapshot = hasattr(self, "_read_snapshot") and not any(
-            key in options for key in SCAN_KEYS + [
-                CoreOptions.SCAN_MODE.key(), CoreOptions.BRANCH.key(),
-                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()])
-        if resolve_time_travel and not preserve_snapshot:
-            time_travel_schema = self._try_time_travel(Options(new_options), set(applied_options))
-            if time_travel_schema is not None:
-                new_table_schema = time_travel_schema
+            key in options for key in SCAN_KEYS + CoreOptions.INCREMENTAL_SCAN_KEYS + [
+                CoreOptions.SCAN_MODE.key(), CoreOptions.BRANCH.key()])
 
         # Re-encode the branch into the identifier when the option changes, so
         # current_branch() and any catalog-routed snapshot commit see the
@@ -583,12 +556,19 @@ class FileStoreTable(Table):
 
         new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
                                    new_table_schema, catalog_env)
+        if resolve_time_travel and not preserve_snapshot:
+            # Resolve snapshots, tags and schemas in the target branch.
+            time_travel_schema = new_table._try_time_travel(Options(new_options), set(applied_options))
+            if time_travel_schema is not None:
+                new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
+                                           time_travel_schema, catalog_env)
+
         new_table._applied_dynamic_options = applied_options
         if preserve_snapshot:
             new_table._read_snapshot = self._read_snapshot
-            from pypaimon.read.native_plan import _NativeRestTableCache
-            new_table._native_pinned_table_cache = vars(self).setdefault(
-                '_native_pinned_table_cache', _NativeRestTableCache())
+            # Copies of one pinned view share lazily allocated backend
+            # resources. Copying a Python table must not initialize a backend.
+            new_table._pinned_read_resources = vars(self).setdefault('_pinned_read_resources', {})
         return new_table
 
     def _try_time_travel(self, options: Options, dynamic_option_keys: Set[str]) -> Optional[TableSchema]:

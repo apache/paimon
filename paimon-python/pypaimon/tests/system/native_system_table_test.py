@@ -24,7 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
-from pypaimon.table.system.native_system_table import try_read_native_system_table
+from pypaimon.execution.native.read.system_table import try_read_native_system_table
 
 
 def _table(name='files', enabled=True):
@@ -37,19 +37,19 @@ def _table(name='files', enabled=True):
 @pytest.mark.parametrize('reason', ['disabled', 'old-binding', 'custom-io', 'unknown-table'])
 def test_unsupported_metadata_reads_do_not_create_native_tables(reason):
     table = _table('unknown' if reason == 'unknown-table' else 'files', enabled=reason != 'disabled')
-    with patch('pypaimon.table.system.native_system_table.native_runtime_available',
+    with patch('pypaimon.execution.native.read.system_table.native_runtime_available',
                return_value=reason != 'old-binding'):
-        with patch('pypaimon.table.system.native_system_table._rest_catalog_supported',
+        with patch('pypaimon.execution.native.read.system_table._rest_catalog_supported',
                    return_value=reason != 'custom-io'):
-            with patch('pypaimon.table.system.native_system_table._native_table') as create:
+            with patch('pypaimon.execution.native.read.system_table._native_table') as create:
                 assert try_read_native_system_table(table) is None
                 create.assert_not_called()
 
 
 def _read_with_native_result(result=None, error=None):
-    with patch('pypaimon.table.system.native_system_table.native_runtime_available', return_value=True):
-        with patch('pypaimon.table.system.native_system_table._rest_catalog_supported', return_value=True):
-            with patch('pypaimon.table.system.native_system_table._native_table') as create:
+    with patch('pypaimon.execution.native.read.system_table.native_runtime_available', return_value=True):
+        with patch('pypaimon.execution.native.read.system_table._rest_catalog_supported', return_value=True):
+            with patch('pypaimon.execution.native.read.system_table._native_table') as create:
                 read = create.return_value.new_system_read.return_value.read
                 read.return_value = result
                 read.side_effect = error

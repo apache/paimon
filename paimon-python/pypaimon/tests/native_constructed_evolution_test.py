@@ -87,8 +87,10 @@ def test_large_list_constructed_strings_use_native_read(
             # while its Parquet reader normalizes MAP values to regular List.
     for native in (False, True):
         reader = table.copy({'read.native.enabled': str(native).lower()}).new_read_builder().new_read()
-        guard = patch('pypaimon.read.table_read.TableRead._create_split_read',
-                      side_effect=AssertionError('Native read fell back')) if native else ExitStack()
+        guard = patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Native read fell back')
+        ) if native else ExitStack()
         with guard:
             result = reader.to_arrow(splits).sort_by([('id', 'ascending')])
         # Java's constructed casts use STRING for children and ignore the

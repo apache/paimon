@@ -97,6 +97,12 @@ class Catalog(ABC):
     def get_table(self, identifier: Union[str, Identifier]) -> Table:
         """Get paimon table identified by the given Identifier."""
 
+    def get_table_by_id(self, table_id: str) -> Table:
+        """Get paimon table identified by the given table id."""
+        raise NotImplementedError(
+            "get_table_by_id is not supported by this catalog."
+        )
+
     @abstractmethod
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
         """Create table with schema."""

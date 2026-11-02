@@ -239,7 +239,6 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
                                 table, commitUser, committableStateManager),
                 table::snapshotManager,
                 table::tagManager,
-                () -> table.store().newTagDeletion(),
                 () -> table.store().createTagCallbacks(table),
                 table.store().options().tagDefaultTimeRetained());
     }
@@ -257,7 +256,6 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
                                 table, commitUser, committableStateManager, initializeFunction),
                 table::snapshotManager,
                 table::tagManager,
-                () -> table.store().newTagDeletion(),
                 () -> table.store().createTagCallbacks(table),
                 table.store().options().tagDefaultTimeRetained());
     }

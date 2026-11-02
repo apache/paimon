@@ -24,7 +24,9 @@ import pytest
 
 import pypaimon.multimodal as pm
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import VINDEX_IDENTIFIERS
+from pypaimon.globalindex.vindex_options import (
+    VINDEX_IDENTIFIERS,
+)
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.tests.global_index_build_test import _FakeVectorIndexTrainer, _FakeVectorIndexWriter
 
@@ -110,6 +112,32 @@ def test_native_search_excludes_deletions_before_and_after_build(table, metric, 
     assert search(table) == []
     assert search(table, batch=True) == [[], []]
     assert build(table, metric) == 0
+
+
+@pytest.mark.python_plan
+@pytest.mark.python_write
+@pytest.mark.python_commit
+@pytest.mark.parametrize('batch', [False, True])
+def test_python_ivfpq_search_keeps_live_null_vectors_out_of_results(tmp_path, batch):
+    pytest.importorskip('paimon_vindex')
+    schema = pa.schema([('id', pa.int64()), ('embedding', pa.list_(pa.float32()))])
+    table = pm.connect(options={'warehouse': str(tmp_path)}).create_table(
+        'vectors', schema=schema, options={
+            'file.format': 'parquet', 'vector.file.format': 'parquet', 'vector-index.search-mode': 'fast'})
+    table.add(pa.table({
+        'id': list(range(5)), 'embedding': [[1., 0.], [0., 1.], None, [1., 1.], [2., 2.]]}, schema=schema))
+    table.delete('id = 0 OR id = 3')
+    assert table.create_index('embedding', 'ivf-pq', options={
+        'ivf-pq.dimension': '2', 'ivf-pq.nlist': '1', 'ivf-pq.pq.m': '1',
+        'ivf-pq.distance.metric': 'l2'}) == 1
+    raw_table = table.raw_table
+    query = (raw_table.new_batch_vector_search_builder().with_query_vectors([[1., 1.], [1., 1.]]) if batch
+             else raw_table.new_vector_search_builder().with_query_vector([1., 1.]))
+    query.with_vector_column('embedding').with_limit(64).with_option('ivf.nprobe', '1')
+    results = query.execute_batch_local() if batch else [query.execute_local()]
+    assert len(results) == (2 if batch else 1)
+    for result in results:
+        assert sorted(result.results()) == [1, 4]
 
 
 def test_native_build_and_query_keep_snapshot_semantics(table):

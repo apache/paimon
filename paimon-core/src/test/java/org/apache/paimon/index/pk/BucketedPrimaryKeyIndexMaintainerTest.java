@@ -128,7 +128,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
     @Test
     void testFactoryCreatesConfiguredFullTextMaintainer() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(), "content");
+        options.put(CoreOptions.GLOBAL_INDEX_FULL_TEXT_INDEX_COLUMNS.key(), "content");
         TableSchema schema =
                 new TableSchema(
                         0,

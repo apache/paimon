@@ -20,6 +20,8 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.fs.Path;
 
+import javax.annotation.Nullable;
+
 /** Path factory to create an index path. */
 public interface IndexPathFactory {
 
@@ -27,8 +29,12 @@ public interface IndexPathFactory {
 
     Path newPath();
 
+    default Path toPath(String fileName, @Nullable String externalPath) {
+        return toPath(fileName);
+    }
+
     default Path toPath(IndexFileMeta file) {
-        return toPath(file.fileName());
+        return toPath(file.fileName(), file.externalPath());
     }
 
     boolean isExternalPath();

@@ -44,7 +44,7 @@ class OptionalDataSketchesDependencyTest(unittest.TestCase):
 
             import pypaimon
             from pypaimon.common.options import CoreOptions, Options
-            from pypaimon.read.reader.aggregate import create_field_aggregator
+            from pypaimon.execution.python.read.reader.aggregate import create_field_aggregator
             from pypaimon.schema.data_types import AtomicType
 
             options = CoreOptions(Options.from_none())

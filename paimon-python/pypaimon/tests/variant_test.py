@@ -41,6 +41,7 @@ Sections
 """
 
 import asyncio
+import importlib.util
 import io
 import json
 import os
@@ -57,27 +58,30 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.native.read.table_read import NativeTableRead
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.data.variant_shredding import (
     VARIANT_ARROW_TYPE,
     VariantSchema,
-    _decompose_field_bytes,
-    _NULL_VALUE_BYTES,
     _build_array_value,
     _build_object_value,
-    _extract_overflow_fields,
     _encode_scalar_to_value_bytes,
-    assemble_shredded_column,
     build_variant_schema,
-    decompose_variant,
     is_shredded_variant,
     parse_metadata_dict,
     parse_shredding_schema_option,
-    rebuild,
-    rebuild_value,
     shredding_schema_to_arrow_type,
 )
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.python.read.variant_shredding import (
+    _decompose_field_bytes,
+    _NULL_VALUE_BYTES,
+    _extract_overflow_fields,
+    assemble_shredded_column,
+    decompose_variant,
+    rebuild,
+    rebuild_value,
+)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import (
     AtomicType,
     DataField,
@@ -1193,7 +1197,7 @@ class TestShreddingWrite(unittest.TestCase):
                     gv = GenericVariant.from_python(value)
                     schema = VariantSchema(value_idx=0, typed_idx=1,
                                            scalar_arrow_type=arrow_type)
-                    with patch('pypaimon.data.variant_shredding.pa.scalar', wraps=pa.scalar) as scalar:
+                    with patch('pypaimon.execution.python.read.variant_shredding.pa.scalar', wraps=pa.scalar) as scalar:
                         row = _decompose_field_bytes(gv.value(), schema, gv.metadata())
                     if not (pa.types.is_decimal(arrow_type) or pa.types.is_timestamp(arrow_type)):
                         scalar.assert_not_called()
@@ -1259,7 +1263,8 @@ class TestVariantPaimonTable(unittest.TestCase):
             pa.field('payload', _variant_arrow_type()),
         ])
 
-    def test_native_variant_projection_rejects_row_readers(self):
+    @unittest.skipUnless(importlib.util.find_spec('torch') is not None, 'torch is not installed')
+    def test_variant_projection_torch_row_backend_boundary(self):
         for mode, options in (
             ('append', {}),
             ('lazy', {
@@ -1286,18 +1291,28 @@ class TestVariantPaimonTable(unittest.TestCase):
                 writer.close()
                 commit.close()
 
-                builder = table.new_read_builder().with_projection(
-                    {'ratio': "try_variant_get(payload, '$.ratio', 'float')"})
+                projection = {'ratio': "try_variant_get(payload, '$.ratio', 'float')"}
+                builder = table.copy({'read.native.enabled': 'false'}).new_read_builder().with_projection(projection)
                 splits = builder.new_scan().plan().splits()
                 self.assertTrue(splits)
                 read = builder.new_read()
 
-                with self.assertRaisesRegex(RuntimeError, 'to_iterator'):
-                    read.to_iterator(splits)
-                with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
-                    read.to_torch(splits, streaming=True)
                 with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
                     read.to_torch(splits, streaming=False)
+
+                dataset = read.to_torch(splits, streaming=True)
+                with self.assertRaisesRegex(RuntimeError, 'Variant extraction requires a compatible native reader'):
+                    list(dataset)
+
+                builder = table.copy({'read.native.enabled': 'true'}).new_read_builder().with_projection(projection)
+                read = builder.new_read()
+                with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=False):
+                    dataset = read.to_torch(splits, streaming=True)
+                    with self.assertRaisesRegex(RuntimeError, 'Variant extraction requires a compatible native reader'):
+                        list(dataset)
+
+                if _native_variant_projection_available():
+                    self.assertEqual(list(read.to_torch(splits, streaming=True)), [{'ratio': 1.25}])
 
     def _check_variant_projection_literal_top_level_names(
             self, suffix, native_read):
@@ -1340,7 +1355,7 @@ class TestVariantPaimonTable(unittest.TestCase):
                 splits = builder.new_scan().plan().splits()
                 self.assertTrue(splits)
                 read = builder.new_read()
-                kwargs = read._native_read_kwargs()
+                kwargs = NativeTableRead(read)._read_kwargs()
                 self.assertEqual(
                     [field.name for field in kwargs['read_type']], projection)
                 self.assertNotIn('nested_projection', kwargs)
@@ -1514,7 +1529,7 @@ class TestVariantPaimonTable(unittest.TestCase):
             builder = table.new_batch_write_builder()
             writer = builder.new_write()
             self.assertEqual(type(writer).__name__,
-                             'NativeTableWrite' if native else 'BatchTableWrite')
+                             'NativeBatchTableWrite' if native else 'BatchTableWrite')
             commit = builder.new_commit()
             try:
                 for start in range(0, len(gvs), 3):
@@ -1563,7 +1578,6 @@ class TestVariantPaimonTable(unittest.TestCase):
     def test_native_writer_preserves_shredded_variant_types(self):
         try:
             import pypaimon_rust  # noqa: F401
-            from pypaimon.write.native_write import NativeTableWrite  # noqa: F401
         except ImportError:
             self.skipTest('native writer is not available')
         self._check_shredding_type_preservation(native=True)

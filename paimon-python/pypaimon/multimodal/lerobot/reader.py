@@ -30,15 +30,25 @@ class _PaimonTableFrameReader:
     def __init__(self, frames_table, *, columns):
         self._table, self.snapshot_id, splits = _indexed_read_table(
             frames_table, columns)
+        from pypaimon.read.read_dispatch import configure_indexed_read
+        self._table = configure_indexed_read(self._table)
         snapshot = self._table.snapshot_manager().get_snapshot_by_id(
             self.snapshot_id)
+        self._table = self._table._copy_with_snapshot(snapshot)
         self.num_rows = snapshot.next_row_id
         self.file_io = self._table.file_io
-        self._locator = _FrameLocator(self._table, snapshot, splits)
+        self._locator = _FrameLocator(
+            self._table, snapshot, splits, projection=columns)
 
     def read_indices(self, indices, columns):
-        splits, needs_filter = self._locator.locate(indices)
         builder = self._table.new_read_builder().with_projection(columns)
+        from pypaimon.read.read_dispatch import plan_indexed_read
+        builder.with_filter(_index_predicate(self._table, indices))
+        plan = plan_indexed_read(builder.new_scan())
+        if plan is not None:
+            return builder.new_read().to_arrow(plan.splits())
+        builder = self._table.new_read_builder().with_projection(columns)
+        splits, needs_filter = self._locator.locate(indices)
         if needs_filter:
             builder = builder.with_filter(
                 _index_predicate(self._table, indices))
@@ -51,9 +61,10 @@ class _PaimonTableFrameReader:
 class _FrameLocator:
     """Locate LeRobot frame rows in one fixed Paimon snapshot."""
 
-    def __init__(self, table, snapshot, splits):
+    def __init__(self, table, snapshot, splits, *, projection):
         self._table = table
         self._snapshot = snapshot
+        self._projection = list(projection)
         self._scanner = None
         self._scanner_initialized = False
         self._process_id = os.getpid()
@@ -120,13 +131,17 @@ class _FrameLocator:
             return
         self._scanner = None
         self._scanner_initialized = False
-        self._set_splits(self._splits)
+        splits = self._splits
+        if splits is None:
+            splits = self._table.new_read_builder().with_projection(
+                self._projection).new_scan().plan().splits()
+        self._set_splits(splits)
         self._process_id = process_id
 
     def _index_scanner(self, predicate):
         if not self._scanner_initialized:
-            from pypaimon.globalindex import DataEvolutionGlobalIndexScanner
-            self._scanner = DataEvolutionGlobalIndexScanner.create(
+            from pypaimon.globalindex.index_dispatch import create_python_scalar_index_scanner
+            self._scanner = create_python_scalar_index_scanner(
                 self._table,
                 predicate=predicate,
                 snapshot=self._snapshot,
@@ -148,6 +163,10 @@ class _FrameLocator:
         state["_process_id"] = None
         state["_split_ranges"] = None
         state["_split_range_index"] = None
+        if (self._table.options.native_read_enabled()
+                or self._table.options.native_plan_enabled()):
+            # Native reads do not need fallback splits in the worker payload.
+            state["_splits"] = None
         return state
 
     def __del__(self):

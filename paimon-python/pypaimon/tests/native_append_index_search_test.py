@@ -23,10 +23,10 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
 from pypaimon.table.source.hybrid_search_builder import HybridSearchBuilderImpl
-from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+from pypaimon.execution.python.read.search.vector_search_read import DataEvolutionVectorRead
 from pypaimon.tests import native_sorted_index_build_test as indexes
 from pypaimon.tests.vector_search_filter_test import match_query
 
@@ -130,8 +130,21 @@ def test_exact_scalar_index_filters_work_on_append_vector_routes(rest_catalog, f
 
 
 @pytest.mark.parametrize('family', ['full-text', 'hybrid-text', 'hybrid-mixed'])
-@pytest.mark.parametrize('native', [False, True])
-def test_append_full_text_row_filters_remain_unsupported(rest_catalog, family, native):
-    table = _table(rest_catalog[0], True).copy({'read.native.enabled': str(native).lower()})
+def test_python_append_full_text_row_filters_remain_unsupported(rest_catalog, family):
+    table = _table(rest_catalog[0], True)
     with pytest.raises(Exception, match='[Ff]ull-text row filters require a data-evolution table'):
         _builder(table, family, row_filter=True).execute_local()
+
+
+@pytest.mark.parametrize('family', ['full-text', 'hybrid-text', 'hybrid-mixed'])
+@pytest.mark.parametrize('partition', [False, True])
+def test_native_append_full_text_routes_apply_scalar_filters(rest_catalog, family, partition):
+    table = _table(rest_catalog[0], True).copy({'read.native.enabled': 'true'})
+    with _native_only():
+        actual = _scores(_builder(table, family, partition, row_filter=True).execute_local())
+    wanted = {3} if partition else {0, 3}
+    if family == 'hybrid-mixed':
+        wanted = {2, 3} if partition else {0, 2, 3}
+    assert set(actual) == wanted
+    # A matching text document still has to satisfy the scalar predicate.
+    assert 1 not in actual

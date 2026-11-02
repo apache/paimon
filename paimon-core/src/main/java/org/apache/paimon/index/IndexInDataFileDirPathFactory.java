@@ -21,6 +21,8 @@ package org.apache.paimon.index;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -52,10 +54,10 @@ public class IndexInDataFileDirPathFactory implements IndexPathFactory {
     }
 
     @Override
-    public Path toPath(IndexFileMeta file) {
-        return Optional.ofNullable(file.externalPath())
+    public Path toPath(String fileName, @Nullable String externalPath) {
+        return Optional.ofNullable(externalPath)
                 .map(Path::new)
-                .orElse(new Path(dataFilePathFactory.parent(), file.fileName()));
+                .orElse(new Path(dataFilePathFactory.parent(), fileName));
     }
 
     @Override

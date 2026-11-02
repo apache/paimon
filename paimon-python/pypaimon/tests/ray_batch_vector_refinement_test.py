@@ -23,8 +23,11 @@ import pytest
 
 pytest.importorskip("ray")
 
+from pypaimon.ray.search_execution import RaySearchTaskExecutor
+from pypaimon.tests.search_execution_test_helpers import task_parts
+
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.ray import batch_vector_search as search_module
+from pypaimon.execution.python.read.search import distributed_vector_search as search_module
 from pypaimon.read.table_read import TableRead
 from pypaimon.tests import ray_vector_search_test as fixtures
 from pypaimon.tests.ray_vector_search_test import VECTORS, add_rows, build_index
@@ -44,20 +47,21 @@ def test_batch_refinement_reads_vectors_only_on_workers(table, ray_cluster, metr
     query = table.search_vectors(QUERIES, options={"refine_factor": "2"}).select(["id"]).limit(3)
     expected = query.to_list()
     original_read = TableRead._new_arrow_batch_reader
-    original_map = search_module._map_tasks
+    original_map = RaySearchTaskExecutor.map
     dispatched = []
 
     def no_driver_vectors(read, *args, **kwargs):
         assert "embedding" not in [field.name for field in read.read_type]
         return original_read(read, *args, **kwargs)
 
-    def record(worker, context, items, *args):
+    def record(executor, tasks, ordered=False):
+        worker, context, items = task_parts(tasks)
         if worker is search_module._search_batch_refine_split:
             dispatched.append(len(items))
-        return original_map(worker, context, items, *args)
+        return original_map(executor, tasks, ordered=ordered)
 
     with patch.object(TableRead, "_new_arrow_batch_reader", no_driver_vectors), \
-            patch.object(search_module, "_map_tasks", record):
+            patch.object(RaySearchTaskExecutor, "map", record):
         actual = query.to_arrow(execution="ray", concurrency=concurrency)
     assert [result.to_pylist() for result in actual] == expected
     assert dispatched == [2]
@@ -99,9 +103,9 @@ def test_worker_shares_stream_and_keeps_per_query_membership(table, fail_read):
 def test_empty_candidates_do_not_plan_or_dispatch(table):
     query = table.search_vectors(QUERIES, options={"refine_factor": "2"})
     reader = query._batch_vector_search_builder(query).new_batch_vector_search_read()
-    distributed = search_module._RayBatchVectorSearchRead(reader, 2, {})
+    distributed = search_module.DistributedBatchVectorSearchRead(reader, RaySearchTaskExecutor(2, {}))
     with patch.object(distributed, "_plan_raw_read", side_effect=AssertionError("empty read")), \
-            patch.object(search_module, "_map_tasks", side_effect=AssertionError("empty task")):
+            patch.object(RaySearchTaskExecutor, "map", side_effect=AssertionError("empty task")):
         results = distributed._maybe_rerank_indexed_results(
             [DictBasedScoredIndexResult({}) for _ in QUERIES], "ivf-flat", QUERIES)
     assert all(result.results().is_empty() for result in results)
@@ -113,16 +117,17 @@ def test_commit_between_selection_and_refinement_keeps_snapshot(table, ray_clust
     table.raw_table = table.raw_table.copy({"global-index.column-update-action": "DROP_PARTITION_INDEX"})
     query = table.search_vectors(QUERIES, options={"refine_factor": "2"}).select(["id"]).limit(1)
     expected = query.to_list()
-    original = search_module._map_tasks
+    original = RaySearchTaskExecutor.map
     changed = []
 
-    def commit(worker, *args):
+    def commit(executor, tasks, ordered=False):
+        worker, context, items = task_parts(tasks)
         if worker is search_module._search_batch_refine_split and not changed:
             table.update("id = 0", {"embedding": [100., 1.]})
             changed.append(True)
-        return original(worker, *args)
+        return original(executor, tasks, ordered=ordered)
 
-    with patch.object(search_module, "_map_tasks", commit):
+    with patch.object(RaySearchTaskExecutor, "map", commit):
         assert [result.to_pylist() for result in query.to_arrow(execution="ray")] == expected
     assert changed == [True]
     assert query.to_list() != expected

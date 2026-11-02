@@ -43,6 +43,8 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 public class DataEvolutionCompactTaskSerializer
         implements VersionedSerializer<DataEvolutionCompactTask> {
 
+    // A task type without its own payload keeps the version, so restored jobs can still read
+    // in-flight tasks. Only older binaries reading the new type fail, at TaskType.fromCode.
     private static final int CURRENT_VERSION = 4;
 
     private final DataFileMetaSerializer dataFileSerializer;
@@ -135,6 +137,8 @@ public class DataEvolutionCompactTaskSerializer
                 return new DataEvolutionNormalCompactTask(partition, files, ranges);
             case BLOB:
                 return new DataEvolutionBlobCompactTask(partition, files);
+            case VECTOR:
+                return new DataEvolutionVectorCompactTask(partition, files);
             case MATERIALIZE_DELETION:
                 return new DataEvolutionMaterializeDeletionCompactTask(
                         partition,

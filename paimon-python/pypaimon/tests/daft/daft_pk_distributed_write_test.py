@@ -34,6 +34,7 @@ pypaimon = pytest.importorskip("pypaimon")
 daft = pytest.importorskip("daft")
 
 from daft.recordbatch.micropartition import MicroPartition
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon.daft import daft_datasink
 from pypaimon.daft.daft_paimon import _read_table, _write_table
 from pypaimon.daft.daft_datasink import PaimonDataSink
@@ -235,7 +236,7 @@ def test_postpone_mode_primary_key_write_preserves_existing_path(catalog):
 
     assert sum(summary["rows"]) == 2
     assert table.snapshot_manager().get_latest_snapshot() is not None
-    scanner = table.new_read_builder().new_scan().file_scanner
+    scanner = PythonTableScan(table.new_read_builder().new_scan())._file_scanner()
     manifests, _ = scanner.manifest_scanner()
     entries = scanner.manifest_file_manager.read_entries_parallel(manifests)
     assert {entry.bucket for entry in entries} == {-2}
@@ -288,7 +289,7 @@ def test_hash_dynamic_pk_restores_bucket_mapping_across_commits(catalog):
     _write_table(
         daft.from_pydict(
             {
-                # A fresh task-local SimpleHashBucketAssigner puts id=2 in
+                # A fresh task-local SimpleDynamicBucketAssigner puts id=2 in
                 # bucket 0 and incorrectly moves the existing id=1 to bucket 1.
                 "id": [2, 1],
                 "value": ["other", "new"],
@@ -318,7 +319,7 @@ def test_hash_dynamic_pk_restores_bucket_mapping_across_commits(catalog):
 @pytest.mark.parametrize('overwrite', [False, True])
 def test_grouped_pk_writes_use_native_without_python_fallback(
         catalog, monkeypatch, bucket, partitioned, overwrite):
-    from pypaimon.write.native_write import NativeTableWrite
+    from pypaimon.write.write_dispatch import NativeTableWrite
 
     def reject_fallback(self):
         raise AssertionError('Grouped Daft write fell back to Python')
@@ -538,7 +539,7 @@ def test_pk_distributed_write_on_ray():
         from daft import runners
         from pypaimon import CatalogFactory, Schema
         from pypaimon.daft.daft_paimon import _read_table, _write_table
-        from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+        from pypaimon.execution.python.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
         root = tempfile.mkdtemp(prefix="paimon-daft-pk-ray-")
         try:

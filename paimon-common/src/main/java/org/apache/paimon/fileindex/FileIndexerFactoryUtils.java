@@ -46,6 +46,10 @@ public class FileIndexerFactoryUtils {
         }
     }
 
+    public static boolean isRegistered(String type) {
+        return factories.containsKey(type);
+    }
+
     public static FileIndexerFactory load(String type) {
         FileIndexerFactory fileIndexerFactory = factories.get(type);
         if (fileIndexerFactory == null) {

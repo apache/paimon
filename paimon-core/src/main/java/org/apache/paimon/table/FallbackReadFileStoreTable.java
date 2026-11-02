@@ -34,6 +34,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
@@ -54,6 +55,7 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
+import org.apache.paimon.utils.TypeUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,6 +66,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -122,6 +125,12 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 wrapped.copy(newTableSchema),
                 other.copy(newTableSchema.copy(rewriteOtherOptions(newTableSchema.options()))),
                 wrappedFirst);
+    }
+
+    @Override
+    public FileStoreTable copyWithoutQueryAuth() {
+        return new FallbackReadFileStoreTable(
+                wrapped.copyWithoutQueryAuth(), other.copyWithoutQueryAuth(), wrappedFirst);
     }
 
     @Override
@@ -422,8 +431,11 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         protected final Function<FileStoreTable, DataTableScan> scanCreator;
         protected final DataTableScan mainScan;
         protected final DataTableScan fallbackScan;
+        @Nullable protected RowType readType;
+        private Set<String> userFilterFields = Collections.emptySet();
         private PartitionPredicate mainPartitionPredicate;
         private PartitionPredicate fallbackPartitionPredicate;
+        @Nullable private PartitionPredicate internalPartitionPredicate;
 
         public FallbackReadScan(
                 FileStoreTable wrappedTable,
@@ -449,6 +461,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public FallbackReadScan withFilter(Predicate predicate) {
             mainScan.withFilter(predicate);
             fallbackScan.withFilter(predicate);
+            userFilterFields = PredicateVisitor.collectFieldNames(predicate);
             if (predicate != null) {
                 Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
                         PartitionPredicate.splitPartitionPredicatesAndDataPredicates(
@@ -462,6 +475,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         @Override
         public FallbackReadScan withReadType(@Nullable RowType readType) {
+            this.readType = readType;
             mainScan.withReadType(readType);
             fallbackScan.withReadType(readType);
             return this;
@@ -521,6 +535,14 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             if (partitionPredicate != null) {
                 setPartitionPredicate(partitionPredicate);
             }
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withInternalPartitionFilter(PartitionPredicate partitionPredicate) {
+            mainScan.withInternalPartitionFilter(partitionPredicate);
+            fallbackScan.withInternalPartitionFilter(partitionPredicate);
+            this.internalPartitionPredicate = partitionPredicate;
             return this;
         }
 
@@ -601,7 +623,10 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                             .filter(p -> !completePartitions.contains(p))
                             .collect(Collectors.toList());
             if (!remainingPartitions.isEmpty()) {
-                fallbackScan.withPartitionFilter(remainingPartitions);
+                // Restrict fallback reads to partitions missing from the main branch.
+                fallbackScan.withInternalPartitionFilter(
+                        PartitionPredicate.fromMultiple(
+                                tableSchema.logicalPartitionType(), remainingPartitions));
                 for (Split split : fallbackScan.plan().splits()) {
                     splits.add(toFallbackSplit(split, true));
                 }
@@ -637,8 +662,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         protected void setPartitionPredicate(PartitionPredicate predicate) {
-            this.mainPartitionPredicate = predicate;
-            this.fallbackPartitionPredicate = predicate;
+            setPartitionPredicate(predicate, predicate);
         }
 
         protected void setPartitionPredicate(
@@ -646,6 +670,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 PartitionPredicate fallbackPartitionPredicate) {
             this.mainPartitionPredicate = mainPartitionPredicate;
             this.fallbackPartitionPredicate = fallbackPartitionPredicate;
+            this.internalPartitionPredicate = null;
         }
 
         protected PartitionPredicate getMainPartitionPredicate() {
@@ -658,12 +683,35 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         private DataTableScan newPartitionListingScan(boolean isMain) {
             DataTableScan scan = scanCreator.apply(isMain ? wrappedTable : fallbackTable);
+            configureBranchScan(scan, isMain);
+            return scan;
+        }
+
+        @Nullable
+        protected RowType branchReadType() {
+            // Include projected and user-filter columns in internal scans' authorization requests.
+            // Carry filter dependencies through the read type: pushing value predicates here could
+            // change fallback partition ownership or discard records needed for chain merging.
+            return readType == null
+                    ? null
+                    : TypeUtils.withMissingFields(
+                            tableSchema.logicalRowType(), readType, userFilterFields);
+        }
+
+        /** Applies the shared read type and partition conditions to a newly created branch scan. */
+        protected void configureBranchScan(DataTableScan scan, boolean isMain) {
+            scan.withReadType(branchReadType());
             if (isMain && getMainPartitionPredicate() != null) {
                 scan.withPartitionFilter(getMainPartitionPredicate());
             } else if (!isMain && getFallbackPartitionPredicate() != null) {
                 scan.withPartitionFilter(getFallbackPartitionPredicate());
             }
-            return scan;
+            if (internalPartitionPredicate != null) {
+                // Replace the physical partition filter while preserving the user partition-filter
+                // authorization fields registered above. Columns referenced only by the internal
+                // filter are not added to authorization.
+                scan.withInternalPartitionFilter(internalPartitionPredicate);
+            }
         }
     }
 
@@ -676,6 +724,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         private final InnerTableRead mainRead;
         private final InnerTableRead fallbackRead;
+        private final InnerTableRead wrappedRead;
         private final boolean fallbackReadFailFast;
 
         private Read() {
@@ -683,6 +732,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             FileStoreTable second = wrappedFirst ? other : wrapped;
             this.mainRead = first.newRead();
             this.fallbackRead = second.newRead();
+            this.wrappedRead = wrappedFirst ? mainRead : fallbackRead;
             this.fallbackReadFailFast =
                     wrapped.coreOptions()
                             .toConfiguration()
@@ -758,7 +808,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 }
                 return mainRead.createReader(wrappedSplit);
             }
-            return mainRead.createReader(split);
+            // Plain splits come from newSnapshotReader(), which plans the wrapped table.
+            return wrappedRead.createReader(split);
         }
     }
 }

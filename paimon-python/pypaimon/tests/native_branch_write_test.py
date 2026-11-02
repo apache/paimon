@@ -22,9 +22,11 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.core_options import MergeEngine
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 _SCHEMA = pa.schema([('id', pa.int32()), ('value', pa.int32()), ('p', pa.string())])
@@ -63,8 +65,9 @@ def _commit(builder, messages, checkpoint=None, overwrite=False):
             else:
                 commit.commit(messages, checkpoint)
         if builder.table.catalog_environment.supports_version_management:
-            with patch.object(commit.file_store_commit, 'overwrite' if overwrite else 'commit',
-                              side_effect=AssertionError('Python commit fallback')):
+            with patch('pypaimon.execution.python.write.file_store_commit.'
+                       'FileStoreCommit.' + ('overwrite' if overwrite else 'commit'),
+                       side_effect=AssertionError('Python commit fallback')):
                 publish()
         else:
             publish()
@@ -89,11 +92,14 @@ def _rows(table, native):
     builder = table.copy({'scan.native-plan.enabled': str(native).lower(),
                           'read.native.enabled': str(native).lower()}).new_read_builder()
     scan = builder.new_scan()
-    splits = (scan.plan_all_files() if table.is_primary_key_table
+    splits = (scan.plan_all() if table.is_primary_key_table
               and table.options.merge_engine() == MergeEngine.FIRST_ROW else scan.plan()).splits()
     reader = builder.new_read()
     if native:
-        with patch.object(reader, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python read fallback')
+        ):
             rows = reader.to_arrow(splits).to_pylist()
     else:
         rows = reader.to_arrow(splits).to_pylist()
@@ -184,7 +190,7 @@ def test_native_branch_stream_checkpoint_histories(tmp_path, native_rest_catalog
     _write(main, [{'id': 1, 'value': 10, 'p': 'a'}])
     branch = _branch(catalog, main)
     for target, value in ((main, 100), (branch, 20)):
-        builder = target.new_stream_write_builder()._with_commit_user('same-writer')
+        builder = target.new_stream_write_builder().with_commit_user('same-writer')
         messages = _prepare(builder, [{'id': 1, 'value': value, 'p': 'a'}], checkpoint=7)
         _commit(builder, messages, checkpoint=7)
         snapshot = target.snapshot_manager().get_latest_snapshot()
@@ -296,8 +302,6 @@ def test_native_branch_schema_evolution_is_independent(tmp_path, native_rest_cat
 @pytest.mark.parametrize('rest', [False, True], ids=['filesystem', 'rest'])
 def test_native_branch_predicate_upsert_and_batch_updates(tmp_path, native_rest_catalog, rest):
     from pypaimon.read.table_read import TableRead
-    from pypaimon.write.table_update import BatchTableUpdate
-    from pypaimon.write.table_upsert_by_key import TableUpsertByKey
     from pypaimon.write.table_delete import TableDeleteByRowId
 
     catalog, main = _table(tmp_path, native_rest_catalog, rest, {
@@ -313,7 +317,7 @@ def test_native_branch_predicate_upsert_and_batch_updates(tmp_path, native_rest_
             predicate, {'value': lambda batch: pa.compute.add(batch['value'], 1)}, ['value'])
     _commit(builder, messages)
     builder = branch.new_batch_write_builder()
-    with patch.object(TableUpsertByKey, '_upsert_partition',
+    with patch.object(PythonTableUpsert, '_upsert_partition',
                       side_effect=AssertionError('Python upsert fallback')):
         messages = builder.new_update().upsert_by_arrow_with_key(pa.Table.from_pylist([
             {'id': 1, 'value': 12, 'p': 'a'}, {'id': 3, 'value': 30, 'p': 'c'}], schema=_SCHEMA), ['id'])
@@ -325,7 +329,7 @@ def test_native_branch_predicate_upsert_and_batch_updates(tmp_path, native_rest_
     ids = {row['id']: row['_ROW_ID'] for row in read.new_read().to_arrow(
         read.new_scan().plan().splits()).to_pylist()}
     builder = branch.new_batch_write_builder()
-    with patch.object(BatchTableUpdate, '_update_by_arrow_batches_with_row_id',
+    with patch.object(PythonTableUpdate, '_update_by_arrow_batches_with_row_id',
                       side_effect=AssertionError('Python grouped update fallback')):
         messages = builder.new_update().with_update_type(['value']).update_by_arrow_batches_with_row_id([
             pa.table({'_ROW_ID': [ids[1]], 'value': [13]}),
@@ -387,8 +391,9 @@ def test_native_branch_abort_removes_only_unpublished_output(tmp_path, native_re
     commit = builder.new_commit()
     try:
         if rest:
-            with patch.object(commit.file_store_commit, 'abort',
-                              side_effect=AssertionError('Python abort fallback')):
+            with patch('pypaimon.execution.python.write.file_store_commit.'
+                       'FileStoreCommit.abort',
+                       side_effect=AssertionError('Python abort fallback')):
                 commit.abort(messages)
         else:
             commit.abort(messages)

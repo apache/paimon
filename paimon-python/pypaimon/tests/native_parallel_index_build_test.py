@@ -27,7 +27,8 @@ import pytest
 
 from pypaimon.api.api_response import GetTableSnapshotResponse
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.read.native_plan import _native_table
+from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
+from pypaimon.execution.native.table import (_native_table)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.tests import native_generic_index_build_test as generic
 from pypaimon.tests import native_sorted_index_build_test as indexes
@@ -57,7 +58,7 @@ def _table(catalog, options=None, partitioned=False):
 def _build(table, kind, options=None, **kwargs):
     settings = generic._options(kind, 4)
     settings.update(options or {})
-    with patch.object(GlobalIndexBuilder, '_build_generic_index',
+    with patch.object(PythonGlobalIndexBuilder, '_build_generic_index',
                       side_effect=AssertionError('Python rows were materialized')):
         return GlobalIndexBuilder(table, 'name' if kind == 'full-text' else 'embedding',
                                   index_type=kind, options=settings, **kwargs).build()
@@ -132,16 +133,21 @@ def test_parallel_partition_selection_preserves_global_row_ids(rest_catalog, kin
 
 
 @pytest.mark.parametrize('kind', generic.KINDS)
-@pytest.mark.parametrize('value,expected', [(2.0, '2'), (True, '1'), (None, '1')])
+@pytest.mark.parametrize('value,expected', [(2.0, '2'), (True, '1'), (None, None)])
 def test_typed_build_parallelism_uses_existing_option_conversion(rest_catalog, kind, value, expected):
     catalog, _ = rest_catalog
     table = _table(catalog)
     # Observe the control passed over FFI while retaining the real Rust builder.
-    native = Mock(wraps=_native_table(table).new_global_index_build_builder())
-    proxy = SimpleNamespace(new_global_index_build_builder=lambda: native)
-    with patch('pypaimon.globalindex.native_index_build._native_table', return_value=proxy):
+    captured = []
+
+    def native_table(source):
+        native = Mock(wraps=_native_table(source).new_global_index_build_builder())
+        captured.append(native)
+        return SimpleNamespace(new_global_index_build_builder=lambda: native)
+
+    with patch('pypaimon.execution.native.write.native_index_build._native_table', side_effect=native_table):
         messages = _build(table, kind, {PARALLELISM: value})
-    assert native.with_options.call_args[0][0][PARALLELISM] == expected
+    assert captured[0].with_options.call_args[0][0].get(PARALLELISM) == expected
     assert len(indexes._message_files(messages)) == (5 if kind == 'full-text' else 4)
 
 

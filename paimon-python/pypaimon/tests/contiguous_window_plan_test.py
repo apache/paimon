@@ -26,12 +26,13 @@ import pyarrow as pa
 import pytest
 
 import pypaimon.multimodal as pmm
+from pypaimon.execution.native.read.plan import NativeTableScan
 from pypaimon import Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.multimodal.table import MultimodalTable
-from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.python.read.reader.format_pyarrow_reader import (FormatPyArrowReader)
 from pypaimon.read.table_scan import TableScan
 
 
@@ -186,14 +187,14 @@ class ContiguousWindowPlanTest(unittest.TestCase):
             "read.native.enabled": str(native).lower(),
         })
         native_plans = []
-        original_native_plan = TableScan._try_native_plan
+        original_native_plan = NativeTableScan._plan
 
         def record_native_plan(scan):
             plan = original_native_plan(scan)
             native_plans.append(plan)
             return plan
 
-        with patch.object(TableScan, "_try_native_plan", record_native_plan):
+        with patch.object(NativeTableScan, "_plan", record_native_plan):
             dataset = self._windows(ScanQuery(raw))
             samples = dataset.__getitems__([2, 0, 1])
 

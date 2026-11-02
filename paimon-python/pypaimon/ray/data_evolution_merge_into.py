@@ -40,7 +40,7 @@ from pypaimon.ray.data_evolution_merge_join import (
     distributed_update_apply,
     distributed_write_collect_msgs,
 )
-from pypaimon.ray.data_evolution_merge_transform import (
+from pypaimon.write.merge_transform import (
     LiteralValue,
     OnSpec,
     SetSpec,
@@ -50,6 +50,7 @@ from pypaimon.ray.data_evolution_merge_transform import (
     WhenNotMatched,
     _NormalizedClause,
 )
+from pypaimon.write.update_validation import _authorize_update
 from pypaimon.ray.partitioning import (
     _default_hash_shuffle_parallelism,
     _estimate_dataset_size_bytes,
@@ -183,6 +184,7 @@ def _prepare(
 
     catalog = CatalogFactory.create(catalog_options)
     table = catalog.get_table(target)
+    _authorize_update(table)
     if not table.options.data_evolution_enabled():
         raise ValueError(
             f"merge_into requires 'data-evolution.enabled' = 'true' on '{target}'."
@@ -237,10 +239,7 @@ def _prepare(
         for c in list(when_matched) + list(when_not_matched)
     )
     if has_condition:
-        from pypaimon.ray.merge_condition import (
-            _load_datafusion, extract_target_columns,
-        )
-        _load_datafusion()
+        from pypaimon.write.merge_condition import extract_target_columns
         for c in when_not_matched:
             if c.condition is not None:
                 t_refs = extract_target_columns(c.condition)
@@ -292,6 +291,7 @@ def _prepare(
         source_read_projection = None
         if isinstance(source, str):
             source_table = catalog.get_table(source)
+            _authorize_update(source_table)
             source_read_projection = _resolve_source_projection(
                 matched_specs + not_matched_specs,
                 source_on_cols,
@@ -311,7 +311,7 @@ def _prepare(
     )
 
     if has_condition:
-        from pypaimon.ray.merge_condition import extract_columns
+        from pypaimon.write.merge_condition import extract_columns
         target_names = set(full_target_field_names)
         if is_self_merge:
             target_names |= set(target_on_cols)
@@ -341,7 +341,7 @@ def _prepare(
     if (is_self_merge and matched_specs
             and all(c.condition is not None for c in matched_specs)):
         from pypaimon.common.predicate_builder import PredicateBuilder
-        from pypaimon.ray.merge_condition import (
+        from pypaimon.write.merge_condition import (
             try_parse_self_merge_predicate,
         )
         predicates = [
@@ -394,6 +394,7 @@ def _build_datasets(
     insert_ds = None
     update_cols_union: List[str] = []
     target_empty = _is_target_empty(base_snapshot)
+    native_enabled = table.options.native_write_enabled()
 
     if ctx.is_self_merge:
         if matched_specs and not target_empty:
@@ -409,6 +410,7 @@ def _build_datasets(
                     snapshot_id=base_snapshot_id,
                     scan_predicate=ctx.self_merge_scan_predicate,
                     read_columns=ctx.read_columns,
+                    native_enabled=native_enabled,
                 )
             if any(c.delete for c in matched_specs):
                 delete_ds = build_self_merge_delete_ds(
@@ -420,6 +422,7 @@ def _build_datasets(
                     snapshot_id=base_snapshot_id,
                     scan_predicate=ctx.self_merge_scan_predicate,
                     ray_remote_args=ray_remote_args,
+                    native_enabled=native_enabled,
                 )
         return update_ds, delete_ds, insert_ds, update_cols_union
 
@@ -444,6 +447,7 @@ def _build_datasets(
                 resolve_target_projection=_resolve_target_projection,
                 snapshot_id=base_snapshot_id,
                 ray_remote_args=ray_remote_args,
+                native_enabled=native_enabled,
             )
         if any(c.delete for c in matched_specs):
             delete_ds = build_matched_delete_ds(
@@ -459,6 +463,7 @@ def _build_datasets(
                 resolve_target_projection=_resolve_target_projection,
                 snapshot_id=base_snapshot_id,
                 ray_remote_args=ray_remote_args,
+                native_enabled=native_enabled,
             )
 
     if not_matched_specs:
@@ -475,6 +480,7 @@ def _build_datasets(
             snapshot_id=base_snapshot_id,
             target_empty=target_empty,
             ray_remote_args=ray_remote_args,
+            native_enabled=native_enabled,
         )
 
     return update_ds, delete_ds, insert_ds, update_cols_union
@@ -722,7 +728,7 @@ def _resolve_target_projection(
            for clause in clauses for value in clause.spec.values()):
         needed.update(target_field_names if callable_columns is None else callable_columns)
     if any(c.condition is not None for c in clauses):
-        from pypaimon.ray.merge_condition import extract_target_columns
+        from pypaimon.write.merge_condition import extract_target_columns
         target_set = set(target_field_names)
         for clause in clauses:
             if clause.condition is not None:

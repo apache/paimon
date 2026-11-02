@@ -22,8 +22,9 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.read.table_read import TableRead
-from pypaimon.table.source.vector_search_read import BatchVectorSearchReadImpl
+from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl
 from pypaimon.tests.data_evolution_test_helpers import BatchModeMixin, DataEvolutionTestBase
 from pypaimon.utils.range import Range
 
@@ -124,11 +125,11 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
         self._write_arrow(table, self._data([[1, 0], [0, 1], [2, 0], [0, 2]]))
         reader = self._reader(table, [[1, 0], [0, 1]])
         original = TableRead._new_arrow_batch_reader
-        original_generator = TableRead._arrow_batch_generator
+        original_generator = PythonTableRead._arrow_batch_generator
         generators = []
         batch_sizes = []
-        module = 'pypaimon.table.source.vector_search_read'
-        from pypaimon.table.source.vector_search_read import _compute_scores
+        module = 'pypaimon.execution.python.read.search.vector_search_read'
+        from pypaimon.execution.python.read.search.vector_search_read import _compute_scores
 
         def batches(table_read, splits):
             arrow, generator = original(table_read, splits)
@@ -148,7 +149,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
                 source.close()
 
         with patch.object(TableRead, '_new_arrow_batch_reader', batches), \
-                patch.object(TableRead, '_arrow_batch_generator', tracked_generator), \
+                patch.object(PythonTableRead, '_arrow_batch_generator', tracked_generator), \
                 patch(module + '._compute_scores', wraps=_compute_scores) as score:
             reader._read_raw_batch_search([Range(0, 3)], None, 'ivf-flat')
         self.assertEqual(4, score.call_count)
@@ -206,7 +207,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
         for partition in range(4):
             self._write_arrow(table, self._data(
                 [[1, 0], [0, 1], None, [0, 0], [partition, 1]], partition))
-        original = TableRead._arrow_batch_generator
+        original = PythonTableRead._arrow_batch_generator
         for parallelism in (1, 2, 4, None):
             options = {} if parallelism is None else {'read.parallelism': str(parallelism)}
             read_table = table.copy(options)
@@ -238,8 +239,8 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
                                     state['active'] -= 1
                                     state['closed'] += 1
 
-                        with patch.object(TableRead, '_arrow_batch_generator', tracked), \
-                                patch('pypaimon.read.table_read.os.cpu_count', return_value=4):
+                        with patch.object(PythonTableRead, '_arrow_batch_generator', tracked), \
+                                patch('pypaimon.read.read_support.os.cpu_count', return_value=4):
                             actual = (read_table.new_batch_vector_search_builder()
                                       .with_vector_column('embedding').with_query_vectors(queries)
                                       .with_option('metric', metric).with_limit(2).execute_batch_local())
@@ -255,7 +256,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
             partition_keys=['pt'], options=dict(self.table_options, **{'read.parallelism': '2'}))
         for partition in range(4):
             self._write_arrow(table, self._data([[1, 0], [0, 1]], partition))
-        original = TableRead._arrow_batch_generator
+        original = PythonTableRead._arrow_batch_generator
         for failure in ('dimension', 'read'):
             with self.subTest(failure=failure):
                 barrier = threading.Barrier(2)
@@ -282,7 +283,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
                 query = [1] if failure == 'dimension' else [1, 0]
                 exception = ValueError if failure == 'dimension' else RuntimeError
                 message = 'dimension mismatch' if failure == 'dimension' else 'injected parallel read failure'
-                with patch.object(TableRead, '_arrow_batch_generator', tracked):
+                with patch.object(PythonTableRead, '_arrow_batch_generator', tracked):
                     with self.assertRaisesRegex(exception, message):
                         (table.new_batch_vector_search_builder().with_vector_column('embedding')
                          .with_query_vectors([query]).with_limit(2).execute_batch_local())

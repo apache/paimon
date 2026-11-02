@@ -267,6 +267,7 @@ class RESTCommitLockIntegrationTest {
         Schema schema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
+                        .option(CoreOptions.COMMIT_AUTO_ROLLBACK_ENABLED.key(), "true")
                         .option(CoreOptions.REST_COMMIT_LOCK_ENABLED.key(), "true")
                         .option(CoreOptions.REST_COMMIT_ACQUIRE_LOCK.key(), String.valueOf(locking))
                         .option(CoreOptions.COMMIT_MIN_RETRY_WAIT.key(), "1 ms")

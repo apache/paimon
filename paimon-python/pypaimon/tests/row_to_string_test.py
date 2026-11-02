@@ -21,8 +21,7 @@ import unittest
 from datetime import date, datetime, time
 from decimal import Decimal
 
-from pypaimon.casting.row_to_string import (cast_row_to_string,
-                                            cast_value_to_string)
+from pypaimon.utils.row_to_string import cast_row_to_string, cast_value_to_string
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
 

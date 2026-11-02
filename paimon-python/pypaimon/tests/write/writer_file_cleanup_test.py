@@ -25,8 +25,8 @@ from unittest.mock import patch
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.writer.data_vector_writer import DataVectorWriter
-from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+from pypaimon.execution.python.write.writer.data_vector_writer import DataVectorWriter
+from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
 
 
 class WriterFileCleanupTest(unittest.TestCase):

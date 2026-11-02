@@ -35,8 +35,8 @@ from _datasketches import hll_sketch, update_theta_sketch
 
 from pypaimon.common.options import CoreOptions, Options
 from pypaimon.data import Timestamp, Decimal
-from pypaimon.read.reader.aggregate import create_field_aggregator
-from pypaimon.read.reader.aggregate.aggregators import (
+from pypaimon.execution.python.read.reader.aggregate import (create_field_aggregator)
+from pypaimon.execution.python.read.reader.aggregate.aggregators import (
     FieldBoolAndAgg,
     FieldBoolOrAgg,
     FieldFirstNonNullValueAgg,
@@ -2668,7 +2668,7 @@ class RegistrationTest(unittest.TestCase):
     ])
 
     def test_all_expected_aggregators_registered(self):
-        from pypaimon.read.reader.aggregate import _FACTORIES
+        from pypaimon.execution.python.read.reader.aggregate import (_FACTORIES)
         registered = set(_FACTORIES.keys())
         missing = self.EXPECTED - registered
         self.assertEqual(missing, set(),
@@ -2680,7 +2680,7 @@ class RegistrationTest(unittest.TestCase):
         # the two can drift. Adding an aggregator without updating the
         # guard would leave it rejected at read time even though it is
         # registered; pin them together here.
-        from pypaimon.read.merge_engine_support import (
+        from pypaimon.execution.python.read.merge_engine_support import (
             _AGGREGATION_SUPPORTED_AGG_FUNCS)
         self.assertEqual(set(_AGGREGATION_SUPPORTED_AGG_FUNCS),
                          set(self.EXPECTED))

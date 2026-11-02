@@ -954,6 +954,27 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testMinMaxNotPushDownAfterOrderBreakingTypeChange() {
+        // one writer, so one file holds '100' and '2': as strings its min is '100', its max '2'
+        sql(
+                "CREATE TABLE min_max_type_change (f0 STRING, f1 INT) "
+                        + "WITH ('sink.parallelism' = '1')");
+        sql("INSERT INTO min_max_type_change VALUES ('100', 1), ('2', 2)");
+        sql("ALTER TABLE min_max_type_change MODIFY f0 INT");
+        sql("INSERT INTO min_max_type_change VALUES (50, 3)");
+
+        String sql = "SELECT MIN(f0), MAX(f0) FROM min_max_type_change";
+        assertThat(sql(sql)).containsOnly(Row.of(2, 100));
+        validateAggregateNotPushDown(sql, "MinAggFunction", "MaxAggFunction");
+
+        // a widening keeps the order of values, so the aggregate is still pushed down
+        sql("ALTER TABLE min_max_type_change MODIFY f1 BIGINT");
+        sql = "SELECT MIN(f1), MAX(f1) FROM min_max_type_change";
+        assertThat(sql(sql)).containsOnly(Row.of(1L, 3L));
+        validateAggregatePushDown(sql, "MinAggFunction", "MaxAggFunction");
+    }
+
+    @Test
     public void testMinMaxPKNotPushDown() {
         sql("CREATE TABLE min_max_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 INT)");
         sql("INSERT INTO min_max_pk VALUES (1, 3), (2, 5)");

@@ -24,15 +24,27 @@ import pytest
 
 ray = pytest.importorskip("ray")
 
-from pypaimon.ray import full_text_search, vector_search
+from pypaimon.execution.python.read.search import hybrid_search
+from pypaimon.ray import full_text_search
+from pypaimon.ray.search_execution import RaySearchTaskExecutor
+from pypaimon.table.source.search_execution import SearchTask
 
 
-def builder(count):
-    routes = [SimpleNamespace(route=SimpleNamespace(is_vector=lambda: False), search_builder=i)
-              for i in range(count)]
-    return SimpleNamespace(route_builders=lambda: routes,
-                           to_route_result=lambda route, result: (route.search_builder, result),
-                           rank=lambda results: results)
+def builder(count, execute):
+    def search_builder(ordinal):
+        return SimpleNamespace(
+            ordinal=ordinal,
+            new_full_text_scan=lambda: SimpleNamespace(scan=lambda: ordinal),
+            new_full_text_read=lambda: SimpleNamespace(read_plan=execute))
+
+    routes = [SimpleNamespace(route=SimpleNamespace(is_vector=lambda: False),
+                              search_builder=search_builder(i)) for i in range(count)]
+    result = SimpleNamespace(
+        route_builders=lambda: routes,
+        to_route_result=lambda route, result: (route.search_builder.ordinal, result),
+        rank=lambda results: results)
+    result.execute = lambda executor=None: hybrid_search.execute(result, executor)
+    return result
 
 
 @pytest.mark.parametrize("concurrency, count", [(2, 2), (3, 2), (4, 2), (2, 4)])
@@ -44,9 +56,10 @@ def test_routes_overlap_within_budget_and_preserve_order(concurrency, count):
     peak = 0
     completed = []
 
-    def execute(ordinal, *, concurrency, ray_remote_args):
+    def execute(ordinal, *, executor):
         nonlocal active, peak
-        assert ray_remote_args == {"num_cpus": 0.5}
+        assert executor._remote_args == {"num_cpus": 0.5}
+        concurrency = executor.concurrency
         with lock:
             active += concurrency
             peak = max(peak, active)
@@ -60,9 +73,8 @@ def test_routes_overlap_within_budget_and_preserve_order(concurrency, count):
             second_completed.set()
         return ordinal
 
-    with patch.object(full_text_search, "_execute_full_text_search", execute):
-        result = full_text_search._execute_hybrid_search(
-            builder(count), concurrency=concurrency, ray_remote_args={"num_cpus": 0.5})
+    result = full_text_search._execute_hybrid_search(
+        builder(count, execute), concurrency=concurrency, ray_remote_args={"num_cpus": 0.5})
     assert result == [(i, i) for i in range(count)]
     assert completed.index(1) < completed.index(0)
     assert 2 <= peak <= concurrency
@@ -72,14 +84,13 @@ def test_routes_overlap_within_budget_and_preserve_order(concurrency, count):
 def test_serial_routes_keep_full_budget(concurrency, count):
     calls = []
 
-    def execute(ordinal, **kwargs):
-        assert kwargs["concurrency"] == concurrency
+    def execute(ordinal, *, executor):
+        assert executor.concurrency == concurrency
         calls.append(ordinal)
         return ordinal
 
-    with patch.object(full_text_search, "_execute_full_text_search", execute):
-        assert full_text_search._execute_hybrid_search(builder(count), concurrency=concurrency) == [
-            (i, i) for i in range(count)]
+    assert full_text_search._execute_hybrid_search(
+        builder(count, execute), concurrency=concurrency) == [(i, i) for i in range(count)]
     assert calls == list(range(count))
 
 
@@ -87,7 +98,7 @@ def test_route_failure_cancels_sibling_ray_tasks():
     waiting = Event()
     submitted, cancelled = [], []
 
-    def submit(context, item):
+    def submit(operation, context, item, *dependencies):
         submitted.append(item)
         return item
 
@@ -101,32 +112,32 @@ def test_route_failure_cancels_sibling_ray_tasks():
         Event().wait(0.01)
         return [], refs
 
-    def execute(ordinal, **kwargs):
+    def execute(ordinal, *, executor):
         if ordinal == 0:
             assert waiting.wait(10)
             raise ValueError("route failed")
-        return list(vector_search._map_tasks(None, None, [0, 1, 2], 1, {}))
+        return list(executor.map([SearchTask(None, None, item) for item in range(3)]))
 
-    with patch.object(full_text_search, "_execute_full_text_search", execute), \
-            patch.object(ray, "put", return_value=None), \
+    with patch.object(ray, "put", return_value=None), \
             patch.object(ray, "remote", return_value=remote), \
             patch.object(ray, "wait", side_effect=wait), \
             patch.object(ray, "cancel", side_effect=cancelled.append), \
             pytest.raises(ValueError, match="route failed"):
-        full_text_search._execute_hybrid_search(builder(2), concurrency=2)
+        full_text_search._execute_hybrid_search(builder(2, execute), concurrency=2)
     assert submitted == [0]
     assert cancelled == [0]
 
 
 def test_cancellation_scope_restores_state_and_skips_pending_routes():
+    executor = RaySearchTaskExecutor()
     cancelled = Event()
     cancelled.set()
-    with pytest.raises(CancelledError), vector_search._task_cancellation(cancelled):
+    with pytest.raises(CancelledError), executor.cancellation_scope(cancelled):
         pytest.fail("cancelled route started")
-    assert getattr(vector_search._task_state, "cancelled", None) is None
+    assert executor._cancellations.cancellation_events() == ()
     outer, inner = Event(), Event()
-    with vector_search._task_cancellation(outer):
-        with vector_search._task_cancellation(inner):
-            assert vector_search._task_state.cancelled is inner
-        assert vector_search._task_state.cancelled is outer
-    assert vector_search._task_state.cancelled is None
+    with executor.cancellation_scope(outer):
+        with executor.cancellation_scope(inner):
+            assert executor._cancellations.cancellation_events() == (outer, inner)
+        assert executor._cancellations.cancellation_events() == (outer,)
+    assert executor._cancellations.cancellation_events() == ()

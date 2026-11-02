@@ -26,10 +26,16 @@ import pytest
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.vector_search import VectorSearch
-from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
-    PaimonVindexInput, VINDEX_IDENTIFIERS, VindexVectorGlobalIndexReader,
+from pypaimon.globalindex.vindex_input import (
+    PaimonVindexInput,
 )
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.globalindex.vindex_options import (
+    VINDEX_IDENTIFIERS,
+)
+from pypaimon.globalindex.vindex_reader import (
+    VindexVectorGlobalIndexReader,
+)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 pytestmark = pytest.mark.skipif(

@@ -24,6 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.native.read.table_read import NativeTableRead
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.data.map_shared_shredding import is_map_selected_keys_field
@@ -125,12 +126,15 @@ def test_nested_map_variant_share_read_type(tmp_path, mode, shredded, stream):
     if shredded:
         for row in expected:
             del row['ratio']
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         for parallelism in (1, 2):
             assert read.to_arrow(splits, parallelism=parallelism).sort_by('id').to_pylist() == expected
             result = read.to_arrow_batch_reader(splits, parallelism=parallelism).read_all()
             assert result.sort_by('id').to_pylist() == expected
-    assert set(read._native_read_kwargs()) == {'predicate', 'limit', 'read_type'}
+    assert set(NativeTableRead(read)._read_kwargs()) == {'predicate', 'limit', 'read_type'}
 
 
 @pytest.mark.parametrize('native', [False, True])
@@ -145,7 +149,10 @@ def test_list_output_order_and_nullable_parents(tmp_path, native, mode):
                 {'profile_detail_score': None, 'attrs_overflow': None, 'id': 2},
                 {'profile_detail_score': None, 'attrs_overflow': None, 'id': 3}]
     if native:
-        with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python fallback')
+        ):
             result = read.to_arrow(splits).sort_by('id').to_pylist()
     else:
         # ROW fallback in DE remains deliberately unsupported in the existing
@@ -219,7 +226,10 @@ def test_nested_variant_and_map_types_are_structured_native_requests(tmp_path, m
         'paths': ['$.ratio'], 'target_type': pa.float32(), 'fail_on_error': True}})
     read_builder = table.new_read_builder().with_read_type(requested)
     read = read_builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         result = read.to_arrow(read_builder.new_scan().plan().splits()).sort_by('id')
     assert result.to_pylist() == [
         {'outer': {'payload': {'0': 1.25}, 'attrs': {'wanted': 10}}, 'id': 1},
@@ -229,7 +239,10 @@ def test_nested_variant_and_map_types_are_structured_native_requests(tmp_path, m
         'ratio': "variant_get(outer.payload, '$.ratio', 'float')",
         'wanted': "outer.attrs['wanted']", 'id': 'id'})
     read = named.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         assert read.to_arrow(named.new_scan().plan().splits()).sort_by('id').to_pylist() == [
             {'ratio': 1.25, 'wanted': 10, 'id': 1}, {'ratio': None, 'wanted': None, 'id': 2},
             {'ratio': None, 'wanted': None, 'id': 3}]
@@ -243,7 +256,10 @@ def test_shredded_variant_projection_retains_fallbacks_and_nulls(tmp_path, mode)
         'wrong_case': "try_variant_get(payload, '$.Ratio', 'float')",
         'id': 'id'})
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         assert read.to_arrow(builder.new_scan().plan().splits()).sort_by('id').to_pylist() == [
             {'ratio': values[0]['payload']['ratio'], 'wrong_case': None, 'id': 1},
             {'ratio': None, 'wrong_case': None, 'id': 2},
@@ -408,7 +424,8 @@ def test_map_projection_preserves_masked_key_nullability(tmp_path, native):
     # A logical NOT NULL key becomes nullable after masking. Test the captured
     # batch schema independently of the core's conservative read nullability.
     with patch.object(FileSystemCatalog, 'auth_table_query', return_value=auth), \
-            patch('pypaimon.read.table_read.read_arrow_schema', PyarrowFieldParser.from_paimon_schema):
+            patch('pypaimon.read.table_read.read_arrow_schema', PyarrowFieldParser.from_paimon_schema), \
+            patch('pypaimon.read.read_support.read_arrow_schema', PyarrowFieldParser.from_paimon_schema):
         splits = builder.new_scan().plan().splits()
         result = builder.new_read().to_arrow_batch_reader(splits).read_all()
     assert result.num_rows == 3
@@ -436,7 +453,10 @@ def test_clipped_variant_reads_only_selected_paths_for_all_json_kinds(tmp_path):
             'ratio': "%s(payload, '$.ratio', 'float')" % function,
             'wanted': "attrs['wanted']", 'id': 'id'})
         read = reader.new_read()
-        with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python fallback')
+        ):
             result = read.to_arrow(reader.new_scan().plan().splits()).sort_by('id').to_pylist()
         assert result == [{'ratio': 1.25, 'wanted': None, 'id': 1},
                           {'ratio': None, 'wanted': None, 'id': 2},
@@ -468,7 +488,10 @@ def test_map_aggregation_projects_keys_after_merging_original_values(tmp_path, d
             commit.close()
     builder = table.new_read_builder().with_projection({'a': "attrs['a']", 'b': "attrs['b']"})
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         assert read.to_arrow(builder.new_scan().plan().splits()).to_pylist() == [{'a': 7, 'b': 9}]
 
 
@@ -505,12 +528,18 @@ def test_reversed_nested_variant_fields_keep_their_own_paths(tmp_path):
         for name, path in [('v2', '$.b'), ('v1', '$.a')]})
     builder = table.new_read_builder().with_read_type(requested)
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         assert read.to_arrow(builder.new_scan().plan().splits()).to_pylist() == [
             {'outer': {'inner': {'v2': {'0': 9.0}, 'v1': {'0': 7.0}}, 'ordinary': 5}}]
     builder.with_projection({'second': "variant_get(outer.inner.v2, '$.b', 'float')",
                              'first': "variant_get(outer.inner.v1, '$.a', 'float')", 'ordinary': 'outer.ordinary'})
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         assert read.to_arrow(builder.new_scan().plan().splits()).to_pylist() == [
             {'second': 9.0, 'first': 7.0, 'ordinary': 5}]

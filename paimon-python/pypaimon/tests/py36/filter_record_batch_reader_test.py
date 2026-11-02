@@ -20,7 +20,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon.common.predicate import Predicate
-from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
+from pypaimon.execution.python.read.reader.filter_record_batch_reader import (FilterRecordBatchReader)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import AtomicType, DataField
 

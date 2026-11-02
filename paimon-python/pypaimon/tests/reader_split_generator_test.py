@@ -341,7 +341,7 @@ class ApplyPushDownLimitUnitTest(unittest.TestCase):
             deletion_vectors_enabled=False,
             explicit_partition_filter=False,
             has_row_filter=False):
-        from pypaimon.read.scanner.file_scanner import FileScanner
+        from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 
         class _FakeScanner:
             pass

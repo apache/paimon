@@ -309,7 +309,7 @@ class RayBucketJoinTest(unittest.TestCase):
         # Files left under an old bucket count (rescale not yet rewritten) would carry a
         # different total_buckets; the same bucket id must not be treated as co-located.
         import types
-        from pypaimon.read.scanner.file_scanner import FileScanner
+        from pypaimon.read.file_scanner import FileScanner
         sch = pa.schema([("url", pa.string())])
         self._bucketed_table("default.rs_a", sch, "url",
                              pa.Table.from_pydict({"url": ["u0", "u1"]}, schema=sch))

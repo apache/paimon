@@ -68,10 +68,7 @@ class QueryAuthSplit(Split):
         return getattr(self._split, name)
 
 
-def resolve_auth_result(query_auth_fn, read_type, predicate=None, partition_predicate=None,
-                        columns=None):
-    if query_auth_fn is None:
-        return None
+def query_auth_columns(read_type, predicate=None, partition_predicate=None, columns=None):
     select = [f.name for f in read_type] if read_type else None
     if select is not None:
         from pypaimon.read.push_down_utils import predicate_field_names
@@ -82,6 +79,14 @@ def resolve_auth_result(query_auth_fn, read_type, predicate=None, partition_pred
                     # other names are leaf aliases of projected columns, which are already selected
                     names &= columns
                 select.extend(sorted(names))
+    return select
+
+
+def resolve_auth_result(query_auth_fn, read_type, predicate=None, partition_predicate=None,
+                        columns=None):
+    if query_auth_fn is None:
+        return None
+    select = query_auth_columns(read_type, predicate, partition_predicate, columns)
     result = query_auth_fn(select)
     if result is None or not result.has_restrictions:
         return None

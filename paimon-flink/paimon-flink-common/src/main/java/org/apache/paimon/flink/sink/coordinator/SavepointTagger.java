@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink.coordinator;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.sink.SavepointTagUtils;
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -47,7 +46,6 @@ public class SavepointTagger {
 
     private final SnapshotManager snapshotManager;
     private final TagManager tagManager;
-    private final TagDeletion tagDeletion;
     private final List<TagCallback> callbacks;
     private final Duration tagTimeRetained;
     // findSnapshotsForIdentifiers filters by commit user, so the tagger must be bound to the user
@@ -59,13 +57,11 @@ public class SavepointTagger {
     public SavepointTagger(
             SnapshotManager snapshotManager,
             TagManager tagManager,
-            TagDeletion tagDeletion,
             List<TagCallback> callbacks,
             Duration tagTimeRetained,
             String commitUser) {
         this.snapshotManager = checkNotNull(snapshotManager);
         this.tagManager = checkNotNull(tagManager);
-        this.tagDeletion = checkNotNull(tagDeletion);
         this.callbacks = checkNotNull(callbacks);
         this.tagTimeRetained = tagTimeRetained;
         this.commitUser = checkNotNull(commitUser);
@@ -90,8 +86,7 @@ public class SavepointTagger {
     /** Drops an aborted savepoint's pending intent and removes any tag already created for it. */
     public void dropAborted(long checkpointId) {
         pendingIdentifiers.remove(checkpointId);
-        SavepointTagUtils.deleteTagIfMatches(
-                tagManager, commitUser, checkpointId, tagDeletion, snapshotManager, callbacks);
+        SavepointTagUtils.deleteTagIfMatches(tagManager, commitUser, checkpointId, callbacks);
     }
 
     private void createTags(Collection<Long> identifiers) {

@@ -26,6 +26,7 @@ the delegate FileIO.
 """
 
 import hashlib
+import io
 import os
 import threading
 import uuid
@@ -169,7 +170,7 @@ class LocalDiskCacheManager:
         return self._block_size
 
     def _cache_path(self, file_path: str, block_index: int) -> str:
-        key = f"{file_path}:{block_index}"
+        key = f"{self._block_size}:{file_path}:{block_index}"
         h = hashlib.sha256(key.encode('utf-8')).hexdigest()
         prefix = h[:2]
         sub_dir = os.path.join(self._cache_dir, prefix)
@@ -262,7 +263,7 @@ class LocalDiskCacheManager:
         self._file_size_cache[file_path] = size
 
 
-class CachingInputStream:
+class CachingInputStream(io.RawIOBase):
     """Wraps a remote stream with block-level caching."""
 
     def __init__(self, file_io, file_path: str, cache, file_size=None):
@@ -273,7 +274,20 @@ class CachingInputStream:
         self._cache = cache
         self._pos = 0
         self._io_lock = threading.Lock()
+        self._open_lock = threading.Lock()
         self._remote_supports_pread = None
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def readinto(self, buffer):
+        view = memoryview(buffer).cast('B')
+        data = self.read(len(view))
+        view[:len(data)] = data
+        return len(data)
 
     def _get_file_size(self) -> int:
         if self._file_size == -1:
@@ -303,23 +317,11 @@ class CachingInputStream:
         if size <= 0 or self._pos >= self._get_file_size():
             return b''
 
-        end = min(self._pos + size, self._get_file_size())
-        block_size = self._cache.block_size
-
-        first_block = self._pos // block_size
-        last_block = (end - 1) // block_size
-
-        result = bytearray()
-        for bi in range(first_block, last_block + 1):
-            block_data = self._read_block(bi)
-
-            block_start = bi * block_size
-            start_in_block = max(self._pos - block_start, 0)
-            end_in_block = min(end - block_start, len(block_data))
-            result.extend(block_data[start_in_block:end_in_block])
-
-        self._pos = end
-        return bytes(result)
+        position = self._pos
+        end = min(position + size, self._get_file_size())
+        result = self.read_at(end - position, position)
+        self._pos = position + len(result)
+        return result
 
     def read_at(self, nbytes: int, offset: int) -> bytes:
         """Position-based read. Does not change the cursor. Thread-safe."""
@@ -332,29 +334,48 @@ class CachingInputStream:
         first_block = offset // block_size
         last_block = (end - 1) // block_size
 
-        result = bytearray()
-        for bi in range(first_block, last_block + 1):
-            block_data = self._read_block(bi)
-
+        parts = []
+        for bi, block_data in self._read_blocks(first_block, last_block):
             block_start = bi * block_size
             start_in_block = max(offset - block_start, 0)
             end_in_block = min(end - block_start, len(block_data))
-            result.extend(block_data[start_in_block:end_in_block])
+            parts.append(block_data[start_in_block:end_in_block])
 
-        return bytes(result)
+        return b''.join(parts)
 
-    def _read_block(self, block_index: int) -> bytes:
-        cached = self._cache.get_block(self._file_path, block_index)
-        if cached is not None:
-            return cached
-
+    def _read_blocks(self, first: int, last: int):
         block_size = self._cache.block_size
-        offset = block_index * block_size
-        read_size = min(block_size, self._get_file_size() - offset)
-
-        data = self._read_remote(offset, read_size)
-        self._cache.put_block(self._file_path, block_index, data)
-        return data
+        # Bound temporary buffers; a larger individual block remains unchanged.
+        batch_size = max(1, min(32, (8 * 1024 * 1024) // block_size))
+        for batch_start in range(first, last + 1, batch_size):
+            batch_end = min(batch_start + batch_size, last + 1)
+            blocks = [self._cache.get_block(self._file_path, bi)
+                      for bi in range(batch_start, batch_end)]
+            i = 0
+            while i < len(blocks):
+                if blocks[i] is not None:
+                    yield batch_start + i, blocks[i]
+                    i += 1
+                    continue
+                begin = i
+                while i < len(blocks) and blocks[i] is None:
+                    i += 1
+                offset = (batch_start + begin) * block_size
+                end = min((batch_start + i) * block_size, self._get_file_size())
+                data = self._read_remote(offset, end - offset)
+                if len(data) > end - offset:
+                    raise OSError("Cache range read exceeded request")
+                complete = len(data) == end - offset
+                for j in range(begin, i):
+                    lo = (j - begin) * block_size
+                    block = data[lo:lo + block_size]
+                    if not block:
+                        break
+                    if complete:
+                        self._cache.put_block(self._file_path, batch_start + j, block)
+                    yield batch_start + j, block
+                if not complete:
+                    return
 
     def _read_remote(self, offset: int, size: int) -> bytes:
         stream = self._get_remote_stream()
@@ -378,14 +399,21 @@ class CachingInputStream:
         return bytes(buf)
 
     def _get_remote_stream(self):
+        # read_at is documented as thread-safe, so concurrent misses must not
+        # each open their own stream: only the first one is retained and the
+        # rest would leak. Kept separate from _io_lock, which serializes seek
+        # and read on an already open stream.
         if self._stream is None:
-            self._stream = self._file_io.new_input_stream(self._file_path)
+            with self._open_lock:
+                if self._stream is None:
+                    self._stream = self._file_io.new_input_stream(self._file_path)
         return self._stream
 
     def close(self):
         if self._stream is not None:
             self._stream.close()
             self._stream = None
+        super().close()
 
     def __enter__(self):
         return self
@@ -464,12 +492,17 @@ class CachingFileIO(FileIO):
     def properties(self):
         return self._delegate.properties
 
+    def _is_cacheable(self, path: str):
+        file_type = FileType.classify(path)
+        return (self._cache is not None
+                and file_type in self._whitelist
+                and not FileType.is_mutable(path))
+
     def new_input_stream(self, path: str):
         return self._new_input_stream_with_known_size(path, None)
 
     def _new_input_stream_with_known_size(self, path: str, file_size):
-        file_type = FileType.classify(path)
-        if self._cache is None or file_type not in self._whitelist or FileType.is_mutable(path):
+        if not self._is_cacheable(path):
             return self._delegate.new_input_stream(path)
         return CachingInputStream(self._delegate, path, self._cache, file_size)
 
@@ -519,20 +552,8 @@ class CachingFileIO(FileIO):
     def write_avro(self, *args, **kwargs):
         return self._delegate.write_avro(*args, **kwargs)
 
-    def write_lance(self, *args, **kwargs):
-        return self._delegate.write_lance(*args, **kwargs)
-
-    def write_blob(self, *args, **kwargs):
-        return self._delegate.write_blob(*args, **kwargs)
-
     def write_mosaic(self, *args, **kwargs):
         return self._delegate.write_mosaic(*args, **kwargs)
-
-    def write_vortex(self, *args, **kwargs):
-        return self._delegate.write_vortex(*args, **kwargs)
-
-    def write_row(self, *args, **kwargs):
-        return self._delegate.write_row(*args, **kwargs)
 
     def __getattr__(self, name):
         delegate = self.__dict__.get('_delegate')

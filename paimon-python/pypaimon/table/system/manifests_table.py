@@ -21,7 +21,7 @@ from typing import List, Optional
 
 import pyarrow
 
-from pypaimon.casting.row_to_string import cast_row_to_string
+from pypaimon.utils.row_to_string import cast_row_to_string
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
 from pypaimon.table.system.system_table import SystemTable, metadata_snapshot

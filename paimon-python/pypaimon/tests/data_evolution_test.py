@@ -28,7 +28,7 @@ import pyarrow.dataset as ds
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.table.row.offset_row import OffsetRow
@@ -201,7 +201,7 @@ class DataEvolutionTest(unittest.TestCase):
         self.assertIsNotNone(second_commit, "Should have a manifest with min_row_id=2, max_row_id=3")
 
     def test_merge_reader(self):
-        from pypaimon.read.reader.concat_batch_reader import MergeAllBatchReader
+        from pypaimon.execution.python.read.reader.concat_batch_reader import (MergeAllBatchReader)
 
         simple_pa_schema = pa.schema([
             ('f0', pa.int32()),
@@ -252,7 +252,7 @@ class DataEvolutionTest(unittest.TestCase):
                 batch_size = 999
             return original_merge_all(reader_suppliers, batch_size=batch_size)
 
-        import pypaimon.read.split_read as split_read_module
+        import pypaimon.execution.python.read.split_read as split_read_module
         split_read_module.MergeAllBatchReader = patched_merge_all
         try:
             read_builder = table.new_read_builder()
@@ -1131,7 +1131,7 @@ class DataEvolutionTest(unittest.TestCase):
         self.assertIn(102, f0_vals)
 
     def test_filter_manifest_entries_by_row_ranges(self):
-        from pypaimon.read.scanner.file_scanner import _filter_manifest_entries_by_row_ranges
+        from pypaimon.execution.python.read.scanner.file_scanner import (_filter_manifest_entries_by_row_ranges)
 
         entry_0 = SimpleNamespace(file=SimpleNamespace(first_row_id=0, row_count=1))
         entries = [entry_0]

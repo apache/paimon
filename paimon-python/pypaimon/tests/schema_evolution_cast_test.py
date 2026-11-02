@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import builtins
 from decimal import Decimal, DefaultContext, Inexact, localcontext, Rounded
 import os
 import struct
@@ -24,15 +25,73 @@ from types import SimpleNamespace
 import pyarrow as pa
 import pytest
 
-from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution
-from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.arrow_schema import read_arrow_schema
+from pypaimon.execution.python.casting.schema_evolution import cast_array_for_schema_evolution
+from pypaimon.schema.data_types import ArrayType, AtomicType, DataField, MapType, PyarrowFieldParser, RowType
 
 
-@pytest.fixture(autouse=True)
-def python_fallback_casts(monkeypatch):
-    # These tests exercise libc/Python fallbacks, including mocked localtime
-    # and changes to TZ. Native casts have separate process-zone regressions.
-    monkeypatch.setattr('pypaimon.casting.schema_evolution._native_schema_cast', lambda *args: None)
+@pytest.mark.parametrize('chunked', [False, True])
+def test_schema_helpers_do_not_load_native_execution(monkeypatch, chunked):
+    original_import = builtins.__import__
+
+    def python_import(name, *args, **kwargs):
+        if name.startswith(('pypaimon.execution.native', 'pypaimon_rust')):
+            raise AssertionError('Python schema evolution imported Native execution: ' + name)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, '__import__', python_import)
+    values = pa.array([1.9, -2.5, None])
+    if chunked:
+        values = pa.chunked_array([values.slice(0, 1), values.slice(1)])
+    result = cast_array_for_schema_evolution(values, pa.int32(), AtomicType('DOUBLE'), AtomicType('INT'))
+    assert result.to_pylist() == [1, -2, None]
+
+    fields = [DataField(1, 'rows', ArrayType(False, RowType(True, [
+        DataField(2, 'id', AtomicType('INT', False)),
+    ])), description='nested schema')]
+    schema = read_arrow_schema(fields)
+    assert schema.field('rows').nullable
+    assert schema.field('rows').metadata is None
+    assert schema.field('rows').type.value_field.nullable
+    assert schema.field('rows').type.value_type.field('id').nullable
+
+
+def test_read_schema_preserves_runtime_nulls_without_relaxing_write_constraints():
+    from pypaimon.read.table_read import TableRead
+
+    decimal = AtomicType('DECIMAL(3,2)', False)
+    row = RowType(False, [DataField(2, 'amount', decimal)])
+    fields = [DataField(1, 'rows', ArrayType(False, row)),
+              DataField(3, 'amounts', MapType(False, AtomicType('STRING', False), row)),
+              DataField(4, 'variant', AtomicType('VARIANT', False)),
+              DataField(5, 'row_keys', MapType(False, row, ArrayType(False, decimal)))]
+    schema = read_arrow_schema(fields)
+    rows, amounts, variant = schema.field('rows'), schema.field('amounts'), schema.field('variant')
+    assert rows.nullable and rows.type.value_field.nullable
+    assert rows.type.value_type.field('amount').nullable
+    assert amounts.nullable and not amounts.type.key_field.nullable
+    assert amounts.type.item_field.nullable and amounts.type.item_type.field('amount').nullable
+    row_keys = schema.field('row_keys').type
+    assert not row_keys.key_field.nullable and row_keys.key_type.field('amount').nullable
+    assert row_keys.item_field.nullable and row_keys.item_type.value_field.nullable
+    # These VARIANT children describe its physical representation, not logical
+    # ROW fields. Nullable read values do not relax the required binary buffers.
+    assert variant.nullable and not any(field.nullable for field in variant.type)
+    values = [[{'amount': None}], None, []]
+    rows_array = pa.array(values, type=rows.type)
+    rows_array.validate(full=True)
+    batch = pa.record_batch([rows_array], names=['rows'])
+    aligned = TableRead._try_to_pad_batch_by_schema(batch, pa.schema([rows]))
+    assert aligned.schema.equals(pa.schema([rows]))
+    assert aligned.column(0).to_pylist() == values
+    maps = [[('a', {'amount': None}), ('b', None)], None, []]
+    pa.array(maps, type=amounts.type).validate(full=True)
+
+    write_schema = PyarrowFieldParser.from_paimon_schema(fields)
+    assert not write_schema.field('rows').nullable
+    assert not write_schema.field('rows').type.value_field.nullable
+    assert not write_schema.field('rows').type.value_type.field('amount').nullable
+    assert not write_schema.field('amounts').type.item_field.nullable
 
 
 @pytest.mark.parametrize('chunked', [False, True])
@@ -52,6 +111,23 @@ def test_decimal_evolution_uses_supported_jvm_floating_decimal_digits(chunked):
     # interval endpoint and preserves 9.999999999999999E22, rather than 1E23.
     result = cast_array_for_schema_evolution(pa.array([1e23]), pa.decimal128(38, 6))
     assert result.to_pylist() == [Decimal('99999999999999990000000.000000')]
+
+
+@pytest.mark.parametrize('chunked', [False, True])
+@pytest.mark.parametrize('source_type', [pa.int8(), pa.int16(), pa.int32(), pa.int64()])
+def test_integer_decimal_evolution_applies_precision_per_value(chunked, source_type):
+    # Java NumericPrimitiveToDecimalCastRule accepts a narrow target even when
+    # the source type's full range would overflow it. Only overflowing rows
+    # become NULL; PyArrow's integer cast instead rejects the whole target type.
+    values = pa.array([None, 1, -1, 99, -99, 100, -100, None], type=source_type)
+    source = values.slice(1, 7)
+    if chunked:
+        source = pa.chunked_array([source.slice(0, 2), source.slice(2, 0), source.slice(2)])
+    actual = cast_array_for_schema_evolution(source, pa.decimal128(4, 2))
+    assert actual.to_pylist() == [
+        Decimal('1.00'), Decimal('-1.00'), Decimal('99.00'), Decimal('-99.00'),
+        None, None, None,
+    ]
 
 
 @pytest.mark.parametrize('chunked', [False, True])

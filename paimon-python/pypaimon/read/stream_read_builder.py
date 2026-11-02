@@ -22,17 +22,17 @@ This module provides a builder for configuring streaming reads from Paimon
 tables, similar to ReadBuilder but for continuous streaming use cases.
 """
 
-import logging
-
-from typing import Callable, Dict, List, Optional, Set, Union
+from typing import Callable, Dict, List, Optional, Set, Union, TYPE_CHECKING
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
-from pypaimon.read.read_builder import ReadBuilder
-from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan, StreamTableScan
+from pypaimon.read.read_builder import ReadBuilder, _normalize_filter
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import DataField
+
+
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
 
 
 class StreamReadBuilder:
@@ -53,9 +53,7 @@ class StreamReadBuilder:
 
     def __init__(self, table):
         """Initialize the StreamReadBuilder."""
-        from pypaimon.table.file_store_table import FileStoreTable
-
-        self.table: FileStoreTable = table
+        self.table: "FileStoreTable" = table
         self._predicate: Optional[Predicate] = None
         self._read_builder = ReadBuilder(table)
         self._poll_interval_ms: int = 1000
@@ -63,10 +61,14 @@ class StreamReadBuilder:
         self._bucket_filter: Optional[Callable[[int], bool]] = None
         self._consumer_id: Optional[str] = None
 
-    def with_filter(self, predicate: Predicate) -> 'StreamReadBuilder':
-        """Set a filter predicate for the streaming read."""
-        self._predicate = predicate
-        self._read_builder.with_filter(predicate)
+    def with_filter(self, predicate: Union[str, Predicate]) -> 'StreamReadBuilder':
+        """Set a filter predicate, either a Predicate or a SQL-like WHERE string.
+
+        Strings are parsed against the table schema, as in
+        :meth:`pypaimon.read.read_builder.ReadBuilder.with_filter`.
+        """
+        self._predicate = _normalize_filter(predicate, self.table.fields)
+        self._read_builder.with_filter(self._predicate)
         return self
 
     def with_projection(
@@ -125,30 +127,10 @@ class StreamReadBuilder:
         bucket_set: Set[int] = set(bucket_ids)
         return self.with_bucket_filter(lambda bucket: bucket in bucket_set)
 
-    def new_streaming_scan(self) -> Union[AsyncStreamingTableScan, StreamTableScan]:
+    def new_streaming_scan(self) -> Union["AsyncStreamingTableScan", "StreamTableScan"]:
         """Create a stateful streaming scan using the configured backend."""
-        projection = self._projection_builder()
-        projection._validate_map_key_filter()
-        from pypaimon.read.native_plan import _native_query_auth_supported
-        if (self.table.options.native_plan_enabled()
-                and _native_query_auth_supported(self.table)):
-            try:
-                return StreamTableScan(
-                    self.table, predicate=self._predicate, read_type=projection.read_type(),
-                    poll_interval_ms=self._poll_interval_ms, bucket_filter=self._bucket_filter,
-                    consumer_id=self._consumer_id)
-            except Exception as error:
-                _raise_if_native_fork_safety_error(error)
-                logging.warning("Cannot create Native stream scan, using Python: %s", error)
-        scan = AsyncStreamingTableScan(
-            table=self.table,
-            predicate=self._predicate,
-            poll_interval_ms=self._poll_interval_ms,
-            bucket_filter=self._bucket_filter,
-            consumer_id=self._consumer_id
-        )
-        scan._read_type = projection.read_type()
-        return scan
+        from pypaimon.read.read_dispatch import new_streaming_scan
+        return new_streaming_scan(self)
 
     def new_read(self) -> TableRead:
         """Create a new TableRead with this builder's settings."""

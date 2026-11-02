@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
@@ -25,11 +26,10 @@ import pyarrow.parquet as pq
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
@@ -78,7 +78,7 @@ def test_clustered_materialized_dv_files_use_native_raw_splits(tmp_path, engine,
 
     vector = BitmapDeletionVector()
     vector.delete(0)  # clustered first file starts with id=3
-    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+    entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
         GenericRow([], []), 0, {files[0].file_name: vector})
     commit = table.new_batch_write_builder().new_commit()
     try:
@@ -97,7 +97,9 @@ def test_clustered_materialized_dv_files_use_native_raw_splits(tmp_path, engine,
                 builder.with_filter(predicate)
             scan = builder.new_scan()
             if native:
-                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+                with patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                        side_effect=AssertionError('native fallback')):
                     plan = scan.plan()
             else:
                 plan = scan.plan()
@@ -106,7 +108,7 @@ def test_clustered_materialized_dv_files_use_native_raw_splits(tmp_path, engine,
                 assert all(getattr(split, '_native_split', None) is not None
                            for split in plan.splits())
                 read_guard = patch(
-                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                     side_effect=AssertionError(
                         'materialized PK native read fell back'))
             else:
@@ -129,7 +131,9 @@ def test_clustered_materialized_dv_files_use_native_raw_splits(tmp_path, engine,
             writer.close()
             commit.close()
         scan = table.copy({'scan.native-plan.enabled': 'true'}).new_read_builder().new_scan()
-        with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Native plan fell back')):
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('Native plan fell back')):
             plan = scan.plan()
         assert all(getattr(split, '_native_split', None) is not None for split in plan.splits())
         assert any(file.level == 0 for split in plan.splits() for file in split.files)
@@ -174,7 +178,7 @@ def test_first_row_level_zero_merges_before_filtering(tmp_path, target_size, com
             commit.close()
     vector = BitmapDeletionVector()
     vector.delete(1)  # Remove id=2 from the first sorted L0 run.
-    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+    entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
         GenericRow(['pending'], table.partition_keys_fields), 0, {first_file.file_name: vector})
     commit = table.new_batch_write_builder().new_commit()
     try:
@@ -195,7 +199,9 @@ def test_first_row_level_zero_merges_before_filtering(tmp_path, target_size, com
                 builder.with_filter(predicate)
             scan = builder.new_scan()
             if native:
-                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+                with patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                        side_effect=AssertionError('native fallback')):
                     plan = scan.plan()
             else:
                 plan = scan.plan()
@@ -204,7 +210,7 @@ def test_first_row_level_zero_merges_before_filtering(tmp_path, target_size, com
                 assert all(getattr(split, '_native_split', None) is not None
                            for split in plan.splits())
                 read_guard = patch(
-                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                     side_effect=AssertionError(
                         'first-row native read fell back'))
             else:
@@ -255,7 +261,7 @@ def test_pk_merge_engines_read_deletion_vectors_natively(tmp_path, engine, merge
     deleted_position = pq.read_table(first_path).column('id').to_pylist().index(2)
     vector = BitmapDeletionVector()
     vector.delete(deleted_position)
-    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+    entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
         GenericRow([], []), 0, {first_file.file_name: vector})
     commit = table.new_batch_write_builder().new_commit()
     try:
@@ -278,12 +284,13 @@ def test_pk_merge_engines_read_deletion_vectors_natively(tmp_path, engine, merge
                 builder.with_filter(predicates.equal('value', predicate_value))
             scan = builder.new_scan()
             if native:
-                with patch.object(scan.file_scanner, 'scan',
-                                  side_effect=AssertionError('native plan fell back')):
+                with patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                        side_effect=AssertionError('native plan fell back')):
                     plan = scan.plan()
                 assert all(getattr(split, '_native_split', None) is not None
                            for split in plan.splits())
-                guard = patch('pypaimon.read.table_read.TableRead._create_split_read',
+                guard = patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                               side_effect=AssertionError('native read fell back'))
             else:
                 plan = scan.plan()
@@ -330,10 +337,12 @@ def test_first_row_sorted_materialized_and_l0_merge_natively(tmp_path, batch_siz
         scan = builder.new_scan()
         with ExitStack() as guards:
             if native:
-                guards.enter_context(patch.object(scan.file_scanner, 'scan',
-                                                  side_effect=AssertionError('Native plan fell back')))
-                guards.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
-                                           side_effect=AssertionError('Native read fell back')))
+                guards.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('Native plan fell back')))
+                guards.enter_context(patch(
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                    side_effect=AssertionError('Native read fell back')))
             plan = scan.plan()
             assert any(not split.raw_convertible for split in plan.splits())
             rows = builder.new_read().to_arrow(plan.splits()).sort_by([('id', 'ascending')]).to_pylist()

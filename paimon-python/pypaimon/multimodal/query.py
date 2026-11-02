@@ -20,7 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
 from pypaimon.schema.data_types import is_array_blob_type, is_blob_type, is_map_blob_type
@@ -86,6 +86,24 @@ class ScanQuery:
         splits = read_builder.new_scan().plan().splits()
         return read_builder.new_read()._to_managed_arrow_batch_reader(
             splits, blob_parallelism=blob_parallelism)
+
+    def export_lance(
+            self, uri, *, mode="create", blob_mode="materialize",
+            storage_options=None, blob_parallelism=64):
+        """Export this scan to an independent Lance dataset and return it.
+
+        Filter, projection, limit and snapshot selection are preserved. Scalar
+        BLOBs use native Lance Blob storage; ARRAY and MAP BLOB values use
+        ordinary binary payloads. MAPs become lists of key/value structs.
+        Selected VARIANT and video-frame columns are unsupported.
+        Requires ``pypaimon[lance]`` with pylance >= 13 (Python >= 3.10).
+        """
+        if self._result_factory is not None:
+            raise TypeError("export_lance is only supported on scan(), not search queries.")
+        from pypaimon.multimodal.lance_export import export_lance
+        return export_lance(
+            self, uri, mode=mode, blob_mode=blob_mode,
+            storage_options=storage_options, blob_parallelism=blob_parallelism)
 
     def _configured_read_builder(self, table=None):
         read_builder = (
@@ -598,6 +616,9 @@ class _PreFilterQuery(ScanQuery):
     def stream_blobs(self, *args, **kwargs):
         raise TypeError("stream_blobs is only supported on scan(), not search queries.")
 
+    def export_lance(self, *args, **kwargs):
+        raise TypeError("export_lance is only supported on scan(), not search queries.")
+
     def to_ray(self, *, execution="ray", concurrency=None, ray_remote_args=None,
                override_num_blocks=None):
         """Return search rows as a Ray Dataset, with BLOB descriptors.
@@ -607,9 +628,9 @@ class _PreFilterQuery(ScanQuery):
         until the Dataset has finished executing.
         """
         from pypaimon.ray.search_result import read_search_result
-        from pypaimon.ray.vector_search import _execution_options
+        from pypaimon.ray.search_execution import execution_options
 
-        concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
+        concurrency, remote_args = execution_options(concurrency, ray_remote_args)
         query = self._for_execution()
         if execution == "ray":
             result = query._execute_ray(concurrency, remote_args)
@@ -861,9 +882,9 @@ class BatchVectorQuery(_PreFilterQuery):
         """Return one lazy Ray Dataset per query, with distributed row lookup."""
         from pypaimon.ray.batch_vector_search import _execute_batch_vector_search
         from pypaimon.ray.search_result import read_search_result
-        from pypaimon.ray.vector_search import _execution_options
+        from pypaimon.ray.search_execution import execution_options
 
-        concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
+        concurrency, remote_args = execution_options(concurrency, ray_remote_args)
         query = self._for_execution()
         if execution == "ray":
             results = _execute_batch_vector_search(

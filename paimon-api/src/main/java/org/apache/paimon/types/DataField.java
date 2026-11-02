@@ -47,6 +47,7 @@ public final class DataField implements Serializable {
     private final DataType type;
     private final @Nullable String description;
     private final @Nullable String defaultValue;
+    private final @Nullable String generationExpression;
 
     public DataField(int id, String name, DataType dataType) {
         this(id, name, dataType, null, null);
@@ -62,11 +63,22 @@ public final class DataField implements Serializable {
             DataType type,
             @Nullable String description,
             @Nullable String defaultValue) {
+        this(id, name, type, description, defaultValue, null);
+    }
+
+    public DataField(
+            int id,
+            String name,
+            DataType type,
+            @Nullable String description,
+            @Nullable String defaultValue,
+            @Nullable String generationExpression) {
         this.id = id;
         this.name = name;
         this.type = type;
         this.description = description;
         this.defaultValue = defaultValue;
+        this.generationExpression = generationExpression;
     }
 
     public int id() {
@@ -82,23 +94,27 @@ public final class DataField implements Serializable {
     }
 
     public DataField newId(int newId) {
-        return new DataField(newId, name, type, description, defaultValue);
+        return new DataField(newId, name, type, description, defaultValue, generationExpression);
     }
 
     public DataField newName(String newName) {
-        return new DataField(id, newName, type, description, defaultValue);
+        return new DataField(id, newName, type, description, defaultValue, generationExpression);
     }
 
     public DataField newType(DataType newType) {
-        return new DataField(id, name, newType, description, defaultValue);
+        return new DataField(id, name, newType, description, defaultValue, generationExpression);
     }
 
     public DataField newDescription(String newDescription) {
-        return new DataField(id, name, type, newDescription, defaultValue);
+        return new DataField(id, name, type, newDescription, defaultValue, generationExpression);
     }
 
     public DataField newDefaultValue(String newDefaultValue) {
-        return new DataField(id, name, type, description, newDefaultValue);
+        return new DataField(id, name, type, description, newDefaultValue, generationExpression);
+    }
+
+    public DataField newGenerationExpression(@Nullable String expression) {
+        return new DataField(id, name, type, description, defaultValue, expression);
     }
 
     @Nullable
@@ -111,17 +127,28 @@ public final class DataField implements Serializable {
         return defaultValue;
     }
 
+    /** Returns the expression generating this physical column, or null for an ordinary column. */
+    @Nullable
+    public String generationExpression() {
+        return generationExpression;
+    }
+
     public DataField copy() {
-        return new DataField(id, name, type.copy(), description, defaultValue);
+        return new DataField(
+                id, name, type.copy(), description, defaultValue, generationExpression);
     }
 
     public DataField copy(boolean isNullable) {
-        return new DataField(id, name, type.copy(isNullable), description, defaultValue);
+        return new DataField(
+                id, name, type.copy(isNullable), description, defaultValue, generationExpression);
     }
 
     public String asSQLString() {
         StringBuilder sb = new StringBuilder();
         sb.append(escapeIdentifier(name)).append(" ").append(type.asSQLString());
+        if (generationExpression != null) {
+            sb.append(" GENERATED ALWAYS AS (").append(generationExpression).append(")");
+        }
         if (StringUtils.isNotEmpty(description)) {
             sb.append(" COMMENT '").append(escapeSingleQuotes(description)).append("'");
         }
@@ -143,6 +170,9 @@ public final class DataField implements Serializable {
         if (defaultValue() != null) {
             generator.writeStringField("defaultValue", defaultValue());
         }
+        if (generationExpression != null) {
+            generator.writeStringField("generationExpression", generationExpression);
+        }
         generator.writeEndObject();
     }
 
@@ -159,7 +189,8 @@ public final class DataField implements Serializable {
                 && Objects.equals(name, field.name)
                 && Objects.equals(type, field.type)
                 && Objects.equals(description, field.description)
-                && Objects.equals(defaultValue, field.defaultValue);
+                && Objects.equals(defaultValue, field.defaultValue)
+                && Objects.equals(generationExpression, field.generationExpression);
     }
 
     public boolean equalsIgnoreFieldId(DataField other) {
@@ -172,7 +203,8 @@ public final class DataField implements Serializable {
         return Objects.equals(name, other.name)
                 && type.equalsIgnoreFieldId(other.type)
                 && Objects.equals(description, other.description)
-                && Objects.equals(defaultValue, other.defaultValue);
+                && Objects.equals(defaultValue, other.defaultValue)
+                && Objects.equals(generationExpression, other.generationExpression);
     }
 
     public boolean isPrunedFrom(DataField other) {
@@ -186,12 +218,13 @@ public final class DataField implements Serializable {
                 && Objects.equals(name, other.name)
                 && type.isPrunedFrom(other.type)
                 && Objects.equals(description, other.description)
-                && Objects.equals(defaultValue, other.defaultValue);
+                && Objects.equals(defaultValue, other.defaultValue)
+                && Objects.equals(generationExpression, other.generationExpression);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, name, type, description, defaultValue);
+        return Objects.hash(id, name, type, description, defaultValue, generationExpression);
     }
 
     @Override
@@ -210,7 +243,9 @@ public final class DataField implements Serializable {
             return Objects.equals(dataField1.name(), dataField2.name())
                     && Objects.equals(dataField1.type(), dataField2.type())
                     && Objects.equals(dataField1.description(), dataField2.description())
-                    && Objects.equals(dataField1.defaultValue(), dataField2.defaultValue());
+                    && Objects.equals(dataField1.defaultValue(), dataField2.defaultValue())
+                    && Objects.equals(
+                            dataField1.generationExpression(), dataField2.generationExpression());
         } else {
             return false;
         }

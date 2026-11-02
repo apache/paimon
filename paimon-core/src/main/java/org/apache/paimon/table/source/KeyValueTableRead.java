@@ -125,6 +125,20 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     }
 
     @Override
+    protected boolean hasSequenceNumber(Split split) {
+        if (!Boolean.parseBoolean(
+                schema().options()
+                        .getOrDefault(
+                                CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(), "false"))) {
+            return false;
+        }
+        SplitReadProvider readProvider = readProvider(split);
+        return readProvider instanceof MergeFileSplitReadProvider
+                || readProvider instanceof IncrementalChangelogReadProvider
+                || readProvider instanceof IncrementalDiffReadProvider;
+    }
+
+    @Override
     public InnerTableRead forceKeepDelete() {
         initialized().forEach(SplitRead::forceKeepDelete);
         this.forceKeepDelete = true;
@@ -229,9 +243,13 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
 
     @Override
     public RecordReader<InternalRow> reader(Split split) throws IOException {
+        return readProvider(split).get().get().createReader(split);
+    }
+
+    private SplitReadProvider readProvider(Split split) {
         for (SplitReadProvider readProvider : readProviders) {
             if (readProvider.match(split, new SplitReadProvider.Context(forceKeepDelete))) {
-                return readProvider.get().get().createReader(split);
+                return readProvider;
             }
         }
 

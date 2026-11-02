@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 from dataclasses import replace
 from uuid import uuid4
 
@@ -27,7 +28,6 @@ from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
 
 def _publish_reassigned_partition(table, partition_value):
@@ -91,13 +91,13 @@ def test_video_backfill_reassign_interleavings(tmp_path, monkeypatch, phase, con
             _publish_reassigned_partition(raw, 'a' if concurrent_change == 'same_partition' else 'b')
         injected.append(raw.snapshot_manager().get_latest_snapshot().id)
 
-    real_init = TableUpdateByRowId.__init__
+    real_init = PythonTableUpdateByRowId.initialize
     real_commit = RenamingSnapshotCommit.commit
 
     def init_after_reassign(updater, *args, **kwargs):
         if not injected:
             concurrent_commit()
-        real_init(updater, *args, **kwargs)
+        return real_init(updater, *args, **kwargs)
 
     def commit_after_reassign(committer, base_uuid, snapshot, statistics):
         if not injected and snapshot.commit_kind == 'APPEND':
@@ -108,7 +108,7 @@ def test_video_backfill_reassign_interleavings(tmp_path, monkeypatch, phase, con
 
     with monkeypatch.context() as patch:
         if phase == 'after_mapping':
-            patch.setattr(TableUpdateByRowId, '__init__', init_after_reassign)
+            patch.setattr(PythonTableUpdateByRowId, 'initialize', init_after_reassign)
         else:
             patch.setattr(RenamingSnapshotCommit, 'commit', commit_after_reassign)
         if concurrent_change == 'same_partition':

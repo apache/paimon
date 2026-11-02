@@ -61,7 +61,8 @@ case class PaimonScan(
         val bucketSpec = fileStoreTable.bucketSpec()
         // todo introduce bucket transform for different bucket function type
         if (
-          bucketSpec.getBucketMode != BucketMode.HASH_FIXED || coreOptions
+          bucketSpec.getBucketMode != BucketMode.HASH_FIXED ||
+          coreOptions.bucketFunctionProvider().isPresent || coreOptions
             .bucketFunctionType() != BucketFunctionType.DEFAULT
         ) {
           None
@@ -163,6 +164,7 @@ case class PaimonScan(
     // Multi-primary keys are fine:
     // `Array(a, b)` satisfies the required ordering `Array(a)`
     primaryKeys
+      .map(quote)
       .map(Expressions.identity)
       .map {
         sortExpr =>

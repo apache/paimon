@@ -247,6 +247,7 @@ class GetTableResponse(AuditRESTResponse):
 
     # Field constants for JSON serialization
     FIELD_ID = "id"
+    FIELD_DATABASE = "database"
     FIELD_NAME = "name"
     FIELD_PATH = "path"
     FIELD_IS_EXTERNAL = "isExternal"
@@ -254,6 +255,8 @@ class GetTableResponse(AuditRESTResponse):
     FIELD_SCHEMA = "schema"
 
     id: Optional[str] = json_field(FIELD_ID, default=None)
+    # Omitted when None: native readers compare it with the table's database
+    database: Optional[str] = optional_json_field(FIELD_DATABASE, "non_null")
     name: Optional[str] = json_field(FIELD_NAME, default=None)
     path: Optional[str] = json_field(FIELD_PATH, default=None)
     is_external: Optional[bool] = json_field(FIELD_IS_EXTERNAL, default=None)
@@ -273,9 +276,11 @@ class GetTableResponse(AuditRESTResponse):
             created_by: Optional[str] = None,
             updated_at: Optional[int] = None,
             updated_by: Optional[str] = None,
+            database: Optional[str] = None,
     ):
         super().__init__(owner, created_at, created_by, updated_at, updated_by)
         self.id = id
+        self.database = database
         self.name = name
         self.path = path
         self.is_external = is_external
@@ -284,6 +289,9 @@ class GetTableResponse(AuditRESTResponse):
 
     def get_id(self) -> str:
         return self.id
+
+    def get_database(self) -> Optional[str]:
+        return self.database
 
     def get_name(self) -> str:
         return self.name

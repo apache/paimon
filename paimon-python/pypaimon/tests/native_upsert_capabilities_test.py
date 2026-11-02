@@ -24,9 +24,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
 pytestmark = pytest.mark.native_plan
@@ -68,7 +68,7 @@ def test_partial_upsert_keys_and_values(tmp_path, native, streaming, row_input, 
     with ExitStack() as stack:
         if native:
             for method in ('_upsert_partition', '_upsert_row_partition'):
-                stack.enter_context(patch.object(TableUpsertByKey, method,
+                stack.enter_context(patch.object(PythonTableUpsert, method,
                                                  side_effect=AssertionError('Python upsert fallback')))
         if row_input:
             fields = [field for field in table.fields if field.name in source.column_names]
@@ -140,7 +140,7 @@ def test_temporal_upsert_keys(tmp_path, native, streaming, row_input, key_type):
     with ExitStack() as stack:
         if native:
             for method in ('_upsert_partition', '_upsert_row_partition'):
-                stack.enter_context(patch.object(TableUpsertByKey, method,
+                stack.enter_context(patch.object(PythonTableUpsert, method,
                                                  side_effect=AssertionError('Python upsert fallback')))
         if row_input:
             rows = [GenericRow([row[field.name] for field in table.fields], table.fields)
@@ -204,7 +204,7 @@ def test_upsert_reads_only_exact_input_partitions(tmp_path, native):
                        'sub': [1, 2, 1, 1], 'value': [15, 30, 40, 20]}, schema=schema)
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(TableUpsertByKey, '_upsert_partition',
+            stack.enter_context(patch.object(PythonTableUpsert, '_upsert_partition',
                                              side_effect=AssertionError('Python upsert fallback')))
         messages = builder.new_update().with_update_type(['value']).upsert_by_arrow_with_key(
             source, ['id'])

@@ -26,6 +26,9 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
@@ -206,6 +209,8 @@ public final class FileIndexFormat {
     /** Reader for file index file. */
     public static class Reader implements Closeable {
 
+        private static final Logger LOG = LoggerFactory.getLogger(Reader.class);
+
         private final SeekableInputStream seekableInputStream;
         // Cache the index entries.
         private final Map<String, Map<String, Pair<Long, Long>>> indexEntries = new HashMap<>();
@@ -266,10 +271,20 @@ public final class FileIndexFormat {
         }
 
         public Set<FileIndexReader> readColumnIndex(String columnName) {
+            return readColumnIndex(columnName, false);
+        }
+
+        public Set<FileIndexReader> readColumnIndex(String columnName, boolean ignoreUnknownType) {
             return Optional.ofNullable(indexEntries.getOrDefault(columnName, null))
                     .map(
                             f ->
                                     f.entrySet().stream()
+                                            .filter(
+                                                    entry ->
+                                                            !ignoreUnknownType
+                                                                    || isKnownIndex(
+                                                                            columnName,
+                                                                            entry.getKey()))
                                             .map(
                                                     entry ->
                                                             getFileIndexReader(
@@ -278,6 +293,17 @@ public final class FileIndexFormat {
                                                                     entry.getValue()))
                                             .collect(Collectors.toSet()))
                     .orElse(Collections.emptySet());
+        }
+
+        private boolean isKnownIndex(String columnName, String indexType) {
+            if (FileIndexerFactoryUtils.isRegistered(indexType)) {
+                return true;
+            }
+            LOG.warn(
+                    "Ignoring unregistered file index type '{}' for column '{}'; retaining all rows for this index.",
+                    indexType,
+                    columnName);
+            return false;
         }
 
         /** Returns the parsed index metadata without reading index payloads. */

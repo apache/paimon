@@ -312,19 +312,18 @@ def test_ltz_partition_strings_outside_arrow_nanosecond_range(type_name, value, 
     assert _render_partition(decoded) == '{' + expected[zone] + '}'
 
 
-def test_ltz_partition_strings_preserve_submicrosecond_fraction():
+@pytest.mark.parametrize('value', [
+    '2024-01-01 00:00:00.123456789',
+    '1969-12-31 23:59:59.999999999',
+])
+def test_ltz_partition_strings_preserve_submicrosecond_fraction(value, monkeypatch):
     import pandas as pd
-    expected = {
-        'UTC': '2024-01-01 00:00:00.123456789',
-        'America/New_York': '2023-12-31 19:00:00.123456789',
-        'Asia/Shanghai': '2024-01-01 08:00:00.123456789',
-    }
-    zone = os.environ.get('TZ', time.tzname[0])
-    if zone not in expected:
-        pytest.skip('Run Java timezone golden cases with TZ set to UTC, New York or Shanghai')
-    row = GenericRow([pd.Timestamp('2024-01-01 00:00:00.123456789', tz='UTC')],
+
+    # The precision regression must also run outside the timezone golden jobs.
+    monkeypatch.setattr('pypaimon.utils.temporal_utils._local_offset', lambda _seconds: 0)
+    row = GenericRow([pd.Timestamp(value, tz='UTC')],
                      [DataField(0, 'pt', AtomicType('TIMESTAMP_LTZ(9)'))])
-    assert _render_partition(row) == '{' + expected[zone] + '}'
+    assert _render_partition(row) == '{' + value + '}'
 
 
 @pytest.mark.parametrize('root,expected', [
