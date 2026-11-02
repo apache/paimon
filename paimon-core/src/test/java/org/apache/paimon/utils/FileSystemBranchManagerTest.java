@@ -551,6 +551,50 @@ class FileSystemBranchManagerTest {
     }
 
     @Test
+    void testFastForwardRechecksLeaseAfterCheckingTarget() throws Exception {
+        schemaManager.commitChanges(SchemaChange.setOption(BUCKET.key(), "1"));
+        InterceptingFileIO io = new InterceptingFileIO();
+        HeldFlagLockFactory lockFactory = new HeldFlagLockFactory();
+        FileStoreTable table = createTableWithLock(io, lockFactory);
+        commitRow(table, 1);
+        table.createTag("tag1", 1);
+        table.createBranch("b1", "tag1");
+        FileStoreTable branch = table.switchToBranch("b1");
+        commitRow(branch, 2);
+
+        // Once the branch's snapshot 2 has been read for the copy, the lease expires while
+        // checking whether main already has snapshot 2.
+        Path target = table.snapshotManager().snapshotPath(2);
+        io.onOpen(
+                branch.snapshotManager().snapshotPath(2),
+                () -> io.onExists(target, () -> lockFactory.expired.set(true)));
+        assertThatThrownBy(() -> table.fastForward("b1")).hasStackTraceContaining("Lease expired");
+
+        assertThat(io.exists(target)).isFalse();
+    }
+
+    @Test
+    void testFastForwardRechecksLeaseBeforeRetryingHint() throws Exception {
+        schemaManager.commitChanges(SchemaChange.setOption(BUCKET.key(), "1"));
+        InterceptingFileIO io = new InterceptingFileIO();
+        HeldFlagLockFactory lockFactory = new HeldFlagLockFactory();
+        FileStoreTable table = createTableWithLock(io, lockFactory);
+        commitRow(table, 1);
+        table.createTag("tag1", 1);
+        table.createBranch("b1", "tag1");
+        commitRow(table.switchToBranch("b1"), 2);
+
+        // The first write of main's LATEST hint fails, and the lease expires before the retry.
+        Path snapshotDirectory = table.snapshotManager().snapshotDirectory();
+        io.failWrite(snapshotDirectory, HintFileUtils.LATEST, 0);
+        io.afterInjectedFailure = () -> lockFactory.expired.set(true);
+        assertThatThrownBy(() -> table.fastForward("b1")).hasStackTraceContaining("Lease expired");
+
+        assertThat(HintFileUtils.readHint(io, HintFileUtils.LATEST, snapshotDirectory))
+                .isEqualTo(1L);
+    }
+
+    @Test
     void testReplaceStopsDeletingWhenLeaseExpires() throws Exception {
         schemaManager.commitChanges(SchemaChange.setOption(BUCKET.key(), "1"));
         InterceptingFileIO io = new InterceptingFileIO();
@@ -816,8 +860,11 @@ class FileSystemBranchManagerTest {
         private volatile BooleanSupplier lockHeld = () -> false;
         private volatile Runnable afterWatchedWrite = () -> {};
         private volatile Runnable afterWatchedDelete = () -> {};
+        private volatile Runnable afterInjectedFailure = () -> {};
         @Nullable private volatile Path openTrigger;
         private volatile Runnable onOpenAction = () -> {};
+        @Nullable private volatile Path existsTrigger;
+        private volatile Runnable onExistsAction = () -> {};
         @Nullable private volatile Path undeletable;
         private final List<String> changes = new CopyOnWriteArrayList<>();
         private final List<Boolean> lockHeldOnChanges = new CopyOnWriteArrayList<>();
@@ -826,6 +873,12 @@ class FileSystemBranchManagerTest {
         void onOpen(Path path, Runnable action) {
             onOpenAction = action;
             openTrigger = path;
+        }
+
+        /** Run the action once, when the file's existence is next checked. */
+        void onExists(Path path, Runnable action) {
+            onExistsAction = action;
+            existsTrigger = path;
         }
 
         /** Make the next delete of the file report failure and leave it in place. */
@@ -886,6 +939,16 @@ class FileSystemBranchManagerTest {
         }
 
         @Override
+        public boolean exists(Path path) throws IOException {
+            boolean exists = super.exists(path);
+            if (sameFile(path, existsTrigger)) {
+                existsTrigger = null;
+                onExistsAction.run();
+            }
+            return exists;
+        }
+
+        @Override
         public SeekableInputStream newInputStream(Path path) throws IOException {
             if (sameFile(path, openTrigger)) {
                 openTrigger = null;
@@ -920,6 +983,7 @@ class FileSystemBranchManagerTest {
             if (isIn(path, failingDirectory, failingPrefix)
                     && writesBeforeFailure.getAndDecrement() <= 0) {
                 failingDirectory = null;
+                afterInjectedFailure.run();
                 throw new IOException("Injected write failure");
             }
             if (isIn(path, watchedDirectory, watchedPrefix)) {

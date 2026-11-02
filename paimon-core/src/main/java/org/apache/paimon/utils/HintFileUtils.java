@@ -110,9 +110,20 @@ public class HintFileUtils {
 
     public static void commitHint(FileIO fileIO, long id, String fileName, Path dir)
             throws IOException {
+        commitHint(fileIO, id, fileName, dir, () -> {});
+    }
+
+    /**
+     * Like {@link #commitHint(FileIO, long, String, Path)}, but runs {@code beforeWrite} before
+     * every attempt, so that a check is repeated after the pause before a retry.
+     */
+    public static void commitHint(
+            FileIO fileIO, long id, String fileName, Path dir, Runnable beforeWrite)
+            throws IOException {
         Path hintFile = new Path(dir, fileName);
         int loopTime = 3;
         while (loopTime-- > 0) {
+            beforeWrite.run();
             try {
                 fileIO.overwriteHintFile(hintFile, String.valueOf(id));
                 return;

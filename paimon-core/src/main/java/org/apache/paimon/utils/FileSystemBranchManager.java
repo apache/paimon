@@ -281,8 +281,7 @@ public class FileSystemBranchManager implements BranchManager {
         }
         copySnapshots(branchSnapshotManager, latestId + 1, branchLatestId, lock);
         copyBranchTags(branchName, lock);
-        lock.ensureValid();
-        snapshotManager.commitLatestHint(branchLatestId);
+        commitHint(lock, HintFileUtils.LATEST, branchLatestId);
         return true;
     }
 
@@ -386,8 +385,7 @@ public class FileSystemBranchManager implements BranchManager {
                 HintFileUtils.readHint(
                         fileIO, HintFileUtils.EARLIEST, snapshotManager.snapshotDirectory());
         if (earliestHint != null && earliestHint > earliestSnapshotId) {
-            lock.ensureValid();
-            snapshotManager.commitEarliestHint(earliestSnapshotId);
+            commitHint(lock, HintFileUtils.EARLIEST, earliestSnapshotId);
         }
 
         List<Long> branchSchemaIds = sorted(branchSchemaManager.listAllIds());
@@ -405,8 +403,7 @@ public class FileSystemBranchManager implements BranchManager {
         long branchLatestId = Collections.max(snapshotSizes(branchSnapshotManager).keySet());
         copySnapshots(branchSnapshotManager, earliestSnapshotId, branchLatestId, lock);
         copyBranchTags(branchName, lock);
-        lock.ensureValid();
-        snapshotManager.commitLatestHint(branchLatestId);
+        commitHint(lock, HintFileUtils.LATEST, branchLatestId);
     }
 
     private void copySnapshots(
@@ -435,10 +432,15 @@ public class FileSystemBranchManager implements BranchManager {
     /** Copies a file without exposing partial content, accepting a target already copied. */
     private void copyAtomically(Lock lock, Path source, Path target) throws IOException {
         String content = readExactly(source);
-        // Reading the source may outlast the lease, so check it right before writing.
-        lock.ensureValid();
-        if ((fileIO.exists(target) || !fileIO.tryToWriteAtomic(target, content))
-                && !content.equals(readExactly(target))) {
+        if (!fileIO.exists(target)) {
+            // Reading the source and checking the target may outlast the lease, so check it right
+            // before writing.
+            lock.ensureValid();
+            if (fileIO.tryToWriteAtomic(target, content)) {
+                return;
+            }
+        }
+        if (!content.equals(readExactly(target))) {
             throw new IOException(
                     String.format(
                             "Cannot copy %s to %s, because the target holds other content.",
@@ -452,6 +454,12 @@ public class FileSystemBranchManager implements BranchManager {
             delete(lock, target);
         }
         copyAtomically(lock, source, target);
+    }
+
+    /** Writes a hint file of the current branch, checking the lease before every attempt. */
+    private void commitHint(Lock lock, String fileName, long id) throws IOException {
+        HintFileUtils.commitHint(
+                fileIO, id, fileName, snapshotManager.snapshotDirectory(), lock::ensureValid);
     }
 
     /** Deletes a file while the lease is valid, failing if it remains. */
