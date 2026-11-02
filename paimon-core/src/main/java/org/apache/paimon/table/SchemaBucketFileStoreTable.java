@@ -84,6 +84,11 @@ public class SchemaBucketFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public FileStoreTable copyWithoutQueryAuth() {
+        return new SchemaBucketFileStoreTable(wrapped().copyWithoutQueryAuth());
+    }
+
+    @Override
     public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
         return new SchemaBucketFileStoreTable(wrapped().copyWithoutTimeTravel(dynamicOptions));
     }
