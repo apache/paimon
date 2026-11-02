@@ -47,7 +47,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -1000,15 +999,7 @@ public class FlinkCatalog extends AbstractCatalog {
             if (optionalName == null || physicalColumns.contains(optionalName)) {
                 // build physical column from table row field
                 RowType.RowField field = physicalRowFields.get(physicalColumnIndex++);
-                org.apache.flink.table.types.DataType dataType =
-                        fromLogicalToDataType(field.getType());
-                if (table.rowType().getField(field.getName()).generationExpression() != null
-                        && !table.primaryKeys().contains(field.getName())) {
-                    // Flink validates omitted columns before the sink can fill them. Paimon
-                    // enforces the stored NOT NULL constraint after generating the value.
-                    dataType = dataType.nullable();
-                }
-                builder.column(field.getName(), dataType);
+                builder.column(field.getName(), fromLogicalToDataType(field.getType()));
             } else {
                 // build non-physical column from options
                 deserializeNonPhysicalColumn(newOptions, i, builder);
@@ -1107,14 +1098,15 @@ public class FlinkCatalog extends AbstractCatalog {
         ResolvedCatalogBaseTable<CatalogBaseTable> resolvedTable =
                 (ResolvedCatalogBaseTable<CatalogBaseTable>) catalogTable;
         ResolvedSchema schema = resolvedTable.getResolvedSchema();
-        Map<String, DataField> generatedFields =
+        Map<String, String> generationExpressions =
                 resolvedTable.getOrigin() instanceof DataCatalogTable
                         ? ((DataCatalogTable) resolvedTable.getOrigin())
                                 .table().rowType().getFields().stream()
                                         .filter(f -> f.generationExpression() != null)
                                         .collect(
                                                 Collectors.toMap(
-                                                        DataField::name, Function.identity()))
+                                                        f -> f.name(),
+                                                        f -> f.generationExpression()))
                         : Collections.emptyMap();
         RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
 
@@ -1147,27 +1139,18 @@ public class FlinkCatalog extends AbstractCatalog {
         Map<String, String> columnComments = getColumnComments(catalogTable);
         rowType.getFields()
                 .forEach(
-                        field -> {
-                            DataField generated = generatedFields.get(field.getName());
-                            org.apache.paimon.types.DataType dataType =
-                                    resolveDataType(
-                                            field.getName(),
-                                            field.getType(),
-                                            options,
-                                            blobFileFields,
-                                            blobInlineFields);
-                            if (generated != null) {
-                                // Restore the stored constraint hidden from Flink's pre-sink
-                                // validation of omitted generated columns.
-                                dataType = dataType.copy(generated.type().isNullable());
-                            }
-                            schemaBuilder.column(
-                                    field.getName(),
-                                    dataType,
-                                    columnComments.get(field.getName()),
-                                    null,
-                                    generated == null ? null : generated.generationExpression());
-                        });
+                        field ->
+                                schemaBuilder.column(
+                                        field.getName(),
+                                        resolveDataType(
+                                                field.getName(),
+                                                field.getType(),
+                                                options,
+                                                blobFileFields,
+                                                blobInlineFields),
+                                        columnComments.get(field.getName()),
+                                        null,
+                                        generationExpressions.get(field.getName())));
 
         return schemaBuilder.build();
     }

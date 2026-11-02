@@ -208,7 +208,7 @@ class GeneratedColumnITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testGeneratedNotNullConstraint() throws Exception {
+    void testNotNullGeneratedColumnMustBeSupplied() throws Exception {
         createTable(
                 "events",
                 Schema.newBuilder()
@@ -216,23 +216,22 @@ class GeneratedColumnITCase extends CatalogITCaseBase {
                         .generatedColumn("label", DataTypes.STRING().notNull(), "UPPER(name)")
                         .build());
 
-        tEnv.executeSql("INSERT INTO events (name) VALUES ('hello')").await();
-        assertThat(sql("SELECT * FROM events")).containsExactly(Row.of("hello", "HELLO"));
-        sql("ALTER TABLE events MODIFY label STRING COMMENT 'generated label'");
-        assertThat(paimonTable("events").rowType().getField("label").type())
-                .isEqualTo(DataTypes.STRING().notNull());
+        assertThat(
+                        tEnv.from("events")
+                                .getResolvedSchema()
+                                .getColumn("label")
+                                .get()
+                                .getDataType()
+                                .getLogicalType()
+                                .isNullable())
+                .isFalse();
         assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "INSERT INTO events VALUES ('hello', CAST(NULL AS STRING))")
-                                        .await())
-                .hasStackTraceContaining("Cannot write null to non-null column(label)");
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "INSERT INTO events (name) VALUES (CAST(NULL AS STRING))")
-                                        .await())
-                .hasStackTraceContaining("Cannot write null to non-null column(label)");
+                        () -> tEnv.executeSql("INSERT INTO events (name) VALUES ('hello')").await())
+                .hasStackTraceContaining("Column 'label'");
+        assertThat(sql("SELECT * FROM events")).isEmpty();
+
+        tEnv.executeSql("INSERT INTO events VALUES ('hello', 'supplied')").await();
+        assertThat(sql("SELECT * FROM events")).containsExactly(Row.of("hello", "supplied"));
     }
 
     @ParameterizedTest

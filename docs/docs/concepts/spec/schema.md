@@ -138,7 +138,7 @@ initialization. These operations define the automatically generated value, inclu
 formatting and invalid-input behavior; the write engine's ANSI mode or implicit CAST rules do
 not change that definition. Spark and Flink 1.18+ SQL inserts with an explicit target column
 list fill omitted generated columns through the same evaluator, including source-column defaults,
-before writing. Flink does not automatically fill primary-key columns. See
+before writing. Flink automatically fills only nullable generated columns outside the primary key. See
 [Flink SQL Write](../../flink/sql-write#physical-generated-columns) for details.
 Expressions may reference ordinary top-level fields and compose supported scalar calls, such as
 `YEAR(event_time)`, `UPPER(name)`, `CONCAT(UPPER(name), '-', name)`, and

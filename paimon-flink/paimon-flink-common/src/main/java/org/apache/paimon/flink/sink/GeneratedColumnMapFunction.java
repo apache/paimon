@@ -64,7 +64,6 @@ class GeneratedColumnMapFunction implements MapFunction<RowData, RowData> {
         getters = new RowData.FieldGetter[rowType.getFieldCount()];
         Set<Integer> blobFields = new HashSet<>();
         for (int i = 0; i < getters.length; i++) {
-            // Flink's input contains NULL placeholders even for NOT NULL generated columns.
             getters[i] =
                     RowData.createFieldGetter(toLogicalType(rowType.getTypeAt(i)).copy(true), i);
             if (BlobType.isBlobFileField(rowType.getTypeAt(i))) {
