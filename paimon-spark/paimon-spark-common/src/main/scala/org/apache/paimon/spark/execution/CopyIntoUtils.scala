@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.execution
 
+import org.apache.hadoop.fs.FileStatus
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.catalyst.parser.ParseException
 import org.apache.spark.sql.catalyst.plans.logical.{Command, InsertIntoDir, LogicalPlan, ParsedStatement}
@@ -83,6 +84,11 @@ object CopyIntoUtils {
 
   def extractBaseName(fullPath: String): String = {
     fullPath.substring(fullPath.lastIndexOf('/') + 1)
+  }
+
+  /** The base name of a file, URL-encoded like the values of `input_file_name()`. */
+  def encodedBaseName(fileStatus: FileStatus): String = {
+    extractBaseName(fileStatus.getPath.toUri.toString)
   }
 
   /** Count rows per file, keyed by base file name. */
