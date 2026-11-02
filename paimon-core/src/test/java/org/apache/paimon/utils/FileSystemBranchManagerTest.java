@@ -588,7 +588,9 @@ class FileSystemBranchManagerTest {
         Path snapshotDirectory = table.snapshotManager().snapshotDirectory();
         io.failWrite(snapshotDirectory, HintFileUtils.LATEST, 0);
         io.afterInjectedFailure = () -> lockFactory.expired.set(true);
-        assertThatThrownBy(() -> table.fastForward("b1")).hasStackTraceContaining("Lease expired");
+        assertThatThrownBy(() -> table.fastForward("b1"))
+                .hasStackTraceContaining("Lease expired")
+                .hasStackTraceContaining("Injected write failure");
 
         assertThat(HintFileUtils.readHint(io, HintFileUtils.LATEST, snapshotDirectory))
                 .isEqualTo(1L);

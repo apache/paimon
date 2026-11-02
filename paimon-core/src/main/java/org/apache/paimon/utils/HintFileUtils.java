@@ -115,19 +115,30 @@ public class HintFileUtils {
 
     /**
      * Like {@link #commitHint(FileIO, long, String, Path)}, but runs {@code beforeWrite} before
-     * every attempt, so that a check is repeated after the pause before a retry.
+     * every attempt, so that a check is repeated after the pause before a retry. An exception from
+     * {@code beforeWrite} ends the retries; the previous attempt's failure, if any, is added to it
+     * as suppressed.
      */
     public static void commitHint(
             FileIO fileIO, long id, String fileName, Path dir, Runnable beforeWrite)
             throws IOException {
         Path hintFile = new Path(dir, fileName);
         int loopTime = 3;
+        IOException previous = null;
         while (loopTime-- > 0) {
-            beforeWrite.run();
+            try {
+                beforeWrite.run();
+            } catch (RuntimeException e) {
+                if (previous != null) {
+                    e.addSuppressed(previous);
+                }
+                throw e;
+            }
             try {
                 fileIO.overwriteHintFile(hintFile, String.valueOf(id));
                 return;
             } catch (IOException e) {
+                previous = e;
                 try {
                     Thread.sleep(ThreadLocalRandom.current().nextInt(1000) + 500);
                 } catch (InterruptedException ex) {
