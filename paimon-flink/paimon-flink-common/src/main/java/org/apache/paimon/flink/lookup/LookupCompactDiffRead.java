@@ -45,6 +45,9 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
     public LookupCompactDiffRead(MergeFileSplitRead mergeRead, TableSchema schema) {
         super(schema);
         this.incrementalDiffRead = new IncrementalCompactDiffSplitRead(mergeRead);
+        // deleted rows must reach the lookup cache as DELETE records, both when compaction keeps
+        // the delete record and when it drops the row and the row is only in the files before
+        this.incrementalDiffRead.forceKeepDelete();
         this.fullPhaseMergeRead =
                 SplitRead.convert(
                         mergeRead,

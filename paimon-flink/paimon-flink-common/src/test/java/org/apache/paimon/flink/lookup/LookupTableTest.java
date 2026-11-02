@@ -436,6 +436,34 @@ public class LookupTableTest extends TableTestBase {
     }
 
     @TestTemplate
+    public void testSecKeyTableDeleteWithoutSecKey() throws Exception {
+        FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        null,
+                        tempDir.toFile(),
+                        singletonList("f1"),
+                        null);
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        table.refresh(singletonList(row(1, 11, 111)).iterator());
+        assertThat(table.get(row(11))).hasSize(1);
+
+        // a delete record that carries only the key
+        table.refresh(singletonList(row(RowKind.DELETE, 1, null, 222)).iterator());
+        assertThat(table.get(row(11))).isEmpty();
+
+        // reinsert the key with another sec key
+        table.refresh(singletonList(row(1, 22, 333)).iterator());
+        assertThat(table.get(row(11))).isEmpty();
+        assertThat(table.get(row(22)).stream().map(row -> row.getInt(2))).containsExactly(333);
+    }
+
+    @TestTemplate
     public void testSecKeyTableWithSequenceField() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.SEQUENCE_FIELD, "f1");
