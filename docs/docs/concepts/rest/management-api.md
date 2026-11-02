@@ -550,9 +550,32 @@ ALTER TABLE paimon.sales.orders
 SET TBLPROPERTIES ('query-auth.enabled' = 'true');
 ```
 
-`create_policy` accepts the canonical `principal` and a serialized Paimon `Predicate`. The JSON
-below is the same representation accepted in one `AuthTableQueryResponse.filter` entry. Named
-arguments are recommended because row-filter and column-mask definitions use different fields:
+`create_policy` accepts the canonical `principal` and exactly one of `filter_sql` or
+`predicate_json` for a row filter. Use `filter_sql` to write a SQL condition against the target
+table's columns:
+
+```sql
+CALL paimon.sys.create_policy(
+  database => 'sales',
+  table => 'orders',
+  policy_type => 'ROW_FILTER',
+  principal => 'group:analysts',
+  filter_sql => 'region = \'APAC\''
+);
+```
+
+Spark resolves column names and types against the target table and converts the entire condition
+to a serialized Paimon `Predicate` before sending the existing REST request. Supported conditions
+include comparisons, `IN`, `AND`/`OR`, `NOT`, and `IS NULL`/`IS NOT NULL`. Conditions must be Boolean
+and deterministic, and cannot contain subqueries or session-dependent expressions such as
+`current_date()` or `current_user()`. Constant expressions are evaluated when the policy is
+created. Any condition that cannot be fully converted is rejected; no part is silently omitted.
+The exact expression support follows the predicate converters for the Spark version in use.
+`filter_sql` is only available for `ROW_FILTER` policies.
+
+Alternatively, supply `predicate_json` directly. The JSON below is the same representation
+accepted in one `AuthTableQueryResponse.filter` entry. Named arguments are recommended because
+row-filter and column-mask definitions use different fields:
 
 ```sql
 CALL paimon.sys.create_policy(

@@ -26,6 +26,7 @@ import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSparkTestWithRestCata
 import org.apache.paimon.types.DataTypes
 import org.apache.paimon.utils.JsonSerdeUtil
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.assertThat
 
@@ -33,6 +34,9 @@ import java.util.{Arrays, Collections}
 
 /** End-to-end tests for permission and policy management procedures. */
 class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
+
+  override protected def sparkConf: SparkConf =
+    super.sparkConf.set("spark.sql.catalog.paimon.v1Function.enabled", "false")
 
   test("grant, list and idempotently revoke a permission") {
     checkAnswer(
@@ -506,6 +510,179 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
         "principal => 'analyst', column => 'email', if_exists => true)")
   }
 
+  test("create row-filter policies from SQL and enforce the complete condition") {
+    restCatalogServer.setQueryPrincipals(Collections.singleton("analyst"))
+    withTable("paimon.sales.sql_filter_orders") {
+      spark.sql("""CREATE TABLE paimon.sales.sql_filter_orders (
+                  |  id INT, region STRING, email STRING, amount BIGINT,
+                  |  order_date DATE, `quoted id` INT)
+                  |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                  |""".stripMargin)
+      spark.sql("""INSERT INTO paimon.sales.sql_filter_orders VALUES
+                  |  (1, 'APAC', 'a@example.com', 10, DATE '2026-10-28', 1),
+                  |  (2, 'EMEA', NULL, 20, DATE '2026-10-29', 2),
+                  |  (3, 'APAC', NULL, 30, DATE '2026-10-29', 3),
+                  |  (4, NULL, 'd@example.com', 40, DATE '2026-10-30', 4)
+                  |""".stripMargin)
+
+      val conditions = Seq(
+        "REGION = 'APAC'",
+        "id >= 2 AND (region IN ('APAC', 'EMEA') OR region IS NULL)",
+        "(id <= 2 AND email IS NOT NULL) OR (id > 2 AND email IS NULL)",
+        "NOT (region = 'APAC')",
+        "region NOT IN ('EMEA', NULL)",
+        "region <=> NULL OR region <=> 'APAC'",
+        "amount = 20 AND order_date = DATE '2026-10-29'",
+        "id = CAST(floor(pi()) AS INT)",
+        "id >= CAST(1 + 1 AS INT)",
+        "true",
+        "false"
+      ) ++ (if (org.apache.spark.SPARK_VERSION >= "3.3") Seq("`quoted id` = 2") else Nil)
+      conditions.foreach {
+        condition =>
+          val expected = spark
+            .sql(s"SELECT id FROM paimon.sales.sql_filter_orders WHERE $condition")
+            .collect()
+            .toSeq
+          checkAnswer(
+            spark.sql(s"""CALL sys.create_policy(
+                         |  database => 'sales', table => 'sql_filter_orders',
+                         |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                         |  filter_sql => ${sqlLiteral(condition)})
+                         |""".stripMargin),
+            Row(true)
+          )
+          try {
+            checkAnswer(spark.sql("SELECT id FROM paimon.sales.sql_filter_orders"), expected)
+            val stored = spark
+              .sql("CALL sys.list_policies(database => 'sales', table => 'sql_filter_orders')")
+              .head()
+              .getString(4)
+            assertThat(stored).contains("\"kind\":")
+          } finally {
+            spark.sql(
+              "CALL sys.drop_policy(database => 'sales', table => 'sql_filter_orders', " +
+                "policy_type => 'ROW_FILTER', principal => 'analyst')")
+          }
+      }
+    }
+  }
+
+  test("SQL policy filters reject invalid and partially convertible conditions") {
+    withTable("paimon.sales.rejected_sql_filters") {
+      spark.sql("""CREATE TABLE paimon.sales.rejected_sql_filters (
+                  |  id INT, region STRING, `quoted id` INT)
+                  |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                  |""".stripMargin)
+      val conditions = Seq(
+        "id = 1 AND abs(id) = 1",
+        "id = 1 OR abs(id) = 1",
+        "id = 1 OR (id = 2 AND abs(id) = 1)",
+        "id = 1 AND (region = 'APAC' OR abs(id) = 1)",
+        "missing = 1",
+        "id",
+        "id =",
+        "id = 1 AND rand() < 0.5",
+        "id = (SELECT 1)"
+      ) ++ (if (org.apache.spark.SPARK_VERSION < "3.3") Seq("`quoted id` = 2") else Nil)
+      conditions.foreach {
+        condition =>
+          intercept[Exception] {
+            spark
+              .sql(s"""CALL sys.create_policy(
+                      |  database => 'sales', table => 'rejected_sql_filters',
+                      |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                      |  filter_sql => ${sqlLiteral(condition)})
+                      |""".stripMargin)
+              .collect()
+          }
+          checkAnswer(
+            spark.sql(
+              "CALL sys.list_policies(database => 'sales', " +
+                "table => 'rejected_sql_filters')"),
+            Nil)
+      }
+    }
+  }
+
+  test("SQL policy filters reject query context before constant folding") {
+    withTable("paimon.sales.context_sql_filters") {
+      spark.sql("""CREATE TABLE paimon.sales.context_sql_filters (id INT, region STRING)
+                  |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                  |""".stripMargin)
+      val conditions = Seq(
+        "id = dayofmonth(current_date())",
+        "id = year(current_timestamp())",
+        "id = year(localtimestamp())",
+        "region = current_user()",
+        "region = current_database()",
+        "region = current_catalog()",
+        "region = current_timezone()"
+      ) ++ (if (org.apache.spark.SPARK_VERSION >= "4.1") {
+              Seq("current_time() IS NOT NULL")
+            } else {
+              Nil
+            })
+      conditions.foreach {
+        condition =>
+          val error = intercept[IllegalArgumentException] {
+            spark
+              .sql(s"""CALL sys.create_policy(
+                      |  database => 'sales', table => 'context_sql_filters',
+                      |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                      |  filter_sql => ${sqlLiteral(condition)})
+                      |""".stripMargin)
+              .collect()
+          }
+          assertThat(error.getMessage).contains("depend on the current query context")
+      }
+      checkAnswer(
+        spark.sql("CALL sys.list_policies(database => 'sales', table => 'context_sql_filters')"),
+        Nil)
+    }
+  }
+
+  test("SQL policy filter arguments preserve the predicate JSON interface") {
+    withTable("paimon.sales.sql_filter_arguments") {
+      spark.sql("""CREATE TABLE paimon.sales.sql_filter_arguments (id INT)
+                  |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                  |""".stripMargin)
+      val predicate = sqlLiteral(intEqualsPredicate(0, "id", 1))
+      Seq(
+        ("ROW_FILTER", "", "exactly one of predicate_json or filter_sql"),
+        ("ROW_FILTER", ", filter_sql => ' '", "exactly one of predicate_json or filter_sql"),
+        (
+          "ROW_FILTER",
+          s", predicate_json => $predicate, filter_sql => 'id = 1'",
+          "exactly one of predicate_json or filter_sql"),
+        ("COLUMN_MASKING", ", filter_sql => 'id = 1'", "cannot specify filter_sql")
+      ).foreach {
+        case (policyType, arguments, message) =>
+          val error = intercept[IllegalArgumentException] {
+            spark
+              .sql(s"""CALL sys.create_policy(
+                      |  database => 'sales', table => 'sql_filter_arguments',
+                      |  policy_type => '$policyType', principal => 'analyst'$arguments)
+                      |""".stripMargin)
+              .collect()
+          }
+          assertThat(error.getMessage).contains(message)
+      }
+
+      checkAnswer(
+        spark.sql(
+          s"CALL sys.create_policy('sales', 'sql_filter_arguments', " +
+            s"'ROW_FILTER', 'analyst', $predicate)"),
+        Row(true)
+      )
+      assertThat(
+        spark
+          .sql("CALL sys.list_policies(database => 'sales', table => 'sql_filter_arguments')")
+          .head()
+          .getString(4)).contains("\"name\":\"id\"")
+    }
+  }
+
   test("policy creation validates query authorization, JSON and columns") {
     val validFilter = intEqualsPredicate(0, "id", 1)
     spark.sql("CREATE TABLE paimon.sales.disabled_orders (id INT)")
@@ -765,7 +942,7 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
   }
 
   private def sqlLiteral(value: String): String = {
-    "'" + value.replace("'", "''") + "'"
+    "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
   }
 }
 
