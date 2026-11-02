@@ -26,7 +26,7 @@ from typing import Callable, Dict, List, Optional, Set, Union, TYPE_CHECKING
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.read_builder import ReadBuilder
+from pypaimon.read.read_builder import ReadBuilder, _normalize_filter
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import DataField
 
@@ -61,10 +61,14 @@ class StreamReadBuilder:
         self._bucket_filter: Optional[Callable[[int], bool]] = None
         self._consumer_id: Optional[str] = None
 
-    def with_filter(self, predicate: Predicate) -> 'StreamReadBuilder':
-        """Set a filter predicate for the streaming read."""
-        self._predicate = predicate
-        self._read_builder.with_filter(predicate)
+    def with_filter(self, predicate: Union[str, Predicate]) -> 'StreamReadBuilder':
+        """Set a filter predicate, either a Predicate or a SQL-like WHERE string.
+
+        Strings are parsed against the table schema, as in
+        :meth:`pypaimon.read.read_builder.ReadBuilder.with_filter`.
+        """
+        self._predicate = _normalize_filter(predicate, self.table.fields)
+        self._read_builder.with_filter(self._predicate)
         return self
 
     def with_projection(
