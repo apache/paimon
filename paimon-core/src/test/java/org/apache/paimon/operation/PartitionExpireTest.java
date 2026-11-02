@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -67,6 +68,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -83,6 +86,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -360,10 +364,8 @@ public class PartitionExpireTest {
                         tableOptions,
                         ""));
         newTable();
-        org.apache.paimon.data.Timestamp expiredTs =
-                org.apache.paimon.data.Timestamp.fromLocalDateTime(date(1));
-        org.apache.paimon.data.Timestamp retainedTs =
-                org.apache.paimon.data.Timestamp.fromLocalDateTime(date(5));
+        Timestamp expiredTs = Timestamp.fromLocalDateTime(date(1));
+        Timestamp retainedTs = Timestamp.fromLocalDateTime(date(5));
         write(GenericRow.of(expiredTs, BinaryString.fromString("expired")));
         write(GenericRow.of(retainedTs, BinaryString.fromString("retained")));
 
@@ -381,7 +383,7 @@ public class PartitionExpireTest {
         List<Map<String, String>> expectedExpired = new ArrayList<>();
         expectedExpired.add(Collections.singletonMap("f0", expiredName));
         LocalDateTime checkTime = date(6);
-        List<org.apache.paimon.data.Timestamp> expectedRemaining = singletonList(retainedTs);
+        List<Timestamp> expectedRemaining = singletonList(retainedTs);
         if ("update-time".equals(expirationStrategy)) {
             checkTime = LocalDateTime.now().plusDays(3);
             expectedExpired.add(Collections.singletonMap("f0", retainedName));
@@ -389,11 +391,94 @@ public class PartitionExpireTest {
         }
         assertThat(expire.expire(checkTime, Long.MAX_VALUE))
                 .containsExactlyElementsOf(expectedExpired);
-        List<org.apache.paimon.data.Timestamp> remaining = new ArrayList<>();
+        List<Timestamp> remaining = new ArrayList<>();
         table.newRead()
                 .createReader(table.newScan().plan().splits())
                 .forEachRemaining(row -> remaining.add(row.getTimestamp(0, 0)));
         assertThat(remaining).containsExactlyElementsOf(expectedRemaining);
+    }
+
+    @Test
+    public void testExpireLocalZonedTimestampPartitionInNonUtcZone() throws Exception {
+        TimeZone defaultZone = TimeZone.getDefault();
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+        try {
+            // current partition names render LTZ values in the default time zone
+            createTimestampPartitionedTable(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0), false);
+            // instant 2023-01-01T00:00Z is local 2023-01-01 08:00:00
+            Timestamp expiredTs = Timestamp.fromLocalDateTime(date(1));
+            // instant 2023-01-01T20:00Z is local 2023-01-02 04:00:00
+            Timestamp retainedTs = Timestamp.fromLocalDateTime(date(1).plusHours(20));
+            write(GenericRow.of(expiredTs, BinaryString.fromString("expired")));
+            write(GenericRow.of(retainedTs, BinaryString.fromString("retained")));
+
+            NormalPartitionExpire expire = newValuesTimeExpire("1 d", null);
+            // local 2023-01-03 02:00:00: the retained partition is only 22 hours old
+            assertThat(expire.expire(date(3).plusHours(2), Long.MAX_VALUE))
+                    .containsExactly(Collections.singletonMap("f0", "2023-01-01 08:00:00"));
+            assertThat(readTimestamps()).containsExactly(retainedTs);
+        } finally {
+            TimeZone.setDefault(defaultZone);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testExpireTimestampPartitionWithCustomFormatter(boolean legacyPartitionName)
+            throws Exception {
+        createTimestampPartitionedTable(DataTypes.TIMESTAMP(0), legacyPartitionName);
+        Timestamp expiredTs = Timestamp.fromLocalDateTime(date(1));
+        Timestamp retainedTs = Timestamp.fromLocalDateTime(date(5));
+        write(GenericRow.of(expiredTs, BinaryString.fromString("expired")));
+        write(GenericRow.of(retainedTs, BinaryString.fromString("retained")));
+
+        // the formatter matches the Timestamp#toString input it has always received
+        NormalPartitionExpire expire = newValuesTimeExpire("2 d", "yyyy-MM-dd'T'HH:mm");
+        String expiredName = legacyPartitionName ? "2023-01-01T00:00" : "2023-01-01 00:00:00";
+        assertThat(expire.expire(date(6), Long.MAX_VALUE))
+                .containsExactly(Collections.singletonMap("f0", expiredName));
+        assertThat(readTimestamps()).containsExactly(retainedTs);
+    }
+
+    private void createTimestampPartitionedTable(DataType partitionType, boolean legacyName)
+            throws Exception {
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(METASTORE_PARTITIONED_TABLE.key(), "false");
+        tableOptions.put(
+                CoreOptions.PARTITION_GENERATE_LEGACY_NAME.key(), String.valueOf(legacyName));
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(partitionType, VarCharType.STRING_TYPE).getFields(),
+                        singletonList("f0"),
+                        emptyList(),
+                        tableOptions,
+                        ""));
+        newTable();
+    }
+
+    private NormalPartitionExpire newValuesTimeExpire(
+            String expirationTime, @Nullable String formatter) {
+        Map<String, String> options = new HashMap<>();
+        options.put(PARTITION_EXPIRATION_TIME.key(), expirationTime);
+        options.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), "values-time");
+        options.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), "$f0");
+        if (formatter != null) {
+            options.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), formatter);
+        }
+        table = table.copy(options);
+        NormalPartitionExpire expire =
+                (NormalPartitionExpire) table.store().newPartitionExpire("", table);
+        expire.setLastCheck(date(1));
+        return expire;
+    }
+
+    private List<Timestamp> readTimestamps() throws Exception {
+        List<Timestamp> timestamps = new ArrayList<>();
+        table.newRead()
+                .createReader(table.newScan().plan().splits())
+                .forEachRemaining(row -> timestamps.add(row.getTimestamp(0, 0)));
+        return timestamps;
     }
 
     @ParameterizedTest

@@ -27,6 +27,7 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
@@ -45,6 +46,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TimeZone;
 
 /** Strategy for partition expiration. */
 public abstract class PartitionExpireStrategy implements Serializable {
@@ -54,11 +56,20 @@ public abstract class PartitionExpireStrategy implements Serializable {
     protected final List<String> partitionKeys;
     protected final String partitionDefaultName;
     private final RowDataToObjectArrayConverter toObjectArrayConverter;
+    @Nullable private final String timestampFormatter;
 
     public PartitionExpireStrategy(RowType partitionType, String partitionDefaultName) {
+        this(partitionType, partitionDefaultName, null);
+    }
+
+    public PartitionExpireStrategy(
+            RowType partitionType,
+            String partitionDefaultName,
+            @Nullable String timestampFormatter) {
         this.toObjectArrayConverter = new RowDataToObjectArrayConverter(partitionType);
         this.partitionKeys = partitionType.getFieldNames();
         this.partitionDefaultName = partitionDefaultName;
+        this.timestampFormatter = timestampFormatter;
     }
 
     public Map<String, String> toPartitionString(Object[] array) {
@@ -110,17 +121,31 @@ public abstract class PartitionExpireStrategy implements Serializable {
                     break;
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
                 case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                    // Timestamp#toString uses the ISO 'T' separator, which the default
-                    // partition time formatter cannot parse. Render it as the SQL string.
                     values[index] =
-                            DateTimeUtils.formatTimestamp(
-                                    (Timestamp) values[index], DataTypeChecks.getPrecision(type));
+                            formatTimestampForTimeExtraction((Timestamp) values[index], type);
                     break;
                 default:
                     break;
             }
         }
         return values;
+    }
+
+    private String formatTimestampForTimeExtraction(Timestamp timestamp, DataType type) {
+        if (type.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
+            // Use the local wall-clock time, consistent with the current partition names and
+            // with the local current time used for expiration.
+            timestamp =
+                    DateTimeUtils.timestampWithLocalZoneToTimestamp(
+                            timestamp, TimeZone.getDefault());
+        }
+        if (timestampFormatter != null) {
+            // Keep the Timestamp#toString input an explicitly configured formatter expects.
+            return timestamp.toString();
+        }
+        // Timestamp#toString uses the ISO 'T' separator, which the default partition time
+        // formatter cannot parse. Render it as the SQL timestamp string.
+        return DateTimeUtils.formatTimestamp(timestamp, DataTypeChecks.getPrecision(type));
     }
 
     public abstract List<PartitionEntry> selectExpiredPartitions(
