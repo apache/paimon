@@ -374,12 +374,12 @@ class TorchDataset(Dataset):
             [Range(row_id, row_id) for row_id in set(row_ids)], True)
         splits = self._select_splits(ranges)
 
-        output_has_row_id = any(
+        read_has_row_id = any(
             field.name == SpecialFields.ROW_ID.name
             for field in self.table_read.read_type
         )
         read_type = list(self.table_read.read_type)
-        if not output_has_row_id:
+        if not read_has_row_id:
             read_type.append(SpecialFields.ROW_ID)
         batch_read = TableRead(
             self.table_read.table,
@@ -387,13 +387,16 @@ class TorchDataset(Dataset):
             read_type,
             include_row_kind=self.table_read.include_row_kind,
         )
-        rows = batch_read.to_arrow(splits).to_pylist()
-        by_row_id = {}
-        for row in rows:
-            row_id = row[SpecialFields.ROW_ID.name]
-            if not output_has_row_id:
-                del row[SpecialFields.ROW_ID.name]
-            by_row_id[row_id] = row
+        batch = batch_read.to_arrow(splits)
+        # Capture physical row IDs before aliases can hide or overwrite them.
+        batch_row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
+        projection = self.table_read.output_projection
+        if projection is None:
+            batch = batch.select([field.name for field in self.table_read.read_type])
+        else:
+            batch = batch.select([path[0] for _, path in projection.columns])
+            batch = batch.rename_columns([alias for alias, _ in projection.columns])
+        by_row_id = dict(zip(batch_row_ids, batch.to_pylist()))
         missing = set(row_ids) - set(by_row_id)
         if missing:
             raise RuntimeError(
