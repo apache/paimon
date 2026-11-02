@@ -32,8 +32,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Collections;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -144,6 +146,58 @@ public class RenamingSnapshotCommitTest {
 
         assertThat(ex).hasMessageContaining(ThrowingRenameLocalFileIO.MESSAGE);
         assertThat(fileIO.exists(snapshotManager.snapshotPath(snapshot.id()))).isFalse();
+    }
+
+    /**
+     * The lease of the commit lock expires while the commit checks whether the snapshot file
+     * already exists. The commit must not publish the snapshot after that.
+     */
+    @Test
+    public void testCommitRechecksLeaseAfterCheckingSnapshot(@TempDir java.nio.file.Path tmp)
+            throws Exception {
+        AtomicBoolean expired = new AtomicBoolean();
+        Path tablePath = new Path(tmp.toUri());
+        SnapshotManager snapshotManager =
+                new SnapshotManager(new LocalFileIO(), tablePath, null, null, null);
+        Path snapshotPath = snapshotManager.snapshotPath(5L);
+        FileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public boolean exists(Path path) throws IOException {
+                        boolean exists = super.exists(path);
+                        if (path.equals(snapshotPath)) {
+                            expired.set(true);
+                        }
+                        return exists;
+                    }
+                };
+        snapshotManager = new SnapshotManager(fileIO, tablePath, null, null, null);
+        Lock lock =
+                new Lock() {
+                    @Override
+                    public AutoCloseable acquire() {
+                        return () -> {};
+                    }
+
+                    @Override
+                    public void ensureValid() {
+                        if (expired.get()) {
+                            throw new IllegalStateException("Lease expired");
+                        }
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+
+        RenamingSnapshotCommit commit = new RenamingSnapshotCommit(snapshotManager, lock);
+        Snapshot snapshot = createSnapshot(5L);
+        // thrown by the check in commitImpl, not wrapped like a failure to acquire the lock
+        assertThatThrownBy(() -> commit.commit(null, snapshot, "main", Collections.emptyList()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Lease expired");
+
+        assertThat(new LocalFileIO().exists(snapshotPath)).isFalse();
     }
 
     private static Snapshot createSnapshot(long id) throws IOException {
