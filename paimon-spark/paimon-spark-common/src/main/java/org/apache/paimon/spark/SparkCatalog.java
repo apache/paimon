@@ -474,7 +474,7 @@ public class SparkCatalog extends SparkBaseCatalog
                         catalog.options(),
                         properties)) {
             throw new UnsupportedOperationException(
-                    "Using CTAS with a partitioned engine format table is not supported. "
+                    "Using CTAS or RTAS with a partitioned engine format table is not supported. "
                             + "Set 'format-table.implementation' to 'paimon'.");
         }
     }
