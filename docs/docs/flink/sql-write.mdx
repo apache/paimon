@@ -100,16 +100,13 @@ Paimon evaluates its stored expressions, applying source-column defaults before 
 Generation happens before partition routing and bucket assignment and supports ordinary append,
 primary-key, and Data Evolution tables. Explicitly supplied generated values, including NULL,
 are preserved without evaluating or checking the expression. Static partition values are also
-treated as supplied. Paimon enforces stored NOT NULL constraints after generation; generated
+treated as supplied. Paimon enforces stored NOT NULL constraints after generation; non-key generated
 columns are exposed as nullable in the Flink catalog to allow omitted-column placeholders.
-When a generated column belongs to the primary key, the catalog exposes the key through the
-`primary-key` table option instead of a Flink primary-key constraint. The stored Paimon primary
-key and its NOT NULL constraints are preserved.
 
-Generated-column filling retains the sink's existing changelog and merge-engine behavior.
-Default streaming reads of these tables reconstruct
-before images using checkpointed state holding the previous row per primary key. Projection and
-non-key filtering run after this reconstruction so updates can retract previously matching rows.
+Flink SQL does not support automatically filling generated primary-key columns or generated
+partition columns in primary-key tables; supply their values explicitly. Generated partition
+columns can be filled for ordinary append and Data Evolution tables. Generated-column filling
+retains the sink's existing changelog and merge-engine behavior.
 
 `UPDATE` preserves generated values unless explicitly assigned. Flink's virtual computed columns
 (`column AS expression`) retain their existing semantics. On Flink 1.16 and 1.17, supply all

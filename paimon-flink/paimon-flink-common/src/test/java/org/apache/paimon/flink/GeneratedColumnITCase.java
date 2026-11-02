@@ -21,13 +21,11 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -37,7 +35,6 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -60,10 +57,11 @@ class GeneratedColumnITCase extends CatalogITCaseBase {
                         .column("name", DataTypes.STRING(), null, "default")
                         .column("ts", DataTypes.TIMESTAMP(3))
                         .generatedColumn("label", DataTypes.STRING(), "UPPER(name)")
-                        .generatedColumn("dt", DataTypes.DATE(), "CAST(ts AS DATE)")
-                        .partitionKeys("dt");
+                        .generatedColumn("dt", DataTypes.DATE(), "CAST(ts AS DATE)");
         if (mode.equals("primary-key")) {
-            builder.primaryKey("id", "dt");
+            builder.primaryKey("id", "ts").partitionKeys("ts");
+        } else {
+            builder.partitionKeys("dt");
         }
         if (mode.equals("data-evolution")) {
             builder.option("row-tracking.enabled", "true")
@@ -88,17 +86,9 @@ class GeneratedColumnITCase extends CatalogITCaseBase {
     }
 
     @ParameterizedTest
-    @CsvSource({
-        "append, DATE",
-        "append, STRING",
-        "primary-key, DATE",
-        "primary-key, STRING",
-        "data-evolution, DATE",
-        "data-evolution, STRING"
-    })
+    @CsvSource({"append, DATE", "append, STRING", "data-evolution, DATE", "data-evolution, STRING"})
     void testStringEventDayPartition(String mode, String partitionType) throws Exception {
         boolean datePartition = partitionType.equals("DATE");
-        boolean primaryKey = mode.equals("primary-key");
         Schema.Builder builder =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
@@ -111,9 +101,7 @@ class GeneratedColumnITCase extends CatalogITCaseBase {
                                         ? "CAST(event_day AS DATE)"
                                         : "CAST(CAST(event_day AS DATE) AS STRING)")
                         .partitionKeys("dt");
-        if (primaryKey) {
-            builder.primaryKey("id", "dt");
-        } else if (mode.equals("data-evolution")) {
+        if (mode.equals("data-evolution")) {
             builder.option("row-tracking.enabled", "true")
                     .option("data-evolution.enabled", "true")
                     .option("bucket", "-1");
@@ -125,7 +113,7 @@ class GeneratedColumnITCase extends CatalogITCaseBase {
                         "INSERT INTO events (event_day, payload, id) VALUES "
                                 + "('2025-12-31', 'initial', 1), ('2026-1-1', 'next-day', 1)")
                 .await();
-        // A late record must return to its business-date partition, including for primary keys.
+        // A late record must return to its business-date partition.
         tEnv.executeSql(
                         "INSERT INTO events (id, event_day, payload) "
                                 + "SELECT 1, '2025-12-31', 'late'")
@@ -135,9 +123,7 @@ class GeneratedColumnITCase extends CatalogITCaseBase {
         Object nextDay = datePartition ? LocalDate.of(2026, 1, 1) : "2026-01-01";
         List<Row> previousPartition = new ArrayList<>();
         previousPartition.add(Row.of(1, "2025-12-31", "late", previousDay));
-        if (!primaryKey) {
-            previousPartition.add(Row.of(1, "2025-12-31", "initial", previousDay));
-        }
+        previousPartition.add(Row.of(1, "2025-12-31", "initial", previousDay));
         Row nextPartition = Row.of(1, "2026-1-1", "next-day", nextDay);
         List<Row> expected = new ArrayList<>(previousPartition);
         expected.add(nextPartition);
@@ -249,50 +235,36 @@ class GeneratedColumnITCase extends CatalogITCaseBase {
                 .hasStackTraceContaining("Cannot write null to non-null column(label)");
     }
 
-    @Test
-    void testGeneratedPrimaryKey() throws Exception {
-        createTable(
-                "events",
+    @ParameterizedTest
+    @ValueSource(strings = {"unpartitioned", "partitioned", "cross-partition"})
+    void testGeneratedPrimaryKeyOrPartitionCannotBeOmitted(String mode) throws Exception {
+        Schema.Builder builder =
                 Schema.newBuilder()
-                        .column("name", DataTypes.STRING())
-                        .generatedColumn("id", DataTypes.STRING(), "UPPER(name)")
-                        .primaryKey("id")
-                        .build());
-
-        tEnv.executeSql("INSERT INTO events (name) VALUES ('hello')").await();
-        tEnv.executeSql("INSERT INTO events (name) VALUES ('Hello')").await();
-        tEnv.executeSql("INSERT INTO events VALUES ('hello', 'supplied')").await();
-        assertThat(sql("SELECT * FROM events"))
-                .containsExactlyInAnyOrder(Row.of("Hello", "HELLO"), Row.of("hello", "supplied"));
-        assertThat(paimonTable("events").primaryKeys()).containsExactly("id");
-        assertThat(paimonTable("events").rowType().getField("id").type().isNullable()).isFalse();
-        sql("ALTER TABLE events MODIFY id STRING COMMENT 'generated key'");
-        assertThat(paimonTable("events").primaryKeys()).containsExactly("id");
-        assertThat(paimonTable("events").rowType().getField("id").type().isNullable()).isFalse();
-    }
-
-    @Test
-    @Timeout(60)
-    void testGeneratedPrimaryKeyStreamingRead() throws Exception {
-        createTable(
-                "events",
-                Schema.newBuilder()
-                        .column("name", DataTypes.STRING())
-                        .column("score", DataTypes.INT())
-                        .generatedColumn("id", DataTypes.STRING(), "UPPER(name)")
-                        .primaryKey("id")
-                        .build());
-
-        assertThatCode(() -> sEnv.explainSql("SELECT score FROM events WHERE score < 10"))
-                .doesNotThrowAnyException();
-        tEnv.executeSql("INSERT INTO events (name, score) VALUES ('hello', 1)").await();
-        try (BlockingIterator<Row, Row> iterator =
-                streamSqlBlockIter("SELECT score FROM events WHERE score < 10")) {
-            assertThat(iterator.collect(1, 20, TimeUnit.SECONDS)).containsExactly(Row.of(1));
-            tEnv.executeSql("INSERT INTO events (name, score) VALUES ('hello', 20)").await();
-            assertThat(iterator.collect(1, 20, TimeUnit.SECONDS))
-                    .containsExactly(Row.ofKind(RowKind.UPDATE_BEFORE, 1));
+                        .column("id", DataTypes.INT())
+                        .column("event_day", DataTypes.STRING())
+                        .generatedColumn("dt", DataTypes.DATE(), "CAST(event_day AS DATE)")
+                        .option("primary-key.nullable", "true");
+        if (mode.equals("cross-partition")) {
+            builder.primaryKey("id").option("bucket", "-1");
+        } else {
+            builder.primaryKey("id", "dt");
         }
+        if (!mode.equals("unpartitioned")) {
+            builder.partitionKeys("dt");
+        }
+        createTable("events", builder.build());
+
+        // Even nullable primary keys must not silently receive Flink's NULL placeholder.
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                        "INSERT INTO events (id, event_day) VALUES (1, '2026-11-02')"))
+                .hasStackTraceContaining("does not support omitting generated column 'dt'");
+        assertThat(sql("SELECT * FROM events")).isEmpty();
+        // Explicit values remain ordinary physical writes, without evaluating the expression.
+        tEnv.executeSql("INSERT INTO events VALUES (1, 'invalid', DATE '2026-11-02')").await();
+        assertThat(sql("SELECT * FROM events"))
+                .containsExactly(Row.of(1, "invalid", LocalDate.of(2026, 11, 2)));
     }
 
     @ParameterizedTest
@@ -303,14 +275,14 @@ class GeneratedColumnITCase extends CatalogITCaseBase {
         "partial-update, true"
     })
     void testUpdatingInsertPreservesMergeEngineSemantics(
-            String mergeEngine, boolean omitGeneratedKey) throws Exception {
+            String mergeEngine, boolean omitGeneratedColumn) throws Exception {
         createTable(
                 "events",
                 Schema.newBuilder()
                         .column("name", DataTypes.STRING())
                         .column("cnt", DataTypes.BIGINT())
-                        .generatedColumn("id", DataTypes.STRING(), "UPPER(name)")
-                        .primaryKey("id")
+                        .generatedColumn("label", DataTypes.STRING(), "UPPER(name)")
+                        .primaryKey("name")
                         .option("merge-engine", mergeEngine)
                         .build());
         String dataId =
@@ -322,59 +294,33 @@ class GeneratedColumnITCase extends CatalogITCaseBase {
                         + dataId
                         + "')");
         sEnv.executeSql(
-                        omitGeneratedKey
+                        omitGeneratedColumn
                                 ? "INSERT INTO events (name, cnt) SELECT name, COUNT(*) FROM input_events GROUP BY name"
                                 : "INSERT INTO events SELECT name, COUNT(*), UPPER(name) FROM input_events GROUP BY name")
                 .await();
 
-        assertThat(sql("SELECT COUNT(*), MAX(cnt), MAX(id) FROM events"))
+        assertThat(sql("SELECT COUNT(*), MAX(cnt), MAX(label) FROM events"))
                 .containsExactly(Row.of(1L, mergeEngine.equals("first-row") ? 1L : 2L, "HELLO"));
     }
 
     @Test
-    void testGeneratedPrimaryKeyWithBlob() throws Exception {
+    void testGeneratedColumnWithPrimaryKeyAndBlob() throws Exception {
         createTable(
                 "events",
                 Schema.newBuilder()
                         .column("name", DataTypes.STRING())
                         .column("payload", DataTypes.BLOB())
-                        .generatedColumn("id", DataTypes.STRING(), "UPPER(name)")
-                        .primaryKey("id")
+                        .generatedColumn("label", DataTypes.STRING(), "UPPER(name)")
+                        .primaryKey("name")
                         .option("blob-field", "payload")
                         .build());
 
         assertThatCode(() -> tEnv.explainSql("SELECT name FROM events")).doesNotThrowAnyException();
     }
 
-    @Test
-    void testGeneratedPrimaryKeyRejectsExplicitAndGeneratedNull() throws Exception {
-        createTable(
-                "events",
-                Schema.newBuilder()
-                        .column("name", DataTypes.STRING())
-                        .generatedColumn("id", DataTypes.STRING(), "UPPER(name)")
-                        .primaryKey("id")
-                        .build());
-
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "INSERT INTO events VALUES ('hello', CAST(NULL AS STRING))")
-                                        .await())
-                .isInstanceOf(Exception.class);
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "INSERT INTO events (name) VALUES (CAST(NULL AS STRING))")
-                                        .await())
-                .isInstanceOf(Exception.class);
-        assertThat(sql("SELECT * FROM events")).isEmpty();
-    }
-
     @ParameterizedTest
-    @CsvSource({"DATE, false", "STRING, false", "DATE, true", "STRING, true"})
-    void testExplicitNullGeneratedPartition(String partitionType, boolean primaryKey)
-            throws Exception {
+    @ValueSource(strings = {"DATE", "STRING"})
+    void testExplicitNullGeneratedPartition(String partitionType) throws Exception {
         boolean datePartition = partitionType.equals("DATE");
         Schema.Builder builder =
                 Schema.newBuilder()
@@ -387,9 +333,6 @@ class GeneratedColumnITCase extends CatalogITCaseBase {
                                         ? "CAST(event_day AS DATE)"
                                         : "CAST(CAST(event_day AS DATE) AS STRING)")
                         .partitionKeys("dt");
-        if (primaryKey) {
-            builder.primaryKey("id", "dt").option("primary-key.nullable", "true");
-        }
         createTable("events", builder.build());
         tEnv.executeSql("INSERT INTO events (id, event_day) VALUES (1, '2026-11-02')").await();
         tEnv.executeSql(

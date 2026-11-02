@@ -1002,7 +1002,8 @@ public class FlinkCatalog extends AbstractCatalog {
                 RowType.RowField field = physicalRowFields.get(physicalColumnIndex++);
                 org.apache.flink.table.types.DataType dataType =
                         fromLogicalToDataType(field.getType());
-                if (table.rowType().getField(field.getName()).generationExpression() != null) {
+                if (table.rowType().getField(field.getName()).generationExpression() != null
+                        && !table.primaryKeys().contains(field.getName())) {
                     // Flink validates omitted columns before the sink can fill them. Paimon
                     // enforces the stored NOT NULL constraint after generating the value.
                     dataType = dataType.nullable();
@@ -1025,16 +1026,11 @@ public class FlinkCatalog extends AbstractCatalog {
             deserializeWatermarkSpec(newOptions, builder);
         }
 
-        // Flink primary-key constraints imply NOT NULL. Expose nullable or generated primary keys
-        // through the Paimon option so Flink accepts NULL placeholders before generation.
+        // Flink primary-key constraints imply NOT NULL. For a nullable Paimon primary key, expose
+        // the key through the Paimon table option instead so Flink preserves the physical column
+        // nullability while the underlying table remains a primary-key table.
         boolean nullablePrimaryKey = CoreOptions.primaryKeyNullable(newOptions);
-        boolean generatedPrimaryKey =
-                table.primaryKeys().stream()
-                        .anyMatch(
-                                key ->
-                                        table.rowType().getField(key).generationExpression()
-                                                != null);
-        if (!table.primaryKeys().isEmpty() && !nullablePrimaryKey && !generatedPrimaryKey) {
+        if (!table.primaryKeys().isEmpty() && !nullablePrimaryKey) {
             builder.primaryKey(table.primaryKeys());
         } else if (!table.primaryKeys().isEmpty()) {
             newOptions.put(CoreOptions.PRIMARY_KEY.key(), String.join(",", table.primaryKeys()));
@@ -1126,9 +1122,7 @@ public class FlinkCatalog extends AbstractCatalog {
         List<String> blobFields = CoreOptions.blobField(options);
         Set<String> blobFileFields = new HashSet<>(CoreOptions.blobField(options));
         Set<String> blobInlineFields = blobInlineFields(options);
-        if (!blobFields.isEmpty()
-                && !schema.getPrimaryKey().isPresent()
-                && !options.containsKey(CoreOptions.PRIMARY_KEY.key())) {
+        if (!blobFields.isEmpty() && !schema.getPrimaryKey().isPresent()) {
             checkArgument(
                     options.containsKey(CoreOptions.DATA_EVOLUTION_ENABLED.key()),
                     "When setting '"

@@ -18,23 +18,21 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.casting.DefaultValueRow;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowDataWithBlob;
 import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.flink.ProjectedRowData;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.GeneratedColumn;
+import org.apache.paimon.utils.GeneratedColumnRow;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 
-import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 
@@ -44,11 +42,10 @@ class GeneratedColumnMapFunction implements MapFunction<RowData, RowData> {
     private final RowType rowType;
     private final int[] generatedColumns;
 
-    private transient List<GeneratedColumn> generators;
-    private transient DefaultValueRow defaults;
+    private transient GeneratedColumnRow generator;
+    private transient ProjectedRowData inputProjection;
     private transient RowData.FieldGetter[] getters;
     private transient FlinkRowDataWithBlob generatedRow;
-    private transient GenericRow generatedValues;
 
     GeneratedColumnMapFunction(RowType rowType, int[] generatedColumns) {
         this.rowType = rowType;
@@ -56,11 +53,14 @@ class GeneratedColumnMapFunction implements MapFunction<RowData, RowData> {
     }
 
     private void initialize() {
-        generators = new ArrayList<>();
+        BitSet omitted = new BitSet(rowType.getFieldCount());
         for (int index : generatedColumns) {
-            generators.add(GeneratedColumn.create(rowType, rowType.getFields().get(index)));
+            omitted.set(index);
         }
-        defaults = DefaultValueRow.create(rowType);
+        int[] inputFields =
+                IntStream.range(0, rowType.getFieldCount()).filter(i -> !omitted.get(i)).toArray();
+        inputProjection = ProjectedRowData.from(inputFields);
+        generator = new GeneratedColumnRow(rowType, rowType.project(inputFields));
         getters = new RowData.FieldGetter[rowType.getFieldCount()];
         Set<Integer> blobFields = new HashSet<>();
         for (int i = 0; i < getters.length; i++) {
@@ -71,26 +71,24 @@ class GeneratedColumnMapFunction implements MapFunction<RowData, RowData> {
                 blobFields.add(i);
             }
         }
-        generatedValues = new GenericRow(rowType.getFieldCount());
-        generatedRow = new FlinkRowDataWithBlob(generatedValues, blobFields, true);
+        generatedRow = new FlinkRowDataWithBlob(null, blobFields, true);
     }
 
     @Override
     public RowData map(RowData row) {
-        if (generators == null) {
+        if (generator == null) {
             initialize();
         }
-        InternalRow source = new FlinkRowWrapper(row);
-        if (defaults != null) {
-            source = defaults.replaceRow(source);
-        }
+        // Remove only omitted generated columns; supplied columns, including NULLs, stay in input.
+        generatedRow.replace(
+                generator.replaceRow(new FlinkRowWrapper(inputProjection.replaceRow(row))));
         GenericRowData result = new GenericRowData(row.getRowKind(), getters.length);
+        // Preserve Flink's representation of supplied columns, including BLOB bytes and nested
+        // rows.
         for (int i = 0; i < getters.length; i++) {
             result.setField(i, getters[i].getFieldOrNull(row));
         }
-        for (GeneratedColumn generator : generators) {
-            int index = generator.targetIndex();
-            generatedValues.setField(index, generator.evaluate(source));
+        for (int index : generatedColumns) {
             result.setField(index, getters[index].getFieldOrNull(generatedRow));
         }
         return result;

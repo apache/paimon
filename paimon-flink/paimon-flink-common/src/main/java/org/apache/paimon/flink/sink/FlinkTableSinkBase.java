@@ -207,10 +207,26 @@ public abstract class FlinkTableSinkBase
             // Target paths include virtual columns, while the runtime row contains physical ones.
             supplied.add(columnNames.get(path[0]));
         }
-        return IntStream.range(0, table.rowType().getFieldCount())
-                .filter(i -> table.rowType().getFields().get(i).generationExpression() != null)
-                .filter(i -> !supplied.contains(table.rowType().getFields().get(i).name()))
-                .toArray();
+        int[] omitted =
+                IntStream.range(0, table.rowType().getFieldCount())
+                        .filter(
+                                i ->
+                                        table.rowType().getFields().get(i).generationExpression()
+                                                != null)
+                        .filter(i -> !supplied.contains(table.rowType().getFields().get(i).name()))
+                        .toArray();
+        for (int index : omitted) {
+            String name = table.rowType().getFields().get(index).name();
+            if (table.primaryKeys().contains(name)
+                    || (!table.primaryKeys().isEmpty() && table.partitionKeys().contains(name))) {
+                throw new UnsupportedOperationException(
+                        "Flink SQL does not support omitting generated column '"
+                                + name
+                                + "' used as a primary key or partition column in a primary-key table. "
+                                + "Supply its value explicitly.");
+            }
+        }
+        return omitted;
     }
 
     protected FlinkSinkBuilder createSinkBuilder() {

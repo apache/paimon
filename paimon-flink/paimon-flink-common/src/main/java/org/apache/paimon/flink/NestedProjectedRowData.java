@@ -77,11 +77,6 @@ public class NestedProjectedRowData implements RowData, Serializable {
         return this;
     }
 
-    /** Creates a projection over the full source row, without pruning its physical fields first. */
-    public static NestedProjectedRowData from(RowType sourceType, int[][] projectedFields) {
-        return new NestedProjectedRowData(sourceType, projectedFields);
-    }
-
     public static @Nullable NestedProjectedRowData copy(@Nullable NestedProjectedRowData rowData) {
         if (rowData == null) {
             return null;
