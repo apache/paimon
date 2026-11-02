@@ -106,9 +106,7 @@ When a generated column belongs to the primary key, the catalog exposes the key 
 `primary-key` table option instead of a Flink primary-key constraint. The stored Paimon primary
 key and its NOT NULL constraints are preserved.
 
-With the default deduplicate merge engine, updating INSERT inputs provide before images when the
-primary key contains a generated column, so a changed generated key or partition retracts the
-old record. Other merge engines retain their existing upsert and retraction rules.
+Generated-column filling retains the sink's existing changelog and merge-engine behavior.
 Default streaming reads of these tables reconstruct
 before images using checkpointed state holding the previous row per primary key. Projection and
 non-key filtering run after this reconstruction so updates can retract previously matching rows.

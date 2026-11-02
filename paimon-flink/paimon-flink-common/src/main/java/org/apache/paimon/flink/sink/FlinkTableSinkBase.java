@@ -89,20 +89,6 @@ public abstract class FlinkTableSinkBase
             return requestedMode;
         } else {
             Options options = Options.fromMap(table.options());
-            if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE
-                    && requestedMode.contains(RowKind.UPDATE_AFTER)
-                    && table.primaryKeys().stream()
-                            .anyMatch(
-                                    key ->
-                                            table.rowType().getField(key).generationExpression()
-                                                    != null)) {
-                // The planner cannot see an omitted key's generating expression. Request old
-                // rows as well so a changed generated key or partition retracts the old record.
-                ChangelogMode.Builder builder = ChangelogMode.newBuilder();
-                requestedMode.getContainedKinds().forEach(builder::addContainedKind);
-                builder.addContainedKind(RowKind.UPDATE_BEFORE);
-                return builder.build();
-            }
             if (options.get(CHANGELOG_PRODUCER) == ChangelogProducer.INPUT) {
                 warnKeyOnlyDeletesIgnored("'changelog-producer' is 'input'");
                 return requestedMode;

@@ -295,31 +295,6 @@ class GeneratedColumnITCase extends CatalogITCaseBase {
         }
     }
 
-    @Test
-    void testUpdatingInsertRetractsOldGeneratedKeyAndPartition() throws Exception {
-        createTable(
-                "events",
-                Schema.newBuilder()
-                        .column("id", DataTypes.INT())
-                        .column("cnt", DataTypes.BIGINT())
-                        .generatedColumn("dt", DataTypes.STRING(), "CAST(cnt AS STRING)")
-                        .partitionKeys("dt")
-                        .primaryKey("id", "dt")
-                        .build());
-        String dataId = TestValuesTableFactory.registerData(Arrays.asList(Row.of(1), Row.of(1)));
-        sEnv.executeSql(
-                "CREATE TEMPORARY TABLE input_events (id INT) WITH ("
-                        + "'connector' = 'values', 'bounded' = 'true', 'data-id' = '"
-                        + dataId
-                        + "')");
-
-        sEnv.executeSql(
-                        "INSERT INTO events (id, cnt) SELECT id, COUNT(*) FROM input_events GROUP BY id")
-                .await();
-
-        assertThat(sql("SELECT * FROM events")).containsExactly(Row.of(1, 2L, "2"));
-    }
-
     @ParameterizedTest
     @CsvSource({
         "first-row, false",
