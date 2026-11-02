@@ -467,3 +467,100 @@ def test_nominal_frame_rate_differs_from_presentation_timestamps():
             assert decoder._indexed is supports_file_like()
     finally:
         decoder.close()
+
+
+def test_decoded_frames_are_released_before_next_seek(mp4):
+    import weakref
+    from types import SimpleNamespace
+
+    VideoDecoder = require_torchcodec()
+    source, unused = indexed_source(mp4)
+    decoder = _IndexedTorchCodecDecoder(source, source.video_keyframe_index)
+    if not decoder._indexed:
+        decoder.close()
+        return  # File-like decoding is covered separately on older TorchCodec.
+    indices = [24, 0, 24, 13, 35, 1]
+    reference = VideoDecoder(mp4, seek_mode="exact")
+    expected = reference.get_frames_at(indices=indices)
+    live = []
+    visited = []
+
+    def seek(second):
+        assert all(item() is None for item in live)
+        position = sorted(set(indices))[len(visited)]
+        decoded = reference.get_frame_at(position)
+        tensor = decoded.data.clone()
+        live.append(weakref.ref(tensor))
+        visited.append(position)
+        return SimpleNamespace(data=tensor, pts_seconds=decoded.pts_seconds,
+                               duration_seconds=decoded.duration_seconds)
+
+    try:
+        with patch.object(decoder._decoder, 'get_frame_played_at', side_effect=seek):
+            actual = decoder.get_frames_at(indices=indices)
+        assert decoder._indexed
+        assert visited == sorted(set(indices))
+        assert all(item() is None for item in live)
+        assert actual.data.is_contiguous()
+        np.testing.assert_array_equal(actual.data.numpy(), expected.data.numpy())
+        np.testing.assert_array_equal(actual.pts_seconds.numpy(), expected.pts_seconds.numpy())
+        np.testing.assert_array_equal(actual.duration_seconds.numpy(), expected.duration_seconds.numpy())
+    finally:
+        decoder.close()
+
+
+def test_keyframe_timeline_validation_is_lazy():
+    import sys
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    count = 1000000
+    payload = timing_only_mp4(count)
+
+    def read_page(offset, size):
+        first = offset // 24
+        return [(i, i * 1001 + (1 if i == 500000 else 0), 0)
+                for i in range(first, min(first + size // 24, count))]
+
+    read_range = Mock(side_effect=read_page)
+
+    class LazyKeyframes:
+        def __init__(self):
+            self.reads = []
+            self.pages = {}
+
+        def __len__(self):
+            return count
+
+        def __getitem__(self, ordinal):
+            if ordinal < 0:
+                ordinal += count
+            if ordinal >= count:
+                raise IndexError(ordinal)
+            self.reads.append(ordinal)
+            page, entry = divmod(ordinal, 4096)
+            if page not in self.pages:
+                self.pages[page] = read_range(page * 4096 * 24, 4096 * 24)
+            return self.pages[page][entry]
+
+    entries = LazyKeyframes()
+    source = io.BytesIO(payload)
+    source.video_length = len(payload)
+    source.video_read_ranges = lambda ranges: [payload[o:o + n] for o, n in ranges]
+    index = SimpleNamespace(keyframes=entries, metadata_ranges=[(0, len(payload))])
+    with patch.dict(sys.modules, {'torchcodec.decoders': SimpleNamespace(VideoDecoder=Mock())}):
+        decoder = _IndexedTorchCodecDecoder(source, index)
+    try:
+        assert decoder._indexed
+        assert entries.reads == [0, count - 1]
+        assert read_range.call_count == 2
+        exact = Mock()
+        with patch.object(decoder, '_exact', return_value=exact):
+            result = decoder.get_frames_at(indices=[500000])
+        assert not decoder._indexed
+        assert len(entries.reads) < 30  # Binary search, not a scan of every page.
+        assert read_range.call_count < 12
+        exact.get_frames_at.assert_called_once_with(indices=[500000])
+        assert result is exact.get_frames_at.return_value
+    finally:
+        decoder.close()

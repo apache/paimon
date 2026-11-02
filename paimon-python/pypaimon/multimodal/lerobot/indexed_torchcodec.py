@@ -275,9 +275,6 @@ class _IndexedTorchCodecDecoder:
             self._pts, self._durations, self._scale = timeline.pts, timeline.durations, timeline.scale
             if index.keyframes[-1][0] >= len(self._pts):
                 raise ValueError("Keyframe ordinal exceeds the MP4 timeline.")
-            # MP4 stream time base is 1 / media timescale.
-            if any(self._pts[o] != pts for o, pts, _ in index.keyframes):
-                raise ValueError("Keyframe PTS does not match the MP4 timeline.")
             self._timeline = timeline
             self._pts_tolerance = timeline.tolerance
             if cache is not None:
@@ -307,14 +304,19 @@ class _IndexedTorchCodecDecoder:
             raise IndexError("Video frame index is out of range.")
         if not positions:
             return self._decoder.get_frames_at(indices=positions)
-        ranges = []
-        for index in sorted(set(positions)):
-            anchor = bisect.bisect_right(self._index.keyframes, (index, float("inf"), float("inf"))) - 1
-            start = self._index.keyframes[anchor][2]
-            end = (self._index.keyframes[anchor + 1][2]
-                   if anchor + 1 < len(self._index.keyframes) else self._length)
-            ranges.append((start, end - start))
+        data = frame = None
         try:
+            ranges = []
+            for position in sorted(set(positions)):
+                anchor = bisect.bisect_right(
+                    self._index.keyframes, (position, float("inf"), float("inf"))) - 1
+                ordinal, pts, start = self._index.keyframes[anchor]
+                # Validate only the anchors used by this request, preserving lazy indexes.
+                if self._pts[ordinal] != pts:
+                    raise ValueError("Keyframe PTS does not match the MP4 timeline.")
+                end = (self._index.keyframes[anchor + 1][2]
+                       if anchor + 1 < len(self._index.keyframes) else self._length)
+                ranges.append((start, end - start))
             self._range_source.prefetch(ranges)
             expected = self._pts[positions] / self._scale
             # Query inside the frame's presentation interval, avoiding floating
@@ -326,20 +328,28 @@ class _IndexedTorchCodecDecoder:
             # seeks by PTS instead; sort/deduplicate requests, then restore order.
             import torch
             from torchcodec import FrameBatch
-            frames = {position: self._decoder.get_frame_played_at(float(second))
-                      for position, second in sorted(set(zip(positions, seconds)))}
-            ordered = [frames[position] for position in positions]
-            result = FrameBatch(
-                data=torch.stack([frame.data for frame in ordered]),
-                pts_seconds=torch.tensor([frame.pts_seconds for frame in ordered], dtype=torch.float64),
-                duration_seconds=torch.tensor(
-                    [frame.duration_seconds for frame in ordered], dtype=torch.float64))
+            destinations = {}
+            for output, position in enumerate(positions):
+                destinations.setdefault(position, []).append(output)
+            pts_seconds = torch.empty(len(positions), dtype=torch.float64, device="cpu")
+            duration_seconds = torch.empty_like(pts_seconds)
+            for position, second in sorted(set(zip(positions, seconds))):
+                frame = self._decoder.get_frame_played_at(float(second))
+                if data is None:
+                    data = frame.data.new_empty((len(positions),) + tuple(frame.data.shape))
+                for output in destinations[position]:
+                    data[output].copy_(frame.data)
+                    pts_seconds[output] = frame.pts_seconds
+                    duration_seconds[output] = frame.duration_seconds
+                frame = None
+            result = FrameBatch(data=data, pts_seconds=pts_seconds, duration_seconds=duration_seconds)
             actual = result.pts_seconds.cpu().numpy()
             if actual.shape != expected.shape or not np.allclose(
                     actual, expected, rtol=0, atol=self._pts_tolerance):
                 raise ValueError("TorchCodec returned a different frame PTS.")
             return result
         except (TypeError, ValueError, OSError, RuntimeError, AttributeError, IndexError):
+            data = frame = result = None
             self._fallback()
             return self._decoder.get_frames_at(indices=positions)
 
