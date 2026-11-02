@@ -218,7 +218,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             long id = Long.parseLong(scanSnapshotId);
             long millis = wrapped.snapshotManager().snapshot(id).timeMillis();
             Snapshot otherSnapshot = other.snapshotManager().earlierOrEqualTimeMills(millis);
-            if (otherSnapshot == null) {
+            if (otherSnapshot == null && !coreOptions().isChainTable()) {
                 otherSnapshot = other.snapshotManager().earliestSnapshot();
                 if (otherSnapshot != null) {
                     Preconditions.checkArgument(
@@ -243,12 +243,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 }
             }
             if (otherSnapshot == null) {
-                // Chain-group scans bypass EmptyBranchScan; keep their existing handling.
+                // Preserve the original snapshot-1 fallback for chain tables.
                 result.put(
                         scanSnapshotIdOptionKey,
-                        coreOptions().isChainTable()
-                                ? scanSnapshotId
-                                : String.valueOf(EMPTY_BRANCH_SNAPSHOT_ID));
+                        String.valueOf(
+                                coreOptions().isChainTable()
+                                        ? Snapshot.FIRST_SNAPSHOT_ID
+                                        : EMPTY_BRANCH_SNAPSHOT_ID));
             } else {
                 result.put(scanSnapshotIdOptionKey, String.valueOf(otherSnapshot.id()));
             }
@@ -275,6 +276,9 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         validateSchema();
         FileStoreTable first = wrappedFirst ? wrapped : other;
         FileStoreTable second = wrappedFirst ? other : wrapped;
+        if (coreOptions().isChainTable()) {
+            return new FallbackReadScan(first, second, wrapped.schema(), scanCreator);
+        }
         boolean otherIsEmpty =
                 Objects.equals(other.coreOptions().scanSnapshotId(), EMPTY_BRANCH_SNAPSHOT_ID)
                         || (other.coreOptions().scanSnapshotId() != null
