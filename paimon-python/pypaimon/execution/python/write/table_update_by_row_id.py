@@ -16,12 +16,18 @@
 # under the License.
 
 import bisect
+import logging
+import os
+import shutil
+import subprocess
+import tempfile
 import uuid
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
+import pyarrow.parquet as pq
 
 from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -47,6 +53,8 @@ from pypaimon.execution.python.write.writer.blob_writer import BlobWriter
 from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.execution.python.write.writer.single_file_writer import SingleFileWriter
 from pypaimon.execution.python.write.writer.write_buffer import WriteBuffer
+from pypaimon.execution.python.write.writer.parquet_writer_options import create_parquet_writer_options
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 
 _ARROW_MAJOR = int(pa.__version__.split('.')[0])
 # Keep aligned with org.apache.parquet.hadoop.ParquetWriter.DEFAULT_BLOCK_SIZE.
@@ -465,6 +473,209 @@ class PythonTableUpdateByRowId(RowIdUpdateInputMixin):
             finally:
                 writer.close()
 
+    def _write_group_by_column_source(self, partition, first_row_id, data, column_names):
+        options = self.table.options
+        if (str(options.options.data.get('data-evolution.row-group-reuse.enabled')).lower()
+                != 'true' or not os.path.isfile(
+                    os.environ.get('PYPAIMON_ROW_GROUP_SPLICE_BIN', ''))):
+            return False
+        _, files = self._first_row_id_index[first_row_id]
+        remaining = set(column_names)
+        groups = []
+        for file in sorted(files, key=lambda item: item.max_sequence_number, reverse=True):
+            if file.write_cols is None:
+                continue
+            group = [column for column in column_names
+                     if column in remaining and column in file.write_cols]
+            if group:
+                groups.append(group)
+                remaining.difference_update(group)
+        if remaining:
+            groups.append([column for column in column_names if column in remaining])
+        if len(groups) < 2:
+            return False
+
+        first_message = len(self.commit_messages)
+        try:
+            for group in groups:
+                if not self._write_group_reusing_row_groups(
+                        partition, first_row_id, data, group):
+                    self._write_group_streaming(partition, first_row_id, data, group)
+        except BaseException:
+            for message in self.commit_messages[first_message:]:
+                for file in message.new_files:
+                    path = file.physical_path() or canonical_data_file_path(
+                        self.table, tuple(partition.values), 0, file.file_name)
+                    self.table.file_io.delete_quietly(path)
+            del self.commit_messages[first_message:]
+            raise
+        return True
+
+    def _write_group_reusing_row_groups(self, partition, first_row_id, data, column_names):
+        """Copy unchanged Parquet row groups when one file owns every target column."""
+        options = self.table.options
+        enabled = options.options.data.get('data-evolution.row-group-reuse.enabled')
+        executable = os.environ.get('PYPAIMON_ROW_GROUP_SPLICE_BIN')
+        if str(enabled).lower() != 'true' or not executable or not os.path.isfile(executable):
+            return False
+        reason = None
+        if (not _RowIdUpdateFileWriter.supports_table(self.table)
+                or options.deletion_vectors_enabled(False)
+                or options.metadata_stats_enabled()
+                or options.data_file_external_paths()
+                or not column_names):
+            reason = 'unsupported_table'
+        _, files = self._first_row_id_index[first_row_id]
+        requested = set(column_names)
+        candidates = [
+            file for file in files
+            if (file.first_row_id == first_row_id
+                and file.write_cols is not None
+                and requested.issubset(set(file.write_cols))
+                and set(file.write_cols) == requested
+                and not file.extra_files and not file.external_path
+                and file.schema_id == self.table.table_schema.id
+                and file.row_count > 0)
+        ]
+        source = max(candidates, key=lambda file: file.max_sequence_number) if candidates else None
+        if source is None:
+            reason = reason or 'multiple_column_sources'
+        if reason is None:
+            for file in files:
+                if file is source:
+                    continue
+                # A null write_cols denotes a full-column file, not an empty one.
+                if ((file.write_cols is None or requested.intersection(file.write_cols))
+                        and file.max_sequence_number >= source.max_sequence_number):
+                    reason = 'newer_column_source'
+                    break
+        if reason is not None:
+            logging.getLogger(__name__).info('row_group_reuse fallback reason=%s', reason)
+            return False
+
+        source_path = source.physical_path() or canonical_data_file_path(
+            self.table, tuple(partition.values), 0, source.file_name)
+        file_io = self.table.file_io
+        # The helper uses local random access. Limit staging until a remote
+        # ChunkReader can be supplied without copying the whole source file.
+        if source.file_size > 2 * 1024 ** 3:
+            logging.getLogger(__name__).info('row_group_reuse fallback reason=source_too_large')
+            return False
+        if shutil.disk_usage(tempfile.gettempdir()).free < 3 * source.file_size + 512 * 1024 ** 2:
+            logging.getLogger(__name__).info('row_group_reuse fallback reason=insufficient_temp_disk')
+            return False
+
+        sorted_updates = sorted(
+            enumerate(data[SpecialFields.ROW_ID.name].to_pylist()),
+            key=lambda pair: pair[1])
+        if not sorted_updates or sorted_updates[0][1] < first_row_id or sorted_updates[-1][1] >= first_row_id + source.row_count:
+            return False
+        new_file_path = None
+        message_prepared = False
+        try:
+            with tempfile.TemporaryDirectory(prefix='paimon-rowgroup-reuse-') as tmp:
+                local_source = os.path.join(tmp, 'source.parquet')
+                with file_io.new_input_stream(source_path) as stream, open(local_source, 'wb') as out:
+                    shutil.copyfileobj(stream, out, length=4 * 1024 * 1024)
+                parquet = pq.ParquetFile(local_source)
+                schema = parquet.schema_arrow
+                if (set(schema.names) != requested or len(schema.names) != len(column_names)
+                        or parquet.metadata.num_rows != source.row_count):
+                    logging.getLogger(__name__).info('row_group_reuse fallback reason=schema_or_rows')
+                    return False
+                offsets = [0]
+                for index in range(parquet.metadata.num_row_groups):
+                    row_group = parquet.metadata.row_group(index)
+                    offsets.append(offsets[-1] + row_group.num_rows)
+                if offsets[-1] != source.row_count:
+                    return False
+
+                replacement_args = []
+                update_cursor = 0
+                for index in range(parquet.metadata.num_row_groups):
+                    start = first_row_id + offsets[index]
+                    end = first_row_id + offsets[index + 1]
+                    selected = []
+                    while update_cursor < len(sorted_updates) and sorted_updates[update_cursor][1] < end:
+                        if sorted_updates[update_cursor][1] < start:
+                            raise ValueError('Update row IDs precede the source row group')
+                        selected.append(sorted_updates[update_cursor])
+                        update_cursor += 1
+                    if not selected:
+                        continue
+                    local_replacement = os.path.join(tmp, 'replacement-{}.parquet'.format(index))
+                    kwargs = dict(compression=options.file_compression(),
+                                  **create_parquet_writer_options(options))
+                    if kwargs['compression'].lower() == 'zstd':
+                        kwargs['compression_level'] = options.file_compression_zstd_level()
+                    row_group = parquet.metadata.row_group(index)
+                    average_row_bytes = max(
+                        1, row_group.total_byte_size // max(1, row_group.num_rows))
+                    batch_rows = min(1024, max(1, (8 * 1024 ** 2) // average_row_bytes))
+                    group_offset = start
+                    with pq.ParquetWriter(local_replacement, schema, **kwargs) as replacement:
+                        for batch in parquet.iter_batches(
+                                batch_size=batch_rows, row_groups=[index],
+                                columns=column_names, use_threads=False):
+                            batch_end = group_offset + batch.num_rows
+                            batch_updates = [position for position, row_id in selected
+                                             if group_offset <= row_id < batch_end]
+                            original = pa.Table.from_batches([batch]).select(column_names)
+                            if batch_updates:
+                                merged, _ = self._merge_update_with_original(
+                                    original, data.take(batch_updates),
+                                    column_names, group_offset)
+                            else:
+                                merged = original
+                            merged = self._normalize_write_data(merged)
+                            merged = merged.select(schema.names).cast(schema, safe=True)
+                            replacement.write_table(merged, row_group_size=merged.num_rows)
+                            group_offset = batch_end
+                    if group_offset != end:
+                        raise ValueError('Replacement row count does not match source')
+                    replacement_args.extend([str(index), local_replacement])
+                if update_cursor != len(sorted_updates) or not replacement_args:
+                    return False
+                local_output = os.path.join(tmp, 'output.parquet')
+                subprocess.run([executable, local_source, local_output] + replacement_args,
+                               check=True, timeout=300, capture_output=True)
+                writer = _RowIdUpdateFileWriter(
+                    self.table, tuple(partition.values), column_names)
+                try:
+                    data_writer = writer._data_writer
+                    file_name = '{}{}-0.parquet'.format(
+                        data_writer.options.data_file_prefix(), uuid.uuid4())
+                    new_file_path = data_writer._generate_file_path(file_name)
+                    with open(local_output, 'rb') as src, file_io.new_output_stream(new_file_path) as dst:
+                        shutil.copyfileobj(src, dst, length=4 * 1024 * 1024)
+                    meta = data_writer._create_data_file_meta(
+                        file_name=file_name, file_path=new_file_path,
+                        row_count=source.row_count,
+                        min_key=GenericRow([], []), max_key=GenericRow([], []),
+                        key_stats=SimpleStats.empty_stats(),
+                        value_stats=SimpleStats.empty_stats(),
+                        min_sequence_number=0, max_sequence_number=0)
+                    data_writer._finish_data_file(meta)
+                finally:
+                    writer.close()
+                self._assign_update_file_metadata([meta], first_row_id, column_names, {})
+                self.commit_messages.append(CommitMessage(
+                    partition=tuple(partition.values), bucket=0,
+                    new_files=[meta], check_from_snapshot=self.snapshot_id))
+                message_prepared = True
+                logging.getLogger(__name__).info(
+                    'row_group_reuse hit copied=%s rewritten=%s',
+                    parquet.metadata.num_row_groups - len(replacement_args) // 2,
+                    len(replacement_args) // 2)
+                return True
+        except BaseException as error:
+            if new_file_path is not None and not message_prepared:
+                file_io.delete_quietly(new_file_path)
+            if not isinstance(error, Exception):
+                raise
+            logging.getLogger(__name__).info('row_group_reuse fallback error=%s', type(error).__name__)
+            return False
+
     def _merge_update_with_original(
             self,
             original_data: Optional[pa.Table],
@@ -827,6 +1038,12 @@ class PythonTableUpdateByRowId(RowIdUpdateInputMixin):
         """
         # Specialized writers still own their sidecars and physical encoding.
         if _RowIdUpdateFileWriter.supports_table(self.table):
+            if self._write_group_reusing_row_groups(
+                    partition, first_row_id, data, column_names):
+                return
+            if self._write_group_by_column_source(
+                    partition, first_row_id, data, column_names):
+                return
             self._write_group_streaming(partition, first_row_id, data, column_names)
             return
         original_data = self._read_original_file_data(first_row_id, column_names)
