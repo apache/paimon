@@ -81,11 +81,18 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     public void add(KeyValue kv) {
         latestKv = kv;
 
-        currentDeleteRow = removeRecordOnDelete && kv.valueKind() == RowKind.DELETE;
-        if (currentDeleteRow) {
+        if (removeRecordOnDelete && kv.valueKind() == RowKind.DELETE) {
+            currentDeleteRow = true;
             row = new GenericRow(getters.length);
             initRow(row, kv.value());
             return;
+        }
+        if (currentDeleteRow) {
+            // The record was removed by the previous delete, so later records start a new
+            // aggregation instead of accumulating onto the deleted record's values.
+            currentDeleteRow = false;
+            row = new GenericRow(getters.length);
+            Arrays.stream(aggregators).forEach(FieldAggregator::reset);
         }
 
         boolean isRetract = kv.valueKind().isRetract();
