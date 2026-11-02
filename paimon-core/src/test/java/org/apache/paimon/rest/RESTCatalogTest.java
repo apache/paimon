@@ -103,6 +103,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
@@ -4666,6 +4667,32 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThatThrownBy(scan::plan)
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("does not exist in table schema");
+    }
+
+    @Test
+    void testStreamScanWithAuthRulesKeepsSnapshotNotExistPlan() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_stream_no_snapshot");
+        Table table =
+                createMaskingAuthTable(
+                        identifier, stringFields("name", "secret"), Collections.emptyMap());
+        setRowFilter(
+                identifier,
+                Collections.singletonList(
+                        leaf(
+                                0,
+                                "name",
+                                DataTypes.STRING(),
+                                Equal.INSTANCE,
+                                BinaryString.fromString("john"))));
+        maskConstant(identifier, "secret");
+
+        // stream consumers tell "no new snapshot yet" from an empty plan by this instance
+        StreamTableScan scan = table.newReadBuilder().newStreamScan();
+        assertThat(scan.plan()).isSameAs(SnapshotNotExistPlan.INSTANCE);
+
+        writeStringRow(table, "john", "s1");
+        assertThat(scan.plan().splits()).isNotEmpty();
+        assertThat(scan.plan()).isSameAs(SnapshotNotExistPlan.INSTANCE);
     }
 
     @Test
