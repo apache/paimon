@@ -51,7 +51,11 @@ import org.apache.parquet.schema.Types;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import shaded.parquet.org.apache.thrift.TException;
 import shaded.parquet.org.apache.thrift.protocol.TCompactProtocol;
+import shaded.parquet.org.apache.thrift.protocol.TField;
+import shaded.parquet.org.apache.thrift.protocol.TList;
+import shaded.parquet.org.apache.thrift.protocol.TMap;
 import shaded.parquet.org.apache.thrift.transport.TMemoryBuffer;
 
 import java.io.ByteArrayInputStream;
@@ -1562,6 +1566,177 @@ public class SelectiveFooterParserTest {
         Assertions.assertEquals(
                 officialColA.getOffsetIndexReference().getLength(),
                 subsetColA.getOffsetIndexReference().getLength());
+    }
+
+    // ------------------------------------------------------------------ unknown MAP field skipping
+
+    /**
+     * Unknown-field skipping must honor the compact protocol's MAP encoding: entries are
+     * interleaved (k1,v1,k2,v2), never all keys followed by all values. The map is deliberately
+     * hostile — both keys and both values serialize to bytes that a misaligned cursor reads as
+     * zero, so a wrong skip leaves a 0x00 that looks like the enclosing struct's STOP and silently
+     * discards every row group after the unknown field. Field id 99 is unknown to every
+     * parquet.thrift revision, so both parsers must skip it and still see all three row groups.
+     */
+    @Test
+    public void testUnknownMapFieldBeforeRowGroups() throws Exception {
+        byte[] footer =
+                insertUnknownFieldBeforeRowGroups(
+                        unknownFieldBytes(
+                                TTYPE_MAP,
+                                prot -> {
+                                    prot.writeMapBegin(new TMap(TTYPE_STRING, TTYPE_I32, 2));
+                                    prot.writeString("");
+                                    prot.writeI32(0);
+                                    prot.writeString("\u0000");
+                                    prot.writeI32(0);
+                                    prot.writeMapEnd();
+                                }));
+        assertSelectiveMatchesOfficial(footer);
+    }
+
+    /**
+     * Same scenario through a list&lt;map&lt;string,i32&gt;&gt; extension: the unknown field is a
+     * LIST whose elements are maps, exercising the MAP branch of the element-context skip path.
+     */
+    @Test
+    public void testUnknownListOfMapsFieldBeforeRowGroups() throws Exception {
+        byte[] footer =
+                insertUnknownFieldBeforeRowGroups(
+                        unknownFieldBytes(
+                                TTYPE_LIST,
+                                prot -> {
+                                    prot.writeListBegin(new TList(TTYPE_MAP, 2));
+                                    for (int i = 0; i < 2; i++) {
+                                        prot.writeMapBegin(new TMap(TTYPE_STRING, TTYPE_I32, 2));
+                                        prot.writeString("");
+                                        prot.writeI32(0);
+                                        prot.writeString("\u0000");
+                                        prot.writeI32(0);
+                                        prot.writeMapEnd();
+                                    }
+                                    prot.writeListEnd();
+                                }));
+        assertSelectiveMatchesOfficial(footer);
+    }
+
+    private static byte[] unknownFieldBytes(byte thriftType, UnknownFieldValueWriter valueWriter)
+            throws Exception {
+        TMemoryBuffer buffer = new TMemoryBuffer(64);
+        TCompactProtocol prot = new TCompactProtocol(buffer);
+        prot.writeFieldBegin(new TField("unknown", thriftType, (short) 99));
+        valueWriter.write(prot);
+        prot.writeFieldEnd();
+        return Arrays.copyOf(buffer.getArray(), buffer.length());
+    }
+
+    /** Writes the value of an unknown field, between writeFieldBegin and writeFieldEnd. */
+    private interface UnknownFieldValueWriter {
+        void write(TCompactProtocol prot) throws TException;
+    }
+
+    // Thrift wire type bytes. The vendored shaded thrift (parquet 1.16) exposes no TType
+    // constants, so spell them out: STRING=11, I32=8, LIST=15, MAP=13.
+    private static final byte TTYPE_STRING = 11;
+    private static final byte TTYPE_I32 = 8;
+    private static final byte TTYPE_LIST = 15;
+    private static final byte TTYPE_MAP = 13;
+
+    /**
+     * Serializes a three-row-group footer, splices raw unknown-field bytes between num_rows and
+     * row_groups, and re-encodes the row_groups field header in long form (explicit field id
+     * varint), because the unknown field id 99 resets the compact protocol's short-form delta base.
+     */
+    private static byte[] insertUnknownFieldBeforeRowGroups(byte[] unknownField) throws Exception {
+        FileMetaData metaData = threeRowGroupFileMetaData();
+        List<RowGroup> rowGroups = metaData.getRow_groups();
+        // row_groups is a required field, so compare against an empty list instead of an absent
+        // one: the serializations then first differ at the row_groups list-size byte
+        metaData.setRow_groups(new ArrayList<>());
+        byte[] without = serializeFooter(metaData);
+        metaData.setRow_groups(rowGroups);
+        byte[] full = serializeFooter(metaData);
+
+        int split = 0;
+        while (without[split] == full[split]) {
+            split++;
+        }
+        // sanity: split-1 is the short-form row_groups field header (delta 1 from num_rows, LIST),
+        // split is the list header (0 vs 3 elements, element type STRUCT = RowGroup)
+        Assertions.assertEquals((1 << 4) | ThriftCompactReader.LIST, full[split - 1] & 0xff);
+        Assertions.assertEquals((3 << 4) | ThriftCompactReader.STRUCT, full[split] & 0xff);
+
+        byte[] spliced = new byte[full.length + unknownField.length + 1];
+        System.arraycopy(full, 0, spliced, 0, split - 1);
+        System.arraycopy(unknownField, 0, spliced, split - 1, unknownField.length);
+        int at = split - 1 + unknownField.length;
+        // row_groups header, long form: (delta 0) | LIST, then zigzag varint of field id 4
+        spliced[at] = (byte) ThriftCompactReader.LIST;
+        spliced[at + 1] = 0x08;
+        System.arraycopy(full, split, spliced, at + 2, full.length - split);
+        return spliced;
+    }
+
+    /**
+     * FileMetaData with three single-chunk row groups — the data the unknown field must not eat.
+     */
+    private static FileMetaData threeRowGroupFileMetaData() {
+        FileMetaData metaData = new FileMetaData();
+
+        List<SchemaElement> schema = new ArrayList<>();
+        SchemaElement root = new SchemaElement();
+        root.setName("unknown_map");
+        root.setNum_children(1);
+        SchemaElement col = new SchemaElement();
+        col.setName("col");
+        col.setType(org.apache.parquet.format.Type.INT64);
+        col.setRepetition_type(FieldRepetitionType.OPTIONAL);
+        schema.add(root);
+        schema.add(col);
+        metaData.setSchema(schema);
+        metaData.setNum_rows(3L);
+        metaData.setVersion(1);
+        metaData.setCreated_by("handcrafted");
+
+        List<RowGroup> rowGroups = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            RowGroup rowGroup = new RowGroup();
+            rowGroup.setColumns(
+                    Collections.singletonList(
+                            newChunk(
+                                    null,
+                                    "col",
+                                    statsWithNullCountOnly(0L),
+                                    -1,
+                                    -1,
+                                    -1,
+                                    -1,
+                                    -1,
+                                    -1)));
+            rowGroup.setTotal_byte_size(80L);
+            rowGroup.setNum_rows(1L);
+            rowGroup.setFile_offset(0L);
+            rowGroup.setTotal_compressed_size(80L);
+            rowGroup.setOrdinal((short) i);
+            rowGroups.add(rowGroup);
+        }
+        metaData.setRow_groups(rowGroups);
+        return metaData;
+    }
+
+    /** Both parsers must see all three row groups and agree on the full metadata. */
+    private static void assertSelectiveMatchesOfficial(byte[] footer) throws IOException {
+        ParquetMetadataConverter converter = new ParquetMetadataConverter();
+        ParquetMetadata official =
+                converter.readParquetMetadata(
+                        new ByteArrayInputStream(footer), ParquetMetadataConverter.NO_FILTER);
+        ParquetMetadata selective =
+                SelectiveFooterParser.parse(ByteBuffer.wrap(footer), null, converter);
+
+        Assertions.assertEquals(3, official.getBlocks().size());
+        Assertions.assertEquals(3, selective.getBlocks().size());
+        Assertions.assertEquals(
+                ParquetMetadata.toPrettyJSON(official), ParquetMetadata.toPrettyJSON(selective));
     }
 
     private static ColumnChunk newChunk(

@@ -254,8 +254,7 @@ final class ThriftCompactReader {
                     long size = readVarint();
                     if (size > 0) {
                         int kvTypes = readByte() & 0xff;
-                        skipElements((int) size, (byte) (kvTypes >>> 4));
-                        skipElements((int) size, (byte) (kvTypes & 0x0f));
+                        skipMapEntries(size, (byte) (kvTypes >>> 4), (byte) (kvTypes & 0x0f));
                     }
                     return;
                 }
@@ -275,49 +274,66 @@ final class ThriftCompactReader {
     /** Skips {@code count} elements of the given type (list-element context). */
     private void skipElements(int count, byte elemType) throws IOException {
         for (int i = 0; i < count; i++) {
-            switch (elemType) {
-                case BOOLEAN_TRUE:
-                case BOOLEAN_FALSE:
-                    skipBytes(1); // booleans are real bytes inside lists
+            skipElement(elemType);
+        }
+    }
+
+    /**
+     * Skips {@code size} map entries. Compact protocol map entries are interleaved — each key is
+     * immediately followed by its value — so they must be consumed in k1,v1,k2,v2 order; consuming
+     * all keys before all values would leave the cursor mid-entry, and a trailing zero value would
+     * then be mistaken for the enclosing struct's STOP.
+     */
+    private void skipMapEntries(long size, byte keyType, byte valueType) throws IOException {
+        for (long i = 0; i < size; i++) {
+            skipElement(keyType);
+            skipElement(valueType);
+        }
+    }
+
+    /** Skips a single element of the given type (list-element context). */
+    private void skipElement(byte elemType) throws IOException {
+        switch (elemType) {
+            case BOOLEAN_TRUE:
+            case BOOLEAN_FALSE:
+                skipBytes(1); // booleans are real bytes inside lists
+                break;
+            case BYTE:
+                skipBytes(1);
+                break;
+            case I16:
+            case I32:
+            case I64:
+                readVarint();
+                break;
+            case DOUBLE:
+                skipBytes(8);
+                break;
+            case BINARY:
+                skipBytes((int) readVarint());
+                break;
+            case LIST:
+            case SET:
+                {
+                    int header = readListHeader();
+                    skipElements(listSize(header), listElemType(header));
                     break;
-                case BYTE:
-                    skipBytes(1);
-                    break;
-                case I16:
-                case I32:
-                case I64:
-                    readVarint();
-                    break;
-                case DOUBLE:
-                    skipBytes(8);
-                    break;
-                case BINARY:
-                    skipBytes((int) readVarint());
-                    break;
-                case LIST:
-                case SET:
-                    {
-                        int header = readListHeader();
-                        skipElements(listSize(header), listElemType(header));
-                        break;
+                }
+            case MAP:
+                {
+                    long size = readVarint();
+                    if (size > 0) {
+                        int kvTypes = readByte() & 0xff;
+                        skipMapEntries(size, (byte) (kvTypes >>> 4), (byte) (kvTypes & 0x0f));
                     }
-                case MAP:
-                    {
-                        long size = readVarint();
-                        if (size > 0) {
-                            int kvTypes = readByte() & 0xff;
-                            skipElements((int) size, (byte) (kvTypes >>> 4));
-                            skipElements((int) size, (byte) (kvTypes & 0x0f));
-                        }
-                        break;
-                    }
-                case STRUCT:
-                    skip(STRUCT);
                     break;
-                default:
-                    throw new IOException(
-                            "unknown thrift compact element type " + elemType + " at " + pos);
-            }
+                }
+            case STRUCT:
+                skip(STRUCT);
+                break;
+            default:
+                throw new IOException(
+                        "unknown thrift compact element type " + elemType + " at " + pos);
         }
     }
 
