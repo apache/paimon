@@ -20,7 +20,10 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.StringUtils;
@@ -210,6 +213,30 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         result = sql("SELECT next_row_id FROM T$snapshots");
 
         assertThat(result).contains(Row.of(1L), Row.of(2L), Row.of(3L));
+    }
+
+    @Test
+    public void testSnapshotProperties() throws Exception {
+        sql("CREATE TABLE T (a INT)");
+        FileStoreTable table = paimonTable("T");
+        Map<String, String> properties = new HashMap<>();
+        properties.put("source.batch-id", "42");
+        properties.put("empty", "");
+        properties.put("nullable", null);
+        ManifestCommittable committable = new ManifestCommittable(0);
+        properties.forEach(committable::addProperty);
+        try (TableCommitImpl commit = table.newCommit("test").ignoreEmptyCommit(false)) {
+            commit.commit(committable);
+            commit.commit(new ManifestCommittable(1));
+        }
+
+        assertThat(sql("SELECT snapshot_id, properties FROM T$snapshots ORDER BY snapshot_id"))
+                .containsExactly(Row.of(1L, properties), Row.of(2L, null));
+        assertThat(
+                        sql(
+                                "SELECT snapshot_id, properties['source.batch-id'], properties['missing'] "
+                                        + "FROM T$snapshots WHERE properties['source.batch-id'] = '42'"))
+                .containsExactly(Row.of(1L, "42", null));
     }
 
     @Test
