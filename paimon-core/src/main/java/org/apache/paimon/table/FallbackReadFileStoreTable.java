@@ -88,6 +88,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     private static final Logger LOG = LoggerFactory.getLogger(FallbackReadFileStoreTable.class);
 
+    private static final long EMPTY_BRANCH_SNAPSHOT_ID = -1;
+
     private final FileStoreTable other;
     private final boolean wrappedFirst;
 
@@ -240,10 +242,16 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                             CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
                 }
             }
-            // An empty branch is skipped by newFallbackScan instead of loading this ID.
-            result.put(
-                    scanSnapshotIdOptionKey,
-                    otherSnapshot == null ? scanSnapshotId : String.valueOf(otherSnapshot.id()));
+            if (otherSnapshot == null) {
+                // Chain-group scans bypass EmptyBranchScan; keep their existing handling.
+                result.put(
+                        scanSnapshotIdOptionKey,
+                        coreOptions().isChainTable()
+                                ? scanSnapshotId
+                                : String.valueOf(EMPTY_BRANCH_SNAPSHOT_ID));
+            } else {
+                result.put(scanSnapshotIdOptionKey, String.valueOf(otherSnapshot.id()));
+            }
         }
 
         // bucket number of main branch and other branch are very likely different,
@@ -268,11 +276,12 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         FileStoreTable first = wrappedFirst ? wrapped : other;
         FileStoreTable second = wrappedFirst ? other : wrapped;
         boolean otherIsEmpty =
-                other.coreOptions().scanSnapshotId() != null
-                        && other.snapshotManager().latestSnapshotId() == null;
+                Objects.equals(other.coreOptions().scanSnapshotId(), EMPTY_BRANCH_SNAPSHOT_ID)
+                        || (other.coreOptions().scanSnapshotId() != null
+                                && other.snapshotManager().latestSnapshotId() == null);
         if (otherIsEmpty) {
             LOG.warn(
-                    "Branch '{}' has no snapshots; skipping it when reading branch '{}'.",
+                    "Skipping branch '{}' because it was empty when resolving this read of branch '{}'.",
                     other.coreOptions().branch(),
                     wrapped.coreOptions().branch());
         }

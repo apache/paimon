@@ -122,6 +122,29 @@ public class ChainTableFileStoreTableTest {
         tableName = "chain_t_" + uuid.replace("-", "");
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testTimeTravelWithInitiallyEmptyDeltaBranch(boolean group) throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable table = loadTable();
+        writeWithCommit(
+                table.switchToBranch(SNAPSHOT_BRANCH),
+                row(1L, 1L, "snapshot", "CN", "20250810", "20"));
+        writeWithCommit(table, row(3L, 1L, "main", "US", "20250810", "20"));
+        table = loadTable();
+        FileStoreTable target = group ? ((ChainTableFileStoreTable) table).other() : table;
+        FileStoreTable historical =
+                target.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
+        writeWithCommit(
+                table.switchToBranch(DELTA_BRANCH), row(2L, 1L, "delta", "CN", "20250810", "21"));
+
+        assertThat(getResult(historical, Collections.singletonMap("region", "CN")))
+                .containsExactlyInAnyOrder(
+                        row(1L, 1L, "snapshot", "CN", "20250810", "20"),
+                        row(1L, 1L, "snapshot", "CN", "20250810", "21"),
+                        row(2L, 1L, "delta", "CN", "20250810", "21"));
+    }
+
     private static Stream<Arguments> filterPushdownParams() {
         return Stream.of("parquet", "orc")
                 .flatMap(
