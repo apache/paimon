@@ -290,10 +290,16 @@ know. Paimon 2.1 reads Vortex with Vortex 0.73. With the default `vortex.write.e
 Python writers write files that Paimon 2.1 can read, so you can upgrade writers and readers in any
 order.
 
-To write with a newer edition, for example `core2026.08.3`:
+The default edition is old, so writers do not use the newest encodings and layouts. Newer editions
+can make smaller files and faster reads. When all readers of the table use this Paimon version or a
+newer one, switch to the latest edition, at this time `core2026.08.3`:
 1. Upgrade all readers of the table, in all engines and in PyPaimon, to a Vortex version that reads
    the edition.
-2. Then set `vortex.write.edition`.
+2. Then set `vortex.write.edition` to the latest edition, for example:
+   `ALTER TABLE t SET ('vortex.write.edition' = 'core2026.08.3')`.
+
+The new edition applies only to files that writers write after the change. Files written before the
+change keep their edition until compaction rewrites them.
 
 After a file is written with a newer edition, you cannot roll back the readers to an older Vortex
 version that does not read it. To roll back, first rewrite or restore these files.
