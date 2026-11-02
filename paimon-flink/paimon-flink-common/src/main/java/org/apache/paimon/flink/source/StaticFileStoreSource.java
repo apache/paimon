@@ -150,14 +150,10 @@ public class StaticFileStoreSource extends FlinkSource {
         return Boundedness.BOUNDED;
     }
 
-    public StaticFileStoreSource withRewriteOperation(@Nullable String operation) {
+    public StaticFileStoreSource withRewriteOperation(@Nullable String operation, Table table) {
         this.rewriteOperation = operation;
-        return this;
-    }
-
-    public StaticFileStoreSource withRewriteOperation(String operation, Table table) {
         this.rewriteTable = table;
-        return withRewriteOperation(operation);
+        return this;
     }
 
     @Override
@@ -194,7 +190,6 @@ public class StaticFileStoreSource extends FlinkSource {
         }
         TableScan.Plan plan = scan.plan();
         if (rewriteOperation != null) {
-            rejectRewriteUnderQueryAuth(rewriteTable, rewriteOperation);
             rejectRewriteUnderQueryAuthRules(plan.splits(), rewriteOperation);
         }
         return splitGenerator.createSplits(plan);

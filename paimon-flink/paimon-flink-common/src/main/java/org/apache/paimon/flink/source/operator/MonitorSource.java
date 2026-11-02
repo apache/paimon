@@ -348,39 +348,7 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                 limit,
                 table,
                 readBuilder.readType(),
-                false);
-    }
-
-    public static DataStream<RowData> buildSource(
-            StreamExecutionEnvironment env,
-            String name,
-            TypeInformation<RowData> typeInfo,
-            ReadBuilder readBuilder,
-            long monitorInterval,
-            boolean emitSnapshotWatermark,
-            boolean shuffleBucketWithPartition,
-            boolean unordered,
-            NestedProjectedRowData nestedProjectedRowData,
-            boolean isBounded,
-            @Nullable Long limit,
-            @Nullable Table table,
-            RowType readType,
-            boolean blobAsDescriptor) {
-        return buildSource(
-                env,
-                name,
-                typeInfo,
-                readBuilder,
-                monitorInterval,
-                emitSnapshotWatermark,
-                shuffleBucketWithPartition,
-                unordered,
-                nestedProjectedRowData,
-                isBounded,
-                limit,
-                table,
-                readType,
-                blobAsDescriptor,
+                false,
                 null);
     }
 

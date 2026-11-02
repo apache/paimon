@@ -46,6 +46,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
+
 /**
  * The checker for merge into update result. It will check each committable to see if some
  * global-indexed columns are updated. It will take some actions according to {@link
@@ -86,6 +88,8 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
 
     @Override
     public void endInput() throws Exception {
+        // Authorize again before the commit, as a source with _ROW_ID does not read the target.
+        rejectRewriteUnderQueryAuth(table, "MERGE INTO");
         checkUpdatedColumns();
     }
 

@@ -28,6 +28,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Expression, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 import scala.collection.JavaConverters._
@@ -79,9 +80,26 @@ case class PaimonMergeInto(spark: SparkSession)
           val aligned = alignAllMergeActions(resolvedMerge, targetOutput)
 
           if (!shouldFallbackToV1MergeInto(aligned)) {
+            // Spark appends an insert-only merge without a row-level operation, which checks query
+            // auth, so the scan of the target checks instead.
+            val marked =
+              if (
+                aligned.matchedActions.isEmpty &&
+                SparkShimLoader.shim.notMatchedBySourceActions(aligned).isEmpty
+              ) {
+                val target = aligned.targetTable.transform {
+                  case r: DataSourceV2Relation if r.table.isInstanceOf[SparkTable] =>
+                    PaimonRelation.withRewriteOperation(r, "MERGE")
+                }
+                aligned
+                  .withNewChildren(Seq(target, aligned.sourceTable))
+                  .asInstanceOf[MergeIntoTable]
+              } else {
+                aligned
+              }
             // Tag so the analyzer's idempotence re-run skips this node (V1 fallback is a different
             // node type and doesn't need the tag).
-            PaimonMergeActionTags.markAligned(aligned)
+            PaimonMergeActionTags.markAligned(marked)
           } else {
             buildV1Command(v2Table, resolvedMerge, aligned)
           }

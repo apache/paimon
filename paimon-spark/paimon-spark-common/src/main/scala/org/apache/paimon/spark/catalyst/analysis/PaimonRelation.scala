@@ -18,12 +18,17 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.SparkTable
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.analysis.{EliminateSubqueryAliases, ResolvedTable}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Project}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import java.util.{HashMap => JHashMap}
 
 import scala.util.control.NonFatal
 
@@ -54,5 +59,20 @@ object PaimonRelation extends Logging {
       case d: DataSourceV2Relation if d.table.isInstanceOf[SparkTable] => d
       case _ => throw new RuntimeException(s"It's not a paimon table, $plan")
     }
+  }
+
+  /** Reads the relation for a rewrite, so the scan checks query auth when it plans splits. */
+  def withRewriteOperation(
+      relation: DataSourceV2Relation,
+      operation: String): DataSourceV2Relation = {
+    val options = new JHashMap[String, String](relation.options.asCaseSensitiveMap())
+    options.put(CoreOptions.SCAN_REWRITE_OPERATION.key(), operation)
+    SparkShimLoader.shim.copyDataSourceV2Relation(relation, new CaseInsensitiveStringMap(options))
+  }
+
+  def withoutRewriteOperation(relation: DataSourceV2Relation): DataSourceV2Relation = {
+    val options = new JHashMap[String, String](relation.options.asCaseSensitiveMap())
+    options.remove(CoreOptions.SCAN_REWRITE_OPERATION.key())
+    SparkShimLoader.shim.copyDataSourceV2Relation(relation, new CaseInsensitiveStringMap(options))
   }
 }

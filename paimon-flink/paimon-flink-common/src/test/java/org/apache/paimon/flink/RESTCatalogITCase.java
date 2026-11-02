@@ -44,6 +44,7 @@ import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.RESTToken;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
 
@@ -51,19 +52,25 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.api.dag.Transformation;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
+import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogFunction;
 import org.apache.flink.table.catalog.CatalogFunctionImpl;
 import org.apache.flink.table.catalog.FunctionLanguage;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.resource.ResourceType;
 import org.apache.flink.table.resource.ResourceUri;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.ValueSource;
+
+import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -244,33 +251,17 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
     public void testRowLevelOperationsRequireFullTableAccess(
             boolean dataEvolution, boolean masking) {
         String tableName = DATABASE_NAME + ".t_rewrite";
-        batchSql(
-                "CREATE TABLE "
-                        + tableName
-                        + " (id INT, ssn STRING, note STRING, p INT) PARTITIONED BY (p)"
-                        + " WITH ('query-auth.enabled'='true', "
-                        + (dataEvolution
-                                ? "'bucket'='-1', 'data-evolution.enabled'='true',"
-                                        + " 'row-tracking.enabled'='true', 'deletion-vectors.enabled'='true'"
-                                : "'primary-key'='id,p', 'bucket'='1'")
-                        + ")");
+        createAuthTable(
+                "t_rewrite",
+                "(id INT, ssn STRING, note STRING, p INT) PARTITIONED BY (p)",
+                dataEvolution,
+                "id,p");
         batchSql("INSERT INTO " + tableName + " VALUES (1, 's1', 'n1', 1), (2, 's2', 'n2', 1)");
         Identifier identifier = Identifier.create(DATABASE_NAME, "t_rewrite");
         if (masking) {
-            restCatalogServer.setColumnMaskingAuth(
-                    identifier,
-                    Collections.singletonMap(
-                            "ssn",
-                            new ConcatTransform(
-                                    Collections.singletonList(BinaryString.fromString("****")))));
+            restCatalogServer.setColumnMaskingAuth(identifier, mask("ssn", "****"));
         } else {
-            restCatalogServer.setRowFilterAuth(
-                    identifier,
-                    Collections.singletonList(
-                            LeafPredicate.of(
-                                    new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
-                                    Equal.INSTANCE,
-                                    Collections.singletonList(1))));
+            restCatalogServer.setRowFilterAuth(identifier, equalTo(0, "id", DataTypes.INT(), 1));
         }
         assertThatThrownBy(() -> batchSql("UPDATE " + tableName + " SET note = ssn"))
                 .hasStackTraceContaining("UPDATE requires full-table access");
@@ -298,94 +289,229 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testRowLevelActionsRequireFullTableAccess(boolean dataEvolution) throws Exception {
-        String tableName = DATABASE_NAME + ".t_actions";
-        batchSql(
-                "CREATE TABLE "
-                        + tableName
-                        + " (id STRING, note STRING) WITH ('query-auth.enabled'='true', "
-                        + (dataEvolution
-                                ? "'bucket'='-1', 'data-evolution.enabled'='true',"
-                                        + " 'row-tracking.enabled'='true', 'deletion-vectors.enabled'='true'"
-                                : "'primary-key'='id', 'bucket'='1'")
-                        + ")");
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    public void testMergeIntoChecksQueryAuthWhenTheJobReads(boolean dataEvolution, boolean alias)
+            throws Exception {
+        String tableName = DATABASE_NAME + ".t_merge";
+        createAuthTable("t_merge", "(id STRING, note STRING)", dataEvolution, "id");
         batchSql(
                 "INSERT INTO "
                         + tableName
                         + " VALUES ('visible', 'original'), ('hidden', 'original')");
-        Identifier identifier = Identifier.create(DATABASE_NAME, "t_actions");
-        restCatalogServer.setRowFilterAuth(
-                identifier,
-                Collections.singletonList(
-                        LeafPredicate.of(
-                                new FieldTransform(new FieldRef(0, "id", DataTypes.STRING())),
-                                Equal.INSTANCE,
-                                Collections.singletonList(BinaryString.fromString("visible")))));
-        restCatalogServer.setColumnMaskingAuth(
-                identifier,
-                Collections.singletonMap(
-                        "id",
-                        new ConcatTransform(
-                                Collections.singletonList(BinaryString.fromString("hidden")))));
-        assertThat(batchSql("SELECT * FROM " + tableName))
-                .containsExactly(Row.of("hidden", "original"));
+        Identifier identifier = Identifier.create(DATABASE_NAME, "t_merge");
+        Table table = flinkCatalog().catalog().getTable(identifier);
+        long snapshotId = table.latestSnapshot().get().id();
+        List<Predicate> rowFilter = equalTo(0, "id", DataTypes.STRING(), "visible");
+        restCatalogServer.setRowFilterAuth(identifier, rowFilter);
+        assertThatThrownBy(mergeAction(dataEvolution, alias, singleParallelismEnv())::run)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("MERGE INTO requires full-table access");
+        restCatalogServer.setRowFilterAuth(identifier, null);
 
+        // The merge is built with full access, and a row filter is added before the job reads.
+        StreamExecutionEnvironment env = singleParallelismEnv();
+        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
+        ActionBase merge = mergeAction(dataEvolution, alias, env);
+        DataStream<RowData> stream =
+                dataEvolution
+                        ? ((DataEvolutionMergeIntoAction) merge).buildSource().f0
+                        : ((MergeIntoAction) merge).buildDataStream();
+        restCatalogServer.setRowFilterAuth(identifier, rowFilter);
+        stream.sinkTo(new DiscardingSink<>());
+        assertThatThrownBy(env::execute)
+                .hasStackTraceContaining("MERGE INTO requires full-table access");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshotId);
+
+        restCatalogServer.setRowFilterAuth(identifier, null);
+        mergeAction(dataEvolution, alias, singleParallelismEnv()).run();
+        assertThat(batchSql("SELECT note FROM " + tableName + " ORDER BY id"))
+                .extracting(row -> row.getField(0))
+                .containsExactly("merged", "original");
+    }
+
+    @Test
+    public void testDataEvolutionMergeWithRowIdsChecksQueryAuthBeforeCommit() throws Exception {
+        String tableName = DATABASE_NAME + ".t_row_ids";
+        createAuthTable("t_row_ids", "(id STRING, note STRING)", true, null);
+        batchSql(
+                "INSERT INTO "
+                        + tableName
+                        + " VALUES ('visible', 'original'), ('hidden', 'original')");
+        long rowId =
+                (Long)
+                        batchSql(
+                                        "SELECT _ROW_ID FROM "
+                                                + DATABASE_NAME
+                                                + ".`t_row_ids$row_tracking` WHERE id = 'hidden'")
+                                .get(0)
+                                .getField(0);
+        Identifier identifier = Identifier.create(DATABASE_NAME, "t_row_ids");
+        Table table = flinkCatalog().catalog().getTable(identifier);
+        long snapshotId = table.latestSnapshot().get().id();
+
+        // The source gives the row IDs, so the merge does not read the target; the row filter is
+        // added after the merge checked, when it submits the job.
+        List<Predicate> rowFilter = equalTo(0, "id", DataTypes.STRING(), "visible");
+        assertThatThrownBy(rowIdMergeAction(rowId, rowFilter)::run)
+                .hasStackTraceContaining("MERGE INTO requires full-table access");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshotId);
+
+        restCatalogServer.setRowFilterAuth(identifier, null);
+        rowIdMergeAction(rowId, null).run();
+        assertThat(batchSql("SELECT note FROM " + tableName + " ORDER BY id"))
+                .extracting(row -> row.getField(0))
+                .containsExactly("merged", "original");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    public void testDeleteActionChecksQueryAuthWhenTheJobReads(
+            boolean dataEvolution, boolean filterAll) throws Exception {
+        String tableName = DATABASE_NAME + ".t_delete";
+        createAuthTable(
+                "t_delete",
+                "(id STRING, note STRING, p INT) PARTITIONED BY (p)",
+                dataEvolution,
+                "id,p");
+        batchSql(
+                "INSERT INTO "
+                        + tableName
+                        + " VALUES ('visible', 'original', 1), ('hidden', 'original', 1)");
+        Identifier identifier = Identifier.create(DATABASE_NAME, "t_delete");
+        Table table = flinkCatalog().catalog().getTable(identifier);
+        long snapshotId = table.latestSnapshot().get().id();
+        // A filter on another partition leaves no split to read.
+        List<Predicate> rowFilter =
+                filterAll
+                        ? equalTo(2, "p", DataTypes.INT(), 2)
+                        : equalTo(0, "id", DataTypes.STRING(), "visible");
+
+        restCatalogServer.setRowFilterAuth(identifier, rowFilter);
+        assertThatThrownBy(
+                        new DeleteAction(DATABASE_NAME, "t_delete", "TRUE", catalogOptions())::run)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("DELETE requires full-table access");
+        restCatalogServer.setRowFilterAuth(identifier, null);
+
+        // The row filter is added after the action checked, when it submits the job.
+        DeleteAction delete =
+                new DeleteAction(DATABASE_NAME, "t_delete", "TRUE", catalogOptions()) {
+                    @Override
+                    protected TableResult executeInternal(
+                            List<Transformation<?>> transformations,
+                            List<String> sinkIdentifierNames) {
+                        restCatalogServer.setRowFilterAuth(identifier, rowFilter);
+                        return super.executeInternal(transformations, sinkIdentifierNames);
+                    }
+                };
+        delete.withStreamExecutionEnvironment(singleParallelismEnv());
+        assertThatThrownBy(delete::run)
+                .hasStackTraceContaining("DELETE requires full-table access");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshotId);
+
+        restCatalogServer.setRowFilterAuth(identifier, null);
+        assertThat(batchSql("SELECT * FROM " + tableName))
+                .containsExactlyInAnyOrder(
+                        Row.of("visible", "original", 1), Row.of("hidden", "original", 1));
+        new DeleteAction(DATABASE_NAME, "t_delete", "TRUE", catalogOptions())
+                .withStreamExecutionEnvironment(singleParallelismEnv())
+                .run();
+        assertThat(batchSql("SELECT * FROM " + tableName)).isEmpty();
+    }
+
+    /** Creates a table with query auth, a Data Evolution table or one with the primary key. */
+    private void createAuthTable(
+            String name, String schema, boolean dataEvolution, @Nullable String primaryKey) {
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s %s WITH ('query-auth.enabled'='true', %s)",
+                        DATABASE_NAME,
+                        name,
+                        schema,
+                        dataEvolution
+                                ? "'bucket'='-1', 'data-evolution.enabled'='true',"
+                                        + " 'row-tracking.enabled'='true', 'deletion-vectors.enabled'='true'"
+                                : "'primary-key'='" + primaryKey + "', 'bucket'='1'"));
+    }
+
+    private static List<Predicate> equalTo(int index, String field, DataType type, Object value) {
+        return Collections.singletonList(
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(index, field, type)),
+                        Equal.INSTANCE,
+                        Collections.singletonList(
+                                value instanceof String
+                                        ? BinaryString.fromString((String) value)
+                                        : value)));
+    }
+
+    private static Map<String, Transform> mask(String column, String value) {
+        return Collections.singletonMap(
+                column,
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString(value))));
+    }
+
+    private static StreamExecutionEnvironment singleParallelismEnv() {
+        return StreamExecutionEnvironment.getExecutionEnvironment().setParallelism(1);
+    }
+
+    private DataEvolutionMergeIntoAction rowIdMergeAction(
+            long rowId, @Nullable List<Predicate> lateRowFilter) {
+        DataEvolutionMergeIntoAction merge =
+                new DataEvolutionMergeIntoAction(DATABASE_NAME, "t_row_ids", catalogOptions()) {
+                    @Override
+                    protected TableResult executeInternal(
+                            List<Transformation<?>> transformations,
+                            List<String> sinkIdentifierNames) {
+                        if (lateRowFilter != null) {
+                            restCatalogServer.setRowFilterAuth(
+                                    Identifier.create(DATABASE_NAME, "t_row_ids"), lateRowFilter);
+                        }
+                        return super.executeInternal(transformations, sinkIdentifierNames);
+                    }
+                }.withTargetAlias("T")
+                        .withSourceSqls(
+                                "CREATE TEMPORARY VIEW "
+                                        + DATABASE_NAME
+                                        + ".S AS SELECT CAST("
+                                        + rowId
+                                        + " AS BIGINT) AS rid, 'merged' AS note")
+                        .withSourceTable(DATABASE_NAME + ".S")
+                        .withMergeCondition("T._ROW_ID = S.rid")
+                        .withMatchedUpdateSet("note = S.note")
+                        .withSinkParallelism(1);
+        merge.withStreamExecutionEnvironment(singleParallelismEnv());
+        return merge;
+    }
+
+    private ActionBase mergeAction(
+            boolean dataEvolution, boolean alias, StreamExecutionEnvironment env) {
         String sourceSql =
                 "CREATE TEMPORARY VIEW "
                         + DATABASE_NAME
                         + ".S AS SELECT 'hidden' AS id, 'merged' AS note";
-        ActionBase merge =
-                dataEvolution
-                        ? new DataEvolutionMergeIntoAction(
-                                        DATABASE_NAME, "t_actions", catalogOptions())
-                                .withTargetAlias("T")
-                                .withSourceSqls(sourceSql)
-                                .withSourceTable(DATABASE_NAME + ".S")
-                                .withMergeCondition("T.id = S.id")
-                                .withMatchedUpdateSet("note = S.note")
-                                .withSinkParallelism(1)
-                        : new MergeIntoAction(DATABASE_NAME, "t_actions", catalogOptions())
-                                .withTargetAlias("T")
-                                .withSourceSqls(sourceSql)
-                                .withSourceTable(DATABASE_NAME + ".S")
-                                .withMergeCondition("T.id = S.id")
-                                .withMatchedUpsert(null, "note = S.note");
-        merge.withStreamExecutionEnvironment(
-                StreamExecutionEnvironment.getExecutionEnvironment().setParallelism(1));
-        Table table = flinkCatalog().catalog().getTable(identifier);
-        long snapshotIdBeforeMerge = table.latestSnapshot().get().id();
-        assertThatThrownBy(merge::run)
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("MERGE INTO requires full-table access");
-        assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshotIdBeforeMerge);
-        long snapshotIdBeforeDelete = table.latestSnapshot().get().id();
-        assertThatThrownBy(
-                        () ->
-                                new DeleteAction(
-                                                DATABASE_NAME,
-                                                "t_actions",
-                                                "TRUE",
-                                                catalogOptions())
-                                        .run())
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("DELETE requires full-table access");
-        assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshotIdBeforeDelete);
-
-        restCatalogServer.setRowFilterAuth(identifier, null);
-        restCatalogServer.setColumnMaskingAuth(identifier, Collections.emptyMap());
-        assertThat(batchSql("SELECT * FROM " + tableName))
-                .containsExactlyInAnyOrder(
-                        Row.of("visible", "original"), Row.of("hidden", "original"));
-        merge.run();
-        assertThat(batchSql("SELECT note FROM " + tableName + " ORDER BY id"))
-                .extracting(row -> row.getField(0))
-                .containsExactly("merged", "original");
-        new DeleteAction(DATABASE_NAME, "t_actions", "TRUE", catalogOptions())
-                .withStreamExecutionEnvironment(
-                        StreamExecutionEnvironment.getExecutionEnvironment().setParallelism(1))
-                .run();
-        assertThat(batchSql("SELECT * FROM " + tableName)).isEmpty();
+        String condition = (alias ? "T" : "t_merge") + ".id = S.id";
+        ActionBase merge;
+        if (dataEvolution) {
+            DataEvolutionMergeIntoAction action =
+                    new DataEvolutionMergeIntoAction(DATABASE_NAME, "t_merge", catalogOptions())
+                            .withSourceSqls(sourceSql)
+                            .withSourceTable(DATABASE_NAME + ".S")
+                            .withMergeCondition(condition)
+                            .withMatchedUpdateSet("note = S.note")
+                            .withSinkParallelism(1);
+            merge = alias ? action.withTargetAlias("T") : action;
+        } else {
+            MergeIntoAction action =
+                    new MergeIntoAction(DATABASE_NAME, "t_merge", catalogOptions())
+                            .withSourceSqls(sourceSql)
+                            .withSourceTable(DATABASE_NAME + ".S")
+                            .withMergeCondition(condition)
+                            .withMatchedUpsert(null, "note = S.note");
+            merge = alias ? action.withTargetAlias("T") : action;
+        }
+        merge.withStreamExecutionEnvironment(env);
+        return merge;
     }
 
     @ParameterizedTest
@@ -413,18 +539,9 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         + ")");
         batchSql("INSERT INTO " + tableName + " VALUES (1, 's1'), (2, 's2')");
         Identifier identifier = Identifier.create(DATABASE_NAME, "t_compact");
-        Predicate rowFilter =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(filterAll ? 3 : 1));
-        restCatalogServer.setRowFilterAuth(identifier, Collections.singletonList(rowFilter));
-        restCatalogServer.setColumnMaskingAuth(
-                identifier,
-                Collections.singletonMap(
-                        "ssn",
-                        new ConcatTransform(
-                                Collections.singletonList(BinaryString.fromString("****")))));
+        List<Predicate> rowFilter = equalTo(0, "id", DataTypes.INT(), filterAll ? 3 : 1);
+        restCatalogServer.setRowFilterAuth(identifier, rowFilter);
+        restCatalogServer.setColumnMaskingAuth(identifier, mask("ssn", "****"));
         ActionBase action =
                 sort
                         ? new SortCompactAction(
@@ -436,8 +553,7 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                                 .withOrderColumns("id")
                         : new RescaleAction(DATABASE_NAME, "t_compact", catalogOptions())
                                 .withBucketNum(2);
-        StreamExecutionEnvironment env =
-                StreamExecutionEnvironment.getExecutionEnvironment().setParallelism(1);
+        StreamExecutionEnvironment env = singleParallelismEnv();
         action.withStreamExecutionEnvironment(env);
         assertThatThrownBy(action::build)
                 .isInstanceOf(UnsupportedOperationException.class)
@@ -449,7 +565,7 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
         Table table = flinkCatalog().catalog().getTable(identifier);
         long snapshotId = table.latestSnapshot().get().id();
         action.build();
-        restCatalogServer.setRowFilterAuth(identifier, Collections.singletonList(rowFilter));
+        restCatalogServer.setRowFilterAuth(identifier, rowFilter);
         assertThatThrownBy(env::execute)
                 .hasStackTraceContaining(
                         (sort ? "Sort compaction" : "Rescale") + " requires full-table access");
@@ -504,31 +620,28 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         .catalog()
                         .getTable(new Identifier(DATABASE_NAME, "t_chain", "snapshot"));
         long snapshotId = table.latestSnapshot().get().id();
-        StreamExecutionEnvironment env =
-                StreamExecutionEnvironment.getExecutionEnvironment().setParallelism(1);
+        StreamExecutionEnvironment env = singleParallelismEnv();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         CompactChainTableAction action =
                 new CompactChainTableAction(
                         DATABASE_NAME, "t_chain", catalogOptions(), "dt=20261002", false);
         action.withStreamExecutionEnvironment(env);
-        Map<String, Transform> masking =
-                Collections.singletonMap(
-                        "note",
-                        new ConcatTransform(
-                                Collections.singletonList(BinaryString.fromString("****"))));
+        Map<String, Transform> masking = mask("note", "****");
         Identifier identifier = Identifier.create(DATABASE_NAME, "t_chain");
         List<Identifier> chainIdentifiers =
                 Arrays.asList(
                         identifier,
                         new Identifier(DATABASE_NAME, "t_chain", "snapshot"),
                         new Identifier(DATABASE_NAME, "t_chain", "delta"));
-        chainIdentifiers.forEach(id -> restCatalogServer.setColumnMaskingAuth(id, masking));
-        assertThatThrownBy(action::build)
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Chain table compaction requires full-table access");
-        assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshotId);
-        chainIdentifiers.forEach(
-                id -> restCatalogServer.setColumnMaskingAuth(id, Collections.emptyMap()));
+        // A rule on the table or on either branch alone is enough.
+        for (Identifier chainIdentifier : chainIdentifiers) {
+            restCatalogServer.setColumnMaskingAuth(chainIdentifier, masking);
+            assertThatThrownBy(action::build)
+                    .isInstanceOf(UnsupportedOperationException.class)
+                    .hasMessageContaining("Chain table compaction requires full-table access");
+            assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshotId);
+            restCatalogServer.setColumnMaskingAuth(chainIdentifier, Collections.emptyMap());
+        }
         assertThatCode(action::run).doesNotThrowAnyException();
     }
 
