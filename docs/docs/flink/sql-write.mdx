@@ -79,6 +79,44 @@ expiration, and partition expiration.
 
 For multiple jobs to write the same table, you can refer to [dedicated compaction job](../maintenance/dedicated-compaction#dedicated-compaction-job) for more info.
 
+### Physical Generated Columns
+
+On Flink 1.18 and later, `INSERT INTO` and batch `INSERT OVERWRITE` fill physical generated
+columns omitted from an explicit target column list. Create their definitions through
+[Spark DDL](../spark/sql-ddl#generated-columns) or the Java schema builder's
+`generatedColumn(name, type, expression)`; Flink SQL does not provide DDL syntax for these definitions.
+
+For an existing table with ordinary columns `id`, `name`, `event_time` and generated columns
+`label = UPPER(name)` and `dt = CAST(event_time AS DATE)`:
+
+```sql
+INSERT INTO events (id, name, event_time)
+VALUES (1, 'hello', TIMESTAMP '2026-10-30 12:00:00');
+
+-- label is stored as 'HELLO', and dt as DATE '2026-10-30'.
+```
+
+Paimon evaluates its stored expressions, applying source-column defaults before generation.
+Generation happens before partition routing and bucket assignment and supports ordinary append,
+primary-key, and Data Evolution tables. Explicitly supplied generated values, including NULL,
+are preserved without evaluating or checking the expression. Static partition values are also
+treated as supplied. Paimon enforces stored NOT NULL constraints after generation; generated
+columns are exposed as nullable in the Flink catalog to allow omitted-column placeholders.
+When a generated column belongs to the primary key, the catalog exposes the key through the
+`primary-key` table option instead of a Flink primary-key constraint. The stored Paimon primary
+key and its NOT NULL constraints are preserved.
+
+With the default deduplicate merge engine, updating INSERT inputs provide before images when the
+primary key contains a generated column, so a changed generated key or partition retracts the
+old record. Other merge engines retain their existing upsert and retraction rules.
+Default streaming reads of these tables reconstruct
+before images using checkpointed state holding the previous row per primary key. Projection and
+non-key filtering run after this reconstruction so updates can retract previously matching rows.
+
+`UPDATE` preserves generated values unless explicitly assigned. Flink's virtual computed columns
+(`column AS expression`) retain their existing semantics. On Flink 1.16 and 1.17, supply all
+physical generated values explicitly because those versions do not expose the target column list.
+
 ### Clustering
 
 Clustering groups append-table rows by selected columns to improve data skipping. This write

@@ -27,6 +27,7 @@ import org.apache.paimon.flink.utils.ChangelogModeUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.GeneratedColumnRow;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -34,13 +35,18 @@ import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.types.RowKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.CLUSTERING_COLUMNS;
@@ -65,6 +71,7 @@ public abstract class FlinkTableSinkBase
 
     protected Map<String, String> staticPartitions = new HashMap<>();
     protected boolean overwrite = false;
+    protected boolean rowLevelUpdate = false;
 
     public FlinkTableSinkBase(
             ObjectIdentifier tableIdentifier, Table table, DynamicTableFactory.Context context) {
@@ -82,6 +89,20 @@ public abstract class FlinkTableSinkBase
             return requestedMode;
         } else {
             Options options = Options.fromMap(table.options());
+            if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE
+                    && requestedMode.contains(RowKind.UPDATE_AFTER)
+                    && table.primaryKeys().stream()
+                            .anyMatch(
+                                    key ->
+                                            table.rowType().getField(key).generationExpression()
+                                                    != null)) {
+                // The planner cannot see an omitted key's generating expression. Request old
+                // rows as well so a changed generated key or partition retracts the old record.
+                ChangelogMode.Builder builder = ChangelogMode.newBuilder();
+                requestedMode.getContainedKinds().forEach(builder::addContainedKind);
+                builder.addContainedKind(RowKind.UPDATE_BEFORE);
+                return builder.build();
+            }
             if (options.get(CHANGELOG_PRODUCER) == ChangelogProducer.INPUT) {
                 warnKeyOnlyDeletesIgnored("'changelog-producer' is 'input'");
                 return requestedMode;
@@ -131,6 +152,7 @@ public abstract class FlinkTableSinkBase
                     "Paimon doesn't support streaming INSERT OVERWRITE.");
         }
         String name = tableIdentifier.asSummaryString();
+        int[] generatedColumns = omittedGeneratedColumns(context);
 
         if (table instanceof FormatTable) {
             FormatTable formatTable = (FormatTable) table;
@@ -147,11 +169,19 @@ public abstract class FlinkTableSinkBase
         // Do not sink to log store when overwrite mode
         return new PaimonDataStreamSinkProvider(
                 (dataStream) -> {
+                    DataStream<RowData> input = dataStream;
+                    if (generatedColumns.length > 0) {
+                        input =
+                                input.map(
+                                                new GeneratedColumnMapFunction(
+                                                        table.rowType(), generatedColumns),
+                                                input.getType())
+                                        .name("Paimon generated columns");
+                    }
                     FlinkSinkBuilder builder = createSinkBuilder();
                     builder.forRowData(
                             new DataStream<>(
-                                    dataStream.getExecutionEnvironment(),
-                                    dataStream.getTransformation()));
+                                    input.getExecutionEnvironment(), input.getTransformation()));
                     if (!conf.get(CLUSTERING_INCREMENTAL)
                             || conf.get(CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE)) {
                         builder.clusteringIfPossible(
@@ -170,6 +200,33 @@ public abstract class FlinkTableSinkBase
                 table);
     }
 
+    private int[] omittedGeneratedColumns(Context context) {
+        if (rowLevelUpdate || !GeneratedColumnRow.hasGeneratedColumns(table.rowType())) {
+            return new int[0];
+        }
+        int[][] targets;
+        try {
+            // Flink 1.16 and 1.17 do not expose target columns. Keep their full-row writes working.
+            targets = context.getTargetColumns().orElse(null);
+        } catch (NoSuchMethodError e) {
+            return new int[0];
+        }
+        if (targets == null || targets.length == 0) {
+            return new int[0];
+        }
+        List<String> columnNames =
+                this.context.getCatalogTable().getResolvedSchema().getColumnNames();
+        Set<String> supplied = new HashSet<>(staticPartitions.keySet());
+        for (int[] path : targets) {
+            // Target paths include virtual columns, while the runtime row contains physical ones.
+            supplied.add(columnNames.get(path[0]));
+        }
+        return IntStream.range(0, table.rowType().getFieldCount())
+                .filter(i -> table.rowType().getFields().get(i).generationExpression() != null)
+                .filter(i -> !supplied.contains(table.rowType().getFields().get(i).name()))
+                .toArray();
+    }
+
     protected FlinkSinkBuilder createSinkBuilder() {
         return new FlinkSinkBuilder(table);
     }
@@ -179,6 +236,7 @@ public abstract class FlinkTableSinkBase
         FlinkTableSink copied = new FlinkTableSink(tableIdentifier, table, context);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
+        copied.rowLevelUpdate = rowLevelUpdate;
         return copied;
     }
 

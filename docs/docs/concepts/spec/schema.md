@@ -136,8 +136,9 @@ A top-level field, including a partition field, may define `generationExpression
 Writers compile expressions for omitted columns into Paimon `Transform` operations once at
 initialization. These operations define the automatically generated value, including CAST
 formatting and invalid-input behavior; the write engine's ANSI mode or implicit CAST rules do
-not change that definition. Spark fills omitted columns through the same evaluator, including
-source-column defaults, before writing.
+not change that definition. Spark and Flink 1.18+ SQL inserts with an explicit target column
+list fill omitted generated columns through the same evaluator, including source-column defaults,
+before writing. See [Flink SQL Write](../../flink/sql-write#physical-generated-columns) for details.
 Expressions may reference ordinary top-level fields and compose supported scalar calls, such as
 `YEAR(event_time)`, `UPPER(name)`, `CONCAT(UPPER(name), '-', name)`, and
 `DATE_ADD(CAST(event_time AS DATE), days)`. The expression result type must match the declared

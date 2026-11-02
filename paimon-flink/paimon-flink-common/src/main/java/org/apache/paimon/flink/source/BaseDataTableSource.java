@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions.WatermarkEmitStrategy;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.lookup.FileStoreLookupFunction;
 import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
@@ -43,7 +44,9 @@ import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.LookupTableSource;
@@ -53,7 +56,9 @@ import org.apache.flink.table.connector.source.abilities.SupportsLookupCustomShu
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.AggregateExpression;
+import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.DataType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,6 +67,7 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -83,6 +89,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
+import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -165,7 +172,38 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                             + "Configure 'changelog-producer' to a value other than 'none'.");
         }
 
-        return ChangelogMode.upsert();
+        return needsGeneratedPrimaryKeyNormalization()
+                ? ChangelogMode.all()
+                : ChangelogMode.upsert();
+    }
+
+    @Override
+    public Result applyFilters(List<ResolvedExpression> filters) {
+        if (needsGeneratedPrimaryKeyNormalization()) {
+            // An update leaving a filter must retract its previous matching value first.
+            predicate = null;
+            return Result.of(Collections.emptyList(), filters);
+        }
+        return super.applyFilters(filters);
+    }
+
+    private boolean needsGeneratedPrimaryKeyNormalization() {
+        if (!unbounded
+                || table.primaryKeys().isEmpty()
+                || table.primaryKeys().stream()
+                        .noneMatch(
+                                name ->
+                                        table.rowType().getField(name).generationExpression()
+                                                != null)
+                || context == null
+                || context.getCatalogTable().getResolvedSchema().getPrimaryKey().isPresent()) {
+            return false;
+        }
+        CoreOptions coreOptions = new CoreOptions(Options.fromMap(table.options()));
+        return !coreOptions.primaryKeyNullable()
+                && coreOptions.mergeEngine() != FIRST_ROW
+                && coreOptions.changelogProducer() == CoreOptions.ChangelogProducer.NONE
+                && !options.get(SCAN_REMOVE_NORMALIZE);
     }
 
     @Override
@@ -175,6 +213,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         }
 
         Table scanTable = tableForScan();
+        boolean normalize = needsGeneratedPrimaryKeyNormalization();
 
         WatermarkStrategy<RowData> watermarkStrategy = this.watermarkStrategy;
         Options options = Options.fromMap(scanTable.options());
@@ -202,21 +241,52 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                 new FlinkSourceBuilder(scanTable)
                         .sourceName(tableIdentifier.asSummaryString())
                         .sourceBounded(!unbounded)
-                        .projection(projectFieldsForScan())
-                        .predicate(predicate)
+                        .projection(normalize ? null : projectFieldsForScan())
+                        .predicate(normalize ? null : predicate)
                         .partitionPredicate(partitionPredicate)
-                        .limit(limit)
-                        .watermarkStrategy(watermarkStrategy)
+                        .limit(normalize ? null : limit)
+                        .watermarkStrategy(normalize ? null : watermarkStrategy)
                         .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields());
+        WatermarkStrategy<RowData> finalWatermarkStrategy = watermarkStrategy;
         return new PaimonDataStreamScanProvider(
                 !unbounded,
-                env ->
-                        PostponeMergeOnRead.usesCustomSource(scanTable)
-                                ? sourceBuilder.env(env).build()
-                                : sourceBuilder
-                                        .sourceParallelism(inferSourceParallelism(env))
-                                        .env(env)
-                                        .build(),
+                env -> {
+                    DataStream<RowData> stream =
+                            PostponeMergeOnRead.usesCustomSource(scanTable)
+                                    ? sourceBuilder.env(env).build()
+                                    : sourceBuilder
+                                            .sourceParallelism(inferSourceParallelism(env))
+                                            .env(env)
+                                            .build();
+                    if (normalize) {
+                        stream =
+                                GeneratedPrimaryKeyChangelogNormalizer.normalize(
+                                        stream,
+                                        toLogicalType(scanTable.rowType()),
+                                        scanTable
+                                                .rowType()
+                                                .getFieldIndices(scanTable.primaryKeys()));
+                        int[][] projection = projectFieldsForScan();
+                        if (projection != null) {
+                            NestedProjectedRowData projected =
+                                    NestedProjectedRowData.from(
+                                            toLogicalType(scanTable.rowType()), projection);
+                            stream =
+                                    stream.map(
+                                            (MapFunction<RowData, RowData>) projected::replaceRow,
+                                            InternalTypeInfo.of(
+                                                    org.apache.paimon.flink.Projection.of(
+                                                                    projection)
+                                                            .project(
+                                                                    toLogicalType(
+                                                                            scanTable.rowType()))));
+                        }
+                        if (finalWatermarkStrategy != null) {
+                            stream = stream.assignTimestampsAndWatermarks(finalWatermarkStrategy);
+                        }
+                    }
+                    return stream;
+                },
                 tableIdentifier.asSummaryString(),
                 table,
                 options.getOptional(SCAN_PARALLELISM));
