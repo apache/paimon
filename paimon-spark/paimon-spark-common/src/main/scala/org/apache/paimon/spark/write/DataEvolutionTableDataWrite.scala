@@ -151,6 +151,7 @@ case class DataEvolutionTableDataWrite(
     val writer = writeBuilder
       .newWrite()
       .withWriteType(writeType)
+      .withIOManager(ioManager)
       .asInstanceOf[TableWriteImpl[InternalRow]]
       .getWrite
       .asInstanceOf[AbstractFileStoreWrite[InternalRow]]
