@@ -369,6 +369,11 @@ original history, future and stride must be preserved. See
 [task-local context and anchor selection](pytorch#task-local-context-and-anchor-selection)
 for a metadata-only selection example and distributed ownership guidance.
 
+On data-evolution tables, search queries also expose
+`to_contiguous_window_dataset()`: hits automatically select anchors while a
+separate scan on the same snapshot preserves their history and future context.
+See [search hits as training samples and window anchors](pytorch#search-hits-as-training-samples-and-window-anchors).
+
 The Dataset plans and authorizes all requested columns once, reads only the
 index columns at construction, and reuses the resulting split metadata for
 lazy payload reads across projections and workers.

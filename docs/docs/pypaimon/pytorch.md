@@ -328,6 +328,54 @@ physical file/split boundaries inside those episodes. If context has already
 been divided among ranks, use a local sampler instead of sharding it again
 with a world-size `DistributedSampler`; coordinate rank step counts separately.
 
+### Search hits as training samples and window anchors
+
+On data-evolution tables, vector, full-text, and hybrid queries can directly
+call `to_torch()` or `to_contiguous_window_dataset()`. Both resolve the search
+and its post-filtered row IDs eagerly, then read training values lazily from
+that same snapshot. Reusing the query creates a new Dataset at the next
+execution's snapshot; an existing Dataset keeps its original read view.
+
+```python
+hits = (
+    frames.search(query_embedding, column="embedding", tag_name="train-v1")
+    .pre_filter("task_id = 'pick'")
+    .where("eligible = true")
+    .select(["state", "image", "action"])
+    .limit(1000)
+)
+
+# Train on the matching rows, with ordinary scan().to_torch() options.
+rows = hits.to_torch(streaming=True)
+
+# Use the matching rows as anchors while retaining their surrounding frames.
+windows = hits.to_contiguous_window_dataset(
+    context_filter="task_id = 'pick'",
+    frame_offsets={"state": [-2, -1, 0], "action": list(range(16))},
+    boundary="pad",
+)
+```
+
+For search windows, `pre_filter()`, `where()`, and `limit()` select anchors;
+they do not restrict the context or truncate its groups. The context defaults
+to the entire captured snapshot. Use `context_filter` to restrict it to complete
+episodes for the task. A selected anchor outside that context raises
+`ValueError`. The search supplies `anchor_row_ids`, so passing a separate
+selection is rejected. Stride, boundary handling, per-column offsets,
+transforms, and adapters retain the scan window semantics described above.
+
+`select()` supplies the training projection; windows can override it with
+`columns`. `to_torch()` returns rows in scan order, or in its requested shuffle
+order. Windows retain group/order and stride order. Neither conversion accepts
+`with_score()` or `order_by_score()`. Batch vector queries via `search_vectors`
+return one Dataset per input query, in input-query order, with a shared
+snapshot and context index. The context is read, validated, and sorted once
+for the batch; each Dataset keeps its own anchor selection, read cache, and
+video decoders. The search execution options `execution`, `concurrency`, and
+`ray_remote_args` match `to_arrow()`; training reads use the local PyTorch
+Dataset and its DataLoader workers. Retain the snapshot's files for the whole
+training run, for example with `tag_name="train-v1"`.
+
 ### Resuming a CWD training run
 
 Install `torchdata>=0.11,<0.12` alongside your compatible PyTorch installation.
