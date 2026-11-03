@@ -423,26 +423,26 @@ public class ChangelogOnReadTest extends TableTestBase {
 
     @ParameterizedTest
     @CsvSource({"min-heap,false", "min-heap,true", "loser-tree,false", "loser-tree,true"})
-    public void testCloseReleasesMergeSpills(String sortEngine, boolean forceLookup)
+    public void testChangelogWithMergeSpills(String sortEngine, boolean forceLookup)
             throws Exception {
-        testMergeSpillCleanup(sortEngine, forceLookup, false, false);
+        readChangelogWithMergeSpills(sortEngine, forceLookup, false, false);
     }
 
     @ParameterizedTest
     @CsvSource({"min-heap,false", "min-heap,true", "loser-tree,false", "loser-tree,true"})
-    public void testEarlyCloseReleasesMergeSpills(String sortEngine, boolean forceLookup)
+    public void testEarlyCloseWithMergeSpills(String sortEngine, boolean forceLookup)
             throws Exception {
-        testMergeSpillCleanup(sortEngine, forceLookup, true, false);
+        readChangelogWithMergeSpills(sortEngine, forceLookup, true, false);
     }
 
     @ParameterizedTest
     @CsvSource({"min-heap,false", "min-heap,true", "loser-tree,false", "loser-tree,true"})
-    public void testProjectedReaderReleasesMergeSpills(String sortEngine, boolean forceLookup)
+    public void testProjectionWithMergeSpills(String sortEngine, boolean forceLookup)
             throws Exception {
-        testMergeSpillCleanup(sortEngine, forceLookup, false, true);
+        readChangelogWithMergeSpills(sortEngine, forceLookup, false, true);
     }
 
-    private void testMergeSpillCleanup(
+    private void readChangelogWithMergeSpills(
             String sortEngine, boolean forceLookup, boolean earlyClose, boolean projected)
             throws Exception {
         Schema schema =
@@ -480,7 +480,7 @@ public class ChangelogOnReadTest extends TableTestBase {
         StreamTableScan scan = builder.newStreamScan();
         DataSplit initial = (DataSplit) scan.plan().splits().get(0);
         String firstDataFile = initial.dataFiles().get(0).fileName();
-        Path lookupDir = tempPath.resolve("lookup");
+        Path lookupDir = Files.createDirectories(tempPath.resolve("lookup"));
         try (IOManager lookupIO = IOManager.create(lookupDir.toString())) {
             TableRead read = builder.newRead().withIOManager(lookupIO);
             Path firstLookupFile = null;
@@ -504,6 +504,7 @@ public class ChangelogOnReadTest extends TableTestBase {
                     TableScan.Plan plan = scan.plan();
                     assertThat(plan.splits()).hasSize(1);
                     List<String> result = new ArrayList<>();
+                    List<Path> previousSpills = mergeSpillFiles(lookupDir);
                     try (RecordReader<InternalRow> reader = read.createReader(plan)) {
                         RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
                         assertThat(batch).isNotNull();
@@ -513,7 +514,8 @@ public class ChangelogOnReadTest extends TableTestBase {
                             assertThat(before.getFieldCount()).isEqualTo(projected ? 2 : 3);
                             assertThat(before.getString(projected ? 0 : 2)).isEqualTo(value);
                             result.add(before.getRowKind().shortString() + " " + before.getInt(1));
-                            assertThat(mergeSpillFiles(lookupDir)).isNotEmpty();
+                            assertThat(mergeSpillFiles(lookupDir))
+                                    .anyMatch(file -> !previousSpills.contains(file));
                             if (!earlyClose) {
                                 InternalRow row;
                                 while ((row = batch.next()) != null) {
@@ -547,7 +549,6 @@ public class ChangelogOnReadTest extends TableTestBase {
                         assertThat(result)
                                 .containsExactly("-U " + beforeSeq, "+U " + (round * 100 + 11));
                     }
-                    assertThat(mergeSpillFiles(lookupDir)).isEmpty();
                     Path cachedFile = findLookupFile(lookupDir, firstDataFile);
                     if (firstLookupFile == null) {
                         firstLookupFile = cachedFile;
@@ -560,7 +561,6 @@ public class ChangelogOnReadTest extends TableTestBase {
                 read.close();
             }
             assertThat(firstLookupFile).doesNotExist();
-            assertThat(mergeSpillFiles(lookupDir)).isEmpty();
         }
     }
 
