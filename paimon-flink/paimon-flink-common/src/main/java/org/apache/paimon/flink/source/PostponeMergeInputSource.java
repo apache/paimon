@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PostponeMergePlan;
@@ -32,11 +33,15 @@ import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.core.io.InputStatus;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
 
 /** Emits real-bucket markers and writer-grouped postpone splits for merge-on-read. */
 final class PostponeMergeInputSource extends AbstractNonCoordinatedSource<Split> {
@@ -44,8 +49,13 @@ final class PostponeMergeInputSource extends AbstractNonCoordinatedSource<Split>
     private static final long serialVersionUID = 1L;
 
     private final List<Split> inputs;
+    private final Table table;
+    @Nullable private final String rewriteOperation;
 
-    PostponeMergeInputSource(PostponeMergePlan plan) {
+    PostponeMergeInputSource(
+            PostponeMergePlan plan, Table table, @Nullable String rewriteOperation) {
+        this.table = table;
+        this.rewriteOperation = rewriteOperation;
         this.inputs = new ArrayList<>();
 
         Map<Pair<BinaryRow, Integer>, List<DataSplit>> realBuckets = new LinkedHashMap<>();
@@ -69,6 +79,9 @@ final class PostponeMergeInputSource extends AbstractNonCoordinatedSource<Split>
 
     @Override
     public SourceReader<Split, SimpleSourceSplit> createReader(SourceReaderContext readerContext) {
+        if (rewriteOperation != null) {
+            rejectRewriteUnderQueryAuth(table, rewriteOperation);
+        }
         return new Reader();
     }
 

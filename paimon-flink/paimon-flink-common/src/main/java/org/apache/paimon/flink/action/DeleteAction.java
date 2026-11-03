@@ -39,6 +39,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
+import static org.apache.paimon.CoreOptions.SCAN_REWRITE_OPERATION;
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
 
 /** Delete from table action for Flink, dispatching by table type. */
 public class DeleteAction extends TableActionBase {
@@ -86,6 +88,7 @@ public class DeleteAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
+        rejectRewriteUnderQueryAuth(table, "DELETE");
         handleSqls();
         if (dataEvolutionDelete != null) {
             dataEvolutionDelete.runInternal().await();
@@ -116,10 +119,11 @@ public class DeleteAction extends TableActionBase {
         Table queriedTable =
                 batchTEnv.sqlQuery(
                         String.format(
-                                "SELECT * FROM `%s`.`%s`.`%s` WHERE %s",
+                                "SELECT * FROM `%s`.`%s`.`%s` /*+ OPTIONS('%s'='DELETE') */ WHERE %s",
                                 catalogName,
                                 identifier.getDatabaseName(),
                                 identifier.getObjectName(),
+                                SCAN_REWRITE_OPERATION.key(),
                                 filter));
 
         List<DataStructureConverter<Object, Object>> converters =

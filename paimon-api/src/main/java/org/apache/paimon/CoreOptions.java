@@ -2447,6 +2447,15 @@ public class CoreOptions implements Serializable {
                             "Enable query auth to give Catalog the opportunity to perform "
                                     + "column level and row level permission validation on queries.");
 
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<String> SCAN_REWRITE_OPERATION =
+            key("scan.rewrite-operation")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The rewrite reading this table, which fails when the read is under "
+                                    + "row filters or column masks.");
+
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
             key("materialized-table.definition-query")

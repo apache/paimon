@@ -39,6 +39,8 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.Collections;
 
+import static org.apache.paimon.CoreOptions.SCAN_REWRITE_OPERATION;
+
 /** Internal implementation which logically deletes rows from a Data Evolution append table. */
 class DataEvolutionDelete implements Serializable {
 
@@ -91,12 +93,14 @@ class DataEvolutionDelete implements Serializable {
         String query =
                 String.format(
                         "SELECT `_ROW_ID` FROM `%s`.`%s`.`%s$row_tracking` "
-                                + "/*+ OPTIONS('scan.snapshot-id'='%d', '%s'='full') */ WHERE %s",
+                                + "/*+ OPTIONS('scan.snapshot-id'='%d', '%s'='full', '%s'='DELETE') */"
+                                + " WHERE %s",
                         action.catalogName,
                         action.identifier.getDatabaseName(),
                         action.identifier.getObjectName(),
                         baseSnapshotId,
                         CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(),
+                        SCAN_REWRITE_OPERATION.key(),
                         filter);
         LOG.info("Data-evolution delete source query: {}", query);
 

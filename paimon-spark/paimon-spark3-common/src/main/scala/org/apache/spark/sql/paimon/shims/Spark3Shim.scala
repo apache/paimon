@@ -282,6 +282,12 @@ class Spark3Shim extends SparkShim {
     relation.copy(table = table, output = output)
   }
 
+  override def copyDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      options: CaseInsensitiveStringMap): DataSourceV2Relation = {
+    relation.copy(options = options)
+  }
+
   override def createDataSourceV2Relation(
       table: Table,
       catalog: Option[CatalogPlugin],

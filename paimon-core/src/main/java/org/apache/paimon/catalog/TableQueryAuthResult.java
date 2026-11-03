@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.And;
@@ -28,6 +29,8 @@ import org.apache.paimon.predicate.PredicateRemapper;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
@@ -35,7 +38,9 @@ import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.system.RowTrackingTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -140,6 +145,53 @@ public class TableQueryAuthResult implements Serializable {
             throw new UnsupportedOperationException(
                     "Search is not supported on a query-auth table: the index ranks raw values, "
                             + "which a column mask invalidates.");
+        }
+    }
+
+    public static void rejectRewriteUnderQueryAuth(@Nullable Table table, String operation) {
+        if (table instanceof RowTrackingTable) {
+            // Data Evolution rewrites read the table through its row tracking table.
+            rejectRewriteUnderQueryAuth(((RowTrackingTable) table).wrapped(), operation);
+            return;
+        }
+        if (table instanceof FileStoreTable) {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            CoreOptions options = fileStoreTable.coreOptions();
+            if (options.queryAuthEnabled()) {
+                CatalogEnvironment environment = fileStoreTable.catalogEnvironment();
+                rejectRewriteUnderQueryAuthRules(
+                        environment.tableQueryAuth(options).auth(null), operation);
+                // A chain table reads its branches with the main table's identifier.
+                Identifier identifier = environment.identifier();
+                if (identifier != null
+                        && !identifier.getBranchNameOrDefault().equals(options.branch())) {
+                    Identifier branch =
+                            new Identifier(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    options.branch());
+                    rejectRewriteUnderQueryAuthRules(
+                            environment.copy(branch).tableQueryAuth(options).auth(null), operation);
+                }
+            }
+            if (fileStoreTable instanceof FallbackReadFileStoreTable) {
+                rejectRewriteUnderQueryAuth(
+                        ((FallbackReadFileStoreTable) fileStoreTable).other(), operation);
+            }
+        }
+    }
+
+    public static void rejectRewriteUnderQueryAuthRules(List<Split> splits, String operation) {
+        for (Split split : splits) {
+            rejectRewriteUnderQueryAuthRules(Splits.authResult(split), operation);
+        }
+    }
+
+    private static void rejectRewriteUnderQueryAuthRules(
+            @Nullable TableQueryAuthResult authResult, String operation) {
+        if (authResult != null && authResult.hasRules()) {
+            throw new UnsupportedOperationException(
+                    operation + " requires full-table access without row filters or column masks.");
         }
     }
 
