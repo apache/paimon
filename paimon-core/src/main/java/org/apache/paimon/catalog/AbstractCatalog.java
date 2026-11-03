@@ -29,6 +29,7 @@ import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.operation.EntropyInjectTemplateFilesDeletion;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -392,9 +393,24 @@ public abstract class AbstractCatalog implements Catalog {
                 FileIO tableFileIO = fileIO(tablePath);
                 SchemaManager schemaManager = new FileSystemSchemaManager(tableFileIO, tablePath);
                 externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
+                FileStoreTable table = (FileStoreTable) getTable(identifier);
+                boolean isExternal = loadTableMetadata(identifier).isExternal();
+                Optional<TableSchema> latestMainSchema = schemaManager.latest();
+                if (!isExternal
+                        && latestMainSchema.isPresent()
+                        && EntropyInjectTemplateFilesDeletion.isTemplate(latestMainSchema.get())) {
+                    EntropyInjectTemplateFilesDeletion.delete(table);
+                }
                 for (String branch : FileSystemBranchManager.branches(tableFileIO, tablePath)) {
-                    externalPaths.addAll(
-                            getSchemaExternalPaths(schemaManager.copyWithBranch(branch).listAll()));
+                    SchemaManager schemaBranch = schemaManager.copyWithBranch(branch);
+                    externalPaths.addAll(getSchemaExternalPaths(schemaBranch.listAll()));
+                    Optional<TableSchema> latestBranchSchema = schemaBranch.latest();
+                    if (!isExternal
+                            && latestBranchSchema.isPresent()
+                            && EntropyInjectTemplateFilesDeletion.isTemplate(
+                                    latestBranchSchema.get())) {
+                        EntropyInjectTemplateFilesDeletion.delete(table.switchToBranch(branch));
+                    }
                 }
             }
         }

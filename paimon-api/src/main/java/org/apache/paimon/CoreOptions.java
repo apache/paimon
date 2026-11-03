@@ -5826,6 +5826,12 @@ public class CoreOptions implements Serializable {
                 "entropy-inject",
                 "When writing a new file, a path is chosen based on the hash value of the file's content."),
 
+        ENTROPY_INJECT_TEMPLATE(
+                "entropy-inject-template",
+                "Uses a single path template in data-file.external-paths containing a '{hash}' placeholder. "
+                        + "The placeholder is replaced in place by hash directories computed from the file name. "
+                        + "Place '{hash}' before the database and table directories to share object storage prefixes across tables."),
+
         WEIGHTED(
                 "weight-robin",
                 "When writing a new file, a path is chosen based on configured weights.");
