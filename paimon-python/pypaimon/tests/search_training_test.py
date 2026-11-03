@@ -15,8 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from unittest.mock import patch
+import pickle
+from unittest.mock import Mock, patch
 
+import numpy as np
 import pyarrow as pa
 import pytest
 import torch
@@ -25,6 +27,7 @@ import pypaimon.multimodal as pm
 from pypaimon import CatalogFactory, Schema
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
 from pypaimon.multimodal.query import ScanQuery, VectorQuery
+from pypaimon.multimodal import window_dataset
 from pypaimon.table.row.blob import BlobDescriptor
 
 
@@ -214,6 +217,79 @@ def test_batch_search_keeps_query_specific_anchors(frames):
         [{"state": 2, "action": 12}], [{"state": 5, "action": 15}]]
     filtered = query.where("frame_index = 5").to_contiguous_window_dataset()
     assert [len(dataset) for dataset in filtered] == [0, 1]
+
+
+@pytest.mark.parametrize("predicate,expected", [
+    (None, [[1, 2, 3], [4, 5, 6], [1, 2, 3]]),
+    ("frame_index = 5", [None, [4, 5, 6], None]),
+    ("frame_index < 0", [None, None, None]),
+])
+def test_batch_windows_read_and_retain_context_once(frames, predicate, expected):
+    query = (frames.search_vectors([[2., 0.], [5., 0.], [2., 0.]])
+             .pre_filter("eligible = true").select(["state"]).limit(1))
+    if predicate is not None:
+        query.where(predicate)
+    with patch.object(window_dataset, "_read_window_index", wraps=window_dataset._read_window_index) as read:
+        windows = query.to_contiguous_window_dataset(
+            frame_offsets={"state": [-1, 0, 1]}, boundary="error")
+    assert read.call_count == 1
+    assert [dataset[0]["state"] if len(dataset) else None for dataset in windows] == expected
+    for dataset in windows[1:]:
+        assert dataset._splits is windows[0]._splits
+        for name in ("_row_ids", "_group_starts", "_group_lengths", "_group_first_orders"):
+            assert np.shares_memory(getattr(dataset, name), getattr(windows[0], name))
+            assert not getattr(dataset, name).flags.writeable
+        assert dataset._plans is not windows[0]._plans
+        assert dataset.column_transforms is not windows[0].column_transforms
+
+
+def test_batch_window_views_keep_stride_checkpoints_and_worker_reads(frames):
+    query = search(frames, "batch").limit(1)
+    kwargs = {"frame_offsets": {"state": [-1, 0, 1]}, "boundary": "error"}
+    windows = query.to_contiguous_window_dataset(**kwargs)
+    state = windows[0].state_dict()
+    standalone = (frames.scan(snapshot_id=windows[0].snapshot_id).select(["state", "action"])
+                  .to_contiguous_window_dataset(anchor_row_ids=[2], **kwargs))
+    standalone.load_state_dict(state)
+    with pytest.raises(ValueError, match="different CWD"):
+        windows[1].load_state_dict(state)
+    windows[0][0]  # Warm one view's local read plan before serialization.
+    assert windows[0]._plans
+    assert not windows[1]._plans
+    restored = pickle.loads(pickle.dumps(windows))
+    assert restored[0]._row_ids is restored[1]._row_ids
+    assert not restored[0]._plans and not restored[1]._plans
+    restored[0].load_state_dict(state)
+    loader = torch.utils.data.DataLoader(
+        restored[1], batch_size=None, num_workers=1, multiprocessing_context="spawn")
+    assert [sample["state"] for sample in loader] == [[4, 5, 6]]
+    strided = query.to_contiguous_window_dataset(stride=2, **kwargs)
+    assert [len(dataset) for dataset in strided] == [1, 0]
+    assert strided[0][0]["state"] == [1, 2, 3]
+
+
+def test_batch_window_views_own_video_collators(tmp_path):
+    from pypaimon.table.row.blob import Blob
+
+    table = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
+        "video", schema=pa.schema([
+            ("episode_index", pa.int64()), ("frame_index", pa.int64()),
+            ("embedding", pa.list_(pa.float32(), 2)), ("video", pa.large_binary()),
+        ]), options={"file.format": "parquet", "vector.file.format": "parquet",
+                     "vector-index.search-mode": "full", "video-frame-field": "video"})
+    video = tmp_path / "episode.mp4"
+    video.write_bytes(b"video-content")
+    table.add_video(Blob.from_local(str(video)), [
+        {"episode_index": 0, "frame_index": step, "embedding": [float(step), 0.]}
+        for step in range(3)])
+    query = table.search_vectors([[0., 0.], [2., 0.]]).limit(1)
+    with patch.object(window_dataset, "VideoFrameCollator", side_effect=lambda *args, **kwargs: Mock()):
+        first, second = query.to_contiguous_window_dataset(columns=["video"])
+        assert first._video_collators["video"] is not second._video_collators["video"]
+        first.close()
+        first._video_collators["video"].close.assert_called_once()
+        second._video_collators["video"].close.assert_not_called()
+        second.close()
 
 
 @pytest.mark.parametrize("streaming", [True, False])

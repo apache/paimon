@@ -714,11 +714,12 @@ class _PreFilterQuery(ScanQuery):
         context._projection = query._projection
         context._predicate = predicate
 
-        def convert(rows):
-            return context.to_contiguous_window_dataset(
-                anchor_row_ids=rows.column(SpecialFields.ROW_ID.name).to_pylist(), **kwargs)
-
-        return [convert(rows) for rows in matches] if isinstance(matches, list) else convert(matches)
+        if isinstance(matches, list):
+            from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
+            return ContiguousWindowDataset._from_anchor_selections(
+                context, [rows.column(SpecialFields.ROW_ID.name).to_pylist() for rows in matches], **kwargs)
+        return context.to_contiguous_window_dataset(
+            anchor_row_ids=matches.column(SpecialFields.ROW_ID.name).to_pylist(), **kwargs)
 
 
 class VectorQuery(_PreFilterQuery):

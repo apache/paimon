@@ -24,6 +24,7 @@ import operator
 import pickle
 import random
 from functools import partial
+from itertools import chain
 
 import numpy as np
 import pyarrow as pa
@@ -193,13 +194,17 @@ class ContiguousWindowDataset(Dataset):
         self.snapshot_id = plan.snapshot_id
         self._table = _pin_table(query._table, self.snapshot_id)
         self._splits = plan.splits()
+        self._build_index(index, anchor_row_ids)
+        self._reset_read_state()
+
+    def _reset_read_state(self):
         self._plans = {}
         self._video_collators = {
             name: VideoFrameCollator(
                 self._table,
                 video_column=name,
                 decoder_factory=partial(
-                    _open_default_video_decoder, backend=video_backend),
+                    _open_default_video_decoder, backend=self.video_backend),
                 decode_batch_fn=_decode_video_frames,
                 output_column=name,
                 collate_fn=list,
@@ -207,13 +212,41 @@ class ContiguousWindowDataset(Dataset):
             )
             for name in self._video_columns
         }
-        self._build_index(index, anchor_row_ids)
         self._checkpoint_identity = None
 
     @classmethod
     def from_query(cls, query, **kwargs):
         """Build a contiguous-window Dataset from a ``ScanQuery``."""
         return cls(query, **kwargs)
+
+    @classmethod
+    def _from_anchor_selections(cls, query, anchor_selections, **kwargs):
+        """Share one validated context and authorized plan across a search batch."""
+        if not anchor_selections:
+            return []
+        context = cls(query, anchor_row_ids=dict.fromkeys(chain.from_iterable(anchor_selections)), **kwargs)
+        for name in ("_row_ids", "_group_starts", "_group_lengths", "_group_first_orders"):
+            getattr(context, name).flags.writeable = False
+        # Schedule and check boundaries only once, over the union of selected
+        # anchors. Each view then filters this small schedule, not the context.
+        anchor_ids = pa.array(context._row_ids[
+            context._group_starts[context._anchor_groups] + context._anchor_starts])
+        datasets = []
+        for selected in anchor_selections:
+            mask = pc.is_in(anchor_ids, value_set=pa.array(selected, type=pa.int64())).to_numpy(
+                zero_copy_only=False)
+            dataset = copy.copy(context)
+            dataset._anchor_groups = context._anchor_groups[mask]
+            dataset._anchor_starts = context._anchor_starts[mask]
+            for name in ("columns", "anchor_columns", "_video_columns"):
+                setattr(dataset, name, list(getattr(context, name)))
+            for name in ("frame_offsets", "column_transforms", "pad_values"):
+                setattr(dataset, name, dict(getattr(context, name)))
+            dataset._read_groups = {key: list(columns) for key, columns in context._read_groups.items()}
+            # Readers, decoders and checkpoint identity belong to each view.
+            dataset._reset_read_state()
+            datasets.append(dataset)
+        return datasets
 
     def __len__(self):
         return int(self._anchor_groups.size)
