@@ -468,16 +468,24 @@ For an upsert, concurrent inserts or changes to the `ON` columns can change
 which source rows match. The retry reevaluates target groups whose read or
 written columns changed, as well as newly inserted rows in new partitions,
 and recomputes the unmatched source rows against the complete latest target.
-It regenerates the insert files and aborts the old staged insert files;
+It regenerates the insert files and aborts superseded staged update and insert files;
 unaffected staged update files are reused, including when concurrent writers
 only changed columns the MERGE neither reads nor writes.
-The source can be scanned again; `data-evolution.merge-into.source-persist`
-can cache it for reuse within the statement.
+When automatic logical retries are eligible and `commit.max-retries` is
+positive, Spark materializes the referenced source columns in a local checkpoint before
+writing target files. Initial evaluation and retries reuse that result,
+including when a concurrent source write invalidates Spark's table cache.
+The checkpoint is released on success or failure. A retry uses the frozen
+source for self-merges too, rather than substituting the latest target values.
+`data-evolution.merge-into.source-persist` retains its existing cache behavior
+for statements outside this automatic retry path.
 
 Logical-update retries use `commit.max-retries`, `commit.timeout`, and the
 commit retry wait options. They are not attempted for statements with delete
 actions, nondeterministic expressions, subqueries in expressions, or an
-explicitly selected target snapshot. Staged update files must be normal data
+explicitly selected target snapshot. They also retain the original conflict
+behavior when MERGE references complex source columns (structs, arrays, or
+maps), to preserve nested column pruning. Staged update files must be normal data
 files; update commits carrying index-file changes retain their
 original conflict behavior. Spark V1 `UPDATE` retains the separate retry
 policy described above.

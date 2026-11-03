@@ -21,14 +21,16 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.Snapshot
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.errors.ErrorMessages
+import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
+import org.apache.paimon.table.sink.{BatchTableCommit, BatchWriteBuilder, CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.catalyst.QueryPlanningTracker
 import org.apache.spark.sql.functions.{col, lit, udf}
+import org.mockito.Mockito.{doThrow, mock, verify, when => mockWhen}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
@@ -319,20 +321,22 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
   }
 
   for (
+    withInsert <- Seq(false, true);
     (dependency, action, firstValue, secondValue) <- Seq(
       ("condition", "WHEN MATCHED AND t.status = 'pending' THEN UPDATE SET b = t.b + 1", 12, 2),
       ("assignment", "WHEN MATCHED THEN UPDATE SET b = t.b + length(t.status)", 18, 6)
     )
   ) {
-    test(s"upsert retry refreshes a column read by the matched $dependency") {
+    test(s"merge retry refreshes a matched $dependency dependency with insert $withInsert") {
       withTable("t") {
         createTable()
         sql("INSERT INTO t VALUES (1, 1, 'pending')")
         sql("INSERT INTO t VALUES (2, 2, 'pending')")
         val merge = pinnedMerge(
           "MERGE INTO t USING (SELECT id FROM VALUES (1), (2), (3) s(id)) s " +
-            s"ON t.id = s.id $action " +
-            "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')")
+            s"ON t.id = s.id $action " + (if (withInsert) {
+                                            "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')"
+                                          } else ""))
 
         concurrentMerge("b = t.b + 10")
         sql(
@@ -342,9 +346,235 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
 
         checkAnswer(
           sql("SELECT id, b FROM t"),
-          Seq(Row(1, firstValue), Row(2, secondValue), Row(3, 0)))
+          Seq(Row(1, firstValue), Row(2, secondValue)) ++
+            (if (withInsert) Seq(Row(3, 0)) else Nil))
       }
     }
+  }
+
+  for (persistSource <- Seq(false, true); withInsert <- Seq(false, true)) {
+    test(s"retry keeps one source snapshot with persist $persistSource and insert $withInsert") {
+      withTable("t", "src") {
+        createTable(s"'data-evolution.merge-into.source-persist' = '$persistSource',")
+        sql("INSERT INTO t VALUES (1, 1, 'pending')")
+        sql("INSERT INTO t VALUES (2, 2, 'pending')")
+        sql("CREATE TABLE src (id INT, delta INT)")
+        sql("INSERT INTO src VALUES (1, 10), (2, 10), (3, 10)")
+        var attempts = 0
+        val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
+        val merge = interleavedMerge(
+          "MERGE INTO t USING src s ON t.id = s.id WHEN MATCHED THEN UPDATE SET b = s.delta " +
+            (if (withInsert) {
+               "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, s.delta, 'new')"
+             } else ""),
+          _ => {
+            attempts += 1
+            if (attempts == 1) {
+              sql("INSERT OVERWRITE src VALUES (1, 20), (2, 20), (4, 20)")
+              concurrentMerge("b = t.b + 100")
+            }
+          }
+        )
+        merge.run(spark)
+
+        checkAnswer(
+          sql("SELECT id, b FROM t"),
+          Seq(Row(1, 10), Row(2, 10)) ++ (if (withInsert) Seq(Row(3, 10)) else Nil))
+        assert(attempts == 2)
+        assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
+      }
+    }
+  }
+
+  test("self merge retries keep the original source values") {
+    withTable("t") {
+      createTable()
+      sql("INSERT INTO t VALUES (1, 1, 'pending')")
+      sql("INSERT INTO t VALUES (2, 2, 'pending')")
+      var attempts = 0
+      val merge = interleavedMerge(
+        "MERGE INTO t AS t USING t AS s ON t._ROW_ID = s._ROW_ID " +
+          "WHEN MATCHED THEN UPDATE SET b = s.b + 1",
+        _ => {
+          attempts += 1
+          if (attempts == 1) concurrentMerge("b = t.b + 100")
+        }
+      )
+      merge.run(spark)
+
+      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 2), Row(2, 3)))
+      assert(attempts == 2)
+    }
+  }
+
+  test("failed retry insert staging cleans unpublished files and keeps its original error") {
+    withTable("t") {
+      createTable()
+      sql("INSERT INTO t VALUES (1, 1, 'pending')")
+      sql("INSERT INTO t VALUES (2, 2, 'pending')")
+      val merge = interleavedMerge(
+        "MERGE INTO t USING (SELECT id FROM VALUES (1), (2), (3) s(id)) s ON t.id = s.id " +
+          "WHEN MATCHED THEN UPDATE SET b = t.b + 1 " +
+          "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')",
+        _ => concurrentMerge("b = t.b + 100"),
+        failInsertAttempt = 2
+      )
+
+      val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
+      val error = intercept[RuntimeException](merge.run(spark))
+      assert(error.getMessage == "retry insert staging failed")
+      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 101), Row(2, 2)))
+      assertOnlyLiveDataFiles()
+      assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
+    }
+  }
+
+  test("a failure after publication does not delete committed files") {
+    withTable("t") {
+      createTable()
+      sql("INSERT INTO t VALUES (1, 1, 'pending')")
+      var attempts = 0
+      val merge = interleavedMerge(
+        "MERGE INTO t USING (SELECT 1 AS id UNION ALL SELECT 2 AS id) s ON t.id = s.id " +
+          "WHEN MATCHED THEN UPDATE SET b = t.b + 1 " +
+          "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')",
+        _ => {
+          attempts += 1
+          if (attempts == 1) concurrentMerge("b = t.b + 100")
+        },
+        afterCommit = () => throw new RuntimeException("publication response failed")
+      )
+
+      val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
+      val error = intercept[RuntimeException](merge.run(spark))
+      assert(error.getMessage == "publication response failed")
+      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 102), Row(2, 0)))
+      assertOnlyLiveDataFiles()
+      assert(attempts == 2)
+      assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
+    }
+  }
+
+  for (needsSourceColumn <- Seq(false, true)) {
+    test(s"source freezing prunes unused columns with source reference=$needsSourceColumn") {
+      withTable("t", "src") {
+        createTable()
+        sql("INSERT INTO t VALUES (1, 1, 'pending')")
+        sql("CREATE TABLE src (id INT)")
+        sql("INSERT INTO src VALUES (1)")
+        spark.udf.register(
+          "unused_retry_source",
+          (id: Int) => {
+            if (id >= 0) throw new IllegalStateException("unused source column evaluated") else id
+          })
+        try {
+          var attempts = 0
+          val on = if (needsSourceColumn) "t.id = s.id" else "t.id = 1"
+          val merge = interleavedMerge(
+            "MERGE INTO t USING (SELECT id, unused_retry_source(id) AS unused FROM src) s " +
+              s"ON $on WHEN MATCHED THEN UPDATE SET b = t.b + 1",
+            _ => {
+              attempts += 1
+              if (attempts == 1) concurrentMerge("b = t.b + 100")
+            }
+          )
+          val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
+          merge.run(spark)
+          checkAnswer(sql("SELECT b FROM t"), Seq(Row(102)))
+          assert(attempts == 2)
+          assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
+        } finally {
+          sql("DROP TEMPORARY FUNCTION IF EXISTS unused_retry_source")
+        }
+      }
+    }
+  }
+
+  test("complex source references retain nested pruning and the original conflict behavior") {
+    withTable("t", "src") {
+      createTable()
+      sql("INSERT INTO t VALUES (1, 1, 'pending')")
+      sql("CREATE TABLE src (id INT)")
+      sql("INSERT INTO src VALUES (1)")
+      spark.udf.register(
+        "unused_nested_retry_source",
+        (id: Int) => {
+          if (id >= 0) throw new IllegalStateException("unused nested source evaluated") else id
+        })
+      try {
+        val statement =
+          "MERGE INTO t USING (SELECT named_struct('id', id, " +
+            "'unused', unused_nested_retry_source(id)) AS k FROM src) s " +
+            "ON t.id = s.k.id WHEN MATCHED THEN UPDATE SET b = t.b + 1"
+        val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
+        analyzedMerge(statement).run(spark)
+        checkAnswer(sql("SELECT b FROM t"), Seq(Row(2)))
+        var attempts = 0
+        val merge = interleavedMerge(
+          statement,
+          _ => {
+            attempts += 1
+            concurrentMerge("b = t.b + 100")
+          })
+        val error = intercept[RuntimeException](merge.run(spark))
+        assert(DataEvolutionMergeConflictRetry.isUpdateConflict(error))
+        assert(attempts == 1)
+        checkAnswer(sql("SELECT b FROM t"), Seq(Row(102)))
+        assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
+      } finally {
+        sql("DROP TEMPORARY FUNCTION IF EXISTS unused_nested_retry_source")
+      }
+    }
+  }
+
+  test("source materialization failure releases its checkpoint before any target write") {
+    withTable("t", "src") {
+      createTable()
+      sql("INSERT INTO t VALUES (1, 1, 'pending')")
+      sql("CREATE TABLE src (id INT)")
+      sql("INSERT INTO src VALUES (1)")
+      spark.udf.register(
+        "fail_retry_source",
+        (id: Int) => {
+          if (id >= 0) throw new IllegalStateException("source materialization failed") else id
+        })
+      try {
+        val merge = analyzedMerge(
+          "MERGE INTO t USING (SELECT id, fail_retry_source(id) AS delta FROM src) s " +
+            "ON t.id = s.id WHEN MATCHED THEN UPDATE SET b = s.delta")
+        val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
+        val error = intercept[Exception](merge.run(spark))
+        assert(
+          Iterator
+            .iterate[Throwable](error)(_.getCause)
+            .takeWhile(_ != null)
+            .exists(
+              cause =>
+                Option(cause.getMessage).exists(_.contains("source materialization failed"))))
+        assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
+        checkAnswer(sql("SELECT b FROM t"), Seq(Row(1)))
+        assertOnlyLiveDataFiles()
+      } finally {
+        sql("DROP TEMPORARY FUNCTION IF EXISTS fail_retry_source")
+      }
+    }
+  }
+
+  test("abort cleanup errors do not replace the staging failure") {
+    val table = mock(classOf[FileStoreTable])
+    val builder = mock(classOf[BatchWriteBuilder])
+    val commit = mock(classOf[BatchTableCommit])
+    val messages = Seq(mock(classOf[CommitMessage]))
+    val original = new RuntimeException("staging failed")
+    val cleanup = new RuntimeException("cleanup failed")
+    mockWhen(table.newBatchWriteBuilder()).thenReturn(builder)
+    mockWhen(builder.newCommit()).thenReturn(commit)
+    doThrow(cleanup).when(commit).abort(messages.asJava)
+
+    DataEvolutionMergeConflictRetry.abortUnpublished(table, messages, original)
+
+    assert(original.getSuppressed.toSeq == Seq(cleanup))
+    verify(commit).close()
   }
 
   test("upsert retries preserve unaffected update files across repeated conflicts") {
@@ -428,12 +658,57 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
               .pathFactory()
               .createDataFilePathFactory(message.partition(), message.bucket())
             files(Seq(message))
-              .filter(_.firstRowId() == null)
+              .filter(file => !liveNames.contains(file.fileName()))
               .flatMap(_.collectFiles(factory).asScala)
         })
       assert(abandonedPaths.nonEmpty)
       assert(abandonedPaths.forall(path => !table.fileIO().exists(path)))
     }
+  }
+
+  private def interleavedMerge(
+      statement: String,
+      beforeCommit: Seq[CommitMessage] => Unit,
+      failInsertAttempt: Int = 0,
+      afterCommit: () => Unit = () => ()): MergeIntoPaimonDataEvolutionTable = {
+    val original = analyzedMerge(statement)
+    new MergeIntoPaimonDataEvolutionTable(
+      original.v2Table,
+      original.targetTable,
+      original.sourceTable,
+      original.matchedCondition,
+      original.matchedActions,
+      original.notMatchedActions,
+      original.notMatchedBySourceActions
+    ) {
+      override lazy val writer: PaimonSparkWriter =
+        new InterleavingMergeWriter(table, beforeCommit, failInsertAttempt, afterCommit)
+    }
+  }
+
+  private def assertOnlyLiveDataFiles(): Unit = {
+    val table = loadTable("t")
+    val splits = table
+      .newSnapshotReader()
+      .read()
+      .splits()
+      .asScala
+      .collect { case split: DataSplit => split }
+    val live = splits.flatMap(_.dataFiles().asScala).map(_.fileName()).toSet
+    val physical = splits
+      .map(_.bucketPath())
+      .distinct
+      .flatMap {
+        bucket =>
+          table
+            .fileIO()
+            .listStatus(new Path(bucket))
+            .toSeq
+            .filter(file => !file.isDir() && file.getPath.getName.startsWith("data-"))
+            .map(_.getPath.getName)
+      }
+      .toSet
+    assert(physical == live)
   }
 
   private def createTable(extraOptions: String = ""): Unit = {
@@ -476,11 +751,24 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
 // the writer's normal write closures are sent to executors.
 private class InterleavingMergeWriter(
     fileStoreTable: FileStoreTable,
-    @transient private val beforeCommit: Seq[CommitMessage] => Unit)
+    @transient private val beforeCommit: Seq[CommitMessage] => Unit,
+    private val failInsertAttempt: Int = 0,
+    @transient private val afterCommit: () => Unit = () => ())
   extends PaimonSparkWriter(fileStoreTable) {
+
+  @transient private var insertAttempt = 0
+
+  override def write(data: DataFrame): Seq[CommitMessage] = {
+    insertAttempt += 1
+    if (insertAttempt == failInsertAttempt) {
+      throw new RuntimeException("retry insert staging failed")
+    }
+    super.write(data)
+  }
 
   override def commit(messages: Seq[CommitMessage], operation: Snapshot.Operation): Unit = {
     beforeCommit(messages)
     super.commit(messages, operation)
+    afterCommit()
   }
 }
