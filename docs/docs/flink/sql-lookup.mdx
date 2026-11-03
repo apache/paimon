@@ -281,6 +281,47 @@ CALL sys.query_service('default.customers', 1);
 
 </Tabs>
 
+### Full Cache Query Service
+
+By default, Query Service uses `query-service.cache=PARTIAL`, which loads lookup files on demand.
+Set `query-service.cache=FULL` on the dimension table **before starting the service** to materialize
+its rows in the service's local key-value state:
+
+```sql
+ALTER TABLE customers SET ('query-service.cache' = 'FULL');
+CALL sys.query_service('default.customers', 4);
+```
+
+Each executor loads only the partition/bucket pairs assigned to it by the existing query-service
+routing. The service is registered after all executors finish their initial load. Multiple lookup
+jobs share these caches; increasing a lookup job's parallelism does not create additional full
+copies in that job. Executors still plan table snapshots independently, so increasing service
+parallelism also increases metadata planning work.
+
+Leave **`lookup.cache=AUTO` on lookup clients**, and use join keys matching the table's primary key
+(including partition columns, either in the join or supplied by partition selection). The existing
+RPC protocol and service discovery work with both backends. Setting `lookup.cache=FULL` on a client
+continues to select a local full cache. Restart the service to change `query-service.cache`; run
+only one query-service job for a given table.
+
+The full backend retains the fixed-bucket, primary-key requirements of Query Service. It reads
+the complete rows of its assigned shards, including all partitions, even if individual clients
+select fewer columns or partitions. Provision enough local disk for the materialized shards and
+allow time for the initial load. FULL may be useful when many jobs reuse a dimension table and
+on-demand file loading causes unacceptable cold-query latency. PARTIAL may be preferable when
+only a small part of the table is queried.
+
+File-monitor notifications, polled at `continuous.discovery-interval`, trigger incremental cache
+refresh independently of client requests. The service serializes refresh itself; client-side
+`lookup.refresh.async` and refresh blacklist settings do not control it.
+Refresh follows the same changelog and merge-engine rules as local full-cache lookup; it does not
+make updates visible before the required snapshot or compaction is committed. Refresh and RPC
+lookups are serialized within an executor, so a large refresh can delay requests. Overwrites and
+expired scan snapshots rebuild the affected executor's cache from the current snapshot; an
+executor restart also rebuilds its cache. Different executors can temporarily serve different
+snapshot versions. A refresh failure fails the service task and stops that executor from serving
+potentially stale or partially updated rows.
+
 ## Verify the Result
 
 If a lookup returns no match, first query the dimension table in batch mode and check the join

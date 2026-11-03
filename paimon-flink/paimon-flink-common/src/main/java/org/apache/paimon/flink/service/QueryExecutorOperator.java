@@ -24,16 +24,19 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
+import org.apache.paimon.flink.query.FullCacheTableQuery;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.operation.metrics.PartialLookupMetrics;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.service.network.NetworkUtils;
 import org.apache.paimon.service.network.stats.DisabledServiceRequestStats;
 import org.apache.paimon.service.server.KvQueryServer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -42,10 +45,13 @@ import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+import java.io.File;
 import java.net.InetSocketAddress;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.QUERY_SERVICE_CACHE_MODE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.QueryServiceCacheMode.FULL;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /** Operator for query executor. */
@@ -56,7 +62,7 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
 
     private final Table table;
 
-    private transient LocalTableQuery query;
+    private transient TableQuery query;
 
     private transient IOManager ioManager;
 
@@ -79,15 +85,27 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
                                 .getEnvironment()
                                 .getIOManager()
                                 .getSpillingDirectoriesPaths());
-        PartialLookupMetrics metrics =
-                new PartialLookupMetrics(
-                        new FlinkMetricRegistry(getRuntimeContext().getMetricGroup()),
-                        table.name());
-        this.query =
-                ((FileStoreTable) table)
-                        .newLocalTableQuery()
-                        .withIOManager(ioManager)
-                        .withMetrics(metrics);
+        if (Options.fromMap(table.options()).get(QUERY_SERVICE_CACHE_MODE) == FULL) {
+            this.query =
+                    new FullCacheTableQuery(
+                            (FileStoreTable) table,
+                            new File(
+                                    getRuntimeContext()
+                                            .getTaskManagerRuntimeInfo()
+                                            .getTmpDirectories()[0]),
+                            RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),
+                            RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext()));
+        } else {
+            PartialLookupMetrics metrics =
+                    new PartialLookupMetrics(
+                            new FlinkMetricRegistry(getRuntimeContext().getMetricGroup()),
+                            table.name());
+            this.query =
+                    ((FileStoreTable) table)
+                            .newLocalTableQuery()
+                            .withIOManager(ioManager)
+                            .withMetrics(metrics);
+        }
         this.server =
                 new KvQueryServer(
                         RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),
@@ -118,13 +136,19 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
 
     @Override
     public void processElement(StreamRecord<InternalRow> streamRecord) throws Exception {
+        if (query instanceof FullCacheTableQuery) {
+            // File-monitor notifications wake up the independent full-cache scan. Its own cursor
+            // handles changelog/compaction semantics and may already be ahead of this notification.
+            ((FullCacheTableQuery) query).refresh();
+            return;
+        }
         InternalRow row = streamRecord.getValue();
         BinaryRow partition = deserializeBinaryRow(row.getBinary(1));
         int bucket = row.getInt(2);
         DataFileMetaSerializer fileMetaSerializer = new DataFileMetaSerializer();
         List<DataFileMeta> beforeFiles = fileMetaSerializer.deserializeList(row.getBinary(3));
         List<DataFileMeta> dataFiles = fileMetaSerializer.deserializeList(row.getBinary(4));
-        query.refreshFiles(partition, bucket, beforeFiles, dataFiles);
+        ((LocalTableQuery) query).refreshFiles(partition, bucket, beforeFiles, dataFiles);
     }
 
     @Override
