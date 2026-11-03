@@ -166,7 +166,7 @@ NULL after failed computation. If schema publication or data commit has an
 unknown outcome, inspect the table before retrying. Prepared files are preserved
 on failure and may require ordinary orphan-file maintenance.
 
-See [PyPaimon Data Evolution](../docs/docs/pypaimon/data-evolution.md) for a
+See [Multimodal Column Enrichment](../docs/docs/pypaimon/multimodal-tables.mdx#column-enrichment) for a
 complete example and the column update contract.
 
 # Parquet page-index reads
