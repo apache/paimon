@@ -69,25 +69,17 @@ class ColumnUpdateError(RuntimeError):
                self.source_snapshot_id, self.commit_outcome))
 
 
-def _refresh(owner):
-    from pypaimon.multimodal.connection import _validate_multimodal_table
-
-    original = owner.raw_table
+def _validate_update(table):
     selectors = SCAN_KEYS + CoreOptions.INCREMENTAL_SCAN_KEYS + [
         CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(),
         CoreOptions.SCAN_CREATION_TIME_MILLIS.key(),
     ]
-    if (hasattr(original, "_read_snapshot")
-            or any(original.table_schema.options.get(key) is not None for key in selectors)
-            or original.table_schema.options.get("scan.mode", "default")
+    if (hasattr(table, "_read_snapshot")
+            or any(table.table_schema.options.get(key) is not None for key in selectors)
+            or table.table_schema.options.get("scan.mode", "default")
             not in ("default", "latest", "latest-full")):
         raise ValueError("Column updates require a current full-table view.")
-    raw = owner.catalog.get_table(owner.identifier).copy_without_time_travel(
-        getattr(original, "_applied_dynamic_options", {}))
-    _validate_multimodal_table(raw, owner.identifier)
-    _authorize_update(raw)
-    owner.raw_table = owner.table = raw
-    return raw
+    _authorize_update(table)
 
 
 class _ColumnUpdate:
@@ -141,7 +133,12 @@ class _ColumnUpdate:
         self.schema_changed = None
         self.owner.catalog.alter_table(self.owner.identifier, changes)
         self.schema_changed = True
-        self.raw = _refresh(self.owner)
+        # Only this operation's schema addition needs a new table definition.
+        # Ordinary calls keep the caller's existing handle, like add/update/merge.
+        raw = self.owner.catalog.get_table(self.owner.identifier).copy_without_time_travel(
+            getattr(self.raw, "_applied_dynamic_options", {}))
+        _authorize_update(raw)
+        self.raw = self.owner.raw_table = self.owner.table = raw
         self.added_columns = tuple(field.name for field in fields)
 
     def finish(self, updated_rows, unmatched_rows=0, commit=None, messages=()):
@@ -253,7 +250,8 @@ def _cast_match_keys(data, target_schema, target_keys, source_keys):
 def merge_columns(owner, data, *, on, unmatched):
     if unmatched not in ("error", "ignore"):
         raise ValueError("unmatched must be 'error' or 'ignore'.")
-    raw = _refresh(owner)
+    raw = owner.raw_table
+    _validate_update(raw)
     data = _to_arrow_table(data)
     _validate_names(data.column_names, "Source")
     target_keys, source_keys = _normalize_merge_on(on, "merge_columns")
@@ -297,7 +295,8 @@ def add_columns(owner, schema, *, inputs, fn, batch_size):
     if any(not field.nullable for field in schema):
         raise ValueError("New columns must be nullable until backfill is complete.")
     fields = [_canonical_field(field) for field in schema]
-    raw = _refresh(owner)
+    raw = owner.raw_table
+    _validate_update(raw)
     existing = set(schema.names).intersection(raw.field_names)
     if existing:
         raise ValueError("Column already exists: %s" % sorted(existing))

@@ -324,6 +324,7 @@ physical writes. `add_columns` buffers outputs per original file group so a
 small function batch does not repeatedly rewrite the same group.
 
 These are local, single-writer operations on a current full-table view.
+As with other table methods, reopen the table after external schema changes.
 Time-travel and incremental table views are rejected. `merge_columns` holds the
 source and target match keys in memory. The read snapshot is fixed for the
 operation, and an observed snapshot or schema change before commit rejects the

@@ -170,7 +170,7 @@ def test_add_columns_batches_payloads_and_writes_each_file_group_once(frames):
     assert feature_files[0].write_cols == ["embedding"]
 
 
-def test_add_columns_schema_only_refreshes_the_existing_facade(frames):
+def test_add_columns_schema_only_updates_the_existing_facade(frames):
     snapshot = _snapshot(frames)
     files = set(_files(frames))
     result = frames.add_columns(pa.schema([("caption", pa.string())]))
@@ -395,25 +395,13 @@ def test_merge_columns_treats_signed_zero_as_the_same_key(tmp_path, key_type):
         table.merge_columns(pa.table({"id": pa.array([0.], type=key_type), "label": ["a"]}), on="id")
 
 
-@pytest.mark.parametrize("operation", ["schema", "compute", "merge"])
-def test_stale_facade_rejects_replacement_with_an_ordinary_append_table(frames, operation):
-    from pypaimon import Schema
+def test_merge_columns_keeps_the_callers_table_handle(frames):
+    raw_table = frames.raw_table
+    frames.merge_columns(pa.table({"id": [1], "label": ["new"]}), on="id")
 
-    catalog, identifier = frames.catalog, frames.identifier
-    catalog.drop_table(identifier)
-    catalog.create_table(identifier, Schema.from_pyarrow_schema(
-        pa.schema([("id", pa.int64())]), options={"file.format": "parquet"}), False)
-    schema_id = catalog.get_table(identifier).table_schema.id
-
-    with pytest.raises(ValueError, match="data-evolution"):
-        if operation == "merge":
-            frames.merge_columns(pa.table({"id": [1], "feature": [2]}), on="id")
-        else:
-            kwargs = {"inputs": ["id"], "fn": lambda batch: batch} if operation == "compute" else {}
-            frames.add_columns(pa.schema([("feature", pa.int64())]), **kwargs)
-    replacement = catalog.get_table(identifier)
-    assert replacement.table_schema.id == schema_id
-    assert replacement.field_names == ["id"]
+    assert frames.raw_table is raw_table
+    assert frames.table is raw_table
+    assert _rows(frames, ["id", "label"])[1] == {"id": 1, "label": "new"}
 
 
 def test_merge_columns_rejects_a_lossy_match_key_cast_before_publication(tmp_path):
