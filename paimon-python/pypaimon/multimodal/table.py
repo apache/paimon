@@ -502,20 +502,22 @@ class MultimodalTable:
     def merge(self, on):
         return _MergeBuilder(self, on)
 
-    def merge_columns(self, data, *, on, unmatched="error"):
+    def merge_columns(self, data, *, on):
         """Match external column values without inserting rows or rewriting other columns.
 
         Missing output columns are added as nullable columns using the input
-        Arrow types. Match keys must be non-null and unique in the source;
-        each must match at most one target row. Key type conversions must be
-        lossless. Set ``unmatched='ignore'`` to
-        skip absent keys. Existing output types must match the table types.
+        Arrow types. Matching follows an update-only MERGE: unmatched source
+        rows are ignored, one source row may update multiple target rows, and
+        multiple source rows matching the same target row are rejected.
+        Existing output types must match the table types. Execution reuses
+        the standard MERGE backend, including native execution when enabled.
         Schema publication and data commit are separate operations. Requires
         a current full-table view and a single writer for the operation.
-        Returns :class:`pypaimon.multimodal.ColumnUpdateResult`.
+        Returns :class:`pypaimon.multimodal.ColumnUpdateResult` with
+        ``updated_rows=None`` because MERGE does not return logical row counts.
         """
         from pypaimon.multimodal.columns import merge_columns
-        return merge_columns(self, data, on=on, unmatched=unmatched)
+        return merge_columns(self, data, on=on)
 
     def add_columns(self, schema, *, inputs=None, fn=None, batch_size=1024):
         """Add nullable columns, optionally computing their values in batches.

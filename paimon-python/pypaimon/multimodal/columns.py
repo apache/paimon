@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import pyarrow as pa
-import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.table import (
@@ -31,19 +30,23 @@ from pypaimon.multimodal.table import (
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+from pypaimon.table.data_evolution_merge_into import WhenMatched, source_col
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.update_validation import _authorize_update
 
 
 @dataclass(frozen=True)
 class ColumnUpdateResult:
-    """Schema and data versions produced by a successful column operation."""
+    """Schema and data versions produced by a successful column operation.
+
+    ``updated_rows`` is available for ``add_columns`` and is ``None`` for
+    ``merge_columns``, whose MERGE executor does not return logical row counts.
+    """
 
     source_snapshot_id: Optional[int]
     snapshot_id: Optional[int]
     schema_id: int
-    updated_rows: int
-    unmatched_rows: int
+    updated_rows: Optional[int]
     added_columns: Tuple[str, ...]
 
 
@@ -131,7 +134,7 @@ class _ColumnUpdate:
         self.raw = self.owner.raw_table = self.owner.table = raw
         self.added_columns = tuple(field.name for field in fields)
 
-    def finish(self, updated_rows, unmatched_rows=0, commit=None, messages=()):
+    def finish(self, updated_rows, commit=None, messages=()):
         if messages:
             self.phase = "commit"
             self.commit_outcome = "unknown"
@@ -141,7 +144,7 @@ class _ColumnUpdate:
         snapshot = self.raw.snapshot_manager().get_latest_snapshot()
         return ColumnUpdateResult(
             self.source_snapshot_id, None if snapshot is None else snapshot.id,
-            self.raw.table_schema.id, updated_rows, unmatched_rows, self.added_columns)
+            self.raw.table_schema.id, updated_rows, self.added_columns)
 
 
 def _validate_names(names, label):
@@ -178,66 +181,7 @@ def _normalize_output(data, schema):
     return pa.Table.from_arrays(arrays, schema=schema)
 
 
-def _match_rows(raw, snapshot, data, target_keys, source_keys):
-    aliases = ["key_%d" % i for i in range(len(target_keys))]
-    source = data.select(source_keys).rename_columns(aliases)
-    for column in source.columns:
-        if column.null_count:
-            raise ValueError("Source match keys cannot contain null values.")
-        if pa.types.is_floating(column.type) and pc.any(pc.is_nan(column)).as_py():
-            raise ValueError("Source match keys cannot contain NaN values.")
-    source = _normalize_float_keys(source, aliases)
-    source = source.append_column("source_index", pa.array(range(data.num_rows), type=pa.int64()))
-    if data.num_rows == 0:
-        return pa.table({"source_index": pa.array([], type=pa.int64()),
-                         "row_id": pa.array([], type=pa.int64())}), 0
-    counts = source.group_by(aliases).aggregate([("source_index", "count")])
-    if pc.any(pc.greater(counts["source_index_count"], 1)).as_py():
-        raise ValueError("Source contains duplicate match keys.")
-
-    builder = raw._copy_with_snapshot(snapshot).new_read_builder().with_projection(
-        target_keys + [SpecialFields.ROW_ID.name])
-    target = builder.new_read().to_arrow(builder.new_scan().plan_all().splits())
-    target = target.rename_columns(aliases + ["row_id"])
-    target = _normalize_float_keys(target, aliases)
-    matched = source.join(target, keys=aliases, join_type="left outer")
-    counts = matched.group_by("source_index").aggregate([("row_id", "count")])
-    if pc.any(pc.greater(counts["row_id_count"], 1)).as_py():
-        raise ValueError("Source key matches multiple target rows.")
-    unmatched = matched["row_id"].null_count
-    return matched.filter(pc.is_valid(matched["row_id"])).select(["source_index", "row_id"]), unmatched
-
-
-def _normalize_float_keys(table, names):
-    # Arrow hashes IEEE signed zero by representation; numeric key equality
-    # requires both representations to match and share uniqueness checks.
-    for name in names:
-        index = table.schema.get_field_index(name)
-        column = table.column(index)
-        if pa.types.is_floating(column.type):
-            column = pc.if_else(pc.equal(column, 0), pa.scalar(0, type=column.type), column)
-            table = table.set_column(index, table.schema.field(index), column)
-    return table
-
-
-def _cast_match_keys(data, target_schema, target_keys, source_keys):
-    casted = _cast_merge_on_columns(data, target_schema, target_keys, source_keys)
-    for name in source_keys:
-        original, converted = data[name], casted[name]
-        if original.type == converted.type:
-            continue
-        try:
-            restored = converted.cast(original.type)
-        except pa.ArrowException as error:
-            raise ValueError("Match key %s cannot be converted without loss." % name) from error
-        if not original.equals(restored):
-            raise ValueError("Match key %s cannot be converted without loss." % name)
-    return casted
-
-
-def merge_columns(owner, data, *, on, unmatched):
-    if unmatched not in ("error", "ignore"):
-        raise ValueError("unmatched must be 'error' or 'ignore'.")
+def merge_columns(owner, data, *, on):
     raw = owner.raw_table
     _validate_update(raw)
     data = _to_arrow_table(data)
@@ -245,7 +189,7 @@ def merge_columns(owner, data, *, on, unmatched):
     target_keys, source_keys = _normalize_merge_on(on, "merge_columns")
     target_schema = _target_schema(raw)
     _validate_merge_on(target_schema, data, target_keys, source_keys, "merge_columns")
-    data = _cast_match_keys(data, target_schema, target_keys, source_keys)
+    data = _cast_merge_on_columns(data, target_schema, target_keys, source_keys)
     output_names = [name for name in data.column_names if name not in source_keys]
     _validate_names(output_names, "Output")
     if set(output_names).intersection(raw.partition_keys + target_keys):
@@ -256,21 +200,20 @@ def merge_columns(owner, data, *, on, unmatched):
               else _canonical_field(data.schema.field(name)).with_nullable(True)
               for name in output_names]
     output = _normalize_output(data.select(output_names), pa.schema(fields))
-    operation = _ColumnUpdate(owner, raw)
-    matches, unmatched_rows = _match_rows(raw, operation.snapshot, data, target_keys, source_keys)
-    if unmatched_rows and unmatched == "error":
-        raise ValueError("Source contains %d unmatched rows." % unmatched_rows)
-    updates = output.take(matches["source_index"]).append_column(
-        SpecialFields.ROW_ID.name, matches["row_id"])
-    with operation:
+    source = data
+    for field, column in zip(output.schema, output.columns):
+        source = source.set_column(source.schema.get_field_index(field.name), field, column)
+    with _ColumnUpdate(owner, raw) as operation:
         operation.add_schema([field for field in fields if field.name not in target_schema.names])
-        if updates.num_rows == 0:
-            return operation.finish(0, unmatched_rows)
+        if source.num_rows == 0:
+            return operation.finish(None)
         operation.phase = "write"
         builder = operation.raw._copy_with_snapshot(operation.snapshot).new_batch_write_builder()
         commit = operation.keep(builder.new_commit())
-        messages = builder.new_update().with_update_type(output_names).update_by_arrow_with_row_id(updates)
-        return operation.finish(updates.num_rows, unmatched_rows, commit, messages)
+        messages = builder.new_update().merge_into(
+            source, on=dict(zip(target_keys, source_keys)),
+            when_matched=[WhenMatched.update({name: source_col(name) for name in output_names})])
+        return operation.finish(None, commit=commit, messages=messages)
 
 
 def add_columns(owner, schema, *, inputs, fn, batch_size):

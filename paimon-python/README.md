@@ -142,10 +142,11 @@ result = table.add_columns(
 result = table.add_columns(schema=nullable_columns)
 ```
 
-`table` is a `pypaimon.multimodal.MultimodalTable`. Match keys must be non-null
-and unique in the source and must match at most one target row. Unmatched keys
-raise by default; `unmatched="ignore"` skips them without inserting rows.
-Match-key type conversions must be lossless.
+`table` is a `pypaimon.multimodal.MultimodalTable`. `merge_columns` uses ordinary
+update-only MERGE semantics: unmatched source rows are ignored, NULL keys do not
+match, and one source row can update multiple target rows. Multiple source rows
+matching the same target row are rejected by the MERGE executor. Key type
+conversion follows `merge`.
 Outputs must have the declared/existing types. A fixed-size Arrow list declares
 a VECTOR column, for example `pa.list_(pa.float32(), 768)` for an embedding.
 
@@ -154,10 +155,15 @@ operation. They do not provide distributed execution or automatic retries.
 `add_columns` reads only its inputs, materializing ordinary BLOB inputs as bytes;
 video-frame columns keep their descriptor semantics. Function calls have at most
 `batch_size` rows; outputs are buffered per original file group before writing.
-`merge_columns` materializes the source and the target match keys in memory.
+`merge_columns` materializes the source as an Arrow table and delegates target
+matching and updates to the standard MERGE backend. Supported routes use native
+MERGE when `write.native.enabled=true` and a compatible `pypaimon_rust` is available.
+`add_columns` can use the native shard reader and writer; its `fn` runs in Python.
 
-`ColumnUpdateResult` reports `updated_rows`, `unmatched_rows`, `added_columns`,
-`source_snapshot_id`, `snapshot_id`, and `schema_id`. Schema publication and data
+`ColumnUpdateResult` reports `updated_rows`, `added_columns`, `source_snapshot_id`,
+`snapshot_id`, and `schema_id`. `updated_rows` is the backfilled row count for
+`add_columns` (zero for schema-only additions) and `None` for `merge_columns`.
+Schema publication and data
 commit are separate. A schema-only call does not create a data snapshot.
 Failures during publication or data preparation raise `ColumnUpdateError` with `phase`,
 `schema_changed`, `schema_id`, `source_snapshot_id`, and `commit_outcome`;

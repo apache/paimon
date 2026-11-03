@@ -282,7 +282,7 @@ frames = connection.create_table(
 # Import external labels. The nullable label column is created automatically.
 result = frames.merge_columns(
     pa.table({"sample_id": [2], "label": ["pedestrian"]}), on="sample_id")
-print(result.updated_rows)  # 1; the first row's label remains NULL
+print(result.added_columns)  # ('label',); the first row's label remains NULL
 
 # Derive a new column. Only image is passed to the function; row IDs are internal.
 def image_sizes(batch):
@@ -310,12 +310,19 @@ New columns must be nullable; existing column names are rejected by `add_columns
 or a mapping from target names to source names. It updates only non-key columns
 present in the source and never inserts rows. Omitted columns keep their values;
 explicit NULL values clear nullable columns. New columns are nullable and use the
-source's Arrow types; existing output types must match the table types. Match
-keys are converted to target types only without loss. They cannot contain NULL
-or NaN, must be unique in the source, and must match at
-most one target row. Unmatched keys raise before schema publication unless
-`unmatched="ignore"` is selected. Partition and match keys cannot be updated;
+source's Arrow types; existing output types must match the table types. Matching
+and key type conversion follow ordinary `merge` semantics: unmatched source rows
+are ignored, NULL keys do not match, and one source row can update multiple target
+rows with the same key. Multiple source rows matching the same target row are
+rejected by the MERGE executor. Partition and match keys cannot be updated;
 use `replace_video` to replace configured video-frame columns.
+
+`merge_columns` delegates matching and updates to the standard MERGE executor.
+With a compatible `pypaimon_rust` runtime and `write.native.enabled=true`,
+supported tables use native MERGE without a separate Python target-key scan.
+`add_columns` can use the native shard reader and writer with the same option;
+the supplied `fn` still runs in Python. Unsupported native routes select Python
+before execution.
 
 Both methods retain files for untouched columns. Computing an image embedding
 still reads the image, but does not rewrite it. Normal partial updates write the
@@ -325,13 +332,16 @@ small function batch does not repeatedly rewrite the same group.
 
 These are local, single-writer operations on a current full-table view.
 As with other table methods, reopen the table after external schema changes.
-Time-travel and incremental table views are rejected. `merge_columns` holds the
-source and target match keys in memory. The read snapshot is fixed for the
+Time-travel and incremental table views are rejected. `merge_columns` materializes
+the source as an Arrow table; target matching is handled by the selected MERGE
+executor. The read snapshot is fixed for the
 operation. Coordinate writers for the entire call.
 The APIs do not provide automatic retries, checkpoints, or distributed jobs.
 
-Successful calls return `ColumnUpdateResult` with row counts, added column names,
-the source and final data snapshot IDs, and the schema ID. Schema-only changes
+Successful calls return `ColumnUpdateResult` with added column names,
+the source and final data snapshot IDs, and the schema ID. `updated_rows` is the
+backfilled row count for `add_columns` (zero for schema-only additions) and `None`
+for `merge_columns`, because MERGE does not return logical row counts. Schema-only changes
 leave the data snapshot ID unchanged. Schema publication and data publication
 are separate operations. Failures during schema publication or data preparation
 and commit raise

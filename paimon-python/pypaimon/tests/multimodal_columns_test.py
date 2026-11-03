@@ -74,8 +74,7 @@ def test_merge_columns_adds_typed_features_without_reading_or_rewriting_media(fr
     assert result.source_snapshot_id == snapshot
     assert result.snapshot_id > snapshot
     assert result.schema_id == frames.raw_table.table_schema.id
-    assert result.updated_rows == 2
-    assert result.unmatched_rows == 0
+    assert result.updated_rows is None
     assert result.added_columns == ("embedding",)
     assert _rows(frames, ["id", "label", "embedding"]) == [
         {"id": i, "label": "old", "embedding":
@@ -98,36 +97,39 @@ def test_merge_columns_preserves_omitted_values_and_writes_explicit_null(frames)
     assert blobs["image"] == [bytes([i]) * 100 for i in range(5)]
 
 
-@pytest.mark.parametrize("ids, message", [
-    ([1, 1], "duplicate"), ([None], "null"), ([99], "unmatched"),
-])
-def test_merge_columns_rejects_bad_keys_before_adding_schema(frames, ids, message):
+def test_merge_columns_rejects_multiple_sources_for_the_same_target(frames):
     snapshot = _snapshot(frames)
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(pmm.ColumnUpdateError) as failure:
         frames.merge_columns(pa.table({
-            "id": pa.array(ids, type=pa.int64()), "new_label": ["new"] * len(ids),
+            "id": [1, 1], "new_label": ["first", "second"],
         }), on="id")
 
+    assert failure.value.phase == "write"
+    assert failure.value.schema_changed is True
+    assert failure.value.commit_outcome == "not_started"
+    assert "multiple source rows" in str(failure.value.__cause__)
     assert _snapshot(frames) == snapshot
-    assert "new_label" not in frames.catalog.get_table(frames.identifier).field_names
+    assert frames.scan().select(["new_label"]).to_arrow()["new_label"].to_pylist() == [None] * 5
 
 
-def test_merge_columns_counts_ignored_keys_and_supports_key_mapping(frames):
+def test_merge_columns_ignores_unmatched_and_null_keys_and_supports_key_mapping(frames):
     result = frames.merge_columns(
-        pa.table({"source_id": [2, 99], "label": ["new", "missing"]}),
-        on={"id": "source_id"}, unmatched="ignore")
+        pa.table({"source_id": pa.array([2, 99, 99, None], type=pa.int32()),
+                  "label": ["new", "missing", "duplicate unmatched", "null"]}),
+        on={"id": "source_id"})
 
-    assert (result.updated_rows, result.unmatched_rows) == (1, 1)
+    assert result.updated_rows is None
     assert _rows(frames, ["id", "label"])[2] == {"id": 2, "label": "new"}
     assert len(_rows(frames, ["id"])) == 5
 
 
-def test_merge_columns_rejects_ambiguous_target_keys(frames):
+def test_merge_columns_updates_all_target_rows_with_the_same_key(frames):
     frames.add([{"id": 1, "label": "duplicate", "image": b"other"}])
     snapshot = _snapshot(frames)
-    with pytest.raises(ValueError, match="multiple target rows"):
-        frames.merge_columns(pa.table({"id": [1], "label": ["new"]}), on="id")
-    assert _snapshot(frames) == snapshot
+    frames.merge_columns(pa.table({"id": [1], "label": ["new"]}), on="id")
+    assert _snapshot(frames) > snapshot
+    assert frames.scan().where("id = 1").select(["label"]).to_list() == [
+        {"label": "new"}, {"label": "new"}]
 
 
 def test_merge_columns_rejects_incompatible_types_before_schema_changes(frames):
@@ -247,7 +249,7 @@ def test_merge_columns_matches_composite_keys_without_materializing_payloads(fra
         "source_id": [0], "source_label": ["second"], "caption": ["matched"],
     }), on={"id": "source_id", "label": "source_label"})
 
-    assert result.updated_rows == 1
+    assert result.updated_rows is None
     rows = frames.scan().select(["id", "label", "caption"]).where("id = 0").to_list()
     assert sorted(rows, key=lambda row: row["label"]) == [
         {"id": 0, "label": "old", "caption": None},
@@ -258,8 +260,8 @@ def test_merge_columns_matches_composite_keys_without_materializing_payloads(fra
 def test_merge_columns_all_ignored_rows_do_not_create_a_data_snapshot(frames):
     snapshot = _snapshot(frames)
     result = frames.merge_columns(pa.table({"id": [99], "label": ["absent"]}),
-                                  on="id", unmatched="ignore")
-    assert (result.updated_rows, result.unmatched_rows) == (0, 1)
+                                  on="id")
+    assert result.updated_rows is None
     assert result.snapshot_id == snapshot
     assert _snapshot(frames) == snapshot
 
@@ -278,8 +280,8 @@ def test_column_enrichment_on_an_empty_table(tmp_path):
     assert result.snapshot_id is None
     assert result.updated_rows == 0
     result = table.merge_columns(pa.table({"id": [1], "feature": [2]}),
-                                 on="id", unmatched="ignore")
-    assert (result.updated_rows, result.unmatched_rows) == (0, 1)
+                                 on="id")
+    assert result.updated_rows is None
     assert result.snapshot_id is None
 
 
@@ -361,23 +363,6 @@ def test_merge_columns_inline_nullable_vectors_are_readable(tmp_path, with_media
         {"id": i, "embedding": [3., 4.] if i == 2 else None} for i in range(3)]
 
 
-@pytest.mark.parametrize("key_type", [pa.float32(), pa.float64()])
-def test_merge_columns_treats_signed_zero_as_the_same_key(tmp_path, key_type):
-    connection = pmm.connect(options={"warehouse": str(tmp_path / "warehouse")})
-    table = connection.create_table(
-        "zeros", schema=pa.schema([("id", key_type), ("label", pa.string())]),
-        data=[{"id": 0., "label": "old"}], options={"file.format": "parquet"})
-    table.merge_columns(pa.table({"id": pa.array([-0.], type=key_type), "label": ["new"]}), on="id")
-    assert table.scan().select(["label"]).to_list() == [{"label": "new"}]
-
-    with pytest.raises(ValueError, match="duplicate"):
-        table.merge_columns(pa.table({"id": pa.array([0., -0.], type=key_type),
-                                      "label": ["a", "b"]}), on="id")
-    table.add([{"id": -0., "label": "second"}])
-    with pytest.raises(ValueError, match="multiple target rows"):
-        table.merge_columns(pa.table({"id": pa.array([0.], type=key_type), "label": ["a"]}), on="id")
-
-
 def test_merge_columns_keeps_the_callers_table_handle(frames):
     raw_table = frames.raw_table
     frames.merge_columns(pa.table({"id": [1], "label": ["new"]}), on="id")
@@ -387,21 +372,63 @@ def test_merge_columns_keeps_the_callers_table_handle(frames):
     assert _rows(frames, ["id", "label"])[1] == {"id": 1, "label": "new"}
 
 
-def test_merge_columns_rejects_a_lossy_match_key_cast_before_publication(tmp_path):
-    connection = pmm.connect(options={"warehouse": str(tmp_path / "warehouse")})
-    table = connection.create_table(
-        "float_keys", schema=pa.schema([("id", pa.float32()), ("label", pa.string())]),
-        data=[{"id": 1., "label": "old"}], options={"file.format": "parquet"})
-    snapshot = _snapshot(table)
-    schema_id = table.raw_table.table_schema.id
-    with pytest.raises(ValueError, match="loss"):
-        table.merge_columns(pa.table({
-            "id": pa.array([1.0000000001], type=pa.float64()),
-            "label": ["wrong"], "feature": [42],
-        }), on="id")
+def test_merge_columns_empty_source_can_add_schema_without_a_data_snapshot(frames):
+    snapshot = _snapshot(frames)
+    result = frames.merge_columns(
+        pa.table({"id": pa.array([], type=pa.int64()), "caption": pa.array([], type=pa.string())}),
+        on="id")
 
+    assert result.updated_rows is None
+    assert result.added_columns == ("caption",)
+    assert result.snapshot_id == snapshot
+    assert frames.scan().select(["caption"]).to_arrow()["caption"].to_pylist() == [None] * 5
+
+
+@pytest.mark.native_plan
+@pytest.mark.parametrize("native_read", [False, True])
+def test_column_enrichment_uses_native_merge_and_shard_without_rewriting_media(frames, native_read):
+    table = frames.copy({"write.native.enabled": "true",
+                         "read.native.enabled": str(native_read).lower()})
+    blobs = _blobs(table)
+    snapshot = _snapshot(table)
+    vector_type = pa.list_(pa.float32(), 2)
+    with patch("pypaimon.execution.python.write.merge_into._build_tables",
+               side_effect=AssertionError("must use native MERGE")):
+        result = table.merge_columns(pa.table({
+            "id": [3, 99], "embedding": pa.array([[3., 4.], [99., 100.]], type=vector_type),
+        }), on="id")
+    assert result.updated_rows is None
+    assert result.added_columns == ("embedding",)
+    assert _rows(table, ["id", "embedding"]) == [
+        {"id": i, "embedding": [3., 4.] if i == 3 else None} for i in range(5)]
+
+    with patch("pypaimon.execution.python.write.table_update.ShardTableUpdator.arrow_reader",
+               side_effect=AssertionError("must use native shard")):
+        result = table.add_columns(
+            pa.schema([("image_size", pa.int64())]), inputs=["image"],
+            fn=lambda batch: pa.table({"image_size": [len(value) for value in batch["image"].to_pylist()]}),
+            batch_size=2)
+    assert result.updated_rows == 5
+    assert _rows(table, ["id", "image_size"]) == [{"id": i, "image_size": 100} for i in range(5)]
+    assert _blobs(table) == blobs
+    assert table.scan(snapshot_id=snapshot).select(["id", "label"]).to_arrow().num_rows == 5
+
+
+@pytest.mark.native_plan
+def test_native_merge_columns_uses_standard_merge_cardinality(frames):
+    frames.add([{"id": 1, "label": "duplicate", "image": b"other"}])
+    table = frames.copy({"write.native.enabled": "true"})
+    with patch("pypaimon.execution.python.write.merge_into._build_tables",
+               side_effect=AssertionError("must use native MERGE")):
+        table.merge_columns(pa.table({
+            "id": pa.array([1, 99, 99, None], type=pa.int64()),
+            "label": ["new", "missing", "duplicate unmatched", "null"],
+        }), on="id")
+        assert table.scan().where("id = 1").select(["label"]).to_list() == [
+            {"label": "new"}, {"label": "new"}]
+        snapshot = _snapshot(table)
+        with pytest.raises(pmm.ColumnUpdateError) as failure:
+            table.merge_columns(pa.table({"id": [1, 1], "label": ["first", "second"]}), on="id")
+    assert "multiple source rows" in str(failure.value.__cause__)
+    assert failure.value.commit_outcome == "not_started"
     assert _snapshot(table) == snapshot
-    assert table.catalog.get_table(table.identifier).table_schema.id == schema_id
-    assert table.scan().select(["label"]).to_list() == [{"label": "old"}]
-    table.merge_columns(pa.table({"id": pa.array([1.], type=pa.float64()), "label": ["exact"]}), on="id")
-    assert table.scan().select(["label"]).to_list() == [{"label": "exact"}]
