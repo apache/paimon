@@ -35,6 +35,7 @@ import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.pool.CachedClientPool;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -49,7 +50,6 @@ import org.apache.paimon.table.CatalogTableType;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -824,7 +824,9 @@ public class HiveCatalog extends AbstractCatalog {
                             branchTable.rowType().project(branchTable.partitionKeys()),
                             branchTable.partitionKeys().toArray(new String[0]),
                             branchTable.coreOptions().legacyPartitionName());
-            DataTableScan scan = branchTable.newScan();
+            // Ownership depends on the latest physical snapshot. A table batch scan may instead
+            // follow persisted query selectors such as scan.snapshot-id or scan.tag-name.
+            FileStoreScan scan = branchTable.store().newScan();
             if (!syntheticPartitions) {
                 scan.withPartitionsFilter(new ArrayList<>(inputsToRemove));
             }

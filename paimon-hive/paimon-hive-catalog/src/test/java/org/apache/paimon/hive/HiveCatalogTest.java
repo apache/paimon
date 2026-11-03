@@ -1287,6 +1287,109 @@ public class HiveCatalogTest extends CatalogTestBase {
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId + 1);
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "scan.snapshot-id,false",
+        "scan.snapshot-id,true",
+        "scan.tag-name,false",
+        "scan.tag-name,true"
+    })
+    public void testMarkerCleanupIgnoresHistoricalReads(String selector, boolean otherBranch)
+            throws Exception {
+        String databaseName = "test_marker_cleanup_historical_reads";
+        String tableName = "t";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+        writeAppendPartition(identifier, "keep");
+        writeAppendPartition(identifier, "20230101");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        Identifier owner = identifier;
+        if (otherBranch) {
+            table.createBranch("other");
+            owner = new Identifier(databaseName, tableName, "other");
+            writeAppendPartition(owner, "keep");
+        }
+        writeAppendPartition(owner, "20230101.done");
+        setHistoricalReadSelector(owner, selector);
+        assertPhysicalDts(owner, "keep");
+        long snapshotId = table.snapshotManager().latestSnapshotId();
+
+        catalog.dropPartitions(identifier, partitionSpecs("20230101"));
+
+        // Ownership checks must neither follow nor remove the persisted query selector.
+        assertPhysicalDts(owner, "keep");
+        catalog.alterTable(
+                owner, Collections.singletonList(SchemaChange.removeOption(selector)), false);
+        assertPhysicalDts(owner, "keep", "20230101.done");
+        if (otherBranch) {
+            assertPhysicalDts(identifier, "keep");
+        }
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId + 1);
+        assertHmsDts(databaseName, tableName, "keep", "20230101.done");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"scan.snapshot-id", "scan.tag-name"})
+    public void testDropPartitionsKeepsSharedPartitionWithHistoricalReads(String selector)
+            throws Exception {
+        String databaseName = "test_shared_partition_historical_reads";
+        String tableName = "t";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+        writeAppendPartition(identifier, "keep");
+        writeAppendPartition(identifier, "20230101");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        table.createBranch("other");
+        Identifier other = new Identifier(databaseName, tableName, "other");
+        writeAppendPartition(other, "keep");
+        writeAppendPartition(other, "20230101");
+        AddDonePartitionAction action =
+                new AddDonePartitionAction(table.catalogEnvironment().partitionModification());
+        action.markDone("dt=20230101");
+        setHistoricalReadSelector(other, selector);
+        assertPhysicalDts(other, "keep");
+
+        catalog.dropPartitions(identifier, partitionSpecs("20230101"));
+
+        assertPhysicalDts(other, "keep");
+        catalog.alterTable(
+                other, Collections.singletonList(SchemaChange.removeOption(selector)), false);
+        assertPhysicalDts(identifier, "keep");
+        assertPhysicalDts(other, "keep", "20230101");
+        assertHmsDts(databaseName, tableName, "keep", "20230101", "20230101.done");
+    }
+
+    private void setHistoricalReadSelector(Identifier identifier, String selector)
+            throws Exception {
+        String value = "1";
+        if (selector.equals("scan.tag-name")) {
+            catalog.getTable(identifier).createTag("before", 1L);
+            value = "before";
+        }
+        catalog.alterTable(
+                identifier,
+                Collections.singletonList(SchemaChange.setOption(selector, value)),
+                false);
+    }
+
     private void writeIntegerChainPartitions(Identifier identifier, int... partitions)
             throws Exception {
         BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
