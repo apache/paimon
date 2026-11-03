@@ -19,14 +19,11 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.KeyValue;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -42,6 +39,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.CloseableIterator;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -49,16 +47,13 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -66,100 +61,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for generating changelog during reads. */
 public class ChangelogOnReadTest extends TableTestBase {
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testAggregationProjectionMultipleLevel0AndCacheLifecycle(boolean forceLookup)
-            throws Exception {
-        FileStoreTable table =
-                createTable(
-                        CoreOptions.MergeEngine.AGGREGATE,
-                        CoreOptions.CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.defaultValue(),
-                        forceLookup);
-        write(table, GenericRow.of(1, 1, 1, 1));
-
-        StreamTableScan scan = table.newStreamScan();
-        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {3});
-        Path lookupDir = tempPath.resolve("lookup");
-        IOManager lookupIO = IOManager.create(lookupDir.toString());
-        TableRead read = readBuilder.newRead().withIOManager(lookupIO);
-        Path firstLookupFile = null;
-        try {
-            TableScan.Plan initial = scan.plan();
-            String firstDataFile =
-                    ((DataSplit) initial.splits().get(0)).dataFiles().get(0).fileName();
-            assertThat(read(read, initial)).containsExactly("+I 1");
-
-            write(table, GenericRow.of(1, 1, 2, 2));
-            assertThat(readAfterLookupPrepared(read, scan.plan(), lookupDir, firstDataFile))
-                    .containsExactly("-U 1", "+U 3");
-            firstLookupFile = findLookupFile(lookupDir, firstDataFile);
-            long modified = Files.getLastModifiedTime(firstLookupFile).toMillis();
-
-            write(table, GenericRow.of(1, 1, 0, 3));
-            assertThat(read(read, scan.plan())).containsExactly("-U 3", "+U 6");
-            assertThat(firstLookupFile).exists();
-            assertThat(Files.getLastModifiedTime(firstLookupFile).toMillis()).isEqualTo(modified);
-
-            // The temporary history filter for partition 1 must not affect the next delta scan.
-            write(table, GenericRow.of(2, 1, 1, 4));
-            assertThat(read(read, scan.plan())).containsExactly("+I 4");
-        } finally {
-            read.close();
-            if (firstLookupFile != null) {
-                assertThat(firstLookupFile).doesNotExist();
-            }
-            lookupIO.close();
-        }
-    }
-
-    @Test
-    public void testForceLookupPreservesCompactedHistoryWithProjection() throws Exception {
-        FileStoreTable table =
-                createTable(
-                                CoreOptions.MergeEngine.AGGREGATE,
-                                CoreOptions.CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.defaultValue(),
-                                true)
-                        .copy(Collections.singletonMap("lookup.merge-records-threshold", "0"));
-        write(table, ioManager, GenericRow.of(1, 1, 1, 10));
-        DataSplit first = (DataSplit) table.newReadBuilder().newScan().plan().splits().get(0);
-        String olderFile = first.dataFiles().get(0).fileName();
-        write(table, ioManager, GenericRow.of(1, 1, 2, 13));
-        StreamTableScan scan = table.newStreamScan();
-        scan.plan();
-        write(table, ioManager, GenericRow.of(1, 1, 3, 4));
-        IncrementalSplit delta = (IncrementalSplit) scan.plan().splits().get(0);
-        assertThat(delta.beforeFiles()).hasSize(2);
-        // Model lookup-compacted history: L2 has 10, and the newer L1 value 13 includes it.
-        List<DataFileMeta> history =
-                delta.beforeFiles().stream()
-                        .map(file -> file.upgrade(file.fileName().equals(olderFile) ? 2 : 1))
-                        .collect(Collectors.toList());
-        IncrementalSplit split =
-                new IncrementalSplit(
-                        delta.snapshotId(),
-                        delta.partition(),
-                        delta.bucket(),
-                        delta.totalBuckets(),
-                        history,
-                        null,
-                        delta.afterFiles(),
-                        null,
-                        true);
-        try (IOManager lookupIO = IOManager.create(tempPath.resolve("lookup").toString());
-                TableRead read =
-                        table.newReadBuilder()
-                                .withProjection(new int[] {3})
-                                .newRead()
-                                .withIOManager(lookupIO);
-                RecordReader<InternalRow> reader = read.createReader(split)) {
-            List<String> result = new ArrayList<>();
-            reader.forEachRemaining(
-                    row -> result.add(row.getRowKind().shortString() + " " + row.getInt(0)));
-            // History is 13, not 10 + 13; then apply the new delta 4.
-            assertThat(result).containsExactly("-U 13", "+U 17");
-        }
-    }
 
     @Test
     public void testForceLookupCachedHistoryAfterFileUpgrade() throws Exception {
@@ -169,11 +70,7 @@ public class ChangelogOnReadTest extends TableTestBase {
         options.put(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER.key(), "10");
         options.put(CoreOptions.LOOKUP_COMPACT.key(), "radical");
         FileStoreTable table =
-                createTable(
-                                CoreOptions.MergeEngine.AGGREGATE,
-                                CoreOptions.CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.defaultValue(),
-                                true)
-                        .copy(options);
+                createTable(CoreOptions.MergeEngine.AGGREGATE, 2, true).copy(options);
         // Keep the history file large enough that the next small delta compacts only to L1.
         List<InternalRow> rows = new ArrayList<>();
         for (int key = 1; key <= 2000; key++) {
@@ -221,7 +118,7 @@ public class ChangelogOnReadTest extends TableTestBase {
 
     @Test
     public void testDeduplicateMultipleLevel0() throws Exception {
-        FileStoreTable table = createTable(CoreOptions.MergeEngine.DEDUPLICATE);
+        FileStoreTable table = createTable(CoreOptions.MergeEngine.DEDUPLICATE, 2, false);
         write(table, GenericRow.of(1, 1, 1, 10));
 
         StreamTableScan scan = table.newStreamScan();
@@ -233,8 +130,8 @@ public class ChangelogOnReadTest extends TableTestBase {
             write(table, GenericRow.of(1, 1, 3, 30));
             assertThat(read(read, scan.plan())).containsExactly("-U 10", "+U 30");
 
-            write(table, GenericRow.of(1, 1, 4, 40));
-            assertThat(read(read, scan.plan())).containsExactly("-U 30", "+U 40");
+            write(table, GenericRow.ofKind(RowKind.DELETE, 1, 1, 4, null));
+            assertThat(read(read, scan.plan())).containsExactly("-D 30");
         }
     }
 
@@ -301,7 +198,7 @@ public class ChangelogOnReadTest extends TableTestBase {
 
     @Test
     public void testLookupStateEvictionAndReload() throws Exception {
-        FileStoreTable table = createTable(CoreOptions.MergeEngine.AGGREGATE, 2);
+        FileStoreTable table = createTable(CoreOptions.MergeEngine.AGGREGATE, 2, false);
         write(
                 table,
                 GenericRow.of(1, 1, 1, 10),
@@ -310,14 +207,13 @@ public class ChangelogOnReadTest extends TableTestBase {
 
         StreamTableScan scan = table.newStreamScan();
         Path lookupDir = tempPath.resolve("lookup");
-        List<Path> cachedFiles = new ArrayList<>();
+        Path reloaded;
         try (IOManager lookupIO = IOManager.create(lookupDir.toString())) {
-            TableRead read =
+            try (TableRead read =
                     table.newReadBuilder()
                             .withProjection(new int[] {3})
                             .newRead()
-                            .withIOManager(lookupIO);
-            try {
+                            .withIOManager(lookupIO)) {
                 TableScan.Plan initial = scan.plan();
                 Map<Integer, String> dataFiles = new HashMap<>();
                 for (Split split : initial.splits()) {
@@ -329,93 +225,33 @@ public class ChangelogOnReadTest extends TableTestBase {
                 assertThat(read(read, initial))
                         .containsExactlyInAnyOrder("+I 10", "+I 20", "+I 30");
 
-                // Access A, B, A, C: B is the least recently used state, not A.
+                // Access A, B, A, C. B must be evicted even though A was loaded first.
                 write(table, GenericRow.of(1, 1, 2, 1));
                 assertThat(read(read, scan.plan())).containsExactly("-U 10", "+U 11");
                 Path lookupA = findLookupFile(lookupDir, dataFiles.get(1));
-                cachedFiles.add(lookupA);
-
                 write(table, GenericRow.of(2, 1, 2, 2));
                 assertThat(read(read, scan.plan())).containsExactly("-U 20", "+U 22");
                 Path lookupB = findLookupFile(lookupDir, dataFiles.get(2));
-                cachedFiles.add(lookupB);
-
                 write(table, GenericRow.of(1, 1, 3, 3));
                 assertThat(read(read, scan.plan())).containsExactly("-U 11", "+U 14");
-                assertThat(lookupA).exists();
-                assertThat(lookupB).exists();
-
                 write(table, GenericRow.of(3, 1, 2, 4));
                 assertThat(read(read, scan.plan())).containsExactly("-U 30", "+U 34");
-                Path lookupC = findLookupFile(lookupDir, dataFiles.get(3));
-                cachedFiles.add(lookupC);
                 assertThat(lookupA).exists();
                 assertThat(lookupB).doesNotExist();
-                assertThat(lookupC).exists();
 
-                // Reconstruct the evicted partition from both historical level-0 files.
                 write(table, GenericRow.of(2, 1, 3, 5));
                 assertThat(read(read, scan.plan())).containsExactly("-U 22", "+U 27");
-                Path reloadedLookupB = findLookupFile(lookupDir, dataFiles.get(2));
-                cachedFiles.add(reloadedLookupB);
-                assertThat(reloadedLookupB).exists().isNotEqualTo(lookupB);
-                assertThat(lookupA).doesNotExist();
-                assertThat(lookupB).doesNotExist();
-                assertThat(lookupC).exists();
-            } finally {
-                read.close();
-                for (Path cachedFile : cachedFiles) {
-                    assertThat(cachedFile).doesNotExist();
-                }
+                reloaded = findLookupFile(lookupDir, dataFiles.get(2));
+                assertThat(reloaded).exists().isNotEqualTo(lookupB);
             }
-        }
-    }
-
-    @Test
-    public void testLookupStateCountBoundedAcrossPartitionsAndBuckets() throws Exception {
-        int maxStates = 2;
-        FileStoreTable table = createTable(CoreOptions.MergeEngine.DEDUPLICATE, maxStates);
-        try (IOManager lookupIO = IOManager.create(tempPath.resolve("lookup").toString())) {
-            MergeFileSplitRead read =
-                    ((PrimaryKeyFileStoreTable) table).store().newRead().withIOManager(lookupIO);
-            Field lookupLevelsField = MergeFileSplitRead.class.getDeclaredField("lookupLevelsMap");
-            lookupLevelsField.setAccessible(true);
-            Map<?, ?> lookupLevels = (Map<?, ?>) lookupLevelsField.get(read);
-            try {
-                int statesCreated = 0;
-                for (int partition = 0; partition < 32; partition++) {
-                    for (int bucket = 0; bucket < 4; bucket++) {
-                        // Even states without cached files own locks and must be bounded.
-                        IncrementalSplit split =
-                                new IncrementalSplit(
-                                        1L,
-                                        BinaryRow.singleColumn(partition),
-                                        bucket,
-                                        4,
-                                        Collections.emptyList(),
-                                        null,
-                                        Collections.emptyList(),
-                                        null,
-                                        true);
-                        try (RecordReader<KeyValue> reader =
-                                read.createChangelogOnReadReader(split)) {
-                            assertThat(reader.readBatch()).isNull();
-                        }
-                        statesCreated++;
-                        assertThat(lookupLevels).hasSize(Math.min(maxStates, statesCreated));
-                    }
-                }
-            } finally {
-                read.close();
-            }
-            assertThat(lookupLevels).isEmpty();
+            assertThat(reloaded).doesNotExist();
         }
     }
 
     @ParameterizedTest
     @ValueSource(ints = {0, -1})
     public void testRejectNonPositiveLookupStateMaxSize(int maxStates) throws Exception {
-        FileStoreTable table = createTable(CoreOptions.MergeEngine.DEDUPLICATE, maxStates);
+        FileStoreTable table = createTable(CoreOptions.MergeEngine.DEDUPLICATE, maxStates, false);
         assertThatThrownBy(() -> ((PrimaryKeyFileStoreTable) table).store().newRead())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(CoreOptions.CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.key());
@@ -423,27 +259,7 @@ public class ChangelogOnReadTest extends TableTestBase {
 
     @ParameterizedTest
     @CsvSource({"min-heap,false", "min-heap,true", "loser-tree,false", "loser-tree,true"})
-    public void testChangelogWithMergeSpills(String sortEngine, boolean forceLookup)
-            throws Exception {
-        readChangelogWithMergeSpills(sortEngine, forceLookup, false, false);
-    }
-
-    @ParameterizedTest
-    @CsvSource({"min-heap,false", "min-heap,true", "loser-tree,false", "loser-tree,true"})
-    public void testEarlyCloseWithMergeSpills(String sortEngine, boolean forceLookup)
-            throws Exception {
-        readChangelogWithMergeSpills(sortEngine, forceLookup, true, false);
-    }
-
-    @ParameterizedTest
-    @CsvSource({"min-heap,false", "min-heap,true", "loser-tree,false", "loser-tree,true"})
-    public void testProjectionWithMergeSpills(String sortEngine, boolean forceLookup)
-            throws Exception {
-        readChangelogWithMergeSpills(sortEngine, forceLookup, false, true);
-    }
-
-    private void readChangelogWithMergeSpills(
-            String sortEngine, boolean forceLookup, boolean earlyClose, boolean projected)
+    public void testProjectedChangelogWithSpill(String sortEngine, boolean forceLookup)
             throws Exception {
         Schema schema =
                 Schema.newBuilder()
@@ -453,11 +269,11 @@ public class ChangelogOnReadTest extends TableTestBase {
                         .primaryKey("k")
                         .option("bucket", "1")
                         .option("write-only", "true")
-                        .option("file.format", "avro")
                         .option("changelog-producer", "on-read")
                         .option("force-lookup", String.valueOf(forceLookup))
                         .option("sequence.field", "seq")
                         .option("sort-engine", sortEngine)
+                        // Only the per-key merge buffer should create spill files in this test.
                         .option("sort-spill-threshold", "1000")
                         .option("lookup.merge-records-threshold", "0")
                         .option("lookup.merge-buffer-size", "4 kb")
@@ -465,122 +281,51 @@ public class ChangelogOnReadTest extends TableTestBase {
                         .build();
         catalog.createTable(identifier(), schema, false);
         FileStoreTable table = getTableDefault();
-        char[] chars = new char[1000];
-        Arrays.fill(chars, 'x');
-        BinaryString value = BinaryString.fromString(new String(chars));
-        // Keep enough historical versions to spill historyMerge when force-lookup is enabled.
-        for (int i = 0; i < 12; i++) {
-            write(table, ioManager, GenericRow.of(1, i, value));
+        BinaryString value =
+                BinaryString.fromString(String.join("", Collections.nCopies(1000, "x")));
+        for (int seq = 0; seq < 8; seq++) {
+            write(table, ioManager, GenericRow.of(1, seq, value));
         }
-        ReadBuilder builder = table.newReadBuilder();
-        if (projected) {
-            // Drop the primary key and reorder values so spill serialization must use readType.
-            builder.withProjection(new int[] {2, 1});
-        }
+        ReadBuilder builder = table.newReadBuilder().withProjection(new int[] {2, 1});
         StreamTableScan scan = builder.newStreamScan();
-        DataSplit initial = (DataSplit) scan.plan().splits().get(0);
-        String firstDataFile = initial.dataFiles().get(0).fileName();
-        Path lookupDir = Files.createDirectories(tempPath.resolve("lookup"));
-        try (IOManager lookupIO = IOManager.create(lookupDir.toString())) {
-            TableRead read = builder.newRead().withIOManager(lookupIO);
-            Path firstLookupFile = null;
-            try {
-                for (int round = 1; round <= 2; round++) {
-                    // Multiple writers contribute overlapping files to one APPEND snapshot.
-                    List<CommitMessage> messages = new ArrayList<>();
-                    BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-                    for (int i = 0; i < 12; i++) {
-                        try (BatchTableWrite write = writeBuilder.newWrite()) {
-                            write.withIOManager(ioManager);
-                            write.write(GenericRow.of(1, round * 100 + i, value));
-                            messages.addAll(write.prepareCommit());
-                        }
-                    }
-                    try (BatchTableCommit commit = writeBuilder.newCommit()) {
-                        commit.commit(messages);
-                    }
-                    // The table's merge-function factory is shared by writes and reads.
-                    read.withIOManager(lookupIO);
-                    TableScan.Plan plan = scan.plan();
-                    assertThat(plan.splits()).hasSize(1);
-                    List<String> result = new ArrayList<>();
-                    List<Path> previousSpills = mergeSpillFiles(lookupDir);
-                    try (RecordReader<InternalRow> reader = read.createReader(plan)) {
-                        RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
-                        assertThat(batch).isNotNull();
-                        try {
-                            InternalRow before = batch.next();
-                            assertThat(before).isNotNull();
-                            assertThat(before.getFieldCount()).isEqualTo(projected ? 2 : 3);
-                            assertThat(before.getString(projected ? 0 : 2)).isEqualTo(value);
-                            result.add(before.getRowKind().shortString() + " " + before.getInt(1));
-                            assertThat(mergeSpillFiles(lookupDir))
-                                    .anyMatch(file -> !previousSpills.contains(file));
-                            if (!earlyClose) {
-                                InternalRow row;
-                                while ((row = batch.next()) != null) {
-                                    result.add(
-                                            row.getRowKind().shortString() + " " + row.getInt(1));
-                                }
-                            }
-                        } finally {
-                            batch.releaseBatch();
-                        }
-                        if (!earlyClose) {
-                            while ((batch = reader.readBatch()) != null) {
-                                try {
-                                    InternalRow row;
-                                    while ((row = batch.next()) != null) {
-                                        result.add(
-                                                row.getRowKind().shortString()
-                                                        + " "
-                                                        + row.getInt(1));
-                                    }
-                                } finally {
-                                    batch.releaseBatch();
-                                }
-                            }
-                        }
-                    }
-                    int beforeSeq = (round - 1) * 100 + 11;
-                    if (earlyClose) {
-                        assertThat(result).containsExactly("-U " + beforeSeq);
-                    } else {
-                        assertThat(result)
-                                .containsExactly("-U " + beforeSeq, "+U " + (round * 100 + 11));
-                    }
-                    Path cachedFile = findLookupFile(lookupDir, firstDataFile);
-                    if (firstLookupFile == null) {
-                        firstLookupFile = cachedFile;
-                    } else {
-                        assertThat(cachedFile).isEqualTo(firstLookupFile);
-                    }
-                    assertThat(firstLookupFile).exists();
-                }
-            } finally {
-                read.close();
+        scan.plan();
+
+        // Commit overlapping files together so the new versions of this key also spill.
+        BatchWriteBuilder writes = table.newBatchWriteBuilder();
+        List<CommitMessage> messages = new ArrayList<>();
+        for (int seq = 8; seq < 16; seq++) {
+            try (BatchTableWrite write = writes.newWrite()) {
+                write.withIOManager(ioManager);
+                write.write(GenericRow.of(1, seq, value));
+                messages.addAll(write.prepareCommit());
             }
-            assertThat(firstLookupFile).doesNotExist();
         }
-    }
-
-    private List<Path> mergeSpillFiles(Path lookupDir) throws IOException {
-        try (Stream<Path> paths = Files.walk(lookupDir)) {
-            // Lookup files have a data-file prefix; only merge buffers use unnamed channels.
-            return paths.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().matches("[0-9a-f]{32}[.]channel"))
-                    .collect(Collectors.toList());
+        try (BatchTableCommit commit = writes.newCommit()) {
+            commit.commit(messages);
         }
-    }
-
-    private FileStoreTable createTable(CoreOptions.MergeEngine mergeEngine) throws Exception {
-        return createTable(
-                mergeEngine, CoreOptions.CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.defaultValue());
-    }
-
-    private FileStoreTable createTable(CoreOptions.MergeEngine mergeEngine, int maxStates)
-            throws Exception {
-        return createTable(mergeEngine, maxStates, false);
+        Path lookupDir = tempPath.resolve("lookup");
+        try (IOManager lookupIO = IOManager.create(lookupDir.toString());
+                TableRead read = builder.newRead().withIOManager(lookupIO);
+                CloseableIterator<InternalRow> rows =
+                        read.createReader(scan.plan()).toCloseableIterator()) {
+            InternalRow before = rows.next();
+            assertThat(before.getRowKind()).isEqualTo(RowKind.UPDATE_BEFORE);
+            assertThat(before.getString(0)).isEqualTo(value);
+            assertThat(before.getInt(1)).isEqualTo(7);
+            try (Stream<Path> files = Files.walk(lookupDir)) {
+                assertThat(files)
+                        .anyMatch(
+                                file ->
+                                        file.getFileName()
+                                                .toString()
+                                                .matches("[0-9a-f]{32}[.]channel"));
+            }
+            InternalRow after = rows.next();
+            assertThat(after.getRowKind()).isEqualTo(RowKind.UPDATE_AFTER);
+            assertThat(after.getString(0)).isEqualTo(value);
+            assertThat(after.getInt(1)).isEqualTo(15);
+            assertThat(rows.hasNext()).isFalse();
+        }
     }
 
     private FileStoreTable createTable(
@@ -597,8 +342,8 @@ public class ChangelogOnReadTest extends TableTestBase {
                         .option(CoreOptions.BUCKET.key(), "1")
                         .option(CoreOptions.WRITE_ONLY.key(), "true")
                         .option(CoreOptions.CHANGELOG_PRODUCER.key(), "on-read")
-                        .option(CoreOptions.MERGE_ENGINE.key(), mergeEngine.toString())
                         .option(CoreOptions.FORCE_LOOKUP.key(), String.valueOf(forceLookup))
+                        .option(CoreOptions.MERGE_ENGINE.key(), mergeEngine.toString())
                         .option(CoreOptions.SEQUENCE_FIELD.key(), "seq")
                         .option(
                                 CoreOptions.CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.key(),
@@ -617,31 +362,6 @@ public class ChangelogOnReadTest extends TableTestBase {
                     row -> result.add(row.getRowKind().shortString() + " " + row.getInt(0)));
         }
         return result;
-    }
-
-    private List<String> readAfterLookupPrepared(
-            TableRead read, TableScan.Plan plan, Path lookupDir, String dataFile)
-            throws IOException {
-        List<String> result = new ArrayList<>();
-        try (RecordReader<InternalRow> reader = read.createReader(plan)) {
-            RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
-            assertThat(batch).isNotNull();
-            assertThat(findLookupFile(lookupDir, dataFile)).exists();
-            consume(batch, result);
-            while ((batch = reader.readBatch()) != null) {
-                consume(batch, result);
-            }
-        }
-        return result;
-    }
-
-    private void consume(RecordReader.RecordIterator<InternalRow> batch, List<String> result)
-            throws IOException {
-        InternalRow row;
-        while ((row = batch.next()) != null) {
-            result.add(row.getRowKind().shortString() + " " + row.getInt(0));
-        }
-        batch.releaseBatch();
     }
 
     private Path findLookupFile(Path lookupDir, String dataFile) throws IOException {

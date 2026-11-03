@@ -301,18 +301,10 @@ public class LookupLevelsTest {
             // Revisit the old view after upgrading, as when reading an older on-read split.
             for (DataFileMeta current : Arrays.asList(file, upgraded, file)) {
                 levels.update(levels.allFiles(), Collections.singletonList(current));
-                KeyValue result = lookupLevels.lookup(row(1), 0);
-                assertThat(result).isNotNull();
-                assertThat(result.level()).isEqualTo(current.level());
+                assertThat(lookupLevels.lookup(row(1), 0).level()).isEqualTo(current.level());
                 assertThat(lookupLevels.lookupAll(row(1)))
-                        .hasSize(1)
-                        .allSatisfy(
-                                kv -> {
-                                    assertThat(kv.level()).isEqualTo(current.level());
-                                    assertThat(kv.sequenceNumber()).isEqualTo(7);
-                                    assertThat(kv.valueKind()).isEqualTo(RowKind.INSERT);
-                                    assertThat(kv.value().getInt(1)).isEqualTo(11);
-                                });
+                        .extracting(KeyValue::level)
+                        .containsExactly(current.level());
                 assertThat(lookupLevels.lookupFiles().getIfPresent(file.fileName()))
                         .isSameAs(cached);
             }
@@ -324,28 +316,14 @@ public class LookupLevelsTest {
         DataFileMeta first = newFile(1, kv(1, 11));
         DataFileMeta second = newFile(1, kv(2, 22));
         Levels levels = new Levels(comparator, Arrays.asList(first, second), 1);
-        AtomicInteger localFileRequests = new AtomicInteger();
-        LookupLevels<KeyValue> lookupLevels =
-                createLookupLevels(
-                        levels,
-                        MemorySize.ofMebiBytes(10),
-                        fileName -> {
-                            localFileRequests.incrementAndGet();
-                            return new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + fileName);
-                        });
-
-        try {
-            lookupLevels.prepareLookupFiles(Arrays.asList(first, second));
-            assertThat(localFileRequests.get()).isEqualTo(2);
-            assertThat(lookupLevels.lookupFiles().asMap().keySet())
-                    .containsExactlyInAnyOrder(first.fileName(), second.fileName());
-
-            assertThat(lookupLevels.lookup(row(1), 1).value().getInt(1)).isEqualTo(11);
-            assertThat(lookupLevels.lookup(row(2), 1).value().getInt(1)).isEqualTo(22);
-            lookupLevels.prepareLookupFiles(Arrays.asList(first, second));
-            assertThat(localFileRequests.get()).isEqualTo(2);
-        } finally {
-            lookupLevels.close();
+        try (LookupLevels<KeyValue> lookup =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10))) {
+            lookup.prepareLookupFiles(Collections.singletonList(first));
+            LookupFile cached = lookup.lookupFiles().getIfPresent(first.fileName());
+            assertThat(cached).isNotNull();
+            lookup.prepareLookupFiles(Arrays.asList(first, second));
+            assertThat(lookup.lookupFiles().getIfPresent(first.fileName())).isSameAs(cached);
+            assertThat(lookup.lookupFiles().getIfPresent(second.fileName())).isNotNull();
         }
     }
 

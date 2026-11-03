@@ -75,6 +75,9 @@ import static org.apache.paimon.flink.source.FileStoreSourceSplitSerializerTest.
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 /** Test for {@link FileStoreSourceSplitReader}. */
 public class FileStoreSourceSplitReaderTest {
@@ -432,13 +435,9 @@ public class FileStoreSourceSplitReaderTest {
 
     @Test
     public void testCloseDoesNotCloseTableRead() throws Exception {
-        TestingTableRead tableRead =
-                new TestingTableRead(new SingleBatchRecordReader(new TrackingRecordIterator()));
-        FileStoreSourceSplitReader reader = createReader(tableRead, null);
-
-        reader.close();
-
-        assertThat(tableRead.closed()).isFalse();
+        TableRead tableRead = mock(TableRead.class);
+        createReader(tableRead, null).close();
+        verify(tableRead, never()).close();
     }
 
     @Test
@@ -614,7 +613,6 @@ public class FileStoreSourceSplitReaderTest {
     private static class TestingTableRead implements TableRead {
 
         private final RecordReader<InternalRow> recordReader;
-        private boolean closed;
 
         private TestingTableRead(RecordReader<InternalRow> recordReader) {
             this.recordReader = recordReader;
@@ -638,15 +636,6 @@ public class FileStoreSourceSplitReaderTest {
         @Override
         public RecordReader<InternalRow> createReader(Split split) {
             return recordReader;
-        }
-
-        @Override
-        public void close() {
-            closed = true;
-        }
-
-        private boolean closed() {
-            return closed;
         }
     }
 

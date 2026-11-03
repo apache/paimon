@@ -24,7 +24,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -37,6 +37,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IteratorRecordReader;
 
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
@@ -52,21 +53,23 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.IOException;
-import java.util.ArrayList;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.flink.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Unit tests for the {@link FileStoreSourceReader}. */
 public class FileStoreSourceReaderTest {
@@ -166,85 +169,72 @@ public class FileStoreSourceReaderTest {
     }
 
     @Test
-    public void testCloseClosesTableRead() throws Exception {
-        TestingReaderContext context = new TestingReaderContext();
-        CloseTrackingTableRead tableRead =
-                new CloseTrackingTableRead(
-                        new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey());
-        FileStoreSourceReader reader = createReader(context, tableRead);
-
-        reader.close();
-
-        assertThat(tableRead.closeCount()).isEqualTo(1);
-    }
-
-    @Test
     public void testCheckpointDuringFetchAndRestore() throws Exception {
-        List<List<InternalRow>> batches =
-                Arrays.asList(
-                        Arrays.asList(
-                                changelogRow(RowKind.UPDATE_BEFORE, 1L),
-                                changelogRow(RowKind.UPDATE_AFTER, 2L)),
-                        Collections.singletonList(changelogRow(RowKind.INSERT, 3L)));
-        CountDownLatch preparationStarted = new CountDownLatch(1);
-        CountDownLatch finishPreparation = new CountDownLatch(1);
-        ExecutorService checkpointExecutor = Executors.newSingleThreadExecutor();
-        FileStoreSourceReader reader =
-                createReader(
-                        new TestingReaderContext(),
-                        new BlockingTableRead(batches, preparationStarted, finishPreparation));
-        FileStoreSourceReader restoredReader = null;
-
-        try {
+        TableRead tableRead = mock(TableRead.class, RETURNS_SELF);
+        CountDownLatch preparing = new CountDownLatch(1);
+        CountDownLatch resume = new CountDownLatch(1);
+        when(tableRead.createReader(any(Split.class)))
+                .thenAnswer(
+                        invocation -> {
+                            preparing.countDown();
+                            assertThat(resume.await(15, TimeUnit.SECONDS)).isTrue();
+                            return changelogRecords();
+                        });
+        List<FileStoreSourceSplit> checkpoint;
+        try (FileStoreSourceReader reader = createReader(new TestingReaderContext(), tableRead)) {
             reader.addSplits(Collections.singletonList(createTestFileSplit("id1")));
             reader.start();
-            assertThat(preparationStarted.await(10, TimeUnit.SECONDS)).isTrue();
-
-            FileStoreSourceReader checkpointReader = reader;
-            Future<List<FileStoreSourceSplit>> checkpointDuringPreparation =
-                    checkpointExecutor.submit(() -> checkpointReader.snapshotState(1L));
-            List<FileStoreSourceSplit> unconsumedSplits =
-                    checkpointDuringPreparation.get(1, TimeUnit.SECONDS);
-            assertThat(unconsumedSplits)
-                    .singleElement()
-                    .extracting(FileStoreSourceSplit::recordsToSkip)
-                    .isEqualTo(0L);
-
-            finishPreparation.countDown();
-            TestingReaderOutput<RowData> outputBeforeCheckpoint = new TestingReaderOutput<>();
-            pollUntilRecords(reader, outputBeforeCheckpoint, 2);
-            assertThat(format(outputBeforeCheckpoint.getEmittedRecords()))
+            try {
+                assertThat(preparing.await(10, TimeUnit.SECONDS)).isTrue();
+                assertTimeoutPreemptively(
+                        Duration.ofSeconds(5),
+                        () ->
+                                assertThat(reader.snapshotState(1L))
+                                        .extracting(FileStoreSourceSplit::recordsToSkip)
+                                        .containsExactly(0L));
+            } finally {
+                resume.countDown();
+            }
+            TestingReaderOutput<RowData> output = new TestingReaderOutput<>();
+            while (output.getEmittedRecords().isEmpty()) {
+                reader.isAvailable().get(10, TimeUnit.SECONDS);
+                reader.pollNext(output);
+            }
+            assertThat(output.getEmittedRecords())
+                    .extracting(row -> row.getRowKind().shortString() + " " + row.getLong(0))
                     .containsExactly("-U 1", "+U 2");
-
-            List<FileStoreSourceSplit> checkpoint = reader.snapshotState(2L);
+            checkpoint = reader.snapshotState(2L);
             assertThat(checkpoint)
-                    .singleElement()
                     .extracting(FileStoreSourceSplit::recordsToSkip)
-                    .isEqualTo(2L);
-            reader.close();
-            reader = null;
-
-            restoredReader =
-                    createReader(new TestingReaderContext(), new BlockingTableRead(batches));
-            restoredReader.addSplits(checkpoint);
-            restoredReader.start();
-            TestingReaderOutput<RowData> outputAfterRestore = new TestingReaderOutput<>();
-            drain(restoredReader, outputAfterRestore);
-
-            List<String> allRecords = new ArrayList<>();
-            allRecords.addAll(format(outputBeforeCheckpoint.getEmittedRecords()));
-            allRecords.addAll(format(outputAfterRestore.getEmittedRecords()));
-            assertThat(allRecords).containsExactly("-U 1", "+U 2", "+I 3");
-        } finally {
-            finishPreparation.countDown();
-            if (reader != null) {
-                reader.close();
-            }
-            if (restoredReader != null) {
-                restoredReader.close();
-            }
-            checkpointExecutor.shutdownNow();
+                    .containsExactly(2L);
         }
+        verify(tableRead).close();
+        TableRead restoredRead = mock(TableRead.class, RETURNS_SELF);
+        when(restoredRead.createReader(any(Split.class))).thenReturn(changelogRecords());
+        try (FileStoreSourceReader restored =
+                createReader(new TestingReaderContext(), restoredRead)) {
+            restored.addSplits(checkpoint);
+            restored.start();
+            TestingReaderOutput<RowData> output = new TestingReaderOutput<>();
+            while (restored.getNumberOfCurrentlyAssignedSplits() > 0) {
+                restored.isAvailable().get(10, TimeUnit.SECONDS);
+                restored.pollNext(output);
+            }
+            assertThat(output.getEmittedRecords())
+                    .extracting(row -> row.getRowKind().shortString() + " " + row.getLong(0))
+                    .containsExactly("+I 3");
+        }
+    }
+
+    private static RecordReader<InternalRow> changelogRecords() throws Exception {
+        List<InternalRow> update =
+                Arrays.asList(
+                        GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1L),
+                        GenericRow.ofKind(RowKind.UPDATE_AFTER, 2L));
+        List<InternalRow> insert = Collections.singletonList(GenericRow.of(3L));
+        return ConcatRecordReader.create(
+                () -> new IteratorRecordReader<>(update.iterator()),
+                () -> new IteratorRecordReader<>(insert.iterator()));
     }
 
     protected FileStoreSourceReader createReader(TestingReaderContext context) {
@@ -267,168 +257,6 @@ public class FileStoreSourceReaderTest {
 
     protected static FileStoreSourceSplit createTestFileSplit(String id) {
         return newSourceSplit(id, row(1), 0, Collections.emptyList());
-    }
-
-    private static GenericRow changelogRow(RowKind kind, long value) {
-        GenericRow row = GenericRow.of(value);
-        row.setRowKind(kind);
-        return row;
-    }
-
-    private static void pollUntilRecords(
-            FileStoreSourceReader reader, TestingReaderOutput<RowData> output, int expected)
-            throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (output.getEmittedRecords().size() < expected && System.nanoTime() < deadline) {
-            reader.pollNext(output);
-            Thread.sleep(10);
-        }
-        assertThat(output.getEmittedRecords()).hasSize(expected);
-    }
-
-    private static void drain(FileStoreSourceReader reader, TestingReaderOutput<RowData> output)
-            throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (reader.getNumberOfCurrentlyAssignedSplits() > 0 && System.nanoTime() < deadline) {
-            reader.pollNext(output);
-            Thread.sleep(10);
-        }
-        assertThat(reader.getNumberOfCurrentlyAssignedSplits()).isZero();
-    }
-
-    private static List<String> format(List<RowData> records) {
-        List<String> result = new ArrayList<>();
-        for (RowData row : records) {
-            result.add(row.getRowKind().shortString() + " " + row.getLong(0));
-        }
-        return result;
-    }
-
-    private static class BlockingTableRead implements TableRead {
-
-        private final List<List<InternalRow>> batches;
-        private final CountDownLatch preparationStarted;
-        private final CountDownLatch finishPreparation;
-
-        private BlockingTableRead(List<List<InternalRow>> batches) {
-            this(batches, null, null);
-        }
-
-        private BlockingTableRead(
-                List<List<InternalRow>> batches,
-                CountDownLatch preparationStarted,
-                CountDownLatch finishPreparation) {
-            this.batches = batches;
-            this.preparationStarted = preparationStarted;
-            this.finishPreparation = finishPreparation;
-        }
-
-        @Override
-        public TableRead withMetricRegistry(MetricRegistry registry) {
-            return this;
-        }
-
-        @Override
-        public TableRead executeFilter() {
-            return this;
-        }
-
-        @Override
-        public TableRead withIOManager(IOManager ioManager) {
-            return this;
-        }
-
-        @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            if (preparationStarted != null) {
-                preparationStarted.countDown();
-                try {
-                    if (!finishPreparation.await(10, TimeUnit.SECONDS)) {
-                        throw new IOException("Timed out waiting for lookup preparation.");
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IOException(e);
-                }
-            }
-            return new BatchedRowsRecordReader(batches);
-        }
-    }
-
-    private static class BatchedRowsRecordReader implements RecordReader<InternalRow> {
-
-        private final List<List<InternalRow>> batches;
-        private int nextBatch;
-
-        private BatchedRowsRecordReader(List<List<InternalRow>> batches) {
-            this.batches = batches;
-        }
-
-        @Override
-        public RecordIterator<InternalRow> readBatch() {
-            if (nextBatch >= batches.size()) {
-                return null;
-            }
-
-            List<InternalRow> batch = batches.get(nextBatch++);
-            return new RecordIterator<InternalRow>() {
-                private int nextRow;
-
-                @Override
-                public InternalRow next() {
-                    return nextRow < batch.size() ? batch.get(nextRow++) : null;
-                }
-
-                @Override
-                public void releaseBatch() {}
-            };
-        }
-
-        @Override
-        public void close() {}
-    }
-
-    private static class CloseTrackingTableRead implements TableRead {
-
-        private final TableRead delegate;
-        private int closeCount;
-
-        private CloseTrackingTableRead(TableRead delegate) {
-            this.delegate = delegate;
-        }
-
-        private int closeCount() {
-            return closeCount;
-        }
-
-        @Override
-        public TableRead withMetricRegistry(MetricRegistry registry) {
-            delegate.withMetricRegistry(registry);
-            return this;
-        }
-
-        @Override
-        public TableRead executeFilter() {
-            delegate.executeFilter();
-            return this;
-        }
-
-        @Override
-        public TableRead withIOManager(IOManager ioManager) {
-            delegate.withIOManager(ioManager);
-            return this;
-        }
-
-        @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            return delegate.createReader(split);
-        }
-
-        @Override
-        public void close() throws IOException {
-            closeCount++;
-            delegate.close();
-        }
     }
 
     /** A {@link MetricGroup} for testing. */

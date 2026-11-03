@@ -333,7 +333,6 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         MergeFunction<KeyValue> historyMerge = mfFactory.create(readType);
         MergeFunctionFactory<KeyValue> mergeFactory = unwrapLookup(mfFactory);
 
-        // Keep one lookup layer and size its spill serializer for the projected values.
         LookupMergeFunction.Factory lookupFactory =
                 (LookupMergeFunction.Factory)
                         LookupMergeFunction.wrap(
