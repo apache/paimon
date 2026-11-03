@@ -352,11 +352,13 @@ public class ChainTablePartitionExpire implements PartitionExpire {
                     for (List<Map<String, String>> batch :
                             Lists.partition(partitionSpecs, expireBatchSize)) {
                         partitionModification.dropPartitions(batch);
-                        partitionModification.dropPartitions(toDonePartitions(batch));
+                        partitionModification.dropPartitionsFromMetastore(
+                                toDonePartitions(batch), batch);
                     }
                 } else {
                     partitionModification.dropPartitions(partitionSpecs);
-                    partitionModification.dropPartitions(toDonePartitions(partitionSpecs));
+                    partitionModification.dropPartitionsFromMetastore(
+                            toDonePartitions(partitionSpecs), partitionSpecs);
                 }
             } catch (Catalog.TableNotExistException e) {
                 throw new RuntimeException(e);

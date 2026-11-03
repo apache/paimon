@@ -893,6 +893,12 @@ public class ChainTablePartitionExpireTest {
         }
 
         @Override
+        public void dropPartitionsFromMetastore(List<Map<String, String>> partitions)
+                throws Catalog.TableNotExistException {
+            dropPartitions(partitions);
+        }
+
+        @Override
         public void alterPartitions(List<PartitionStatistics> partitions)
                 throws Catalog.TableNotExistException {}
 

@@ -49,6 +49,7 @@ import org.apache.paimon.table.CatalogTableType;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -525,12 +526,19 @@ public class HiveCatalog extends AbstractCatalog {
         if (metastorePartitioned(schema)) {
             List<Map<String, String>> metaPartitions = partitions;
             if (!tagToPart) {
-                Set<Map<String, String>> removableDataPartitions =
+                boolean syntheticPartitions = !partitions.equals(dataPartitions);
+                Set<Map<String, String>> specsToCheck = new HashSet<>(dataPartitions);
+                specsToCheck.addAll(partitions);
+                Set<Map<String, String>> removablePartitions =
                         new HashSet<>(
-                                removePartitionsExistsInOtherBranches(identifier, dataPartitions));
+                                removePartitionsStillInUse(
+                                        identifier,
+                                        new ArrayList<>(specsToCheck),
+                                        syntheticPartitions));
                 metaPartitions = new ArrayList<>();
                 for (int i = 0; i < partitions.size(); i++) {
-                    if (removableDataPartitions.contains(dataPartitions.get(i))) {
+                    if (removablePartitions.contains(dataPartitions.get(i))
+                            && removablePartitions.contains(partitions.get(i))) {
                         metaPartitions.add(partitions.get(i));
                     }
                 }
@@ -790,26 +798,23 @@ public class HiveCatalog extends AbstractCatalog {
                                         Short.MAX_VALUE));
     }
 
-    private List<Map<String, String>> removePartitionsExistsInOtherBranches(
-            Identifier identifier, List<Map<String, String>> inputs) throws TableNotExistException {
+    private List<Map<String, String>> removePartitionsStillInUse(
+            Identifier identifier, List<Map<String, String>> inputs, boolean syntheticPartitions)
+            throws TableNotExistException {
         FileStoreTable mainTable =
                 (FileStoreTable)
                         getTable(
                                 new Identifier(
                                         identifier.getDatabaseName(), identifier.getTableName()));
 
-        InternalRowPartitionComputer partitionComputer =
-                new InternalRowPartitionComputer(
-                        mainTable.coreOptions().partitionDefaultName(),
-                        mainTable.rowType().project(mainTable.partitionKeys()),
-                        mainTable.partitionKeys().toArray(new String[0]),
-                        mainTable.coreOptions().legacyPartitionName());
         List<String> branchNames = new ArrayList<>(mainTable.branchManager().branches());
         branchNames.add(DEFAULT_MAIN_BRANCH);
 
         Set<Map<String, String>> inputsToRemove = new HashSet<>(inputs);
         for (String branchName : branchNames) {
-            if (branchName.equals(identifier.getBranchNameOrDefault())) {
+            // Ordinary partitions are checked before their data is dropped. Marker cleanup runs
+            // afterwards and must also protect real, colliding partitions on the current branch.
+            if (!syntheticPartitions && branchName.equals(identifier.getBranchNameOrDefault())) {
                 continue;
             }
 
@@ -819,8 +824,20 @@ public class HiveCatalog extends AbstractCatalog {
                 continue;
             }
 
-            branchTableForPartitionExistence(mainTable, branchName).newScan()
-                    .withPartitionsFilter(new ArrayList<>(inputsToRemove)).listPartitions().stream()
+            FileStoreTable branchTable = branchTableForPartitionExistence(mainTable, branchName);
+            InternalRowPartitionComputer partitionComputer =
+                    new InternalRowPartitionComputer(
+                            branchTable.coreOptions().partitionDefaultName(),
+                            branchTable.rowType().project(branchTable.partitionKeys()),
+                            branchTable.partitionKeys().toArray(new String[0]),
+                            branchTable.coreOptions().legacyPartitionName());
+            DataTableScan scan = branchTable.newScan();
+            if (!syntheticPartitions) {
+                scan.withPartitionsFilter(new ArrayList<>(inputsToRemove));
+            }
+            // Synthetic values need not fit the partition type. Compare their literal specs with
+            // actual branch partitions, including real STRING values that collide with markers.
+            scan.listPartitions().stream()
                     .map(partitionComputer::generatePartValues)
                     .forEach(inputsToRemove::remove);
         }

@@ -1164,6 +1164,9 @@ public interface Catalog extends AutoCloseable {
     /**
      * Remove partition metadata using the corresponding data partitions to check branch ownership.
      *
+     * <p>A synthetic spec must also be retained when it names a real data partition still in use.
+     * Synthetic specs need not conform to the data partition types.
+     *
      * @param partitions metastore partition specs to remove, including synthetic markers
      * @param dataPartitions underlying data partition specs, in the same order as {@code
      *     partitions}
