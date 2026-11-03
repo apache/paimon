@@ -815,6 +815,11 @@ def _pin_table(table, snapshot_id):
     """
     if snapshot_id is None:
         return table
+    captured = getattr(table, "_read_snapshot", None)
+    if captured is not None and captured.id == snapshot_id:
+        # Search already captured the complete read view. Replacing it with
+        # a raw ID would lose tag-retained metadata after snapshot expiration.
+        return table
     tag_name = table.options.scan_tag_name()
     if tag_name is not None:
         _require_tag_snapshot(table, tag_name, snapshot_id)

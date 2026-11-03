@@ -145,6 +145,18 @@ matches = (
 )
 ```
 
+## Training from Search Results
+
+On data-evolution tables, search queries can call `to_torch()` to train on their
+matching rows, or `to_contiguous_window_dataset()` to use those rows as training
+anchors. Both capture one snapshot for search, post-filtering, and subsequent
+training reads. Window history and future frames come from the full snapshot
+context, optionally restricted with `context_filter`; search filters and top-k
+only select anchors. Batch vector search returns one Dataset per input query.
+
+See [search hits as training samples and window anchors](pytorch#search-hits-as-training-samples-and-window-anchors)
+for examples, ordering, projection, and snapshot retention requirements.
+
 ## Scores and Result Ordering
 
 On data-evolution tables, use `with_score()` to append a `float64` relevance
