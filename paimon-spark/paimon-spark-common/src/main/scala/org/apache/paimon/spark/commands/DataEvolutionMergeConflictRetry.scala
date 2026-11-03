@@ -68,7 +68,7 @@ private[commands] object DataEvolutionMergeConflictRetry {
       messages: Seq[CommitMessage],
       readSnapshotId: Long,
       latestSnapshot: Snapshot,
-      readFieldIds: Set[Int]): Option[Plan] = {
+      keyFieldIds: Set[Int]): Option[Plan] = {
     if (readSnapshotId < 0 || table.coreOptions().deletionVectorsEnabled()) {
       return None
     }
@@ -174,7 +174,7 @@ private[commands] object DataEvolutionMergeConflictRetry {
               DataEvolutionUtils
                 .fileFieldIds(schema, file)
                 .asScala
-                .exists(id => readFieldIds.contains(id))
+                .exists(id => keyFieldIds.contains(id))
             }
         }
         .map(

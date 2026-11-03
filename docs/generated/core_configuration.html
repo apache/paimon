@@ -567,12 +567,6 @@ under the License.
             <td>Whether to persist source when process merge into action on data evolution table.</td>
         </tr>
         <tr>
-            <td><h5>data-evolution.merge-into.source-repeatable</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether the source of a Spark MERGE INTO is guaranteed to return the same rows and values on every evaluation, including retries. If true, eligible deterministic MERGE statements can retry logical conflicts without checkpointing the source. If false, only null-safe COALESCE upserts are retried, with referenced source columns checkpointed once. Enable only when the caller can guarantee source repeatability.</td>
-        </tr>
-        <tr>
             <td><h5>data-evolution.merged-read.stats-pushdown.enabled</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>

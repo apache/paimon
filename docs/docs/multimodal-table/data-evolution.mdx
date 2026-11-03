@@ -456,50 +456,42 @@ latest boundaries after concurrent compaction, using distributed processing
 without rerunning the source and join.
 
 Spark also retries logical update conflicts with concurrent writes, including
-other `MERGE INTO` statements committed as `APPEND`. By default, this supports
-upserts with all of the following:
+other `MERGE INTO` statements committed as `APPEND`, for keyed upserts of this form:
 
-- The `ON` condition joins source and target columns using `<=>`, combined with `AND`.
+- The `ON` condition joins scalar source and target columns using `<=>`,
+  combined with `AND`.
 - One unconditional `WHEN MATCHED UPDATE` assigns `COALESCE(s.col, t.col)`,
-  retaining each updated column's own target value as the fallback. Equivalent
-  assignments from non-null source columns after optimization are also recognized.
-- One unconditional `WHEN NOT MATCHED INSERT` uses source columns or literal defaults.
+  retaining each updated column's own target value as the fallback. Join keys
+  must remain unchanged.
+- One unconditional `WHEN NOT MATCHED INSERT` copies the same source key and
+  updated value columns, with optional literal defaults for other columns.
 
-Spark materializes the referenced source columns once in a local checkpoint
+Updated columns can include whole structs, arrays, and maps with matching nested
+field names and structure. A non-null source value replaces the entire column;
+a null source value retains the latest target value. Nested field assignments
+and complex join keys retain the original conflict behavior.
+
+Spark materializes only the referenced source columns once in a local checkpoint
 before writing target files. Initial evaluation and retries reuse that result
 despite concurrent source writes or cache invalidation. The checkpoint is
-released on success or failure.
+released on success or failure. `data-evolution.merge-into.source-persist`
+continues to control ordinary caching for other MERGE statements.
 
-Set `data-evolution.merge-into.source-repeatable=true` only when the caller
-guarantees that source reevaluation returns the same rows and values throughout
-the MERGE and its retries. This additionally enables retries for general
-deterministic matched updates with optional inserts, without forcing a source
-checkpoint. The default is `false`.
-`data-evolution.merge-into.source-persist` continues to control ordinary caching
-for statements that do not require a retry checkpoint.
-The two options can be enabled together. Source persistence alone does not
-guarantee repeatability or enable general logical-conflict retries.
-
-Retries reevaluate the join, conditions, and assignments for current file
-groups whose read or written columns changed, and reuse unaffected staged
-update files. Compaction boundary changes can widen the affected groups.
-
-For an upsert, retries also update newly matched rows, including rows in new
-partitions, and regenerate inserts by finding unmatched source rows against
-the complete latest target. Superseded files are excluded from retry commits.
-Retries never delete staged files, including after a failure; unreferenced
-files are left for [orphan file cleanup](../maintenance/manage-snapshots#remove-orphan-files).
+Retries recompute conflicted file groups against the latest snapshot and reuse
+unaffected staged update files. Compaction boundary changes can widen the affected
+groups. Retries also reevaluate groups with changed join keys or newly inserted
+rows, including rows in new partitions, and regenerate inserts by finding
+unmatched source rows against the complete latest target.
+Superseded files are excluded from retry commits. Retries never delete staged
+files, including after a failure; unreferenced files are left for
+[orphan file cleanup](../maintenance/manage-snapshots#remove-orphan-files).
 
 Logical-update retries use `commit.max-retries`, `commit.timeout`, and the
-commit retry wait options. They are not attempted for statements with delete
-actions, nondeterministic expressions, subqueries in expressions, or an
-explicitly selected target snapshot. They also retain the original conflict
-behavior when MERGE references complex source columns (structs, arrays, or
-maps), to preserve nested column pruning. Staged update files must be normal data
-files; update commits carrying index-file changes retain their
-original conflict behavior. Self-merges using the row-ID shortcut do not retry
-logical conflicts. Spark V1 `UPDATE` retains the separate retry policy described
-above. These restrictions also apply when `source-repeatable` is enabled.
+commit retry wait options. They are not attempted with deletion vectors,
+nondeterministic expressions, subqueries in expressions, or an explicitly
+selected target snapshot. Staged update files must be normal data files;
+update commits carrying index-file changes retain their original conflict
+behavior. Spark V1 `UPDATE` retains its separate retry policy described above.
 
 This recovery is triggered by a detected row-ID update conflict. It does not
 add business-key uniqueness: two writers inserting the same previously absent

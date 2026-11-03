@@ -25,10 +25,12 @@ import org.apache.paimon.table.PrimaryKeyTableUtils.validatePKUpsertDeletable
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Expression, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Cast, Coalesce, EqualNullSafe, Expression, Literal, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.objects.AssertNotNull
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.types.{ArrayType, DataType, MapType, NullType, StructType}
 
 import scala.collection.JavaConverters._
 
@@ -102,7 +104,8 @@ case class PaimonMergeInto(spark: SparkSession)
         resolvedMerge.mergeCondition,
         aligned.matchedActions,
         aligned.notMatchedActions,
-        notMatchedBySource
+        notMatchedBySource,
+        upsertKeyColumns = keyedUpsertColumns(resolvedMerge)
       )
     } else {
       MergeIntoPaimonTable(
@@ -114,6 +117,94 @@ case class PaimonMergeInto(spark: SparkSession)
         aligned.notMatchedActions,
         notMatchedBySource
       )
+    }
+  }
+
+  // Validate before alignment expands whole ROW/ARRAY/MAP assignments into field projections.
+  private def keyedUpsertColumns(merge: MergeIntoTable): Set[String] = {
+    val sourceIds = merge.sourceTable.output.map(_.exprId).toSet
+    val targetIds = merge.targetTable.output.map(_.exprId).toSet
+    def unwrap(expression: Expression): Expression = expression match {
+      case cast: Cast => unwrap(cast.child)
+      case check: AssertNotNull => unwrap(check.child)
+      case other => other
+    }
+    def attribute(expression: Expression): Option[Attribute] = unwrap(expression) match {
+      case attr: Attribute => Some(attr)
+      case _ => None
+    }
+    def sameShape(source: DataType, target: DataType): Boolean = (source, target) match {
+      case (NullType, _) => true
+      case (StructType(left), StructType(right)) =>
+        left.length == right.length && left.zip(right).forall {
+          case (a, b) =>
+            spark.sessionState.analyzer.resolver(a.name, b.name) &&
+            sameShape(a.dataType, b.dataType)
+        }
+      case (ArrayType(left, _), ArrayType(right, _)) => sameShape(left, right)
+      case (MapType(lk, lv, _), MapType(rk, rv, _)) => sameShape(lk, rk) && sameShape(lv, rv)
+      case (_: StructType | _: ArrayType | _: MapType, _) => false
+      case (_, _: StructType | _: ArrayType | _: MapType) => false
+      case _ => true
+    }
+    def sourceColumn(expression: Expression, target: Attribute): Option[Attribute] =
+      attribute(expression).filter(
+        attr => sourceIds.contains(attr.exprId) && sameShape(attr.dataType, target.dataType))
+    def keyPair(left: Expression, right: Expression): Option[(Attribute, Attribute)] = {
+      for {
+        target <- attribute(left) if targetIds.contains(target.exprId)
+        source <- attribute(right) if sourceIds.contains(source.exprId)
+        if !target.dataType.isInstanceOf[StructType] &&
+          !target.dataType.isInstanceOf[ArrayType] && !target.dataType.isInstanceOf[MapType] &&
+          !source.dataType.isInstanceOf[StructType] &&
+          !source.dataType.isInstanceOf[ArrayType] && !source.dataType.isInstanceOf[MapType]
+      } yield target -> source
+    }
+    val keys = splitConjunctivePredicates(merge.mergeCondition).map {
+      case EqualNullSafe(left, right) => keyPair(left, right).orElse(keyPair(right, left))
+      case _ => None
+    }
+    if (
+      keys.isEmpty || keys.exists(_.isEmpty) ||
+      resolveNotMatchedBySourceActions(merge).nonEmpty
+    ) return Set.empty
+    val keyPairs = keys.flatten
+    val keyIds = keyPairs.map(_._1.exprId).toSet
+    (merge.matchedActions, merge.notMatchedActions) match {
+      case (Seq(update: UpdateAction), Seq(insert: InsertAction))
+          if update.condition.isEmpty && insert.condition.isEmpty =>
+        val modified = update.assignments.filterNot {
+          case Assignment(key: Attribute, value: Attribute) => key.exprId == value.exprId
+          case _ => false
+        }
+        val sources = modified.map {
+          case Assignment(key: Attribute, Coalesce(Seq(source, previous)))
+              if targetIds.contains(key.exprId) && !keyIds.contains(key.exprId) &&
+                attribute(previous).exists(_.exprId == key.exprId) =>
+            sourceColumn(source, key).map(attr => key.exprId -> attr.exprId)
+          case _ => None
+        }
+        val inserts = insert.assignments.map {
+          case Assignment(key: Attribute, value) if targetIds.contains(key.exprId) =>
+            sourceColumn(value, key).map(source => key.exprId -> source.exprId)
+          case _ => None
+        }
+        val validValues = insert.assignments.forall {
+          case Assignment(key: Attribute, value) =>
+            sourceColumn(value, key).isDefined || unwrap(value).isInstanceOf[Literal]
+          case _ => false
+        }
+        val inserted = inserts.flatten.toMap
+        val required = sources.flatten ++ keyPairs.map {
+          case (target, source) => target.exprId -> source.exprId
+        }
+        if (
+          modified.nonEmpty && sources.forall(_.isDefined) && validValues &&
+          inserted == required.toMap
+        ) {
+          keyPairs.map(_._1.name).toSet
+        } else Set.empty
+      case _ => Set.empty
     }
   }
 

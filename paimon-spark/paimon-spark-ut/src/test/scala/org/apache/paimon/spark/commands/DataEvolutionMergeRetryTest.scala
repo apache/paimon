@@ -44,29 +44,13 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       sql("INSERT INTO t VALUES (2, 2, 'pending')")
       val merge = pinnedMerge(
-        "MERGE INTO t USING (SELECT 1 AS id UNION ALL SELECT 2 AS id) s " +
-          "ON t.id = s.id WHEN MATCHED THEN UPDATE SET b = t.b + 1")
+        upsert("(SELECT * FROM VALUES (1, CAST(NULL AS INT)), (2, 30), (3, 4) batch(id, b))"))
 
       concurrentMerge("b = t.b + 10")
       assert(loadTable("t").latestSnapshot().get().commitKind() == CommitKind.APPEND)
       merge.run(spark)
 
-      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 12), Row(2, 3)))
-    }
-  }
-
-  test("merge retry reevaluates matched conditions") {
-    withTable("t") {
-      createTable()
-      sql("INSERT INTO t VALUES (1, 1, 'pending')")
-      val merge = pinnedMerge(
-        "MERGE INTO t USING (SELECT 1 AS id) s ON t.id = s.id " +
-          "WHEN MATCHED AND t.status = 'pending' THEN UPDATE SET status = 'done'")
-
-      concurrentMerge("status = 'cancelled'")
-      merge.run(spark)
-
-      checkAnswer(sql("SELECT status FROM t"), Seq(Row("cancelled")))
+      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 11), Row(2, 30), Row(3, 4)))
     }
   }
 
@@ -74,10 +58,8 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     withTable("t") {
       createTable("'commit.max-retries' = '0',")
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
-      val merge = pinnedMerge(
-        "MERGE INTO t USING (SELECT 1 AS id UNION ALL SELECT 2 AS id) s ON t.id = s.id " +
-          "WHEN MATCHED THEN UPDATE SET b = t.b + 1 " +
-          "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')")
+      val merge =
+        pinnedMerge(upsert("(SELECT * FROM VALUES (1, CAST(NULL AS INT)), (2, 0) batch(id, b))"))
 
       concurrentMerge("b = t.b + 10")
       assertUpdateConflict(intercept[RuntimeException](merge.run(spark)))
@@ -125,7 +107,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
           staged,
           readSnapshot.id(),
           table.latestSnapshot().get(),
-          Set(table.rowType().getField("b").id()))
+          Set(table.rowType().getField("id").id()))
         .get
 
       val retainedFiles = plan.remainingMessages
@@ -174,7 +156,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
             staged,
             readSnapshot.id(),
             table.latestSnapshot().get(),
-            Set(table.rowType().getField("b").id()))
+            Set(table.rowType().getField("id").id()))
           .isEmpty)
       checkAnswer(sql("SELECT b, status FROM t"), Seq(Row(99, "replaced")))
     }
@@ -186,8 +168,8 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       sql("INSERT INTO t VALUES (2, 2, 'pending')")
       val merge = pinnedMerge(
-        "MERGE INTO t USING (SELECT 1 AS id UNION ALL SELECT 2 AS id) s " +
-          "ON t.id = s.id WHEN MATCHED THEN UPDATE SET b = t.b + 1")
+        upsert(
+          "(SELECT * FROM VALUES (1, CAST(NULL AS INT)), (2, CAST(NULL AS INT)) batch(id, b))"))
 
       concurrentMerge("b = t.b + 10")
       sql(
@@ -195,7 +177,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
           "WHEN MATCHED THEN UPDATE SET b = t.b + 20").collect()
       merge.run(spark)
 
-      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 12), Row(2, 23)))
+      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 11), Row(2, 22)))
     }
   }
 
@@ -205,30 +187,14 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       sql("INSERT INTO t VALUES (2, 2, 'pending')")
       val merge = pinnedMerge(
-        "MERGE INTO t USING (SELECT 1 AS id UNION ALL SELECT 2 AS id) s " +
-          "ON t.id = s.id WHEN MATCHED THEN UPDATE SET b = t.b + 1")
+        upsert(
+          "(SELECT * FROM VALUES (1, CAST(NULL AS INT)), (2, CAST(NULL AS INT)) batch(id, b))"))
 
       concurrentMerge("b = t.b + 10")
       sql("CALL sys.compact(table => 't')").collect()
       merge.run(spark)
 
-      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 12), Row(2, 3)))
-    }
-  }
-
-  test("merge retry reevaluates the ON condition") {
-    withTable("t") {
-      createTable()
-      sql("INSERT INTO t VALUES (1, 1, 'pending')")
-      val merge = pinnedMerge(
-        "MERGE INTO t USING (SELECT 1 AS id) s " +
-          "ON t.id = s.id AND t.status = 'pending' " +
-          "WHEN MATCHED THEN UPDATE SET b = t.b + 1")
-
-      concurrentMerge("b = t.b + 10, status = 'cancelled'")
-      merge.run(spark)
-
-      checkAnswer(sql("SELECT b, status FROM t"), Seq(Row(11, "cancelled")))
+      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 11), Row(2, 2)))
     }
   }
 
@@ -236,74 +202,11 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     withTable("t") {
       createTable()
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
-      val merge = pinnedMerge(
-        "MERGE INTO t USING (SELECT 1 AS id, rand() AS delta) s ON t.id = s.id " +
-          "WHEN MATCHED THEN UPDATE SET b = CAST(t.b + s.delta AS INT)")
+      val merge = pinnedMerge(upsert("(SELECT 1 AS id, CAST(rand() * 100 AS INT) AS b)"))
 
       concurrentMerge("b = t.b + 10")
       assertUpdateConflict(intercept[RuntimeException](merge.run(spark)))
       checkAnswer(sql("SELECT b FROM t"), Seq(Row(11)))
-    }
-  }
-
-  test("merge retries updates and inserts without retaining stale insert results") {
-    withTable("t") {
-      createTable()
-      sql("INSERT INTO t VALUES (1, 1, 'pending')")
-      val merge = pinnedMerge(
-        "MERGE INTO t USING (SELECT 1 AS id UNION ALL SELECT 2 AS id) s ON t.id = s.id " +
-          "WHEN MATCHED THEN UPDATE SET b = t.b + 1 " +
-          "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')")
-
-      concurrentMerge("b = t.b + 10")
-      merge.run(spark)
-      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 12), Row(2, 0)))
-    }
-  }
-
-  for (
-    sourceRepeatable <- Seq(None, Some(false), Some(true));
-    sourcePersist <- Seq(false, true)
-  ) {
-    test(
-      s"general MERGE retry with repeatable source $sourceRepeatable and persist $sourcePersist") {
-      withTable("t") {
-        val persistOption = s"'data-evolution.merge-into.source-persist' = '$sourcePersist',"
-        sourceRepeatable match {
-          case Some(enabled) =>
-            createTable(persistOption, sourceRepeatable = enabled)
-          case None =>
-            sql(
-              "CREATE TABLE t (id INT, b INT, status STRING) TBLPROPERTIES (" +
-                persistOption +
-                "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-        }
-        sql("INSERT INTO t VALUES (1, 1, 'pending')")
-        val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
-        var attempts = 0
-        val merge = interleavedMerge(
-          "MERGE INTO t USING (SELECT 1 AS id UNION ALL SELECT 2 AS id) s ON t.id = s.id " +
-            "WHEN MATCHED THEN UPDATE SET b = t.b + 1 " +
-            "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')",
-          _ => {
-            attempts += 1
-            val cachedSource =
-              spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore)
-            assert(cachedSource.nonEmpty == sourcePersist)
-            if (attempts == 1) concurrentMerge("b = t.b + 10")
-          }
-        )
-        if (sourceRepeatable.contains(true)) {
-          merge.run(spark)
-          checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 12), Row(2, 0)))
-          assert(attempts == 2)
-        } else {
-          assertUpdateConflict(intercept[RuntimeException](merge.run(spark)))
-          checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 11)))
-          assert(attempts == 1)
-        }
-        assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
-      }
     }
   }
 
@@ -338,16 +241,39 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
         "missing insert",
         "t.id <=> s.id",
         "WHEN MATCHED THEN UPDATE SET b = COALESCE(s.delta, t.b)",
-        false)
+        false),
+      (
+        "key update",
+        "t.id <=> s.id",
+        "WHEN MATCHED THEN UPDATE SET id = COALESCE(s.delta, t.id), b = COALESCE(s.delta, t.b)",
+        true),
+      (
+        "source value missing from insert",
+        "t.id <=> s.id",
+        "WHEN MATCHED THEN UPDATE SET b = COALESCE(s.delta, t.b)",
+        true),
+      ("target arithmetic", "t.id <=> s.id", "WHEN MATCHED THEN UPDATE SET b = t.b + 1", true),
+      (
+        "value mapped to another column",
+        "t.id <=> s.id",
+        "WHEN MATCHED THEN UPDATE SET b = COALESCE(s.delta, t.b)",
+        true)
     )
   ) {
-    test(s"default retry rejects noncanonical upsert: $name") {
+    test(s"retry rejects noncanonical upsert: $name") {
       withTable("t") {
-        createTable(sourceRepeatable = false)
+        createTable()
         sql("INSERT INTO t VALUES (1, 1, 'pending')")
-        val insertValue = if (name == "insert expression") "s.delta + 1" else "s.delta"
+        val insertValue = name match {
+          case "insert expression" => "s.delta + 1"
+          case "source value missing from insert" | "value mapped to another column" => "0"
+          case _ => "s.delta"
+        }
+        val statusValue = if (name == "value mapped to another column") {
+          "CAST(s.delta AS STRING)"
+        } else "'new'"
         val insertClause = if (insert) {
-          s"WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, $insertValue, 'new')"
+          s"WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, $insertValue, $statusValue)"
         } else ""
         var attempts = 0
         val merge = interleavedMerge(
@@ -365,9 +291,9 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     }
   }
 
-  test("default retry supports optimized COALESCE with a nonnullable source") {
+  test("retry supports optimized COALESCE with a nonnullable source") {
     withTable("t") {
-      createTable(sourceRepeatable = false)
+      createTable()
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       var attempts = 0
       val merge = interleavedMerge(
@@ -387,7 +313,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
   }
 
   for (notNull <- Seq(false, true)) {
-    test(s"default retry supports optimized STRING to DATE COALESCE with not-null=$notNull") {
+    test(s"retry supports optimized STRING to DATE COALESCE with not-null=$notNull") {
       withSQLConf("spark.sql.ansi.enabled" -> "false") {
         withTable("t") {
           val nullability = if (notNull) " NOT NULL" else ""
@@ -472,9 +398,8 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       sql("INSERT INTO t VALUES (3, 20, 'pending')")
       val merge = pinnedMerge(
-        "MERGE INTO t USING (SELECT 1 AS id UNION ALL SELECT 3 AS id) s ON t.id = s.id " +
-          "WHEN MATCHED THEN UPDATE SET b = t.b + 1 " +
-          "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')")
+        upsert(
+          "(SELECT * FROM VALUES (1, CAST(NULL AS INT)), (3, CAST(NULL AS INT)) batch(id, b))"))
 
       concurrentMerge("b = t.b + 10")
       sql(
@@ -482,48 +407,14 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
           "WHEN MATCHED THEN UPDATE SET id = 99")
       merge.run(spark)
 
-      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 12), Row(99, 20), Row(3, 0)))
-    }
-  }
-
-  for (
-    withInsert <- Seq(false, true);
-    (dependency, action, firstValue, secondValue) <- Seq(
-      ("condition", "WHEN MATCHED AND t.status = 'pending' THEN UPDATE SET b = t.b + 1", 12, 2),
-      ("assignment", "WHEN MATCHED THEN UPDATE SET b = t.b + length(t.status)", 18, 6)
-    )
-  ) {
-    test(s"merge retry refreshes a matched $dependency dependency with insert $withInsert") {
-      withTable("t") {
-        createTable()
-        sql("INSERT INTO t VALUES (1, 1, 'pending')")
-        sql("INSERT INTO t VALUES (2, 2, 'pending')")
-        val merge = pinnedMerge(
-          "MERGE INTO t USING (SELECT id FROM VALUES (1), (2), (3) s(id)) s " +
-            s"ON t.id = s.id $action " + (if (withInsert) {
-                                            "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')"
-                                          } else ""))
-
-        concurrentMerge("b = t.b + 10")
-        sql(
-          "MERGE INTO t USING (SELECT 2 AS id) s ON t.id = s.id " +
-            "WHEN MATCHED THEN UPDATE SET status = 'done'")
-        merge.run(spark)
-
-        checkAnswer(
-          sql("SELECT id, b FROM t"),
-          Seq(Row(1, firstValue), Row(2, secondValue)) ++
-            (if (withInsert) Seq(Row(3, 0)) else Nil))
-      }
+      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 11), Row(99, 20), Row(3, null)))
     }
   }
 
   for (persistSource <- Seq(false, true)) {
-    test(s"default COALESCE upsert keeps one source snapshot with source persist $persistSource") {
+    test(s"COALESCE upsert keeps one source snapshot with source persist $persistSource") {
       withTable("t", "src") {
-        createTable(
-          s"'data-evolution.merge-into.source-persist' = '$persistSource',",
-          sourceRepeatable = false)
+        createTable(s"'data-evolution.merge-into.source-persist' = '$persistSource',")
         sql("INSERT INTO t VALUES (1, 1, 'pending')")
         sql("INSERT INTO t VALUES (2, 2, 'pending')")
         sql("CREATE TABLE src (id INT, delta INT)")
@@ -551,39 +442,13 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     }
   }
 
-  for (sourceRepeatable <- Seq(false, true)) {
-    test(
-      s"self merge shortcut retains its conflict behavior with repeatable source $sourceRepeatable") {
-      withTable("t") {
-        createTable(sourceRepeatable = sourceRepeatable)
-        sql("INSERT INTO t VALUES (1, 1, 'pending')")
-        sql("INSERT INTO t VALUES (2, 2, 'pending')")
-        var attempts = 0
-        val merge = interleavedMerge(
-          "MERGE INTO t AS t USING t AS s ON t._ROW_ID = s._ROW_ID " +
-            "WHEN MATCHED THEN UPDATE SET b = s.b + 1",
-          _ => {
-            attempts += 1
-            if (attempts == 1) concurrentMerge("b = t.b + 100")
-          }
-        )
-        assertUpdateConflict(intercept[RuntimeException](merge.run(spark)))
-
-        checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 101), Row(2, 2)))
-        assert(attempts == 1)
-      }
-    }
-  }
-
   test("failed retry insert staging keeps its original error and releases cached source") {
     withTable("t") {
       createTable("'data-evolution.merge-into.source-persist' = 'true',")
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       sql("INSERT INTO t VALUES (2, 2, 'pending')")
       val merge = interleavedMerge(
-        "MERGE INTO t USING (SELECT id FROM VALUES (1), (2), (3) s(id)) s ON t.id = s.id " +
-          "WHEN MATCHED THEN UPDATE SET b = t.b + 1 " +
-          "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')",
+        upsert("(SELECT * FROM VALUES (1, CAST(NULL AS INT)), (2, 3), (3, 0) batch(id, b))"),
         _ => concurrentMerge("b = t.b + 100"),
         failInsertAttempt = 2
       )
@@ -602,9 +467,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       var attempts = 0
       val merge = interleavedMerge(
-        "MERGE INTO t USING (SELECT 1 AS id UNION ALL SELECT 2 AS id) s ON t.id = s.id " +
-          "WHEN MATCHED THEN UPDATE SET b = t.b + 1 " +
-          "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')",
+        upsert("(SELECT * FROM VALUES (1, CAST(NULL AS INT)), (2, 0) batch(id, b))"),
         _ => {
           attempts += 1
           if (attempts == 1) concurrentMerge("b = t.b + 100")
@@ -615,15 +478,15 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
       val error = intercept[RuntimeException](merge.run(spark))
       assert(error.getMessage == "publication response failed")
-      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 102), Row(2, 0)))
+      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 101), Row(2, 0)))
       assert(attempts == 2)
       assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
     }
   }
 
-  test("default COALESCE upsert source checkpoint prunes unused columns") {
+  test("COALESCE upsert source checkpoint prunes unused columns") {
     withTable("t", "src") {
-      createTable(sourceRepeatable = false)
+      createTable()
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       sql("CREATE TABLE src (id INT)")
       sql("INSERT INTO src VALUES (1)")
@@ -694,7 +557,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
 
   test("source materialization failure releases its checkpoint before any target write") {
     withTable("t", "src") {
-      createTable(sourceRepeatable = false)
+      createTable()
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       sql("CREATE TABLE src (id INT)")
       sql("INSERT INTO src VALUES (1)")
@@ -733,9 +596,9 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       sql("INSERT INTO t VALUES (2, 2, 'pending')")
       val attempts = ArrayBuffer.empty[Seq[CommitMessage]]
       val merge = interleavedMerge(
-        "MERGE INTO t USING (SELECT id FROM VALUES (1), (2), (3), (4) s(id)) s " +
-          "ON t.id = s.id WHEN MATCHED THEN UPDATE SET b = t.b + 1 " +
-          "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')",
+        upsert(
+          "(SELECT * FROM VALUES (1, CAST(NULL AS INT)), (2, 3), " +
+            "(3, CAST(NULL AS INT)), (4, 0) batch(id, b))"),
         messages => {
           attempts += messages
           attempts.size match {
@@ -753,7 +616,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       )
       merge.run(spark)
 
-      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 112), Row(2, 3), Row(3, 31), Row(4, 0)))
+      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 111), Row(2, 3), Row(3, 30), Row(4, 0)))
       checkAnswer(sql("SELECT status FROM t WHERE id = 2"), Seq(Row("rival")))
       assert(attempts.size == 3)
       def files(messages: Seq[CommitMessage]) =
@@ -803,6 +666,106 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     }
   }
 
+  test("upsert retry supports typed literal insert defaults") {
+    withTable("t") {
+      createTable()
+      sql("INSERT INTO t VALUES (1, 1, 'pending')")
+      val merge = pinnedMerge(
+        upsert("(SELECT * FROM VALUES (1, CAST(NULL AS INT)), (2, 20) batch(id, b))")
+          .replace("'new'", "CAST(NULL AS STRING)"))
+      concurrentMerge("b = t.b + 10")
+      merge.run(spark)
+      checkAnswer(sql("SELECT id, b, status FROM t"), Seq(Row(1, 11, "pending"), Row(2, 20, null)))
+    }
+  }
+
+  test("upsert retry finds a previously unmatched group whose key changed") {
+    withTable("t") {
+      createTable()
+      sql("INSERT INTO t VALUES (1, 1, 'pending')")
+      sql("INSERT INTO t VALUES (99, 99, 'pending')")
+      var attempts = 0
+      val merge = interleavedMerge(
+        upsert("(SELECT * FROM VALUES (1, CAST(NULL AS INT)), (2, 20) batch(id, b))"),
+        messages => {
+          attempts += 1
+          if (attempts == 1) {
+            val updated = messages
+              .flatMap(_.asInstanceOf[CommitMessageImpl].newFilesIncrement().newFiles().asScala)
+              .flatMap(file => Option(file.firstRowId()).map(_.longValue()))
+            assert(updated.toSet == Set(0L))
+            concurrentMerge("b = t.b + 10")
+            sql(
+              "MERGE INTO t USING (SELECT 99 AS id) s ON t.id = s.id " +
+                "WHEN MATCHED THEN UPDATE SET id = 2")
+          }
+        }
+      )
+      merge.run(spark)
+      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 11), Row(2, 20)))
+      assert(attempts == 2)
+    }
+  }
+
+  for (nestedFields <- Seq(false, true)) {
+    test(s"upsert retry replaces whole complex columns with nested fields $nestedFields") {
+      withTable("t", "src") {
+        val schema = "(id INT, payload STRUCT<x: INT, tags: ARRAY<STRING>>, " +
+          "items ARRAY<STRUCT<x: INT>>, attrs MAP<STRING, STRUCT<x: INT>>)"
+        sql(
+          s"CREATE TABLE t $schema TBLPROPERTIES (" +
+            "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true', " +
+            s"'data-evolution.nested-field.enabled' = '$nestedFields')")
+        sql(s"CREATE TABLE src $schema")
+        def values(id: Int, x: Int, tag: String): String =
+          s"($id, named_struct('x', $x, 'tags', array('$tag')), " +
+            s"array(named_struct('x', $x)), map('$tag', named_struct('x', $x)))"
+        sql(s"INSERT INTO t VALUES (1, NULL, NULL, NULL), ${values(2, 2, "old")}")
+        sql(
+          "INSERT INTO src VALUES (1, NULL, NULL, NULL), " +
+            s"${values(2, 20, "source")}, ${values(3, 30, "source")}, (4, NULL, NULL, NULL)")
+        var attempts = 0
+        val merge = interleavedMerge(
+          "MERGE INTO t USING src s ON t.id <=> s.id " +
+            "WHEN MATCHED THEN UPDATE SET payload = COALESCE(s.payload, t.payload), " +
+            "items = COALESCE(s.items, t.items), attrs = COALESCE(s.attrs, t.attrs) " +
+            "WHEN NOT MATCHED THEN INSERT *",
+          _ => {
+            attempts += 1
+            if (attempts == 1) {
+              sql(
+                s"INSERT OVERWRITE src VALUES ${values(1, 2000, "changed")}, " +
+                  s"${values(2, 2000, "changed")}, ${values(5, 2000, "changed")}")
+              concurrentMerge(
+                "payload = named_struct('x', 101, 'tags', array('rival')), " +
+                  "items = array(named_struct('x', 101)), " +
+                  "attrs = map('rival', named_struct('x', 101))")
+            }
+          }
+        )
+        val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
+        merge.run(spark)
+        def expected(id: Int, x: Int, tag: String): Row =
+          Row(id, s"""{"x":$x,"tags":["$tag"]}""", s"""[{"x":$x}]""", s"""{"$tag":{"x":$x}}""")
+        checkAnswer(
+          sql("SELECT id, to_json(payload), to_json(items), to_json(attrs) FROM t"),
+          Seq(
+            expected(1, 101, "rival"),
+            expected(2, 20, "source"),
+            expected(3, 30, "source"),
+            Row(4, null, null, null))
+        )
+        assert(attempts == 2)
+        assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
+      }
+    }
+  }
+
+  private def upsert(source: String): String =
+    s"MERGE INTO t USING $source s ON t.id <=> s.id " +
+      "WHEN MATCHED THEN UPDATE SET b = COALESCE(s.b, t.b) " +
+      "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, s.b, 'new')"
+
   private def interleavedMerge(
       statement: String,
       beforeCommit: Seq[CommitMessage] => Unit,
@@ -823,7 +786,8 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       original.matchedCondition,
       original.matchedActions,
       original.notMatchedActions,
-      original.notMatchedBySourceActions
+      original.notMatchedBySourceActions,
+      upsertKeyColumns = original.upsertKeyColumns
     ) {
       override lazy val writer: PaimonSparkWriter =
         new InterleavingMergeWriter(table, beforeCommit, failInsertAttempt, afterCommit)
@@ -855,11 +819,10 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     assert(physical == live)
   }
 
-  private def createTable(extraOptions: String = "", sourceRepeatable: Boolean = true): Unit = {
+  private def createTable(extraOptions: String = ""): Unit = {
     sql(
       "CREATE TABLE t (id INT, b INT, status STRING) TBLPROPERTIES (" +
-        extraOptions + "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true', " +
-        s"'data-evolution.merge-into.source-repeatable' = '$sourceRepeatable')")
+        extraOptions + "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
   }
 
   private def pinnedMerge(statement: String): MergeIntoPaimonDataEvolutionTable = {

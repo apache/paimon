@@ -49,16 +49,15 @@ import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.EliminateSubqueryAliases
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, Cast, Coalesce, CreateNamedStruct, EqualNullSafe, EqualTo, Expression, ExprId, GetStructField, If, IsNull, Literal, Or, PythonUDF, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, CreateNamedStruct, EqualTo, Expression, ExprId, GetStructField, If, IsNull, Literal, Or, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
-import org.apache.spark.sql.catalyst.expressions.objects.AssertNotNull
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.LogicalRDD
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
-import org.apache.spark.sql.types.{ArrayType, BooleanType, MapType, StructType}
+import org.apache.spark.sql.types.{BooleanType, StructType}
 
 import java.util.{HashMap => JHashMap}
 
@@ -77,7 +76,8 @@ case class MergeIntoPaimonDataEvolutionTable(
     matchedActions: Seq[MergeAction],
     notMatchedActions: Seq[MergeAction],
     notMatchedBySourceActions: Seq[MergeAction],
-    allowPinnedSelfMergeShortcut: Boolean = false)
+    allowPinnedSelfMergeShortcut: Boolean = false,
+    upsertKeyColumns: Set[String] = Set.empty)
   extends PaimonRowLevelCommand
   with Logging {
 
@@ -373,7 +373,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     var sourceCleanup = () => ()
     try {
       val persistSourceDss: Option[Dataset[Row]] =
-        if (canRetryMergeUpdates && !table.coreOptions().dataEvolutionMergeIntoSourceRepeatable()) {
+        if (canRetryMergeUpdates) {
           // Cache invalidation on a concurrent source write must not replace only part of the
           // source used by this MERGE. A checkpoint detaches it from table-cache refreshes.
           val checkpoint =
@@ -447,69 +447,8 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
   }
 
-  private lazy val isCoalesceUpsert: Boolean = {
-    val sourceIds = (sourceTable.output ++ sourceTable.metadataOutput).map(_.exprId).toSet
-    val targetIds = targetTable.output.map(_.exprId).toSet
-
-    def unwrap(expression: Expression): Expression = expression match {
-      case cast: Cast => unwrap(cast.child)
-      case check: AssertNotNull => unwrap(check.child)
-      case other => other
-    }
-
-    def attribute(expression: Expression): Option[AttributeReference] =
-      unwrap(expression) match {
-        case attr: AttributeReference => Some(attr)
-        case _ => None
-      }
-
-    def isSource(expression: Expression): Boolean =
-      attribute(expression).exists(attr => sourceIds.contains(attr.exprId))
-
-    def isTarget(expression: Expression): Boolean =
-      attribute(expression).exists(attr => targetIds.contains(attr.exprId))
-
-    val keyJoin = splitConjunctivePredicates(matchedCondition).forall {
-      case EqualNullSafe(left, right) =>
-        (isTarget(left) && isSource(right)) || (isSource(left) && isTarget(right))
-      case _ => false
-    }
-    val coalesceUpdate = matchedActions match {
-      case Seq(update: UpdateAction) if update.condition.isEmpty =>
-        val modified = update.assignments.filter(isModifiedAssignment)
-        modified.nonEmpty && modified.forall {
-          assignment =>
-            unwrap(assignment.value) match {
-              case Coalesce(Seq(source, previous)) =>
-                isSource(source) &&
-                attribute(previous).exists(_.sameRef(assignmentKeyAttribute(assignment)))
-              // Spark simplifies COALESCE when its source value cannot be null.
-              case source
-                  if attribute(source).exists(
-                    attr => sourceIds.contains(attr.exprId) && !attr.nullable) =>
-                true
-              case _ => false
-            }
-        }
-      case _ => false
-    }
-    val sourceInsert = notMatchedActions match {
-      case Seq(insert: InsertAction) if insert.condition.isEmpty =>
-        insert.assignments.forall(
-          assignment =>
-            isSource(assignment.value) || unwrap(assignment.value).isInstanceOf[Literal])
-      case _ => false
-    }
-    keyJoin && coalesceUpdate && sourceInsert
-  }
-
   private lazy val retryExpressions: Seq[Expression] =
-    Seq(matchedCondition) ++ (matchedActions ++ notMatchedActions).flatMap {
-      case update: UpdateAction =>
-        update.condition.toSeq ++ update.assignments.filter(isModifiedAssignment).map(_.value)
-      case insert: InsertAction => insert.condition.toSeq ++ insert.assignments.map(_.value)
-      case action => action.condition.toSeq
-    }
+    Seq(matchedCondition) ++ matchedActions ++ notMatchedActions
 
   private lazy val retrySourceColumns = {
     val referenced = retryExpressions.flatMap(_.references).map(_.exprId).toSet
@@ -520,39 +459,24 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   private lazy val canRetryMergeUpdates: Boolean = {
     // V1 UPDATE has its own retry policy. Explicit time travel must retain its requested baseline.
-    !allowPinnedSelfMergeShortcut && !useSelfMergeShortcut && matchedActions.nonEmpty &&
-    (table.coreOptions().dataEvolutionMergeIntoSourceRepeatable() || isCoalesceUpsert) &&
+    !allowPinnedSelfMergeShortcut && upsertKeyColumns.nonEmpty &&
     table.coreOptions().commitMaxRetries() > 0 &&
     !table.coreOptions().deletionVectorsEnabled() &&
-    !hasTargetSideDeleteActions &&
-    notMatchedBySourceActions.isEmpty &&
     !timeTravelOptionKeys.exists(v2Table.getTable.options().containsKey) &&
     retryExpressions.forall(e => e.deterministic && !SubqueryExpression.hasSubquery(e)) &&
-    // Logical retries currently support scalar source dependencies only.
-    retrySourceColumns.forall(_.dataType match {
-      case _: StructType | _: ArrayType | _: MapType => false
-      case _ => true
-    }) &&
     sourceTable
       .collect { case plan => plan.expressions }
       .flatten
       .forall(e => e.deterministic && !SubqueryExpression.hasSubquery(e))
   }
 
-  private lazy val retryReadFieldIds: Set[Int] = {
-    val names = retryExpressions
-      .flatMap(extractFields)
-      .filter(attr => targetTable.output.exists(_.exprId == attr.exprId))
-      .map(_.name)
-      .toSet ++ updateColumns.map(_.name)
-    table
-      .rowType()
-      .getFields
-      .asScala
-      .filter(field => names.exists(name => resolver(name, field.name())))
-      .map(_.id())
-      .toSet
-  }
+  private lazy val retryKeyFieldIds: Set[Int] = table
+    .rowType()
+    .getFields
+    .asScala
+    .filter(field => upsertKeyColumns.exists(name => resolver(name, field.name())))
+    .map(_.id())
+    .toSet
 
   private def commitWithUpdateConflictRetry(
       sparkSession: SparkSession,
@@ -594,7 +518,7 @@ case class MergeIntoPaimonDataEvolutionTable(
             .flatMap(
               snapshot =>
                 DataEvolutionMergeConflictRetry
-                  .plan(table, pendingUpdates, checkFromSnapshot, snapshot, retryReadFieldIds))
+                  .plan(table, pendingUpdates, checkFromSnapshot, snapshot, retryKeyFieldIds))
             .getOrElse(throw conflict)
           val firstRowIds = retryPlan.dataSplits
             .flatMap(_.dataFiles().asScala)
