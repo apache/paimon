@@ -467,6 +467,8 @@ class DataWriter(ABC):
             self.committed_changelog_files.append(changelog_meta)
 
     def _write_parquet_data(self, path, data):
+        from pypaimon.execution.python.write.format_file_writer import parquet_write_data
+        data = parquet_write_data(data)
         if self._map_shared_shredding.is_active():
             return self._map_shared_shredding.write_parquet(
                 self.file_io, path, data, self.compression, self.zstd_level)

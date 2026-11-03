@@ -30,6 +30,38 @@ from pypaimon.filesystem.vortex_utils import to_vortex_specified
 from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
 
 
+def parquet_write_schema(schema):
+    """Keep vector dimensions in Paimon rather than Parquet's Arrow metadata.
+
+    PyArrow cannot restore nullable fixed-size lists from Parquet reliably.
+    Use physical variable-size lists, including for streaming writers whose
+    later batches may contain NULLs. Preserve unrelated field/schema metadata.
+    """
+    def physical_type(data_type):
+        if pa.types.is_struct(data_type):
+            return pa.struct([field.with_type(physical_type(field.type)) for field in data_type])
+        if (pa.types.is_list(data_type) or pa.types.is_large_list(data_type)
+                or pa.types.is_fixed_size_list(data_type)):
+            field = data_type.value_field.with_type(physical_type(data_type.value_type))
+            return pa.large_list(field) if pa.types.is_large_list(data_type) else pa.list_(field)
+        if pa.types.is_map(data_type):
+            sorted_keys = data_type == pa.map_(data_type.key_field, data_type.item_field, keys_sorted=True)
+            return pa.map_(
+                data_type.key_field.with_type(physical_type(data_type.key_type)),
+                data_type.item_field.with_type(physical_type(data_type.item_type)),
+                keys_sorted=sorted_keys)
+        return data_type
+
+    return pa.schema([field.with_type(physical_type(field.type)) for field in schema],
+                     metadata=schema.metadata)
+
+
+def parquet_write_data(data, schema=None):
+    """Convert vectors to their Parquet representation without dropping metadata."""
+    schema = parquet_write_schema(data.schema) if schema is None else schema
+    return data if data.schema.equals(schema, check_metadata=True) else data.cast(schema)
+
+
 def write_row_file(file_io, path, data, fields=None, zstd_level=1):
     try:
         if fields is None:

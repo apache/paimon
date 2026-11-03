@@ -125,6 +125,50 @@ finally:
 For stream updates, use `table.new_stream_write_builder()` and pass the stream
 commit identifier to `new_update().new_update_by_row_id(commit_identifier)`.
 
+# Multimodal column enrichment
+
+Multimodal Data Evolution tables provide two local column-enrichment methods:
+
+```python
+# labels is a typed Arrow table containing sample_id and the columns to fill.
+# New columns are added automatically; existing media columns retain their files.
+result = table.merge_columns(labels, on="sample_id")
+
+# Compute new nullable columns from selected inputs, in input row order.
+result = table.add_columns(
+    schema=feature_schema, inputs=["image"], fn=compute_features, batch_size=128)
+
+# Without fn, only the schema is changed; existing rows read as NULL.
+result = table.add_columns(schema=nullable_columns)
+```
+
+`table` is a `pypaimon.multimodal.MultimodalTable`. Match keys must be non-null
+and unique in the source and must match at most one target row. Unmatched keys
+raise by default; `unmatched="ignore"` skips them without inserting rows.
+Match-key type conversions must be lossless.
+Outputs must have the declared/existing types. A fixed-size Arrow list declares
+a VECTOR column, for example `pa.list_(pa.float32(), 768)` for an embedding.
+
+These methods require a current full-table view and a single writer during the
+operation. They do not provide distributed execution or automatic retries.
+`add_columns` reads only its inputs, materializing ordinary BLOB inputs as bytes;
+video-frame columns keep their descriptor semantics. Function calls have at most
+`batch_size` rows; outputs are buffered per original file group before writing.
+`merge_columns` materializes the source and the target match keys in memory.
+
+`ColumnUpdateResult` reports `updated_rows`, `unmatched_rows`, `added_columns`,
+`source_snapshot_id`, `snapshot_id`, and `schema_id`. Schema publication and data
+commit are separate. A schema-only call does not create a data snapshot.
+Failures during publication or data preparation raise `ColumnUpdateError` with `phase`,
+`schema_changed`, `schema_id`, `source_snapshot_id`, and `commit_outcome`;
+the original exception remains in `__cause__`. New columns can remain visible as
+NULL after failed computation. If schema publication or data commit has an
+unknown outcome, inspect the table before retrying. Prepared files are preserved
+on failure and may require ordinary orphan-file maintenance.
+
+See [PyPaimon Data Evolution](../docs/docs/pypaimon/data-evolution.md) for a
+complete example and the column update contract.
+
 # Parquet page-index reads
 
 For row-tracking tables with a Parquet OffsetIndex, PyPaimon can read a

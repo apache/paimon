@@ -115,6 +115,99 @@ table_commit.close()
 #   'f1': [-1001, 1002]
 ```
 
+## High-Level Column Enrichment
+
+Use `pypaimon.multimodal` to backfill labels or features on a Data Evolution
+append table without managing row IDs and commit messages. These tables have no
+primary key, use `bucket=-1`, and enable both row tracking and data evolution.
+The multimodal connection sets these options when creating a table.
+
+```python
+import pyarrow as pa
+import pyarrow.compute as pc
+import pypaimon.multimodal as pmm
+
+connection = pmm.connect(options={"warehouse": "/tmp/column-enrichment"})
+frames = connection.create_table(
+    "frames",
+    schema=pa.schema([("sample_id", pa.int64()), ("image", pa.large_binary())]),
+    data=[{"sample_id": 1, "image": b"first"},
+          {"sample_id": 2, "image": b"second"}],
+)
+
+# Import external labels. The nullable label column is created automatically.
+result = frames.merge_columns(
+    pa.table({"sample_id": [2], "label": ["pedestrian"]}), on="sample_id")
+print(result.updated_rows)  # 1; the first row's label remains NULL
+
+# Derive a new column. Only image is passed to the function; row IDs are internal.
+def image_sizes(batch):
+    return pa.table({"image_size": pc.binary_length(batch["image"]).cast(pa.int64())})
+
+result = frames.add_columns(
+    schema=pa.schema([("image_size", pa.int64())]),
+    inputs=["image"], fn=image_sizes, batch_size=128)
+print(result.updated_rows)  # 2
+
+# A schema-only addition does not backfill values or create a data snapshot.
+frames.add_columns(pa.schema([("caption", pa.string())]))
+```
+
+For embeddings, declare a fixed-size list such as
+`pa.list_(pa.float32(), 768)` and return arrays of that type. The function returns
+an Arrow Table or RecordBatch containing exactly the declared output columns,
+with the same row count and order as its input. Inputs are RecordBatches of at
+most `batch_size` rows. Functions should be deterministic and side-effect-free.
+Ordinary BLOB inputs are bytes; video-frame inputs retain their descriptor
+semantics and need decoding in the function. With no `fn`, omit `inputs`.
+New columns must be nullable; existing column names are rejected by `add_columns`.
+
+`merge_columns` accepts the same key forms as `merge`: a name, a list of names,
+or a mapping from target names to source names. It updates only non-key columns
+present in the source and never inserts rows. Omitted columns keep their values;
+explicit NULL values clear nullable columns. New columns are nullable and use the
+source's Arrow types; existing output types must match the table types. Match
+keys are converted to target types only without loss. They cannot contain NULL
+or NaN, must be unique in the source, and must match at
+most one target row. Unmatched keys raise before schema publication unless
+`unmatched="ignore"` is selected. Partition and match keys cannot be updated;
+use `replace_video` to replace configured video-frame columns.
+
+Both methods retain files for untouched columns. Computing an image embedding
+still reads the image, but does not rewrite it. Normal partial updates write the
+selected columns over affected file row-ID ranges; they are not single-cell
+physical writes. `add_columns` buffers outputs per original file group so a
+small function batch does not repeatedly rewrite the same group.
+
+These are local, single-writer operations on a current full-table view.
+Time-travel and incremental table views are rejected. `merge_columns` holds the
+source and target match keys in memory. The read snapshot is fixed for the
+operation, and an observed snapshot or schema change before commit rejects the
+prepared work. This check is not a lock: coordinate writers for the entire call.
+The APIs do not provide automatic retries, checkpoints, or distributed jobs.
+
+Successful calls return `ColumnUpdateResult` with row counts, added column names,
+the source and final data snapshot IDs, and the schema ID. Schema-only changes
+leave the data snapshot ID unchanged. Schema publication and data publication
+are separate operations. Failures during schema publication or data preparation
+and commit raise
+`ColumnUpdateError`, retaining the original exception as `__cause__` and exposing:
+
+| Attribute | Meaning |
+| --- | --- |
+| `phase` | The stage that failed: schema, compute, write, validate, commit, result, or close |
+| `schema_changed` | `True` if schema publication succeeded, `False` if it did not start, or `None` if its outcome is unknown |
+| `schema_id` | The last known schema ID |
+| `source_snapshot_id` | The snapshot used to match or compute rows |
+| `commit_outcome` | `not_started`, `unknown`, or `committed` |
+
+Input validation errors remain ordinary exceptions. Failed
+computation can leave new columns visible as NULL, without publishing any data
+updates. Prepared files are retained on failure; ordinary orphan-file maintenance
+can remove abandoned files. If publication has an unknown outcome, inspect the
+table before deciding whether to retry. Do not automatically retry the function
+or delete prepared files after a commit error.
+
 ## Update Columns By Predicate
 
 You can use `update_by_predicate` for SQL-like `UPDATE ... SET ... WHERE ...`

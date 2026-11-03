@@ -25,6 +25,7 @@ from pypaimon.multimodal.blob_store import (
     PutObjectResult,
 )
 from pypaimon.multimodal.connection import MultimodalConnection, connect
+from pypaimon.multimodal.columns import ColumnUpdateError, ColumnUpdateResult
 from pypaimon.multimodal.hdf5 import (
     Hdf5File,
     Hdf5LoadResult,
@@ -64,6 +65,8 @@ __all__ = [
     "BlobDescriptor",
     "BlobObject",
     "BlobStore",
+    "ColumnUpdateError",
+    "ColumnUpdateResult",
     "Hdf5File",
     "Hdf5LoadResult",
     "MultimodalConnection",
