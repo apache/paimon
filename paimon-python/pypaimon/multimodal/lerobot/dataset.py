@@ -1789,6 +1789,9 @@ def _open_video_decoder(stream, backend=None, codec_threads=0):
             stream.seek(0)
         else:
             return _FallbackVideoDecoder(stream, decoder)
+    if backend == "torchcodec" and keyframe_index is not None:
+        from pypaimon.multimodal.lerobot.indexed_torchcodec import _IndexedTorchCodecDecoder
+        return _IndexedTorchCodecDecoder(stream, keyframe_index, codec_threads)
     if backend in (None, "torchcodec"):
         try:
             return _open_torchcodec_decoder(stream)
