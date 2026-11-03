@@ -20,6 +20,7 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.CoreOptions.MapStorageLayout;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.TableType;
@@ -30,6 +31,7 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexerFactory;
 import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.fs.TemplateEntropyInjectExternalPathProvider;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
@@ -437,6 +439,52 @@ public class SchemaValidation {
         validatePkClusteringOverride(options);
 
         validateManifestSort(schema, options);
+
+        validateExternalPaths(options);
+    }
+
+    private static void validateExternalPaths(CoreOptions options) {
+        String externalPaths = options.dataFileExternalPaths();
+        if (externalPaths == null || externalPaths.isEmpty()) {
+            return;
+        }
+
+        boolean templateStrategy =
+                options.externalPathStrategy() == ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE;
+        String[] paths = externalPaths.split(",");
+
+        if (templateStrategy && paths.length > 1) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "'%s' only accepts a single path when '%s' is '%s', but got %s.",
+                            CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                            CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                            ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE,
+                            paths.length));
+        }
+
+        for (String externalPath : paths) {
+            boolean isTemplate = TemplateEntropyInjectExternalPathProvider.isTemplate(externalPath);
+            if (templateStrategy && !isTemplate) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "External path '%s' must contain the '%s' placeholder when '%s' is '%s'.",
+                                externalPath.trim(),
+                                TemplateEntropyInjectExternalPathProvider.HASH_PLACEHOLDER,
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                                ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE));
+            }
+            if (!templateStrategy && isTemplate) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "External path '%s' can only contain the '%s' placeholder when '%s' is '%s', but it is '%s'.",
+                                externalPath.trim(),
+                                TemplateEntropyInjectExternalPathProvider.HASH_PLACEHOLDER,
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                                ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE,
+                                options.externalPathStrategy()));
+            }
+        }
     }
 
     /**

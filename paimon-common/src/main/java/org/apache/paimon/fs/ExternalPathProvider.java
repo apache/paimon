@@ -40,6 +40,9 @@ public interface ExternalPathProvider extends Serializable {
             case ENTROPY_INJECT:
                 return new EntropyInjectExternalPathProvider(
                         externalTablePaths, relativeBucketPath);
+            case ENTROPY_INJECT_TEMPLATE:
+                return new TemplateEntropyInjectExternalPathProvider(
+                        externalTablePaths, relativeBucketPath);
             case SPECIFIC_FS:
                 // specific fs can use round-robin with only one path
             case ROUND_ROBIN:
