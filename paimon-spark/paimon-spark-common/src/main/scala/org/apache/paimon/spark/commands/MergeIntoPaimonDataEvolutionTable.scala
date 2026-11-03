@@ -42,7 +42,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil
 import org.apache.paimon.types.{BlobType, RowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
-import org.apache.paimon.utils.BranchManager
+import org.apache.paimon.utils.{BranchManager, RetryWaiter}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
@@ -423,20 +423,150 @@ case class MergeIntoPaimonDataEvolutionTable(
           insertActionInvoke(sparkSession, touchedFileTargetRelation, persistSourceDss)
         else Nil
 
-      DataEvolutionRowIdConflictCommitter.commit(
+      commitWithUpdateConflictRetry(
         sparkSession,
-        table,
-        targetRelation,
-        writer,
         matchedResult.commitMessages,
         deleteCommit ++ insertCommit,
         if (readSnapshot == null) -1L else readSnapshot.id(),
-        Snapshot.Operation.MERGE
-      )
+        persistSourceDss)
     } finally {
       targetActionCleanup()
       if (persistSourceDss.isDefined) {
         persistSourceDss.get.unpersist(blocking = false)
+      }
+    }
+  }
+
+  private def canRetryMergeUpdates: Boolean = {
+    val expressions = Seq(matchedCondition) ++ (matchedActions ++ notMatchedActions).flatMap {
+      case update: UpdateAction => update.condition.toSeq ++ update.assignments.map(_.value)
+      case insert: InsertAction => insert.condition.toSeq ++ insert.assignments.map(_.value)
+      case action => action.condition.toSeq
+    }
+    // V1 UPDATE has its own retry policy. Explicit time travel must retain its requested baseline.
+    !allowPinnedSelfMergeShortcut && matchedActions.nonEmpty &&
+    !hasTargetSideDeleteActions &&
+    notMatchedBySourceActions.isEmpty &&
+    !timeTravelOptionKeys.exists(v2Table.getTable.options().containsKey) &&
+    expressions.forall(e => e.deterministic && !SubqueryExpression.hasSubquery(e)) &&
+    sourceTable
+      .collect { case plan => plan.expressions }
+      .flatten
+      .forall(e => e.deterministic && !SubqueryExpression.hasSubquery(e))
+  }
+
+  private lazy val retryReadFieldIds: Set[Int] = {
+    val expressions = Seq(matchedCondition) ++ matchedActions.flatMap {
+      case update: UpdateAction =>
+        update.condition.toSeq ++ update.assignments.filter(isModifiedAssignment).map(_.value)
+      case action => action.condition.toSeq
+    }
+    val names = expressions
+      .flatMap(extractFields)
+      .filter(attr => targetTable.output.exists(_.exprId == attr.exprId))
+      .map(_.name)
+      .toSet ++ updateColumns.map(_.name)
+    table
+      .rowType()
+      .getFields
+      .asScala
+      .filter(field => names.exists(name => resolver(name, field.name())))
+      .map(_.id())
+      .toSet
+  }
+
+  private def commitWithUpdateConflictRetry(
+      sparkSession: SparkSession,
+      updateMessages: Seq[CommitMessage],
+      otherMessages: Seq[CommitMessage],
+      readSnapshotId: Long,
+      persistSourceDss: Option[Dataset[Row]]): Unit = {
+    var pendingUpdates = updateMessages
+    var pendingOtherMessages = otherMessages
+    var checkFromSnapshot = readSnapshotId
+    var retryCount = 0
+    val startMillis = System.currentTimeMillis()
+    val options = table.coreOptions()
+    val retryWaiter = new RetryWaiter(options.commitMinRetryWait(), options.commitMaxRetryWait())
+    while (true) {
+      try {
+        DataEvolutionRowIdConflictCommitter.commit(
+          sparkSession,
+          table,
+          targetRelation,
+          writer,
+          pendingUpdates,
+          pendingOtherMessages,
+          checkFromSnapshot,
+          Snapshot.Operation.MERGE)
+        return
+      } catch {
+        case conflict: RuntimeException
+            if canRetryMergeUpdates && DataEvolutionMergeConflictRetry.isUpdateConflict(conflict) =>
+          if (
+            retryCount >= options.commitMaxRetries() ||
+            System.currentTimeMillis() - startMillis > options.commitTimeout()
+          ) {
+            throw conflict
+          }
+          retryWaiter.retryWait(retryCount)
+          val latest = table.snapshotManager().latestSnapshot()
+          val retryPlan = Option(latest)
+            .flatMap(
+              snapshot =>
+                DataEvolutionMergeConflictRetry
+                  .plan(
+                    table,
+                    pendingUpdates,
+                    checkFromSnapshot,
+                    snapshot,
+                    includeConcurrentChanges = notMatchedActions.nonEmpty,
+                    readFieldIds = Some(retryReadFieldIds)))
+            .getOrElse(throw conflict)
+          val firstRowIds = retryPlan.dataSplits
+            .flatMap(_.dataFiles().asScala)
+            .filter(file => !isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName()))
+            .map(_.firstRowId().longValue())
+            .distinct
+            .sorted
+            .toIndexedSeq
+          val result = targetActionInvoke(
+            retryPlan.dataSplits,
+            sparkSession,
+            createNewScanPlan(retryPlan.dataSplits, targetRelation),
+            firstRowIds,
+            persistSourceDss)
+          try {
+            val inserts = if (notMatchedActions.nonEmpty) {
+              // The anti join must see the complete latest target, including new files and
+              // partitions which were not part of the original matched update.
+              val messages = insertActionInvoke(
+                sparkSession,
+                createNewScanPlan(retryPlan.currentSplits, targetRelation),
+                persistSourceDss)
+              val abort = table.newBatchWriteBuilder().newCommit()
+              try {
+                abort.abort(pendingOtherMessages.asJava)
+              } finally {
+                abort.close()
+              }
+              messages
+            } else pendingOtherMessages
+            pendingUpdates = retryPlan.remainingMessages ++ result.commitMessages
+            pendingOtherMessages = inserts
+          } finally {
+            result.cleanup()
+          }
+          // Every retained file was checked against all intervening non-compaction writes;
+          // the replaced file groups were recomputed from this same latest snapshot.
+          checkFromSnapshot = latest.id()
+          retryCount += 1
+          if (System.currentTimeMillis() - startMillis > options.commitTimeout()) {
+            throw conflict
+          }
+          logInfo(
+            s"Retry MERGE INTO after concurrent update conflict " +
+              s"($retryCount/${options.commitMaxRetries()}) against snapshot $checkFromSnapshot.")
       }
     }
   }
