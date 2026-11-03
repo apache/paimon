@@ -250,11 +250,14 @@ def test_named_iterator_keeps_map_key_authorization_boundary(projected_table):
     {'user_id': 'id', 'city': 'profile.city'},
     {'user_id': 'id', 'source': "attributes['source']"},
 ])
-def test_named_projection_keeps_non_streaming_torch_row_boundary(projected_table, projection):
+def test_named_projection_non_streaming_torch_empty_input(projected_table, projection):
+    pytest.importorskip('torch')
     table, _ = projected_table
     read = table.new_read_builder().with_projection(projection).new_read()
-    with pytest.raises(RuntimeError, match='not supported by Torch row format'):
-        read.to_torch([], streaming=False, batch_format='row')
+    dataset = read.to_torch([], streaming=False, batch_format='row')
+    assert len(dataset) == 0
+    assert dataset.__getitems__([]) == []
+    assert dataset._data.column_names == list(projection)
 
 
 @pytest.mark.parametrize('function', ['variant_get', 'try_variant_get'])

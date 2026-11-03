@@ -61,6 +61,30 @@ ID; other reads retain an Arrow table in memory for map-style access.
 **`prefetch_concurrency`** (default: 1): In streaming row mode, controls
 reader threads per DataLoader worker. It has no effect in non-streaming mode.
 
+### Named nested projections
+
+Map-style datasets support named ROW fields and literal MAP-key projections,
+including projections mixed with top-level columns:
+
+```python
+read_builder = table.new_read_builder().with_projection({
+    "user_id": "id",
+    "city": "profile.city",
+    "source": "attributes['source']",
+})
+splits = read_builder.new_scan().plan().splits()
+dataset = read_builder.new_read().to_torch(splits, streaming=False, batch_format="row")
+sample = dataset[0]
+samples = dataset.__getitems__([2, 0, 2])
+```
+
+Each sample uses the specified aliases in projection order. These requests
+materialize their Arrow result in memory when the dataset is constructed,
+including on Data Evolution tables. Indexing preserves the requested order
+and duplicate indices. Values and supported reads follow `to_arrow`, including
+its table, format, and authorization restrictions. VARIANT extraction
+expressions still require streaming.
+
 ### Distributed Sharding
 
 Streaming reads shard splits across DDP ranks and DataLoader workers:
