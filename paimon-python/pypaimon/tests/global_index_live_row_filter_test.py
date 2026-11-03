@@ -27,7 +27,8 @@ from pypaimon.utils.range import Range
 
 def test_scoped_live_rows_only_load_relevant_deletions(tmp_path):
     table = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
-        "rows", schema=pa.schema([("id", pa.int64())]), options={"file.format": "parquet"})
+        "rows", schema=pa.schema([("id", pa.int64())]), options={
+            "file.format": "parquet", "deletion-vectors.enabled": "true"})
     table.add(pa.table({"id": [0, 1, 2]}))
     table.add(pa.table({"id": [3, 4, 5]}))
     snapshot = table.raw_table.snapshot_manager().get_latest_snapshot()

@@ -46,6 +46,7 @@ def create_table(tmp_path, null_vector=False):
     table = pm.connect(options={'warehouse': str(tmp_path)}).create_table(
         'vectors', schema=schema, options={
             'file.format': 'parquet', 'vector.file.format': 'parquet', 'read.batch-size': '2',
+            'deletion-vectors.enabled': 'true',
             'global-index.row-count-per-shard': '4', 'global-index.build.parallelism': '1'})
     append(table, list(range(7)), null_vector)
     return table
@@ -123,7 +124,8 @@ def test_python_ivfpq_search_keeps_live_null_vectors_out_of_results(tmp_path, ba
     schema = pa.schema([('id', pa.int64()), ('embedding', pa.list_(pa.float32()))])
     table = pm.connect(options={'warehouse': str(tmp_path)}).create_table(
         'vectors', schema=schema, options={
-            'file.format': 'parquet', 'vector.file.format': 'parquet', 'vector-index.search-mode': 'fast'})
+            'file.format': 'parquet', 'vector.file.format': 'parquet', 'vector-index.search-mode': 'fast',
+            'deletion-vectors.enabled': 'true'})
     table.add(pa.table({
         'id': list(range(5)), 'embedding': [[1., 0.], [0., 1.], None, [1., 1.], [2., 2.]]}, schema=schema))
     table.delete('id = 0 OR id = 3')
@@ -178,7 +180,9 @@ def test_native_incremental_build_with_concurrent_delete(table):
 def test_native_partition_scoped_build_after_deletion(tmp_path):
     pytest.importorskip('paimon_vindex')
     table = pm.connect(options={'warehouse': str(tmp_path)}).create_table(
-        'vectors', schema=SCHEMA, partitioned=['category'], options={'file.format': 'parquet'})
+        'vectors', schema=SCHEMA, partitioned=['category'], options={
+            'file.format': 'parquet', 'vector.file.format': 'parquet',
+            'deletion-vectors.enabled': 'true'})
     append(table, [0, 1, 2], category='other')
     append(table, [3, 4, 5])
     table.delete("category = 'yes' AND id = 4")

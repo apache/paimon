@@ -36,7 +36,8 @@ def frames(tmp_path):
         ]),
         data=[{"id": i, "label": "old", "image": bytes([i]) * 100}
               for i in range(5)],
-        options={"file.format": "parquet", "read.batch-size": "2"},
+        options={"file.format": "parquet", "read.batch-size": "2",
+                 "deletion-vectors.enabled": "true"},
     )
 
 
