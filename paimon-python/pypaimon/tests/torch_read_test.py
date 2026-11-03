@@ -2045,7 +2045,9 @@ class TorchReadTest(unittest.TestCase):
 
         schema = pa.schema([('id', pa.int64()), ('vector', pa.list_(pa.float32(), 2))])
         table = pm.connect(options={'warehouse': self.warehouse}).create_table(
-            'batch_shuffle_vectors', schema=schema, options={'file.format': 'parquet'})
+            'batch_shuffle_vectors', schema=schema, options={
+                'file.format': 'parquet', 'vector.file.format': 'parquet',
+                'deletion-vectors.enabled': 'true'})
         table.add(pa.table({'id': list(range(8)), 'vector': [[i, i + 1] for i in range(8)]}, schema=schema))
         snapshot = table.raw_table.snapshot_manager().get_latest_snapshot().id
         table.delete('id = 2')
