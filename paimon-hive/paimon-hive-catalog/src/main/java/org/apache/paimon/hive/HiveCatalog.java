@@ -488,8 +488,23 @@ public class HiveCatalog extends AbstractCatalog {
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         TableSchema schema = this.loadTableSchema(identifier);
-        CoreOptions options = CoreOptions.fromMap(schema.options());
-        boolean tagToPart = options.tagToPartitionField() != null;
+        dropPartitionsFromMetastore(identifier, partitions, schema);
+        if (CoreOptions.fromMap(schema.options()).tagToPartitionField() == null) {
+            super.dropPartitions(identifier, partitions);
+        }
+    }
+
+    @Override
+    public void dropPartitionsFromMetastore(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        dropPartitionsFromMetastore(identifier, partitions, loadTableSchema(identifier));
+    }
+
+    private void dropPartitionsFromMetastore(
+            Identifier identifier, List<Map<String, String>> partitions, TableSchema schema)
+            throws TableNotExistException {
+        boolean tagToPart = CoreOptions.fromMap(schema.options()).tagToPartitionField() != null;
         if (metastorePartitioned(schema)) {
             List<Map<String, String>> metaPartitions =
                     tagToPart
@@ -514,9 +529,6 @@ public class HiveCatalog extends AbstractCatalog {
                     throw new RuntimeException(e);
                 }
             }
-        }
-        if (!tagToPart) {
-            super.dropPartitions(identifier, partitions);
         }
     }
 

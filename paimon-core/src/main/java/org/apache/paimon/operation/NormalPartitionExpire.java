@@ -199,7 +199,8 @@ public class NormalPartitionExpire implements PartitionExpire {
             try {
                 partitionModification.dropPartitions(expiredBatchPartitions);
                 // also drop corresponding .done partitions
-                partitionModification.dropPartitions(toDonePartitions(expiredBatchPartitions));
+                partitionModification.dropPartitionsFromMetastore(
+                        toDonePartitions(expiredBatchPartitions));
             } catch (Catalog.TableNotExistException e) {
                 throw new RuntimeException(e);
             }

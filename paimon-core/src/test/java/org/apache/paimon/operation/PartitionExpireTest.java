@@ -139,12 +139,7 @@ public class PartitionExpireTest {
                     @Override
                     public void dropPartitions(List<Map<String, String>> partitions)
                             throws Catalog.TableNotExistException {
-                        for (Map<String, String> partition : partitions) {
-                            // only record partitions that were created
-                            if (createdPartitions.remove(partition)) {
-                                deletedPartitions.add(partition);
-                            }
-                        }
+                        dropPartitionsFromMetastore(partitions);
                         try (FileStoreCommit commit =
                                 table.store()
                                         .newCommit(
@@ -152,6 +147,16 @@ public class PartitionExpireTest {
                                                         table.coreOptions().toConfiguration()),
                                                 null)) {
                             commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
+                        }
+                    }
+
+                    @Override
+                    public void dropPartitionsFromMetastore(List<Map<String, String>> partitions) {
+                        for (Map<String, String> partition : partitions) {
+                            // only record partitions that were created
+                            if (createdPartitions.remove(partition)) {
+                                deletedPartitions.add(partition);
+                            }
                         }
                     }
 

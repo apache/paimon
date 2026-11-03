@@ -33,6 +33,10 @@ public interface PartitionModification extends AutoCloseable {
 
     void dropPartitions(List<Map<String, String>> partitions) throws Catalog.TableNotExistException;
 
+    /** Remove only metastore metadata, including synthetic done partitions. */
+    default void dropPartitionsFromMetastore(List<Map<String, String>> partitions)
+            throws Catalog.TableNotExistException {}
+
     void alterPartitions(List<PartitionStatistics> partitions)
             throws Catalog.TableNotExistException;
 
@@ -49,6 +53,12 @@ public interface PartitionModification extends AutoCloseable {
             public void dropPartitions(List<Map<String, String>> partitions)
                     throws Catalog.TableNotExistException {
                 catalog.dropPartitions(identifier, partitions);
+            }
+
+            @Override
+            public void dropPartitionsFromMetastore(List<Map<String, String>> partitions)
+                    throws Catalog.TableNotExistException {
+                catalog.dropPartitionsFromMetastore(identifier, partitions);
             }
 
             @Override
