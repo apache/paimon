@@ -664,6 +664,92 @@ class LeRobotValidationTest(unittest.TestCase):
                 finally:
                     decoder.close()
 
+    @unittest.skipUnless(
+        av is not None and importlib.util.find_spec("torch") is not None,
+        "PyAV and Torch are required for video decoding",
+    )
+    def test_indexed_pyav_decoder_reuses_session_across_batches(self):
+        output = io.BytesIO()
+        with av.open(output, mode="w", format="mp4") as container:
+            stream = container.add_stream("libx264", rate=30)
+            stream.width = stream.height = 32
+            stream.pix_fmt = "yuv420p"
+            stream.options = {"x264-params":
+                              "keyint=12:min-keyint=12:scenecut=0:bframes=2:threads=1"}
+            for ordinal in range(48):
+                frame = av.VideoFrame.from_ndarray(
+                    np.full((32, 32, 3), ordinal * 4, dtype=np.uint8),
+                    format="rgb24")
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+        payload = output.getvalue()
+        index = VideoKeyframeIndex.inspect(io.BytesIO(payload), len(payload))
+        with av.open(io.BytesIO(payload)) as container:
+            expected = [frame.to_ndarray(format="rgb24")
+                        for frame in container.decode(video=0)]
+
+        source = io.BytesIO(payload)
+        decoder = _PyAVVideoDecoder(source, index, thread_count=1)
+        inputs = []
+        original_open = av.open
+
+        def open_container(value):
+            inputs.append(value)
+            return original_open(value)
+
+        try:
+            with patch.object(av, "open", side_effect=open_container):
+                for indices in ([31, 0, 12, 31], [45, 2, 17, 45], [0, 47, 1]):
+                    actual = decoder.get_frames_at(indices=indices).data
+                    np.testing.assert_array_equal(
+                        np.stack([expected[i] for i in indices]),
+                        actual.permute(0, 2, 3, 1).numpy())
+            self.assertEqual(1, len(inputs))
+            self.assertFalse(inputs[0].closed)
+            self.assertEqual([], inputs[0]._segments)
+        finally:
+            decoder.close()
+        self.assertTrue(inputs[0].closed)
+        self.assertEqual([], inputs[0]._segments)
+        self.assertIsNone(decoder._stream)
+        self.assertFalse(source.closed)
+
+    @unittest.skipUnless(av is not None, "PyAV is required")
+    def test_indexed_pyav_decoder_closes_failed_session_before_retry(self):
+        source = io.BytesIO(b"0123456789abcdef")
+        index = VideoKeyframeIndex([(0, 4)], [(0, 0, 4)])
+        decoder = _PyAVVideoDecoder(source, index)
+        inputs = []
+        containers = []
+
+        def open_container(value):
+            inputs.append(value)
+            container = Mock()
+            container.streams.video = [SimpleNamespace(thread_count=0)]
+            containers.append(container)
+            return container
+
+        with patch.object(av, "open", side_effect=open_container), patch.object(
+                decoder, "_decode_indexed_group", side_effect=ValueError("decode failed")) as decode:
+            with self.assertRaisesRegex(ValueError, "decode failed"):
+                decoder._decode_indexed([0])
+            self.assertTrue(inputs[0].closed)
+            containers[0].close.assert_called_once_with()
+
+            def read_group(container, stream, anchor, targets, decoded):
+                decoded[0] = b"frame"
+
+            decode.side_effect = read_group
+            self.assertEqual({0: b"frame"}, decoder._decode_indexed([0]))
+            self.assertEqual(2, len(inputs))
+            self.assertFalse(inputs[1].closed)
+        decoder.close()
+        decoder.close()
+        self.assertTrue(inputs[1].closed)
+        containers[1].close.assert_called_once_with()
+
     @unittest.skipUnless(av is not None, "PyAV is required")
     def test_indexed_plan_prefetches_requested_gops_with_bounded_lookahead(self):
         source = io.BytesIO(b"")
