@@ -573,6 +573,12 @@ created. Any condition that cannot be fully converted is rejected; no part is si
 The exact expression support follows the predicate converters for the Spark version in use.
 `filter_sql` is only available for `ROW_FILTER` policies.
 
+SQL filters adapt signed-zero comparisons and truncate high-precision timestamp columns to
+Spark's microsecond precision. Comparisons on nested timestamp fields with precision above 6
+are not supported. Timestamp value comparisons require Spark 3.4 or later with
+`spark.paimon.legacy-timestamp-mapping.enabled=false`; timestamp null checks remain supported
+with legacy mapping. Direct `predicate_json` input uses native Paimon Predicate comparison semantics.
+
 Alternatively, supply `predicate_json` directly. The JSON below is the same representation
 accepted in one `AuthTableQueryResponse.filter` entry. Named arguments are recommended because
 row-filter and column-mask definitions use different fields:
