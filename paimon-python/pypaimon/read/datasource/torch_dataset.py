@@ -282,6 +282,11 @@ class TorchDataset(Dataset):
             return False
         if self.table_read.nested_name_paths:
             return False
+        # Whole-column reads can still have nested result paths.
+        projection = self.table_read.output_projection
+        if (projection is not None and projection.named
+                and any(len(path) > 1 for _, path in projection.columns)):
+            return False
         if any(self._row_id_is_masked(split) for split in self.splits):
             return False
         return all(self._supports_indexed_split(split) for split in self.splits)
