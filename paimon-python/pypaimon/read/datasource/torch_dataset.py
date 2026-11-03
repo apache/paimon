@@ -358,6 +358,12 @@ class TorchDataset(Dataset):
         return self.__getitems__([index])[0]
 
     def __getitems__(self, indices) -> List[dict]:
+        """Return one row per Dataset position, preserving order and repeats.
+
+        These are position indices in this Dataset, not Paimon ``_ROW_ID``s.
+        An empty batch returns an empty list; out-of-range positions raise
+        IndexError. Both lazy and materialized reads obey the same contract.
+        """
         normalized = [self._normalize_index(index) for index in indices]
         if not normalized:
             return []

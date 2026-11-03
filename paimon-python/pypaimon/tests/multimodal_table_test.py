@@ -2201,6 +2201,85 @@ class MultimodalTableTest(unittest.TestCase):
 
         self.assertEqual([], docs.take_row_ids([]).select(["id"]).to_list())
 
+    def test_row_id_filter_and_ordered_batch_have_distinct_contracts(self):
+        docs = self.conn.create_table(
+            "docs",
+            data=[{"id": i, "content": str(i)} for i in range(3)],
+            schema=_schema({"id": pa.int32(), "content": pa.string()}),
+            options=_PARQUET_OPTIONS,
+        )
+        requested = [2, 0, 2]
+
+        filtered = docs.take_row_ids(requested).select("id").with_row_id().to_list()
+        self.assertEqual(
+            [{"id": 0, "_ROW_ID": 0}, {"id": 2, "_ROW_ID": 2}],
+            sorted(filtered, key=lambda row: row["_ROW_ID"]),
+        )
+        batch = docs.take_batch(requested, columns=["content", "_ROW_ID"])
+        self.assertIsInstance(batch, pa.Table)
+        self.assertEqual(["content", "_ROW_ID"], batch.column_names)
+        self.assertEqual(
+            [{"content": str(i), "_ROW_ID": i} for i in requested],
+            batch.to_pylist(),
+        )
+        self.assertEqual(
+            [{"id": i, "content": str(i)} for i in requested],
+            docs.take_batch(iter(requested)).to_pylist(),
+        )
+        self.assertEqual(
+            [{"id": i} for i in requested],
+            docs.take_batch(pa.chunked_array([[2], [0, 2]]), columns="id").to_pylist(),
+        )
+
+    def test_take_batch_empty_and_missing_rows(self):
+        docs = self.conn.create_table(
+            "docs", data=[{"id": i} for i in range(3)],
+            schema=_schema({"id": pa.int32()}), options=_PARQUET_OPTIONS,
+        )
+        empty = docs.take_batch([], columns=["id", "_ROW_ID"])
+        self.assertEqual(
+            pa.schema([pa.field("id", pa.int32()), pa.field("_ROW_ID", pa.int64())]),
+            empty.schema,
+        )
+        self.assertEqual([], empty.to_pylist())
+        self.assertEqual(3, docs.take_batch([2, 0, 2], columns=[]).num_rows)
+
+        docs.delete(where="id = 1")
+        for row_ids in ([2, 1, 2], [99], [99, 1, 99]):
+            with self.subTest(row_ids=row_ids):
+                with self.assertRaisesRegex(KeyError, "Row IDs not found"):
+                    docs.take_batch(row_ids, columns="id")
+        self.assertEqual(
+            [2, 0, 2], docs.take_batch([2, 0, 2], columns="id")["id"].to_pylist())
+
+    def test_take_batch_reads_one_snapshot_with_order_and_duplicates(self):
+        docs = self.conn.create_table(
+            "docs", data=[{"id": i} for i in range(3)],
+            schema=_schema({"id": pa.int32()}), options=_PARQUET_OPTIONS,
+        )
+        snapshot_id = docs.raw_table.snapshot_manager().get_latest_snapshot().id
+        docs.raw_table.create_tag("training", snapshot_id=snapshot_id)
+        docs.delete(where="id = 2")
+
+        for selection in ({"snapshot_id": snapshot_id}, {"tag_name": "training"}):
+            with self.subTest(selection=selection):
+                self.assertEqual(
+                    [{"id": i, "_ROW_ID": i} for i in [2, 0, 2]],
+                    docs.take_batch(
+                        [2, 0, 2], columns=["id", "_ROW_ID"], **selection).to_pylist(),
+                )
+        with self.assertRaisesRegex(ValueError, "cannot be set at the same time"):
+            docs.take_batch([0], snapshot_id=snapshot_id, tag_name="training")
+
+    def test_row_id_reads_require_row_tracking(self):
+        docs = self.conn.create_table(
+            "docs", schema=_schema({"id": pa.int32()}), options=_PARQUET_OPTIONS)
+        untracked = docs.copy({"row-tracking.enabled": "false"})
+        for read in (untracked.take_row_ids, untracked.take_batch):
+            with self.subTest(read=read.__name__):
+                with self.assertRaisesRegex(ValueError, "require row-tracking.enabled=true"):
+                    read([0])
+
     def test_take_row_ids_supports_snapshot_and_tag_time_travel(self):
         docs = self.conn.create_table(
             "docs",
