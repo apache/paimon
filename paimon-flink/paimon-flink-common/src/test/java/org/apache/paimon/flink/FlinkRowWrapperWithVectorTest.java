@@ -23,6 +23,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FlinkRowWrapper} and vector type. */
 public class FlinkRowWrapperWithVectorTest {
@@ -44,5 +45,26 @@ public class FlinkRowWrapperWithVectorTest {
 
         FlinkRowWrapper wrapper = new FlinkRowWrapper(row);
         assertThat(wrapper.isNullAt(0)).isTrue();
+    }
+
+    @Test
+    public void testRejectNullVectorElements() {
+        for (int nullIndex = 0; nullIndex < 3; nullIndex++) {
+            Float[] values = new Float[] {1.0f, 2.0f, 3.0f};
+            values[nullIndex] = null;
+            GenericArrayData array = new GenericArrayData(values);
+            FlinkRowWrapper wrapper = new FlinkRowWrapper(GenericRowData.of(array));
+            assertThatThrownBy(() -> wrapper.getVector(0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("VECTOR must not contain null elements");
+            assertThat(wrapper.getArray(0).isNullAt(nullIndex)).isTrue();
+
+            FlinkRowWrapper nested =
+                    new FlinkRowWrapper(
+                            GenericRowData.of(new GenericArrayData(new Object[] {array})));
+            assertThatThrownBy(() -> nested.getArray(0).getVector(0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("VECTOR must not contain null elements");
+        }
     }
 }

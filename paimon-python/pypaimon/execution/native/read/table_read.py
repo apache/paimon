@@ -22,6 +22,7 @@ from typing import List, Optional
 import pyarrow
 
 from pypaimon.schema.arrow_schema import read_arrow_schema
+from pypaimon.utils.vector_validation import validate_vector_batch
 from pypaimon.read.read_support import close_read_source
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
@@ -182,6 +183,7 @@ class NativeTableRead:
                 if batch.num_rows == 0:
                     continue
                 batch = self._prepare_batch(batch)
+                validate_vector_batch(batch, read._adapter_read_type)
                 batch = read._project_batch_to_output(batch)
                 yield read._try_to_pad_batch_by_schema(batch, schema)
         except BaseException as error:

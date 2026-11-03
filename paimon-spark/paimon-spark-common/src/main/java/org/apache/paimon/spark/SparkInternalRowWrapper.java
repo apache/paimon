@@ -522,7 +522,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
     /** adapt to spark internal vector. */
     public static class SparkInternalVector extends SparkInternalArray implements InternalVector {
         public SparkInternalVector(ArrayData arrayData, DataType elementType) {
-            super(arrayData, elementType);
+            this(arrayData, elementType, null);
         }
 
         public SparkInternalVector(
@@ -530,6 +530,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
                 DataType elementType,
                 @Nullable UriReaderFactory uriReaderFactory) {
             super(arrayData, elementType, uriReaderFactory);
+            InternalVector.checkNoNullElements(this);
         }
     }
 

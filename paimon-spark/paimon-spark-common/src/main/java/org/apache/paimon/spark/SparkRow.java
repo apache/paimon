@@ -517,6 +517,12 @@ public class SparkRow implements InternalRow, Serializable {
                             "Vector length mismatch. Expected %d but was %d.",
                             expectedLength, list.size()));
         }
+        for (int i = 0; i < expectedLength; i++) {
+            if (list.get(i) == null) {
+                throw new IllegalArgumentException(
+                        "VECTOR must not contain null elements (element index " + i + ").");
+            }
+        }
         switch (vectorType.getElementType().getTypeRoot()) {
             case BOOLEAN:
                 boolean[] booleanValues = new boolean[expectedLength];

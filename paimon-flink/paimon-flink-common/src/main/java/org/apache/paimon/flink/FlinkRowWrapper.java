@@ -555,7 +555,7 @@ public class FlinkRowWrapper implements InternalRow {
 
     private static class FlinkVectorWrapper extends FlinkArrayWrapper implements InternalVector {
         private FlinkVectorWrapper(org.apache.flink.table.data.ArrayData array) {
-            super(array);
+            this(array, null, false);
         }
 
         private FlinkVectorWrapper(
@@ -563,6 +563,7 @@ public class FlinkRowWrapper implements InternalRow {
                 @Nullable UriReaderFactory uriReaderFactory,
                 boolean carryBlobBytes) {
             super(array, uriReaderFactory, carryBlobBytes);
+            InternalVector.checkNoNullElements(this);
         }
     }
 

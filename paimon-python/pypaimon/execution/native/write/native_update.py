@@ -35,6 +35,7 @@ from pypaimon.execution.native.write.native_commit import (
 )
 from pypaimon.write.row_input import RowIdUpdateInputMixin, normalize_row_ids
 from pypaimon.write.row_utils import _contains_blob_value, value_for_arrow
+from pypaimon.utils.vector_validation import validate_vector_batch
 
 
 def _native_update_formats_supported(table):
@@ -81,7 +82,7 @@ def create_native_update(table, commit_user, columns):
               .new_update())
     if columns is not None:
         writer.with_update_type(columns)
-    return NativeBatchTableUpdate(table, writer)
+    return NativeBatchTableUpdate(table, writer, columns)
 
 
 def create_native_update_by_row_id(table, commit_user, commit_identifier, plan=None):
@@ -125,13 +126,14 @@ def create_native_shard_updator(table, commit_user, projection, columns, shard, 
     read = read_builder.new_read()
     writer = update.new_shard_updator(
         shard, shard_count, read_type=json.dumps(RowType(True, read_builder.read_type()).to_dict()))
-    return NativeShardTableUpdator(table, read, writer)
+    return NativeShardTableUpdator(table, read, writer, columns)
 
 
 class NativeShardTableUpdator:
     """Transport Arrow batches and commit messages for a core shard updater."""
 
-    def __init__(self, table, read, writer):
+    def __init__(self, table, read, writer, columns=None):
+        self._columns = columns
         self._table = table
         self._writer = writer
         self._read = read
@@ -144,6 +146,7 @@ class NativeShardTableUpdator:
         return _ClosableArrowBatchReader(pa.ipc.RecordBatchReader.from_batches(schema, batches), batches)
 
     def update_by_arrow_batch(self, data):
+        validate_vector_batch(data, self._table.fields, self._columns)
         self._writer.update_by_arrow_batch(data)
 
     def prepare_commit(self):
@@ -488,11 +491,13 @@ def _raise_native_row_id_error(error):
 class NativeBatchTableUpdate:
     """Wrap public core operations and decode their commit messages."""
 
-    def __init__(self, table, writer):
+    def __init__(self, table, writer, columns=None):
+        self.columns = columns
         self.table = table
         self.writer = writer
 
     def update_by_arrow_with_row_id(self, data: pa.Table):
+        validate_vector_batch(data, self.table.fields, self.columns)
         try:
             messages = self.writer.update_by_arrow_with_row_id(data)
         except ValueError as error:
@@ -500,8 +505,13 @@ class NativeBatchTableUpdate:
         return from_native_commit_messages(self.table, messages)
 
     def update_by_arrow_batches_with_row_id(self, tables):
+        def validated_tables():
+            for data in tables:
+                validate_vector_batch(data, self.table.fields, self.columns)
+                yield data
+
         try:
-            messages = self.writer.update_by_arrow_batches_with_row_id(tables)
+            messages = self.writer.update_by_arrow_batches_with_row_id(validated_tables())
         except ValueError as error:
             _raise_native_row_id_error(error)
         return from_native_commit_messages(self.table, messages)
@@ -529,6 +539,7 @@ class NativeTableUpdateByRowId(RowIdUpdateInputMixin):
         return from_native_commit_messages(self.table, self.writer.commit_messages)
 
     def update_columns(self, data, column_names):
+        validate_vector_batch(data, self.table.fields, column_names)
         try:
             messages = self.writer.update_columns(data, column_names)
         except ValueError as error:
@@ -572,6 +583,9 @@ class NativeTableUpsert:
 
     def upsert(self):
         try:
+            batches = [self.data] if isinstance(self.data, pa.Table) else self.data
+            for batch in batches:
+                validate_vector_batch(batch, self.table.fields)
             return from_native_commit_messages(
                 self.table,
                 self.writer.upsert_by_arrow_with_key(self.data, self.keys))

@@ -29,6 +29,7 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.arrow_schema import normalize_arrow_write_nullability
+from pypaimon.utils.vector_validation import validate_vector_batch
 from pypaimon.schema.data_types import (
     DataField,
     PyarrowFieldParser,
@@ -251,6 +252,7 @@ class PythonTableUpdateByRowId(RowIdUpdateInputMixin):
             if col_name not in self.table.field_names:
                 raise ValueError(f"Column {col_name} not found in table schema")
 
+        validate_vector_batch(data, self.table.fields, column_names)
         data_with_first_row_id = self._calculate_first_row_id(data)
         first_row_ids = set(
             data_with_first_row_id[self.FIRST_ROW_ID_COLUMN].to_pylist()
@@ -274,6 +276,7 @@ class PythonTableUpdateByRowId(RowIdUpdateInputMixin):
         return self.commit_messages
 
     def _write_row_columns(self, update_data, column_names, blob_object_columns):
+        validate_vector_batch(update_data, self.table.fields, column_names)
         data_with_first_row_id = self._calculate_first_row_id(update_data)
         self._write_by_first_row_id(
             data_with_first_row_id, column_names, blob_object_columns)

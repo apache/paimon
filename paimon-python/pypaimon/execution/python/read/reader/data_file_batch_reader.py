@@ -36,6 +36,7 @@ from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, PyarrowFieldParser, RowType)
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.vector_validation import validate_vector_batch
 
 
 def _is_character_string_type(data_type) -> bool:
@@ -173,6 +174,7 @@ class DataFileBatchReader(RecordBatchReader):
         self._file_data_field_map = {
             field.name: field for field in source_fields
         }
+        self._vector_validation_fields = target_data_fields if target_data_fields is not None else fields
         self.schema_map = {field.name: field for field in read_arrow_schema(fields)}
         self.row_tracking_enabled = row_tracking_enabled
         self.first_row_id = first_row_id
@@ -321,6 +323,7 @@ class DataFileBatchReader(RecordBatchReader):
             return None
         record_batch = self._assemble_selected_map_keys(record_batch)
         record_batch = self._normalize_batch(record_batch)
+        validate_vector_batch(record_batch, self._vector_validation_fields)
 
         if self.partition_info is None and self.index_mapping is None:
             # A file written under an older schema (e.g. before an INT -> BIGINT

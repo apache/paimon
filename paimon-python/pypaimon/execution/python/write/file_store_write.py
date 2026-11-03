@@ -23,6 +23,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.data_types import is_blob_file_field, is_blob_type
+from pypaimon.utils.vector_validation import validate_vector_batch, validate_vector_value
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import (
     normalize_inline_blob_row,
@@ -100,6 +101,7 @@ class FileStoreWrite:
         data: pa.RecordBatch,
         total_buckets=None,
     ):
+        validate_vector_batch(data, self.table.fields, self.write_cols)
         self._check_runtime_bucket(partition, bucket, total_buckets)
         key = (partition, bucket)
         if key not in self.data_writers:
@@ -130,6 +132,9 @@ class FileStoreWrite:
         # InternalRows carry explicit field names and may arrive reordered.
         # Bind values by those names, then write the selected column order.
         require_columns(values_by_name, column_names, 'write_row')
+        for field in self.table.fields:
+            if field.name in column_names:
+                validate_vector_value(values_by_name[field.name], field.type, field.name)
         writer = self.data_writers.get(key)
         data = None
         if self._has_blob_columns():

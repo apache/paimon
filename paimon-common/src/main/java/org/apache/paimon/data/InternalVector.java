@@ -26,13 +26,24 @@ import org.apache.paimon.types.VectorType;
  * Base interface of an internal data structure representing data of {@link VectorType}.
  *
  * <p>Note: All elements of this data structure must be internal data structures and must be of the
- * same type. See {@link InternalRow} for more information about internal data structures.
+ * same type. Elements must not be null, even when the vector field itself is nullable. See {@link
+ * InternalRow} for more information about internal data structures.
  *
  * @see BinaryVector
  * @since 2.0.0
  */
 @Public
 public interface InternalVector extends InternalArray {
+
+    /** Validates an engine array before exposing it as a vector. */
+    static void checkNoNullElements(InternalArray array) {
+        for (int i = 0; i < array.size(); i++) {
+            if (array.isNullAt(i)) {
+                throw new IllegalArgumentException(
+                        "VECTOR must not contain null elements (element index " + i + ").");
+            }
+        }
+    }
 
     // ------------------------------------------------------------------------------------------
     // Access Utilities

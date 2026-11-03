@@ -25,6 +25,7 @@ from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.commit_identifier import validate_commit_identifier
+from pypaimon.utils.vector_validation import contains_vector, validate_vector_batch
 from pypaimon.execution.native.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
@@ -167,6 +168,11 @@ class NativeTableWrite:
         self._write_native_batch(data, bucket)
 
     def _write_native_batch(self, data, bucket=None):
+        if any(contains_vector(field.type) for field in self.table.fields
+               if self._write_cols is None or field.name in self._write_cols):
+            from pypaimon.write.row_kind import filter_write_batch
+            validate_vector_batch(filter_write_batch(self.table, data, self._write_cols),
+                                  self.table.fields, self._write_cols)
         if data.num_rows:
             # A failed native write may already have produced files. Never
             # retry that batch through Python after this point.

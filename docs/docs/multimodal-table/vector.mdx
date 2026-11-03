@@ -51,6 +51,9 @@ Compared to variable-length arrays, dense vectors provide:
 **Notes**:
  - Columns of `VECTOR` type cannot be used as primary key columns, partition columns, or for sorting.
  - If a `VECTOR` value itself is not `null`, its elements are not allowed to be `null`.
+   For example, `[1.0, null, 3.0]` is invalid, while a whole-vector `null` is allowed for a nullable column.
+   Spark, Flink, and PyPaimon (including Ray writes) reject null elements when converting input to `VECTOR`.
+   Ordinary `ARRAY` columns retain their element nullability.
 
 ## Dedicated Vector File Storage
 
