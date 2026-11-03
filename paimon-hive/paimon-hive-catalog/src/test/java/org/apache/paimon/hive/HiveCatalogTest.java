@@ -335,7 +335,7 @@ public class HiveCatalogTest extends CatalogTestBase {
         fileIO.overwriteFileUtf8(
                 schemaManager.toSchemaPath(schema.id()), schema.copy(invalidOptions).toString());
 
-        assertThatThrownBy(() -> catalog.getTable(identifier))
+        assertThatThrownBy(() -> ((FileStoreTable) catalog.getTable(identifier)).newScan())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("missing");
         catalog.alterTable(
@@ -350,7 +350,7 @@ public class HiveCatalogTest extends CatalogTestBase {
         fileIO.overwriteFileUtf8(
                 schemaManager.toSchemaPath(repairedSchema.id()),
                 repairedSchema.copy(invalidOptions).toString());
-        assertThatThrownBy(() -> catalog.getTable(identifier))
+        assertThatThrownBy(() -> ((FileStoreTable) catalog.getTable(identifier)).newScan())
                 .isInstanceOf(IllegalArgumentException.class);
         catalog.dropTable(identifier, false);
 
