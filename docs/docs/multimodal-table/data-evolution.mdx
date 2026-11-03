@@ -477,6 +477,8 @@ deterministic matched updates with optional inserts, without forcing a source
 checkpoint. The default is `false`.
 `data-evolution.merge-into.source-persist` continues to control ordinary caching
 for statements that do not require a retry checkpoint.
+The two options can be enabled together. Source persistence alone does not
+guarantee repeatability or enable general logical-conflict retries.
 
 Retries reevaluate the join, conditions, and assignments for current file
 groups whose read or written columns changed, and reuse unaffected staged

@@ -261,14 +261,21 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     }
   }
 
-  for (sourceRepeatable <- Seq(None, Some(false), Some(true))) {
-    test(s"general MERGE logical retry requires repeatable source $sourceRepeatable") {
+  for (
+    sourceRepeatable <- Seq(None, Some(false), Some(true));
+    sourcePersist <- Seq(false, true)
+  ) {
+    test(
+      s"general MERGE retry with repeatable source $sourceRepeatable and persist $sourcePersist") {
       withTable("t") {
+        val persistOption = s"'data-evolution.merge-into.source-persist' = '$sourcePersist',"
         sourceRepeatable match {
-          case Some(enabled) => createTable(sourceRepeatable = enabled)
+          case Some(enabled) =>
+            createTable(persistOption, sourceRepeatable = enabled)
           case None =>
             sql(
               "CREATE TABLE t (id INT, b INT, status STRING) TBLPROPERTIES (" +
+                persistOption +
                 "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
         }
         sql("INSERT INTO t VALUES (1, 1, 'pending')")
@@ -280,7 +287,9 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
             "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')",
           _ => {
             attempts += 1
-            assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
+            val cachedSource =
+              spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore)
+            assert(cachedSource.nonEmpty == sourcePersist)
             if (attempts == 1) concurrentMerge("b = t.b + 10")
           }
         )
@@ -293,6 +302,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
           checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 11)))
           assert(attempts == 1)
         }
+        assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
       }
     }
   }
