@@ -30,6 +30,8 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -199,8 +201,13 @@ public class TableRuntimeValidationTest extends TableTestBase {
         options.toConfiguration().remove(CoreOptions.RECORD_LEVEL_TIME_FIELD.key());
 
         if (primaryKey) {
+            FileStoreTable valid = table.copy(Collections.emptyMap());
+            write(valid, GenericRow.of(1, 10, 100));
+            Split split = valid.newScan().plan().splits().get(0);
             options.toConfiguration().setString("fields.v.aggregate-function", "max");
-            assertThatThrownBy(table::newRead).hasMessageContaining("Must use sequence group");
+            InnerTableRead reader = table.newRead();
+            assertThatThrownBy(() -> reader.createReader(split))
+                    .hasMessageContaining("Must use sequence group");
             options.toConfiguration().setString("fields.seq.sequence-group", "v");
         }
         assertThat(table.store().options()).isSameAs(options);
@@ -223,19 +230,23 @@ public class TableRuntimeValidationTest extends TableTestBase {
         }
         catalog.createTable(identifier(), builder.build(), false);
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-        table.store();
+        write(table, GenericRow.of(1));
+        Split split = table.newScan().plan().splits().get(0);
         FileStoreTable invalid =
                 table.copy(
                         Collections.singletonMap(
                                 CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "missing"));
         assertThat(invalid.rowType().getFieldNames()).containsExactly("id");
         assertThat(invalid.coreOptions().recordLevelTimeField()).isEqualTo("missing");
-        assertThat(invalid.snapshotManager().latestSnapshot()).isNull();
+        assertThat(invalid.snapshotManager().latestSnapshotId())
+                .isEqualTo(table.snapshotManager().latestSnapshotId());
         assertThat(invalid.tagManager().allTagNames()).isEmpty();
         assertThatThrownBy(invalid::store).hasMessageContaining("missing");
-        assertThatThrownBy(invalid::newRead).hasMessageContaining("missing");
-        assertThatThrownBy(invalid::newScan).hasMessageContaining("missing");
-        assertThatThrownBy(() -> invalid.newScan(t -> null)).hasMessageContaining("missing");
+        InnerTableRead reader = invalid.newRead();
+        assertThatThrownBy(() -> reader.createReader(split)).hasMessageContaining("missing");
+        assertThatThrownBy(() -> invalid.newScan().plan()).hasMessageContaining("missing");
+        assertThatThrownBy(() -> invalid.newScan(FileStoreTable::newSnapshotReader).plan())
+                .hasMessageContaining("missing");
         assertThatThrownBy(invalid::newStreamScan).hasMessageContaining("missing");
         assertThatThrownBy(() -> invalid.newWrite("test")).hasMessageContaining("missing");
         assertThatThrownBy(() -> invalid.newCommit("test")).hasMessageContaining("missing");
@@ -421,8 +432,10 @@ public class TableRuntimeValidationTest extends TableTestBase {
                         Collections.singletonMap(
                                 CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "missing"));
         assertThat(invalid.rowType()).isEqualTo(planning.rowType());
-        assertThatThrownBy(invalid::newRead).hasMessageContaining("missing");
-        assertThatThrownBy(invalid::newScan).hasMessageContaining("missing");
+        Split split = planning.newScan().plan().splits().get(0);
+        assertThatThrownBy(() -> invalid.newRead().createReader(split))
+                .hasMessageContaining("missing");
+        assertThatThrownBy(() -> invalid.newScan().plan()).hasMessageContaining("missing");
     }
 
     @ParameterizedTest

@@ -141,6 +141,9 @@ public class ChainTableFileStoreTableTest {
     public void testMetadataCopyDefersRuntimeValidation() throws Exception {
         createChainTable(options -> {});
         FileStoreTable table = loadTable();
+        writeWithCommit(
+                table.switchToBranch(DELTA_BRANCH), row(1L, 1L, "value", "CN", "20250810", "20"));
+        Split split = table.newScan().plan().splits().get(0);
         FileStoreTable invalid =
                 table.copy(
                         Collections.singletonMap(
@@ -148,8 +151,9 @@ public class ChainTableFileStoreTableTest {
         assertThat(invalid).isInstanceOf(ChainTableFileStoreTable.class);
         assertThat(invalid.rowType()).isEqualTo(table.rowType());
         assertThat(invalid.coreOptions().recordLevelTimeField()).isEqualTo("missing");
-        assertThatThrownBy(invalid::newRead).hasMessageContaining("missing");
-        assertThatThrownBy(invalid::newScan).hasMessageContaining("missing");
+        assertThatThrownBy(() -> invalid.newRead().createReader(split))
+                .hasStackTraceContaining("missing");
+        assertThatThrownBy(() -> invalid.newScan().plan()).hasMessageContaining("missing");
         assertThatThrownBy(invalid::newStreamScan).hasMessageContaining("missing");
         assertThatThrownBy(() -> invalid.newWrite("test")).hasMessageContaining("missing");
         assertThatThrownBy(() -> invalid.newCommit("test")).hasMessageContaining("missing");

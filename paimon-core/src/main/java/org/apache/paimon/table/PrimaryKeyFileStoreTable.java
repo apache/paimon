@@ -162,7 +162,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    protected InnerTableRead createRead() {
+    public InnerTableRead newRead() {
         return new KeyValueTableRead(
                 () -> store().newRead(),
                 () -> store().newBatchRawFileRead(),
@@ -172,7 +172,12 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    protected DataTableScan createScan(SnapshotReaderFactory snapshotReaderFactory) {
+    public DataTableScan newScan() {
+        return newScan(FileStoreTable::newSnapshotReader);
+    }
+
+    @Override
+    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
         return new PrimaryKeyBatchScan(
                 this,
                 snapshotReaderFactory.create(this),

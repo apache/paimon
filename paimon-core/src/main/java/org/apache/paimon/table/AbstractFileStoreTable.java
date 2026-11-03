@@ -50,9 +50,7 @@ import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.WriteSelector;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
-import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -382,27 +380,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     protected abstract FileStore<?> createStore(TableSchema runtimeSchema);
 
     @Override
-    public InnerTableRead newRead() {
-        store();
-        return createRead();
-    }
-
-    protected abstract InnerTableRead createRead();
-
-    @Override
-    public DataTableScan newScan() {
-        return newScan(FileStoreTable::newSnapshotReader);
-    }
-
-    @Override
-    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
-        store();
-        return createScan(snapshotReaderFactory);
-    }
-
-    protected abstract DataTableScan createScan(SnapshotReaderFactory snapshotReaderFactory);
-
-    @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
         checkImmutability(dynamicOptions);
         return copyInternal(dynamicOptions, true);
@@ -552,10 +529,20 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public BucketMode bucketMode() {
-        return BucketMode.fromOptions(
-                coreOptions().bucket(),
-                !tableSchema.primaryKeys().isEmpty(),
-                tableSchema.crossPartitionUpdate());
+        int bucket = coreOptions().bucket();
+        if (tableSchema.primaryKeys().isEmpty()) {
+            return bucket == -1 ? BucketMode.BUCKET_UNAWARE : BucketMode.HASH_FIXED;
+        }
+        switch (bucket) {
+            case -2:
+                return BucketMode.POSTPONE_MODE;
+            case -1:
+                return tableSchema.crossPartitionUpdate()
+                        ? BucketMode.KEY_DYNAMIC
+                        : BucketMode.HASH_DYNAMIC;
+            default:
+                return BucketMode.HASH_FIXED;
+        }
     }
 
     @Override

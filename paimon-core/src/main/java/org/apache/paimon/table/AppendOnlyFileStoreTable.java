@@ -112,7 +112,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    protected InnerTableRead createRead() {
+    public InnerTableRead newRead() {
         List<Function<SplitReadConfig, SplitReadProvider>> providerFactories = new ArrayList<>();
         if (coreOptions().dataEvolutionEnabled()) {
             // add data evolution first
@@ -138,7 +138,12 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    protected DataTableScan createScan(SnapshotReaderFactory snapshotReaderFactory) {
+    public DataTableScan newScan() {
+        return newScan(FileStoreTable::newSnapshotReader);
+    }
+
+    @Override
+    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
         CoreOptions options = coreOptions();
         AppendBatchTableScan scan =
                 new AppendBatchTableScan(

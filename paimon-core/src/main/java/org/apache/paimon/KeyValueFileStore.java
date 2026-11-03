@@ -91,7 +91,15 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public BucketMode bucketMode() {
-        return BucketMode.fromOptions(options.bucket(), true, crossPartitionUpdate);
+        int bucket = options.bucket();
+        switch (bucket) {
+            case -2:
+                return BucketMode.POSTPONE_MODE;
+            case -1:
+                return crossPartitionUpdate ? BucketMode.KEY_DYNAMIC : BucketMode.HASH_DYNAMIC;
+            default:
+                return BucketMode.HASH_FIXED;
+        }
     }
 
     @Override
