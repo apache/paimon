@@ -113,19 +113,9 @@ class _ColumnUpdate:
         self.resources.append(resource)
         return resource
 
-    def check_current(self):
-        # This is a stale-work check, not a lock. These local enrichment APIs
-        # require a single writer; ordinary commit conflict checks still apply.
-        latest = self.raw.snapshot_manager().get_latest_snapshot()
-        latest_id = None if latest is None else latest.id
-        schema_id = self.owner.catalog.get_table(self.owner.identifier).table_schema.id
-        if latest_id != self.source_snapshot_id or schema_id != self.raw.table_schema.id:
-            raise RuntimeError("Table changed during column enrichment; recompute from the current table.")
-
     def add_schema(self, fields):
         if not fields:
             return
-        self.check_current()
         changes = [SchemaChange.add_column(
             field.name, PyarrowFieldParser.to_paimon_type(field.type, True),
             comment=(field.metadata or {}).get(b"description", b"").decode("utf-8") or None,
@@ -142,8 +132,6 @@ class _ColumnUpdate:
         self.added_columns = tuple(field.name for field in fields)
 
     def finish(self, updated_rows, unmatched_rows=0, commit=None, messages=()):
-        self.phase = "validate"
-        self.check_current()
         if messages:
             self.phase = "commit"
             self.commit_outcome = "unknown"
@@ -279,7 +267,6 @@ def merge_columns(owner, data, *, on, unmatched):
         if updates.num_rows == 0:
             return operation.finish(0, unmatched_rows)
         operation.phase = "write"
-        operation.check_current()
         builder = operation.raw._copy_with_snapshot(operation.snapshot).new_batch_write_builder()
         commit = operation.keep(builder.new_commit())
         messages = builder.new_update().with_update_type(output_names).update_by_arrow_with_row_id(updates)

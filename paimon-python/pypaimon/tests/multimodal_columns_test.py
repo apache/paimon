@@ -223,23 +223,6 @@ def test_add_columns_rejects_existing_columns_before_calling_user_code(frames):
         frames.add_columns(pa.schema([("label", pa.string())]), inputs=["image"], fn=compute)
 
 
-def test_add_columns_detects_input_changes_during_computation(frames):
-    changed = []
-
-    def compute(batch):
-        if not changed:
-            changed.append(True)
-            frames.update("id = 0", {"label": "changed"})
-        return pa.table({"feature": [1] * batch.num_rows})
-
-    with pytest.raises(pmm.ColumnUpdateError) as failure:
-        frames.add_columns(pa.schema([("feature", pa.int64())]),
-                           inputs=["label"], fn=compute, batch_size=2)
-    assert failure.value.commit_outcome == "not_started"
-    assert frames.scan().select(["feature"]).to_arrow()["feature"].to_pylist() == [None] * 5
-    assert _rows(frames, ["id", "label"])[0]["label"] == "changed"
-
-
 def test_merge_columns_preserves_files_if_commit_response_is_lost(frames):
     commit = BatchTableCommit.commit
 

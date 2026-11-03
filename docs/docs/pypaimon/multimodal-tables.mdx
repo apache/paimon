@@ -327,8 +327,7 @@ These are local, single-writer operations on a current full-table view.
 As with other table methods, reopen the table after external schema changes.
 Time-travel and incremental table views are rejected. `merge_columns` holds the
 source and target match keys in memory. The read snapshot is fixed for the
-operation, and an observed snapshot or schema change before commit rejects the
-prepared work. This check is not a lock: coordinate writers for the entire call.
+operation. Coordinate writers for the entire call.
 The APIs do not provide automatic retries, checkpoints, or distributed jobs.
 
 Successful calls return `ColumnUpdateResult` with row counts, added column names,
@@ -340,7 +339,7 @@ and commit raise
 
 | Attribute | Meaning |
 | --- | --- |
-| `phase` | The stage that failed: schema, compute, write, validate, commit, result, or close |
+| `phase` | The stage that failed: schema, compute, write, commit, result, or close |
 | `schema_changed` | `True` if schema publication succeeded, `False` if it did not start, or `None` if its outcome is unknown |
 | `schema_id` | The last known schema ID |
 | `source_snapshot_id` | The snapshot used to match or compute rows |
