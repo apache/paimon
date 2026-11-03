@@ -119,6 +119,7 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
         for (Element element : polled) {
             collected = releaseCollecting(element, collected);
         }
+        collected = closeCollecting(mergeFunctionWrapper::reset, collected);
         if (collected != null) {
             rethrowCloseFailure(collected);
         }
@@ -135,7 +136,7 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
     }
 
     private static @Nullable Throwable closeCollecting(
-            RecordReader<KeyValue> reader, @Nullable Throwable collected) {
+            AutoCloseable reader, @Nullable Throwable collected) {
         try {
             reader.close();
         } catch (Throwable t) {
