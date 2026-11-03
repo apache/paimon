@@ -1162,6 +1162,21 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException {}
 
     /**
+     * Remove partition metadata using the corresponding data partitions to check branch ownership.
+     *
+     * @param partitions metastore partition specs to remove, including synthetic markers
+     * @param dataPartitions underlying data partition specs, in the same order as {@code
+     *     partitions}
+     */
+    default void dropPartitionsFromMetastore(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            List<Map<String, String>> dataPartitions)
+            throws TableNotExistException {
+        dropPartitionsFromMetastore(identifier, partitions);
+    }
+
+    /**
      * Alter partitions of the specify table. For non-existent partitions, partitions will be
      * created directly.
      *

@@ -488,7 +488,7 @@ public class HiveCatalog extends AbstractCatalog {
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         TableSchema schema = this.loadTableSchema(identifier);
-        dropPartitionsFromMetastore(identifier, partitions, schema);
+        dropPartitionsFromMetastore(identifier, partitions, partitions, schema);
         if (CoreOptions.fromMap(schema.options()).tagToPartitionField() == null) {
             super.dropPartitions(identifier, partitions);
         }
@@ -498,18 +498,43 @@ public class HiveCatalog extends AbstractCatalog {
     public void dropPartitionsFromMetastore(
             Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        dropPartitionsFromMetastore(identifier, partitions, loadTableSchema(identifier));
+        dropPartitionsFromMetastore(
+                identifier, partitions, partitions, loadTableSchema(identifier));
+    }
+
+    @Override
+    public void dropPartitionsFromMetastore(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            List<Map<String, String>> dataPartitions)
+            throws TableNotExistException {
+        dropPartitionsFromMetastore(
+                identifier, partitions, dataPartitions, loadTableSchema(identifier));
     }
 
     private void dropPartitionsFromMetastore(
-            Identifier identifier, List<Map<String, String>> partitions, TableSchema schema)
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            List<Map<String, String>> dataPartitions,
+            TableSchema schema)
             throws TableNotExistException {
+        checkArgument(
+                partitions.size() == dataPartitions.size(),
+                "Metastore and data partition specs must have the same size.");
         boolean tagToPart = CoreOptions.fromMap(schema.options()).tagToPartitionField() != null;
         if (metastorePartitioned(schema)) {
-            List<Map<String, String>> metaPartitions =
-                    tagToPart
-                            ? partitions
-                            : removePartitionsExistsInOtherBranches(identifier, partitions);
+            List<Map<String, String>> metaPartitions = partitions;
+            if (!tagToPart) {
+                Set<Map<String, String>> removableDataPartitions =
+                        new HashSet<>(
+                                removePartitionsExistsInOtherBranches(identifier, dataPartitions));
+                metaPartitions = new ArrayList<>();
+                for (int i = 0; i < partitions.size(); i++) {
+                    if (removableDataPartitions.contains(dataPartitions.get(i))) {
+                        metaPartitions.add(partitions.get(i));
+                    }
+                }
+            }
             for (Map<String, String> part : metaPartitions) {
                 List<String> partitionValues =
                         new ArrayList<>(

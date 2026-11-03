@@ -37,6 +37,13 @@ public interface PartitionModification extends AutoCloseable {
     default void dropPartitionsFromMetastore(List<Map<String, String>> partitions)
             throws Catalog.TableNotExistException {}
 
+    /** Remove metadata while checking ownership using the corresponding data partition specs. */
+    default void dropPartitionsFromMetastore(
+            List<Map<String, String>> partitions, List<Map<String, String>> dataPartitions)
+            throws Catalog.TableNotExistException {
+        dropPartitionsFromMetastore(partitions);
+    }
+
     void alterPartitions(List<PartitionStatistics> partitions)
             throws Catalog.TableNotExistException;
 
@@ -59,6 +66,13 @@ public interface PartitionModification extends AutoCloseable {
             public void dropPartitionsFromMetastore(List<Map<String, String>> partitions)
                     throws Catalog.TableNotExistException {
                 catalog.dropPartitionsFromMetastore(identifier, partitions);
+            }
+
+            @Override
+            public void dropPartitionsFromMetastore(
+                    List<Map<String, String>> partitions, List<Map<String, String>> dataPartitions)
+                    throws Catalog.TableNotExistException {
+                catalog.dropPartitionsFromMetastore(identifier, partitions, dataPartitions);
             }
 
             @Override

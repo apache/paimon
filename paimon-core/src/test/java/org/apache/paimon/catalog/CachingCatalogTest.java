@@ -364,6 +364,29 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testDropMarkerMetadataForwardsDataPartitionsAndInvalidatesCache() throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(wrapped, EXPIRATION_TTL, ticker);
+        Identifier identifier = new Identifier("db", "tbl");
+        Map<String, String> marker = singletonMap("dt", "20230101.done");
+        Map<String, String> dataPartition = singletonMap("dt", "20230101");
+        Partition partition = new Partition(marker, 0, 0, 0, 0, -1, true);
+        when(wrapped.listPartitions(identifier)).thenReturn(singletonList(partition), emptyList());
+
+        assertThat(catalog.listPartitions(identifier)).containsExactly(partition);
+        catalog.dropPartitionsFromMetastore(
+                identifier, singletonList(marker), singletonList(dataPartition));
+
+        Mockito.verify(wrapped)
+                .dropPartitionsFromMetastore(
+                        identifier, singletonList(marker), singletonList(dataPartition));
+        Mockito.verify(wrapped, Mockito.never())
+                .dropPartitionsFromMetastore(identifier, singletonList(marker));
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+    }
+
+    @Test
     public void testCreatePartitionsInvalidatesPartitionCache() throws Exception {
         Catalog wrapped = Mockito.mock(Catalog.class);
         TestableCachingCatalog catalog =

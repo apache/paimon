@@ -884,6 +884,139 @@ public class HiveCatalogTest extends CatalogTestBase {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testExpireIntegerPartitionsWithEmptyBranch(boolean markDone) throws Exception {
+        String databaseName = "test_expire_integer_partitions";
+        String tableName = "t";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd")
+                        .option(PARTITION_TIMESTAMP_PATTERN.key(), "$dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.INT())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 20230101));
+            write.write(GenericRow.of(2, 20990101));
+            commit.commit(write.prepareCommit());
+        }
+        if (markDone) {
+            AddDonePartitionAction action =
+                    new AddDonePartitionAction(table.catalogEnvironment().partitionModification());
+            action.markDone("dt=20230101");
+            action.markDone("dt=20990101");
+        }
+        Map<String, String> expirationOptions = new HashMap<>();
+        expirationOptions.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), "1 d");
+        expirationOptions.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "0 s");
+        table.createBranch("empty");
+        assertThat(table.switchToBranch("empty").newScan().listPartitions()).isEmpty();
+        table = table.copy(expirationOptions);
+        long snapshotId = table.snapshotManager().latestSnapshotId();
+        table.store().newPartitionExpire("expire", table).expire(Long.MAX_VALUE);
+
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId + 1);
+        assertThat(table.newScan().listPartitions())
+                .extracting(partition -> partition.getInt(0))
+                .containsExactly(20990101);
+        if (markDone) {
+            assertHmsDts(databaseName, tableName, "20990101", "20990101.done");
+        } else {
+            assertHmsDts(databaseName, tableName, "20990101");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testExpireIntegerPartitionsSharedWithOtherBranch(boolean markDone)
+            throws Exception {
+        String databaseName = "test_expire_shared_integer_partitions";
+        String tableName = "t";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd")
+                        .option(PARTITION_TIMESTAMP_PATTERN.key(), "$dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.INT())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 20230101));
+            write.write(GenericRow.of(2, 20230102));
+            write.write(GenericRow.of(3, 20990101));
+            commit.commit(write.prepareCommit());
+        }
+        table.createBranch("other");
+        FileStoreTable other = table.switchToBranch("other");
+        BatchWriteBuilder otherWriteBuilder = other.newBatchWriteBuilder();
+        try (BatchTableWrite write = otherWriteBuilder.newWrite();
+                BatchTableCommit commit = otherWriteBuilder.newCommit()) {
+            write.write(GenericRow.of(2, 20230102));
+            commit.commit(write.prepareCommit());
+        }
+        if (markDone) {
+            AddDonePartitionAction action =
+                    new AddDonePartitionAction(table.catalogEnvironment().partitionModification());
+            action.markDone("dt=20230101");
+            action.markDone("dt=20230102");
+            action.markDone("dt=20990101");
+        }
+        Map<String, String> expirationOptions = new HashMap<>();
+        expirationOptions.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), "1 d");
+        expirationOptions.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "0 s");
+        table = table.copy(expirationOptions);
+        table.store().newPartitionExpire("expire-main", table).expire(Long.MAX_VALUE);
+
+        assertThat(table.newScan().listPartitions())
+                .extracting(partition -> partition.getInt(0))
+                .containsExactly(20990101);
+        assertThat(other.newScan().listPartitions())
+                .extracting(partition -> partition.getInt(0))
+                .containsExactly(20230102);
+        if (markDone) {
+            assertHmsDts(
+                    databaseName,
+                    tableName,
+                    "20230102",
+                    "20230102.done",
+                    "20990101",
+                    "20990101.done");
+        } else {
+            assertHmsDts(databaseName, tableName, "20230102", "20990101");
+        }
+
+        // Only the last branch holding a partition may remove its shared HMS entry and marker.
+        other = other.copy(expirationOptions);
+        other.store().newPartitionExpire("expire-other", other).expire(Long.MAX_VALUE);
+        assertThat(other.newScan().listPartitions()).isEmpty();
+        assertThat(table.newScan().listPartitions())
+                .extracting(partition -> partition.getInt(0))
+                .containsExactly(20990101);
+        if (markDone) {
+            assertHmsDts(databaseName, tableName, "20990101", "20990101.done");
+        } else {
+            assertHmsDts(databaseName, tableName, "20990101");
+        }
+    }
+
     @Test
     public void testDropPartitionsFromMetastorePreservesData() throws Exception {
         String databaseName = "test_drop_partition_metadata";
@@ -912,6 +1045,43 @@ public class HiveCatalogTest extends CatalogTestBase {
         // A real STRING partition ending in .done must still support ordinary data deletion.
         catalog.dropPartitions(identifier, partitionSpecs("20230101.done"));
         assertPhysicalDts(identifier);
+    }
+
+    @Test
+    public void testRealDoneSuffixPartitionKeepsBranchProtection() throws Exception {
+        String databaseName = "test_real_done_suffix_partition";
+        String tableName = "t";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+        writeAppendPartition(identifier, "20230101.done");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        table.createBranch("other");
+        Identifier otherId = new Identifier(databaseName, tableName, "other");
+        writeAppendPartition(otherId, "20230101.done");
+        long snapshotId = table.snapshotManager().latestSnapshotId();
+
+        catalog.dropPartitionsFromMetastore(identifier, partitionSpecs("20230101.done"));
+        assertHmsDts(databaseName, tableName, "20230101.done");
+        assertPhysicalDts(identifier, "20230101.done");
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId);
+
+        catalog.dropPartitions(identifier, partitionSpecs("20230101.done"));
+        assertPhysicalDts(identifier);
+        assertPhysicalDts(otherId, "20230101.done");
+        assertHmsDts(databaseName, tableName, "20230101.done");
+
+        catalog.dropPartitions(otherId, partitionSpecs("20230101.done"));
+        assertPhysicalDts(otherId);
+        assertHmsDts(databaseName, tableName);
     }
 
     private static Map<String, String> orderedSpec(
