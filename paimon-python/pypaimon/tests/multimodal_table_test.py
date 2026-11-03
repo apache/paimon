@@ -137,11 +137,11 @@ class MultimodalTableTest(unittest.TestCase):
         options = table.raw_table.table_schema.options
         self.assertEqual("true", options["row-tracking.enabled"])
         self.assertEqual("true", options["data-evolution.enabled"])
-        self.assertEqual("true", options["deletion-vectors.enabled"])
+        self.assertNotIn("deletion-vectors.enabled", options)
         self.assertEqual("true", options["blob-as-descriptor"])
         self.assertNotIn("data-evolution.row-sidecar.enabled", options)
         self.assertEqual("full", options["global-index.search-mode"])
-        self.assertEqual("parquet", options["vector.file.format"])
+        self.assertNotIn("vector.file.format", options)
         self.assertEqual("default.docs", self.conn.get_table("docs").identifier)
         self.assertEqual(["id", "content", "embedding", "payload"],
                          [field.name for field in table.raw_table.fields])

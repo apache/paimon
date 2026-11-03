@@ -35,12 +35,14 @@ primary keys. Each `add`, `overwrite`, `update`, or `delete` call handles its ow
 commit; use the [Python API](./python-api) for explicit writer and commit control.
 
 Creating a multimodal table enables `row-tracking.enabled`,
-`data-evolution.enabled`, `deletion-vectors.enabled`, and
-`blob-as-descriptor` by default. Global index scans use full fallback coverage
+`data-evolution.enabled`, and `blob-as-descriptor` by default.
+Global index scans use full fallback coverage
 through `global-index.search-mode` set to `FULL`. Data files use Paimon's
-default Parquet format, and vector columns are stored in dedicated Parquet
-files through `vector.file.format` set to `parquet`. These defaults require no
-file-format extra:
+default Parquet format, including vector columns. To store vectors in dedicated
+files, explicitly set `vector.file.format`, for example to `parquet`.
+Deletion vectors are disabled by default; enable them with
+`deletion-vectors.enabled` set to `true` in the table creation options.
+These defaults require no file-format extra:
 
 ```shell
 pip install pypaimon
@@ -365,9 +367,10 @@ or delete prepared files after a commit error.
 ## Delete
 
 `delete` removes rows matched by a SQL-like predicate. It uses the same
-predicate syntax as `scan().where(...)` and `update(...)`. Multimodal tables
-enable deletion vectors by default; on partitioned tables, a predicate that
-references only partition columns uses the partition drop path.
+predicate syntax as `scan().where(...)` and `update(...)`. Row-level deletes
+require `deletion-vectors.enabled` set to `true` when creating the table.
+On partitioned tables, a predicate that references only partition columns uses
+the partition drop path.
 
 ```python
 docs.delete(where="id = 2")
@@ -405,7 +408,8 @@ docs.merge("id") \
     ])
 ```
 
-Use `when_matched_delete()` for matched rows that should be removed:
+Use `when_matched_delete()` for matched rows that should be removed. The table
+must have `deletion-vectors.enabled` set to `true`:
 
 ```python
 docs.merge("id") \
