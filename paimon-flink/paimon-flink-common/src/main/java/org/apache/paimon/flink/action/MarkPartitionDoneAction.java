@@ -18,8 +18,10 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.PartitionPathUtils;
 
@@ -31,7 +33,6 @@ import static org.apache.paimon.flink.sink.listener.PartitionMarkDoneListener.ma
 /** Table partition mark done action for Flink. */
 public class MarkPartitionDoneAction extends TableActionBase implements LocalAction {
 
-    private final FileStoreTable fileStoreTable;
     private final List<Map<String, String>> partitions;
 
     public MarkPartitionDoneAction(
@@ -40,29 +41,50 @@ public class MarkPartitionDoneAction extends TableActionBase implements LocalAct
             List<Map<String, String>> partitions,
             Map<String, String> catalogConfig) {
         super(databaseName, tableName, catalogConfig);
-        if (!(table instanceof FileStoreTable)) {
+        if (!(table instanceof FileStoreTable) && !(table instanceof FormatTable)) {
             throw new UnsupportedOperationException(
                     String.format(
-                            "Only FileStoreTable supports mark_partition_done action. The table type is '%s'.",
+                            "Only FileStoreTable and FormatTable support mark_partition_done "
+                                    + "action. The table type is '%s'.",
                             table.getClass().getName()));
         }
 
-        this.fileStoreTable = (FileStoreTable) table;
         this.partitions = partitions;
     }
 
     @Override
     public void executeLocally() throws Exception {
+        if (table instanceof FormatTable) {
+            FormatTable formatTable = (FormatTable) table;
+            List<PartitionMarkDoneAction> actions =
+                    PartitionMarkDoneAction.createActions(
+                            getClass().getClassLoader(),
+                            formatTable,
+                            CoreOptions.fromMap(formatTable.options()));
+            List<String> partitionPaths =
+                    PartitionPathUtils.generatePartitionPaths(
+                            partitions, formatTable.partitionType());
+            try {
+                for (PartitionMarkDoneAction action : actions) {
+                    action.markDone(partitionPaths);
+                }
+            } finally {
+                IOUtils.closeAllQuietly(actions);
+            }
+            return;
+        }
+
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
         List<PartitionMarkDoneAction> actions =
                 PartitionMarkDoneAction.createActions(
                         getClass().getClassLoader(), fileStoreTable, fileStoreTable.coreOptions());
-
-        List<String> partitionPaths =
-                PartitionPathUtils.generatePartitionPaths(
-                        partitions, fileStoreTable.store().partitionType());
-
-        markDone(partitionPaths, actions);
-
-        IOUtils.closeAllQuietly(actions);
+        try {
+            markDone(
+                    PartitionPathUtils.generatePartitionPaths(
+                            partitions, fileStoreTable.store().partitionType()),
+                    actions);
+        } finally {
+            IOUtils.closeAllQuietly(actions);
+        }
     }
 }

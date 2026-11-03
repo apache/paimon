@@ -20,8 +20,10 @@ package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.PartitionMarkDone;
 import org.apache.paimon.table.PartitionModification;
+import org.apache.paimon.table.format.FormatTableSuccessFileMarkDoneAction;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.Closeable;
@@ -41,6 +43,13 @@ public interface PartitionMarkDoneAction extends Closeable {
     default void open(FileStoreTable fileStoreTable, CoreOptions options) {}
 
     void markDone(String partition) throws Exception;
+
+    /** Marks several partitions done; an implementation may batch them. */
+    default void markDone(List<String> partitions) throws Exception {
+        for (String partition : partitions) {
+            markDone(partition);
+        }
+    }
 
     static List<PartitionMarkDoneAction> createActions(
             ClassLoader cl, FileStoreTable fileStoreTable, CoreOptions options) {
@@ -78,6 +87,29 @@ public interface PartitionMarkDoneAction extends Closeable {
                             }
                             instance.open(fileStoreTable, options);
                             return instance;
+                        })
+                .collect(Collectors.toList());
+    }
+
+    /** Creates the actions of a {@link FormatTable}, which only supports {@code success-file}. */
+    static List<PartitionMarkDoneAction> createActions(
+            ClassLoader cl, FormatTable formatTable, CoreOptions options) {
+        return options.partitionMarkDoneActions().stream()
+                .map(
+                        action -> {
+                            if (action != CoreOptions.PartitionMarkDoneAction.SUCCESS_FILE) {
+                                throw new UnsupportedOperationException(
+                                        String.format(
+                                                "Format Table %s only supports the '%s' partition "
+                                                        + "mark done action, but '%s' is "
+                                                        + "configured in %s.",
+                                                formatTable.fullName(),
+                                                CoreOptions.PartitionMarkDoneAction.SUCCESS_FILE,
+                                                action,
+                                                PARTITION_MARK_DONE_ACTION.key()));
+                            }
+                            return (PartitionMarkDoneAction)
+                                    new FormatTableSuccessFileMarkDoneAction(formatTable);
                         })
                 .collect(Collectors.toList());
     }

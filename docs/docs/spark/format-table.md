@@ -112,6 +112,42 @@ change the table's managed/external ownership.
 
 ## Writes and Maintenance
 
+### Partition Mark Done
+
+With `'partition.end-input-to-done' = 'true'`, a Spark write creates an empty `_SUCCESS` file in
+each partition it writes, as Hadoop jobs do, so that downstream jobs waiting for the file can
+start. Unpartitioned tables are not marked: no `_SUCCESS` is written at the table root, and the
+procedure rejects them. A Format Table only supports the default `partition.mark-done-action`,
+`success-file`; any other action fails the statement before data is written. Only the default
+`format-table.implementation = paimon` marks partitions: writes to a table that uses `engine` do
+not, and the procedure rejects it.
+
+```sql
+CREATE TABLE my_table (id INT, dt STRING) USING parquet PARTITIONED BY (dt)
+TBLPROPERTIES ('partition.end-input-to-done' = 'true');
+
+-- creates dt=20240101/_SUCCESS, even when the query returns no rows
+INSERT OVERWRITE my_table PARTITION (dt = '20240101') SELECT id FROM source;
+```
+
+- An `INSERT OVERWRITE` that names every partition column marks that partition even without rows;
+  an `INSERT INTO` that writes no rows marks nothing.
+- Before a write or `TRUNCATE` changes a partition, its `_SUCCESS` is deleted, including a
+  partition an overwrite clears without writing to. After the commit, the write creates it again
+  in the partitions it wrote, so a partition that was only cleared is left without it. If marking
+  fails after the commit, the statement fails with the data written; mark the partitions with the
+  [mark_partition_done](./procedures/metadata#mark_partition_done) procedure.
+- Without `partition.end-input-to-done`, writes leave `_SUCCESS` files alone. When marking
+  partitions with the procedure, enable it as well, so that a later write does not leave a stale
+  file next to changed data.
+- A write marks a partition done when that write finishes, so a partition must have one writer at
+  a time. Writers are not coordinated: with two concurrent writes to a partition, the first to
+  finish marks it while the other may still be publishing files.
+- The file follows `format-table.partition-path-only-value` and is not read as data. A
+  catalog-managed partition at a custom location, or not registered, is skipped.
+- Flink writes delete the file of the partitions they change but do not create it; run the
+  procedure after them.
+
 ### Partition File Formats
 
 Catalog-managed partitions can override the table's `file.format` through the partition `options`

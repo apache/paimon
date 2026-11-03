@@ -18,15 +18,21 @@
 
 package org.apache.paimon.spark.format
 
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.partition.actions.PartitionMarkDoneAction
 import org.apache.paimon.spark.SparkInternalRowWrapper
 import org.apache.paimon.spark.write.{FormatTableWriteTaskResult, V2DataWrite, WriteTaskResult}
 import org.apache.paimon.table.FormatTable
-import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessage}
+import org.apache.paimon.table.format.FormatTableCommit
+import org.apache.paimon.table.sink.{BatchTableCommit, BatchTableWrite, BatchWriteBuilder, CommitMessage}
+import org.apache.paimon.utils.{IOUtils, PartitionPathUtils}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.write.{DataWriterFactory, WriterCommitMessage}
 import org.apache.spark.sql.types.StructType
+
+import java.util.{LinkedHashMap => JLinkedHashMap}
 
 import scala.collection.JavaConverters._
 
@@ -61,22 +67,80 @@ abstract class FormatTableBatchWriteBase(
     (_: Int, _: Long) => new FormatTableDataWriter(batchWriteBuilder, writeSchema)
   }
 
+  // Once committed, a later failure (e.g. marking partitions done) must not let abort delete data.
+  @volatile private var committed = false
+
   protected def commitMessages(messages: Array[WriterCommitMessage]): Unit = {
     logInfo(s"Committing to FormatTable ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     val commitMessages = WriteTaskResult.merge(messages).asJava
+    // Created before committing, so an unsupported action fails the write before it publishes data.
+    val markDoneActions = createMarkDoneActions()
     try {
-      val start = System.currentTimeMillis()
-      batchTableCommit.commit(commitMessages)
-      logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
+      try {
+        val start = System.currentTimeMillis()
+        batchTableCommit.commit(commitMessages)
+        committed = true
+        logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
+      } catch {
+        case e: Exception =>
+          logError("Failed to commit FormatTable writes", e)
+          throw e
+      }
+      markDone(markDoneActions, batchTableCommit)
+    } finally {
+      IOUtils.closeAllQuietly(markDoneActions.asJava)
+    }
+  }
+
+  private def createMarkDoneActions(): Seq[PartitionMarkDoneAction] = {
+    val coreOptions = CoreOptions.fromMap(table.options())
+    if (
+      table.partitionKeys().isEmpty ||
+      !coreOptions.toConfiguration.get(CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT)
+    ) {
+      Seq.empty
+    } else {
+      PartitionMarkDoneAction
+        .createActions(getClass.getClassLoader, table, coreOptions)
+        .asScala
+        .toSeq
+    }
+  }
+
+  private def markDone(
+      actions: Seq[PartitionMarkDoneAction],
+      batchTableCommit: BatchTableCommit): Unit = {
+    val partitions = batchTableCommit match {
+      case commit: FormatTableCommit => commit.committedPartitions().asScala
+      case _ => Seq.empty
+    }
+    if (actions.isEmpty || partitions.isEmpty) {
+      return
+    }
+    val partitionPaths = partitions
+      .map(
+        partition =>
+          PartitionPathUtils.generatePartitionPath(new JLinkedHashMap[String, String](partition)))
+      .asJava
+    try {
+      actions.foreach(_.markDone(partitionPaths))
     } catch {
       case e: Exception =>
-        logError("Failed to commit FormatTable writes", e)
-        throw e
+        throw new RuntimeException(
+          s"Committed data to FormatTable ${table.fullName()}, but failed to mark its partitions " +
+            "done. Call the mark_partition_done procedure to mark them.",
+          e
+        )
     }
   }
 
   protected def abortMessages(messages: Array[WriterCommitMessage]): Unit = {
+    if (committed) {
+      logWarning(
+        s"Skip aborting the write to FormatTable ${table.name()}, its data is already committed")
+      return
+    }
     logInfo(s"Aborting write to FormatTable ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     val commitMessages = WriteTaskResult.merge(messages).asJava

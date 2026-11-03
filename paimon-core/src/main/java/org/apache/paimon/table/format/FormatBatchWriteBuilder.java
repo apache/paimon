@@ -86,22 +86,28 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
                 table.partitionManager() != null && !table.partitionKeys().isEmpty()
                         ? options.formatTableCommitPublishThreadNum()
                         : 1;
-        return new FormatTableCommit(
-                table.location(),
-                table.partitionKeys(),
-                table.fileIO(),
-                formatTablePartitionOnlyValueInPath,
-                table.defaultPartName(),
-                overwrite,
-                Identifier.fromString(table.fullName()),
-                staticPartition,
-                syncHiveUri,
-                table.catalogContext(),
-                table.partitionManager(),
-                options.dynamicPartitionOverwrite(),
-                cleanupThreadNum,
-                publishThreadNum,
-                FormatTablePartitionOptions.fileFormat(table.options(), null));
+        FormatTableCommit commit =
+                new FormatTableCommit(
+                        table.location(),
+                        table.partitionKeys(),
+                        table.fileIO(),
+                        formatTablePartitionOnlyValueInPath,
+                        table.defaultPartName(),
+                        overwrite,
+                        Identifier.fromString(table.fullName()),
+                        staticPartition,
+                        syncHiveUri,
+                        table.catalogContext(),
+                        table.partitionManager(),
+                        options.dynamicPartitionOverwrite(),
+                        cleanupThreadNum,
+                        publishThreadNum,
+                        FormatTablePartitionOptions.fileFormat(table.options(), null));
+        // A partition marked done must not keep its success file while its data changes.
+        return commit.withSuccessFileDeletion(
+                !table.partitionKeys().isEmpty()
+                        && options.toConfiguration()
+                                .get(CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT));
     }
 
     @Override

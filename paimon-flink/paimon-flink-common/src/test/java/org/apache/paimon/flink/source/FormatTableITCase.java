@@ -319,6 +319,32 @@ public class FormatTableITCase extends RESTCatalogITCaseBase {
         sql("DROP TABLE %s", tableName);
     }
 
+    @Test
+    public void testMarkPartitionDoneProcedure() throws Exception {
+        String tableName = "mark_partition_done";
+        sql(
+                "CREATE TABLE %s (id INT, dt STRING, hh STRING) PARTITIONED BY (dt, hh) WITH "
+                        + "('type'='format-table','file.format'='csv',"
+                        + "'metastore.partitioned-table'='true')",
+                tableName);
+        setDataToken(tableName);
+        sql("INSERT INTO %s VALUES (1, '20240101', '08'), (2, '20240101', '09')", tableName);
+        FormatTable table =
+                (FormatTable)
+                        flinkCatalog().catalog().getTable(Identifier.create("default", tableName));
+
+        sql(
+                "CALL sys.mark_partition_done(`table` => 'default.%s', "
+                        + "partitions => 'dt=20240101,hh=08')",
+                tableName);
+
+        assertThat(table.fileIO().exists(new Path(table.location(), "dt=20240101/hh=08/_SUCCESS")))
+                .isTrue();
+        assertThat(table.fileIO().exists(new Path(table.location(), "dt=20240101/hh=09/_SUCCESS")))
+                .isFalse();
+        assertThat(sql("SELECT id FROM %s WHERE hh = '08'", tableName)).containsExactly(Row.of(1));
+    }
+
     private void setDataToken(String tableName) {
         restCatalogServer.setDataToken(
                 Identifier.create("default", tableName),

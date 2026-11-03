@@ -33,6 +33,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.partition.actions.SuccessFileMarkDoneAction;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -103,6 +104,9 @@ public class FormatTableCommit implements BatchTableCommit {
     private final int cleanupThreadNum;
     private final int publishThreadNum;
     @Nullable private final String fileFormat;
+
+    private List<Map<String, String>> committedPartitions = Collections.emptyList();
+    private boolean deletesSuccessFiles = false;
 
     /**
      * Creates a legacy committer whose write format is unknown. Appends and overwrites reject
@@ -207,6 +211,7 @@ public class FormatTableCommit implements BatchTableCommit {
 
     @Override
     public void commit(List<CommitMessage> commitMessages) {
+        committedPartitions = Collections.emptyList();
         try {
             // One reading for the whole commit: stat-ing each file back costs a request per
             // file for a coarser number.
@@ -236,6 +241,16 @@ public class FormatTableCommit implements BatchTableCommit {
             Set<Map<String, String>> reportTargetSpecs = new LinkedHashSet<>();
             if (overwrite && partitionManager != null) {
                 targetPartitions.forEach(partition -> reportTargetSpecs.add(partition.spec()));
+            }
+            if (!overwrite && deletesSuccessFiles) {
+                Set<Path> writtenPartitionPaths = new LinkedHashSet<>();
+                for (TwoPhaseCommitMessage message : messages) {
+                    Path targetPath = message.getCommitter().targetPath();
+                    if (targetPath != null) {
+                        writtenPartitionPaths.add(targetPath.getParent());
+                    }
+                }
+                deleteSuccessFiles(new ArrayList<>(writtenPartitionPaths), cleanupThreadNum);
             }
             Path staticPartitionPath = null;
 
@@ -380,7 +395,7 @@ public class FormatTableCommit implements BatchTableCommit {
                     }
                 }
             }
-
+            committedPartitions = committedPartitionSpecs(writtenPartitionSpecs);
         } catch (Throwable failure) {
             // Cleanup restores the caller's interrupt before failing. Clear it only while aborting
             // staging output, then restore it; an abort failure is secondary to the commit failure
@@ -497,6 +512,40 @@ public class FormatTableCommit implements BatchTableCommit {
         return writtenPartitionSpecs.isEmpty()
                 ? Collections.emptyList()
                 : loadPartitionsByNames(writtenPartitionSpecs);
+    }
+
+    /**
+     * Partitions written by the last successful commit, including the full static partition of an
+     * overwrite that wrote no rows. Empty after a failed commit or for an unpartitioned table.
+     */
+    public List<Map<String, String>> committedPartitions() {
+        return committedPartitions;
+    }
+
+    /**
+     * Whether to delete the success file of a partition before writing to it or clearing it, so
+     * that a stale one is never seen next to the changed data.
+     */
+    FormatTableCommit withSuccessFileDeletion(boolean deletesSuccessFiles) {
+        this.deletesSuccessFiles = deletesSuccessFiles;
+        return this;
+    }
+
+    private List<Map<String, String>> committedPartitionSpecs(
+            Set<Map<String, String>> writtenPartitionSpecs) {
+        if (partitionKeys == null || partitionKeys.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Set<Map<String, String>> committed = new LinkedHashSet<>();
+        if (staticPartitions != null && staticPartitions.size() == partitionKeys.size()) {
+            LinkedHashMap<String, String> orderedStaticPartition = new LinkedHashMap<>();
+            for (String partitionKey : partitionKeys) {
+                orderedStaticPartition.put(partitionKey, staticPartitions.get(partitionKey));
+            }
+            committed.add(orderedStaticPartition);
+        }
+        committed.addAll(writtenPartitionSpecs);
+        return Collections.unmodifiableList(new ArrayList<>(committed));
     }
 
     private Set<Map<String, String>> writtenPartitionSpecs(List<TwoPhaseCommitMessage> messages) {
@@ -914,6 +963,9 @@ public class FormatTableCommit implements BatchTableCommit {
 
     private Set<Path> deletePreviousDataFiles(
             List<Path> partitionPaths, int partitionLevels, int threadNum) throws IOException {
+        if (deletesSuccessFiles) {
+            deleteSuccessFiles(partitionDirectories(partitionPaths, partitionLevels), threadNum);
+        }
         Iterator<FileStatus> dataFiles = previousDataFiles(partitionPaths, partitionLevels);
         Set<Path> clearedPartitionPaths = new HashSet<>();
         try {
@@ -1184,6 +1236,69 @@ public class FormatTableCommit implements BatchTableCommit {
             unwrapped.addSuppressed(unwrapUncheckedIOException(suppressed));
         }
         return unwrapped;
+    }
+
+    /** The partition directories the given number of levels below each path. */
+    private List<Path> partitionDirectories(List<Path> paths, int partitionLevels)
+            throws IOException {
+        if (partitionLevels == 0) {
+            return paths;
+        }
+        List<String> keys =
+                partitionKeys.subList(partitionKeys.size() - partitionLevels, partitionKeys.size());
+        List<Path> directories = new ArrayList<>();
+        for (Path path : paths) {
+            if (!fileIO.exists(path)) {
+                continue;
+            }
+            for (Pair<LinkedHashMap<String, String>, Path> partition :
+                    PartitionPathUtils.searchPartSpecAndPaths(
+                            fileIO,
+                            path,
+                            partitionLevels,
+                            keys,
+                            formatTablePartitionOnlyValueInPath,
+                            null,
+                            null,
+                            defaultPartName)) {
+                directories.add(partition.getRight());
+            }
+        }
+        return directories;
+    }
+
+    private void deleteSuccessFiles(List<Path> partitionPaths, int threadNum) throws IOException {
+        if (partitionPaths.isEmpty()) {
+            return;
+        }
+        try {
+            executeSideEffects(
+                    COMMIT_EXECUTOR,
+                    this::deleteSuccessFile,
+                    partitionPaths.iterator(),
+                    threadNum,
+                    ignored -> {});
+        } catch (UncheckedIOException e) {
+            throw (IOException) unwrapUncheckedIOException(e);
+        }
+    }
+
+    private List<Path> deleteSuccessFile(Path partitionPath) {
+        Path successPath = new Path(partitionPath, SuccessFileMarkDoneAction.SUCCESS_FILE_NAME);
+        try {
+            if (fileIO.delete(successPath, false) || !fileIO.exists(successPath)) {
+                return Collections.emptyList();
+            }
+        } catch (FileNotFoundException ignore) {
+            return Collections.emptyList();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        throw new UncheckedIOException(
+                new IOException(
+                        String.format(
+                                "Failed to delete success file %s of table %s.",
+                                successPath, tableIdentifier.getFullName())));
     }
 
     /** Deletes one listed file and reports its parent when this commit removed the file. */

@@ -379,6 +379,9 @@ Mark partitions as done. Arguments:
 
 - `partitions`: semicolon-separated partition specs.
 
+A Format Table only supports the `success-file` action, which creates an empty `_SUCCESS` file in
+each partition directory.
+
 **Syntax**
 
 ```sql

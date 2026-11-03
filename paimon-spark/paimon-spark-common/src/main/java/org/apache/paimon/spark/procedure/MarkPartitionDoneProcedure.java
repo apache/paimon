@@ -20,17 +20,23 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
+import org.apache.paimon.spark.format.PaimonFormatTable;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.connector.catalog.Identifier;
+import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 
@@ -79,6 +85,28 @@ public class MarkPartitionDoneProcedure extends BaseProcedure {
         String partitionStr = args.getString(1);
         String[] partitions = partitionStr.split(";");
 
+        FormatTable formatTable = loadFormatTable(tableIdent);
+        if (formatTable != null) {
+            List<PartitionMarkDoneAction> actions =
+                    PartitionMarkDoneAction.createActions(
+                            getClass().getClassLoader(),
+                            formatTable,
+                            CoreOptions.fromMap(formatTable.options()));
+            List<String> partitionPaths =
+                    PartitionPathUtils.generatePartitionPaths(
+                            getPartitions(partitions), formatTable.partitionType());
+            try {
+                for (PartitionMarkDoneAction action : actions) {
+                    action.markDone(partitionPaths);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            } finally {
+                IOUtils.closeAllQuietly(actions);
+            }
+            return new InternalRow[] {newInternalRow(true)};
+        }
+
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
@@ -104,6 +132,18 @@ public class MarkPartitionDoneProcedure extends BaseProcedure {
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};
                 });
+    }
+
+    /** Returns the Format Table of the identifier, or null if it is not one. */
+    @Nullable
+    private FormatTable loadFormatTable(Identifier ident) {
+        try {
+            Table table = tableCatalog().loadTable(ident);
+            return table instanceof PaimonFormatTable ? ((PaimonFormatTable) table).table() : null;
+        } catch (NoSuchTableException e) {
+            // Let the regular path report the missing table.
+            return null;
+        }
     }
 
     public static void markDone(List<String> partitions, List<PartitionMarkDoneAction> actions) {

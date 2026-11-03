@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.PartitionPathUtils;
@@ -56,9 +57,31 @@ public class MarkPartitionDoneProcedure extends ProcedureBase {
 
         Identifier identifier = Identifier.fromString(tableId);
         Table table = catalog.getTable(identifier);
+        if (table instanceof FormatTable) {
+            FormatTable formatTable = (FormatTable) table;
+            List<PartitionMarkDoneAction> actions =
+                    PartitionMarkDoneAction.createActions(
+                            getClass().getClassLoader(),
+                            formatTable,
+                            CoreOptions.fromMap(formatTable.options()));
+            List<String> partitionPaths =
+                    PartitionPathUtils.generatePartitionPaths(
+                            getPartitions(partitionStrings), formatTable.partitionType());
+            try {
+                for (PartitionMarkDoneAction action : actions) {
+                    action.markDone(partitionPaths);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            } finally {
+                IOUtils.closeAllQuietly(actions);
+            }
+            return new String[] {"Success"};
+        }
         checkArgument(
                 table instanceof FileStoreTable,
-                "Only FileStoreTable supports mark_partition_done procedure. The table type is '%s'.",
+                "Only FileStoreTable and FormatTable support mark_partition_done procedure. "
+                        + "The table type is '%s'.",
                 table.getClass().getName());
 
         FileStoreTable fileStoreTable = (FileStoreTable) table;

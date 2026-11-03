@@ -88,6 +88,9 @@ Mark partitions as done.
 - `table` (`STRING`, required): the target table identifier.
 - `partitions` (`STRING`, required): partitions need to be mark done, If you specify multiple partitions, delimiter is ';'.
 
+A Format Table only supports the `success-file` action; see
+[Format Table Partition Mark Done](../format-table#partition-mark-done).
+
 ```sql
 -- mark single partition done
 CALL sys.mark_partition_done(table => 'default.T', partitions => 'day=2024-07-01');
