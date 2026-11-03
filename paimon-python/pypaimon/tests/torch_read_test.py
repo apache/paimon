@@ -715,6 +715,39 @@ class TorchReadTest(unittest.TestCase):
 
         print(f"✓ Test passed: Successfully read {len(all_user_ids)} rows with correct data")
 
+    @parameterized.expand([("materialized", False), ("lazy", True)])
+    def test_map_style_batch_sampling_preserves_order_and_replacement(self, name, lazy):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            options={
+                'data-evolution.enabled': str(lazy).lower(),
+                'row-tracking.enabled': str(lazy).lower(),
+            },
+        )
+        identifier = 'default.test_torch_sampling_' + name
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        self._write_test_table(table)
+        builder = table.new_read_builder().with_projection(['user_id', 'behavior'])
+        read, splits = builder.new_read(), builder.new_scan().plan().splits()
+        expected = read.to_arrow(splits).to_pylist()
+        dataset = read.to_torch(splits, streaming=False)
+        self.assertEqual([], dataset.__getitems__([]))
+
+        batches = [[2, 0, 2], [len(dataset) - 1, 0, len(dataset) - 1]]
+        actual_batches = list(DataLoader(dataset, batch_sampler=batches))
+        self.assertEqual(len(batches), len(actual_batches))
+        for indices, actual in zip(batches, actual_batches):
+            self.assertEqual(
+                [expected[index]['user_id'] for index in indices],
+                actual['user_id'].tolist(),
+            )
+            self.assertEqual(
+                [expected[index]['behavior'] for index in indices], actual['behavior'])
+        with self.assertRaises(IndexError):
+            dataset.__getitems__([0, len(dataset)])
+
     def test_non_streaming_row_tracking_reads_batches_lazily(self):
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,

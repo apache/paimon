@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Sequence
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.query import (
@@ -532,9 +533,17 @@ class MultimodalTable:
             *,
             snapshot_id: Optional[int] = None,
             tag_name: Optional[str] = None):
+        """Return a scan filtering rows by Paimon row ID; requires row tracking.
+
+        Input order and duplicates do not affect this membership query.
+        Missing or deleted IDs are omitted. Use ``take_batch`` for ordered
+        sampling with replacement.
+        """
         row_ids = _coerce_row_ids(row_ids)
         read_table = _time_travel_table(
             self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
+        if not read_table.options.row_tracking_enabled():
+            raise ValueError("Row ID reads require row-tracking.enabled=true.")
         read_builder = read_table.new_read_builder().with_projection(
             [field.name for field in read_table.fields]
             + [SpecialFields.ROW_ID.name]
@@ -544,6 +553,44 @@ class MultimodalTable:
         query = ScanQuery(read_table)
         query._predicate = predicate
         return query
+
+    def take_batch(
+            self,
+            row_ids,
+            *,
+            columns=None,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None) -> pa.Table:
+        """Fetch an ordered batch by Paimon row ID, preserving duplicates.
+
+        Returns an Arrow table with one row per input ID, in input order.
+        ``columns`` defaults to all table columns; include ``_ROW_ID``
+        explicitly to return it. Missing, deleted, or filtered-out IDs raise
+        KeyError instead of shortening the batch. An empty input returns an
+        empty table with the projected schema.
+
+        Requires row tracking. IDs are table row handles, not Dataset position
+        indices. Pass the source snapshot or tag when sampling a saved manifest.
+        BLOB columns follow the table's read options, as in ``scan()``.
+        """
+        row_ids = _coerce_row_ids(row_ids)
+        query = self.take_row_ids(
+            row_ids, snapshot_id=snapshot_id, tag_name=tag_name)
+        if columns is None:
+            columns = [field.name for field in query._table.fields]
+        elif isinstance(columns, str):
+            columns = [columns]
+        else:
+            columns = list(columns)
+
+        batch = query.select(columns).with_row_id().to_arrow()
+        requested = pa.array(row_ids, type=pa.int64())
+        positions = pc.index_in(
+            requested, value_set=batch.column(SpecialFields.ROW_ID.name))
+        if positions.null_count:
+            missing = requested.filter(pc.is_null(positions)).to_pylist()
+            raise KeyError("Row IDs not found: %s" % list(dict.fromkeys(missing)))
+        return batch.take(positions).select(columns)
 
     def blobs(self, *, column: Optional[str] = None, key_column: Optional[str] = None):
         from pypaimon.multimodal.blob_store import BlobStore

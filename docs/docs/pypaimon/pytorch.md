@@ -58,6 +58,14 @@ When the `streaming` parameter is true, it will iteratively read. When it is
 false, eligible data-evolution reads fetch each DataLoader batch lazily by row
 ID; other reads retain an Arrow table in memory for map-style access.
 
+In map-style mode, `__getitems__(indices)` preserves input order and repeated
+positions, including sampling with replacement. For example, `[2, 0, 2]`
+returns `[dataset[2], dataset[0], dataset[2]]`. DataLoader uses this batch
+interface for sampler output. Empty input returns an empty list; out-of-range
+positions raise `IndexError`. These indices are Dataset positions, not Paimon
+`_ROW_ID` values. To fetch an ordered batch of Paimon row IDs directly, use
+[`MultimodalTable.take_batch`](./multimodal-reading#row-ids).
+
 **`prefetch_concurrency`** (default: 1): In streaming row mode, controls
 reader threads per DataLoader worker. It has no effect in non-streaming mode.
 
