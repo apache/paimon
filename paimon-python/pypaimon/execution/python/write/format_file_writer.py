@@ -27,6 +27,7 @@ import pyarrow as pa
 from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 from pypaimon.execution.python.write.writer.format_row_writer import FormatRowWriter
 from pypaimon.filesystem.vortex_utils import to_vortex_specified
+from pypaimon.schema.arrow_schema import parquet_storage_schema
 from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
 
 
@@ -37,23 +38,7 @@ def parquet_write_schema(schema):
     Use physical variable-size lists, including for streaming writers whose
     later batches may contain NULLs. Preserve unrelated field/schema metadata.
     """
-    def physical_type(data_type):
-        if pa.types.is_struct(data_type):
-            return pa.struct([field.with_type(physical_type(field.type)) for field in data_type])
-        if (pa.types.is_list(data_type) or pa.types.is_large_list(data_type)
-                or pa.types.is_fixed_size_list(data_type)):
-            field = data_type.value_field.with_type(physical_type(data_type.value_type))
-            return pa.large_list(field) if pa.types.is_large_list(data_type) else pa.list_(field)
-        if pa.types.is_map(data_type):
-            sorted_keys = data_type == pa.map_(data_type.key_field, data_type.item_field, keys_sorted=True)
-            return pa.map_(
-                data_type.key_field.with_type(physical_type(data_type.key_type)),
-                data_type.item_field.with_type(physical_type(data_type.item_type)),
-                keys_sorted=sorted_keys)
-        return data_type
-
-    return pa.schema([field.with_type(physical_type(field.type)) for field in schema],
-                     metadata=schema.metadata)
+    return parquet_storage_schema(schema)
 
 
 def parquet_write_data(data, schema=None):
