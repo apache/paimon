@@ -49,8 +49,9 @@ import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.EliminateSubqueryAliases
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, CreateNamedStruct, EqualTo, Expression, ExprId, GetStructField, If, IsNull, Literal, Or, PythonUDF, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, Cast, Coalesce, CreateNamedStruct, EqualNullSafe, EqualTo, Expression, ExprId, GetStructField, If, IsNull, Literal, Or, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
+import org.apache.spark.sql.catalyst.expressions.objects.AssertNotNull
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.LogicalRDD
@@ -371,26 +372,27 @@ case class MergeIntoPaimonDataEvolutionTable(
     var targetActionCleanup = () => ()
     var sourceCleanup = () => ()
     try {
-      val persistSourceDss: Option[Dataset[Row]] = if (canRetryMergeUpdates) {
-        // Cache invalidation on a concurrent source write must not replace only part of the
-        // source used by this MERGE. A checkpoint detaches it from table-cache refreshes.
-        val checkpoint =
-          createDataset(sparkSession, Project(retrySourceColumns, frozenSourcePlan(readSnapshot)))
-            .localCheckpoint(eager = false)
-        sourceCleanup = () =>
-          checkpoint.queryExecution.analyzed
-            .collect { case scan: LogicalRDD => scan.rdd }
-            .foreach(_.unpersist(blocking = false))
-        checkpoint.count()
-        Some(checkpoint)
-      } else if (
-        table.coreOptions().dataEvolutionMergeIntoSourcePersist() &&
-        (matchedActions.nonEmpty || notMatchedActions.nonEmpty || notMatchedBySourceActions.nonEmpty)
-      ) {
-        val dss = createDataset(sparkSession, sourceTable).persist()
-        sourceCleanup = () => { dss.unpersist(blocking = false); () }
-        Some(dss)
-      } else None
+      val persistSourceDss: Option[Dataset[Row]] =
+        if (canRetryMergeUpdates && !table.coreOptions().dataEvolutionMergeIntoSourceRepeatable()) {
+          // Cache invalidation on a concurrent source write must not replace only part of the
+          // source used by this MERGE. A checkpoint detaches it from table-cache refreshes.
+          val checkpoint =
+            createDataset(sparkSession, Project(retrySourceColumns, sourceTable))
+              .localCheckpoint(eager = false)
+          sourceCleanup = () =>
+            checkpoint.queryExecution.analyzed
+              .collect { case scan: LogicalRDD => scan.rdd }
+              .foreach(_.unpersist(blocking = false))
+          checkpoint.count()
+          Some(checkpoint)
+        } else if (
+          table.coreOptions().dataEvolutionMergeIntoSourcePersist() &&
+          (matchedActions.nonEmpty || notMatchedActions.nonEmpty || notMatchedBySourceActions.nonEmpty)
+        ) {
+          val dss = createDataset(sparkSession, sourceTable).persist()
+          sourceCleanup = () => { dss.unpersist(blocking = false); () }
+          Some(dss)
+        } else None
       // step 1: find the related data splits for matched / insert actions.
       lazy val matchedOrInsertDataSplits: Seq[DataSplit] = targetRelatedSplits(
         sparkSession,
@@ -445,19 +447,60 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
   }
 
-  private def frozenSourcePlan(readSnapshot: Snapshot): LogicalPlan = {
-    if (useSelfMergeShortcut && readSnapshot != null) {
-      // The initial shortcut reads the pinned target instead of the source. Give the frozen
-      // source that exact snapshot too, then use the regular source join if a retry is needed.
-      sourceTable.transformDown {
-        case relation: DataSourceV2Relation =>
-          val source = relation.table.asInstanceOf[SparkTable].getTable.asInstanceOf[FileStoreTable]
-          val options = new JHashMap[String, String]()
-          options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), readSnapshot.id().toString)
-          val pinned = SparkTable.of(source.copy(options))
-          SparkShimLoader.shim.copyDataSourceV2Relation(relation, pinned, relation.output)
+  private lazy val isCoalesceUpsert: Boolean = {
+    val sourceIds = (sourceTable.output ++ sourceTable.metadataOutput).map(_.exprId).toSet
+    val targetIds = targetTable.output.map(_.exprId).toSet
+
+    def unwrap(expression: Expression): Expression = expression match {
+      case cast: Cast => unwrap(cast.child)
+      case check: AssertNotNull => unwrap(check.child)
+      case other => other
+    }
+
+    def attribute(expression: Expression): Option[AttributeReference] =
+      unwrap(expression) match {
+        case attr: AttributeReference => Some(attr)
+        case _ => None
       }
-    } else sourceTable
+
+    def isSource(expression: Expression): Boolean =
+      attribute(expression).exists(attr => sourceIds.contains(attr.exprId))
+
+    def isTarget(expression: Expression): Boolean =
+      attribute(expression).exists(attr => targetIds.contains(attr.exprId))
+
+    val keyJoin = splitConjunctivePredicates(matchedCondition).forall {
+      case EqualNullSafe(left, right) =>
+        (isTarget(left) && isSource(right)) || (isSource(left) && isTarget(right))
+      case _ => false
+    }
+    val coalesceUpdate = matchedActions match {
+      case Seq(update: UpdateAction) if update.condition.isEmpty =>
+        val modified = update.assignments.filter(isModifiedAssignment)
+        modified.nonEmpty && modified.forall {
+          assignment =>
+            unwrap(assignment.value) match {
+              case Coalesce(Seq(source, previous)) =>
+                isSource(source) &&
+                attribute(previous).exists(_.sameRef(assignmentKeyAttribute(assignment)))
+              // Spark simplifies COALESCE when its source value cannot be null.
+              case source
+                  if attribute(source).exists(
+                    attr => sourceIds.contains(attr.exprId) && !attr.nullable) =>
+                true
+              case _ => false
+            }
+        }
+      case _ => false
+    }
+    val sourceInsert = notMatchedActions match {
+      case Seq(insert: InsertAction) if insert.condition.isEmpty =>
+        insert.assignments.forall(
+          assignment =>
+            isSource(assignment.value) || unwrap(assignment.value).isInstanceOf[Literal])
+      case _ => false
+    }
+    keyJoin && coalesceUpdate && sourceInsert
   }
 
   private lazy val retryExpressions: Seq[Expression] =
@@ -477,15 +520,15 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   private lazy val canRetryMergeUpdates: Boolean = {
     // V1 UPDATE has its own retry policy. Explicit time travel must retain its requested baseline.
-    !allowPinnedSelfMergeShortcut && matchedActions.nonEmpty &&
+    !allowPinnedSelfMergeShortcut && !useSelfMergeShortcut && matchedActions.nonEmpty &&
+    (table.coreOptions().dataEvolutionMergeIntoSourceRepeatable() || isCoalesceUpsert) &&
     table.coreOptions().commitMaxRetries() > 0 &&
     !table.coreOptions().deletionVectorsEnabled() &&
     !hasTargetSideDeleteActions &&
     notMatchedBySourceActions.isEmpty &&
     !timeTravelOptionKeys.exists(v2Table.getTable.options().containsKey) &&
     retryExpressions.forall(e => e.deterministic && !SubqueryExpression.hasSubquery(e)) &&
-    // Materializing whole complex values would defeat nested pruning and could evaluate
-    // unused source expressions. Keep their original execution until nested freezing is supported.
+    // Logical retries currently support scalar source dependencies only.
     retrySourceColumns.forall(_.dataType match {
       case _: StructType | _: ArrayType | _: MapType => false
       case _ => true
@@ -565,8 +608,7 @@ case class MergeIntoPaimonDataEvolutionTable(
             sparkSession,
             createNewScanPlan(retryPlan.dataSplits, targetRelation),
             firstRowIds,
-            persistSourceDss,
-            allowSelfMergeShortcut = false)
+            persistSourceDss)
           try {
             val inserts = if (notMatchedActions.nonEmpty) {
               // The anti join must see the complete latest target, including new files and
@@ -745,8 +787,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       sparkSession: SparkSession,
       touchedFileTargetRelation: DataSourceV2Relation,
       firstRowIds: immutable.IndexedSeq[Long],
-      persistSourceDss: Option[Dataset[Row]],
-      allowSelfMergeShortcut: Boolean = true): TargetActionResult = {
+      persistSourceDss: Option[Dataset[Row]]): TargetActionResult = {
     if (dataSplits.isEmpty) {
       return TargetActionResult(Nil, None, () => ())
     }
@@ -1028,7 +1069,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     def matchedActionInstructions(actions: Seq[MergeAction]): Seq[MergeRows.Instruction] =
       actions.map(matchedActionInstruction) ++ keepCopyInstructions
 
-    val targetActionOutput: Dataset[Row] = if (useSelfMergeShortcut && allowSelfMergeShortcut) {
+    val targetActionOutput: Dataset[Row] = if (useSelfMergeShortcut) {
       // Self-Merge shortcut:
       // - Scan the target table only (no source scan, no join), and read all columns required by
       //   merge condition and update expressions.

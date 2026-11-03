@@ -2764,6 +2764,19 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_SOURCE_REPEATABLE =
+            key("data-evolution.merge-into.source-repeatable")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether the source of a Spark MERGE INTO is guaranteed to return the same "
+                                    + "rows and values on every evaluation, including retries. If true, "
+                                    + "eligible deterministic MERGE statements can retry logical conflicts "
+                                    + "without checkpointing the source. If false, only null-safe COALESCE "
+                                    + "upserts are retried, with referenced source columns checkpointed once. "
+                                    + "Enable only when "
+                                    + "the caller can guarantee source repeatability.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES =
             key("data-evolution.compaction.split-large-files")
                     .booleanType()
@@ -4744,6 +4757,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionMergeIntoSourcePersist() {
         return options.get(DATA_EVOLUTION_MERGE_INTO_SOURCE_PERSIST);
+    }
+
+    public boolean dataEvolutionMergeIntoSourceRepeatable() {
+        return options.get(DATA_EVOLUTION_MERGE_INTO_SOURCE_REPEATABLE);
     }
 
     public boolean blobCompactionEnabled() {

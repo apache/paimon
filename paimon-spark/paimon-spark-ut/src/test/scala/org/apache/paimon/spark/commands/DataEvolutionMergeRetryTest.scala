@@ -29,7 +29,9 @@ import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.catalyst.QueryPlanningTracker
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Cast}
 import org.apache.spark.sql.functions.{col, lit, udf}
+import org.apache.spark.sql.types.DateType
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
@@ -259,6 +261,159 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     }
   }
 
+  for (sourceRepeatable <- Seq(None, Some(false), Some(true))) {
+    test(s"general MERGE logical retry requires repeatable source $sourceRepeatable") {
+      withTable("t") {
+        sourceRepeatable match {
+          case Some(enabled) => createTable(sourceRepeatable = enabled)
+          case None =>
+            sql(
+              "CREATE TABLE t (id INT, b INT, status STRING) TBLPROPERTIES (" +
+                "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        }
+        sql("INSERT INTO t VALUES (1, 1, 'pending')")
+        val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
+        var attempts = 0
+        val merge = interleavedMerge(
+          "MERGE INTO t USING (SELECT 1 AS id UNION ALL SELECT 2 AS id) s ON t.id = s.id " +
+            "WHEN MATCHED THEN UPDATE SET b = t.b + 1 " +
+            "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')",
+          _ => {
+            attempts += 1
+            assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
+            if (attempts == 1) concurrentMerge("b = t.b + 10")
+          }
+        )
+        if (sourceRepeatable.contains(true)) {
+          merge.run(spark)
+          checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 12), Row(2, 0)))
+          assert(attempts == 2)
+        } else {
+          assertUpdateConflict(intercept[RuntimeException](merge.run(spark)))
+          checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 11)))
+          assert(attempts == 1)
+        }
+      }
+    }
+  }
+
+  for (
+    (name, on, matched, insert) <- Seq(
+      (
+        "ordinary equality",
+        "t.id = s.id",
+        "WHEN MATCHED THEN UPDATE SET b = COALESCE(s.delta, t.b)",
+        true),
+      (
+        "extra predicate",
+        "t.id <=> s.id AND t.status = 'pending'",
+        "WHEN MATCHED THEN UPDATE SET b = COALESCE(s.delta, t.b)",
+        true),
+      (
+        "conditional update",
+        "t.id <=> s.id",
+        "WHEN MATCHED AND t.status = 'pending' THEN UPDATE SET b = COALESCE(s.delta, t.b)",
+        true),
+      (
+        "wrong fallback",
+        "t.id <=> s.id",
+        "WHEN MATCHED THEN UPDATE SET b = COALESCE(s.delta, t.id)",
+        true),
+      (
+        "insert expression",
+        "t.id <=> s.id",
+        "WHEN MATCHED THEN UPDATE SET b = COALESCE(s.delta, t.b)",
+        true),
+      (
+        "missing insert",
+        "t.id <=> s.id",
+        "WHEN MATCHED THEN UPDATE SET b = COALESCE(s.delta, t.b)",
+        false)
+    )
+  ) {
+    test(s"default retry rejects noncanonical upsert: $name") {
+      withTable("t") {
+        createTable(sourceRepeatable = false)
+        sql("INSERT INTO t VALUES (1, 1, 'pending')")
+        val insertValue = if (name == "insert expression") "s.delta + 1" else "s.delta"
+        val insertClause = if (insert) {
+          s"WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, $insertValue, 'new')"
+        } else ""
+        var attempts = 0
+        val merge = interleavedMerge(
+          "MERGE INTO t USING (SELECT 1 AS id, CAST(NULL AS INT) AS delta) s " +
+            s"ON $on $matched $insertClause",
+          _ => {
+            attempts += 1
+            concurrentMerge("b = t.b + 10")
+          }
+        )
+        assertUpdateConflict(intercept[RuntimeException](merge.run(spark)))
+        checkAnswer(sql("SELECT b FROM t"), Seq(Row(11)))
+        assert(attempts == 1)
+      }
+    }
+  }
+
+  test("default retry supports optimized COALESCE with a nonnullable source") {
+    withTable("t") {
+      createTable(sourceRepeatable = false)
+      sql("INSERT INTO t VALUES (1, 1, 'pending')")
+      var attempts = 0
+      val merge = interleavedMerge(
+        "MERGE INTO t USING (SELECT 1 AS id, 10 AS b) s ON t.id <=> s.id " +
+          "WHEN MATCHED THEN UPDATE SET b = COALESCE(s.b, t.b) " +
+          "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, s.b, 'new')",
+        _ => {
+          attempts += 1
+          if (attempts == 1) concurrentMerge("b = t.b + 100")
+        },
+        optimize = true
+      )
+      merge.run(spark)
+      checkAnswer(sql("SELECT b FROM t"), Seq(Row(10)))
+      assert(attempts == 2)
+    }
+  }
+
+  for (notNull <- Seq(false, true)) {
+    test(s"default retry supports optimized STRING to DATE COALESCE with not-null=$notNull") {
+      withSQLConf("spark.sql.ansi.enabled" -> "false") {
+        withTable("t") {
+          val nullability = if (notNull) " NOT NULL" else ""
+          sql(
+            s"CREATE TABLE t (id INT, collected_date DATE$nullability) TBLPROPERTIES (" +
+              "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+          sql("INSERT INTO t VALUES (1, DATE '2026-01-01')")
+          var attempts = 0
+          val merge = interleavedMerge(
+            "MERGE INTO t USING (SELECT id, '2026-11-03' AS collected_date " +
+              "FROM VALUES (1), (2) s(id)) s ON t.id <=> s.id " +
+              "WHEN MATCHED THEN UPDATE SET " +
+              "collected_date = COALESCE(s.collected_date, t.collected_date) " +
+              "WHEN NOT MATCHED THEN INSERT (id, collected_date) VALUES (s.id, s.collected_date)",
+            _ => {
+              attempts += 1
+              if (attempts == 1) concurrentMerge("collected_date = DATE '2026-02-02'")
+            },
+            optimize = true
+          )
+          val casts = merge.matchedActions.flatMap(_.collect {
+            case cast: Cast if cast.dataType == DateType => cast
+          })
+          assert(casts.exists(
+            cast =>
+              cast.nullable && cast.child.isInstanceOf[AttributeReference] && !cast.child.nullable))
+          merge.run(spark)
+          checkAnswer(
+            sql("SELECT id, CAST(collected_date AS STRING) FROM t"),
+            Seq(Row(1, "2026-11-03"), Row(2, "2026-11-03")))
+          assert(attempts == 2)
+        }
+      }
+    }
+  }
+
   for (persistSource <- Seq(false, true)) {
     test(
       s"upsert retries null-safe composite keys and COALESCE with source persist $persistSource") {
@@ -353,10 +508,12 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     }
   }
 
-  for (persistSource <- Seq(false, true); withInsert <- Seq(false, true)) {
-    test(s"retry keeps one source snapshot with persist $persistSource and insert $withInsert") {
+  for (persistSource <- Seq(false, true)) {
+    test(s"default COALESCE upsert keeps one source snapshot with source persist $persistSource") {
       withTable("t", "src") {
-        createTable(s"'data-evolution.merge-into.source-persist' = '$persistSource',")
+        createTable(
+          s"'data-evolution.merge-into.source-persist' = '$persistSource',",
+          sourceRepeatable = false)
         sql("INSERT INTO t VALUES (1, 1, 'pending')")
         sql("INSERT INTO t VALUES (2, 2, 'pending')")
         sql("CREATE TABLE src (id INT, delta INT)")
@@ -364,10 +521,9 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
         var attempts = 0
         val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
         val merge = interleavedMerge(
-          "MERGE INTO t USING src s ON t.id = s.id WHEN MATCHED THEN UPDATE SET b = s.delta " +
-            (if (withInsert) {
-               "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, s.delta, 'new')"
-             } else ""),
+          "MERGE INTO t USING src s ON t.id <=> s.id " +
+            "WHEN MATCHED THEN UPDATE SET b = COALESCE(s.delta, t.b) " +
+            "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, s.delta, 'new')",
           _ => {
             attempts += 1
             if (attempts == 1) {
@@ -378,39 +534,40 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
         )
         merge.run(spark)
 
-        checkAnswer(
-          sql("SELECT id, b FROM t"),
-          Seq(Row(1, 10), Row(2, 10)) ++ (if (withInsert) Seq(Row(3, 10)) else Nil))
+        checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 10), Row(2, 10), Row(3, 10)))
         assert(attempts == 2)
         assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
       }
     }
   }
 
-  test("self merge retries keep the original source values") {
-    withTable("t") {
-      createTable()
-      sql("INSERT INTO t VALUES (1, 1, 'pending')")
-      sql("INSERT INTO t VALUES (2, 2, 'pending')")
-      var attempts = 0
-      val merge = interleavedMerge(
-        "MERGE INTO t AS t USING t AS s ON t._ROW_ID = s._ROW_ID " +
-          "WHEN MATCHED THEN UPDATE SET b = s.b + 1",
-        _ => {
-          attempts += 1
-          if (attempts == 1) concurrentMerge("b = t.b + 100")
-        }
-      )
-      merge.run(spark)
+  for (sourceRepeatable <- Seq(false, true)) {
+    test(
+      s"self merge shortcut retains its conflict behavior with repeatable source $sourceRepeatable") {
+      withTable("t") {
+        createTable(sourceRepeatable = sourceRepeatable)
+        sql("INSERT INTO t VALUES (1, 1, 'pending')")
+        sql("INSERT INTO t VALUES (2, 2, 'pending')")
+        var attempts = 0
+        val merge = interleavedMerge(
+          "MERGE INTO t AS t USING t AS s ON t._ROW_ID = s._ROW_ID " +
+            "WHEN MATCHED THEN UPDATE SET b = s.b + 1",
+          _ => {
+            attempts += 1
+            if (attempts == 1) concurrentMerge("b = t.b + 100")
+          }
+        )
+        assertUpdateConflict(intercept[RuntimeException](merge.run(spark)))
 
-      checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 2), Row(2, 3)))
-      assert(attempts == 2)
+        checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 101), Row(2, 2)))
+        assert(attempts == 1)
+      }
     }
   }
 
-  test("failed retry insert staging keeps its original error and releases the source checkpoint") {
+  test("failed retry insert staging keeps its original error and releases cached source") {
     withTable("t") {
-      createTable()
+      createTable("'data-evolution.merge-into.source-persist' = 'true',")
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       sql("INSERT INTO t VALUES (2, 2, 'pending')")
       val merge = interleavedMerge(
@@ -431,7 +588,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
 
   test("a failure after publication does not delete committed files") {
     withTable("t") {
-      createTable()
+      createTable("'data-evolution.merge-into.source-persist' = 'true',")
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       var attempts = 0
       val merge = interleavedMerge(
@@ -454,37 +611,36 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     }
   }
 
-  for (needsSourceColumn <- Seq(false, true)) {
-    test(s"source freezing prunes unused columns with source reference=$needsSourceColumn") {
-      withTable("t", "src") {
-        createTable()
-        sql("INSERT INTO t VALUES (1, 1, 'pending')")
-        sql("CREATE TABLE src (id INT)")
-        sql("INSERT INTO src VALUES (1)")
-        spark.udf.register(
-          "unused_retry_source",
-          (id: Int) => {
-            if (id >= 0) throw new IllegalStateException("unused source column evaluated") else id
-          })
-        try {
-          var attempts = 0
-          val on = if (needsSourceColumn) "t.id = s.id" else "t.id = 1"
-          val merge = interleavedMerge(
-            "MERGE INTO t USING (SELECT id, unused_retry_source(id) AS unused FROM src) s " +
-              s"ON $on WHEN MATCHED THEN UPDATE SET b = t.b + 1",
-            _ => {
-              attempts += 1
-              if (attempts == 1) concurrentMerge("b = t.b + 100")
-            }
-          )
-          val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
-          merge.run(spark)
-          checkAnswer(sql("SELECT b FROM t"), Seq(Row(102)))
-          assert(attempts == 2)
-          assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
-        } finally {
-          sql("DROP TEMPORARY FUNCTION IF EXISTS unused_retry_source")
-        }
+  test("default COALESCE upsert source checkpoint prunes unused columns") {
+    withTable("t", "src") {
+      createTable(sourceRepeatable = false)
+      sql("INSERT INTO t VALUES (1, 1, 'pending')")
+      sql("CREATE TABLE src (id INT)")
+      sql("INSERT INTO src VALUES (1)")
+      spark.udf.register(
+        "unused_retry_source",
+        (id: Int) => {
+          if (id >= 0) throw new IllegalStateException("unused source column evaluated") else id
+        })
+      try {
+        var attempts = 0
+        val merge = interleavedMerge(
+          "MERGE INTO t USING (SELECT id, CAST(NULL AS INT) AS delta, " +
+            "unused_retry_source(id) AS unused FROM src) s ON t.id <=> s.id " +
+            "WHEN MATCHED THEN UPDATE SET b = COALESCE(s.delta, t.b) " +
+            "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, s.delta, 'new')",
+          _ => {
+            attempts += 1
+            if (attempts == 1) concurrentMerge("b = t.b + 100")
+          }
+        )
+        val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
+        merge.run(spark)
+        checkAnswer(sql("SELECT b FROM t"), Seq(Row(101)))
+        assert(attempts == 2)
+        assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
+      } finally {
+        sql("DROP TEMPORARY FUNCTION IF EXISTS unused_retry_source")
       }
     }
   }
@@ -528,7 +684,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
 
   test("source materialization failure releases its checkpoint before any target write") {
     withTable("t", "src") {
-      createTable()
+      createTable(sourceRepeatable = false)
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       sql("CREATE TABLE src (id INT)")
       sql("INSERT INTO src VALUES (1)")
@@ -540,7 +696,8 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       try {
         val merge = analyzedMerge(
           "MERGE INTO t USING (SELECT id, fail_retry_source(id) AS delta FROM src) s " +
-            "ON t.id = s.id WHEN MATCHED THEN UPDATE SET b = s.delta")
+            "ON t.id <=> s.id WHEN MATCHED THEN UPDATE SET b = COALESCE(s.delta, t.b) " +
+            "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, s.delta, 'new')")
         val persistedBefore = spark.sparkContext.getPersistentRDDs.keySet
         val error = intercept[Exception](merge.run(spark))
         assert(
@@ -640,8 +797,15 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       statement: String,
       beforeCommit: Seq[CommitMessage] => Unit,
       failInsertAttempt: Int = 0,
-      afterCommit: () => Unit = () => ()): MergeIntoPaimonDataEvolutionTable = {
-    val original = analyzedMerge(statement)
+      afterCommit: () => Unit = () => (),
+      optimize: Boolean = false): MergeIntoPaimonDataEvolutionTable = {
+    val analyzed = analyzedMerge(statement)
+    val original =
+      if (optimize)
+        spark.sessionState.optimizer
+          .execute(analyzed)
+          .asInstanceOf[MergeIntoPaimonDataEvolutionTable]
+      else analyzed
     new MergeIntoPaimonDataEvolutionTable(
       original.v2Table,
       original.targetTable,
@@ -681,10 +845,11 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     assert(physical == live)
   }
 
-  private def createTable(extraOptions: String = ""): Unit = {
+  private def createTable(extraOptions: String = "", sourceRepeatable: Boolean = true): Unit = {
     sql(
       "CREATE TABLE t (id INT, b INT, status STRING) TBLPROPERTIES (" +
-        extraOptions + "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        extraOptions + "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true', " +
+        s"'data-evolution.merge-into.source-repeatable' = '$sourceRepeatable')")
   }
 
   private def pinnedMerge(statement: String): MergeIntoPaimonDataEvolutionTable = {
