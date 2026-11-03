@@ -18,6 +18,8 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.blob.ManagedBlobReferenceFile;
 import org.apache.paimon.data.Timestamp;
@@ -100,12 +102,33 @@ public abstract class OrphanFilesClean implements Serializable {
     protected final Path location;
 
     public OrphanFilesClean(FileStoreTable table, long olderThanMillis, boolean dryRun) {
+        checkExternalPathStrategySupported(table);
         this.table = table;
         this.fileIO = table.fileIO();
         this.partitionKeysNum = table.partitionKeys().size();
         this.location = table.location();
         this.olderThanMillis = olderThanMillis;
         this.dryRun = dryRun;
+    }
+
+    /**
+     * Candidate collection lists the partition and bucket directories under every external path.
+     * The {@link ExternalPathStrategy#ENTROPY_INJECT_TEMPLATE} layout puts the hash directories
+     * before the table context, so those directories are not reachable by such a listing and are
+     * shared with other tables. Cleaning is therefore refused instead of silently skipping the data
+     * files.
+     */
+    private static void checkExternalPathStrategySupported(FileStoreTable table) {
+        ExternalPathStrategy strategy = table.store().options().externalPathStrategy();
+        if (strategy == ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Removing orphan files is not supported for table %s, "
+                                    + "because its '%s' is '%s'.",
+                            table.fullName(),
+                            CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                            strategy));
+        }
     }
 
     protected List<String> validBranches() {
