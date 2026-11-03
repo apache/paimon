@@ -573,48 +573,29 @@ case class MergeIntoPaimonDataEvolutionTable(
             .distinct
             .sorted
             .toIndexedSeq
-          val oldMessages = pendingUpdates ++ pendingOtherMessages
-          var freshMessages = Seq.empty[CommitMessage]
+          val result = targetActionInvoke(
+            retryPlan.dataSplits,
+            sparkSession,
+            createNewScanPlan(retryPlan.dataSplits, targetRelation),
+            firstRowIds,
+            persistSourceDss,
+            allowSelfMergeShortcut = false)
           try {
-            val result = targetActionInvoke(
-              retryPlan.dataSplits,
-              sparkSession,
-              createNewScanPlan(retryPlan.dataSplits, targetRelation),
-              firstRowIds,
-              persistSourceDss,
-              allowSelfMergeShortcut = false)
-            try {
-              freshMessages = result.commitMessages
-              val inserts = if (notMatchedActions.nonEmpty) {
-                // The anti join must see the complete latest target, including new files and
-                // partitions which were not part of the original matched update.
-                insertActionInvoke(
-                  sparkSession,
-                  createNewScanPlan(retryPlan.currentSplits, targetRelation),
-                  persistSourceDss)
-              } else Nil
-              freshMessages = freshMessages ++ inserts
-              if (System.currentTimeMillis() - startMillis > options.commitTimeout()) {
-                throw conflict
-              }
-              DataEvolutionMergeConflictRetry.abortUnpublished(
-                table,
-                retryPlan.discardedMessages ++ pendingOtherMessages,
-                conflict)
-              pendingUpdates = retryPlan.remainingMessages ++ result.commitMessages
-              pendingOtherMessages = inserts
-            } finally {
-              result.cleanup()
+            val inserts = if (notMatchedActions.nonEmpty) {
+              // The anti join must see the complete latest target, including new files and
+              // partitions which were not part of the original matched update.
+              insertActionInvoke(
+                sparkSession,
+                createNewScanPlan(retryPlan.currentSplits, targetRelation),
+                persistSourceDss)
+            } else Nil
+            if (System.currentTimeMillis() - startMillis > options.commitTimeout()) {
+              throw conflict
             }
-          } catch {
-            case NonFatal(stagingFailure) =>
-              // The previous attempt was rejected before publication and fresh files have not
-              // been submitted yet. Generic commit failures outside this block remain uncertain.
-              DataEvolutionMergeConflictRetry.abortUnpublished(
-                table,
-                oldMessages ++ freshMessages,
-                stagingFailure)
-              throw stagingFailure
+            pendingUpdates = retryPlan.remainingMessages ++ result.commitMessages
+            pendingOtherMessages = inserts
+          } finally {
+            result.cleanup()
           }
           // Every retained file was checked against all intervening non-compaction writes;
           // the replaced file groups were recomputed from this same latest snapshot.

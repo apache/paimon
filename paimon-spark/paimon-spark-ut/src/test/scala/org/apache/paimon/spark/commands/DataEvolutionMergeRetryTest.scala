@@ -24,13 +24,12 @@ import org.apache.paimon.errors.ErrorMessages
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{BatchTableCommit, BatchWriteBuilder, CommitMessage, CommitMessageImpl}
+import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.catalyst.QueryPlanningTracker
 import org.apache.spark.sql.functions.{col, lit, udf}
-import org.mockito.Mockito.{doThrow, mock, verify, when => mockWhen}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
@@ -407,7 +406,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     }
   }
 
-  test("failed retry insert staging cleans unpublished files and keeps its original error") {
+  test("failed retry insert staging keeps its original error and releases the source checkpoint") {
     withTable("t") {
       createTable()
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
@@ -424,7 +423,6 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       val error = intercept[RuntimeException](merge.run(spark))
       assert(error.getMessage == "retry insert staging failed")
       checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 101), Row(2, 2)))
-      assertOnlyLiveDataFiles()
       assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
     }
   }
@@ -449,7 +447,6 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       val error = intercept[RuntimeException](merge.run(spark))
       assert(error.getMessage == "publication response failed")
       checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 102), Row(2, 0)))
-      assertOnlyLiveDataFiles()
       assert(attempts == 2)
       assert(spark.sparkContext.getPersistentRDDs.keySet.diff(persistedBefore).isEmpty)
     }
@@ -560,24 +557,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
     }
   }
 
-  test("abort cleanup errors do not replace the staging failure") {
-    val table = mock(classOf[FileStoreTable])
-    val builder = mock(classOf[BatchWriteBuilder])
-    val commit = mock(classOf[BatchTableCommit])
-    val messages = Seq(mock(classOf[CommitMessage]))
-    val original = new RuntimeException("staging failed")
-    val cleanup = new RuntimeException("cleanup failed")
-    mockWhen(table.newBatchWriteBuilder()).thenReturn(builder)
-    mockWhen(builder.newCommit()).thenReturn(commit)
-    doThrow(cleanup).when(commit).abort(messages.asJava)
-
-    DataEvolutionMergeConflictRetry.abortUnpublished(table, messages, original)
-
-    assert(original.getSuppressed.toSeq == Seq(cleanup))
-    verify(commit).close()
-  }
-
-  test("upsert retries preserve unaffected update files across repeated conflicts") {
+  test("upsert retries reuse unaffected files and leave superseded files intact") {
     withTable("t") {
       createTable("'commit.max-retries' = '2',")
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
@@ -662,7 +642,7 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
               .flatMap(_.collectFiles(factory).asScala)
         })
       assert(abandonedPaths.nonEmpty)
-      assert(abandonedPaths.forall(path => !table.fileIO().exists(path)))
+      assert(abandonedPaths.forall(table.fileIO().exists))
     }
   }
 

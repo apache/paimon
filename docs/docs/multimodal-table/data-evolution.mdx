@@ -468,9 +468,12 @@ For an upsert, concurrent inserts or changes to the `ON` columns can change
 which source rows match. The retry reevaluates target groups whose read or
 written columns changed, as well as newly inserted rows in new partitions,
 and recomputes the unmatched source rows against the complete latest target.
-It regenerates the insert files and aborts superseded staged update and insert files;
-unaffected staged update files are reused, including when concurrent writers
-only changed columns the MERGE neither reads nor writes.
+It regenerates the insert files and excludes superseded staged update and insert
+files from retry commits without deleting them. Unaffected staged update files
+are reused, including when concurrent writers only changed columns the MERGE
+neither reads nor writes.
+The retry does not delete staged files, including after a failure. Unreferenced
+files are left for [orphan file cleanup](../maintenance/manage-snapshots#remove-orphan-files).
 When automatic logical retries are eligible and `commit.max-retries` is
 positive, Spark materializes the referenced source columns in a local checkpoint before
 writing target files. Initial evaluation and retries reuse that result,

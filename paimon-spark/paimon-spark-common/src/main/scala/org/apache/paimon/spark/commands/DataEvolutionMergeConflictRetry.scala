@@ -32,43 +32,16 @@ import org.apache.paimon.table.source.{DataSplit, ScanMode}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.{DataEvolutionUtils, Range, RowRangeIndex}
 
-import org.slf4j.LoggerFactory
-
 import scala.collection.JavaConverters._
 import scala.collection.mutable
-import scala.util.control.NonFatal
 
 /** Select complete current file groups whose MERGE expressions must be evaluated again. */
 private[commands] object DataEvolutionMergeConflictRetry {
 
-  private val LOG = LoggerFactory.getLogger(getClass)
-
   case class Plan(
       remainingMessages: Seq[CommitMessage],
       dataSplits: Seq[DataSplit],
-      currentSplits: Seq[DataSplit],
-      discardedMessages: Seq[CommitMessage])
-
-  /** Only for files known not to have been published; never use after an uncertain commit. */
-  def abortUnpublished(
-      table: FileStoreTable,
-      messages: Seq[CommitMessage],
-      failure: Throwable): Unit = {
-    if (messages.nonEmpty) {
-      try {
-        val commit = table.newBatchWriteBuilder().newCommit()
-        try {
-          commit.abort(messages.asJava)
-        } finally {
-          commit.close()
-        }
-      } catch {
-        case NonFatal(cleanupFailure) =>
-          if (cleanupFailure ne failure) failure.addSuppressed(cleanupFailure)
-          LOG.warn("Failed to abort unpublished MERGE files.", cleanupFailure)
-      }
-    }
-  }
+      currentSplits: Seq[DataSplit])
 
   private case class FileRange(bucket: (BinaryRow, Int), range: Range)
 
@@ -258,13 +231,13 @@ private[commands] object DataEvolutionMergeConflictRetry {
         }
         if (selected.isPresent) Some(selected.get()) else None
     }
-    def selectMessages(discarded: Boolean): Seq[CommitMessage] = impls.flatMap {
+    val remainingMessages = impls.flatMap {
       message =>
         val files = message
           .newFilesIncrement()
           .newFiles()
           .asScala
-          .filter(file => affected.contains(file.fileName()) == discarded)
+          .filterNot(file => affected.contains(file.fileName()))
         if (files.isEmpty) None
         else
           Some(
@@ -279,6 +252,6 @@ private[commands] object DataEvolutionMergeConflictRetry {
               message.compactIncrement()
             ))
     }
-    Some(Plan(selectMessages(false), splits, currentSplits, selectMessages(true)))
+    Some(Plan(remainingMessages, splits, currentSplits))
   }
 }
