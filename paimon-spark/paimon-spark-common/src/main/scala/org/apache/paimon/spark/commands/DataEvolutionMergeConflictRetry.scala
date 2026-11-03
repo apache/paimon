@@ -68,17 +68,7 @@ private[commands] object DataEvolutionMergeConflictRetry {
       messages: Seq[CommitMessage],
       readSnapshotId: Long,
       latestSnapshot: Snapshot,
-      includeConcurrentChanges: Boolean = false): Option[Plan] = {
-    plan(table, messages, readSnapshotId, latestSnapshot, includeConcurrentChanges, None)
-  }
-
-  def plan(
-      table: FileStoreTable,
-      messages: Seq[CommitMessage],
-      readSnapshotId: Long,
-      latestSnapshot: Snapshot,
-      includeConcurrentChanges: Boolean,
-      readFieldIds: Option[Set[Int]]): Option[Plan] = {
+      readFieldIds: Set[Int]): Option[Plan] = {
     if (readSnapshotId < 0 || table.coreOptions().deletionVectorsEnabled()) {
       return None
     }
@@ -105,26 +95,20 @@ private[commands] object DataEvolutionMergeConflictRetry {
       return None
     }
 
-    val partitions = impls.map(_.partition()).distinct.asJava
     val changes = (readSnapshotId + 1 to latestSnapshot.id()).flatMap {
       id =>
         val snapshot = table.snapshotManager().snapshot(id)
         if (snapshot.commitKind() == CommitKind.COMPACT) Nil
         else {
-          val scan = table.store().newScan()
-          if (!includeConcurrentChanges) {
-            scan.withPartitionFilter(partitions)
-          }
-          scan
+          table
+            .store()
+            .newScan()
             .withSnapshot(snapshot)
             .withKind(ScanMode.DELTA)
             .plan()
             .files()
             .asScala
-            .filter(
-              entry =>
-                entry.file().firstRowId() != null &&
-                  (includeConcurrentChanges || entry.file().firstRowId() < nextRowId))
+            .filter(_.file().firstRowId() != null)
         }
     }
     val checkers = changes.groupBy(entry => (entry.partition(), entry.bucket())).map {
@@ -179,21 +163,23 @@ private[commands] object DataEvolutionMergeConflictRetry {
     // rows in partitions absent from the original update messages. Changes to an ON column can
     // also turn an old match into an insert. Reevaluate those target groups as well.
     val schemas = mutable.HashMap.empty[Long, TableSchema]
-    val changedIndex = indexes(if (includeConcurrentChanges) {
+    val changedIndex = indexes(
       changes
         .filter {
           entry =>
             val file = entry.file()
-            file.firstRowId() >= nextRowId || readFieldIds.forall {
-              ids =>
-                val schema = schemas
-                  .getOrElseUpdate(file.schemaId(), table.schemaManager().schema(file.schemaId()))
-                DataEvolutionUtils.fileFieldIds(schema, file).asScala.exists(id => ids.contains(id))
+            file.firstRowId() >= nextRowId || {
+              val schema = schemas
+                .getOrElseUpdate(file.schemaId(), table.schemaManager().schema(file.schemaId()))
+              DataEvolutionUtils
+                .fileFieldIds(schema, file)
+                .asScala
+                .exists(id => readFieldIds.contains(id))
             }
         }
         .map(
-          entry => FileRange((entry.partition(), entry.bucket()), entry.file().nonNullRowIdRange()))
-    } else Nil)
+          entry =>
+            FileRange((entry.partition(), entry.bucket()), entry.file().nonNullRowIdRange())))
 
     // A compacted group can include another staged file. Expand to a fixed point so that
     // replacing that file never drops its updates outside the initially conflicted range.

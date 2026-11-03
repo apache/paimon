@@ -118,7 +118,12 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
 
       concurrentMerge("b = t.b + 10")
       val plan = DataEvolutionMergeConflictRetry
-        .plan(table, staged, readSnapshot.id(), table.latestSnapshot().get())
+        .plan(
+          table,
+          staged,
+          readSnapshot.id(),
+          table.latestSnapshot().get(),
+          Set(table.rowType().getField("b").id()))
         .get
 
       val retainedFiles = plan.remainingMessages
@@ -160,18 +165,15 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       concurrentMerge("b = t.b + 10")
       sql("INSERT OVERWRITE t VALUES (1, 99, 'replaced')")
 
-      Seq(false, true).foreach {
-        includeConcurrentChanges =>
-          assert(
-            DataEvolutionMergeConflictRetry
-              .plan(
-                table,
-                staged,
-                readSnapshot.id(),
-                table.latestSnapshot().get(),
-                includeConcurrentChanges)
-              .isEmpty)
-      }
+      assert(
+        DataEvolutionMergeConflictRetry
+          .plan(
+            table,
+            staged,
+            readSnapshot.id(),
+            table.latestSnapshot().get(),
+            Set(table.rowType().getField("b").id()))
+          .isEmpty)
       checkAnswer(sql("SELECT b, status FROM t"), Seq(Row(99, "replaced")))
     }
   }
@@ -562,38 +564,26 @@ class DataEvolutionMergeRetryTest extends PaimonSparkTestBase {
       createTable("'commit.max-retries' = '2',")
       sql("INSERT INTO t VALUES (1, 1, 'pending')")
       sql("INSERT INTO t VALUES (2, 2, 'pending')")
-      val original = analyzedMerge(
+      val attempts = ArrayBuffer.empty[Seq[CommitMessage]]
+      val merge = interleavedMerge(
         "MERGE INTO t USING (SELECT id FROM VALUES (1), (2), (3), (4) s(id)) s " +
           "ON t.id = s.id WHEN MATCHED THEN UPDATE SET b = t.b + 1 " +
-          "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')")
-      val attempts = ArrayBuffer.empty[Seq[CommitMessage]]
-      val merge = new MergeIntoPaimonDataEvolutionTable(
-        original.v2Table,
-        original.targetTable,
-        original.sourceTable,
-        original.matchedCondition,
-        original.matchedActions,
-        original.notMatchedActions,
-        original.notMatchedBySourceActions
-      ) {
-        override lazy val writer: PaimonSparkWriter = new InterleavingMergeWriter(
-          table,
-          messages => {
-            attempts += messages
-            attempts.size match {
-              case 1 =>
-                concurrentMerge("b = t.b + 10")
-                sql(
-                  "MERGE INTO t USING (SELECT 2 AS id) s ON t.id = s.id " +
-                    "WHEN MATCHED THEN UPDATE SET status = 'rival'")
-              case 2 =>
-                concurrentMerge("b = t.b + 100")
-                sql("INSERT INTO t VALUES (3, 30, 'rival')")
-              case _ =>
-            }
+          "WHEN NOT MATCHED THEN INSERT (id, b, status) VALUES (s.id, 0, 'new')",
+        messages => {
+          attempts += messages
+          attempts.size match {
+            case 1 =>
+              concurrentMerge("b = t.b + 10")
+              sql(
+                "MERGE INTO t USING (SELECT 2 AS id) s ON t.id = s.id " +
+                  "WHEN MATCHED THEN UPDATE SET status = 'rival'")
+            case 2 =>
+              concurrentMerge("b = t.b + 100")
+              sql("INSERT INTO t VALUES (3, 30, 'rival')")
+            case _ =>
           }
-        )
-      }
+        }
+      )
       merge.run(spark)
 
       checkAnswer(sql("SELECT id, b FROM t"), Seq(Row(1, 112), Row(2, 3), Row(3, 31), Row(4, 0)))

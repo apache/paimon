@@ -371,7 +371,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     var targetActionCleanup = () => ()
     var sourceCleanup = () => ()
     try {
-      val persistSourceDss: Option[Dataset[Row]] = if (freezeSourceForRetry) {
+      val persistSourceDss: Option[Dataset[Row]] = if (canRetryMergeUpdates) {
         // Cache invalidation on a concurrent source write must not replace only part of the
         // source used by this MERGE. A checkpoint detaches it from table-cache refreshes.
         val checkpoint =
@@ -445,10 +445,6 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
   }
 
-  private lazy val freezeSourceForRetry: Boolean =
-    canRetryMergeUpdates && table.coreOptions().commitMaxRetries() > 0 &&
-      !table.coreOptions().deletionVectorsEnabled()
-
   private def frozenSourcePlan(readSnapshot: Snapshot): LogicalPlan = {
     if (useSelfMergeShortcut && readSnapshot != null) {
       // The initial shortcut reads the pinned target instead of the source. Give the frozen
@@ -479,9 +475,11 @@ case class MergeIntoPaimonDataEvolutionTable(
       .filter(attr => referenced.contains(attr.exprId) && seen.add(attr.exprId))
   }
 
-  private def canRetryMergeUpdates: Boolean = {
+  private lazy val canRetryMergeUpdates: Boolean = {
     // V1 UPDATE has its own retry policy. Explicit time travel must retain its requested baseline.
     !allowPinnedSelfMergeShortcut && matchedActions.nonEmpty &&
+    table.coreOptions().commitMaxRetries() > 0 &&
+    !table.coreOptions().deletionVectorsEnabled() &&
     !hasTargetSideDeleteActions &&
     notMatchedBySourceActions.isEmpty &&
     !timeTravelOptionKeys.exists(v2Table.getTable.options().containsKey) &&
@@ -499,12 +497,7 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   private lazy val retryReadFieldIds: Set[Int] = {
-    val expressions = Seq(matchedCondition) ++ matchedActions.flatMap {
-      case update: UpdateAction =>
-        update.condition.toSeq ++ update.assignments.filter(isModifiedAssignment).map(_.value)
-      case action => action.condition.toSeq
-    }
-    val names = expressions
+    val names = retryExpressions
       .flatMap(extractFields)
       .filter(attr => targetTable.output.exists(_.exprId == attr.exprId))
       .map(_.name)
@@ -558,13 +551,7 @@ case class MergeIntoPaimonDataEvolutionTable(
             .flatMap(
               snapshot =>
                 DataEvolutionMergeConflictRetry
-                  .plan(
-                    table,
-                    pendingUpdates,
-                    checkFromSnapshot,
-                    snapshot,
-                    includeConcurrentChanges = true,
-                    readFieldIds = Some(retryReadFieldIds)))
+                  .plan(table, pendingUpdates, checkFromSnapshot, snapshot, retryReadFieldIds))
             .getOrElse(throw conflict)
           val firstRowIds = retryPlan.dataSplits
             .flatMap(_.dataFiles().asScala)

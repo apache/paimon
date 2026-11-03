@@ -455,31 +455,24 @@ Spark `MERGE INTO` can rebase staged normal partial-column files onto the
 latest boundaries after concurrent compaction, using distributed processing
 without rerunning the source and join.
 
-For deterministic `MERGE INTO` statements containing `WHEN MATCHED UPDATE`
-and optional `WHEN NOT MATCHED INSERT` actions, Spark also retries logical
-update conflicts from concurrent writes, including other `MERGE INTO`
-statements committed as `APPEND`. It reads the
-intervening changes, reevaluates the join, action conditions, and assignments
-for the affected current file groups, and reuses staged files outside those
-groups. This preserves updates such as `SET b = t.b + 1` without overwriting a
-concurrent increment with a stale value. If compaction has changed boundaries,
-the affected groups can include rows outside the original conflict.
-For an upsert, concurrent inserts or changes to the `ON` columns can change
-which source rows match. The retry reevaluates target groups whose read or
-written columns changed, as well as newly inserted rows in new partitions,
-and recomputes the unmatched source rows against the complete latest target.
-It regenerates the insert files and excludes superseded staged update and insert
-files from retry commits without deleting them. Unaffected staged update files
-are reused, including when concurrent writers only changed columns the MERGE
-neither reads nor writes.
-The retry does not delete staged files, including after a failure. Unreferenced
+Spark also retries logical update conflicts for deterministic `MERGE INTO`
+statements with `WHEN MATCHED UPDATE` and optional `WHEN NOT MATCHED INSERT`,
+including conflicts with other `MERGE INTO` statements committed as `APPEND`.
+It reevaluates the join, conditions, and assignments for current file groups
+whose read or written columns changed, and reuses unaffected staged update
+files. Compaction boundary changes can widen the affected groups.
+
+For an upsert, retries also update newly matched rows, including rows in new
+partitions, and regenerate inserts by finding unmatched source rows against
+the complete latest target. Superseded files are excluded from retry commits.
+Retries never delete staged files, including after a failure; unreferenced
 files are left for [orphan file cleanup](../maintenance/manage-snapshots#remove-orphan-files).
-When automatic logical retries are eligible and `commit.max-retries` is
-positive, Spark materializes the referenced source columns in a local checkpoint before
-writing target files. Initial evaluation and retries reuse that result,
-including when a concurrent source write invalidates Spark's table cache.
-The checkpoint is released on success or failure. A retry uses the frozen
-source for self-merges too, rather than substituting the latest target values.
+
+Eligible statements with positive `commit.max-retries` materialize referenced
+source columns in a local checkpoint before writing target files. Initial
+evaluation and retries, including self-merges, reuse that result despite
+concurrent source writes or cache invalidation. The checkpoint is released
+on success or failure.
 `data-evolution.merge-into.source-persist` retains its existing cache behavior
 for statements outside this automatic retry path.
 
