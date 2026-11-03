@@ -1152,34 +1152,6 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
-     * Remove partition metadata from the metastore without modifying table data or snapshots.
-     *
-     * <p>This is also used for synthetic partitions such as done markers, whose values need not
-     * conform to the table's partition types. Catalogs without partition metadata do nothing.
-     */
-    default void dropPartitionsFromMetastore(
-            Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {}
-
-    /**
-     * Remove partition metadata using the corresponding data partitions to check branch ownership.
-     *
-     * <p>A synthetic spec must also be retained when it names a real data partition still in use.
-     * Synthetic specs need not conform to the data partition types.
-     *
-     * @param partitions metastore partition specs to remove, including synthetic markers
-     * @param dataPartitions underlying data partition specs, in the same order as {@code
-     *     partitions}
-     */
-    default void dropPartitionsFromMetastore(
-            Identifier identifier,
-            List<Map<String, String>> partitions,
-            List<Map<String, String>> dataPartitions)
-            throws TableNotExistException {
-        dropPartitionsFromMetastore(identifier, partitions);
-    }
-
-    /**
      * Alter partitions of the specify table. For non-existent partitions, partitions will be
      * created directly.
      *

@@ -379,22 +379,6 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public void dropPartitionsFromMetastore(
-            Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {
-        wrapped.dropPartitionsFromMetastore(identifier, partitions);
-    }
-
-    @Override
-    public void dropPartitionsFromMetastore(
-            Identifier identifier,
-            List<Map<String, String>> partitions,
-            List<Map<String, String>> dataPartitions)
-            throws TableNotExistException {
-        wrapped.dropPartitionsFromMetastore(identifier, partitions, dataPartitions);
-    }
-
-    @Override
     public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException {
         wrapped.alterPartitions(identifier, partitions);

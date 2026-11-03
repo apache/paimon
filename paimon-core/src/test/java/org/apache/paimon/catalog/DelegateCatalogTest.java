@@ -91,35 +91,6 @@ class DelegateCatalogTest {
         verify(wrapped, never()).createPartitions(IDENTIFIER, specs, true, null, false, null);
     }
 
-    @Test
-    void testDropPartitionsFromMetastoreDoesNotDropData() throws Exception {
-        Catalog wrapped = mock(Catalog.class);
-        Catalog delegating = new TestDelegateCatalog(wrapped);
-        List<Map<String, String>> specs =
-                Collections.singletonList(Collections.singletonMap("dt", "20230101.done"));
-
-        delegating.dropPartitionsFromMetastore(IDENTIFIER, specs);
-
-        verify(wrapped).dropPartitionsFromMetastore(IDENTIFIER, specs);
-        verify(wrapped, never()).dropPartitions(any(), anyList());
-    }
-
-    @Test
-    void testDropMarkerMetadataForwardsDataPartitionSpecs() throws Exception {
-        Catalog wrapped = mock(Catalog.class);
-        Catalog delegating = new TestDelegateCatalog(wrapped);
-        List<Map<String, String>> markers =
-                Collections.singletonList(Collections.singletonMap("dt", "20230101.done"));
-        List<Map<String, String>> dataPartitions =
-                Collections.singletonList(Collections.singletonMap("dt", "20230101"));
-
-        delegating.dropPartitionsFromMetastore(IDENTIFIER, markers, dataPartitions);
-
-        verify(wrapped).dropPartitionsFromMetastore(IDENTIFIER, markers, dataPartitions);
-        verify(wrapped, never()).dropPartitionsFromMetastore(IDENTIFIER, markers);
-        verify(wrapped, never()).dropPartitions(any(), anyList());
-    }
-
     /** {@link DelegateCatalog} forwards every operation; these tests never rebuild one. */
     private static class TestDelegateCatalog extends DelegateCatalog {
 

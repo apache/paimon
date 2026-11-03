@@ -139,7 +139,7 @@ public class PartitionExpireTest {
                     @Override
                     public void dropPartitions(List<Map<String, String>> partitions)
                             throws Catalog.TableNotExistException {
-                        dropPartitionsFromMetastore(partitions);
+                        dropPartitionMetadata(partitions);
                         try (FileStoreCommit commit =
                                 table.store()
                                         .newCommit(
@@ -148,10 +148,21 @@ public class PartitionExpireTest {
                                                 null)) {
                             commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
                         }
+                        // Model HiveCatalog's cleanup of markers after deleting ordinary data.
+                        List<Map<String, String>> donePartitions = new ArrayList<>();
+                        String lastKey =
+                                tableSchema
+                                        .partitionKeys()
+                                        .get(tableSchema.partitionKeys().size() - 1);
+                        for (Map<String, String> partition : partitions) {
+                            Map<String, String> donePartition = new HashMap<>(partition);
+                            donePartition.put(lastKey, partition.get(lastKey) + ".done");
+                            donePartitions.add(donePartition);
+                        }
+                        dropPartitionMetadata(donePartitions);
                     }
 
-                    @Override
-                    public void dropPartitionsFromMetastore(List<Map<String, String>> partitions) {
+                    private void dropPartitionMetadata(List<Map<String, String>> partitions) {
                         for (Map<String, String> partition : partitions) {
                             // only record partitions that were created
                             if (createdPartitions.remove(partition)) {

@@ -489,78 +489,71 @@ public class HiveCatalog extends AbstractCatalog {
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         TableSchema schema = this.loadTableSchema(identifier);
-        dropPartitionsFromMetastore(identifier, partitions, partitions, schema);
-        if (CoreOptions.fromMap(schema.options()).tagToPartitionField() == null) {
+        boolean tagToPart = CoreOptions.fromMap(schema.options()).tagToPartitionField() != null;
+        boolean metastorePartitioned = metastorePartitioned(schema);
+        if (metastorePartitioned) {
+            dropPartitionsFromMetastore(
+                    identifier,
+                    tagToPart
+                            ? partitions
+                            : removePartitionsStillInUse(identifier, partitions, false),
+                    schema);
+        }
+        if (!tagToPart) {
             super.dropPartitions(identifier, partitions);
+            if (metastorePartitioned) {
+                dropDonePartitions(identifier, partitions, schema);
+            }
         }
     }
 
-    @Override
-    public void dropPartitionsFromMetastore(
-            Identifier identifier, List<Map<String, String>> partitions)
+    private void dropDonePartitions(
+            Identifier identifier, List<Map<String, String>> partitions, TableSchema schema)
             throws TableNotExistException {
-        dropPartitionsFromMetastore(
-                identifier, partitions, partitions, loadTableSchema(identifier));
-    }
+        List<Map<String, String>> donePartitions = new ArrayList<>(partitions.size());
+        String lastKey = schema.partitionKeys().get(schema.partitionKeys().size() - 1);
+        for (Map<String, String> partition : partitions) {
+            Map<String, String> donePartition = new LinkedHashMap<>(partition);
+            donePartition.put(lastKey, partition.get(lastKey) + ".done");
+            donePartitions.add(donePartition);
+        }
 
-    @Override
-    public void dropPartitionsFromMetastore(
-            Identifier identifier,
-            List<Map<String, String>> partitions,
-            List<Map<String, String>> dataPartitions)
-            throws TableNotExistException {
-        dropPartitionsFromMetastore(
-                identifier, partitions, dataPartitions, loadTableSchema(identifier));
+        // HMS partition names are shared by all branches. A marker is still needed if a branch
+        // owns its ordinary partition or a real STRING partition with the same literal spec.
+        Set<Map<String, String>> specsToCheck = new HashSet<>(partitions);
+        specsToCheck.addAll(donePartitions);
+        Set<Map<String, String>> removable =
+                new HashSet<>(
+                        removePartitionsStillInUse(
+                                identifier, new ArrayList<>(specsToCheck), true));
+        List<Map<String, String>> markersToDrop = new ArrayList<>();
+        for (int i = 0; i < partitions.size(); i++) {
+            if (removable.contains(partitions.get(i))
+                    && removable.contains(donePartitions.get(i))) {
+                markersToDrop.add(donePartitions.get(i));
+            }
+        }
+        dropPartitionsFromMetastore(identifier, markersToDrop, schema);
     }
 
     private void dropPartitionsFromMetastore(
-            Identifier identifier,
-            List<Map<String, String>> partitions,
-            List<Map<String, String>> dataPartitions,
-            TableSchema schema)
-            throws TableNotExistException {
-        checkArgument(
-                partitions.size() == dataPartitions.size(),
-                "Metastore and data partition specs must have the same size.");
-        boolean tagToPart = CoreOptions.fromMap(schema.options()).tagToPartitionField() != null;
-        if (metastorePartitioned(schema)) {
-            List<Map<String, String>> metaPartitions = partitions;
-            if (!tagToPart) {
-                boolean syntheticPartitions = !partitions.equals(dataPartitions);
-                Set<Map<String, String>> specsToCheck = new HashSet<>(dataPartitions);
-                specsToCheck.addAll(partitions);
-                Set<Map<String, String>> removablePartitions =
-                        new HashSet<>(
-                                removePartitionsStillInUse(
-                                        identifier,
-                                        new ArrayList<>(specsToCheck),
-                                        syntheticPartitions));
-                metaPartitions = new ArrayList<>();
-                for (int i = 0; i < partitions.size(); i++) {
-                    if (removablePartitions.contains(dataPartitions.get(i))
-                            && removablePartitions.contains(partitions.get(i))) {
-                        metaPartitions.add(partitions.get(i));
-                    }
-                }
-            }
-            for (Map<String, String> part : metaPartitions) {
-                List<String> partitionValues =
-                        new ArrayList<>(
-                                orderByPartitionKeys(schema.partitionKeys(), part).values());
-                try {
-                    clients()
-                            .execute(
-                                    client ->
-                                            client.dropPartition(
-                                                    identifier.getDatabaseName(),
-                                                    identifier.getTableName(),
-                                                    partitionValues,
-                                                    false));
-                } catch (NoSuchObjectException e) {
-                    // do nothing if the partition not exists
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
+            Identifier identifier, List<Map<String, String>> partitions, TableSchema schema) {
+        for (Map<String, String> part : partitions) {
+            List<String> partitionValues =
+                    new ArrayList<>(orderByPartitionKeys(schema.partitionKeys(), part).values());
+            try {
+                clients()
+                        .execute(
+                                client ->
+                                        client.dropPartition(
+                                                identifier.getDatabaseName(),
+                                                identifier.getTableName(),
+                                                partitionValues,
+                                                false));
+            } catch (NoSuchObjectException e) {
+                // do nothing if the partition not exists
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
         }
     }

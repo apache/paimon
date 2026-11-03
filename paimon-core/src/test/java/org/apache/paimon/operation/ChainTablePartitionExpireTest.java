@@ -889,13 +889,17 @@ public class ChainTablePartitionExpireTest {
                 throws Catalog.TableNotExistException {
             for (Map<String, String> partition : partitions) {
                 droppedPartitions.add(new HashMap<>(partition));
+                // Model the Hive metastore's cleanup of the corresponding marker.
+                Map<String, String> donePartition = new HashMap<>(partition);
+                String lastKey = null;
+                for (String key : partition.keySet()) {
+                    lastKey = key;
+                }
+                if (lastKey != null) {
+                    donePartition.put(lastKey, partition.get(lastKey) + ".done");
+                    droppedPartitions.add(donePartition);
+                }
             }
-        }
-
-        @Override
-        public void dropPartitionsFromMetastore(List<Map<String, String>> partitions)
-                throws Catalog.TableNotExistException {
-            dropPartitions(partitions);
         }
 
         @Override

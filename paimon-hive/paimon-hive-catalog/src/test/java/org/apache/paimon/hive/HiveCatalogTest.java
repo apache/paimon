@@ -885,6 +885,51 @@ public class HiveCatalogTest extends CatalogTestBase {
         }
     }
 
+    @Test
+    public void testDropPartitionsCleansDoneMarkersInPartitionKeyOrder() throws Exception {
+        String databaseName = "test_drop_multi_key_done_markers";
+        String tableName = "t";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .column("hh", DataTypes.INT())
+                        .partitionKeys("dt", "hh")
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, BinaryString.fromString("20230101"), 1));
+            write.write(GenericRow.of(2, BinaryString.fromString("20230101.done"), 1));
+            commit.commit(write.prepareCommit());
+        }
+        table.createBranch("empty");
+        AddDonePartitionAction action =
+                new AddDonePartitionAction(table.catalogEnvironment().partitionModification());
+        action.markDone("dt=20230101/hh=1");
+        action.markDone("dt=20230101.done/hh=1");
+        long snapshotId = table.snapshotManager().latestSnapshotId();
+
+        catalog.dropPartitions(
+                identifier, Collections.singletonList(orderedSpec("hh", "1", "dt", "20230101")));
+
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId + 1);
+        assertThat(table.newScan().listPartitions())
+                .extracting(partition -> partition.getString(0).toString())
+                .containsExactly("20230101.done");
+        assertThat(((HiveCatalog) catalog).listPartitionsFromHms(identifier))
+                .extracting(partition -> partition.getValues())
+                .containsExactlyInAnyOrder(
+                        Arrays.asList("20230101.done", "1"),
+                        Arrays.asList("20230101.done", "1.done"));
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testExpireIntegerPartitionsWithEmptyBranch(boolean markDone) throws Exception {
@@ -1019,7 +1064,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testDropPartitionsFromMetastorePreservesData() throws Exception {
+    public void testDropRealDoneSuffixPartitionAndItsMarker() throws Exception {
         String databaseName = "test_drop_partition_metadata";
         String tableName = "t";
         catalog.createDatabase(databaseName, false);
@@ -1034,18 +1079,19 @@ public class HiveCatalogTest extends CatalogTestBase {
                         .build(),
                 false);
         writeAppendPartition(identifier, "20230101.done");
+        writeAppendPartition(identifier, "20990101");
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        AddDonePartitionAction action =
+                new AddDonePartitionAction(table.catalogEnvironment().partitionModification());
+        action.markDone("dt=20230101.done");
         long snapshotId = table.snapshotManager().latestSnapshotId();
-
-        catalog.dropPartitionsFromMetastore(identifier, partitionSpecs("20230101.done"));
-
-        assertHmsDts(databaseName, tableName);
-        assertPhysicalDts(identifier, "20230101.done");
-        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId);
 
         // A real STRING partition ending in .done must still support ordinary data deletion.
         catalog.dropPartitions(identifier, partitionSpecs("20230101.done"));
-        assertPhysicalDts(identifier);
+
+        assertHmsDts(databaseName, tableName, "20990101");
+        assertPhysicalDts(identifier, "20990101");
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId + 1);
     }
 
     @Test
@@ -1068,17 +1114,16 @@ public class HiveCatalogTest extends CatalogTestBase {
         table.createBranch("other");
         Identifier otherId = new Identifier(databaseName, tableName, "other");
         writeAppendPartition(otherId, "20230101.done");
+        AddDonePartitionAction action =
+                new AddDonePartitionAction(table.catalogEnvironment().partitionModification());
+        action.markDone("dt=20230101.done");
         long snapshotId = table.snapshotManager().latestSnapshotId();
-
-        catalog.dropPartitionsFromMetastore(identifier, partitionSpecs("20230101.done"));
-        assertHmsDts(databaseName, tableName, "20230101.done");
-        assertPhysicalDts(identifier, "20230101.done");
-        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId);
 
         catalog.dropPartitions(identifier, partitionSpecs("20230101.done"));
         assertPhysicalDts(identifier);
         assertPhysicalDts(otherId, "20230101.done");
-        assertHmsDts(databaseName, tableName, "20230101.done");
+        assertHmsDts(databaseName, tableName, "20230101.done", "20230101.done.done");
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId + 1);
 
         catalog.dropPartitions(otherId, partitionSpecs("20230101.done"));
         assertPhysicalDts(otherId);
@@ -1232,16 +1277,14 @@ public class HiveCatalogTest extends CatalogTestBase {
                 false);
         writeAppendPartition(identifier, "20230101");
         writeAppendPartition(identifier, "20230101.done");
-        catalog.dropPartitions(identifier, partitionSpecs("20230101"));
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         long snapshotId = table.snapshotManager().latestSnapshotId();
 
-        catalog.dropPartitionsFromMetastore(
-                identifier, partitionSpecs("20230101.done"), partitionSpecs("20230101"));
+        catalog.dropPartitions(identifier, partitionSpecs("20230101"));
 
         assertHmsDts(databaseName, tableName, "20230101.done");
         assertPhysicalDts(identifier, "20230101.done");
-        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId);
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId + 1);
     }
 
     private void writeIntegerChainPartitions(Identifier identifier, int... partitions)
