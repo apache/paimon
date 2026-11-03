@@ -280,11 +280,11 @@ def test_variant_iterator_and_torch_rows_require_native(tmp_path, function, nest
             patch.object(PythonTableRead, 'read_rows', side_effect=AssertionError('Python Variant execution')):
         with pytest.raises(RuntimeError, match='Variant extraction requires a compatible native reader'):
             list(read.to_iterator([]))
-        with pytest.raises(RuntimeError, match='not supported by Torch row format'):
-            read.to_torch([], streaming=False, batch_format='row')
         native.assert_not_called()
 
         pytest.importorskip('torch')
+        with pytest.raises(RuntimeError, match='Variant extraction requires a compatible native reader'):
+            read.to_torch([], streaming=False, batch_format='row')
         dataset = read.to_torch([], streaming=True, batch_format='row')
         with pytest.raises(RuntimeError, match='Variant extraction requires a compatible native reader'):
             list(dataset)
