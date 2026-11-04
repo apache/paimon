@@ -971,6 +971,11 @@ class BatchVectorQuery(_PreFilterQuery):
         from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
         projection = self._effective_projection()
+        if len(results) > 1 and self._table.is_primary_key_table:
+            from pypaimon.multimodal.primary_key_batch_lookup import read_primary_key_batch
+            shared = read_primary_key_batch(self, results)
+            if shared is not None:
+                return shared
         if (len(results) <= 1 or any(isinstance(result, GlobalIndexSplitResult) for result in results)
                 or self._metadata_only_result()
                 or (projection and not self._configured_read_builder()._output_fields())):
