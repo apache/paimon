@@ -25,6 +25,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.FileDeletionBase.DataFileDeletionPlan;
+import org.apache.paimon.operation.MaintenanceProgress;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.tag.Tag;
@@ -112,12 +113,26 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
     @Override
     public int expire() {
+        try (MaintenanceProgress progress =
+                new MaintenanceProgress(progressContext(), "evaluate-retention")) {
+            int expired = expire(progress);
+            progress.add("snapshots_expired", expired);
+            progress.complete();
+            return expired;
+        }
+    }
+
+    private int expire(MaintenanceProgress progress) {
         snapshotDeletion.setChangelogDecoupled(expireConfig.isChangelogDecoupled());
         int retainMax = expireConfig.getSnapshotRetainMax();
         int retainMin = expireConfig.getSnapshotRetainMin();
         int maxDeletes = expireConfig.getSnapshotMaxDeletes();
         long olderThanMills =
                 currentTimeMillis.get() - expireConfig.getSnapshotTimeRetain().toMillis();
+
+        progress.add("retain_min", retainMin);
+        progress.add("retain_max", retainMax);
+        progress.add("max_deletes", maxDeletes);
 
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
@@ -165,7 +180,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             try {
                 Snapshot nextSnapshot = snapshotManager.tryGetSnapshot(id + 1);
                 if (olderThanMills <= nextSnapshot.timeMillis()) {
-                    return expireUntil(earliest, id);
+                    progress.phase("expire-selected-range");
+                    return expireUntil(earliest, id, progress);
                 }
             } catch (FileNotFoundException e) {
                 // ignore
@@ -173,13 +189,26 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             }
         }
 
-        return expireUntil(earliest, maxExclusive);
+        progress.phase("expire-selected-range");
+        return expireUntil(earliest, maxExclusive, progress);
     }
 
     @VisibleForTesting
     public int expireUntil(long earliestId, long endExclusiveId) {
+        try (MaintenanceProgress progress =
+                new MaintenanceProgress(
+                        progressContext() + " range=[" + earliestId + "," + endExclusiveId + ")",
+                        "select-expiration-range")) {
+            int expired = expireUntil(earliestId, endExclusiveId, progress);
+            progress.add("snapshots_expired", expired);
+            progress.complete();
+            return expired;
+        }
+    }
+
+    private int expireUntil(long earliestId, long endExclusiveId, MaintenanceProgress progress) {
         try {
-            return innerExpireUntil(earliestId, endExclusiveId);
+            return innerExpireUntil(earliestId, endExclusiveId, progress);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException(e);
@@ -188,7 +217,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         }
     }
 
-    private int innerExpireUntil(long earliestId, long endExclusiveId)
+    private int innerExpireUntil(long earliestId, long endExclusiveId, MaintenanceProgress progress)
             throws ExecutionException, InterruptedException {
         long startTime = currentTimeMillis.get();
 
@@ -205,7 +234,10 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         }
 
         // collect all snapshots
-        List<Snapshot> snapshotsIncludingEnd = collectSnapshots(earliestId, endExclusiveId);
+        progress.phase("load-snapshots");
+        List<Snapshot> snapshotsIncludingEnd =
+                collectSnapshots(earliestId, endExclusiveId, progress);
+        progress.add("snapshots_loaded", snapshotsIncludingEnd.size());
         if (snapshotsIncludingEnd.isEmpty()) {
             return 0;
         }
@@ -216,23 +248,29 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         long beginInclusiveId = snapshotsIncludingEnd.get(0).id();
 
         // tags to create data file skipper
-        List<Snapshot> taggedSnapshots = collectTaggedSnapshots();
+        progress.phase("load-protected-tags");
+        List<Snapshot> taggedSnapshots = collectTaggedSnapshots(progress);
+        progress.add("protected_tags", taggedSnapshots.size());
 
+        progress.phase("delete-unused-data-files");
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
         // id should be (beginInclusiveId, endExclusiveId]
-        cleanDataFiles(snapshotsIncludingEnd, taggedSnapshots, beginInclusiveId);
+        cleanDataFiles(snapshotsIncludingEnd, taggedSnapshots, beginInclusiveId, progress);
 
         // delete changelog files
+        progress.phase("delete-changelog-files");
         if (!expireConfig.isChangelogDecoupled()) {
-            cleanChangelogFiles(snapshotsExcludingEnd);
+            cleanChangelogFiles(snapshotsExcludingEnd, progress);
         }
 
         // data files and changelog files in bucket directories has been deleted
         // then delete changed bucket directories if they are empty
+        progress.phase("clean-empty-directories");
         snapshotDeletion.cleanEmptyDirectories();
 
         // delete manifests and indexFiles
+        progress.phase("build-protected-manifest-set");
         List<Snapshot> skippingSnapshots =
                 findSkippingTags(taggedSnapshots, beginInclusiveId, endExclusiveId);
 
@@ -253,18 +291,22 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             LOG.info("Skip cleaning manifest files due to failed to build skipping set.", e);
         }
         if (skippingSet != null) {
+            progress.phase("delete-unused-manifests-and-indexes");
             snapshotDeletion.executeAll(
-                    collectManifestDeletionTasks(snapshotsExcludingEnd, skippingSet));
+                    collectManifestDeletionTasks(snapshotsExcludingEnd, skippingSet, progress));
         }
 
         // delete snapshot file finally
+        progress.phase("delete-snapshot-metadata");
         for (Snapshot snapshot : snapshotsExcludingEnd) {
             if (expireConfig.isChangelogDecoupled()) {
                 commitChangelog(new Changelog(snapshot));
             }
             snapshotManager.deleteSnapshot(snapshot.id());
+            progress.add("snapshot_delete_calls_completed", 1);
         }
 
+        progress.phase("commit-earliest-hint");
         writeEarliestHint(endExclusiveId);
         long duration = currentTimeMillis.get() - startTime;
         LOG.info(
@@ -278,7 +320,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private void cleanDataFiles(
             List<Snapshot> snapshotsIncludingEnd,
             List<Snapshot> taggedSnapshots,
-            long beginInclusiveId)
+            long beginInclusiveId,
+            MaintenanceProgress progress)
             throws ExecutionException, InterruptedException {
         Map<Long, Snapshot> tagBySnapshotId = new HashMap<>();
         int tagIndex = -1;
@@ -306,13 +349,16 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             }
             batch.add(snapshot);
             if (batch.size() >= snapshotExpireBatchSize) {
-                cleanDataFileBatch(batch, tagBySnapshotId);
+                cleanDataFileBatch(batch, tagBySnapshotId, progress);
             }
         }
-        cleanDataFileBatch(batch, tagBySnapshotId);
+        cleanDataFileBatch(batch, tagBySnapshotId, progress);
     }
 
-    private void cleanDataFileBatch(List<Snapshot> snapshots, Map<Long, Snapshot> tagBySnapshotId)
+    private void cleanDataFileBatch(
+            List<Snapshot> snapshots,
+            Map<Long, Snapshot> tagBySnapshotId,
+            MaintenanceProgress progress)
             throws ExecutionException, InterruptedException {
         if (snapshots.isEmpty()) {
             return;
@@ -322,7 +368,16 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         for (Snapshot snapshot : snapshots) {
             planFutures.add(
                     CompletableFuture.supplyAsync(
-                            () -> snapshotDeletion.planDeletedInDeltaManifest(snapshot),
+                            () -> {
+                                long item =
+                                        progress.startItem(
+                                                "plan-data-files snapshot=" + snapshot.id());
+                                try {
+                                    return snapshotDeletion.planDeletedInDeltaManifest(snapshot);
+                                } finally {
+                                    progress.finishItem(item);
+                                }
+                            },
                             fileExecutor));
         }
         List<DataFileDeletionPlan> plans = getAll(planFutures);
@@ -357,6 +412,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             paths.addAll(snapshotDeletion.dataFilesToDelete(plans.get(i), skipper.get()));
         }
         snapshotDeletion.cleanDataFiles(paths);
+        progress.add("data_snapshots_processed", snapshots.size());
+        progress.add("data_file_delete_candidates", paths.size());
         snapshots.clear();
     }
 
@@ -393,7 +450,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return skippers;
     }
 
-    private void cleanChangelogFiles(List<Snapshot> snapshots)
+    private void cleanChangelogFiles(List<Snapshot> snapshots, MaintenanceProgress progress)
             throws ExecutionException, InterruptedException {
         List<CompletableFuture<List<Path>>> futures = new ArrayList<>();
         int plannedSnapshots = 0;
@@ -404,26 +461,39 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             if (snapshot.changelogManifestList() != null) {
                 futures.add(
                         CompletableFuture.supplyAsync(
-                                () -> snapshotDeletion.planAddedInChangelogManifest(snapshot),
+                                () -> {
+                                    long item =
+                                            progress.startItem(
+                                                    "plan-changelog-files snapshot="
+                                                            + snapshot.id());
+                                    try {
+                                        return snapshotDeletion.planAddedInChangelogManifest(
+                                                snapshot);
+                                    } finally {
+                                        progress.finishItem(item);
+                                    }
+                                },
                                 fileExecutor));
                 if (++plannedSnapshots >= snapshotExpireBatchSize) {
-                    cleanBatch(futures);
+                    cleanBatch(futures, progress);
                     plannedSnapshots = 0;
                 }
             }
         }
-        cleanBatch(futures);
+        cleanBatch(futures, progress);
     }
 
-    private void cleanBatch(List<CompletableFuture<List<Path>>> futures)
+    private void cleanBatch(
+            List<CompletableFuture<List<Path>>> futures, MaintenanceProgress progress)
             throws ExecutionException, InterruptedException {
         Collection<Path> paths = flatten(getAll(futures));
         futures.clear();
         snapshotDeletion.cleanDataFiles(paths);
+        progress.add("changelog_file_delete_candidates", paths.size());
     }
 
     private Collection<Runnable> collectManifestDeletionTasks(
-            List<Snapshot> snapshots, Set<String> skippingSet)
+            List<Snapshot> snapshots, Set<String> skippingSet, MaintenanceProgress progress)
             throws ExecutionException, InterruptedException {
         List<CompletableFuture<List<Runnable>>> futures = new ArrayList<>();
         for (Snapshot snapshot : snapshots) {
@@ -432,10 +502,23 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             }
             futures.add(
                     CompletableFuture.supplyAsync(
-                            () -> snapshotDeletion.planManifestsCleaner(snapshot, skippingSet),
+                            () -> {
+                                long item =
+                                        progress.startItem(
+                                                "plan-manifest-deletion snapshot=" + snapshot.id());
+                                try {
+                                    return snapshotDeletion.planManifestsCleaner(
+                                            snapshot, skippingSet);
+                                } finally {
+                                    progress.finishItem(item);
+                                }
+                            },
                             fileExecutor));
         }
-        return flatten(getAll(futures));
+        Collection<Runnable> tasks = flatten(getAll(futures));
+        progress.add("manifest_snapshots_processed", snapshots.size());
+        progress.add("manifest_delete_tasks", tasks.size());
+        return tasks;
     }
 
     private <T> List<T> getAll(List<CompletableFuture<T>> futures)
@@ -455,7 +538,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return result;
     }
 
-    private List<Snapshot> collectSnapshots(long earliestId, long endExclusiveId)
+    private List<Snapshot> collectSnapshots(
+            long earliestId, long endExclusiveId, MaintenanceProgress progress)
             throws InterruptedException, ExecutionException {
         List<CompletableFuture<Optional<Snapshot>>> futures = new ArrayList<>();
         for (long id = earliestId; id <= endExclusiveId; id++) {
@@ -463,10 +547,14 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             CompletableFuture<Optional<Snapshot>> future =
                     CompletableFuture.supplyAsync(
                             () -> {
+                                long item =
+                                        progress.startItem("load-snapshot snapshot=" + snapshotId);
                                 try {
                                     return Optional.of(snapshotManager.tryGetSnapshot(snapshotId));
                                 } catch (FileNotFoundException ignored) {
                                     return Optional.empty();
+                                } finally {
+                                    progress.finishItem(item);
                                 }
                             },
                             fileExecutor);
@@ -479,7 +567,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return snapshots;
     }
 
-    private List<Snapshot> collectTaggedSnapshots()
+    private List<Snapshot> collectTaggedSnapshots(MaintenanceProgress progress)
             throws InterruptedException, ExecutionException {
         List<Path> tagPaths;
         try {
@@ -493,12 +581,15 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             futures.add(
                     CompletableFuture.supplyAsync(
                             () -> {
+                                long item = progress.startItem("load-tag " + path);
                                 try {
                                     return Optional.of(
                                             Tag.tryFromPath(snapshotManager.fileIO(), path)
                                                     .trimToSnapshot());
                                 } catch (FileNotFoundException ignored) {
                                     return Optional.empty();
+                                } finally {
+                                    progress.finishItem(item);
                                 }
                             },
                             fileExecutor));
@@ -536,6 +627,13 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private String progressContext() {
+        return "operation=expire-snapshots table="
+                + snapshotManager.tablePath()
+                + " branch="
+                + snapshotManager.branch();
     }
 
     @VisibleForTesting

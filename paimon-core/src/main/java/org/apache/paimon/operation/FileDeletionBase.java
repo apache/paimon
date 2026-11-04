@@ -161,7 +161,10 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             for (Integer bucket : entry.getValue()) {
                 toDeleteEmptyDirectory.add(pathFactory.bucketPath(entry.getKey(), bucket));
             }
-            executeAll(toDeleteEmptyDirectory, this::tryDeleteEmptyDirectory);
+            executeAll(
+                    "empty-directory-delete",
+                    toDeleteEmptyDirectory,
+                    this::tryDeleteEmptyDirectory);
 
             List<Path> hierarchicalPaths = pathFactory.getHierarchicalPartitionPath(entry.getKey());
             int hierarchies = hierarchicalPaths.size();
@@ -298,7 +301,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     public void cleanDataFiles(Collection<Path> dataFiles) {
-        executeAll(new LinkedHashSet<>(dataFiles), fileIO::deleteQuietly);
+        executeAll("data-file-delete", new LinkedHashSet<>(dataFiles), fileIO::deleteQuietly);
     }
 
     private void collectUnusedStatisticsManifests(
@@ -675,11 +678,55 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     protected <F> void executeAll(Collection<F> files, Consumer<F> consumer) {
-        List<Runnable> tasks = new ArrayList<>(files.size());
-        for (F f : files) {
-            tasks.add(() -> consumer.accept(f));
+        executeAll("delete-batch", files, consumer);
+    }
+
+    private <F> void executeAll(String phase, Collection<F> files, Consumer<F> consumer) {
+        if (files.isEmpty()) {
+            return;
         }
-        executeAll(tasks);
+
+        try (MaintenanceProgress progress =
+                new MaintenanceProgress(
+                        "operation=file-deletion table=" + pathFactory.root(), phase)) {
+            progress.add("total_calls", files.size());
+            List<CompletableFuture<Void>> futures = new ArrayList<>(files.size());
+            for (F file : files) {
+                progress.add("submitted_calls", 1);
+                progress.add("queued_calls", 1);
+                futures.add(
+                        CompletableFuture.runAsync(
+                                () -> {
+                                    long item = progress.startItem(String.valueOf(file));
+                                    progress.add("queued_calls", -1);
+                                    progress.add("started_calls", 1);
+                                    try {
+                                        consumer.accept(file);
+                                        progress.add("delete_calls_completed", 1);
+                                    } catch (RuntimeException | Error e) {
+                                        progress.add("visible_failures", 1);
+                                        LOG.warn(
+                                                "Deletion call failed for {} in table {}",
+                                                file,
+                                                pathFactory.root(),
+                                                e);
+                                        throw e;
+                                    } finally {
+                                        progress.finishItem(item);
+                                    }
+                                },
+                                fileExecutor));
+            }
+            try {
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
+                progress.complete();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            } catch (ExecutionException e) {
+                throw new RuntimeException(e.getCause());
+            }
+        }
     }
 
     public void executeAll(Collection<Runnable> tasks) {
@@ -687,18 +734,44 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             return;
         }
 
-        List<CompletableFuture<Void>> futures = new ArrayList<>(tasks.size());
-        for (Runnable runnable : tasks) {
-            futures.add(CompletableFuture.runAsync(runnable, fileExecutor));
-        }
+        try (MaintenanceProgress progress =
+                new MaintenanceProgress(
+                        "operation=file-deletion table=" + pathFactory.root(), "delete-batch")) {
+            progress.add("total_calls", tasks.size());
+            List<CompletableFuture<Void>> futures = new ArrayList<>(tasks.size());
+            int taskNumber = 0;
+            for (Runnable runnable : tasks) {
+                String description = "task-" + taskNumber++;
+                progress.add("submitted_calls", 1);
+                progress.add("queued_calls", 1);
+                futures.add(
+                        CompletableFuture.runAsync(
+                                () -> {
+                                    long item = progress.startItem(description);
+                                    progress.add("queued_calls", -1);
+                                    progress.add("started_calls", 1);
+                                    try {
+                                        runnable.run();
+                                        progress.add("delete_calls_completed", 1);
+                                    } catch (RuntimeException | Error e) {
+                                        progress.add("visible_failures", 1);
+                                        throw e;
+                                    } finally {
+                                        progress.finishItem(item);
+                                    }
+                                },
+                                fileExecutor));
+            }
 
-        try {
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        } catch (ExecutionException e) {
-            throw new RuntimeException(e.getCause());
+            try {
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
+                progress.complete();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            } catch (ExecutionException e) {
+                throw new RuntimeException(e.getCause());
+            }
         }
     }
 
