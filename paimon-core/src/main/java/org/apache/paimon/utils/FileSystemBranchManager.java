@@ -254,9 +254,12 @@ public class FileSystemBranchManager implements BranchManager {
         SnapshotManager branchSnapshotManager = snapshotManager.copyWithBranch(branchName);
         SchemaManager branchSchemaManager = schemaManager.copyWithBranch(branchName);
         // List rather than trust the LATEST hint: an interrupted replace by an older version copies
-        // the branch's hint before the snapshots it names.
+        // the branch's hint before the snapshots it names. The branch's snapshots are listed
+        // before its schemas, and only listed snapshots and schemas are published, so commits to
+        // the branch after this point are left for the next fast-forward.
         Map<Long, Long> sizes = snapshotSizes(snapshotManager);
         Map<Long, Long> branchSizes = snapshotSizes(branchSnapshotManager);
+        List<Long> branchSchemaIds = sorted(branchSchemaManager.listAllIds());
         if (sizes.isEmpty() || branchSizes.isEmpty()) {
             return false;
         }
@@ -266,12 +269,12 @@ public class FileSystemBranchManager implements BranchManager {
                 || latestId > branchLatestId
                 || !samePrefix(
                         sizes, branchSizes, branchSnapshotManager, branchEarliestId, latestId)
-                || !sameSchemas(branchSchemaManager)) {
+                || !sameSchemas(branchSchemaManager, branchSchemaIds)) {
             return false;
         }
 
         long latestSchemaId = Collections.max(schemaManager.listAllIds());
-        for (long schemaId : sorted(branchSchemaManager.listAllIds())) {
+        for (long schemaId : branchSchemaIds) {
             if (schemaId > latestSchemaId) {
                 copyAtomically(
                         lock,
@@ -280,7 +283,7 @@ public class FileSystemBranchManager implements BranchManager {
             }
         }
         copySnapshots(branchSnapshotManager, latestId + 1, branchLatestId, lock);
-        copyBranchTags(branchName, lock);
+        copyBranchTags(branchName, branchLatestId, lock);
         commitHint(lock, HintFileUtils.LATEST, branchLatestId);
         return true;
     }
@@ -331,16 +334,15 @@ public class FileSystemBranchManager implements BranchManager {
     }
 
     /** Whether the current branch's schemas are the branch's schemas up to the current latest. */
-    private boolean sameSchemas(SchemaManager branchSchemaManager) throws IOException {
+    private boolean sameSchemas(SchemaManager branchSchemaManager, List<Long> branchSchemaIds)
+            throws IOException {
         Set<Long> ids = new HashSet<>(schemaManager.listAllIds());
         if (ids.isEmpty()) {
             return false;
         }
         long latestId = Collections.max(ids);
         Set<Long> branchIds =
-                branchSchemaManager.listAllIds().stream()
-                        .filter(id -> id <= latestId)
-                        .collect(Collectors.toSet());
+                branchSchemaIds.stream().filter(id -> id <= latestId).collect(Collectors.toSet());
         if (!ids.equals(branchIds)) {
             return false;
         }
@@ -365,6 +367,10 @@ public class FileSystemBranchManager implements BranchManager {
         SnapshotManager branchSnapshotManager = snapshotManager.copyWithBranch(branchName);
         SchemaManager branchSchemaManager = schemaManager.copyWithBranch(branchName);
         long earliestSchemaId = branchSnapshotManager.snapshot(earliestSnapshotId).schemaId();
+        // Fix what is published before copying anything, as the append path does: the branch's
+        // snapshots are listed before its schemas, so every listed snapshot has its schema.
+        long branchLatestId = Collections.max(snapshotSizes(branchSnapshotManager).keySet());
+        List<Long> branchSchemaIds = sorted(branchSchemaManager.listAllIds());
 
         // Delete tags first: a retry decides from snapshots and schemas alone whether to append,
         // which keeps main's tags, so the tags must be gone before either changes.
@@ -388,7 +394,6 @@ public class FileSystemBranchManager implements BranchManager {
             commitHint(lock, HintFileUtils.EARLIEST, earliestSnapshotId);
         }
 
-        List<Long> branchSchemaIds = sorted(branchSchemaManager.listAllIds());
         for (long id : branchSchemaIds) {
             replaceAtomically(
                     lock, branchSchemaManager.toSchemaPath(id), schemaManager.toSchemaPath(id));
@@ -399,10 +404,8 @@ public class FileSystemBranchManager implements BranchManager {
             }
         }
 
-        // List rather than trust the branch's LATEST hint, as the append path does.
-        long branchLatestId = Collections.max(snapshotSizes(branchSnapshotManager).keySet());
         copySnapshots(branchSnapshotManager, earliestSnapshotId, branchLatestId, lock);
-        copyBranchTags(branchName, lock);
+        copyBranchTags(branchName, branchLatestId, lock);
         commitHint(lock, HintFileUtils.LATEST, branchLatestId);
     }
 
@@ -415,17 +418,14 @@ public class FileSystemBranchManager implements BranchManager {
         }
     }
 
-    private void copyBranchTags(String branchName, Lock lock) throws IOException {
-        // Continue fast-forward even without tags.
-        Path branchTagDirectory = tagManager.copyWithBranch(branchName).tagDirectory();
-        if (!fileIO.exists(branchTagDirectory)) {
-            return;
-        }
-        for (FileStatus status : fileIO.listStatus(branchTagDirectory)) {
-            if (!status.isDir()) {
-                Path tag = status.getPath();
-                replaceAtomically(lock, tag, new Path(tagManager.tagDirectory(), tag.getName()));
-            }
+    /** Copies the branch's tags on snapshots up to {@code latestId}. */
+    private void copyBranchTags(String branchName, long latestId, Lock lock) throws IOException {
+        // Only tag files: a writer killed before renaming leaves a temporary file in the directory.
+        for (Path tag :
+                tagManager
+                        .copyWithBranch(branchName)
+                        .tagPaths(path -> Tag.fromPath(fileIO, path).id() <= latestId)) {
+            replaceAtomically(lock, tag, new Path(tagManager.tagDirectory(), tag.getName()));
         }
     }
 

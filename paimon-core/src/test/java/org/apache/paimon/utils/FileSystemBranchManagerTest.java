@@ -425,6 +425,63 @@ class FileSystemBranchManagerTest {
     }
 
     @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFastForwardIgnoresBranchCommitsAfterItStarts(boolean mainDiverged) throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        if (mainDiverged) {
+            commitRow(table, 5);
+        }
+
+        // After the fast-forward has listed the branch, and while it reads the branch's schema 0, a
+        // writer on the branch adds a column, commits a row and tags it. The fast-forward
+        // publishes the branch as it was when listed.
+        AtomicBoolean branchMoved = new AtomicBoolean();
+        io.onOpen(
+                table.switchToBranch("b1").schemaManager().toSchemaPath(0),
+                () -> {
+                    try {
+                        table.switchToBranch("b1")
+                                .schemaManager()
+                                .commitChanges(SchemaChange.addColumn("late", DataTypes.INT()));
+                        commitWideRow(table.switchToBranch("b1"), 6);
+                        table.switchToBranch("b1").createTag("late-tag");
+                        branchMoved.set(true);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+        table.fastForward("b1");
+        assertThat(branchMoved).isTrue();
+
+        FileStoreTable reloaded = FileStoreTableFactory.create(io, tablePath);
+        assertThat(reloaded.snapshotManager().latestSnapshotId()).isEqualTo(4L);
+        assertThat(reloaded.schema().fieldNames()).doesNotContain("late");
+        assertThat(readRows(reloaded))
+                .containsExactlyInAnyOrder("1,10,100", "2,20,200", "3,30,300", "4,40,400");
+        assertThat(reloaded.tagManager().tagExists("late-tag")).isFalse();
+    }
+
+    @Test
+    void testFastForwardSkipsLeftoverFilesInBranchTagDirectory() throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        // What a tag writer killed before its rename leaves behind.
+        Path leftover =
+                new Path(
+                        table.switchToBranch("b1").tagManager().tagDirectory(),
+                        ".tag-broken.0b1c.tmp");
+        io.writeFile(leftover, "{", false);
+
+        table.fastForward("b1");
+
+        assertThat(readRows(FileStoreTableFactory.create(io, tablePath)))
+                .containsExactlyInAnyOrder("1,10,100", "2,20,200", "3,30,300", "4,40,400");
+        assertThat(io.exists(new Path(table.tagManager().tagDirectory(), leftover.getName())))
+                .isFalse();
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"latest-missing", "gap", "truncated-latest", "truncated-middle"})
     void testFastForwardRepairsInterruptedReplace(String state) throws Exception {
         InterceptingFileIO io = new InterceptingFileIO();
