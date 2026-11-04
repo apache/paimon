@@ -64,6 +64,10 @@ public class FakeStoreCatalog implements org.apache.flink.table.catalog.Catalog 
     private static final List<ObjectPath> MISSING_TABLES =
             Collections.synchronizedList(new ArrayList<ObjectPath>());
 
+    private static final Schema DEFAULT_TABLE_SCHEMA =
+            Schema.newBuilder().column("id", DataTypes.INT()).build();
+    private static Schema tableSchema = DEFAULT_TABLE_SCHEMA;
+
     private final String name;
     private final Map<String, String> options;
 
@@ -82,10 +86,15 @@ public class FakeStoreCatalog implements org.apache.flink.table.catalog.Catalog 
     public static void resetGetTableCalls() {
         GET_TABLE_CALLS.clear();
         MISSING_TABLES.clear();
+        tableSchema = DEFAULT_TABLE_SCHEMA;
     }
 
     public static void markTableMissing(ObjectPath tablePath) {
         MISSING_TABLES.add(tablePath);
+    }
+
+    static void useTableSchema(Schema schema) {
+        tableSchema = schema;
     }
 
     public boolean isOpened() {
@@ -184,7 +193,7 @@ public class FakeStoreCatalog implements org.apache.flink.table.catalog.Catalog 
         tableOptions.put("connector", FakeStoreCatalogFactory.IDENTIFIER);
         // CatalogTable#of was removed in Flink 2.x, so build it the way both versions accept
         return CatalogTable.newBuilder()
-                .schema(Schema.newBuilder().column("id", DataTypes.INT()).build())
+                .schema(tableSchema)
                 .comment(SENTINEL_COMMENT)
                 .partitionKeys(Collections.<String>emptyList())
                 .options(tableOptions)

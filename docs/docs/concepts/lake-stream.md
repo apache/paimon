@@ -80,8 +80,10 @@ option without the restart that [disabling the mode](#disable-lake-stream-mode) 
 Disable lake-stream mode first if you need to rename or replace the table.
 
 Column changes are allowed, and they update the Paimon table only. The store's tiering service
-reconciles its own schema afterwards, so the two schemas can differ briefly. Where you can, make
-column changes through the store's catalog to keep the two schemas aligned.
+reconciles its own schema afterwards, so the two schemas can differ briefly. While their physical
+columns, primary or partition keys, or shared immutable table options differ, a write to the table
+is rejected because Paimon cannot safely delegate it to the store. Where you can, make column
+changes through the store's catalog to keep the two schemas aligned.
 
 Dropping a lake-stream table removes it from Paimon and leaves the store's table behind. The store
 owns that table's lifecycle, so remove it through the store if you no longer need it.

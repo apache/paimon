@@ -109,8 +109,12 @@ public class LakeStreamFlussITCase {
     }
 
     private StreamTableEnvironment newTableEnv() {
+        return newTableEnv(RuntimeExecutionMode.BATCH);
+    }
+
+    private StreamTableEnvironment newTableEnv(RuntimeExecutionMode mode) {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment(1);
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
+        env.setRuntimeMode(mode);
         StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
         tEnv.registerCatalog("paimon", catalog);
         tEnv.executeSql(
@@ -131,12 +135,20 @@ public class LakeStreamFlussITCase {
                         "CREATE TABLE %s (id INT) WITH ('lakestream.enabled' = 'true')", name));
     }
 
-    private static List<Integer> query(StreamTableEnvironment tEnv, String sql) throws Exception {
-        List<Integer> result = new ArrayList<>();
+    private static List<Row> queryRows(StreamTableEnvironment tEnv, String sql) throws Exception {
+        List<Row> result = new ArrayList<>();
         try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
             while (it.hasNext()) {
-                result.add((Integer) it.next().getField(0));
+                result.add(it.next());
             }
+        }
+        return result;
+    }
+
+    private static List<Integer> query(StreamTableEnvironment tEnv, String sql) throws Exception {
+        List<Integer> result = new ArrayList<>();
+        for (Row row : queryRows(tEnv, sql)) {
+            result.add((Integer) row.getField(0));
         }
         return result;
     }
@@ -154,6 +166,57 @@ public class LakeStreamFlussITCase {
 
         // the original name still reads Paimon only, which the regular write bypassed
         assertThat(query(tEnv, "SELECT id FROM orders")).isEmpty();
+    }
+
+    @Test
+    public void testWriteIsRejectedWhileTheStoreSchemaHasNotCaughtUp() throws Exception {
+        StreamTableEnvironment tEnv = newTableEnv();
+        // b is a STRING so the aligned write also proves a non-numeric type passes the check
+        tEnv.executeSql(
+                String.format("CREATE TABLE fluss_store.%s.drift (a INT, b STRING)", DATABASE));
+        tEnv.executeSql(
+                "CREATE TABLE drift (a INT, b STRING) WITH ('lakestream.enabled' = 'true')");
+
+        // the aligned write lands in Fluss as a=1, b='x'
+        tEnv.executeSql("INSERT INTO drift SELECT * FROM (VALUES (1, 'x')) AS t(a, b)").await();
+        assertThat(queryRows(tEnv, "SELECT a, b FROM drift$rt " + BOUNDED_SCAN))
+                .containsExactly(Row.of(1, "x"));
+
+        // Paimon reorders its columns; Fluss has not reconciled the layout yet
+        tEnv.executeSql("ALTER TABLE drift MODIFY b STRING FIRST");
+
+        // the rows are planned as (b, a) but Fluss would store them positionally as (a, b),
+        // so the write is refused rather than stored under the wrong columns
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "INSERT INTO drift SELECT * FROM (VALUES ('4', 3)) AS t(b, a)")
+                                        .await())
+                .hasStackTraceContaining("have not caught up");
+
+        // the refused write reached neither side
+        assertThat(queryRows(tEnv, "SELECT a, b FROM drift$rt " + BOUNDED_SCAN))
+                .containsExactly(Row.of(1, "x"));
+    }
+
+    @Test
+    public void testWriteIsRejectedWhenTheStorePrimaryKeyDiffers() throws Exception {
+        StreamTableEnvironment tEnv = newTableEnv(RuntimeExecutionMode.STREAMING);
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE fluss_store.%s.pk_drift "
+                                + "(id INT PRIMARY KEY NOT ENFORCED)",
+                        DATABASE));
+        tEnv.executeSql("CREATE TABLE pk_drift (id INT) WITH ('lakestream.enabled' = 'true')");
+
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "INSERT INTO pk_drift SELECT * FROM (VALUES (1)) AS t(id)")
+                                        .await())
+                .hasStackTraceContaining("have not caught up");
+
+        assertThat(query(tEnv, "SELECT id FROM pk_drift$rt " + BOUNDED_SCAN)).isEmpty();
     }
 
     @Test

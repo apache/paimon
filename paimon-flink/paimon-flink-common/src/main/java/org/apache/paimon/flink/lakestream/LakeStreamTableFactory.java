@@ -26,8 +26,11 @@ import org.apache.paimon.flink.AbstractFlinkTableFactory;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.FlinkFileIOLoader;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
@@ -49,6 +52,8 @@ import org.apache.flink.table.factories.Factory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
@@ -141,6 +146,7 @@ public class LakeStreamTableFactory implements DynamicTableSourceFactory, Dynami
         // require provider-specific table options (PIP-39 L289)
         CatalogBaseTable storeTable =
                 catalog.requireLakeStreamStoreTable(identifier.toObjectPath());
+        checkSchemaAlignment(table, storeTable, identifier);
         DynamicTableSinkFactory sinkFactory =
                 storeFactory(
                         storeCatalog, DynamicTableSinkFactory.class, "create a sink for writes");
@@ -148,6 +154,22 @@ public class LakeStreamTableFactory implements DynamicTableSourceFactory, Dynami
                 sinkFactory.createDynamicTableSink(
                         delegatedContext(context, identifier, storeTable)),
                 identifier);
+    }
+
+    /** Rejects a write while the store's schema, keys, or shared immutable options differ. */
+    private static void checkSchemaAlignment(
+            Table paimonTable, CatalogBaseTable storeTable, ObjectIdentifier identifier) {
+        Schema paimonSchema = LakeStreamUtils.toPaimonSchema(paimonTable);
+        Schema storeSchema = LakeStreamUtils.toPaimonSchema(storeTable);
+        if (!LakeStreamUtils.isCompatible(paimonSchema, storeSchema)) {
+            throw new ValidationException(
+                    String.format(
+                            "Cannot write to lake-stream table '%s': the Lakestream Store's "
+                                    + "schema and table options [%s] have not caught up with "
+                                    + "Paimon's [%s]. Wait for the store to reconcile its schema, "
+                                    + "or align the two through the store's catalog, before writing.",
+                            identifier.asSummaryString(), storeSchema, paimonSchema));
+        }
     }
 
     /** A format table has no Paimon history for the store to tier into, so it cannot be one. */
@@ -194,14 +216,21 @@ public class LakeStreamTableFactory implements DynamicTableSourceFactory, Dynami
         if (path == null) {
             return options.get(CoreOptions.LAKE_STREAM_ENABLED);
         }
-        // only the location goes in: the factory merges whatever it is given over the persisted
-        // schema, so passing the connector options would restate the very flag being read
+        // FileIO needs the mapping's storage options, but the flag must come from the persisted
+        // schema: only the location is merged over the table that is loaded
+        FileIO fileIO;
+        try {
+            fileIO =
+                    FileIO.get(
+                            new Path(path),
+                            CatalogContext.create(options, new FlinkFileIOLoader()));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
         Options location = new Options();
         location.set(CoreOptions.PATH, path);
         location.set(CoreOptions.BRANCH, options.get(CoreOptions.BRANCH));
-        Table table =
-                FileStoreTableFactory.create(
-                        CatalogContext.create(location, new FlinkFileIOLoader()));
+        Table table = FileStoreTableFactory.create(fileIO, location);
         return Options.fromMap(table.options()).get(CoreOptions.LAKE_STREAM_ENABLED);
     }
 

@@ -28,6 +28,7 @@ import org.apache.paimon.flink.FlinkCatalogOptions;
 import org.apache.paimon.flink.FlinkTableFactory;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
+import org.apache.paimon.fs.IsolatedDirectoryFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -65,6 +66,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -92,6 +94,11 @@ public class LakeStreamTableFactoryTest {
     @BeforeEach
     public void beforeEach() {
         FakeStoreCatalogFactory.reset();
+        FakeStoreCatalog.useTableSchema(
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT().notNull())
+                        .primaryKey("id")
+                        .build());
     }
 
     // ------------------------------------------------------------------------
@@ -151,6 +158,15 @@ public class LakeStreamTableFactoryTest {
             ObjectPath path,
             boolean lakeStreamEnabled)
             throws Exception {
+        createTable(catalog, path, lakeStreamEnabled, idSchema());
+    }
+
+    private void createTable(
+            org.apache.flink.table.catalog.Catalog catalog,
+            ObjectPath path,
+            boolean lakeStreamEnabled,
+            ResolvedSchema resolvedSchema)
+            throws Exception {
         catalog.createDatabase(
                 path.getDatabaseName(), new CatalogDatabaseImpl(new HashMap<>(), null), true);
         Map<String, String> options = new HashMap<>();
@@ -158,7 +174,6 @@ public class LakeStreamTableFactoryTest {
         if (lakeStreamEnabled) {
             options.put(CoreOptions.LAKE_STREAM_ENABLED.key(), "true");
         }
-        ResolvedSchema resolvedSchema = idSchema();
         CatalogTable table =
                 new ResolvedCatalogTable(
                         CatalogTable.newBuilder()
@@ -171,6 +186,22 @@ public class LakeStreamTableFactoryTest {
                                 .build(),
                         resolvedSchema);
         catalog.createTable(path, table, false);
+    }
+
+    private static ResolvedSchema twoColumnSchema() {
+        return new ResolvedSchema(
+                Arrays.asList(
+                        Column.physical("id", DataTypes.INT().notNull()),
+                        Column.physical("extra", DataTypes.INT().notNull())),
+                Collections.<WatermarkSpec>emptyList(),
+                UniqueConstraint.primaryKey("PK_id", Collections.singletonList("id")));
+    }
+
+    private static ResolvedSchema bigIntIdSchema() {
+        return new ResolvedSchema(
+                Collections.singletonList(Column.physical("id", DataTypes.BIGINT().notNull())),
+                Collections.<WatermarkSpec>emptyList(),
+                UniqueConstraint.primaryKey("PK_id", Collections.singletonList("id")));
     }
 
     private String tableLocation(FlinkCatalog catalog, ObjectPath path) throws Exception {
@@ -667,6 +698,62 @@ public class LakeStreamTableFactoryTest {
         FlinkTableFactory factory = new FlinkTableFactory();
 
         DynamicTableSink sink = factory.createDynamicTableSink(context(id("t2"), pathOnly));
+
+        assertThat(sink).isInstanceOf(FlinkTableSink.class);
+        assertThat(FakeStoreTableFactory.sinkContexts()).isEmpty();
+    }
+
+    @Test
+    public void testWriteIsRejectedWhileTheStoreSchemaHasNotCaughtUp() throws Exception {
+        FlinkCatalog catalog = newCatalog(null);
+        // Paimon carries two columns; the fake store still reports the single original one
+        ResolvedSchema schema = twoColumnSchema();
+        createTable(catalog, T1, true, schema);
+        ResolvedCatalogTable paimonTable = resolved(catalog.getTable(T1), schema);
+        FlinkTableFactory factory = (FlinkTableFactory) catalog.getFactory().get();
+
+        // a positional write in this state would store values under the wrong columns
+        assertThatThrownBy(() -> factory.createDynamicTableSink(context(id("t1"), paimonTable)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("have not caught up")
+                .hasMessageContaining("id");
+        assertThat(FakeStoreTableFactory.sinkContexts()).isEmpty();
+        catalog.close();
+    }
+
+    @Test
+    public void testWriteIsRejectedWhenTheStoreColumnTypeDiffers() throws Exception {
+        FlinkCatalog catalog = newCatalog(null);
+        // same name and count, so only the type can tell the two columns apart
+        ResolvedSchema schema = bigIntIdSchema();
+        createTable(catalog, T1, true, schema);
+        ResolvedCatalogTable paimonTable = resolved(catalog.getTable(T1), schema);
+        FlinkTableFactory factory = (FlinkTableFactory) catalog.getFactory().get();
+
+        assertThatThrownBy(() -> factory.createDynamicTableSink(context(id("t1"), paimonTable)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("`id` INT")
+                .hasMessageContaining("`id` BIGINT");
+        assertThat(FakeStoreTableFactory.sinkContexts()).isEmpty();
+        catalog.close();
+    }
+
+    @Test
+    public void testConnectorMappingKeepsItsFileIOOptionsWhileReadingThePersistedFlag()
+            throws Exception {
+        FlinkCatalog catalog = newCatalog(null);
+        createTable(catalog, T2, false);
+        String location = tableLocation(catalog, T2);
+        catalog.close();
+
+        // the mapping sits on a storage plugin that needs its connection options: without them
+        // the schema cannot even be read, and the persisted flag is read before the sink is built
+        Map<String, String> extra = new HashMap<>();
+        extra.put(IsolatedDirectoryFileIO.ROOT_DIR, "isolated://" + tempDir);
+        ResolvedCatalogTable mapping = pathOnlyMapping("isolated://" + location, extra);
+        FlinkTableFactory factory = new FlinkTableFactory();
+
+        DynamicTableSink sink = factory.createDynamicTableSink(context(id("t2"), mapping));
 
         assertThat(sink).isInstanceOf(FlinkTableSink.class);
         assertThat(FakeStoreTableFactory.sinkContexts()).isEmpty();

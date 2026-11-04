@@ -18,14 +18,26 @@
 
 package org.apache.paimon.flink.lakestream;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
+import org.apache.paimon.flink.LogicalTypeConversion;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataField;
 
+import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.catalog.CatalogBaseTable;
+import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.types.AbstractDataType;
+import org.apache.flink.table.types.DataType;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /** Utilities for lake-stream mode. */
 public class LakeStreamUtils {
@@ -73,5 +85,105 @@ public class LakeStreamUtils {
             }
         }
         return result;
+    }
+
+    /** The persisted Paimon schema used for lake-stream compatibility checks. */
+    public static Schema toPaimonSchema(Table table) {
+        return new Schema(
+                table.rowType().getFields(),
+                table.partitionKeys(),
+                table.primaryKeys(),
+                table.options(),
+                table.comment().orElse(null));
+    }
+
+    /** A store table expressed as a Paimon schema with only shared table options retained. */
+    public static Schema toPaimonSchema(CatalogBaseTable table) {
+        if (!(table instanceof CatalogTable)) {
+            throw new ValidationException(
+                    "Expected a table from the Lakestream Store, but got "
+                            + table.getClass().getName());
+        }
+        org.apache.flink.table.api.Schema storeSchema = table.getUnresolvedSchema();
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .partitionKeys(((CatalogTable) table).getPartitionKeys())
+                        .options(sharedPaimonOptions(table.getOptions()))
+                        .comment(table.getComment());
+        for (org.apache.flink.table.api.Schema.UnresolvedColumn column : storeSchema.getColumns()) {
+            if (column instanceof org.apache.flink.table.api.Schema.UnresolvedPhysicalColumn) {
+                builder.column(
+                        column.getName(),
+                        toPaimonType(
+                                ((org.apache.flink.table.api.Schema.UnresolvedPhysicalColumn)
+                                                column)
+                                        .getDataType()),
+                        column.getComment().orElse(null));
+            }
+        }
+        storeSchema
+                .getPrimaryKey()
+                .ifPresent(primaryKey -> builder.primaryKey(primaryKey.getColumnNames()));
+        return builder.build();
+    }
+
+    /** Whether physical fields, keys and shared immutable options match. */
+    public static boolean isCompatible(Schema paimonSchema, Schema storeSchema) {
+        return equalFields(paimonSchema.fields(), storeSchema.fields())
+                && paimonSchema.partitionKeys().equals(storeSchema.partitionKeys())
+                && paimonSchema.primaryKeys().equals(storeSchema.primaryKeys())
+                && equalSelectedOptions(paimonSchema.options(), storeSchema.options());
+    }
+
+    private static org.apache.paimon.types.DataType toPaimonType(AbstractDataType<?> type) {
+        return LogicalTypeConversion.toDataType(((DataType) type).getLogicalType());
+    }
+
+    private static Map<String, String> sharedPaimonOptions(Map<String, String> options) {
+        Map<String, String> result = new HashMap<>();
+        for (Map.Entry<String, String> entry : options.entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith("paimon.")) {
+                key = key.substring("paimon.".length());
+            }
+            if (isComparedOption(key)) {
+                result.put(key, entry.getValue());
+            }
+        }
+        return result;
+    }
+
+    private static boolean equalFields(List<DataField> paimonFields, List<DataField> storeFields) {
+        if (paimonFields.size() != storeFields.size()) {
+            return false;
+        }
+        for (int i = 0; i < paimonFields.size(); i++) {
+            DataField paimonField = paimonFields.get(i);
+            DataField storeField = storeFields.get(i);
+            if (!paimonField.name().equals(storeField.name())
+                    || !paimonField.type().equalsIgnoreFieldId(storeField.type())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean equalSelectedOptions(
+            Map<String, String> paimonOptions, Map<String, String> storeOptions) {
+        for (String option : CoreOptions.IMMUTABLE_OPTIONS) {
+            if (isComparedOption(option)
+                    && !Objects.equals(paimonOptions.get(option), storeOptions.get(option))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isComparedOption(String key) {
+        return CoreOptions.IMMUTABLE_OPTIONS.contains(key)
+                && !CoreOptions.BUCKET_KEY.key().equals(key)
+                && !CoreOptions.BUCKET_FUNCTION_TYPE.key().equals(key)
+                && !CoreOptions.PRIMARY_KEY.key().equals(key)
+                && !CoreOptions.PARTITION.key().equals(key);
     }
 }
