@@ -938,6 +938,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         return identity == null || identity.equals(commitIdentity(snapshot));
     }
 
+    /** Builds the metadata on top of the base file, then exposes it or falls back to a rebuild. */
     private void createMetadataWithBase(
             FileChangesCollector fileChangesCollector,
             List<IndexManifestEntry> indexFiles,
@@ -946,8 +947,112 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             int lastColumnIdFloor,
             long nextRowIdFloor)
             throws IOException {
-        long snapshotId = snapshot.id();
         IcebergMetadata baseMetadata = IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
+        BuildResult result =
+                buildMetadataWithBase(
+                        fileChangesCollector,
+                        indexFiles,
+                        snapshot,
+                        baseMetadata,
+                        lastColumnIdFloor,
+                        nextRowIdFloor,
+                        true);
+        switch (result.kind) {
+            case STALE_SOURCE:
+                return;
+            case NEEDS_REBUILD:
+                createMetadataWithoutBase(
+                        snapshot.id(),
+                        result.inheritUuid,
+                        result.lastColumnIdFloor,
+                        result.nextRowIdFloor);
+                return;
+            case COMPLETED:
+                exposeMetadataWithBase(result, snapshot, baseMetadata, baseMetadataPath);
+                return;
+            default:
+                throw new IllegalStateException("Unknown build result " + result.kind);
+        }
+    }
+
+    /** What {@link #buildMetadataWithBase} decided. */
+    private enum BuildKind {
+        /** The metadata was built, and its manifests and manifest list are written. */
+        COMPLETED,
+        /** The base cannot be extended, the caller has to rebuild from the table. */
+        NEEDS_REBUILD,
+        /** The snapshot was replaced by a rollback or recreation, nothing is to be written. */
+        STALE_SOURCE
+    }
+
+    private static final class BuildResult {
+
+        private final BuildKind kind;
+        @Nullable private final IcebergMetadata metadata;
+        @Nullable private final List<IcebergSnapshot> toExpireExceptLast;
+        @Nullable private final String inheritUuid;
+        private final int lastColumnIdFloor;
+        private final long nextRowIdFloor;
+        @Nullable private final String reason;
+
+        private BuildResult(
+                BuildKind kind,
+                @Nullable IcebergMetadata metadata,
+                @Nullable List<IcebergSnapshot> toExpireExceptLast,
+                @Nullable String inheritUuid,
+                int lastColumnIdFloor,
+                long nextRowIdFloor,
+                @Nullable String reason) {
+            this.kind = kind;
+            this.metadata = metadata;
+            this.toExpireExceptLast = toExpireExceptLast;
+            this.inheritUuid = inheritUuid;
+            this.lastColumnIdFloor = lastColumnIdFloor;
+            this.nextRowIdFloor = nextRowIdFloor;
+            this.reason = reason;
+        }
+
+        private static BuildResult completed(
+                IcebergMetadata metadata, List<IcebergSnapshot> toExpireExceptLast) {
+            return new BuildResult(
+                    BuildKind.COMPLETED, metadata, toExpireExceptLast, null, 0, 0L, null);
+        }
+
+        private static BuildResult needsRebuild(
+                @Nullable String inheritUuid,
+                int lastColumnIdFloor,
+                long nextRowIdFloor,
+                String reason) {
+            return new BuildResult(
+                    BuildKind.NEEDS_REBUILD,
+                    null,
+                    null,
+                    inheritUuid,
+                    lastColumnIdFloor,
+                    nextRowIdFloor,
+                    reason);
+        }
+
+        private static BuildResult staleSource() {
+            return new BuildResult(BuildKind.STALE_SOURCE, null, null, null, 0, 0L, null);
+        }
+    }
+
+    /**
+     * Builds the metadata of {@code snapshot} on top of {@code baseMetadata} and writes its
+     * manifests and manifest list. It never writes a metadata file, never publishes, never cleans
+     * up and never rebuilds: whatever it cannot extend is reported in the result.
+     */
+    private BuildResult buildMetadataWithBase(
+            FileChangesCollector fileChangesCollector,
+            List<IndexManifestEntry> indexFiles,
+            Snapshot snapshot,
+            IcebergMetadata baseMetadata,
+            int lastColumnIdFloor,
+            long nextRowIdFloor,
+            boolean compactManifests)
+            throws IOException {
+        long snapshotId = snapshot.id();
         // row ids handed out by the base or by abandoned metadata must never be reused
         long rowIdFloor =
                 Math.max(
@@ -961,36 +1066,33 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             Long latestNow = table.snapshotManager().latestSnapshotId();
             if (latestNow == null || latestNow != snapshotId) {
                 // a delayed replay on the abandoned timeline: leave publication to the head
-                return;
+                return BuildResult.staleSource();
             }
             // keep the stale base's identity so external catalogs do not recreate the table
-            createMetadataWithoutBase(
-                    snapshotId,
+            return BuildResult.needsRebuild(
                     baseMetadata.tableUuid(),
                     Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
-                    rowIdFloor);
-            return;
+                    rowIdFloor,
+                    "the base is on an abandoned timeline");
         }
 
         if (!isSameFormatVersion(baseMetadata.formatVersion())) {
             // we need to recreate iceberg metadata if format version changed
-            createMetadataWithoutBase(
-                    snapshot.id(),
+            return BuildResult.needsRebuild(
                     null,
                     Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
-                    rowIdFloor);
-            return;
+                    rowIdFloor,
+                    "the format version changed");
         }
 
         if (formatVersion == IcebergMetadata.FORMAT_VERSION_V3
                 && baseMetadata.nextRowId() == null) {
             // v3 base metadata written before Paimon emitted row lineage; recreate to self-heal
-            createMetadataWithoutBase(
-                    snapshot.id(),
+            return BuildResult.needsRebuild(
                     baseMetadata.tableUuid(),
                     Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
-                    rowIdFloor);
-            return;
+                    rowIdFloor,
+                    "the base has no row lineage");
         }
 
         // decide the schema story before any manifest is written
@@ -1010,12 +1112,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             : schemaCache.get(known.schemaId());
             if (!known.equals(current)) {
                 // a re-evolution reused this id with different fields; rebuild from scratch
-                createMetadataWithoutBase(
-                        snapshot.id(),
+                return BuildResult.needsRebuild(
                         baseMetadata.tableUuid(),
                         Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
-                        rowIdFloor);
-                return;
+                        rowIdFloor,
+                        "a schema id was reused with different fields");
             }
         }
         if (schemaId < baseMetadata.currentSchemaId()) {
@@ -1029,12 +1130,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             && baseCurrent.schemaId()
                                     == (int) snapshotManager.snapshot(snapshotId - 1).schemaId();
             if (!pointerRollbackOnly) {
-                createMetadataWithoutBase(
-                        snapshot.id(),
+                return BuildResult.needsRebuild(
                         baseMetadata.tableUuid(),
                         Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
-                        rowIdFloor);
-                return;
+                        rowIdFloor,
+                        "the schema pointer moved back");
             }
         }
 
@@ -1103,7 +1203,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
 
         // compact data manifest file if needed
-        newDataManifestFileMetas = compactMetadataIfNeeded(newDataManifestFileMetas, snapshotId);
+        if (compactManifests) {
+            newDataManifestFileMetas =
+                    compactMetadataIfNeeded(newDataManifestFileMetas, snapshotId);
+        }
 
         SummaryMetrics metrics = new SummaryMetrics();
         metrics.addedDataFiles = addedFiles.size();
@@ -1253,6 +1356,19 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         (int) snapshotId,
                         nextRowId,
                         refs);
+        return BuildResult.completed(metadata, toExpireExceptLast);
+    }
+
+    /** Writes the built metadata, and publishes it and cleans up when it is the head. */
+    private void exposeMetadataWithBase(
+            BuildResult result,
+            Snapshot snapshot,
+            IcebergMetadata baseMetadata,
+            Path baseMetadataPath)
+            throws IOException {
+        long snapshotId = snapshot.id();
+        IcebergMetadata metadata = result.metadata;
+        List<IcebergSnapshot> toExpireExceptLast = result.toExpireExceptLast;
 
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);
         // atomic-first: see the no-base path
