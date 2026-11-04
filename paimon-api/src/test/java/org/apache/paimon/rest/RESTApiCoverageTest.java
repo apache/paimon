@@ -29,6 +29,7 @@ import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.management.RowFilter;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.requests.CreateModelRequest;
 import org.apache.paimon.view.SemanticViewDefinition;
 
 import com.sun.net.httpserver.HttpServer;
@@ -239,6 +240,14 @@ class RESTApiCoverageTest {
         arguments.put(List.class, Collections.emptyList());
         arguments.put(Map.class, Collections.emptyMap());
         arguments.put(Identifier.class, Identifier.create("db", "t"));
+        Map<String, Object> modelField = new HashMap<>();
+        modelField.put("dataType", "STRING");
+        Map<String, Map<String, Object>> modelInputs = new HashMap<>();
+        modelInputs.put("input", modelField);
+        arguments.put(
+                CreateModelRequest.class,
+                new CreateModelRequest(
+                        "t", "provider", "model", modelInputs, null, Collections.emptyMap()));
         arguments.put(
                 Function.class, new FunctionImpl(Identifier.create("db", "f"), new HashMap<>()));
         arguments.put(SemanticViewDefinition.class, new SemanticViewDefinition("x1", "x1"));

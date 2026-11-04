@@ -80,7 +80,9 @@ class ModelTest(unittest.TestCase):
         self.assertNotIn("data_type", body["inputs"]["video"])
         self.assertNotIn("outputs", body)
 
-        response = JSON.from_json(JSON.to_json(_response()), GetModelResponse)
+        response_body = json.loads(JSON.to_json(_response()))
+        self.assertNotIn("outputs", response_body)
+        response = JSON.from_json(json.dumps(response_body), GetModelResponse)
         self.assertEqual("BLOB", response.inputs["video"]["data_type"])
         self.assertEqual("quality.qwen_vl", response.to_model("quality").full_name)
 
@@ -90,6 +92,10 @@ class ModelTest(unittest.TestCase):
         )
         self.assertEqual("next", listed.next_page_token)
         self.assertEqual("qwen_vl", listed.models[0].name)
+
+        empty = JSON.from_json("{}", ListModelsResponse)
+        self.assertEqual([], empty.data())
+        self.assertEqual([], json.loads(JSON.to_json(empty))["models"])
 
     def test_validation(self):
         invalid = [

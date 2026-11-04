@@ -95,22 +95,28 @@ class GetModelResponse(RESTResponse):
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "name": self.name,
             "provider": self.provider,
             "model": self.model,
             "inputs": model_fields_to_wire(self.inputs),
-            "outputs": model_fields_to_wire(self.outputs),
             "properties": dict(self.properties),
         }
+        if self.outputs is not None:
+            result["outputs"] = model_fields_to_wire(self.outputs)
+        return result
 
 
 @dataclass
 class ListModelsResponse(PagedResponse[GetModelResponse]):
-    models: Optional[List[GetModelResponse]] = None
+    models: List[GetModelResponse] = field(default_factory=list)
     next_page_token: Optional[str] = None
 
-    def data(self) -> Optional[List[GetModelResponse]]:
+    def __post_init__(self):
+        if self.models is None:
+            self.models = []
+
+    def data(self) -> List[GetModelResponse]:
         return self.models
 
     def get_next_page_token(self) -> Optional[str]:
@@ -118,19 +124,14 @@ class ListModelsResponse(PagedResponse[GetModelResponse]):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ListModelsResponse":
-        models = data.get("models")
-        if models is not None:
-            models = [
-                GetModelResponse.from_dict(model) if isinstance(model, dict) else model
-                for model in models
-            ]
+        models = [
+            GetModelResponse.from_dict(model) if isinstance(model, dict) else model
+            for model in (data.get("models") or [])
+        ]
         return cls(models=models, next_page_token=data.get("nextPageToken"))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "models": (
-                [model.to_dict() for model in self.models]
-                if self.models is not None else None
-            ),
+            "models": [model.to_dict() for model in self.models],
             "nextPageToken": self.next_page_token,
         }

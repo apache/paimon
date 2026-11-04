@@ -1,0 +1,79 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.rest;
+
+import org.apache.paimon.rest.requests.CreateModelRequest;
+import org.apache.paimon.rest.responses.GetModelResponse;
+import org.apache.paimon.rest.responses.ListModelsResponse;
+
+import org.junit.jupiter.api.Test;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Wire-format tests for model metadata requests and responses. */
+class RESTApiModelTest {
+
+    @Test
+    void testOptionalOutputsAreOmitted() throws Exception {
+        Map<String, Map<String, Object>> inputs = inputs();
+        CreateModelRequest request =
+                new CreateModelRequest(
+                        "qwen_vl",
+                        "bailian",
+                        "qwen3.8-flash",
+                        inputs,
+                        null,
+                        Collections.emptyMap());
+        assertThat(RESTApi.fromJson(RESTApi.toJson(request), Map.class))
+                .containsOnlyKeys("name", "provider", "model", "inputs", "properties");
+
+        GetModelResponse response =
+                new GetModelResponse(
+                        "qwen_vl",
+                        "bailian",
+                        "qwen3.8-flash",
+                        inputs,
+                        null,
+                        Collections.emptyMap());
+        assertThat(RESTApi.fromJson(RESTApi.toJson(response), Map.class))
+                .containsOnlyKeys("name", "provider", "model", "inputs", "properties");
+    }
+
+    @Test
+    void testMissingModelsBecomeAnEmptyArray() throws Exception {
+        ListModelsResponse response = RESTApi.fromJson("{}", ListModelsResponse.class);
+        assertThat(response.data()).isEmpty();
+        assertThat(RESTApi.fromJson(RESTApi.toJson(response), Map.class))
+                .containsOnlyKeys("models")
+                .containsEntry("models", Collections.emptyList());
+    }
+
+    private static Map<String, Map<String, Object>> inputs() {
+        Map<String, Object> field = new HashMap<>();
+        field.put("dataType", "BLOB");
+        field.put("modality", "video");
+        Map<String, Map<String, Object>> inputs = new HashMap<>();
+        inputs.put("video", field);
+        return inputs;
+    }
+}

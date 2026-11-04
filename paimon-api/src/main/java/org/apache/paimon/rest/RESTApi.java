@@ -50,6 +50,7 @@ import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
+import org.apache.paimon.rest.requests.CreateModelRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
@@ -84,6 +85,7 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetLabelResponse;
+import org.apache.paimon.rest.responses.GetModelResponse;
 import org.apache.paimon.rest.responses.GetSchemaResponse;
 import org.apache.paimon.rest.responses.GetSemanticViewResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
@@ -99,6 +101,7 @@ import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListLabelsResponse;
+import org.apache.paimon.rest.responses.ListModelsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
@@ -1757,6 +1760,44 @@ public class RESTApi {
         checkFunctionName(identifier.getObjectName());
         client.delete(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
+                restAuthFunction);
+    }
+
+    /** List model metadata for a database. */
+    public List<GetModelResponse> listModels(String databaseName) {
+        return listDataFromPageApi(
+                queryParams ->
+                        client.get(
+                                resourcePaths.models(databaseName),
+                                queryParams,
+                                ListModelsResponse.class,
+                                restAuthFunction));
+    }
+
+    /** Get model metadata by identifier. */
+    public GetModelResponse getModel(Identifier identifier) {
+        return client.get(
+                resourcePaths.model(identifier.getDatabaseName(), identifier.getObjectName()),
+                GetModelResponse.class,
+                restAuthFunction);
+    }
+
+    /** Create model metadata and return its persisted representation. */
+    public GetModelResponse createModel(Identifier identifier, CreateModelRequest request) {
+        checkArgument(
+                identifier.getObjectName().equals(request.getName()),
+                "Model request name must match the identifier");
+        return client.post(
+                resourcePaths.models(identifier.getDatabaseName()),
+                request,
+                GetModelResponse.class,
+                restAuthFunction);
+    }
+
+    /** Drop model metadata by identifier. */
+    public void dropModel(Identifier identifier) {
+        client.delete(
+                resourcePaths.model(identifier.getDatabaseName(), identifier.getObjectName()),
                 restAuthFunction);
     }
 

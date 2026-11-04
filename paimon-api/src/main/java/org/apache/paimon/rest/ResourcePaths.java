@@ -46,6 +46,7 @@ public class ResourcePaths {
     protected static final String ROLLBACK = "rollback";
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
+    protected static final String MODELS = "models";
     protected static final String FUNCTION_DETAILS = "function-details";
     protected static final String PERMISSIONS = "permissions";
     protected static final String POLICIES = "policies";
@@ -147,6 +148,16 @@ public class ResourcePaths {
 
     public String database(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName));
+    }
+
+    public String models(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), MODELS);
+    }
+
+    public String model(String databaseName, String modelName) {
+        checkArgument(
+                modelName != null && !modelName.trim().isEmpty(), "modelName must not be blank");
+        return SLASH.join(models(databaseName), encodeString(modelName));
     }
 
     public String tables(String databaseName) {
