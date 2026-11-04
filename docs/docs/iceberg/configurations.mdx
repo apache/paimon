@@ -40,6 +40,7 @@ Iceberg catalog properties are configured separately.
 | Publish deletion vectors | `metadata.iceberg.format-version` plus `deletion-vectors.*`; [primary key tables](./primary-key-table.mdx#deletion-vector-support) |
 | Adjust manifest compatibility | `metadata.iceberg.manifest-compression`, `metadata.iceberg.manifest-legacy-version`; [query engines](./ecosystem.mdx) |
 | Control metadata cleanup | `metadata.iceberg.delete-after-commit.enabled`, `metadata.iceberg.previous-versions-max` |
+| Recover missing metadata versions | `metadata.iceberg.missing-base-strategy`, `metadata.iceberg.replay.*`; [replaying missing metadata](#replaying-missing-metadata) |
 
 Metadata retention options control generated metadata files, not Paimon data-file retention.
 Use Paimon's [snapshot management](../maintenance/manage-snapshots.mdx) and
@@ -48,6 +49,33 @@ Use Paimon's [snapshot management](../maintenance/manage-snapshots.mdx) and
 ## Iceberg Table Options
 
 <ConfigTable html={icebergConfigurationHtml} />
+
+## Replaying Missing Metadata
+
+Paimon builds the Iceberg metadata of a snapshot on top of the metadata of the snapshot before it.
+When that metadata file is missing, for example because publication was off for a while,
+`metadata.iceberg.missing-base-strategy = rebuild` (the default) rebuilds the metadata from every
+data file of the table. A rebuild keeps all of those files in memory, so it can run out of memory on
+a large table.
+
+With `metadata.iceberg.missing-base-strategy = replay`, Paimon instead looks for the newest older
+metadata version that was built from the matching Paimon snapshot, and replays the snapshots after
+it one by one from their delta manifests.
+
+- Replay applies to tables without primary keys, deletion vectors and Data Evolution, with Iceberg
+  format version 2 and the `table-location`, `hive-catalog` or `hadoop-catalog` storage. Every
+  other table keeps the rebuild.
+- Replay copies the manifest lists and manifests of the retained Iceberg history, so the result
+  does not depend on files that another cleanup may delete. Until retention drops them, the copies
+  add to the size of the metadata. The original files stay under the usual retention cleanup.
+- When replay cannot be used, Paimon rebuilds. That happens when no valid base is within
+  `metadata.iceberg.replay.max-snapshots`, when one of the `metadata.iceberg.replay.*` limits is
+  exceeded, when a file of the base is missing, or when the replayed row count differs from
+  Paimon's. A snapshot that is no longer the latest one is not rebuilt after a failed replay.
+- The limits bound the amount of work. They do not bound the heap that a step uses or how long
+  one step takes.
+- Publication to the version hint and to the external catalog is unchanged, so replay makes no
+  additional promise about concurrent writers.
 
 ## Prefixed Properties
 

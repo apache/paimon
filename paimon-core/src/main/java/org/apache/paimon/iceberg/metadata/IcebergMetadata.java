@@ -291,6 +291,29 @@ public class IcebergMetadata {
         return refs == null ? new HashMap<>() : refs;
     }
 
+    /** The same metadata with another list of snapshots. */
+    public IcebergMetadata withSnapshots(List<IcebergSnapshot> newSnapshots) {
+        return new IcebergMetadata(
+                formatVersion,
+                tableUuid,
+                location,
+                lastSequenceNumber,
+                lastUpdatedMs,
+                lastColumnId,
+                schemas,
+                currentSchemaId,
+                partitionSpecs,
+                defaultSpecId,
+                lastPartitionId,
+                sortOrders,
+                defaultSortOrderId,
+                newSnapshots,
+                currentSnapshotId,
+                nextRowId,
+                properties,
+                refs);
+    }
+
     public IcebergSnapshot currentSnapshot() {
         for (IcebergSnapshot snapshot : snapshots) {
             if (snapshot.snapshotId() == currentSnapshotId) {

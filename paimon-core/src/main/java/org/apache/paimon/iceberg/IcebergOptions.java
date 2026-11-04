@@ -20,6 +20,7 @@ package org.apache.paimon.iceberg;
 
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.InlineElement;
@@ -27,6 +28,7 @@ import org.apache.paimon.options.description.TextElement;
 import org.apache.paimon.utils.Preconditions;
 
 import java.lang.reflect.Field;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -94,6 +96,54 @@ public class IcebergOptions {
                     .withDescription(
                             "The number of old metadata files to keep after each table commit. "
                                     + "For rest-catalog, it will keep 1 old metadata at least.");
+
+    public static final ConfigOption<MissingBaseStrategy> METADATA_MISSING_BASE_STRATEGY =
+            key("metadata.iceberg.missing-base-strategy")
+                    .enumType(MissingBaseStrategy.class)
+                    .defaultValue(MissingBaseStrategy.REBUILD)
+                    .withDescription(
+                            "What to do when the Iceberg metadata of the previous snapshot is "
+                                    + "missing. 'rebuild' creates the metadata from every data file "
+                                    + "of the table. 'replay' extends the newest valid older "
+                                    + "metadata one snapshot at a time and falls back to 'rebuild' "
+                                    + "when that is not possible. Replay applies to append tables "
+                                    + "without deletion vectors or data evolution, with Iceberg "
+                                    + "format version 2, and with the hive-catalog, table-location "
+                                    + "or hadoop-catalog storage type.");
+
+    public static final ConfigOption<Integer> REPLAY_MAX_SNAPSHOTS =
+            key("metadata.iceberg.replay.max-snapshots")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription(
+                            "The most Paimon snapshots a replay may cover. A larger gap is rebuilt.");
+
+    public static final ConfigOption<Long> REPLAY_MAX_DELTA_ENTRIES =
+            key("metadata.iceberg.replay.max-delta-entries")
+                    .longType()
+                    .defaultValue(1_000_000L)
+                    .withDescription(
+                            "The most added and deleted files, summed over the snapshots of a "
+                                    + "replay. A larger gap is rebuilt.");
+
+    public static final ConfigOption<MemorySize> REPLAY_MAX_BASE_MANIFEST_BYTES =
+            key("metadata.iceberg.replay.max-base-manifest-bytes")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(512))
+                    .withDescription(
+                            "The most manifest bytes a replay may copy and read. The copy of the "
+                                    + "retained history counts once for each unique manifest. A "
+                                    + "replay over this limit is rebuilt. This is a work limit, "
+                                    + "not a bound on heap.");
+
+    public static final ConfigOption<Duration> REPLAY_MAX_DURATION =
+            key("metadata.iceberg.replay.max-duration")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(5))
+                    .withDescription(
+                            "The longest a replay may run, checked between steps and before each "
+                                    + "manifest that is copied. A replay over this limit is "
+                                    + "rebuilt.");
 
     public static final ConfigOption<Integer> UNKNOWN_HOST_RETRY_MAX_RETRIES =
             key("metadata.iceberg.unknown-host-retry.max-retries")
@@ -272,6 +322,35 @@ public class IcebergOptions {
          */
         public String committerFactoryIdentifier() {
             return value;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return TextElement.text(description);
+        }
+    }
+
+    /** What to do when the Iceberg metadata of the previous snapshot is missing. */
+    public enum MissingBaseStrategy implements DescribedEnum {
+        REBUILD(
+                "rebuild",
+                "Create the metadata of the snapshot from every data file of the table."),
+        REPLAY(
+                "replay",
+                "Extend the newest valid older metadata one snapshot at a time, and rebuild "
+                        + "when that is not possible.");
+
+        private final String value;
+        private final String description;
+
+        MissingBaseStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
         }
 
         @Override

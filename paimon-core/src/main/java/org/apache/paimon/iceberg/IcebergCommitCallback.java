@@ -20,6 +20,7 @@ package org.apache.paimon.iceberg;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -51,6 +52,8 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -152,6 +155,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     private final IndexFileHandler indexFileHandler;
     private final boolean needAddDvToIceberg;
+    private final IcebergOptions.MissingBaseStrategy missingBaseStrategy;
+    private final IcebergOptions.StorageType storageType;
+
+    private ReplayHook replayHook = (point, value) -> {};
 
     // -------------------------------------------------------------------------------------
     // Public interface
@@ -163,6 +170,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         IcebergOptions.StorageType storageType =
                 table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+        this.storageType = storageType;
         this.pathFactory = new IcebergPathFactory(catalogTableMetadataPath(table));
 
         IcebergMetadataCommitterFactory metadataCommitterFactory;
@@ -206,6 +214,19 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         this.indexFileHandler = table.store().newIndexFileHandler();
         this.needAddDvToIceberg = needAddDvToIceberg();
+        this.missingBaseStrategy =
+                table.coreOptions()
+                        .toConfiguration()
+                        .get(IcebergOptions.METADATA_MISSING_BASE_STRATEGY);
+    }
+
+    @VisibleForTesting
+    void setReplayHook(ReplayHook replayHook) {
+        this.replayHook = replayHook;
+    }
+
+    private void replayPoint(ReplayPoint point, long value) {
+        replayHook.at(point, value);
     }
 
     public static Path catalogTableMetadataPath(FileStoreTable table) {
@@ -451,8 +472,19 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         abandonedLastColumnId,
                         abandonedNextRowId);
             } else {
-                createMetadataWithoutBase(
-                        snapshotId, abandonedUuid, abandonedLastColumnId, abandonedNextRowId);
+                RebuildRequest rebuild =
+                        new RebuildRequest(
+                                abandonedUuid, abandonedLastColumnId, abandonedNextRowId);
+                if (missingBaseStrategy == IcebergOptions.MissingBaseStrategy.REPLAY) {
+                    rebuild = replayOrRebuild(snapshot, fileChangesCollector, rebuild);
+                }
+                if (rebuild != null) {
+                    createMetadataWithoutBase(
+                            snapshotId,
+                            rebuild.inheritUuid,
+                            rebuild.lastColumnIdFloor,
+                            rebuild.nextRowIdFloor);
+                }
             }
 
             if (retireSuffix) {
@@ -487,6 +519,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             int lastColumnIdFloor,
             long nextRowIdFloor)
             throws IOException {
+        replayPoint(ReplayPoint.REBUILD, snapshotId);
         SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshotId);
         Snapshot paimonSnapshot = table.snapshotManager().snapshot(snapshotId);
         SchemaCache schemaCache = new SchemaCache();
@@ -1282,16 +1315,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         // file sizes are not in the manifest list, so the previous total is reused when its
         // file count matches the base manifests
         IcebergSnapshot baseSnapshot = baseMetadata.currentSnapshot();
-        Long previousTotalDataFilesValue =
-                getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_DATA_FILES);
-        Long previousTotalFilesSizeValue =
-                getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_FILES_SIZE);
         long previousTotalFilesSize =
-                previousTotalFilesSizeValue != null
-                                && previousTotalDataFilesValue != null
-                                && previousTotalDataFilesValue
-                                        == computeLiveFileCount(baseDataManifestFileMetas)
-                        ? previousTotalFilesSizeValue
+                baseTotalsUsable(baseSnapshot, baseDataManifestFileMetas)
+                        ? getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_FILES_SIZE)
                         : computeTotalFilesSizeFromManifests(baseDataManifestFileMetas);
         metrics.totalFilesSize =
                 Math.max(
@@ -1766,27 +1792,37 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     // -------------------------------------------------------------------------------------
 
     private boolean shouldExpire(IcebergSnapshot snapshot, long currentSnapshotId) {
+        return shouldExpire(snapshot.snapshotId(), snapshot.timestampMs(), currentSnapshotId);
+    }
+
+    private boolean shouldExpire(long snapshotId, long timestampMs, long currentSnapshotId) {
         Options options = new Options(table.options());
-        if (snapshot.snapshotId()
-                > currentSnapshotId - options.get(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN)) {
+        if (snapshotId > currentSnapshotId - options.get(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN)) {
             return false;
         }
-        if (snapshot.snapshotId()
-                <= currentSnapshotId - options.get(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX)) {
+        if (snapshotId <= currentSnapshotId - options.get(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX)) {
             return true;
         }
-        return snapshot.timestampMs()
+        return timestampMs
                 < System.currentTimeMillis()
                         - options.get(CoreOptions.SNAPSHOT_TIME_RETAINED).toMillis();
     }
 
     private void expireManifestList(String toExpire, String next) {
+        expireManifestList(toExpire, manifestPathsIn(next));
+    }
+
+    private Set<String> manifestPathsIn(String manifestListName) {
         // compare by physical path: a carried-over manifest may be re-listed with different
         // list-level fields (e.g. an assigned first_row_id) while sharing the same file
-        Set<String> pathsInUse = new HashSet<>();
-        for (IcebergManifestFileMeta meta : manifestList.read(next)) {
-            pathsInUse.add(meta.manifestPath());
+        Set<String> paths = new HashSet<>();
+        for (IcebergManifestFileMeta meta : manifestList.read(manifestListName)) {
+            paths.add(meta.manifestPath());
         }
+        return paths;
+    }
+
+    private void expireManifestList(String toExpire, Set<String> pathsInUse) {
         for (IcebergManifestFileMeta meta : manifestList.read(toExpire)) {
             if (pathsInUse.contains(meta.manifestPath())) {
                 continue;
@@ -2218,6 +2254,20 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         return manifestMetas.stream().mapToLong(IcebergManifestFileMeta::liveRowsCount).sum();
     }
 
+    /**
+     * Whether the base summary's total file size can be reused. File sizes are not in the manifest
+     * list, so the total is only trusted while the base's file count matches its manifests.
+     * Otherwise every manifest entry has to be read to recompute it.
+     */
+    private boolean baseTotalsUsable(
+            IcebergSnapshot baseSnapshot, List<IcebergManifestFileMeta> baseDataManifestFileMetas) {
+        Long totalDataFiles = getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_DATA_FILES);
+        Long totalFilesSize = getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_FILES_SIZE);
+        return totalFilesSize != null
+                && totalDataFiles != null
+                && totalDataFiles == computeLiveFileCount(baseDataManifestFileMetas);
+    }
+
     @Nullable
     private Long getSummaryLong(@Nullable IcebergSnapshot snapshot, String key) {
         if (snapshot == null) {
@@ -2251,6 +2301,913 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             }
         }
         return total;
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Gap replay
+    // -------------------------------------------------------------------------------------
+
+    /** The points of a replay that tests can observe and interrupt. */
+    enum ReplayPoint {
+        /** A base candidate was accepted, the value is its version. */
+        BASE_SELECTED,
+        /** A base candidate was rejected, the value is its version. */
+        CANDIDATE_REJECTED,
+        /** The lists of the retained history were read and charged, nothing is copied yet. */
+        LISTS_READ,
+        /** The retained history is copied, the value is the number of copied manifests. */
+        COPIED,
+        /** A snapshot was replayed, the value is its snapshot id. */
+        STEP_DONE,
+        /** The replayed metadata is complete, its file is not written yet. */
+        BEFORE_WRITE,
+        /** The metadata file of the replay is durable. */
+        EXPOSED,
+        /** The replay was dropped and nothing was written for the snapshot. */
+        ABANDONED,
+        /** A rebuild from every data file starts. */
+        REBUILD
+    }
+
+    /** Observes every {@link ReplayPoint}, and may throw to interrupt the replay. */
+    @FunctionalInterface
+    interface ReplayHook {
+        void at(ReplayPoint point, long value);
+    }
+
+    /** What a rebuild from the table inherits from the metadata it replaces. */
+    private static final class RebuildRequest {
+
+        @Nullable private final String inheritUuid;
+        private final int lastColumnIdFloor;
+        private final long nextRowIdFloor;
+
+        private RebuildRequest(
+                @Nullable String inheritUuid, int lastColumnIdFloor, long nextRowIdFloor) {
+            this.inheritUuid = inheritUuid;
+            this.lastColumnIdFloor = lastColumnIdFloor;
+            this.nextRowIdFloor = nextRowIdFloor;
+        }
+    }
+
+    /** An expected failure of a replay: the replay is dropped, the caller decides what is next. */
+    private static class ReplayAbort extends RuntimeException {
+
+        private ReplayAbort(String message) {
+            super(message);
+        }
+
+        private ReplayAbort(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /** A snapshot of the retained history is missing or damaged, so the base cannot be used. */
+    private static final class BrokenHistory extends ReplayAbort {
+
+        private BrokenHistory(String message, Throwable cause) {
+            super(message, cause);
+        }
+
+        private BrokenHistory(String message) {
+            super(message);
+        }
+    }
+
+    /** The Paimon snapshot was replaced by a rollback or a recreation while it was replayed. */
+    private static final class ReplaySourceReplaced extends RuntimeException {
+
+        private ReplaySourceReplaced(String message) {
+            super(message);
+        }
+    }
+
+    /** The reason a replay is not attempted, or null when the table is eligible. */
+    @Nullable
+    private String replayIneligibleReason() {
+        CoreOptions options = table.coreOptions();
+        if (!table.primaryKeys().isEmpty()) {
+            return "the table has primary keys";
+        }
+        if (options.deletionVectorsEnabled()) {
+            return "deletion vectors are enabled";
+        }
+        if (options.dataEvolutionEnabled()) {
+            return "data evolution is enabled";
+        }
+        if (formatVersion != IcebergMetadata.FORMAT_VERSION_V2) {
+            return "the Iceberg format version is " + formatVersion;
+        }
+        switch (storageType) {
+            case TABLE_LOCATION:
+            case HIVE_CATALOG:
+            case HADOOP_CATALOG:
+                return null;
+            default:
+                return "the storage type is " + storageType;
+        }
+    }
+
+    /**
+     * Replays the Iceberg snapshots after the newest valid older metadata version instead of
+     * rebuilding from every data file. Returns null when nothing is left to do, and what a rebuild
+     * has to inherit when the replay failed before it exposed anything and the snapshot is still
+     * the head.
+     */
+    @Nullable
+    private RebuildRequest replayOrRebuild(
+            Snapshot snapshot, FileChangesCollector collector, RebuildRequest rebuild)
+            throws IOException {
+        if (snapshot.id() == Snapshot.FIRST_SNAPSHOT_ID) {
+            return rebuild;
+        }
+        String reason = replayIneligibleReason();
+        if (reason != null) {
+            LOG.warn(
+                    "Table {} does not replay missing Iceberg metadata ({}), so it is rebuilt.",
+                    table.fullName(),
+                    reason);
+            return rebuild;
+        }
+        return new GapReplay(snapshot, collector, rebuild).run();
+    }
+
+    /** One run of the replay for one snapshot. */
+    private final class GapReplay {
+
+        private static final int MAX_CANDIDATES = 5;
+
+        private final Snapshot snapshot;
+        private final long snapshotId;
+        private final FileChangesCollector collector;
+        private final RebuildRequest defaultRebuild;
+
+        private final int maxSnapshots;
+        private final long maxDeltaEntries;
+        private final long maxBaseManifestBytes;
+        private final long maxDurationNanos;
+        private final long startNanos = System.nanoTime();
+
+        private final List<Long> candidates = new ArrayList<>();
+        private int nextCandidate = 0;
+        private long chargedBytes = 0;
+
+        // what a rebuild after a failed replay has to inherit
+        @Nullable private String baseUuid;
+        private int maxLastColumnId;
+        private long maxNextRowId;
+
+        // true once the metadata file may exist: from then on no file of the replay is deleted
+        private boolean exposing = false;
+
+        private GapReplay(
+                Snapshot snapshot, FileChangesCollector collector, RebuildRequest rebuild) {
+            this.snapshot = snapshot;
+            this.snapshotId = snapshot.id();
+            this.collector = collector;
+            this.defaultRebuild = rebuild;
+            this.maxLastColumnId = rebuild.lastColumnIdFloor;
+            this.maxNextRowId = rebuild.nextRowIdFloor;
+
+            Options options = table.coreOptions().toConfiguration();
+            this.maxSnapshots = options.get(IcebergOptions.REPLAY_MAX_SNAPSHOTS);
+            this.maxDeltaEntries = options.get(IcebergOptions.REPLAY_MAX_DELTA_ENTRIES);
+            this.maxBaseManifestBytes =
+                    options.get(IcebergOptions.REPLAY_MAX_BASE_MANIFEST_BYTES).getBytes();
+            this.maxDurationNanos = options.get(IcebergOptions.REPLAY_MAX_DURATION).toNanos();
+        }
+
+        /** See {@link #replayOrRebuild}. */
+        @Nullable
+        private RebuildRequest run() throws IOException {
+            listCandidates();
+            ReplayBase base = nextBase();
+            if (base == null) {
+                LOG.info(
+                        "No usable older Iceberg metadata for snapshot {} of table {}, "
+                                + "so it is rebuilt.",
+                        snapshotId,
+                        table.fullName());
+                return defaultRebuild;
+            }
+            pathFactory.startRecording();
+            try {
+                return replay(base);
+            } finally {
+                pathFactory.stopRecording();
+            }
+        }
+
+        @Nullable
+        private RebuildRequest replay(ReplayBase first) throws IOException {
+            try {
+                ReplayBase base = first;
+                List<Snapshot> steps;
+                Acquired acquired = null;
+                for (int attempt = 0; ; attempt++) {
+                    try {
+                        steps = readSteps(base);
+                        acquired = acquire(base, steps);
+                        break;
+                    } catch (BrokenHistory e) {
+                        LOG.info(
+                                "The history of Iceberg metadata v{} of table {} is broken: {}",
+                                base.version,
+                                table.fullName(),
+                                e.getMessage());
+                        deleteCreatedFiles();
+                        replayPoint(ReplayPoint.CANDIDATE_REJECTED, base.version);
+                        base = attempt == 0 ? nextBase() : null;
+                        if (base == null) {
+                            throw e;
+                        }
+                    }
+                }
+
+                IcebergMetadata result = runSteps(acquired, steps);
+                finish(result, acquired);
+                LOG.info(
+                        "Replayed the Iceberg metadata of snapshots {} to {} of table {} on top "
+                                + "of v{}, and copied {} manifests.",
+                        base.version + 1,
+                        snapshotId,
+                        table.fullName(),
+                        base.version,
+                        acquired.copied.size());
+                return null;
+            } catch (ReplaySourceReplaced e) {
+                LOG.info(
+                        "Snapshot {} of table {} was replaced while its Iceberg metadata was "
+                                + "replayed, so nothing is written: {}",
+                        snapshotId,
+                        table.fullName(),
+                        e.getMessage());
+                deleteCreatedFiles();
+                replayPoint(ReplayPoint.ABANDONED, snapshotId);
+                return null;
+            } catch (ReplayAbort e) {
+                deleteCreatedFiles();
+                Long latest = table.snapshotManager().latestSnapshotId();
+                if (latest != null && latest == snapshotId) {
+                    try {
+                        // the failure may have come before any step checked the source
+                        verifySource(snapshot);
+                    } catch (ReplaySourceReplaced replaced) {
+                        LOG.info(
+                                "Replaying the Iceberg metadata of snapshot {} of table {} failed "
+                                        + "and the snapshot was replaced, so nothing is "
+                                        + "written: {}",
+                                snapshotId,
+                                table.fullName(),
+                                replaced.getMessage());
+                        replayPoint(ReplayPoint.ABANDONED, snapshotId);
+                        return null;
+                    }
+                    LOG.info(
+                            "Replaying the Iceberg metadata of snapshot {} of table {} failed, "
+                                    + "so it is rebuilt: {}",
+                            snapshotId,
+                            table.fullName(),
+                            e.getMessage());
+                    return rebuildRequest();
+                }
+                LOG.info(
+                        "Replaying the Iceberg metadata of snapshot {} of table {} failed and "
+                                + "the head is {}, so it is not rebuilt: {}",
+                        snapshotId,
+                        table.fullName(),
+                        latest,
+                        e.getMessage());
+                replayPoint(ReplayPoint.ABANDONED, snapshotId);
+                return null;
+            } catch (IOException | RuntimeException | Error e) {
+                if (!exposing) {
+                    deleteCreatedFiles();
+                }
+                throw e;
+            }
+        }
+
+        // ---------------------------------------------------------------------------------
+        // Base selection
+        // ---------------------------------------------------------------------------------
+
+        private void listCandidates() throws IOException {
+            List<Long> versions = new ArrayList<>();
+            Iterator<Path> it =
+                    pathFactory.getAllMetadataPathBefore(table.fileIO(), snapshotId).iterator();
+            while (it.hasNext()) {
+                String name = it.next().getName();
+                try {
+                    versions.add(Long.parseLong(name.substring(1, name.indexOf('.'))));
+                } catch (NumberFormatException ignored) {
+                    // not a metadata version
+                }
+            }
+            versions.sort(Comparator.reverseOrder());
+            candidates.addAll(versions.subList(0, Math.min(versions.size(), MAX_CANDIDATES)));
+        }
+
+        @Nullable
+        private ReplayBase nextBase() throws IOException {
+            while (nextCandidate < candidates.size()) {
+                long version = candidates.get(nextCandidate++);
+                String problem = null;
+                ReplayBase base = null;
+                try {
+                    base = checkBase(version);
+                } catch (ReplayAbort e) {
+                    problem = e.getMessage();
+                }
+                if (base != null) {
+                    baseUuid = base.metadata.tableUuid();
+                    maxLastColumnId = Math.max(maxLastColumnId, base.metadata.lastColumnId());
+                    if (base.metadata.nextRowId() != null) {
+                        maxNextRowId = Math.max(maxNextRowId, base.metadata.nextRowId());
+                    }
+                    replayPoint(ReplayPoint.BASE_SELECTED, version);
+                    return base;
+                }
+                LOG.info(
+                        "Iceberg metadata v{} of table {} is not a base for snapshot {}: {}",
+                        version,
+                        table.fullName(),
+                        snapshotId,
+                        problem);
+                replayPoint(ReplayPoint.CANDIDATE_REJECTED, version);
+            }
+            return null;
+        }
+
+        private ReplayBase checkBase(long version) throws IOException {
+            if (snapshotId - version > maxSnapshots) {
+                throw new ReplayAbort(
+                        "it is "
+                                + (snapshotId - version)
+                                + " snapshots behind, more than "
+                                + IcebergOptions.REPLAY_MAX_SNAPSHOTS.key());
+            }
+            Snapshot paimonSnapshot = readSnapshot(version);
+            if (paimonSnapshot == null) {
+                throw new ReplayAbort("there is no Paimon snapshot " + version);
+            }
+            IcebergMetadata metadata = readUsableMetadata(pathFactory.toMetadataPath(version));
+            if (metadata == null) {
+                throw new ReplayAbort("it is missing or malformed");
+            }
+            if (metadata.formatVersion() != formatVersion) {
+                throw new ReplayAbort("its format version is " + metadata.formatVersion());
+            }
+            IcebergSnapshot current;
+            try {
+                current = metadata.currentSnapshot();
+            } catch (RuntimeException e) {
+                throw new ReplayAbort("its current snapshot is missing", e);
+            }
+            if (current.snapshotId() != version) {
+                throw new ReplayAbort("its current snapshot is " + current.snapshotId());
+            }
+            String identity =
+                    current.summary() == null
+                            ? null
+                            : current.summary().get(SNAPSHOT_SUMMARY_PAIMON_COMMIT_IDENTITY);
+            if (identity == null || !identity.equals(commitIdentity(paimonSnapshot))) {
+                throw new ReplayAbort("it was not built from Paimon snapshot " + version);
+            }
+            return new ReplayBase(version, metadata);
+        }
+
+        // ---------------------------------------------------------------------------------
+        // Pre-flight and acquisition of the history
+        // ---------------------------------------------------------------------------------
+
+        /** The Paimon snapshots after the base up to N, and the check that they are replayable. */
+        private List<Snapshot> readSteps(ReplayBase base) {
+            checkDuration();
+            ManifestList deltaLists = table.store().manifestListFactory().create();
+            List<Snapshot> steps = new ArrayList<>();
+            long entries = 0;
+            for (long id = base.version + 1; id <= snapshotId; id++) {
+                Snapshot step = id == snapshotId ? snapshot : readSnapshot(id);
+                if (step == null) {
+                    throw new ReplayAbort("Paimon snapshot " + id + " does not exist");
+                }
+                try {
+                    for (ManifestFileMeta meta : deltaLists.readDeltaManifests(step)) {
+                        entries += meta.numAddedFiles() + meta.numDeletedFiles();
+                    }
+                } catch (RuntimeException e) {
+                    if (isMissingFile(e)) {
+                        throw new ReplayAbort(
+                                "the delta of Paimon snapshot " + id + " cannot be read", e);
+                    }
+                    throw e;
+                }
+                if (entries > maxDeltaEntries) {
+                    throw new ReplayAbort(
+                            "the snapshots after v"
+                                    + base.version
+                                    + " change more than "
+                                    + maxDeltaEntries
+                                    + " files");
+                }
+                steps.add(step);
+            }
+            return steps;
+        }
+
+        /** Index of the first snapshot of the base that retention keeps for snapshot N. */
+        private int firstRetained(IcebergMetadata base, List<Snapshot> steps) {
+            List<IcebergSnapshot> baseSnapshots = base.snapshots();
+            int total = baseSnapshots.size() + steps.size();
+            for (int i = 0; i + 1 < total; i++) {
+                boolean expire;
+                if (i < baseSnapshots.size()) {
+                    expire = shouldExpire(baseSnapshots.get(i), snapshotId);
+                } else {
+                    Snapshot step = steps.get(i - baseSnapshots.size());
+                    expire = shouldExpire(step.id(), step.timeMillis(), snapshotId);
+                }
+                if (!expire) {
+                    return Math.min(i, baseSnapshots.size());
+                }
+            }
+            // like the build helper, nothing is dropped when every older snapshot expires
+            return 0;
+        }
+
+        /**
+         * Copies the manifests and lists the output keeps, and those of the working base, so the
+         * replay owns everything it reads and publishes.
+         */
+        private Acquired acquire(ReplayBase base, List<Snapshot> steps) throws IOException {
+            List<IcebergSnapshot> baseSnapshots = base.metadata.snapshots();
+            int first = firstRetained(base.metadata, steps);
+            List<IcebergSnapshot> retained =
+                    new ArrayList<>(baseSnapshots.subList(first, baseSnapshots.size()));
+            IcebergSnapshot working = base.metadata.currentSnapshot();
+            List<IcebergSnapshot> toCopy = new ArrayList<>(retained);
+            boolean workingRetained = first < baseSnapshots.size();
+            if (!workingRetained) {
+                // the working base is always acquired, even when the output drops its own entry
+                toCopy.add(working);
+            }
+
+            Map<String, Long> unique = new LinkedHashMap<>();
+            for (IcebergSnapshot s : toCopy) {
+                for (IcebergManifestFileMeta meta : readBaseList(s)) {
+                    unique.putIfAbsent(meta.manifestPath(), meta.manifestLength());
+                }
+            }
+            long bytes = 0;
+            for (long length : unique.values()) {
+                bytes += length;
+            }
+            charge(bytes);
+            replayPoint(ReplayPoint.LISTS_READ, base.version);
+
+            Map<String, String> copied = new HashMap<>();
+            Map<Long, String> originalLists = new HashMap<>();
+            List<IcebergSnapshot> retainedCopies = new ArrayList<>();
+            IcebergSnapshot workingCopy = null;
+            for (IcebergSnapshot s : toCopy) {
+                checkDuration();
+                List<IcebergManifestFileMeta> owned = new ArrayList<>();
+                for (IcebergManifestFileMeta meta : readBaseList(s)) {
+                    String target = copied.get(meta.manifestPath());
+                    if (target == null) {
+                        checkDuration();
+                        target = copyManifest(meta);
+                        copied.put(meta.manifestPath(), target);
+                    }
+                    owned.add(meta.withManifestPath(target));
+                }
+                String listName = manifestList.writeWithoutRolling(owned);
+                IcebergSnapshot copy =
+                        s.withManifestList(pathFactory.toManifestListPath(listName).toString());
+                originalLists.put(s.snapshotId(), new Path(s.manifestList()).getName());
+                if (s.snapshotId() == working.snapshotId()) {
+                    workingCopy = copy;
+                }
+                if (retained.contains(s)) {
+                    retainedCopies.add(copy);
+                }
+            }
+            replayPoint(ReplayPoint.COPIED, copied.size());
+
+            List<IcebergSnapshot> ownedSnapshots = new ArrayList<>(retainedCopies);
+            if (!workingRetained) {
+                ownedSnapshots.add(workingCopy);
+            }
+            return new Acquired(
+                    base, base.metadata.withSnapshots(ownedSnapshots), originalLists, copied);
+        }
+
+        private List<IcebergManifestFileMeta> readBaseList(IcebergSnapshot icebergSnapshot) {
+            try {
+                return manifestList.read(new Path(icebergSnapshot.manifestList()).getName());
+            } catch (RuntimeException e) {
+                if (isMissingFile(e)) {
+                    throw new BrokenHistory(
+                            "the manifest list of snapshot "
+                                    + icebergSnapshot.snapshotId()
+                                    + " cannot be read",
+                            e);
+                }
+                throw e;
+            }
+        }
+
+        private String copyManifest(IcebergManifestFileMeta meta) throws IOException {
+            Path source = new Path(meta.manifestPath());
+            Path target = pathFactory.newManifestFile();
+            try {
+                table.fileIO().copyFile(source, target, false);
+            } catch (IOException e) {
+                if (isMissingFile(e)) {
+                    throw new BrokenHistory("manifest " + source + " cannot be copied", e);
+                }
+                throw e;
+            }
+            long length = table.fileIO().getFileSize(target);
+            if (length != meta.manifestLength()) {
+                throw new BrokenHistory(
+                        "the copy of manifest "
+                                + source
+                                + " has "
+                                + length
+                                + " bytes, its list records "
+                                + meta.manifestLength());
+            }
+            return target.toString();
+        }
+
+        // ---------------------------------------------------------------------------------
+        // Steps
+        // ---------------------------------------------------------------------------------
+
+        private IcebergMetadata runSteps(Acquired acquired, List<Snapshot> steps)
+                throws IOException {
+            IcebergMetadata current = acquired.working;
+            for (Snapshot step : steps) {
+                long id = step.id();
+                checkDuration();
+                table.snapshotManager().invalidateCache();
+                verifySource(step);
+
+                FileChangesCollector stepCollector =
+                        id == snapshotId
+                                ? collector
+                                : (removed, added) -> collectFileChanges(id, removed, added);
+                // deletion vectors make a table ineligible, so a step has no index files
+                BuildResult result =
+                        buildMetadataWithBase(
+                                chargingCollector(guardingDelta(stepCollector, id), current),
+                                Collections.emptyList(),
+                                step,
+                                current,
+                                defaultRebuild.lastColumnIdFloor,
+                                defaultRebuild.nextRowIdFloor,
+                                false);
+                switch (result.kind) {
+                    case STALE_SOURCE:
+                        throw new ReplaySourceReplaced(
+                                "the base of snapshot " + id + " is on another timeline");
+                    case NEEDS_REBUILD:
+                        maxLastColumnId = Math.max(maxLastColumnId, result.lastColumnIdFloor);
+                        maxNextRowId = Math.max(maxNextRowId, result.nextRowIdFloor);
+                        throw new ReplayAbort(
+                                "snapshot " + id + " cannot extend its base: " + result.reason);
+                    case COMPLETED:
+                        current = result.metadata;
+                        break;
+                    default:
+                        throw new IllegalStateException("Unknown build result " + result.kind);
+                }
+                assertRowCount(step, current);
+                maxLastColumnId = Math.max(maxLastColumnId, current.lastColumnId());
+                if (current.nextRowId() != null) {
+                    maxNextRowId = Math.max(maxNextRowId, current.nextRowId());
+                }
+                replayPoint(ReplayPoint.STEP_DONE, id);
+            }
+            return current;
+        }
+
+        /**
+         * Reports a delta that is missing as a failed replay. The preflight reads only the delta
+         * lists, so a missing list or manifest can still show up here. Other failures propagate.
+         */
+        private FileChangesCollector guardingDelta(FileChangesCollector inner, long id) {
+            return (removedFiles, addedFiles) -> {
+                try {
+                    return inner.collect(removedFiles, addedFiles);
+                } catch (IOException | RuntimeException e) {
+                    if (isMissingFile(e)) {
+                        throw new ReplayAbort(
+                                "the delta of Paimon snapshot " + id + " cannot be read", e);
+                    }
+                    throw e;
+                }
+            };
+        }
+
+        /** The snapshot on disk is still the one this step replays. */
+        private void verifySource(Snapshot step) {
+            Snapshot onDisk = readSnapshot(step.id());
+            if (onDisk == null) {
+                if (step.id() == snapshotId) {
+                    throw new ReplaySourceReplaced("snapshot " + snapshotId + " is gone");
+                }
+                throw new ReplayAbort("Paimon snapshot " + step.id() + " is gone");
+            }
+            if (!commitIdentity(onDisk).equals(commitIdentity(step))) {
+                throw new ReplaySourceReplaced(
+                        "snapshot " + step.id() + " is not the snapshot that was committed");
+            }
+        }
+
+        /** Charges the manifests a step reads from its base, when it reads more than its delta. */
+        private FileChangesCollector chargingCollector(
+                FileChangesCollector inner, IcebergMetadata base) {
+            return (removedFiles, addedFiles) -> {
+                boolean addOnly = inner.collect(removedFiles, addedFiles);
+                List<IcebergManifestFileMeta> baseMetas =
+                        manifestList.read(
+                                new Path(base.currentSnapshot().manifestList()).getName());
+                List<IcebergManifestFileMeta> baseData =
+                        baseMetas.stream()
+                                .filter(
+                                        meta ->
+                                                meta.content()
+                                                        == IcebergManifestFileMeta.Content.DATA)
+                                .collect(Collectors.toList());
+                if (!addOnly || !baseTotalsUsable(base.currentSnapshot(), baseData)) {
+                    charge(
+                            baseMetas.stream()
+                                    .mapToLong(IcebergManifestFileMeta::manifestLength)
+                                    .sum());
+                }
+                return addOnly;
+            };
+        }
+
+        private void assertRowCount(Snapshot step, IcebergMetadata metadata) {
+            Long actual =
+                    getSummaryLong(metadata.currentSnapshot(), SNAPSHOT_SUMMARY_TOTAL_RECORDS);
+            if (actual == null || actual != step.totalRecordCount()) {
+                throw new ReplayAbort(
+                        "snapshot "
+                                + step.id()
+                                + " has "
+                                + step.totalRecordCount()
+                                + " records in Paimon and "
+                                + actual
+                                + " in the replayed Iceberg metadata");
+            }
+        }
+
+        // ---------------------------------------------------------------------------------
+        // Exposure
+        // ---------------------------------------------------------------------------------
+
+        private void finish(IcebergMetadata result, Acquired acquired) throws IOException {
+            table.snapshotManager().invalidateCache();
+            verifySource(snapshot);
+            keepOnlyReachable(result);
+            replayPoint(ReplayPoint.BEFORE_WRITE, snapshotId);
+
+            Path metadataPath = pathFactory.toMetadataPath(snapshotId);
+            exposing = true;
+            IcebergMetadata durable = writeMetadataFile(metadataPath, result);
+            replayPoint(ReplayPoint.EXPOSED, snapshotId);
+
+            boolean ours =
+                    durable.currentSnapshot()
+                            .manifestList()
+                            .equals(result.currentSnapshot().manifestList());
+            if (!ours) {
+                // another writer's metadata won; it owns its files, and ours are not reachable
+                exposing = false;
+                deleteCreatedFiles();
+            }
+            Long latest = table.snapshotManager().latestSnapshotId();
+            if (latest != null && latest == snapshotId) {
+                table.fileIO()
+                        .overwriteFileUtf8(
+                                new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
+                                String.valueOf(snapshotId));
+                commitToExternalCatalog(durable, metadataPath, null, null);
+                deleteApplicableMetadataFiles(snapshotId);
+                if (ours) {
+                    expireDroppedOriginals(result, acquired);
+                }
+            }
+        }
+
+        /** Deletes the files the replay created that the final metadata does not reach. */
+        private void keepOnlyReachable(IcebergMetadata result) {
+            List<Path> created = pathFactory.recordedPaths();
+            Set<String> createdNames = new HashSet<>();
+            for (Path path : created) {
+                createdNames.add(path.getName());
+            }
+            Set<String> reachable = new HashSet<>();
+            for (IcebergSnapshot s : result.snapshots()) {
+                String listName = new Path(s.manifestList()).getName();
+                Preconditions.checkState(
+                        createdNames.contains(listName),
+                        "Replayed snapshot %s references the list %s, which the replay did not "
+                                + "create.",
+                        s.snapshotId(),
+                        listName);
+                reachable.add(listName);
+                for (IcebergManifestFileMeta meta : manifestList.read(listName)) {
+                    String name = new Path(meta.manifestPath()).getName();
+                    Preconditions.checkState(
+                            createdNames.contains(name),
+                            "Replayed snapshot %s references the manifest %s, which the replay "
+                                    + "did not create.",
+                            s.snapshotId(),
+                            name);
+                    reachable.add(name);
+                }
+            }
+            for (Path path : created) {
+                if (!reachable.contains(path.getName())) {
+                    table.fileIO().deleteQuietly(path);
+                }
+            }
+        }
+
+        /**
+         * Writes the metadata file, and returns the metadata that is durable afterwards: the
+         * replay's own, or the one of another writer that got there first.
+         */
+        private IcebergMetadata writeMetadataFile(Path metadataPath, IcebergMetadata result)
+                throws IOException {
+            String json = result.toJson();
+            boolean written;
+            try {
+                written = table.fileIO().tryToWriteAtomic(metadataPath, json);
+                if (!written
+                        && table.fileIO().exists(metadataPath)
+                        && !metadataMatchesSnapshot(snapshotId, snapshot)) {
+                    table.fileIO().deleteQuietly(metadataPath);
+                    written = table.fileIO().tryToWriteAtomic(metadataPath, json);
+                }
+            } catch (IOException e) {
+                // the outcome is unknown: keep every file, and look at what is durable
+                IcebergMetadata durable = tryReadMetadata(metadataPath);
+                if (durable == null || !metadataMatchesSnapshot(durable, snapshot)) {
+                    throw e;
+                }
+                return durable;
+            }
+            if (written) {
+                return result;
+            }
+            IcebergMetadata winner = tryReadMetadata(metadataPath);
+            if (winner == null || !metadataMatchesSnapshot(winner, snapshot)) {
+                throw new IllegalStateException(
+                        "Failed to replace Iceberg metadata "
+                                + metadataPath
+                                + " for table "
+                                + table.name());
+            }
+            return winner;
+        }
+
+        /**
+         * Applies the usual retention cleanup to the originals of the base snapshots that the
+         * output dropped. The copies are never touched, and the originals that readers of older
+         * metadata can still reach are only deleted when retention would delete them anyway.
+         */
+        private void expireDroppedOriginals(IcebergMetadata result, Acquired acquired) {
+            try {
+                Set<Long> keptIds = new HashSet<>();
+                for (IcebergSnapshot s : result.snapshots()) {
+                    keptIds.add(s.snapshotId());
+                }
+                List<IcebergSnapshot> dropped = new ArrayList<>();
+                for (IcebergSnapshot s : acquired.base.metadata.snapshots()) {
+                    if (!keptIds.contains(s.snapshotId())) {
+                        dropped.add(s);
+                    }
+                }
+                if (dropped.isEmpty()) {
+                    return;
+                }
+                IcebergSnapshot firstKept = result.snapshots().get(0);
+                Set<String> inUse;
+                String keptOriginal = acquired.originalLists.get(firstKept.snapshotId());
+                if (keptOriginal != null) {
+                    inUse = manifestPathsIn(keptOriginal);
+                } else {
+                    Map<String, String> copyToOriginal = new HashMap<>();
+                    for (Map.Entry<String, String> entry : acquired.copied.entrySet()) {
+                        copyToOriginal.put(entry.getValue(), entry.getKey());
+                    }
+                    inUse = new HashSet<>();
+                    for (String path :
+                            manifestPathsIn(new Path(firstKept.manifestList()).getName())) {
+                        inUse.add(copyToOriginal.getOrDefault(path, path));
+                    }
+                }
+                for (int i = 0; i < dropped.size(); i++) {
+                    Set<String> next =
+                            i + 1 < dropped.size()
+                                    ? manifestPathsIn(
+                                            new Path(dropped.get(i + 1).manifestList()).getName())
+                                    : inUse;
+                    expireManifestList(new Path(dropped.get(i).manifestList()).getName(), next);
+                }
+            } catch (RuntimeException e) {
+                LOG.warn(
+                        "Failed to clean the metadata files that retention dropped for table {}. "
+                                + "They stay on storage.",
+                        table.fullName(),
+                        e);
+            }
+        }
+
+        // ---------------------------------------------------------------------------------
+        // Helpers
+        // ---------------------------------------------------------------------------------
+
+        private RebuildRequest rebuildRequest() {
+            return new RebuildRequest(
+                    defaultRebuild.inheritUuid != null ? defaultRebuild.inheritUuid : baseUuid,
+                    maxLastColumnId,
+                    maxNextRowId);
+        }
+
+        private void deleteCreatedFiles() {
+            for (Path path : pathFactory.recordedPaths()) {
+                table.fileIO().deleteQuietly(path);
+            }
+        }
+
+        @Nullable
+        private Snapshot readSnapshot(long id) {
+            try {
+                return SnapshotManager.tryFromPath(
+                        table.fileIO(), table.snapshotManager().snapshotPath(id));
+            } catch (FileNotFoundException e) {
+                return null;
+            }
+        }
+
+        private void checkDuration() {
+            if (System.nanoTime() - startNanos > maxDurationNanos) {
+                throw new ReplayAbort(
+                        "it ran longer than " + IcebergOptions.REPLAY_MAX_DURATION.key());
+            }
+        }
+
+        private void charge(long bytes) {
+            chargedBytes += bytes;
+            if (chargedBytes > maxBaseManifestBytes) {
+                throw new ReplayAbort(
+                        "it reads more than "
+                                + IcebergOptions.REPLAY_MAX_BASE_MANIFEST_BYTES.key()
+                                + " of manifests");
+            }
+        }
+    }
+
+    /** A valid older metadata version. */
+    private static final class ReplayBase {
+
+        private final long version;
+        private final IcebergMetadata metadata;
+
+        private ReplayBase(long version, IcebergMetadata metadata) {
+            this.version = version;
+            this.metadata = metadata;
+        }
+    }
+
+    /** The base metadata whose snapshots point at lists and manifests the replay owns. */
+    private static final class Acquired {
+
+        private final ReplayBase base;
+        private final IcebergMetadata working;
+        /** Snapshot id to the name of its original list, for the snapshots that were copied. */
+        private final Map<Long, String> originalLists;
+        /** Original manifest path to the path of its copy. */
+        private final Map<String, String> copied;
+
+        private Acquired(
+                ReplayBase base,
+                IcebergMetadata working,
+                Map<Long, String> originalLists,
+                Map<String, String> copied) {
+            this.base = base;
+            this.working = working;
+            this.originalLists = originalLists;
+            this.copied = copied;
+        }
     }
 
     // -------------------------------------------------------------------------------------

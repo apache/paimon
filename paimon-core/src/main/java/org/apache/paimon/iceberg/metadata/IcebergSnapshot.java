@@ -126,6 +126,20 @@ public class IcebergSnapshot {
         return manifestList;
     }
 
+    /** The same snapshot reading another manifest list. */
+    public IcebergSnapshot withManifestList(String newManifestList) {
+        return new IcebergSnapshot(
+                sequenceNumber,
+                snapshotId,
+                parentSnapshotId,
+                timestampMs,
+                summary,
+                newManifestList,
+                schemaId,
+                firstRowId,
+                addedRows);
+    }
+
     @JsonGetter(FIELD_SCHEMA_ID)
     public int schemaId() {
         return schemaId;
