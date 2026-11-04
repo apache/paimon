@@ -21,15 +21,17 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.table.ExpireChangelogImpl;
-import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.ProcedureUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.time.Duration;
-import java.util.TimeZone;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A procedure to expire changelogs. */
 public class ExpireChangelogsProcedure extends ProcedureBase {
@@ -72,26 +74,18 @@ public class ExpireChangelogsProcedure extends ProcedureBase {
             Integer maxDeletes,
             Boolean deleteAll)
             throws Catalog.TableNotExistException {
-        ExpireChangelogImpl expireChangelogs =
-                (ExpireChangelogImpl) table(tableId).newExpireChangelog();
-        ExpireConfig.Builder builder = ExpireConfig.builder();
-        if (retainMax != null) {
-            builder.changelogRetainMax(retainMax);
-        }
-        if (retainMin != null) {
-            builder.changelogRetainMin(retainMin);
-        }
-        if (olderThanStr != null) {
-            builder.changelogTimeRetain(
-                    Duration.ofMillis(
-                            System.currentTimeMillis()
-                                    - DateTimeUtils.parseTimestampData(
-                                                    olderThanStr, 3, TimeZone.getDefault())
-                                            .getMillisecond()));
-        }
-        if (maxDeletes != null) {
-            builder.changelogMaxDeletes(maxDeletes);
-        }
+        checkArgument(
+                olderThanStr == null || !StringUtils.isNullOrWhitespaceOnly(olderThanStr),
+                "older_than must not be empty or whitespace-only when specified.");
+        Table table = table(tableId);
+        ExpireChangelogImpl expireChangelogs = (ExpireChangelogImpl) table.newExpireChangelog();
+        ExpireConfig.Builder builder =
+                ProcedureUtils.fillInChangelogOptions(
+                        ((FileStoreTable) table).store().options(),
+                        retainMax,
+                        retainMin,
+                        olderThanStr,
+                        maxDeletes);
         if (deleteAll != null && deleteAll) {
             expireChangelogs.expireAll();
             return new String[] {"Delete all separated changelogs success."};
