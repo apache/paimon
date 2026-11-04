@@ -46,8 +46,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.SnapshotTest.newChangelogManager;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
@@ -503,6 +505,49 @@ public class SnapshotManagerTest {
         }
         // smaller than the second snapshot
         assertThat(snapshotManager.laterOrEqualWatermark(millis + 999)).isNull();
+    }
+
+    @Test
+    public void testDetectIncompleteSnapshotEnumeration() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        long millis = 1684726826L;
+        AtomicBoolean triggerRace = new AtomicBoolean(true);
+        SnapshotManager snapshotManager =
+                new SnapshotManager(
+                        localFileIO,
+                        new Path(tempDir.toString()),
+                        DEFAULT_MAIN_BRANCH,
+                        null,
+                        null) {
+                    @Override
+                    public Stream<Long> snapshotIdStream() throws IOException {
+                        return super.snapshotIdStream()
+                                .peek(
+                                        snapshotId -> {
+                                            if (!triggerRace.compareAndSet(true, false)) {
+                                                return;
+                                            }
+                                            Snapshot nextSnapshot =
+                                                    createSnapshotWithMillis(
+                                                            snapshotId + 1, millis + 1000);
+                                            try {
+                                                localFileIO.tryToWriteAtomic(
+                                                        snapshotPath(nextSnapshot.id()),
+                                                        nextSnapshot.toJson());
+                                                localFileIO.delete(snapshotPath(snapshotId), false);
+                                            } catch (IOException e) {
+                                                throw new RuntimeException(e);
+                                            }
+                                        });
+                    }
+                };
+        Snapshot snapshot = createSnapshotWithMillis(0, millis);
+        localFileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(snapshot.id()), snapshot.toJson());
+
+        assertThatThrownBy(snapshotManager::safelyGetAllSnapshotsWithConsistentLatest)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("latest snapshot changed from 0 to 1");
     }
 
     public static Snapshot createSnapshotWithMillis(long id, long millis) {

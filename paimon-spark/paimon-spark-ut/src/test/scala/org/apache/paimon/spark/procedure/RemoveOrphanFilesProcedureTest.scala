@@ -24,6 +24,8 @@ import org.apache.paimon.utils.DateTimeUtils
 
 import org.apache.spark.sql.Row
 
+import java.nio.file.{Files, Paths}
+import java.nio.file.attribute.FileTime
 import java.util.concurrent.TimeUnit
 
 class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
@@ -309,6 +311,57 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
         .listDirectories(tablePath)
         .map(status => status.getPath.getName)
         .contains(partitionValue))
+  }
+
+  test("Paimon procedure: abort when cached references are recomputed after expiration") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING)
+                 |USING PAIMON
+                 |TBLPROPERTIES (
+                 |  'bucket' = '1',
+                 |  'bucket-key' = 'id',
+                 |  'manifest.merge-min-count' = '1')
+                 |""".stripMargin)
+
+    spark.sql("INSERT INTO T VALUES (1, 'a')")
+    spark.sql("INSERT INTO T VALUES (2, 'b')")
+
+    val oldDataFiles =
+      spark.sql("SELECT file_path FROM `T$files`").collect().map(_.getString(0)).toSeq
+    val oldTime = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(2)
+    oldDataFiles.foreach(
+      path => Files.setLastModifiedTime(Paths.get(path), FileTime.fromMillis(oldTime)))
+
+    val (deleted, cachedDatasets) = new SparkOrphanFilesClean(
+      loadTable("T"),
+      System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1),
+      1,
+      dryRunPara = false,
+      spark
+    ).doOrphanClean()
+
+    try {
+      deleted.queryExecution.executedPlan
+      spark.sql("INSERT INTO T VALUES (3, 'c')")
+      spark.sql("CALL sys.expire_snapshots(table => 'T', retain_max => 1, retain_min => 1)")
+      spark.sparkContext.getPersistentRDDs.values.foreach(_.unpersist(blocking = true))
+
+      val exception = intercept[org.apache.spark.SparkException] {
+        deleted.collect()
+      }
+      assert(
+        Iterator
+          .iterate[Throwable](exception)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(
+            cause => Option(cause.getMessage).exists(_.contains("Detected missing live manifest"))))
+      assert(oldDataFiles.forall(path => Files.exists(Paths.get(path))))
+      checkAnswer(
+        spark.sql("SELECT * FROM T ORDER BY id"),
+        Seq(Row(1, "a"), Row(2, "b"), Row(3, "c")))
+    } finally {
+      cachedDatasets.foreach(_.unpersist())
+    }
   }
 
 }
