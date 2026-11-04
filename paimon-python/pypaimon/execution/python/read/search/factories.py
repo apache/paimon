@@ -17,14 +17,30 @@
 
 """Construct Python search executors from the public builder configuration."""
 
+from typing import NamedTuple
 
-def new_vector_scan(request):
-    from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
-    scan_class = DataEvolutionVectorScan
+
+class _VectorSearchTypes(NamedTuple):
+    scan: type
+    read: type
+    batch_read: type
+
+
+def _vector_search_types(request):
     if request._is_primary_key_vector_search():
         from pypaimon.execution.python.read.search.primary_key_vector_scan import PrimaryKeyVectorScan
-        scan_class = PrimaryKeyVectorScan
-    return scan_class(
+        from pypaimon.execution.python.read.search.primary_key_vector_read import PrimaryKeyVectorRead
+        from pypaimon.execution.python.read.search.primary_key_batch_vector_read import BatchPrimaryKeyVectorRead
+        return _VectorSearchTypes(PrimaryKeyVectorScan, PrimaryKeyVectorRead, BatchPrimaryKeyVectorRead)
+    from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
+    from pypaimon.execution.python.read.search.vector_search_read import (
+        DataEvolutionVectorRead, BatchVectorSearchReadImpl,
+    )
+    return _VectorSearchTypes(DataEvolutionVectorScan, DataEvolutionVectorRead, BatchVectorSearchReadImpl)
+
+
+def new_vector_scan(request):
+    return _vector_search_types(request).scan(
         request._table,
         request._vector_column,
         filter_=request._filter,
@@ -34,29 +50,19 @@ def new_vector_scan(request):
 
 
 def new_vector_read(request):
-    from pypaimon.execution.python.read.search.vector_search_read import DataEvolutionVectorRead
-    read_class = DataEvolutionVectorRead
-    if request._is_primary_key_vector_search():
-        from pypaimon.execution.python.read.search.primary_key_vector_read import PrimaryKeyVectorRead
-        read_class = PrimaryKeyVectorRead
+    return _new_vector_reader(request, _vector_search_types(request).read, request._query_vector)
+
+
+def new_batch_vector_read(request):
+    return _new_vector_reader(request, _vector_search_types(request).batch_read, request._query_vectors)
+
+
+def _new_vector_reader(request, read_class, queries):
     return read_class(
         request._table,
         request._limit,
         request._vector_column,
-        request._query_vector,
-        filter_=request._filter,
-        partition_filter=request._partition_filter,
-        options=request._options,
-    )
-
-
-def new_batch_vector_read(request):
-    from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl
-    return BatchVectorSearchReadImpl(
-        request._table,
-        request._limit,
-        request._vector_column,
-        request._query_vectors,
+        queries,
         filter_=request._filter,
         partition_filter=request._partition_filter,
         options=request._options,
