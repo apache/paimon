@@ -86,6 +86,22 @@ public class ProcedureUtils {
                 .snapshotMaxDeletes(
                         Optional.ofNullable(maxDeletes).orElse(tableOptions.snapshotExpireLimit()))
                 .snapshotTimeRetain(tableOptions.snapshotTimeRetain());
+        // Unset changelog options must follow the effective snapshot options, including overrides.
+        builder.changelogRetainMin(
+                        tableOptions
+                                .toConfiguration()
+                                .getOptional(CoreOptions.CHANGELOG_NUM_RETAINED_MIN)
+                                .orElse(null))
+                .changelogRetainMax(
+                        tableOptions
+                                .toConfiguration()
+                                .getOptional(CoreOptions.CHANGELOG_NUM_RETAINED_MAX)
+                                .orElse(null))
+                .changelogTimeRetain(
+                        tableOptions
+                                .toConfiguration()
+                                .getOptional(CoreOptions.CHANGELOG_TIME_RETAINED)
+                                .orElse(null));
         if (!StringUtils.isNullOrWhitespaceOnly(olderThanStr)) {
             long olderThanMills =
                     DateTimeUtils.parseTimestampData(olderThanStr, 3, TimeZone.getDefault())

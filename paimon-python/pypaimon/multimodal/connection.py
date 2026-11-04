@@ -31,10 +31,8 @@ from pypaimon.multimodal.table import MultimodalTable, _to_arrow_table
 _DEFAULT_OPTIONS = {
     "row-tracking.enabled": "true",
     "data-evolution.enabled": "true",
-    "deletion-vectors.enabled": "true",
     "blob-as-descriptor": "true",
     "global-index.search-mode": "full",
-    "vector.file.format": "parquet",
 }
 
 _DEFAULT_DATABASE = Catalog.DEFAULT_DATABASE

@@ -57,6 +57,7 @@ def table(tmp_path):
     return pm.connect(options={"warehouse": str(tmp_path)}).create_table(
         "vectors", schema=SCHEMA,
         options={"file.format": "parquet", "vector.file.format": "parquet",
+                 "deletion-vectors.enabled": "true",
                  "vector-index.search-mode": "full", "read.batch-size": "2",
                  "source.split.target-size": "1 b", "source.split.open-file-cost": "1 b"})
 

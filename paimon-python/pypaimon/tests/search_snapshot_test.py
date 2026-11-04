@@ -40,7 +40,7 @@ def table(tmp_path):
     return pm.connect(options={"warehouse": str(tmp_path)}).create_table(
         "vectors", schema=SCHEMA,
         options={"file.format": "parquet", "vector.file.format": "parquet",
-                 "vector-index.search-mode": "full"})
+                 "vector-index.search-mode": "full", "deletion-vectors.enabled": "true"})
 
 
 def search(table, kind="vector", **options):

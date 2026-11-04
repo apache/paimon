@@ -145,7 +145,9 @@ writer fills in the generated fields and writes the full table schema. If ordina
 also omitted, `withWriteType` uses the underlying writer's partial-column behavior and generates
 no omitted columns. For Data Evolution partial updates, this preserves unselected column files.
 Flink's existing virtual computed columns retain their original semantics; this feature does not
-add Flink SQL syntax for physical generated columns.
+add Flink SQL syntax for physical generated columns. Flink 1.18 and later can fill nullable physical
+generated columns omitted from an explicit INSERT target column list; see
+[Flink SQL Write](../flink/sql-write#physical-generated-columns).
 
 Generated definitions and the names and types of their dependencies cannot be changed after
 creation. Use writers that understand this schema attribute; older writers may ignore it.

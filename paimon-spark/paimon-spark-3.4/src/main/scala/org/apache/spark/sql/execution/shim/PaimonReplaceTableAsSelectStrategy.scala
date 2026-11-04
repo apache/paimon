@@ -19,6 +19,7 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.Snapshot
+import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.catalog.SparkBaseCatalog
 import org.apache.paimon.spark.write.PaimonWriteOptions
 
@@ -64,6 +65,15 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
       val (tableOptions, writeOptions) =
         splitTableAndWriteOptions(options)
       val qualifiedSpec = qualifyTableSpec(tableSpec, tableOptions)
+      catalog match {
+        case sparkCatalog: SparkCatalog =>
+          sparkCatalog.checkPartitionedFormatTableCtas(
+            ident,
+            qualifiedSpec.provider.orNull,
+            parts.nonEmpty,
+            qualifiedSpec.properties.asJava)
+        case _ =>
+      }
       val operation =
         if (orCreate) Snapshot.Operation.CREATE_OR_REPLACE_TABLE_AS_SELECT
         else Snapshot.Operation.REPLACE_TABLE_AS_SELECT
