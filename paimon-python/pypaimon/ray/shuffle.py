@@ -31,6 +31,7 @@ unchanged.
 """
 
 import uuid
+from functools import partial
 from typing import TYPE_CHECKING, List
 
 import pyarrow as pa
@@ -144,7 +145,45 @@ def _group_by_partition_bucket(
         bucket_udf, batch_format="pyarrow", zero_copy_batch=True,
     )
     group_keys: List[str] = partition_keys + [bucket_col]
-    return ds_with_bucket.groupby(group_keys), bucket_col
+    return _group_by_shuffle_key(ds_with_bucket, group_keys), bucket_col
+
+
+def _group_by_shuffle_key(dataset, keys, **kwargs):
+    """Group routed rows while tolerating schema-less shards in Ray 2.60.0."""
+    context = getattr(dataset, "context", None)
+    if getattr(context, "shuffle_strategy", None) == "shuffle_v2":
+        import ray
+
+        if ray.__version__ == "2.60.0":
+            from ray.data._internal.execution.execution_callback import ExecutionCallback
+            from ray.data._internal.execution.operators.shuffle_operators.shuffle_reduce_operator import (
+                ShuffleReduceOp,
+            )
+
+            group_keys = (keys,) if isinstance(keys, str) else tuple(keys)
+            reduce_prefix = "HashShuffleReduce(keys={}, ".format(group_keys)
+
+            class IgnoreSchemalessShuffleShards(ExecutionCallback):
+                def before_execution_starts(self, executor):
+                    for operator in executor._topology:
+                        if isinstance(operator, ShuffleReduceOp) and operator.name.startswith(reduce_prefix):
+                            reduce = operator._reduce_fn
+                            if getattr(reduce, "__qualname__", None) == "_sort_reduce.<locals>._reduce":
+                                operator._reduce_fn = partial(_reduce_without_schemaless_shards, reduce)
+
+            # Derived datasets otherwise share their parent's DataContext.
+            dataset = ray.data.Dataset.copy(dataset, _deep_copy=True)
+            dataset.context.custom_execution_callback_classes.append(IgnoreSchemalessShuffleShards)
+    return dataset.groupby(keys, **kwargs)
+
+
+def _reduce_without_schemaless_shards(reduce, partition_id, tables_by_input):
+    # A map with no batches may emit a zero-column placeholder. Preserve
+    # typed empties so the sorted reducer can still see the grouping keys.
+    return reduce(partition_id, [
+        [table for table in tables if table.num_columns or table.num_rows]
+        for tables in tables_by_input
+    ])
 
 
 def _identity_batch(batch: pa.Table) -> pa.Table:

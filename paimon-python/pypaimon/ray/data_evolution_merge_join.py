@@ -26,12 +26,14 @@ from pypaimon.write.merge_transform import (
     _NormalizedClause,
     build_delete_schema,
     build_update_schema,
+    cast_to_schema,
 )
 from pypaimon.ray.partitioning import (
     _default_hash_shuffle_parallelism,
     _resolve_num_partitions,
     _resolve_row_id_num_partitions,
 )
+from pypaimon.ray.shuffle import _group_by_shuffle_key
 
 
 def _map_kwargs(
@@ -667,15 +669,18 @@ def distributed_update_apply(
     sentinel_row_id = -1
     captured_sorted = sorted_first_row_ids
 
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    target_pa = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    update_schema = build_update_schema(target_pa, cols, row_id_name)
+
     def _assign_frid(batch: pa.Table) -> pa.Table:
+        # Ray's shuffle reducer concatenates these blocks with the sentinel.
+        batch = cast_to_schema(batch.select(update_schema.names), update_schema)
         return batch.append_column(frid_col, planner.route(batch.column(row_id_name)))
 
     map_kwargs = _map_kwargs(ray_remote_args)
     with_frid = update_ds.map_batches(_assign_frid, **map_kwargs)
 
-    from pypaimon.schema.data_types import PyarrowFieldParser
-    target_pa = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    update_schema = build_update_schema(target_pa, cols, row_id_name)
     # Ray drops the schema of an empty shuffle input. A negative row id keeps
     # the group-by schema in a separate group that is never written.
     sentinel = pa.Table.from_arrays(
@@ -734,8 +739,8 @@ def distributed_update_apply(
     group_partitions = max(
         1, min(len(captured_sorted), num_partitions)
     )
-    msgs_ds = with_frid.groupby(
-        frid_col, num_partitions=group_partitions
+    msgs_ds = _group_by_shuffle_key(
+        with_frid, frid_col, num_partitions=group_partitions
     ).map_groups(_apply_group, **map_kwargs)
 
     all_msgs: list = []
@@ -829,7 +834,7 @@ def distributed_read_by_row_id(
     map_kwargs = _map_kwargs(ray_remote_args)
     with_frid = row_ids_ds.map_batches(_assign_frid, **map_kwargs)
     group_partitions = max(1, min(len(sorted_first_row_ids), num_partitions))
-    return with_frid.groupby(frid_col, num_partitions=group_partitions).map_groups(
+    return _group_by_shuffle_key(with_frid, frid_col, num_partitions=group_partitions).map_groups(
         _read_group, **map_kwargs
     )
 
