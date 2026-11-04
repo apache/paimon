@@ -71,7 +71,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
+import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateReferencingFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.table.SpecialFields.ROW_TRACKING_FIELD_NAMES;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
 public class RawFileSplitRead implements SplitRead<InternalRow> {
@@ -94,6 +96,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
+    // true if some filters are not pushed down, so TopN and limit must wait for them
+    private boolean hasResidualFilters;
     @Nullable private TopN topN;
     @Nullable private Long limit;
     @Nullable private ReadBatchSizer readBatchSizer;
@@ -146,6 +150,13 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     public RawFileSplitRead withFilter(Predicate predicate) {
         if (predicate != null) {
             this.filters = splitAnd(predicate);
+            if (rowTrackingEnabled) {
+                // Row ids and sequence numbers may only be in the file meta, not in the file.
+                List<Predicate> pushed =
+                        excludePredicateReferencingFields(filters, ROW_TRACKING_FIELD_NAMES);
+                this.hasResidualFilters = pushed.size() < filters.size();
+                this.filters = pushed;
+            }
         }
         return this;
     }
@@ -216,7 +227,9 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
         RowType outputRowType = readRowType;
         Builder formatReaderMappingBuilder =
-                createFormatReaderMappingBuilder(outputRowType, topN, intLimit(limit));
+                hasResidualFilters
+                        ? createFormatReaderMappingBuilder(outputRowType, null, null)
+                        : createFormatReaderMappingBuilder(outputRowType, topN, intLimit(limit));
 
         for (DataFileMeta file : files) {
             suppliers.add(
@@ -232,7 +245,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
         RecordReader<InternalRow> reader = ConcatRecordReader.create(suppliers);
         // Apply the final limit after deletion vectors when no later predicate can drop rows.
-        if (topN == null && (filters == null || filters.isEmpty())) {
+        if (topN == null && !hasResidualFilters && (filters == null || filters.isEmpty())) {
             return LimitRecordReader.limit(reader, limit);
         }
         return reader;
