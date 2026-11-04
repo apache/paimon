@@ -30,7 +30,6 @@ class Model:
     identifier: Union[str, Identifier]
     provider: str
     model: str
-    version: int
     inputs: ModelFields
     outputs: Optional[ModelFields] = None
     properties: Dict[str, Any] = field(default_factory=dict)
@@ -42,8 +41,6 @@ class Model:
             raise ValueError("identifier must be an Identifier or database-qualified name")
         _nonblank(self.provider, "provider")
         _nonblank(self.model, "model")
-        if type(self.version) is not int or self.version <= 0:
-            raise ValueError("version must be a positive integer")
         self.inputs = _validate_model_fields(self.inputs, "inputs", True)
         self.outputs = _validate_model_fields(self.outputs, "outputs", False)
         if not isinstance(self.properties, dict):
@@ -65,7 +62,6 @@ class Model:
             "identifier": self.full_name,
             "provider": self.provider,
             "model": self.model,
-            "version": self.version,
             "inputs": _copy_model_fields(self.inputs),
             "outputs": _copy_model_fields(self.outputs),
             "properties": dict(self.properties),

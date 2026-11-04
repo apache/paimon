@@ -64,7 +64,7 @@ paths:
               $ref: '#/components/schemas/CreateModelRequest'
       responses:
         "200":
-          description: Persisted model metadata, including the assigned version
+          description: Persisted model metadata
           content:
             application/json:
               schema:
@@ -4384,7 +4384,7 @@ components:
     GetModelResponse:
       type: object
       additionalProperties: false
-      required: [name, provider, model, version, inputs]
+      required: [name, provider, model, inputs]
       properties:
         name:
           type: string
@@ -4395,10 +4395,6 @@ components:
         model:
           type: string
           minLength: 1
-        version:
-          type: integer
-          format: int64
-          minimum: 1
         inputs:
           type: object
           minProperties: 1

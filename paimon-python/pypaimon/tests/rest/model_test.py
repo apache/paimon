@@ -48,7 +48,6 @@ def _response():
         name="qwen_vl",
         provider="bailian",
         model="qwen3.8-flash",
-        version=1,
         inputs=_inputs(),
         properties={"enable_thinking": False},
     )
@@ -61,7 +60,6 @@ class ModelTest(unittest.TestCase):
             "quality.qwen_vl",
             "bailian",
             "qwen3.8-flash",
-            1,
             _inputs(),
             properties={"enable_thinking": False},
         )
@@ -112,9 +110,6 @@ class ModelTest(unittest.TestCase):
             values.update(changes)
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 CreateModelRequest(**values)
-
-        with self.assertRaises(ValueError):
-            Model("quality.qwen_vl", "bailian", "qwen3.8-flash", 0, _inputs())
 
     def test_rest_catalog_crud_and_errors(self):
         calls = []

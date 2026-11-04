@@ -69,7 +69,6 @@ class GetModelResponse(RESTResponse):
     name: str
     provider: str
     model: str
-    version: int
     inputs: ModelFields
     outputs: Optional[ModelFields] = None
     properties: Dict[str, Any] = field(default_factory=dict)
@@ -79,7 +78,6 @@ class GetModelResponse(RESTResponse):
             identifier=Identifier.create(database_name, self.name),
             provider=self.provider,
             model=self.model,
-            version=self.version,
             inputs=self.inputs,
             outputs=self.outputs,
             properties=self.properties,
@@ -91,7 +89,6 @@ class GetModelResponse(RESTResponse):
             name=data.get("name"),
             provider=data.get("provider"),
             model=data.get("model"),
-            version=data.get("version"),
             inputs=model_fields_from_wire(data.get("inputs")),
             outputs=model_fields_from_wire(data.get("outputs")),
             properties=data.get("properties") or {},
@@ -102,7 +99,6 @@ class GetModelResponse(RESTResponse):
             "name": self.name,
             "provider": self.provider,
             "model": self.model,
-            "version": self.version,
             "inputs": model_fields_to_wire(self.inputs),
             "outputs": model_fields_to_wire(self.outputs),
             "properties": dict(self.properties),
