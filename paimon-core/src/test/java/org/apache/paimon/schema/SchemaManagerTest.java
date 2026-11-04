@@ -100,7 +100,7 @@ public class SchemaManagerTest {
     private final Map<String, String> options = Collections.singletonMap("key", "value");
     private final RowType rowType = RowType.of(new IntType(), new BigIntType(), new VarCharType());
     private final RowType rowTypeWithSequenceField =
-            RowType.of(new IntType(), new BigIntType(), new VarCharType(), new BigIntType());
+            RowType.of(new IntType(), new BigIntType(), new BigIntType(), new BigIntType());
     private final Schema schema =
             new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
 
