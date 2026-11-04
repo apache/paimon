@@ -18,6 +18,8 @@
 
 package org.apache.parquet.hadoop;
 
+import org.apache.paimon.format.parquet.ParquetCodecFactory;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.bytes.ByteBufferAllocator;
@@ -664,7 +666,7 @@ public class ParquetWriter<T> implements Closeable {
         public ParquetWriter<T> build() throws IOException {
             ParquetProperties encodingProps = encodingPropsBuilder.build();
             if (codecFactory == null) {
-                codecFactory = new CodecFactory(conf, encodingProps.getPageSizeThreshold());
+                codecFactory = new ParquetCodecFactory(conf, encodingProps.getPageSizeThreshold());
             }
 
             return new ParquetWriter<>(
