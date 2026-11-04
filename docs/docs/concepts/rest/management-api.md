@@ -573,6 +573,10 @@ created. Any condition that cannot be fully converted is rejected; no part is si
 The exact expression support follows the predicate converters for the Spark version in use.
 `filter_sql` is only available for `ROW_FILTER` policies.
 
+`LOWER` and `UPPER` on non-constant expressions are not supported because their locale and
+collation semantics cannot be preserved in a stored policy. Constant calls, such as
+`region = lower('APAC')`, are evaluated by Spark when the policy is created and remain supported.
+
 SQL filters adapt signed-zero comparisons and truncate high-precision timestamp columns to
 Spark's microsecond precision. Comparisons on nested timestamp fields with precision above 6
 are not supported. Timestamp value comparisons require Spark 3.4 or later with

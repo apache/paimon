@@ -24,6 +24,7 @@ import org.apache.paimon.types.{DataTypeChecks, DataTypeFamily, LocalZonedTimest
 import org.apache.paimon.types.DataTypeRoot.{DOUBLE, FLOAT}
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.expressions.{Lower, Upper}
 import org.apache.spark.sql.catalyst.optimizer.{ConstantFolding, SimplifyCasts}
 import org.apache.spark.sql.catalyst.plans.logical.Filter
 import org.apache.spark.sql.catalyst.trees.TreePattern.CURRENT_LIKE
@@ -51,6 +52,15 @@ object ExpressionUtils extends ExpressionHelper {
     )
 
     val normalized = SimplifyCasts(ConstantFolding(filter)).asInstanceOf[Filter].condition
+    // Fold constant LOWER/UPPER calls in Spark before rejecting case conversion on column values.
+    // Storage transforms use Locale.ROOT and cannot encode Spark's locale and collation rules.
+    require(
+      !normalized.exists {
+        case _: Lower | _: Upper => true
+        case _ => false
+      },
+      "filter_sql does not support LOWER or UPPER on non-constant expressions."
+    )
     // A stored policy has no engine-side residual filter, so every conjunct must convert.
     convertConditionToPaimonPredicate(
       normalized,

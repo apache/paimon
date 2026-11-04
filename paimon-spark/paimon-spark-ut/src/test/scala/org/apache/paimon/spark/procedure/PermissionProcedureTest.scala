@@ -21,7 +21,7 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.data.{BinaryString, GenericRow, Timestamp}
 import org.apache.paimon.management.{PermissionResource, ResourceType}
-import org.apache.paimon.predicate.{ConcatTransform, Equal, FieldRef, FieldTransform, LeafPredicate, NotEqual}
+import org.apache.paimon.predicate.{ConcatTransform, Equal, FieldRef, FieldTransform, LeafPredicate, LowerTransform, NotEqual}
 import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSparkTestWithRestCatalogBase, SparkTypeUtils}
 import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
@@ -33,7 +33,7 @@ import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.assertThat
 
 import java.time.LocalDateTime
-import java.util.{Arrays, Collections}
+import java.util.{Arrays, Collections, Locale}
 
 /** End-to-end tests for permission and policy management procedures. */
 class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
@@ -878,6 +878,108 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
             spark.sql("SELECT id FROM paimon.sales.legacy_sql_timestamp_policy"),
             Seq(Row(1), Row(3)))
         }
+      }
+    }
+  }
+
+  test("SQL policy filters reject locale-sensitive case conversion after constant folding") {
+    restCatalogServer.setQueryPrincipals(Collections.singleton("analyst"))
+    withTable("paimon.sales.sql_locale_policy") {
+      spark.sql("""CREATE TABLE paimon.sales.sql_locale_policy (id INT, region STRING)
+                  |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                  |""".stripMargin)
+      // The non-ASCII suffix forces Spark 3's locale-sensitive fallback for the entire string.
+      val values = Seq("I\u00e9", "i\u00e9", "APAC", "apac").zipWithIndex
+        .map { case (value, index) => s"(${index + 1}, ${sqlLiteral(value)})" }
+        .mkString(", ") + ", (5, CAST(NULL AS STRING))"
+      spark.sql(s"INSERT INTO paimon.sales.sql_locale_policy VALUES $values")
+      val turkishLower = sqlLiteral("\u0131\u00e9")
+      val turkishUpper = sqlLiteral("\u0130\u00c9")
+      val previousLocale = Locale.getDefault
+      try {
+        Seq(Locale.ROOT, new Locale("tr", "TR")).foreach {
+          locale =>
+            Locale.setDefault(locale)
+            // Spark 3 uses the JVM locale for non-ASCII case conversion; Spark 4 has other paths.
+            if (locale.getLanguage == "tr" && org.apache.spark.SPARK_VERSION < "4.0") {
+              Seq(
+                s"id = 1 AND lower(region) <> $turkishLower",
+                s"id = 2 AND upper(region) <> $turkishUpper").foreach {
+                condition =>
+                  checkAnswer(
+                    spark.sql(s"SELECT id FROM VALUES $values AS raw(id, region) WHERE $condition"),
+                    Nil)
+              }
+            }
+            val conditions = Seq(
+              s"lower(region) <> $turkishLower",
+              s"upper(region) <> $turkishUpper",
+              "lower(region) = 'apac'",
+              "upper(region) IN ('APAC')",
+              "lower(region) IS NULL",
+              "upper(region) IS NOT NULL",
+              "NOT (lower(region) = 'apac')",
+              "id = 3 AND lower(region) = 'apac'",
+              "id = 3 OR upper(region) = 'APAC'",
+              "length(lower(region)) = 4",
+              "lower(lower(region)) = 'apac'",
+              "upper(concat(region, 'x')) = 'APACX'"
+            )
+            conditions.foreach {
+              condition =>
+                withClue(s"$locale policy: $condition: ") {
+                  val error = intercept[IllegalArgumentException] {
+                    spark
+                      .sql(s"""CALL sys.create_policy(
+                              |  database => 'sales', table => 'sql_locale_policy',
+                              |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                              |  filter_sql => ${sqlLiteral(condition)})
+                              |""".stripMargin)
+                      .collect()
+                  }
+                  assertThat(error.getMessage).contains(
+                    "LOWER or UPPER on non-constant expressions")
+                  checkAnswer(
+                    spark.sql("CALL sys.list_policies(database => 'sales', " +
+                      "table => 'sql_locale_policy')"),
+                    Nil)
+                }
+            }
+
+            // Only the folded literal is persisted, so its conversion runs in Spark at creation.
+            Seq(
+              "region = lower('APAC')",
+              "region = upper('apac')",
+              s"region = lower(${sqlLiteral("I\u00e9")})",
+              s"region = upper(${sqlLiteral("i\u00e9")})",
+              "region IS NULL"
+            ).foreach {
+              condition =>
+                val expected = spark
+                  .sql(s"SELECT id FROM VALUES $values AS raw(id, region) WHERE $condition")
+                  .collect()
+                  .toSeq
+                checkSqlPolicy("sql_locale_policy", condition, expected)
+            }
+        }
+
+        // Native Predicate JSON continues to use Paimon's Locale.ROOT conversion.
+        val nativePredicate = JsonSerdeUtil.toFlatJson(
+          LeafPredicate.of(
+            new LowerTransform(
+              Collections.singletonList(new FieldRef(1, "region", DataTypes.STRING()))),
+            Equal.INSTANCE,
+            Collections.singletonList(BinaryString.fromString("i\u00e9"))
+          ))
+        spark.sql(s"""CALL sys.create_policy(
+                     |  database => 'sales', table => 'sql_locale_policy',
+                     |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                     |  predicate_json => ${sqlLiteral(nativePredicate)})
+                     |""".stripMargin)
+        checkAnswer(spark.sql("SELECT id FROM paimon.sales.sql_locale_policy"), Seq(Row(1), Row(2)))
+      } finally {
+        // Locale is process-wide; restore it before other tests run.
+        Locale.setDefault(previousLocale)
       }
     }
   }
