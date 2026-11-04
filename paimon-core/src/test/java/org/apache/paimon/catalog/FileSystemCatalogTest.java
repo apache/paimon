@@ -178,7 +178,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         Identifier identifier = Identifier.create("test_db", "legacy_table");
         FileSystemSchemaManager schemaManager = createLegacyTable(identifier, cacheEnabled);
 
-        assertThatThrownBy(() -> catalog.getTable(identifier))
+        assertThatThrownBy(() -> ((FileStoreTable) catalog.getTable(identifier)).newScan())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("primary key");
 
@@ -230,7 +230,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         assertThat(snapshotManager.latestSnapshot()).isNotNull();
         long snapshotId = snapshotManager.latestSnapshot().id();
         assertThat(snapshotManager.latestSnapshot().schemaId()).isZero();
-        assertThatThrownBy(() -> catalog.getTable(identifier))
+        assertThatThrownBy(() -> ((FileStoreTable) catalog.getTable(identifier)).newScan())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("primary key");
 
@@ -285,7 +285,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         assertThat(mainSchemaManager.latest().get().id()).isZero();
         assertThat(catalog.getTable(branchIdentifier).options())
                 .containsEntry("fields.seq.sequence-group", "v");
-        assertThatThrownBy(() -> catalog.getTable(identifier))
+        assertThatThrownBy(() -> ((FileStoreTable) catalog.getTable(identifier)).newScan())
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -298,7 +298,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                 ((FileSystemCatalog) DelegateCatalog.rootCatalog(catalog))
                         .getTableLocation(identifier);
 
-        assertThatThrownBy(() -> catalog.getTable(identifier))
+        assertThatThrownBy(() -> ((FileStoreTable) catalog.getTable(identifier)).newScan())
                 .isInstanceOf(IllegalArgumentException.class);
         catalog.dropTable(identifier, false);
 
@@ -338,7 +338,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                 CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(), newBranchPath.toUri().toString());
         writeLegacySchema(branchSchemaManager, legacySchema, 1, branchOptions);
 
-        assertThatThrownBy(() -> catalog.getTable(identifier))
+        assertThatThrownBy(() -> ((FileStoreTable) catalog.getTable(identifier)).newScan())
                 .isInstanceOf(IllegalArgumentException.class);
         catalog.dropTable(identifier, false);
 

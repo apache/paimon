@@ -39,10 +39,8 @@ import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
-import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScanResult;
-import org.apache.paimon.globalindex.SortedGlobalIndexer;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
@@ -184,13 +182,11 @@ public class SortedIndexTopoBuilder {
             RowType sourceReadType = table.rowType().project(indexColumns);
             RowType dataReadType = SpecialFields.rowTypeWithRowId(sourceReadType);
             String buildTaskIdField = buildTaskIdFieldName(dataReadType);
-            GlobalIndexer indexer =
-                    GlobalIndexer.create(indexType, sourceReadType.getFields(), userOptions);
-            if (!(indexer instanceof SortedGlobalIndexer)) {
-                throw new IllegalArgumentException(
-                        "Index algorithm " + indexType + " does not expose sorted index keys.");
-            }
-            GlobalIndexKeyExtractor keyExtractor = ((SortedGlobalIndexer) indexer).keyExtractor();
+            SortedGlobalIndexWriter indexWriter =
+                    new SortedGlobalIndexWriter(table, indexType, userOptions)
+                            .withIndexFields(indexColumns);
+            Options indexOptions = indexWriter.indexOptions();
+            GlobalIndexKeyExtractor keyExtractor = indexWriter.keyExtractor();
             RowType sortReadType =
                     normalizedReadType(
                             dataReadType, buildTaskIdField, indexColumn, keyExtractor.keyType());
@@ -201,9 +197,9 @@ public class SortedIndexTopoBuilder {
 
             // 3. Calculate maximum parallelism bound
             long recordsPerRange =
-                    userOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE);
+                    indexOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE);
             int maxParallelism =
-                    userOptions.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
+                    indexOptions.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
 
             // 4. Build one topology for all contiguous row ranges
             CoreOptions coreOptions = table.coreOptions();
@@ -245,8 +241,7 @@ public class SortedIndexTopoBuilder {
                             buildTasks,
                             splitTasks,
                             readBuilder,
-                            new SortedGlobalIndexWriter(table, indexType, userOptions)
-                                    .withIndexFields(indexColumns),
+                            indexWriter,
                             scanResult.scanSnapshotId(),
                             partitionFieldSize,
                             taskIdPos,

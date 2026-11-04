@@ -88,7 +88,7 @@ public class VariantGet {
         } else if (dataType instanceof MapType) {
             MapType mapType = (MapType) dataType;
             DataType valueType = mapType.getValueType();
-            if (mapType.getKeyType().equals(DataTypes.STRING())) {
+            if (mapType.getKeyType().equalsIgnoreNullable(DataTypes.STRING())) {
                 if (variantType == Type.OBJECT) {
                     int size = v.objectSize();
                     HashMap<BinaryString, Object> map = new HashMap<>();

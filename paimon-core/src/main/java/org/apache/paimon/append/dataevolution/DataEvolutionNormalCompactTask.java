@@ -110,8 +110,6 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
 
         Map<String, String> writeOptions = new HashMap<>(DYNAMIC_WRITE_OPTIONS);
         if (options.dataEvolutionCompactionSplitLargeFiles()) {
-            // Buffer flushes may close files before reaching a safe dedicated-file boundary.
-            writeOptions.put(CoreOptions.WRITE_BUFFER_FOR_APPEND.key(), "false");
             writeOptions.put(CoreOptions.TARGET_FILE_SIZE.key(), Long.MAX_VALUE + " b");
         }
         table = table.copy(writeOptions);

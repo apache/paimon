@@ -22,7 +22,7 @@ import json
 from pypaimon.common.json_util import JSON
 from pypaimon.execution.native.runtime import native_runtime_available
 from pypaimon.execution.native.table import (
-    _catalog_context_options, _catalog_metastore, _option_value_to_string,
+    _catalog_context_options, _catalog_metastore, _option_value_to_string, _options_to_native,
     _resolved_schema_file_io_options)
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.commit_message_serializer import (
@@ -153,8 +153,7 @@ def create_native_write_table(table):
     from pypaimon_rust.datafusion import Table as NativeTable
     # Preserve the resolved schema and all effective table options, including
     # copy() overrides. Do not inject scan options or reload catalog schemas.
-    options = {str(key): _option_value_to_string(value)
-               for key, value in table.table_schema.options.items() if value is not None}
+    options = _options_to_native(table.table_schema.options)
     # Python accepts boolean spellings such as "off"; pass the parsed value.
     options['dynamic-partition-overwrite'] = _option_value_to_string(
         table.options.dynamic_partition_overwrite())

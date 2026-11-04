@@ -20,6 +20,7 @@ package org.apache.paimon.index.pkvector;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.options.VectorIndexOptions;
 
 import org.junit.jupiter.api.Test;
 
@@ -29,23 +30,23 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for primary-key vector index options in {@link CoreOptions}. */
+/** Tests for legacy primary-key vector configuration handled by {@link VectorIndexOptions}. */
 class PrimaryKeyVectorIndexOptionsTest {
 
     @Test
     void testPluralFieldRegistryEnablesIndex() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("pk-vector.index.columns", "embedding");
 
-        assertThat(new CoreOptions(options).primaryKeyVectorIndexEnabled()).isTrue();
+        assertThat(VectorIndexOptions.columns(new Options(options))).containsExactly("embedding");
     }
 
     @Test
     void testResolvesSingleIndexColumn() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("pk-vector.index.columns", "embedding");
 
-        assertThat(new CoreOptions(options).primaryKeyVectorIndexColumn()).isEqualTo("embedding");
+        assertThat(VectorIndexOptions.columns(new Options(options))).containsExactly("embedding");
     }
 
     @Test
@@ -54,28 +55,31 @@ class PrimaryKeyVectorIndexOptionsTest {
         options.put("pk-vector.index.column", "embedding");
         options.put("pk-vector.index.type", "ivf-pq");
 
-        assertThat(new CoreOptions(options).primaryKeyVectorIndexEnabled()).isFalse();
+        assertThat(VectorIndexOptions.columns(new Options(options))).isEmpty();
     }
 
     @Test
     void testIndexTypeMustBeFieldScoped() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("pk-vector.index.columns", "embedding");
         options.put("pk-vector.index.type", "ivf-pq");
 
-        assertThat(new CoreOptions(options).primaryKeyVectorIndexType("embedding")).isNull();
+        assertThat(
+                        VectorIndexOptions.resolve(new Options(options), null, "embedding", false)
+                                .type())
+                .isNull();
     }
 
     @Test
     void testIndexOptionsMustBeFieldScoped() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("pk-vector.index.columns", "embedding");
         options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
         options.put("pk-vector.index.options", "{\"nlist\":64}");
 
         assertThat(
-                        new CoreOptions(options)
-                                .primaryKeyVectorIndexOptions("embedding")
+                        VectorIndexOptions.resolve(new Options(options), null, "embedding")
+                                .options()
                                 .get("ivf-pq.nlist"))
                 .isNull();
     }
@@ -83,33 +87,34 @@ class PrimaryKeyVectorIndexOptionsTest {
     @Test
     void testDistanceMetricMustBeFieldScoped() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("pk-vector.index.columns", "embedding");
         options.put("pk-vector.distance.metric", "l2");
 
-        assertThat(new CoreOptions(options).primaryKeyVectorDistanceMetric("embedding"))
+        assertThat(VectorIndexOptions.resolve(new Options(options), null, "embedding").metric())
                 .isEqualTo("inner_product");
     }
 
     @Test
     void testFieldScopedDistanceMetricOverridesTableDefault() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("pk-vector.index.columns", "embedding");
         options.put("pk-vector.distance.metric", "l2");
         options.put("fields.embedding.pk-vector.distance.metric", "cosine");
 
-        assertThat(new CoreOptions(options).primaryKeyVectorDistanceMetric("embedding"))
+        assertThat(VectorIndexOptions.resolve(new Options(options), null, "embedding").metric())
                 .isEqualTo("cosine");
     }
 
     @Test
     void testFieldScopedJsonOptionsOverrideTableDefault() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("pk-vector.index.columns", "embedding");
         options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
         options.put("pk-vector.index.options", "{\"nlist\":64}");
         options.put("fields.embedding.pk-vector.index.options", "{\"nlist\":128}");
 
-        Options resolved = new CoreOptions(options).primaryKeyVectorIndexOptions("embedding");
+        Options resolved =
+                VectorIndexOptions.resolve(new Options(options), null, "embedding").options();
 
         assertThat(resolved.get("ivf-pq.nlist")).isEqualTo("128");
     }
@@ -120,7 +125,9 @@ class PrimaryKeyVectorIndexOptionsTest {
                 coreOptions(
                         "{\"nlist\":64,\"ivf-pq.pq.m\":\"8\"," + "\"fields.embedding.hnsw.m\":16}");
 
-        Options resolved = coreOptions.primaryKeyVectorIndexOptions("embedding");
+        Options resolved =
+                VectorIndexOptions.resolve(coreOptions.toConfiguration(), null, "embedding")
+                        .options();
 
         assertThat(resolved.get("ivf-pq.nlist")).isEqualTo("64");
         assertThat(resolved.get("ivf-pq.pq.m")).isEqualTo("8");
@@ -130,7 +137,13 @@ class PrimaryKeyVectorIndexOptionsTest {
 
     @Test
     void testRejectsNonObjectOptions() {
-        assertThatThrownBy(() -> coreOptions("[1,2]").primaryKeyVectorIndexOptions("embedding"))
+        assertThatThrownBy(
+                        () ->
+                                VectorIndexOptions.resolve(
+                                                coreOptions("[1,2]").toConfiguration(),
+                                                null,
+                                                "embedding")
+                                        .options())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("pk-vector.index.options")
                 .hasMessageContaining("JSON object");
@@ -144,7 +157,7 @@ class PrimaryKeyVectorIndexOptionsTest {
             String indexOptions, String additionalKey, String additionalValue) {
         Map<String, String> options = new HashMap<>();
         options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("pk-vector.index.columns", "embedding");
         options.put("fields.embedding.pk-vector.distance.metric", "l2");
         if (indexOptions != null) {
             options.put("fields.embedding.pk-vector.index.options", indexOptions);

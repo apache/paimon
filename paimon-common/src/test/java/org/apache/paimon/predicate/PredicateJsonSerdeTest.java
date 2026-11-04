@@ -91,6 +91,14 @@ class PredicateJsonSerdeTest {
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"IS_NOT_NULL\",\"literals\":[]}"),
 
+                // LeafPredicate - IsNaN
+                TestSpec.forPredicate(new PredicateBuilder(RowType.of(DataTypes.FLOAT())).isNaN(0))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"FLOAT\"}},\"function\":\"IS_NAN\",\"literals\":[]}"),
+                TestSpec.forPredicate(new PredicateBuilder(RowType.of(DataTypes.DOUBLE())).isNaN(0))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"DOUBLE\"}},\"function\":\"IS_NAN\",\"literals\":[]}"),
+
                 // LeafPredicate - In
                 TestSpec.forPredicate(builder.in(0, Arrays.asList(1, 2, 3)))
                         .expectJson(

@@ -1038,34 +1038,6 @@ class CoreOptions:
         )
     )
 
-    PK_VECTOR_INDEX_COLUMNS: ConfigOption[str] = (
-        ConfigOptions.key("pk-vector.index.columns")
-        .string_type()
-        .no_default_value()
-        .with_description("Comma-separated VECTOR columns indexed by primary-key vector indexes.")
-    )
-
-    PK_BTREE_INDEX_COLUMNS: ConfigOption[str] = (
-        ConfigOptions.key("pk-btree.index.columns")
-        .string_type()
-        .no_default_value()
-        .with_description("Comma-separated columns indexed by primary-key BTree indexes.")
-    )
-
-    PK_BITMAP_INDEX_COLUMNS: ConfigOption[str] = (
-        ConfigOptions.key("pk-bitmap.index.columns")
-        .string_type()
-        .no_default_value()
-        .with_description("Comma-separated columns indexed by primary-key Bitmap indexes.")
-    )
-
-    PK_FULL_TEXT_INDEX_COLUMNS: ConfigOption[str] = (
-        ConfigOptions.key("pk-full-text.index.columns")
-        .string_type()
-        .no_default_value()
-        .with_description("Comma-separated character columns indexed by primary-key full-text indexes.")
-    )
-
     GLOBAL_INDEX_COLUMN_UPDATE_ACTION: ConfigOption[GlobalIndexColumnUpdateAction] = (
         ConfigOptions.key("global-index.column-update-action")
         .enum_type(GlobalIndexColumnUpdateAction)
@@ -1227,7 +1199,7 @@ class CoreOptions:
         .int_type()
         .default_value(1)
         .with_description(
-            "FFmpeg threads per PyAV video decoder in a LeRobot worker. "
+            "FFmpeg threads per PyAV or indexed TorchCodec decoder in a LeRobot worker. "
             "0 keeps automatic selection; 1 avoids nested codec parallelism.")
     )
 
@@ -1859,112 +1831,104 @@ class CoreOptions:
     def global_index_build_parallelism(self) -> int:
         return self.options.get(CoreOptions.GLOBAL_INDEX_BUILD_PARALLELISM)
 
-    def primary_key_btree_index_columns(self) -> List[str]:
-        return self._primary_key_index_columns(CoreOptions.PK_BTREE_INDEX_COLUMNS)
+    def btree_index_columns(self) -> List[str]:
+        return self.global_index_columns("btree")
 
-    def primary_key_bitmap_index_columns(self) -> List[str]:
-        return self._primary_key_index_columns(CoreOptions.PK_BITMAP_INDEX_COLUMNS)
+    def bitmap_index_columns(self) -> List[str]:
+        return self.global_index_columns("bitmap")
 
-    def primary_key_vector_index_columns(self) -> List[str]:
-        return self._primary_key_index_columns(CoreOptions.PK_VECTOR_INDEX_COLUMNS)
+    def full_text_index_columns(self) -> List[str]:
+        return self.global_index_columns("full-text")
 
-    def primary_key_full_text_index_columns(self) -> List[str]:
-        return self._primary_key_index_columns(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS)
+    def vector_index_columns(self, index_type: str) -> List[str]:
+        from pypaimon.common.options.vector_index_options import VectorIndexOptions
+        return VectorIndexOptions.columns(self.options, index_type)
 
-    def primary_key_vector_index_type(self, column: str):
-        return self.options.to_map().get(
-            "fields.%s.pk-vector.index.type" % column)
+    def global_index_types(self) -> List[str]:
+        prefix = "global-index."
+        return sorted({key[len(prefix):key.rfind('.')]
+                       for key in self.options.to_map()
+                       if key.startswith(prefix) and key.endswith((".index-columns", ".index-column"))
+                       and key.rfind('.') >= len(prefix)})
 
-    def primary_key_vector_index_options(self, column: str) -> Options:
-        index_type = self.primary_key_vector_index_type(column)
-        if index_type is None or not str(index_type).strip():
-            raise ValueError(
-                "fields.%s.pk-vector.index.type must be configured before "
-                "resolving index options." % column)
-        option_key = "fields.%s.pk-vector.index.options" % column
+    @staticmethod
+    def _is_vector_index_type(index_type: str) -> bool:
+        return index_type not in ("btree", "bitmap", "multivalue", "fm", "full-text")
+
+    def global_index_columns(self, index_type: str) -> List[str]:
+        values = self.options.to_map()
+        columns = values.get("global-index.%s.index-columns" % index_type)
+        if columns is None:
+            columns = values.get("global-index.%s.index-column" % index_type)
+        if columns is None:
+            columns = values.get("pk-%s.index.columns" % index_type)
+        return self._index_columns(columns)
+
+    def global_index_columns_option_key(self, index_type: str) -> str:
+        values = self.options.to_map()
+        for suffix in ("index-columns", "index-column"):
+            key = "global-index.%s.%s" % (index_type, suffix)
+            if values.get(key) is not None:
+                return key
+        legacy = "pk-%s.index.columns" % index_type
+        return legacy if values.get(legacy) is not None else "global-index.%s.index-columns" % index_type
+
+    @staticmethod
+    def _index_columns(columns) -> List[str]:
+        return [] if columns is None else [column.strip() for column in str(columns).split(',')]
+
+    def global_index_options(self, index_type: Optional[str], column: str) -> Options:
+        """Resolve the same implementation and field options for either table mode."""
+        values = dict(self.options.to_map())
+        if index_type is None:
+            return Options(values)
+        vector = self._is_vector_index_type(index_type)
+        prefix = index_type + ("." if vector or index_type == "full-text" else "-index.")
         field_prefix = "fields.%s." % column
-        resolved = self._primary_key_json_options(
-            option_key,
-            lambda key: (key.startswith(str(index_type) + ".")
-                         or (key.startswith(field_prefix)
-                             and not key.startswith(field_prefix + "pk-vector."))),
-            str(index_type) + ".")
-        values = dict(resolved.to_map())
-        values[str(index_type) + ".metric"] = \
-            self.primary_key_vector_distance_metric(column)
+        shared_key = field_prefix + "index-options"
+        shared = values.get(shared_key) is not None
+        option_key = shared_key if shared else field_prefix + "pk-" + (
+            "vector" if vector else index_type) + ".index.options"
+        serialized = values.get(option_key)
+        if serialized is not None and str(serialized).strip():
+            try:
+                parsed = json.loads(serialized)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("%s must be a JSON object of option key-value pairs." % option_key) from exc
+            if not isinstance(parsed, dict):
+                raise ValueError("%s must be a JSON object of option key-value pairs." % option_key)
+            for key, value in parsed.items():
+                if not key.strip() or value is None:
+                    raise ValueError("%s contains an invalid option." % option_key)
+                if isinstance(value, bool):
+                    value = str(value).lower()
+                elif index_type == 'full-text' and isinstance(value, list):
+                    value = ';'.join(str(item) for item in value)
+                qualified = key if key.startswith((prefix, "fields.")) else prefix + key
+                previous = values.get(qualified)
+                if not shared and previous is not None and previous != str(value):
+                    raise ValueError("%s defines conflicting values for %s." % (option_key, qualified))
+                values[qualified] = str(value)
+                if vector and qualified.startswith(prefix):
+                    short_key = qualified[len(prefix):]
+                    if shared:
+                        values[field_prefix + short_key] = str(value)
         return Options(values)
 
-    def primary_key_vector_distance_metric(self, column: str) -> str:
-        value = self.options.to_map().get(
-            "fields.%s.pk-vector.distance.metric" % column,
-            "inner_product")
-        return str(value).lower().replace('-', '_')
+    def full_text_index_options(self, column: str) -> Options:
+        return Options({key: value for key, value in self.global_index_options(
+            "full-text", column).to_map().items() if key.startswith("full-text.")})
 
-    def primary_key_full_text_index_options(self, column: str) -> Options:
-        return self._primary_key_json_options(
-            "fields.%s.pk-full-text.index.options" % column,
-            lambda key: key.startswith("full-text."),
-            "full-text.")
+    def btree_index_options(self, column: str) -> Options:
+        return self._sorted_index_options(column, "btree")
 
-    def primary_key_btree_index_options(self, column: str) -> Options:
-        return self._primary_key_sorted_index_options(column, "pk-btree", "btree-index.")
+    def bitmap_index_options(self, column: str) -> Options:
+        return self._sorted_index_options(column, "bitmap")
 
-    def primary_key_bitmap_index_options(self, column: str) -> Options:
-        return self._primary_key_sorted_index_options(column, "pk-bitmap", "bitmap-index.")
-
-    def _primary_key_index_columns(self, option: ConfigOption[str]) -> List[str]:
-        columns = self.options.get(option)
-        if columns is None:
-            return []
-        return [column.strip() for column in columns.split(',')]
-
-    def _primary_key_sorted_index_options(
-            self, column: str, option_family: str, algorithm_prefix: str) -> Options:
-        resolved = dict(self.options.to_map())
+    def _sorted_index_options(self, column: str, index_type: str) -> Options:
+        resolved = self.global_index_options(index_type, column).to_map()
         resolved.pop("sorted-index.records-per-file", None)
         resolved.pop("sorted-index.records-per-range", None)
-        option_key = "fields.%s.%s.index.options" % (column, option_family)
-        serialized = self.options.to_map().get(option_key)
-        if serialized is None or not str(serialized).strip():
-            return Options(resolved)
-        try:
-            parsed = json.loads(serialized)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key) from exc
-        if not isinstance(parsed, dict):
-            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key)
-        for key, value in parsed.items():
-            if not key or value is None:
-                raise ValueError("%s contains an invalid option." % option_key)
-            qualified = key if key.startswith((algorithm_prefix, "fields.")) \
-                else algorithm_prefix + key
-            previous = resolved.get(qualified)
-            if previous is not None and previous != value:
-                raise ValueError("%s defines conflicting values for %s." % (option_key, qualified))
-            resolved[qualified] = value
-        return Options(resolved)
-
-    def _primary_key_json_options(self, option_key, include, prefix):
-        resolved = {key: value for key, value in self.options.to_map().items()
-                    if include(key) and not key.startswith(option_key)}
-        serialized = self.options.to_map().get(option_key)
-        if serialized is None or not str(serialized).strip():
-            return Options(resolved)
-        try:
-            parsed = json.loads(serialized)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key) from exc
-        if not isinstance(parsed, dict):
-            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key)
-        for key, value in parsed.items():
-            if not key or value is None:
-                raise ValueError("%s contains an invalid option." % option_key)
-            qualified = key if (prefix is None
-                                or key.startswith((prefix, "fields."))) else prefix + key
-            previous = resolved.get(qualified)
-            if previous is not None and previous != str(value):
-                raise ValueError("%s defines conflicting values for %s." % (option_key, qualified))
-            resolved[qualified] = str(value)
         return Options(resolved)
 
     def btree_index_fallback_scan_max_size(self) -> int:

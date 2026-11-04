@@ -27,7 +27,24 @@ import pyarrow as pa
 from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 from pypaimon.execution.python.write.writer.format_row_writer import FormatRowWriter
 from pypaimon.filesystem.vortex_utils import to_vortex_specified
+from pypaimon.schema.arrow_schema import parquet_storage_schema
 from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
+
+
+def parquet_write_schema(schema):
+    """Keep vector dimensions in Paimon rather than Parquet's Arrow metadata.
+
+    PyArrow cannot restore nullable fixed-size lists from Parquet reliably.
+    Use physical variable-size lists, including for streaming writers whose
+    later batches may contain NULLs. Preserve unrelated field/schema metadata.
+    """
+    return parquet_storage_schema(schema)
+
+
+def parquet_write_data(data, schema=None):
+    """Convert vectors to their Parquet representation without dropping metadata."""
+    schema = parquet_write_schema(data.schema) if schema is None else schema
+    return data if data.schema.equals(schema, check_metadata=True) else data.cast(schema)
 
 
 def write_row_file(file_io, path, data, fields=None, zstd_level=1):

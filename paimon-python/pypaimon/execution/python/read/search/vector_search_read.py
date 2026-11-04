@@ -27,6 +27,7 @@ from threading import Lock
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
+from pypaimon.common.options.vector_index_options import VectorIndexOptions
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -313,7 +314,7 @@ class AbstractVectorSearchReadImpl:
             self._table.file_io,
             self._table.path_factory().global_index_path_factory().index_path(),
             index_io_meta_list,
-            self._table.table_schema.options,
+            self._resolved_index_options(vector_index_files[0].index_type),
         )
         try:
             self._record_index_metric(reader, vector_index_files[0].index_type, metric_lock)
@@ -655,12 +656,17 @@ class AbstractVectorSearchReadImpl:
                 del batch, row_ids, vectors
         return [_scored_result(heap) for heap in heaps]
 
+    def _resolved_index_options(self, index_type):
+        values = dict(_table_options_map(self._table))
+        values.update(self._options)
+        return VectorIndexOptions.resolve(Options(values), index_type, self._vector_column.name).options.to_map()
+
     def _configured_refine_factor(self, index_type):
         value = _configured_refine_factor(
             self._options, self._vector_column.name, index_type)
         if value is None:
             value = _configured_refine_factor(
-                _table_options_map(self._table), self._vector_column.name, index_type)
+                self._resolved_index_options(index_type), self._vector_column.name, index_type)
         if value is None:
             return 0
         try:
@@ -684,6 +690,16 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
                          partition_filter=partition_filter,
                          options=options)
         self._query_vector = query_vector
+
+    def _new_distributed_reader(self, executor):
+        if type(self) is not DataEvolutionVectorRead:
+            raise ValueError("Custom vector readers must define their own distributed execution.")
+        if not self._table.options.data_evolution_enabled():
+            raise ValueError("Ray vector search supports only data-evolution tables for this reader.")
+        from pypaimon.execution.python.read.search.distributed_search import validate_query_vectors
+        from pypaimon.execution.python.read.search.distributed_vector_search import DistributedVectorSearchRead
+        validate_query_vectors([self._query_vector])
+        return DistributedVectorSearchRead(self, executor)
 
     def _read(self, splits, snapshot):
         self._index_metric = None
@@ -731,6 +747,16 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
                          partition_filter=partition_filter,
                          options=options)
         self._query_vectors = list(query_vectors)
+
+    def _new_distributed_reader(self, executor):
+        if type(self) is not BatchVectorSearchReadImpl:
+            raise ValueError("Custom vector readers must define their own distributed execution.")
+        if not self._table.options.data_evolution_enabled():
+            raise ValueError("Ray vector search supports only data-evolution tables for this reader.")
+        from pypaimon.execution.python.read.search.distributed_search import validate_query_vectors
+        from pypaimon.execution.python.read.search.distributed_vector_search import DistributedBatchVectorSearchRead
+        validate_query_vectors(self._query_vectors)
+        return DistributedBatchVectorSearchRead(self, executor)
 
     def _read_batch(self, splits, snapshot):
         self._index_metric = None
@@ -985,14 +1011,13 @@ def _table_options_map(table):
 
 
 def _configured_vector_metric(options, vector_column, index_type=None):
-    field_prefix = "fields.%s." % vector_column.name
-    index_prefix = "%s." % index_type if index_type else None
-    keys = [field_prefix + "pk-vector.distance.metric",
-            field_prefix + "distance.metric", field_prefix + "metric"]
-    if index_prefix is not None:
-        keys.extend([index_prefix + "distance.metric", index_prefix + "metric"])
-    keys.extend(["test.vector.metric", "lumina.distance.metric", "distance.metric", "metric"])
-    for key in keys:
+    resolved = VectorIndexOptions.resolve(Options(options), index_type, vector_column.name, default_metric=False)
+    if resolved.index_type is None:
+        resolved = VectorIndexOptions.resolve(Options(options), "vector", vector_column.name, default_metric=False)
+    metric = resolved.options.to_map().get(resolved.index_type + ".metric")
+    if metric is not None:
+        return metric
+    for key in ("test.vector.metric", "lumina.distance.metric"):
         if key in options:
             return _normalize_metric(options[key])
     return None

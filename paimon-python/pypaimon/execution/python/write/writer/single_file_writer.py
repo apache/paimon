@@ -20,6 +20,7 @@ from contextlib import suppress
 import pyarrow.parquet as pq
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.execution.python.write.format_file_writer import parquet_write_data, parquet_write_schema
 
 
 class SingleFileWriter:
@@ -40,6 +41,7 @@ class SingleFileWriter:
         self._closed = False
         self.row_count = 0
         self.column_stats = {}
+        self._physical_schema = parquet_write_schema(schema)
 
         kwargs = dict(parquet_options or {}, compression=compression)
         if compression.lower() == 'zstd':
@@ -47,7 +49,7 @@ class SingleFileWriter:
         try:
             self._stream = file_io.new_output_stream(path)
             self._owns_file = True
-            self._writer = pq.ParquetWriter(self._stream, schema, **kwargs)
+            self._writer = pq.ParquetWriter(self._stream, self._physical_schema, **kwargs)
         except Exception:
             self.abort()
             raise
@@ -59,7 +61,7 @@ class SingleFileWriter:
             kwargs = {}
             if row_group_size is not None:
                 kwargs['row_group_size'] = row_group_size
-            self._writer.write_table(data, **kwargs)
+            self._writer.write_table(parquet_write_data(data, self._physical_schema), **kwargs)
             self.row_count += data.num_rows
             for field in self._stats_fields:
                 current = self._stats_collector(data, field.name)

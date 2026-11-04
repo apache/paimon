@@ -61,6 +61,10 @@ def test_trusted_metadata_lookup_uses_private_python_scanner(operation):
         if operation == 'sequence':
             writer = object.__new__(FileStoreWrite)
             writer.table = table
+            writer.options = Mock(bucket=lambda: 8)
+            writer.restore_snapshot_id = None
+            writer._runtime_total_buckets = {}
+            writer._previous_total_buckets = {}
             writer._sequence_read_table = lambda: table
             assert writer._load_seq_number_stats(()) == {3: 9, 4: 7}
         elif operation == 'dynamic':

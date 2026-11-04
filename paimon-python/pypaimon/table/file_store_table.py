@@ -506,6 +506,14 @@ class FileStoreTable(Table):
         return table
 
     def _copy(self, options: dict, resolve_time_travel: bool) -> 'FileStoreTable':
+        query_auth_key = CoreOptions.QUERY_AUTH_ENABLED.key()
+        if query_auth_key in options and CoreOptions.from_dict(self.table_schema.options).query_auth_enabled:
+            try:
+                enabled = CoreOptions.from_dict(options).query_auth_enabled
+            except ValueError:
+                enabled = False
+            if not enabled:
+                raise ValueError(f"Option '{query_auth_key}' is not allowed to be disabled dynamically")
         video_key = CoreOptions.VIDEO_FRAME_FIELD.key()
         if video_key in options and options[video_key] != self.table_schema.options.get(video_key):
             raise ValueError("Cannot change immutable option " + video_key)

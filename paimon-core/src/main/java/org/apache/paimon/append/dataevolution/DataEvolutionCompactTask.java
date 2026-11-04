@@ -72,6 +72,9 @@ public abstract class DataEvolutionCompactTask {
         options.put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "99999 G");
         // Compaction is size-based; the write-time row limit must not roll its output.
         options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), String.valueOf(Long.MAX_VALUE));
+        // Compaction writers have no IOManager, so a spillable write buffer fails on its first
+        // spill. Buffer flushes may also close files before a safe dedicated-file boundary.
+        options.put(CoreOptions.WRITE_BUFFER_FOR_APPEND.key(), "false");
         return Collections.unmodifiableMap(options);
     }
 

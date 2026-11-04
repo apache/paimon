@@ -116,6 +116,7 @@ public interface FileStoreTable extends DataTable {
 
     TableSchema schema();
 
+    /** Initializes the runtime store, validating this table's effective schema and options. */
     FileStore<?> store();
 
     /** Creates a scan with a customized snapshot reader. */
@@ -123,10 +124,17 @@ public interface FileStoreTable extends DataTable {
 
     CatalogEnvironment catalogEnvironment();
 
+    /**
+     * Copies the table definition with dynamic options. Immutable option changes fail immediately;
+     * runtime configuration is validated when the copied table initializes its own store.
+     */
     @Override
     FileStoreTable copy(Map<String, String> dynamicOptions);
 
     FileStoreTable copy(TableSchema newTableSchema);
+
+    /** Internal copy for raw reads, such as index bootstrap. */
+    FileStoreTable copyWithoutQueryAuth();
 
     /** Doesn't change table schema even when there exists time travel scan options. */
     FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions);

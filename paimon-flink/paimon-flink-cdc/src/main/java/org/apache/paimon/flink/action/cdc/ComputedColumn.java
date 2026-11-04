@@ -23,7 +23,11 @@ import org.apache.paimon.types.DataType;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.nio.charset.Charset;
+import java.util.Base64;
+import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * A Computed column's value is computed from input columns. Only expression with at most two inputs
@@ -72,24 +76,46 @@ public class ComputedColumn implements Serializable {
      */
     @Nullable
     public String evalFromRecord(Map<String, String> rowData) {
-        return eval(referencedValue(rowData));
+        return evalFromRecord(rowData, Collections.emptySet());
+    }
+
+    /** Evaluate binary source fields as text, preserving the existing expression semantics. */
+    @Nullable
+    public String evalFromRecord(Map<String, String> rowData, Set<String> base64EncodedFields) {
+        return eval(referencedValue(rowData, base64EncodedFields));
     }
 
     @Nullable
-    private String referencedValue(Map<String, String> rowData) {
+    private String referencedValue(Map<String, String> rowData, Set<String> base64EncodedFields) {
         String reference = fieldReference();
         if (reference == null) {
             return null;
         }
         String value = rowData.get(reference);
         if (caseSensitive || rowData.containsKey(reference)) {
-            return value;
+            return decodeBase64IfNeeded(value, base64EncodedFields.contains(reference));
         }
         for (Map.Entry<String, String> entry : rowData.entrySet()) {
             if (reference.equalsIgnoreCase(entry.getKey())) {
-                return entry.getValue();
+                return decodeBase64IfNeeded(
+                        entry.getValue(), base64EncodedFields.contains(entry.getKey()));
             }
         }
         return null;
+    }
+
+    /**
+     * Decodes a marked Base64 binary value to text for expression evaluation.
+     *
+     * <p>Null and unmarked values are returned unchanged. Marked non-null values must contain valid
+     * Base64. The default charset preserves the previous {@code new String(bytes)} interpretation
+     * for computed columns; the record retains its Base64 value so the sink can recover the
+     * original bytes.
+     */
+    @Nullable
+    private String decodeBase64IfNeeded(@Nullable String value, boolean base64Encoded) {
+        return value != null && base64Encoded
+                ? new String(Base64.getDecoder().decode(value), Charset.defaultCharset())
+                : value;
     }
 }

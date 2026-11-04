@@ -611,7 +611,8 @@ class MosaicRecordsReaderTest {
     }
 
     /** A mocked native reader whose file schema contains the projected column. */
-    private static MosaicReader createProjectedReader(BufferAllocator allocator, int numRowGroups) {
+    private static MosaicReader createProjectedReader(BufferAllocator allocator, int numRowGroups)
+            throws IOException {
         MosaicReader reader = mock(MosaicReader.class);
         when(reader.getSchema())
                 .thenReturn(

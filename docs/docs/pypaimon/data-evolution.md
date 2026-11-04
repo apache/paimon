@@ -26,9 +26,10 @@ under the License.
 
 Data evolution lets you update selected columns while preserving the remaining
 columns and media payloads. This page covers the lower-level Python update and
-commit APIs; use [Multimodal Tables](./multimodal-tables#update) for the compact
-interface. See [Data Evolution](../multimodal-table/data-evolution) for the storage
-model.
+commit APIs; use [Multimodal Tables](./multimodal-tables#update) for compact row
+updates and [Column Enrichment](./multimodal-tables#column-enrichment) for label
+and feature backfills. See [Data Evolution](../multimodal-table/data-evolution)
+for the storage model.
 
 | You have… | Use |
 | --- | --- |

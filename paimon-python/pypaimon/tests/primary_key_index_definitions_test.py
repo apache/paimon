@@ -53,6 +53,36 @@ from pypaimon.utils.range import Range
 
 
 class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
+
+    def test_duplicate_columns_report_the_configured_declaration_key(self):
+        for kind in ('btree', 'bitmap', 'full-text'):
+            for key in ('global-index.%s.index-columns' % kind,
+                        'global-index.%s.index-column' % kind, 'pk-%s.index.columns' % kind):
+                with self.subTest(key=key):
+                    schema = TableSchema(fields=[DataField(0, 'name', AtomicType('STRING'))],
+                                         options={key: 'name,name'})
+                    with self.assertRaises(ValueError) as error:
+                        PrimaryKeyIndexDefinitions.create(schema)
+                    self.assertIn(key, str(error.exception))
+                    self.assertIn('duplicate column', str(error.exception))
+
+    def test_shared_vector_and_full_text_definitions(self):
+        schema = TableSchema(
+            fields=[DataField(0, "embedding", AtomicType("VECTOR(3)")),
+                    DataField(1, "content", AtomicType("STRING"))],
+            options={
+                "global-index.ivf-pq.index-columns": "embedding",
+                "ivf-pq.dimension": "3",
+                "fields.embedding.index-options": '{"nlist":64,"metric":"cosine"}',
+                "global-index.full-text.index-column": "content",
+                "fields.content.index-options": '{"tokenizer":"jieba"}',
+            })
+        definitions = PrimaryKeyIndexDefinitions.create(schema).definitions
+        self.assertEqual(["ivf-pq", "full-text"], [d.index_type for d in definitions])
+        self.assertEqual("64", definitions[0].options.to_map()["ivf-pq.nlist"])
+        self.assertEqual("cosine", definitions[0].options.to_map()["ivf-pq.metric"])
+        self.assertEqual("jieba", definitions[1].options.to_map()["full-text.tokenizer"])
+
     def test_bucket_planners_preserve_capture_and_physical_metadata(self):
         from pypaimon.execution.python.read.search.primary_key_full_text_scan import _full_text_bucket_splits
         from pypaimon.table.source.deletion_file import DeletionFile
@@ -133,7 +163,9 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
     def test_builders_route_primary_key_searches(self):
         schema = TableSchema(
             fields=[DataField(0, "embedding", AtomicType("VECTOR(3)")),
-                    DataField(1, "content", AtomicType("STRING"))],
+                    DataField(1, "content", AtomicType("STRING")),
+                    DataField(2, "id", AtomicType("INT"))],
+            primary_keys=["id"],
             options={
                 "pk-vector.index.columns": "embedding",
                 "fields.embedding.pk-vector.index.type": "vindex",
@@ -163,6 +195,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
         def builder(mode):
             schema = TableSchema(
                 fields=fields,
+                primary_keys=['id'],
                 options={"pk-full-text.index.columns": "content",
                          "global-index.search-mode": mode})
             table = SimpleNamespace(
@@ -174,6 +207,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
             builder("fast").new_full_text_read(), PrimaryKeyFullTextRead)
         schema = TableSchema(
             fields=fields,
+            primary_keys=['id'],
             options={
                 "pk-full-text.index.columns": "content",
                 "global-index.search-mode": "full",
@@ -192,6 +226,16 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
             with self.subTest(mode=mode), self.assertRaisesRegex(
                     NotImplementedError, "only supports the FAST"):
                 builder(mode).new_full_text_read()
+
+    def test_append_full_text_declarations_do_not_select_primary_key_reads(self):
+        field = DataField(0, 'content', AtomicType('STRING'))
+        for key in ('global-index.full-text.index-columns', 'global-index.full-text.index-column',
+                    'pk-full-text.index.columns'):
+            with self.subTest(key=key):
+                schema = TableSchema(fields=[field], options={key: 'content'})
+                table = SimpleNamespace(fields=[field], table_schema=schema, partition_keys=[])
+                builder = FullTextSearchBuilderImpl(table).with_query('content', 'paimon').with_limit(2)
+                self.assertIsNone(builder._primary_key_full_text_definition())
 
     def test_primary_key_full_text_reader_cannot_bypass_fast_mode(self):
         field = DataField(1, "content", AtomicType("STRING"))
@@ -271,7 +315,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
 
     def test_pk_vector_refine_factor_overflow_is_rejected_before_search(self):
         table = SimpleNamespace(options=SimpleNamespace(
-            primary_key_vector_index_type=lambda column: "ivf-pq",
+            options=Options({"global-index.ivf-pq.index-columns": "embedding"}),
             vector_index_search_mode=lambda: GlobalIndexSearchMode.FAST))
         reader = PrimaryKeyVectorRead(
             table, 2147483647, DataField(1, "embedding", AtomicType("VECTOR(1)")),
@@ -292,7 +336,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
                 (GlobalIndexSearchMode.FULL, 1),
                 (GlobalIndexSearchMode.DETAIL, 1)):
             table = SimpleNamespace(options=SimpleNamespace(
-                primary_key_vector_index_type=lambda column: "ivf-pq",
+                options=Options({"global-index.ivf-pq.index-columns": "embedding"}),
                 vector_index_search_mode=lambda mode=mode: mode))
             reader = PrimaryKeyVectorRead(table, 1, field, [0.0])
             with self.subTest(mode=mode), mock.patch.object(

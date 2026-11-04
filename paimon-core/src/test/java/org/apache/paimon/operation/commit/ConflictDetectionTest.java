@@ -54,6 +54,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -1523,7 +1527,7 @@ class ConflictDetectionTest {
     }
 
     @Test
-    void testCheckRowIdRangeConflictsUsesRetryableExceptionForDataFiles() {
+    void testCheckRowIdRangeConflictsUsesRetryableExceptionForDataFiles() throws Exception {
         DataEvolutionConflictDetection detection = createConflictDetection();
 
         Optional<RuntimeException> exception =
@@ -1542,6 +1546,21 @@ class ConflictDetectionTest {
         assertThat(exception.get())
                 .isInstanceOf(DataEvolutionRowRangeConflictException.class)
                 .hasMessageContaining("partition=<non-partitioned>");
+        DataEvolutionRowRangeConflictException conflict =
+                (DataEvolutionRowRangeConflictException) exception.get();
+        assertThat(conflict.conflictingFiles())
+                .contains(createFileEntryWithRowId("compacted", ADD, 0L, 4L).identifier());
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
+            output.writeObject(conflict);
+        }
+        try (ObjectInputStream input =
+                new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            DataEvolutionRowRangeConflictException restored =
+                    (DataEvolutionRowRangeConflictException) input.readObject();
+            assertThat(restored.conflictingFiles())
+                    .containsExactlyElementsOf(conflict.conflictingFiles());
+        }
     }
 
     @Test

@@ -47,7 +47,6 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.StartupMode.LATEST;
 import static org.apache.paimon.io.SplitsParallelReadUtil.parallelExecute;
@@ -81,12 +80,11 @@ public class IndexBootstrap implements Serializable {
                         .mapToInt(Integer::intValue)
                         .toArray();
 
-        // Force using the latest scan mode and bypass query auth for this internal index read.
-        Options bootstrapOptions = new Options();
-        bootstrapOptions.set(SCAN_MODE, LATEST);
-        bootstrapOptions.set(QUERY_AUTH_ENABLED, false);
         ReadBuilder readBuilder =
-                table.copy(bootstrapOptions.toMap()).newReadBuilder().withProjection(keyProjection);
+                table.copy(new Options().set(SCAN_MODE, LATEST).toMap())
+                        .copyWithoutQueryAuth()
+                        .newReadBuilder()
+                        .withProjection(keyProjection);
 
         DataTableScan tableScan = (DataTableScan) readBuilder.newScan();
         List<Split> splits =

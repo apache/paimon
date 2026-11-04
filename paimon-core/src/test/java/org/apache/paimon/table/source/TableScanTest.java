@@ -1068,6 +1068,39 @@ public class TableScanTest extends ScannerTestBase {
     }
 
     @Test
+    public void testPushDownTopNAfterOrderBreakingTypeChange() throws Exception {
+        createAppendOnlyTable();
+
+        // one file of partition 1 holds b = 1 and b = 200
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        write.write(rowData(1, 10, 1L));
+        write.write(rowData(1, 20, 200L));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        // BIGINT to TINYINT turns 200 into -56, so the file's cast max is no upper bound
+        updateColumn("b", DataTypes.TINYINT());
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(rowData(2, 30, (byte) -10));
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        // partition 1 holds both the max (1) and the min (-56), so no direction may drop it
+        DataField field = table.schema().fields().get(2);
+        FieldRef ref = new FieldRef(2, field.name(), field.type());
+        TableScan.Plan desc =
+                table.newScan().withTopN(new TopN(ref, DESCENDING, NULLS_LAST, 1)).plan();
+        assertThat(desc.splits()).hasSize(2);
+        TableScan.Plan asc =
+                table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_LAST, 1)).plan();
+        assertThat(asc.splits()).hasSize(2);
+    }
+
+    @Test
     public void testPushDownTopNOnlyNull() throws Exception {
         createAppendOnlyTable();
 

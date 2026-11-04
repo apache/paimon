@@ -128,6 +128,12 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public FileStoreTable copyWithoutQueryAuth() {
+        return new FallbackReadFileStoreTable(
+                wrapped.copyWithoutQueryAuth(), other.copyWithoutQueryAuth(), wrappedFirst);
+    }
+
+    @Override
     public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
         return new FallbackReadFileStoreTable(
                 wrapped.copyWithoutTimeTravel(dynamicOptions),

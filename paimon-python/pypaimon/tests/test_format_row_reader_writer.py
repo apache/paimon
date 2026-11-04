@@ -22,6 +22,7 @@ import tempfile
 from decimal import Decimal
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pytest
 
 from pypaimon.execution.python.read.reader.format_row_reader import (FOOTER_SIZE, FormatRowReader)
@@ -186,6 +187,89 @@ class TestFormatRowReaderWriter:
             assert result.column("ts9").to_pylist() == [ts9]
         finally:
             os.unlink(path)
+
+    @pytest.mark.parametrize("precision,unit", [(0, 's'), (3, 'ms'), (6, 'us')])
+    def test_timestamp_distant_dates(self, tmp_path, precision, unit):
+        # Arrow's integer values provide an expectation independent of datetime
+        # arithmetic in the ROW writer, including dates outside the ns range.
+        micros = [
+            13_569_465_600_000_001,  # 2400-01-01 00:00:00.000001
+            13_569_465_600_123_457,
+            -11_676_095_999_999_999,  # 1600-01-01 00:00:00.000001
+            -1, 0, 1, 1_735_689_600_123_456, None,
+        ]
+        divisor = {'s': 1_000_000, 'ms': 1000, 'us': 1}[unit]
+        expected = [value // divisor if value is not None else None for value in micros]
+        fields = [DataField(0, "ts", AtomicType("TIMESTAMP({})".format(precision)))]
+        data = pa.table({"ts": pa.array(expected, type=pa.timestamp(unit))})
+        path = str(tmp_path / "distant-timestamps.row")
+
+        _write_row_file(path, fields, data)
+        result = _read_row_file(path, fields)
+
+        assert result.column("ts").cast(pa.int64()).to_pylist() == expected
+
+    @pytest.mark.parametrize("type_pattern", ["TIMESTAMP_LTZ({})", "TIMESTAMP({}) WITH LOCAL TIME ZONE"])
+    @pytest.mark.parametrize("precision,unit", [(0, 's'), (3, 'ms'), (6, 'us'), (9, 'ns')])
+    @pytest.mark.parametrize("timezone", ['Asia/Shanghai', 'America/New_York', 'UTC', None])
+    def test_timestamp_ltz_preserves_instant(self, tmp_path, type_pattern, precision, unit, timezone):
+        # Named zones also work with Arrow 6; January and July cover DST changes.
+        micros = [1_735_660_800_123_456, 1_751_328_000_123_456, -1, 0, None]
+        if unit == 'ns':
+            expected = [value * 1000 if value is not None else None for value in micros]
+        else:
+            divisor = {'s': 1_000_000, 'ms': 1000, 'us': 1}[unit]
+            expected = [value // divisor if value is not None else None for value in micros]
+        fields = [DataField(0, "ts", AtomicType(type_pattern.format(precision)))]
+        data = pa.table({"ts": pa.array(expected, type=pa.timestamp(unit, tz=timezone))})
+        path = str(tmp_path / "ltz-timestamps.row")
+
+        _write_row_file(path, fields, data)
+        result = _read_row_file(path, fields)
+
+        assert result.column("ts").type == pa.timestamp(unit, tz='UTC')
+        assert result.column("ts").cast(pa.int64()).to_pylist() == expected
+
+    @pytest.mark.parametrize("offset_hours,zone", [(8, 'Etc/GMT-8'), (-5, 'Etc/GMT+5')])
+    def test_timestamp_without_timezone_preserves_wall_clock(self, tmp_path, offset_hours, zone):
+        timezone = datetime.timezone(datetime.timedelta(hours=offset_hours))
+        values = [
+            datetime.datetime(2025, 1, 1, 0, 0, 0, 123456, tzinfo=timezone),
+            datetime.datetime(1969, 12, 31, 23, 59, 59, 999999, tzinfo=timezone),
+            None,
+        ]
+        fields = [DataField(0, "ts", AtomicType("TIMESTAMP(6)"))]
+        data = pa.table({"ts": pa.array(values, type=pa.timestamp('us', tz=zone))})
+        path = str(tmp_path / "wall-clock-timestamps.row")
+
+        _write_row_file(path, fields, data)
+        result = _read_row_file(path, fields)
+
+        assert result.column("ts").cast(pa.int64()).to_pylist() == [1_735_689_600_123_456, -1, None]
+
+    def test_nested_timestamps(self, tmp_path):
+        timestamp = datetime.datetime(2400, 1, 1, 0, 0, 0, 123457)
+        timezone = datetime.timezone(datetime.timedelta(hours=8))
+        instant = datetime.datetime(2025, 1, 1, 0, 0, 0, 123456, tzinfo=timezone)
+        nested_type = RowType(True, [
+            DataField(1, "local", AtomicType("TIMESTAMP(6)")),
+            DataField(2, "instants", ArrayType(True, AtomicType("TIMESTAMP_LTZ(6)"))),
+        ])
+        fields = [DataField(0, "nested", nested_type)]
+        data = pa.table({"nested": pa.array([
+            {"local": timestamp, "instants": [instant, None]}, None,
+        ], type=pa.struct([
+            pa.field("local", pa.timestamp('us')),
+            pa.field("instants", pa.list_(pa.timestamp('us', tz='Asia/Shanghai'))),
+        ]))})
+        path = str(tmp_path / "nested-timestamps.row")
+
+        _write_row_file(path, fields, data)
+        result = _read_row_file(path, fields)
+
+        assert result.column("nested").to_pylist() == [
+            {"local": timestamp, "instants": [instant.astimezone(datetime.timezone.utc), None]}, None,
+        ]
 
     def test_timestamp_nanos_decoded_from_wire(self):
         # A Java-written TIMESTAMP(9) carries nano_of_milli in 0..999999 (genuine
@@ -646,7 +730,7 @@ class TestFormatRowReaderWriter:
             result = read_builder.new_read().to_arrow(splits)
 
             assert result.num_rows == 5
-            result_sorted = result.sort_by('f0')
+            result_sorted = result.take(pc.sort_indices(result, sort_keys=[('f0', 'ascending')]))
             assert result_sorted.column('f0').to_pylist() == [1, 2, 3, 4, 5]
             assert result_sorted.column('f1').to_pylist() == [
                 'a1', 'a2', 'a3', 'a4', 'a5'

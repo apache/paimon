@@ -35,6 +35,7 @@ import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.pool.CachedClientPool;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -488,35 +489,72 @@ public class HiveCatalog extends AbstractCatalog {
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         TableSchema schema = this.loadTableSchema(identifier);
-        CoreOptions options = CoreOptions.fromMap(schema.options());
-        boolean tagToPart = options.tagToPartitionField() != null;
-        if (metastorePartitioned(schema)) {
-            List<Map<String, String>> metaPartitions =
+        boolean tagToPart = CoreOptions.fromMap(schema.options()).tagToPartitionField() != null;
+        boolean metastorePartitioned = metastorePartitioned(schema);
+        if (metastorePartitioned) {
+            dropPartitionsFromMetastore(
+                    identifier,
                     tagToPart
                             ? partitions
-                            : removePartitionsExistsInOtherBranches(identifier, partitions);
-            for (Map<String, String> part : metaPartitions) {
-                List<String> partitionValues =
-                        new ArrayList<>(
-                                orderByPartitionKeys(schema.partitionKeys(), part).values());
-                try {
-                    clients()
-                            .execute(
-                                    client ->
-                                            client.dropPartition(
-                                                    identifier.getDatabaseName(),
-                                                    identifier.getTableName(),
-                                                    partitionValues,
-                                                    false));
-                } catch (NoSuchObjectException e) {
-                    // do nothing if the partition not exists
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            }
+                            : removePartitionsStillInUse(identifier, partitions, false),
+                    schema);
         }
         if (!tagToPart) {
             super.dropPartitions(identifier, partitions);
+            if (metastorePartitioned) {
+                dropDonePartitions(identifier, partitions, schema);
+            }
+        }
+    }
+
+    private void dropDonePartitions(
+            Identifier identifier, List<Map<String, String>> partitions, TableSchema schema)
+            throws TableNotExistException {
+        List<Map<String, String>> donePartitions = new ArrayList<>(partitions.size());
+        String lastKey = schema.partitionKeys().get(schema.partitionKeys().size() - 1);
+        for (Map<String, String> partition : partitions) {
+            Map<String, String> donePartition = new LinkedHashMap<>(partition);
+            donePartition.put(lastKey, partition.get(lastKey) + ".done");
+            donePartitions.add(donePartition);
+        }
+
+        // HMS partition names are shared by all branches. A marker is still needed if a branch
+        // owns its ordinary partition or a real STRING partition with the same literal spec.
+        Set<Map<String, String>> specsToCheck = new HashSet<>(partitions);
+        specsToCheck.addAll(donePartitions);
+        Set<Map<String, String>> removable =
+                new HashSet<>(
+                        removePartitionsStillInUse(
+                                identifier, new ArrayList<>(specsToCheck), true));
+        List<Map<String, String>> markersToDrop = new ArrayList<>();
+        for (int i = 0; i < partitions.size(); i++) {
+            if (removable.contains(partitions.get(i))
+                    && removable.contains(donePartitions.get(i))) {
+                markersToDrop.add(donePartitions.get(i));
+            }
+        }
+        dropPartitionsFromMetastore(identifier, markersToDrop, schema);
+    }
+
+    private void dropPartitionsFromMetastore(
+            Identifier identifier, List<Map<String, String>> partitions, TableSchema schema) {
+        for (Map<String, String> part : partitions) {
+            List<String> partitionValues =
+                    new ArrayList<>(orderByPartitionKeys(schema.partitionKeys(), part).values());
+            try {
+                clients()
+                        .execute(
+                                client ->
+                                        client.dropPartition(
+                                                identifier.getDatabaseName(),
+                                                identifier.getTableName(),
+                                                partitionValues,
+                                                false));
+            } catch (NoSuchObjectException e) {
+                // do nothing if the partition not exists
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
@@ -753,26 +791,23 @@ public class HiveCatalog extends AbstractCatalog {
                                         Short.MAX_VALUE));
     }
 
-    private List<Map<String, String>> removePartitionsExistsInOtherBranches(
-            Identifier identifier, List<Map<String, String>> inputs) throws TableNotExistException {
+    private List<Map<String, String>> removePartitionsStillInUse(
+            Identifier identifier, List<Map<String, String>> inputs, boolean syntheticPartitions)
+            throws TableNotExistException {
         FileStoreTable mainTable =
                 (FileStoreTable)
                         getTable(
                                 new Identifier(
                                         identifier.getDatabaseName(), identifier.getTableName()));
 
-        InternalRowPartitionComputer partitionComputer =
-                new InternalRowPartitionComputer(
-                        mainTable.coreOptions().partitionDefaultName(),
-                        mainTable.rowType().project(mainTable.partitionKeys()),
-                        mainTable.partitionKeys().toArray(new String[0]),
-                        mainTable.coreOptions().legacyPartitionName());
         List<String> branchNames = new ArrayList<>(mainTable.branchManager().branches());
         branchNames.add(DEFAULT_MAIN_BRANCH);
 
         Set<Map<String, String>> inputsToRemove = new HashSet<>(inputs);
         for (String branchName : branchNames) {
-            if (branchName.equals(identifier.getBranchNameOrDefault())) {
+            // Ordinary partitions are checked before their data is dropped. Marker cleanup runs
+            // afterwards and must also protect real, colliding partitions on the current branch.
+            if (!syntheticPartitions && branchName.equals(identifier.getBranchNameOrDefault())) {
                 continue;
             }
 
@@ -782,8 +817,22 @@ public class HiveCatalog extends AbstractCatalog {
                 continue;
             }
 
-            branchTableForPartitionExistence(mainTable, branchName).newScan()
-                    .withPartitionsFilter(new ArrayList<>(inputsToRemove)).listPartitions().stream()
+            FileStoreTable branchTable = branchTableForPartitionExistence(mainTable, branchName);
+            InternalRowPartitionComputer partitionComputer =
+                    new InternalRowPartitionComputer(
+                            branchTable.coreOptions().partitionDefaultName(),
+                            branchTable.rowType().project(branchTable.partitionKeys()),
+                            branchTable.partitionKeys().toArray(new String[0]),
+                            branchTable.coreOptions().legacyPartitionName());
+            // Ownership depends on the latest physical snapshot. A table batch scan may instead
+            // follow persisted query selectors such as scan.snapshot-id or scan.tag-name.
+            FileStoreScan scan = branchTable.store().newScan();
+            if (!syntheticPartitions) {
+                scan.withPartitionsFilter(new ArrayList<>(inputsToRemove));
+            }
+            // Synthetic values need not fit the partition type. Compare their literal specs with
+            // actual branch partitions, including real STRING values that collide with markers.
+            scan.listPartitions().stream()
                     .map(partitionComputer::generatePartValues)
                     .forEach(inputsToRemove::remove);
         }

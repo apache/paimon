@@ -51,6 +51,8 @@ import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.DataEvolutionChangesProvider;
+import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException;
+import org.apache.paimon.operation.commit.DiscardingCompactChangesProvider;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
@@ -347,6 +349,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<CommitMessage> commitMessages = committable.fileCommittables();
         configureRowIdCheckFromMessages(commitMessages);
         ManifestEntryChanges changes = collectChanges(commitMessages);
+        List<ManifestEntry> committedCompactFiles = changes.compactTableFiles;
         Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
         try {
             List<SimpleFileEntry> appendSimpleEntries =
@@ -401,15 +404,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (!changes.compactTableFiles.isEmpty()
                     || !changes.compactChangelog.isEmpty()
                     || !changes.compactIndexFiles.isEmpty()) {
+                CommitChangesProvider compactProvider =
+                        compactChangesProvider(changes, materializedBuckets, commitMessages);
                 attempts +=
                         tryCommit(
-                                dataEvolutionChangesProvider(
-                                        new CommitChanges(
-                                                changes.compactTableFiles,
-                                                changes.compactChangelog,
-                                                changes.compactIndexFiles),
-                                        CommitKind.COMPACT,
-                                        materializedBuckets),
+                                compactProvider,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -417,6 +416,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 false,
                                 true,
                                 null);
+                if (compactProvider instanceof DiscardingCompactChangesProvider) {
+                    committedCompactFiles =
+                            ((DiscardingCompactChangesProvider) compactProvider)
+                                    .retainedOriginalFiles();
+                }
                 generatedSnapshot += 1;
             }
         } finally {
@@ -429,7 +433,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 reportCommit(
                         changes.appendTableFiles,
                         changes.appendChangelog,
-                        changes.compactTableFiles,
+                        committedCompactFiles,
                         changes.compactChangelog,
                         commitDuration,
                         generatedSnapshot,
@@ -862,6 +866,56 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return result;
     }
 
+    private CommitChangesProvider compactChangesProvider(
+            ManifestEntryChanges changes,
+            Set<Pair<BinaryRow, Integer>> materializedBuckets,
+            List<CommitMessage> messages) {
+        CommitChangesProvider provider =
+                dataEvolutionChangesProvider(
+                        new CommitChanges(
+                                changes.compactTableFiles,
+                                changes.compactChangelog,
+                                changes.compactIndexFiles),
+                        CommitKind.COMPACT,
+                        materializedBuckets);
+        if (!options.dataEvolutionEnabled()
+                || !options.toConfiguration()
+                        .get(CoreOptions.DATA_EVOLUTION_COMPACTION_DISCARD_CONFLICTING_TASKS)
+                || !materializedBuckets.isEmpty()
+                || conflictDetection.shouldCheckRowIdFromSnapshot(CommitKind.COMPACT)
+                || !changes.appendTableFiles.isEmpty()
+                || !changes.appendChangelog.isEmpty()
+                || !changes.appendIndexFiles.isEmpty()
+                || !changes.compactChangelog.isEmpty()
+                || !changes.compactIndexFiles.isEmpty()) {
+            return provider;
+        }
+        List<List<ManifestEntry>> tasks = new ArrayList<>();
+        Set<FileEntry.Identifier> taskFiles = new HashSet<>();
+        for (CommitMessage message : messages) {
+            ManifestEntryChanges task = new ManifestEntryChanges(options.bucket());
+            task.collect(message);
+            if (task.compactTableFiles.stream().noneMatch(entry -> entry.kind() == FileKind.ADD)
+                    || task.compactTableFiles.stream()
+                            .noneMatch(entry -> entry.kind() == FileKind.DELETE)
+                    || task.compactTableFiles.stream()
+                            .anyMatch(
+                                    entry ->
+                                            entry.firstRowId() == null
+                                                    || isBlobFile(entry.fileName())
+                                                    || isVectorStoreFile(entry.fileName()))) {
+                return provider;
+            }
+            for (ManifestEntry entry : task.compactTableFiles) {
+                if (!taskFiles.add(entry.identifier())) {
+                    return provider;
+                }
+            }
+            tasks.add(task.compactTableFiles);
+        }
+        return new DiscardingCompactChangesProvider(provider, tasks);
+    }
+
     @VisibleForTesting
     CommitChangesProvider dataEvolutionChangesProvider(
             CommitChanges changes,
@@ -1251,6 +1305,27 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             indexFiles,
                             rowIdConflictChecker,
                             commitKind);
+            while (exception.isPresent()
+                    && exception.get() instanceof DataEvolutionRowRangeConflictException
+                    && changesProvider instanceof DiscardingCompactChangesProvider
+                    && ((DiscardingCompactChangesProvider) changesProvider)
+                            .discard(
+                                    ((DataEvolutionRowRangeConflictException) exception.get())
+                                            .conflictingFiles())) {
+                LOG.warn(
+                        "Discarding conflicting compaction tasks for table {}: {}",
+                        tableName,
+                        exception.get().getMessage());
+                deltaFiles = changesProvider.provide(latestSnapshot).tableFiles;
+                exception =
+                        conflictDetection.checkConflicts(
+                                latestSnapshot,
+                                baseDataFiles,
+                                SimpleFileEntry.from(deltaFiles),
+                                indexFiles,
+                                rowIdConflictChecker,
+                                commitKind);
+            }
             if (exception.isPresent()) {
                 if (allowRollback
                         && rollback != null

@@ -19,7 +19,6 @@
 
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.options.core_options import GlobalIndexSearchMode
-from pypaimon.globalindex.full_text_options import NativeFullTextIndexOptions
 from pypaimon.execution.native.table import (_native_table)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.runtime import (native_runtime_available)
@@ -46,11 +45,7 @@ def _native_full_text_builder(builder, require_limit=True):
         raise NotImplementedError('Primary-key full-text search only supports the FAST full-text index search mode')
     if require_limit and (builder._limit is None or builder._limit <= 0):
         raise ValueError('Limit must be positive, set via with_limit()')
-    # The full-text adapter accepts typed lists and booleans. Reuse its mapping
-    # before the generic table bridge stringifies options for Rust.
-    options = {'full-text.' + key: value for key, value in NativeFullTextIndexOptions.from_options(
-        table.options.options.to_map()).to_native_options().items()}
-    native = _native_table(table.copy(options)).new_full_text_search_builder()
+    native = _native_table(table).new_full_text_search_builder()
     if builder._field_name is not None and builder._query is not None:
         native.with_query(builder._field_name, builder._query)
     if builder._limit is not None:

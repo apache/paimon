@@ -28,6 +28,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexResultSerializer;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.VectorGlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
@@ -56,6 +57,8 @@ import org.apache.paimon.utils.SerializableFunction;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -63,13 +66,16 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link SparkDataEvolutionVectorRead}. */
@@ -181,10 +187,36 @@ public class SparkDataEvolutionVectorReadTest {
         assertThat(result.results()).contains(splitCount - 1L);
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    public void testSharedFieldOptionsReachLocalAndDistributedIndexReads(int splitCount)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("row-tracking.enabled", "true");
+        options.put("data-evolution.enabled", "true");
+        options.put("global-index.test-shared-vector.index-columns", "vec");
+        options.put("test-shared-vector.train.sample-ratio", "0");
+        options.put(
+                "fields.vec.index-options", "{\"train.sample-ratio\":0.5,\"metric\":\"COSINE\"}");
+        SingleTaskSparkVectorRead read =
+                new SingleTaskSparkVectorRead(createTable(options), "cosine");
+
+        ScoredGlobalIndexResult result =
+                read.readIndexSplitsInSpark(indexSplits("test-shared-vector", splitCount), null);
+
+        assertThat(read.evaluatedSplits).hasValue(splitCount);
+        assertThat(result.results()).contains(splitCount - 1L);
+    }
+
     private FileStoreTable createTable() throws Exception {
+        return createTable(Collections.emptyMap());
+    }
+
+    private FileStoreTable createTable(Map<String, String> additionalOptions) throws Exception {
         Path tablePath = new Path(tempDir.toUri());
-        Options options = new Options();
+        Options options = new Options(additionalOptions);
         options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.FILE_FORMAT, "avro");
         options.set(CoreOptions.GLOBAL_INDEX_THREAD_NUM, 1);
         Schema schema =
                 Schema.newBuilder()
@@ -329,9 +361,15 @@ public class SparkDataEvolutionVectorReadTest {
     private static class SingleTaskSparkVectorRead extends SparkDataEvolutionVectorRead {
 
         private final AtomicInteger scoreCalls = new AtomicInteger();
+        private final AtomicInteger evaluatedSplits = new AtomicInteger();
+        private final String expectedMetric;
         private int sparkParallelism;
 
         private SingleTaskSparkVectorRead(FileStoreTable table) {
+            this(table, null);
+        }
+
+        private SingleTaskSparkVectorRead(FileStoreTable table, String expectedMetric) {
             super(
                     table,
                     null,
@@ -340,6 +378,7 @@ public class SparkDataEvolutionVectorReadTest {
                     new DataField(0, "vec", new ArrayType(DataTypes.FLOAT())),
                     new float[] {0.0f},
                     null);
+            this.expectedMetric = expectedMetric;
         }
 
         @Override
@@ -366,6 +405,11 @@ public class SparkDataEvolutionVectorReadTest {
                 int searchLimit,
                 @Nullable RoaringNavigableMap64 includeRowIds,
                 ExecutorService executor) {
+            evaluatedSplits.incrementAndGet();
+            if (expectedMetric != null) {
+                assertThat(((VectorGlobalIndexer) globalIndexer).metric())
+                        .isEqualTo(expectedMetric);
+            }
             RoaringNavigableMap64 rows = new RoaringNavigableMap64();
             rows.add(rowRangeStart);
             return CompletableFuture.completedFuture(
@@ -431,7 +475,33 @@ public class SparkDataEvolutionVectorReadTest {
         }
     }
 
+    /** Factory with construction-time validation, mirroring native ANN factories. */
+    public static class OptionsVectorIndexerFactory implements GlobalIndexerFactory {
+
+        @Override
+        public String identifier() {
+            return "test-shared-vector";
+        }
+
+        @Override
+        public GlobalIndexer create(List<DataField> fields, Options options) {
+            double ratio = Double.parseDouble(options.get("test-shared-vector.train.sample-ratio"));
+            checkArgument(ratio > 0 && ratio <= 1, "Invalid train.sample-ratio: %s", ratio);
+            return new L2Indexer(options.get("test-shared-vector.metric"));
+        }
+    }
+
     private static class L2Indexer implements VectorGlobalIndexer {
+
+        private final String metric;
+
+        private L2Indexer() {
+            this("l2");
+        }
+
+        private L2Indexer(String metric) {
+            this.metric = metric;
+        }
 
         @Override
         public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
@@ -450,7 +520,7 @@ public class SparkDataEvolutionVectorReadTest {
 
         @Override
         public String metric() {
-            return "l2";
+            return metric;
         }
     }
 }
