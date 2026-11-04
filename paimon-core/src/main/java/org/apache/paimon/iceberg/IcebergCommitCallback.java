@@ -78,6 +78,8 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -86,6 +88,7 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -916,6 +919,49 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * The given metadata file. Returns null when the file is missing or malformed, which stays the
+     * same however often it is read. Every other failure propagates, because a storage failure says
+     * nothing about the file and a retry can succeed.
+     */
+    @Nullable
+    private IcebergMetadata readUsableMetadata(Path metadataPath) throws IOException {
+        String json;
+        try {
+            json = table.fileIO().readFileUtf8(metadataPath);
+        } catch (IOException e) {
+            if (isMissingFile(e)) {
+                return null;
+            }
+            throw e;
+        }
+        try {
+            return IcebergMetadata.fromJson(json);
+        } catch (UncheckedIOException e) {
+            if (e.getCause() instanceof JsonProcessingException) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Whether the failure says that a file does not exist, and not that I/O failed. An {@link
+     * java.io.EOFException} does not say it: a stream that closed early looks the same as a file
+     * that is short, and a retry can read the first.
+     */
+    private static boolean isMissingFile(Throwable throwable) {
+        for (Throwable t = throwable; t != null; t = t.getCause()) {
+            if (t instanceof FileNotFoundException || t instanceof NoSuchFileException) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
     }
 
     private boolean metadataMatchesSnapshot(long snapshotId, Snapshot snapshot) {
@@ -1758,7 +1804,19 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         while (it.hasNext()) {
             Path path = it.next();
-            IcebergMetadata metadata = IcebergMetadata.fromPath(table.fileIO(), path);
+            IcebergMetadata metadata = readUsableMetadata(path);
+            if (metadata == null || metadata.snapshots() == null) {
+                // an older version that is missing or malformed names nothing that can be
+                // deleted through it, and it must not block the cleanup of the others: every
+                // later rebuild would fail on it
+                LOG.warn(
+                        "Skipping the cleanup of the Iceberg metadata {} of table {}, because it "
+                                + "is missing or malformed. The files only it references stay on "
+                                + "storage.",
+                        path,
+                        table.fullName());
+                continue;
+            }
 
             for (IcebergSnapshot snapshot : metadata.snapshots()) {
                 Path listPath = new Path(snapshot.manifestList());
