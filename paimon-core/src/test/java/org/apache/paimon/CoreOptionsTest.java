@@ -176,6 +176,18 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testPartitionMarkDoneActionsTrim() {
+        Options conf = new Options();
+        conf.set(CoreOptions.PARTITION_MARK_DONE_ACTION, "success-file, done-partition ");
+
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.partitionMarkDoneActions())
+                .containsExactlyInAnyOrder(
+                        CoreOptions.PartitionMarkDoneAction.SUCCESS_FILE,
+                        CoreOptions.PartitionMarkDoneAction.DONE_PARTITION);
+    }
+
+    @Test
     public void testIgnoreGlobalIndexColumnUpdateAction() {
         Options conf = new Options();
         conf.setString(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(), "IGNORE");
