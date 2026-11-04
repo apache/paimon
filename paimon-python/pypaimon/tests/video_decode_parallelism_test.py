@@ -481,7 +481,9 @@ class VideoDecodeParallelismTest(unittest.TestCase):
                         decode_group = decoder._decode_indexed_group
 
                         def checked_group(container, stream, *args):
-                            self.assertEqual(threads, stream.thread_count)
+                            # FFmpeg resolves thread_count when it opens the codec.
+                            if not stream.codec_context.is_open:
+                                self.assertEqual(threads, stream.thread_count)
                             return decode_group(container, stream, *args)
 
                         with patch.object(decoder, '_decode_indexed_group', checked_group):
