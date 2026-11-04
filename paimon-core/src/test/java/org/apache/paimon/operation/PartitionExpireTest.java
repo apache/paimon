@@ -398,25 +398,25 @@ public class PartitionExpireTest {
         assertThat(remaining).containsExactlyElementsOf(expectedRemaining);
     }
 
-    @Test
-    public void testExpireLocalZonedTimestampPartitionInNonUtcZone() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testLocalZonedTimestampPartitionIsNotExpiredByDefault(boolean legacyPartitionName)
+            throws Exception {
         TimeZone defaultZone = TimeZone.getDefault();
-        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+        TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"));
         try {
-            // current partition names render LTZ values in the default time zone
-            createTimestampPartitionedTable(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0), false);
-            // instant 2023-01-01T00:00Z is local 2023-01-01 08:00:00
-            Timestamp expiredTs = Timestamp.fromLocalDateTime(date(1));
-            // instant 2023-01-01T20:00Z is local 2023-01-02 04:00:00
-            Timestamp retainedTs = Timestamp.fromLocalDateTime(date(1).plusHours(20));
-            write(GenericRow.of(expiredTs, BinaryString.fromString("expired")));
-            write(GenericRow.of(retainedTs, BinaryString.fromString("retained")));
+            // TIMESTAMP_LTZ values are not normalized for time extraction: a legacy name is a UTC
+            // spelling that a partition spec would parse back in the default time zone
+            createTimestampPartitionedTable(
+                    DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0), legacyPartitionName);
+            Timestamp oldTs = Timestamp.fromLocalDateTime(date(1));
+            Timestamp freshTs = Timestamp.fromLocalDateTime(date(1).plusHours(5));
+            write(GenericRow.of(oldTs, BinaryString.fromString("old")));
+            write(GenericRow.of(freshTs, BinaryString.fromString("fresh")));
 
             NormalPartitionExpire expire = newValuesTimeExpire("1 d", null);
-            // local 2023-01-03 02:00:00: the retained partition is only 22 hours old
-            assertThat(expire.expire(date(3).plusHours(2), Long.MAX_VALUE))
-                    .containsExactly(Collections.singletonMap("f0", "2023-01-01 08:00:00"));
-            assertThat(readTimestamps()).containsExactly(retainedTs);
+            assertThat(expire.expire(date(1).plusHours(22), Long.MAX_VALUE)).isEmpty();
+            assertThat(readTimestamps()).containsExactlyInAnyOrder(oldTs, freshTs);
         } finally {
             TimeZone.setDefault(defaultZone);
         }

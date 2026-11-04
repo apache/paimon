@@ -27,7 +27,6 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
@@ -46,7 +45,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.TimeZone;
 
 /** Strategy for partition expiration. */
 public abstract class PartitionExpireStrategy implements Serializable {
@@ -100,7 +98,6 @@ public abstract class PartitionExpireStrategy implements Serializable {
         switch (toObjectArrayConverter.rowType().getTypeAt(index).getTypeRoot()) {
             case DATE:
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return true;
             default:
                 return false;
@@ -120,7 +117,6 @@ public abstract class PartitionExpireStrategy implements Serializable {
                     values[index] = LocalDate.ofEpochDay((Integer) values[index]);
                     break;
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
-                case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                     values[index] =
                             formatTimestampForTimeExtraction((Timestamp) values[index], type);
                     break;
@@ -132,13 +128,6 @@ public abstract class PartitionExpireStrategy implements Serializable {
     }
 
     private String formatTimestampForTimeExtraction(Timestamp timestamp, DataType type) {
-        if (type.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
-            // Use the local wall-clock time, consistent with the current partition names and
-            // with the local current time used for expiration.
-            timestamp =
-                    DateTimeUtils.timestampWithLocalZoneToTimestamp(
-                            timestamp, TimeZone.getDefault());
-        }
         if (timestampFormatter != null) {
             // Keep the Timestamp#toString input an explicitly configured formatter expects.
             return timestamp.toString();
