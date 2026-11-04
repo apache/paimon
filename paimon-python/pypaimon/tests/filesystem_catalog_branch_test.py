@@ -643,8 +643,9 @@ class FileSystemCatalogBranchCRUDTest(unittest.TestCase):
         catalog.create_table(other_id, Schema.from_pyarrow_schema(self.pa_schema), False)
         other = catalog.get_table(other_id)
         self._write(other, pa.table({"id": [99], "value": ["other"]}))
-        self._read(catalog.get_table(other_id))
         other_snapshot = other.snapshot_manager().get_snapshot_path(1)
+        # Warm the FileIO cache independently of the scan backend.
+        catalog.file_io.read_file_utf8(other_snapshot)
         other_block = catalog._cache_manager.get_block(other_snapshot, 0)
         self.assertIsNotNone(other_block)
 
