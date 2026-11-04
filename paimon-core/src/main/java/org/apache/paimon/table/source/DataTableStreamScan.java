@@ -61,6 +61,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     private final CoreOptions options;
     private final StreamScanMode scanMode;
     private final SnapshotManager snapshotManager;
+    private final ChangelogManager changelogManager;
     private final boolean supportStreamingReadOverwrite;
     private final NextSnapshotFetcher nextSnapshotProvider;
     private final boolean hasPk;
@@ -91,6 +92,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         this.options = options;
         this.scanMode = options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         this.snapshotManager = snapshotManager;
+        this.changelogManager = changelogManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
         this.nextSnapshotProvider =
                 new NextSnapshotFetcher(
@@ -315,6 +317,45 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
 
     @Override
     public void restore(@Nullable Long nextSnapshotId) {
+        if (nextSnapshotId != null) {
+            Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+            if (earliestSnapshotId != null && earliestSnapshotId > nextSnapshotId) {
+                // The restored snapshot has already been expired. Whether the consumer can still
+                // resume from it depends on the changelog lifecycle.
+                if (options.changelogLifecycleDecoupled()
+                        && changelogManager.longLivedChangelogExists(nextSnapshotId)) {
+                    // The long-lived changelog outlives the snapshot, so keep reading from the
+                    // changelog instead of replaying data the consumer has already committed.
+                    LOG.warn(
+                            "The restored snapshot with id {} has expired, but its long-lived "
+                                    + "changelog is still available. Resuming from the changelog.",
+                            nextSnapshotId);
+                    this.nextSnapshotId = nextSnapshotId;
+                    return;
+                }
+                if (scanMode == StreamScanMode.COMPACT_BUCKET_TABLE) {
+                    // Only the dedicated compaction job has a recovery contract that can restart
+                    // from the starting scanner: compaction is idempotent, so resuming from the
+                    // latest compact snapshot is safe. For any other consumer, resetting would
+                    // reapply the configured startup mode and silently skip snapshots that are
+                    // still retained, so keep the stalled id and let the reader surface the
+                    // expiry instead of losing data.
+                    LOG.warn(
+                            "The restored snapshot with id {} has expired for the dedicated "
+                                    + "compaction job. The earliest snapshot is {}. "
+                                    + "Falling back to the starting scanner.",
+                            nextSnapshotId,
+                            earliestSnapshotId);
+                    this.nextSnapshotId = null;
+                    return;
+                }
+                LOG.warn(
+                        "The restored snapshot with id {} has expired. The earliest snapshot is "
+                                + "{}. Keeping the restored id; the reader will report the expiry.",
+                        nextSnapshotId,
+                        earliestSnapshotId);
+            }
+        }
         this.nextSnapshotId = nextSnapshotId;
     }
 
