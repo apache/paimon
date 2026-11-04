@@ -52,8 +52,8 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        AuthTableQueryResponse)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
+from pypaimon.api.model import CreateModelRequest, GetModelResponse, ListModelsResponse
 from pypaimon.api.resource_paths import ResourcePaths
-from pypaimon.api.predict import PredictRequest, PredictResponse
 from pypaimon.api.rest_exception import NoSuchResourceException
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.api.typedef import T
@@ -82,18 +82,14 @@ class RESTApi:
     TABLE_NAME_PATTERN = "tableNamePattern"
     TABLE_TYPE = "tableType"
     FUNCTION_NAME_PATTERN = "functionNamePattern"
+    MODEL_NAME_PATTERN = "modelNamePattern"
     PARTITION_NAME_PATTERN = "partitionNamePattern"
     TAG_NAME_PREFIX = "tagNamePrefix"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
 
-    def predict(self, identifier: Identifier, request: PredictRequest) -> PredictResponse:
-        database, table = self._validate_resource_path(identifier)
-        return self.client.post_with_response_type(
-            self.resource_paths.predict(database, table), request,
-            PredictResponse, self.rest_auth_function)
-
     # Function name validation pattern
     _FUNCTION_NAME_PATTERN = re.compile(r'^(?=.*[A-Za-z])[A-Za-z0-9._-]+$')
+    _MODEL_NAME_PATTERN = re.compile(r'^(?=.*[A-Za-z])[A-Za-z0-9._-]+$')
 
     def __init__(self, options: Union[Options, Dict[str, str]], config_required: bool = True):
         if isinstance(options, dict):
@@ -744,6 +740,58 @@ class RESTApi:
             self.resource_paths.function(
                 identifier.get_database_name(), identifier.get_object_name()),
             request,
+            self.rest_auth_function,
+        )
+
+    @staticmethod
+    def is_valid_model_name(name: str) -> bool:
+        return bool(name and RESTApi._MODEL_NAME_PATTERN.match(name))
+
+    @staticmethod
+    def check_model_name(name: str) -> None:
+        if not RESTApi.is_valid_model_name(name):
+            raise IllegalArgumentError("Invalid model name: " + str(name))
+
+    def list_models(self, database_name: str) -> List[GetModelResponse]:
+        if not database_name or not database_name.strip():
+            raise ValueError("Database name cannot be empty")
+        return self.__list_data_from_page_api(
+            lambda query_params: self.client.get_with_params(
+                self.resource_paths.models(database_name),
+                query_params,
+                ListModelsResponse,
+                self.rest_auth_function,
+            )
+        )
+
+    def get_model(self, identifier: Identifier) -> GetModelResponse:
+        database_name, model_name = self._validate_resource_path(identifier)
+        self.check_model_name(model_name)
+        return self.client.get(
+            self.resource_paths.model(database_name, model_name),
+            GetModelResponse,
+            self.rest_auth_function,
+        )
+
+    def create_model(
+            self, identifier: Identifier, request: CreateModelRequest
+    ) -> GetModelResponse:
+        database_name, model_name = self._validate_resource_path(identifier)
+        self.check_model_name(model_name)
+        if request.name != model_name:
+            raise ValueError("Model request name must match the identifier")
+        return self.client.post_with_response_type(
+            self.resource_paths.models(database_name),
+            request,
+            GetModelResponse,
+            self.rest_auth_function,
+        )
+
+    def drop_model(self, identifier: Identifier) -> None:
+        database_name, model_name = self._validate_resource_path(identifier)
+        self.check_model_name(model_name)
+        self.client.delete(
+            self.resource_paths.model(database_name, model_name),
             self.rest_auth_function,
         )
 

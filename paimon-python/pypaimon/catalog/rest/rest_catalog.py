@@ -18,6 +18,7 @@
 import logging
 from typing import Any, Callable, Dict, List, Optional, Union
 from pypaimon.api.api_response import ErrorResponse, GetTableResponse, GetTagResponse, PagedList, Partition
+from pypaimon.api.model import CreateModelRequest
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_permission_management import RESTPermissionManagement
 from pypaimon.api.rest_policy_management import RESTPolicyManagement
@@ -36,11 +37,13 @@ from pypaimon.catalog.catalog_exception import (
     TableNoPermissionException, DatabaseNoPermissionException,
     TableIdNotExistException, TableIdNoPermissionException,
     FunctionNotExistException, FunctionAlreadyExistException,
+    ModelNotExistException, ModelAlreadyExistException,
     DefinitionAlreadyExistException, DefinitionNotExistException,
     TagNotExistException, TagAlreadyExistException,
     BranchNotExistException, BranchAlreadyExistException,
 )
 from pypaimon.catalog.database import Database
+from pypaimon.catalog.model import Model
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.catalog.rest.table_metadata import TableMetadata
@@ -75,18 +78,6 @@ OBJECT_TABLE_TYPE = "object-table"
 
 
 class RESTCatalog(Catalog):
-    def predict(self, identifier, request):
-        """Submit a prediction to a supporting REST service; never execute locally."""
-        if not isinstance(identifier, Identifier):
-            identifier = Identifier.from_string(identifier)
-        check_not_branch(identifier, "predict")
-        check_not_system_table(identifier, "predict")
-        try:
-            return self.rest_api.predict(identifier, request)
-        except NotImplementedException as e:
-            raise NotImplementedError("REST Catalog does not support prediction") from e
-        # Preserve 404: it can also mean that the table or model does not exist.
-
     def __init__(self, context: CatalogContext, config_required: Optional[bool] = True):
         self.warehouse = context.options.get(CatalogOptions.WAREHOUSE)
         self.rest_api = RESTApi(context.options, config_required)
@@ -616,6 +607,71 @@ class RESTCatalog(Catalog):
             return PagedList(functions, result.next_page_token)
         except NoSuchResourceException as e:
             raise DatabaseNotExistException(database_name) from e
+
+    def create_model(
+            self,
+            identifier: Union[str, Identifier],
+            provider: str,
+            model: str,
+            inputs: Dict[str, Dict[str, Any]],
+            outputs: Optional[Dict[str, Dict[str, Any]]] = None,
+            properties: Optional[Dict[str, Any]] = None,
+    ) -> Model:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        request = CreateModelRequest(
+            name=identifier.get_object_name(),
+            provider=provider,
+            model=model,
+            inputs=inputs,
+            outputs=outputs,
+            properties=properties or {},
+        )
+        try:
+            response = self.rest_api.create_model(identifier, request)
+            return response.to_model(identifier.get_database_name())
+        except AlreadyExistsException as e:
+            raise ModelAlreadyExistException(identifier) from e
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(identifier.get_database_name()) from e
+        except NotImplementedException as e:
+            raise NotImplementedError("REST Catalog does not support models") from e
+
+    def get_model(self, identifier: Union[str, Identifier]) -> Model:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            response = self.rest_api.get_model(identifier)
+            return response.to_model(identifier.get_database_name())
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_DATABASE:
+                raise DatabaseNotExistException(identifier.get_database_name()) from e
+            raise ModelNotExistException(identifier) from e
+        except NotImplementedException as e:
+            raise NotImplementedError("REST Catalog does not support models") from e
+
+    def list_models(self, database_name: str) -> List[Model]:
+        try:
+            return [
+                response.to_model(database_name)
+                for response in self.rest_api.list_models(database_name)
+            ]
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+        except NotImplementedException as e:
+            raise NotImplementedError("REST Catalog does not support models") from e
+
+    def drop_model(self, identifier: Union[str, Identifier]) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.drop_model(identifier)
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_DATABASE:
+                raise DatabaseNotExistException(identifier.get_database_name()) from e
+            raise ModelNotExistException(identifier) from e
+        except NotImplementedException as e:
+            raise NotImplementedError("REST Catalog does not support models") from e
 
     # Tag CRUD: mirrors Java RESTCatalog tag handlers.
     def create_tag(self, identifier: Union[str, Identifier], tag_name: str,

@@ -502,7 +502,7 @@ class DLFSignerTest(unittest.TestCase):
             path = re.sub(r"\{[^}]+\}", "x1", template)
             self.assertEqual(action, resolve_action(method, path), path)
             actions.add(action)
-        self.assertEqual(74, len(actions))
+        self.assertEqual(78, len(actions))
 
     def test_openapi_v4_operations_match_java(self):
         """pypaimon registers Java's operations, in Java's order, under the same actions."""

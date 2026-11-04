@@ -28,71 +28,81 @@ servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
 paths:
-  /v1/{prefix}/databases/{database}/tables/{table}/predict:
-    post:
-      tags: [table]
-      summary: Submit an asynchronous prediction (experimental extension)
-      operationId: predictTable
-      description: >-
-        A supporting service authorizes all referenced columns and the model,
-        retains the selected snapshot, freezes the model version, and durably
-        accepts the job before returning 202. This operation is not idempotent;
-        clients must not automatically retry an ambiguous submission failure.
+  /v1/{prefix}/databases/{database}/models:
+    get:
+      tags: [model]
+      summary: List models in a database
+      operationId: listModels
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
         - {name: database, in: path, required: true, schema: {type: string}}
-        - {name: table, in: path, required: true, schema: {type: string}}
+        - {name: pageToken, in: query, required: false, schema: {type: string}}
+      responses:
+        "200":
+          description: Model metadata in the database
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListModelsResponse'
+        "404": {description: Database not found}
+        "501": {description: Models are not supported}
+    post:
+      tags: [model]
+      summary: Create a model
+      operationId: createModel
+      description: >-
+        Registers provider-neutral model metadata. Credentials and task-specific
+        prompts must not be stored in the model.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - {name: database, in: path, required: true, schema: {type: string}}
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required: [model, inputs, result_columns, prompt, response_format]
-              properties:
-                model: {type: string, minLength: 1}
-                prompt: {type: string, minLength: 1}
-                response_format: {type: string, minLength: 1}
-                where: {type: string, minLength: 1}
-                snapshot_id: {type: integer, format: int64, minimum: 1}
-                tag_name: {type: string, minLength: 1}
-                inputs:
-                  type: array
-                  minItems: 1
-                  items:
-                    type: object
-                    additionalProperties: false
-                    required: [column, modality]
-                    properties:
-                      column: {type: string, minLength: 1}
-                      modality: {type: string, enum: [text, image, audio, video]}
-                result_columns:
-                  type: array
-                  uniqueItems: true
-                  items: {type: string, minLength: 1}
-              description: >-
-                snapshot_id and tag_name are mutually exclusive. When neither
-                is provided, the service fixes the latest snapshot at acceptance.
-                Model identifiers and field names are resolved by the service;
-                endpoint, credentials and execution options are not accepted.
+              $ref: '#/components/schemas/CreateModelRequest'
       responses:
-        "202":
-          description: Durably accepted; the result table is readable by the caller
+        "200":
+          description: Persisted model metadata, including the assigned version
           content:
             application/json:
               schema:
-                type: object
-                required: [job_id, result_table, snapshot_id, model_version]
-                properties:
-                  job_id: {type: string, minLength: 1}
-                  result_table: {type: string, minLength: 1}
-                  snapshot_id: {type: integer, format: int64, minimum: 1}
-                  model_version: {type: string, minLength: 1}
-        "400": {description: Invalid request}
-        "403": {description: Not authorized}
-        "404": {description: Table or model not found, or unsupported endpoint}
-        "501": {description: Prediction is not supported}
+                $ref: '#/components/schemas/GetModelResponse'
+        "400": {description: Invalid model metadata}
+        "404": {description: Database not found}
+        "409": {description: Model already exists}
+        "501": {description: Models are not supported}
+  /v1/{prefix}/databases/{database}/models/{model}:
+    get:
+      tags: [model]
+      summary: Get a model
+      operationId: getModel
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - {name: database, in: path, required: true, schema: {type: string}}
+        - {name: model, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Model metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetModelResponse'
+        "404": {description: Database or model not found}
+        "501": {description: Models are not supported}
+    delete:
+      tags: [model]
+      summary: Drop a model
+      operationId: dropModel
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - {name: database, in: path, required: true, schema: {type: string}}
+        - {name: model, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: Model dropped}
+        "404": {description: Database or model not found}
+        "501": {description: Models are not supported}
   /v1/config:
     get:
       tags:
@@ -4334,6 +4344,82 @@ components:
           format: int64
         updatedBy:
           type: string
+    ModelField:
+      type: object
+      required: [dataType]
+      properties:
+        dataType:
+          type: string
+          minLength: 1
+        modality:
+          type: string
+          minLength: 1
+      additionalProperties: true
+    CreateModelRequest:
+      type: object
+      additionalProperties: false
+      required: [name, provider, model, inputs]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        provider:
+          type: string
+          minLength: 1
+        model:
+          type: string
+          minLength: 1
+        inputs:
+          type: object
+          minProperties: 1
+          additionalProperties:
+            $ref: '#/components/schemas/ModelField'
+        outputs:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ModelField'
+        properties:
+          type: object
+          additionalProperties: true
+    GetModelResponse:
+      type: object
+      additionalProperties: false
+      required: [name, provider, model, version, inputs]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        provider:
+          type: string
+          minLength: 1
+        model:
+          type: string
+          minLength: 1
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+        inputs:
+          type: object
+          minProperties: 1
+          additionalProperties:
+            $ref: '#/components/schemas/ModelField'
+        outputs:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ModelField'
+        properties:
+          type: object
+          additionalProperties: true
+    ListModelsResponse:
+      type: object
+      properties:
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/GetModelResponse'
+        nextPageToken:
+          type: [ string, "null" ]
     ConsumerInfo:
       type: object
       properties:

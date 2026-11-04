@@ -49,7 +49,7 @@ public class DLFOpenApiActionsTest {
             assertEquals(operation[2], DLFOpenApiActions.resolve(operation[0], path), path);
             actions.add(operation[2]);
         }
-        assertEquals(74, actions.size());
+        assertEquals(78, actions.size());
     }
 
     /** The table and docs/static/rest-*-open-api.yaml must list the same operations. */

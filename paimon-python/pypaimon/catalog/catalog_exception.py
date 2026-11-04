@@ -119,6 +119,22 @@ class FunctionAlreadyExistException(CatalogException):
         super().__init__(f"Function {identifier.get_full_name()} already exists")
 
 
+class ModelNotExistException(CatalogException):
+    """Model not exist exception"""
+
+    def __init__(self, identifier: Identifier):
+        self.identifier = identifier
+        super().__init__(f"Model {identifier.get_full_name()} does not exist")
+
+
+class ModelAlreadyExistException(CatalogException):
+    """Model already exist exception"""
+
+    def __init__(self, identifier: Identifier):
+        self.identifier = identifier
+        super().__init__(f"Model {identifier.get_full_name()} already exists")
+
+
 class ColumnNotExistException(CatalogException):
     """Column not exist exception"""
 
