@@ -107,7 +107,8 @@ lerobot = [
     "lerobot[dataset]>=0.6,<0.7; python_version >= '3.12'",
 ]
 ray = [
-    "ray>=2.10,<3; python_version >= '3.8'",
+    # Ray 2.60 shuffle v2 regression: https://github.com/ray-project/ray/pull/67812
+    "ray>=2.10,<2.60; python_version >= '3.8'",
 ]
 torch = [
     "torch",
@@ -191,7 +192,7 @@ python-tests = [
     "pypaimon[oss,lance,ray,daft,hdf5,rosbag,video,vortex,mosaic,lumina,vindex,full-text,theta-sketch,hll-sketch]",
     "duckdb>=1.3,<1.4; python_version >= '3.9'",
     # merge_into / row-id operations require Dataset.join; basic Ray I/O does not.
-    "ray>=2.50; python_version >= '3.9'",
+    "ray>=2.50,<2.60; python_version >= '3.9'",
 ]
 dev = [
     {include-group = "python-tests"},
