@@ -94,7 +94,7 @@ If you want to see a partitioned table in Hive and also synchronize newly create
 
 The JDBC catalog stores catalog metadata in a relational database such as SQLite, MySQL, or PostgreSQL.
 
-Currently, lock configuration is only supported for MySQL and SQLite. If you are using a different type of database for catalog storage, please do not configure `lock.enabled`.
+Currently, lock configuration is only supported for MySQL, PostgreSQL, and SQLite. If you are using a different type of database for catalog storage, please do not configure `lock.enabled`.
 
 Add the JDBC driver for your database to Spark's classpath along with the Paimon connector.
 
