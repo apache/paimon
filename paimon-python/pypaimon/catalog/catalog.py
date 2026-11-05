@@ -87,8 +87,12 @@ class Catalog(ABC):
             inputs: Dict[str, Dict[str, Any]],
             outputs: Optional[Dict[str, Dict[str, Any]]] = None,
             properties: Optional[Dict[str, Any]] = None,
+            ignore_if_exists: bool = False,
     ) -> 'Model':
-        """Create a database-scoped model and return its persisted metadata."""
+        """Create a database-scoped model and return its persisted metadata.
+
+        If ``ignore_if_exists`` is true, return the existing model on conflict.
+        """
         raise NotImplementedError("create_model is not supported by this catalog.")
 
     def get_model(self, identifier: Union[str, Identifier]) -> 'Model':
@@ -99,8 +103,15 @@ class Catalog(ABC):
         """List model metadata in a database."""
         raise NotImplementedError("list_models is not supported by this catalog.")
 
-    def drop_model(self, identifier: Union[str, Identifier]) -> None:
-        """Drop a database-scoped model."""
+    def drop_model(
+            self,
+            identifier: Union[str, Identifier],
+            ignore_if_not_exists: bool = False,
+    ) -> None:
+        """Drop a database-scoped model.
+
+        If ``ignore_if_not_exists`` is true, a missing model is ignored.
+        """
         raise NotImplementedError("drop_model is not supported by this catalog.")
 
     def alter_database(self, name: str, changes: List[PropertyChange]) -> None:

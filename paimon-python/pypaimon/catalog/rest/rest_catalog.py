@@ -616,6 +616,7 @@ class RESTCatalog(Catalog):
             inputs: Dict[str, Dict[str, Any]],
             outputs: Optional[Dict[str, Dict[str, Any]]] = None,
             properties: Optional[Dict[str, Any]] = None,
+            ignore_if_exists: bool = False,
     ) -> Model:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
@@ -625,12 +626,14 @@ class RESTCatalog(Catalog):
             model=model,
             inputs=inputs,
             outputs=outputs,
-            properties=properties or {},
+            properties=properties if properties is not None else {},
         )
         try:
             response = self.rest_api.create_model(identifier, request)
             return response.to_model(identifier.get_database_name())
         except AlreadyExistsException as e:
+            if ignore_if_exists:
+                return self.get_model(identifier)
             raise ModelAlreadyExistException(identifier) from e
         except NoSuchResourceException as e:
             raise DatabaseNotExistException(identifier.get_database_name()) from e
@@ -661,12 +664,18 @@ class RESTCatalog(Catalog):
         except NotImplementedException as e:
             raise NotImplementedError("REST Catalog does not support models") from e
 
-    def drop_model(self, identifier: Union[str, Identifier]) -> None:
+    def drop_model(
+            self,
+            identifier: Union[str, Identifier],
+            ignore_if_not_exists: bool = False,
+    ) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
             self.rest_api.drop_model(identifier)
         except NoSuchResourceException as e:
+            if ignore_if_not_exists:
+                return
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_DATABASE:
                 raise DatabaseNotExistException(identifier.get_database_name()) from e
             raise ModelNotExistException(identifier) from e

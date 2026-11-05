@@ -18,6 +18,7 @@ import json
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from unittest.mock import Mock
 
 from pypaimon.api.model import (
     CreateModelRequest,
@@ -25,6 +26,7 @@ from pypaimon.api.model import (
     ListModelsResponse,
 )
 from pypaimon.api.rest_api import RESTApi
+from pypaimon.api.rest_exception import AlreadyExistsException, NoSuchResourceException
 from pypaimon.catalog.catalog_exception import (
     DatabaseNotExistException,
     ModelAlreadyExistException,
@@ -215,6 +217,35 @@ class ModelTest(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join()
+
+    def test_idempotent_create_and_drop(self):
+        api = Mock()
+        catalog = object.__new__(RESTCatalog)
+        catalog.rest_api = api
+        identifier = Identifier.create("quality", "qwen_vl")
+
+        api.create_model.side_effect = AlreadyExistsException(
+            "MODEL", "qwen_vl", "already exists"
+        )
+        api.get_model.return_value = _response()
+        existing = catalog.create_model(
+            identifier,
+            "bailian",
+            "qwen3.8-flash",
+            _inputs(),
+            ignore_if_exists=True,
+        )
+        self.assertEqual("quality.qwen_vl", existing.full_name)
+        api.get_model.assert_called_once_with(identifier)
+
+        api.drop_model.side_effect = NoSuchResourceException(
+            "MODEL", "qwen_vl", "not found"
+        )
+        with self.assertRaises(ModelNotExistException):
+            catalog.drop_model(identifier)
+        api.drop_model.reset_mock()
+        catalog.drop_model(identifier, ignore_if_not_exists=True)
+        api.drop_model.assert_called_once_with(identifier)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.catalog.Model;
+import org.apache.paimon.catalog.ModelValidation;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -29,7 +30,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -63,13 +63,12 @@ public class CreateModelRequest implements RESTRequest {
         checkArgument(name != null && !name.trim().isEmpty(), "name must not be blank");
         checkArgument(provider != null && !provider.trim().isEmpty(), "provider must not be blank");
         checkArgument(model != null && !model.trim().isEmpty(), "model must not be blank");
-        checkArgument(inputs != null && !inputs.isEmpty(), "inputs must not be empty");
         this.name = name;
         this.provider = provider;
         this.model = model;
-        this.inputs = inputs;
-        this.outputs = outputs;
-        this.properties = properties == null ? Collections.emptyMap() : properties;
+        this.inputs = ModelValidation.copyAndValidateFields(inputs, "inputs", true);
+        this.outputs = ModelValidation.copyAndValidateFields(outputs, "outputs", false);
+        this.properties = ModelValidation.copyAndValidateProperties(properties);
     }
 
     public CreateModelRequest(Model model) {
