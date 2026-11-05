@@ -25,7 +25,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.Model;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.TableMetadata;
@@ -67,7 +66,6 @@ import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
-import org.apache.paimon.rest.requests.CreateModelRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
@@ -94,7 +92,6 @@ import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
-import org.apache.paimon.rest.responses.GetModelResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -106,7 +103,6 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
-import org.apache.paimon.rest.responses.ListModelsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
@@ -164,7 +160,6 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -203,6 +198,7 @@ import static org.apache.paimon.rest.RESTCatalogServerUtils.buildManagementPage;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.canonicalizePolicy;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.errorMessage;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.findCause;
+import static org.apache.paimon.rest.RESTCatalogServerUtils.getParameters;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.getPermissionMaxResults;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.matchesPolicy;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.parseColumnMask;
@@ -212,6 +208,7 @@ import static org.apache.paimon.rest.RESTCatalogServerUtils.permissionResource;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.policyPath;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.policyResourceName;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.resourceName;
+import static org.apache.paimon.rest.RESTCatalogServerUtils.sqlPatternToRegex;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.validatePermissionsForSchema;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.validatePoliciesForSchema;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.withResource;
@@ -263,7 +260,8 @@ public class RESTCatalogServer {
     private final List<String> noPermissionTables = new ArrayList<>();
     private final List<String> noPermissionViews = new ArrayList<>();
     private final Map<String, Function> functionStore = new ConcurrentHashMap<>();
-    private final Map<String, Model> modelStore = new ConcurrentHashMap<>();
+    private final RESTCatalogModelHandler modelHandler =
+            new RESTCatalogModelHandler(databaseStore, databaseLifecycleLocks);
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
     private final Map<String, List<Predicate>> rowFilterAuthHandler = new HashMap<>();
     private final Map<String, Map<String, Transform>> columnMaskingAuthHandler = new HashMap<>();
@@ -507,10 +505,10 @@ public class RESTCatalogServer {
                                 resources.length == 2 && resources[1].startsWith(FUNCTIONS);
                         boolean isFunction =
                                 resources.length == 3 && resources[1].startsWith(FUNCTIONS);
-                        boolean isModels =
-                                resources.length == 2 && ResourcePaths.MODELS.equals(resources[1]);
                         boolean isModel =
-                                resources.length == 3 && ResourcePaths.MODELS.equals(resources[1]);
+                                resources.length >= 2
+                                        && resources.length <= 3
+                                        && ResourcePaths.MODELS.equals(resources[1]);
                         boolean isFunctionsDetails =
                                 resources.length == 2 && resources[1].startsWith(FUNCTION_DETAILS);
                         boolean isViews = resources.length == 2 && resources[1].startsWith(VIEWS);
@@ -773,11 +771,15 @@ public class RESTCatalogServer {
                         } else if (isFunction) {
                             return functionApiHandler(
                                     identifier, restAuthParameter.method(), data, parameters);
-                        } else if (isModels) {
-                            return modelsApiHandler(
-                                    databaseName, restAuthParameter.method(), data, parameters);
                         } else if (isModel) {
-                            return modelApiHandler(identifier, restAuthParameter.method());
+                            return identifier == null
+                                    ? modelHandler.handleCollection(
+                                            databaseName,
+                                            restAuthParameter.method(),
+                                            data,
+                                            parameters)
+                                    : modelHandler.handleModel(
+                                            identifier, restAuthParameter.method());
                         } else if (isFunctionsDetails) {
                             return functionDetailsHandle(
                                     restAuthParameter.method(), databaseName, parameters);
@@ -883,14 +885,6 @@ public class RESTCatalogServer {
                                     e.getMessage(),
                                     409);
                     return mockResponse(response, 409);
-                } catch (Catalog.ModelAlreadyExistException e) {
-                    response =
-                            new ErrorResponse(
-                                    ErrorResponse.RESOURCE_TYPE_MODEL,
-                                    e.identifier().getObjectName(),
-                                    e.getMessage(),
-                                    409);
-                    return mockResponse(response, 409);
                 } catch (Catalog.DefinitionAlreadyExistException e) {
                     response =
                             new ErrorResponse(
@@ -919,14 +913,6 @@ public class RESTCatalogServer {
                     response =
                             new ErrorResponse(
                                     ErrorResponse.RESOURCE_TYPE_FUNCTION,
-                                    e.identifier().getObjectName(),
-                                    e.getMessage(),
-                                    404);
-                    return mockResponse(response, 404);
-                } catch (Catalog.ModelNotExistException e) {
-                    response =
-                            new ErrorResponse(
-                                    ErrorResponse.RESOURCE_TYPE_MODEL,
                                     e.identifier().getObjectName(),
                                     e.getMessage(),
                                     404);
@@ -1308,85 +1294,6 @@ public class RESTCatalogServer {
         }
     }
 
-    private MockResponse modelsApiHandler(
-            String databaseName, String method, String data, Map<String, String> parameters)
-            throws Exception {
-        switch (method) {
-            case "GET":
-                List<GetModelResponse> models =
-                        modelStore.values().stream()
-                                .filter(
-                                        model ->
-                                                model.identifier()
-                                                        .getDatabaseName()
-                                                        .equals(databaseName))
-                                .map(this::toGetModelResponse)
-                                .collect(Collectors.toList());
-                int maxResults = getMaxResults(parameters);
-                String pageToken = parameters.get(PAGE_TOKEN);
-                PagedList<GetModelResponse> pagedModels =
-                        buildPagedEntities(models, maxResults, pageToken);
-                return mockResponse(
-                        new ListModelsResponse(
-                                pagedModels.getElements(), pagedModels.getNextPageToken()),
-                        200);
-            case "POST":
-                CreateModelRequest request = parseRequest(data, CreateModelRequest.class);
-                Identifier identifier = Identifier.create(databaseName, request.getName());
-                synchronized (databaseLifecycleLock(databaseName)) {
-                    if (!databaseStore.containsKey(databaseName)) {
-                        throw new Catalog.DatabaseNotExistException(databaseName);
-                    }
-                    if (modelStore.containsKey(identifier.getFullName())) {
-                        throw new Catalog.ModelAlreadyExistException(identifier);
-                    }
-                    Model model =
-                            new Model(
-                                    identifier,
-                                    request.getProvider(),
-                                    request.getModel(),
-                                    request.getInputs(),
-                                    request.getOutputs(),
-                                    request.getProperties());
-                    modelStore.put(identifier.getFullName(), model);
-                    return mockResponse(toGetModelResponse(model), 200);
-                }
-            default:
-                return new MockResponse().setResponseCode(404);
-        }
-    }
-
-    private MockResponse modelApiHandler(Identifier identifier, String method) throws Exception {
-        synchronized (databaseLifecycleLock(identifier.getDatabaseName())) {
-            if (!databaseStore.containsKey(identifier.getDatabaseName())) {
-                throw new Catalog.DatabaseNotExistException(identifier.getDatabaseName());
-            }
-            Model model = modelStore.get(identifier.getFullName());
-            if (model == null) {
-                throw new Catalog.ModelNotExistException(identifier);
-            }
-            switch (method) {
-                case "GET":
-                    return mockResponse(toGetModelResponse(model), 200);
-                case "DELETE":
-                    modelStore.remove(identifier.getFullName());
-                    return new MockResponse().setResponseCode(200);
-                default:
-                    return new MockResponse().setResponseCode(404);
-            }
-        }
-    }
-
-    private GetModelResponse toGetModelResponse(Model model) {
-        return new GetModelResponse(
-                model.name(),
-                model.provider(),
-                model.model(),
-                model.inputs(),
-                model.outputs(),
-                model.properties());
-    }
-
     private MockResponse functionsApiHandler(
             String databaseName, String method, String data, Map<String, String> parameters)
             throws Exception {
@@ -1766,7 +1673,7 @@ public class RESTCatalogServer {
                             () -> {
                                 removeDatabaseObjects(viewStore, databaseName);
                                 removeDatabaseObjects(functionStore, databaseName);
-                                removeDatabaseObjects(modelStore, databaseName);
+                                modelHandler.removeDatabase(databaseName);
                                 databaseStore.remove(databaseName);
                                 permissionStore.removeDatabase(databaseName);
                                 return null;
@@ -4014,50 +3921,12 @@ public class RESTCatalogServer {
         } else if (entity instanceof GetFunctionResponse) {
             GetFunctionResponse functionResponse = (GetFunctionResponse) entity;
             return functionResponse.name();
-        } else if (entity instanceof GetModelResponse) {
-            return ((GetModelResponse) entity).getName();
         } else if (entity instanceof Identifier) {
             Identifier identifier = (Identifier) entity;
             return identifier.getFullName();
         } else {
             return entity.toString();
         }
-    }
-
-    private Map<String, String> getParameters(String query) {
-        return Arrays.stream(query.split("&"))
-                .map(pair -> pair.split("=", 2))
-                .collect(
-                        Collectors.toMap(
-                                pair -> pair[0].trim(), // key
-                                pair -> RESTUtil.decodeString(pair[1].trim()), // value
-                                (existing, replacement) -> existing // handle duplicates
-                                ));
-    }
-
-    private String sqlPatternToRegex(String pattern) {
-        StringBuilder regex = new StringBuilder();
-        boolean escaped = false;
-
-        for (int i = 0; i < pattern.length(); i++) {
-            char c = pattern.charAt(i);
-
-            if (escaped) {
-                regex.append(c);
-                escaped = false;
-                continue;
-            }
-            if (c == '\\') {
-                escaped = true;
-                continue;
-            }
-            if (c == '%') {
-                regex.append(".*");
-            } else {
-                regex.append(c);
-            }
-        }
-        return "^" + regex + "$";
     }
 
     private MockResponse handleInvalidMaxResults(Map<String, String> parameters) {
