@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.BoundedTwoInputOperator;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -245,11 +246,13 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                         "operation=remove-orphans table="
                                                                 + location
                                                                 + " task="
-                                                                + getRuntimeContext()
-                                                                        .getTaskNameWithSubtasks()
+                                                                + RuntimeContextUtils
+                                                                        .getTaskNameWithSubtasks(
+                                                                                getRuntimeContext())
                                                                 + " attempt="
-                                                                + getRuntimeContext()
-                                                                        .getAttemptNumber(),
+                                                                + RuntimeContextUtils
+                                                                        .getAttemptNumber(
+                                                                                getRuntimeContext()),
                                                         "read-data-manifests")) {
                                             progress.add("manifests_total", manifests.size());
                                             Map<String, ManifestFile> branchManifests =
@@ -475,11 +478,13 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                                 + " dry_run="
                                                                 + dryRun
                                                                 + " task="
-                                                                + getRuntimeContext()
-                                                                        .getTaskNameWithSubtasks()
+                                                                + RuntimeContextUtils
+                                                                        .getTaskNameWithSubtasks(
+                                                                                getRuntimeContext())
                                                                 + " attempt="
-                                                                + getRuntimeContext()
-                                                                        .getAttemptNumber(),
+                                                                + RuntimeContextUtils
+                                                                        .getAttemptNumber(
+                                                                                getRuntimeContext()),
                                                         "build-referenced-file-set");
                                     }
 
