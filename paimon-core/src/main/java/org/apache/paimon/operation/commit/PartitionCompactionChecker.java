@@ -29,12 +29,14 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.UnaryOperator;
+import java.util.function.LongConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -58,8 +60,9 @@ public class PartitionCompactionChecker {
         this.scanner = scanner;
     }
 
-    /** Captures the baselines before APPEND and checks them on every COMPACT attempt. */
-    public UnaryOperator<CommitChangesProvider> prepareCheck(List<CommitMessage> messages) {
+    /** Prepares the partition history check before publishing any part of the commit. */
+    @Nullable
+    public LongConsumer prepareCheck(List<CommitMessage> messages) {
         Map<BinaryRow, Long> baseSnapshots = new HashMap<>();
         for (CommitMessage message : messages) {
             if (!changesDataOrDeletionVectors(((CommitMessageImpl) message).compactIncrement())) {
@@ -72,18 +75,9 @@ public class PartitionCompactionChecker {
                             + "restored snapshot. Reload the partition and recompute compaction.");
             baseSnapshots.merge(message.partition(), snapshotId, Math::min);
         }
-        if (baseSnapshots.isEmpty()) {
-            return UnaryOperator.identity();
-        }
-        return provider ->
-                latestSnapshot -> {
-                    long newSnapshotId =
-                            latestSnapshot == null
-                                    ? Snapshot.FIRST_SNAPSHOT_ID
-                                    : latestSnapshot.id() + 1;
-                    check(newSnapshotId, baseSnapshots);
-                    return provider.provide(latestSnapshot);
-                };
+        return baseSnapshots.isEmpty()
+                ? null
+                : newSnapshotId -> check(newSnapshotId, baseSnapshots);
     }
 
     private static boolean changesDataOrDeletionVectors(CompactIncrement compact) {

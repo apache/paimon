@@ -108,8 +108,8 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.function.LongConsumer;
 import java.util.function.Supplier;
-import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
@@ -356,8 +356,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int attempts = 0;
 
         List<CommitMessage> commitMessages = committable.fileCommittables();
-        UnaryOperator<CommitChangesProvider> checkCompaction =
-                prepareConflictChecks(commitMessages);
+        LongConsumer partitionCompactionCheck = prepareConflictChecks(commitMessages);
         ManifestEntryChanges changes = collectChanges(commitMessages);
         List<ManifestEntry> committedCompactFiles = changes.compactTableFiles;
         Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
@@ -401,6 +400,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 changes.appendIndexFiles),
                                         commitKind,
                                         Collections.emptySet()),
+                                null,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -415,12 +415,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.compactChangelog.isEmpty()
                     || !changes.compactIndexFiles.isEmpty()) {
                 CommitChangesProvider compactProvider =
-                        checkCompaction.apply(
-                                compactChangesProvider(
-                                        changes, materializedBuckets, commitMessages));
+                        compactChangesProvider(changes, materializedBuckets, commitMessages);
                 attempts +=
                         tryCommit(
                                 compactProvider,
+                                partitionCompactionCheck,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -537,7 +536,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int generatedSnapshot = 0;
         int attempts = 0;
 
-        UnaryOperator<CommitChangesProvider> checkCompaction =
+        LongConsumer partitionCompactionCheck =
                 prepareConflictChecks(committable.fileCommittables());
         ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
         if (!changes.appendChangelog.isEmpty() || !changes.compactChangelog.isEmpty()) {
@@ -610,14 +609,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (withCompact) {
                 attempts +=
                         tryCommit(
-                                checkCompaction.apply(
-                                        dataEvolutionChangesProvider(
-                                                new CommitChanges(
-                                                        changes.compactTableFiles,
-                                                        emptyList(),
-                                                        changes.compactIndexFiles),
-                                                CommitKind.COMPACT,
-                                                Collections.emptySet())),
+                                dataEvolutionChangesProvider(
+                                        new CommitChanges(
+                                                changes.compactTableFiles,
+                                                emptyList(),
+                                                changes.compactIndexFiles),
+                                        CommitKind.COMPACT,
+                                        Collections.emptySet()),
+                                partitionCompactionCheck,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -788,6 +787,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         String statsFileName = statsFileHandler.writeStats(stats);
         tryCommit(
                 CommitChangesProvider.provider(emptyList(), emptyList(), emptyList()),
+                null,
                 commitIdentifier,
                 null,
                 Collections.emptyMap(),
@@ -814,15 +814,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return changes;
     }
 
-    private UnaryOperator<CommitChangesProvider> prepareConflictChecks(
-            List<CommitMessage> commitMessages) {
+    @Nullable
+    private LongConsumer prepareConflictChecks(List<CommitMessage> commitMessages) {
         if (dvCompactionChecker != null) {
             return dvCompactionChecker.prepareCheck(commitMessages);
         }
         if (options.dataEvolutionEnabled()) {
             configureRowIdCheckFromMessages(commitMessages);
         }
-        return UnaryOperator.identity();
+        return null;
     }
 
     private void configureRowIdCheckFromMessages(List<CommitMessage> commitMessages) {
@@ -998,6 +998,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private int tryCommit(
             CommitChangesProvider changesProvider,
+            @Nullable LongConsumer partitionCompactionCheck,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -1015,6 +1016,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         tryCommitOnce(
                                 retryResult,
                                 changesProvider,
+                                partitionCompactionCheck,
                                 identifier,
                                 watermark,
                                 properties,
@@ -1119,6 +1121,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return tryCommit(
                 scanner.overwriteChangesProvider(
                         options.bucket(), changes, indexFiles, partitionFilter),
+                null,
                 identifier,
                 watermark,
                 properties,
@@ -1157,6 +1160,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 tryCommitOnce(
                         retryResult,
                         CommitChangesProvider.provider(deltaFiles, changelogFiles, indexFiles),
+                        null,
                         identifier,
                         watermark,
                         properties,
@@ -1172,6 +1176,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private CommitResult tryCommitOnce(
             @Nullable RetryCommitResult retryResult,
             CommitChangesProvider changesProvider,
+            @Nullable LongConsumer partitionCompactionCheck,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -1187,6 +1192,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             tryCommitOnceWithoutLock(
                                     retryResult,
                                     changesProvider,
+                                    partitionCompactionCheck,
                                     identifier,
                                     watermark,
                                     properties,
@@ -1205,6 +1211,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private CommitResult tryCommitOnceWithoutLock(
             @Nullable RetryCommitResult retryResult,
             CommitChangesProvider changesProvider,
+            @Nullable LongConsumer partitionCompactionCheck,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -1260,6 +1267,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             conflictDetection.checkSameBucketWithinDelta(deltaFiles);
         }
 
+        // Check snapshot history even when the file-level conflict scan can be skipped.
+        if (partitionCompactionCheck != null) {
+            partitionCompactionCheck.accept(newSnapshotId);
+        }
         List<BinaryRow> changedPartitions = null;
         if (strictModeChecker != null) {
             changedPartitions = changedPartitions(deltaFiles, indexFiles);
