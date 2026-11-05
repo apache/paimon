@@ -22,6 +22,7 @@ import uuid
 from typing import Dict, List, Optional
 
 from pypaimon.build_info import full_version as build_full_version
+from pypaimon.common.file_io import FileSyncError
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
@@ -674,6 +675,10 @@ class FileStoreCommit:
                         None,
                         base_data_files=base_data_files,
                     )
+        except FileSyncError:
+            # A visible snapshot does not settle a known fsync failure. Preserve
+            # its files, but do not retry and acknowledge it as a duplicate.
+            raise
         except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
             logger.warning("Retry commit for exception.", exc_info=True)

@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import errno
 import logging
 import os
 import shutil
@@ -26,7 +27,7 @@ from urllib.parse import unquote, urlparse
 import pyarrow
 import pyarrow.fs as pafs
 
-from pypaimon.common.file_io import FileIO, create_temp_path, normalize_naive_datetimes
+from pypaimon.common.file_io import FileIO, FileSyncError, create_temp_path, normalize_naive_datetimes
 from pypaimon.common.options import Options
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.local import PaimonLocalFileSystem
@@ -39,24 +40,31 @@ def _fsync_file_obj(file_obj) -> None:
     Raises OSError if the data cannot be synced; callers must not publish the
     path as durable when this fails.
     """
-    file_obj.flush()
-    os.fsync(file_obj.fileno())
+    try:
+        file_obj.flush()
+        os.fsync(file_obj.fileno())
+    except OSError as err:
+        raise FileSyncError(err.errno, err.strerror, err.filename) from err
 
 
 def _fsync_directory(dir_path: Path) -> None:
     """Best-effort fsync of a directory so renames are ordered on disk.
 
-    Some platforms reject directory fsync; failures are ignored there. File data
-    durability still depends on a successful prior file fsync.
+    Only unsupported operations are ignored. A storage error must be reported
+    even after a rename; visibility alone does not prove the entry is durable.
     """
     try:
         fd = os.open(str(dir_path), os.O_RDONLY)
-    except OSError:
-        return
+    except OSError as err:
+        if (err.errno in (errno.ENOTSUP, errno.ENOSYS)
+                or (os.name == "nt" and err.errno == errno.EACCES)):
+            return
+        raise FileSyncError(err.errno, err.strerror, err.filename) from err
     try:
         os.fsync(fd)
-    except OSError:
-        pass
+    except OSError as err:
+        if err.errno not in (errno.EINVAL, errno.ENOTSUP, errno.ENOSYS):
+            raise FileSyncError(err.errno, err.strerror, err.filename) from err
     finally:
         os.close(fd)
 
@@ -335,11 +343,7 @@ class LocalFileIO(FileIO):
         try:
             with open(temp_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-                try:
-                    _fsync_file_obj(f)
-                except OSError:
-                    # Do not rename: publishing would claim a durable snapshot/schema.
-                    return False
+                _fsync_file_obj(f)
             success = self.rename(str(temp_path), path)
             if success and parent:
                 _fsync_directory(parent)

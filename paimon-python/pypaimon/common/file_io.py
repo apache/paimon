@@ -31,6 +31,10 @@ from pypaimon.common.options import Options
 _LOG = logging.getLogger(__name__)
 
 
+class FileSyncError(OSError):
+    """A known durability failure, even if the published path is readable."""
+
+
 def normalize_naive_datetimes(value):
     """Recursively attach UTC to naive datetimes, including ones nested inside
     ROW (dict) and ARRAY/MAP (list/tuple) values.
