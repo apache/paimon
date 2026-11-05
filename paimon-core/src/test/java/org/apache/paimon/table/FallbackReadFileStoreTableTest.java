@@ -368,6 +368,15 @@ public class FallbackReadFileStoreTableTest {
 
         assertThat(readAndCollect((FallbackReadFileStoreTable) versioned, scan -> {}))
                 .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
+        FallbackReadFileStoreTable fromFactory =
+                createFromFactory(
+                        mainTable,
+                        "bc",
+                        true,
+                        Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), "2"));
+        assertThat(fromFactory.other().coreOptions().scanSnapshotId()).isEqualTo(1L);
+        assertThat(readAndCollect(fromFactory, scan -> {}))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
     }
 
     @ParameterizedTest
@@ -390,18 +399,9 @@ public class FallbackReadFileStoreTableTest {
         FallbackReadFileStoreTable latest =
                 new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
         assertThat(readAndCollect(latest, scan -> {})).containsExactly(Pair.of(1, 10));
-        Options factoryOptions = new Options(options);
-        factoryOptions.set(
-                wrappedFirst ? CoreOptions.SCAN_FALLBACK_BRANCH : CoreOptions.SCAN_PRIMARY_BRANCH,
-                "empty");
         FallbackReadFileStoreTable fromFactory =
-                (FallbackReadFileStoreTable)
-                        FileStoreTableFactory.create(
-                                fileIO,
-                                tablePath,
-                                mainTable.schema(),
-                                factoryOptions,
-                                CatalogEnvironment.empty());
+                createFromFactory(mainTable, "empty", wrappedFirst, options);
+        assertThat(fromFactory.other().coreOptions().scanSnapshotId()).isEqualTo(-1L);
         assertThat(readAndCollect(fromFactory, scan -> {})).containsExactly(Pair.of(1, 10));
         FallbackReadFileStoreTable table = (FallbackReadFileStoreTable) latest.copy(options);
         assertThat(table.other().coreOptions().scanSnapshotId()).isEqualTo(-1L);
@@ -412,6 +412,7 @@ public class FallbackReadFileStoreTableTest {
         }
         writeDataIntoTable(branchTable, 0, rowData(2, 20));
 
+        assertThat(readAndCollect(fromFactory, scan -> {})).containsExactly(Pair.of(1, 10));
         assertThat(readAndCollect(table, scan -> {})).containsExactly(Pair.of(1, 10));
         assertThat(table.newScan().listPartitionEntries())
                 .map(entry -> entry.partition().getInt(0))
@@ -488,6 +489,9 @@ public class FallbackReadFileStoreTableTest {
         assertThatThrownBy(() -> table.copy(options))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("No snapshot at or before");
+        assertThatThrownBy(() -> createFromFactory(mainTable, "bc", wrappedFirst, options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("No snapshot at or before");
 
         options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), "true");
         FallbackReadFileStoreTable historical = (FallbackReadFileStoreTable) table.copy(options);
@@ -500,6 +504,12 @@ public class FallbackReadFileStoreTableTest {
             expected.add(Pair.of(3, 30));
         }
         assertThat(readAndCollect(historical, scan -> {}))
+                .containsExactlyInAnyOrderElementsOf(expected);
+        FallbackReadFileStoreTable fromFactory =
+                createFromFactory(mainTable, "bc", wrappedFirst, options);
+        assertThat(fromFactory.other().coreOptions().scanSnapshotId()).isEqualTo(earliestId);
+        assertThat(fromFactory.other().rowType()).isEqualTo(mainTable.rowType());
+        assertThat(readAndCollect(fromFactory, scan -> {}))
                 .containsExactlyInAnyOrderElementsOf(expected);
 
         options.remove(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
@@ -561,6 +571,33 @@ public class FallbackReadFileStoreTableTest {
 
         assertThat(readAndCollect(table, scan -> {}))
                 .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
+        assertThat(
+                        readAndCollect(
+                                createFromFactory(
+                                        mainTable,
+                                        "bc",
+                                        true,
+                                        Collections.singletonMap(scanOption, tagName)),
+                                scan -> {}))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
+    }
+
+    private FallbackReadFileStoreTable createFromFactory(
+            FileStoreTable table,
+            String branch,
+            boolean wrappedFirst,
+            Map<String, String> options) {
+        Options dynamicOptions = new Options(options);
+        dynamicOptions.set(
+                wrappedFirst ? CoreOptions.SCAN_FALLBACK_BRANCH : CoreOptions.SCAN_PRIMARY_BRANCH,
+                branch);
+        return (FallbackReadFileStoreTable)
+                FileStoreTableFactory.create(
+                        fileIO,
+                        tablePath,
+                        table.schema(),
+                        dynamicOptions,
+                        CatalogEnvironment.empty());
     }
 
     private DataTableScan queryAuthScan(DataTableScan delegate, TableQueryAuthResult authResult) {

@@ -280,9 +280,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             return new FallbackReadScan(first, second, wrapped.schema(), scanCreator);
         }
         boolean otherIsEmpty =
-                Objects.equals(other.coreOptions().scanSnapshotId(), EMPTY_BRANCH_SNAPSHOT_ID)
-                        || (other.coreOptions().scanSnapshotId() != null
-                                && other.snapshotManager().latestSnapshotId() == null);
+                Objects.equals(other.coreOptions().scanSnapshotId(), EMPTY_BRANCH_SNAPSHOT_ID);
         if (otherIsEmpty) {
             LOG.warn(
                     "Skipping branch '{}' because it was empty when resolving this read of branch '{}'.",
