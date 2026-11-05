@@ -88,8 +88,14 @@ it one by one from their delta manifests.
   as the removal of old metadata files, expired manifest lists and abandoned versions, chooses its
   files outside the lock and deletes them under it, a batch of files for each hold. It checks again
   before every batch that the publication still stands, and it is abandoned when a rollback
-  replaced the snapshot in the meantime. The files it leaves are for the cleaning of orphan files.
-  A rollback that the catalog performs itself is not coordinated.
+  replaced the snapshot in the meantime. Two callbacks can build metadata from the same snapshot,
+  with different files, and only the file that was written first stays. A callback whose write lost
+  deletes nothing that only its own metadata made unneeded, such as the files of the older versions
+  after a rebuild or the manifest lists that retention dropped, because the metadata that stayed
+  may still list them. It gives the catalog the metadata that stayed, and every batch of a cleanup
+  is also checked against the metadata file the cleanup was chosen for. The files it leaves are
+  for the cleaning of orphan files. A rollback that the catalog performs itself is not
+  coordinated.
 
 ## Prefixed Properties
 

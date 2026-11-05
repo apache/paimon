@@ -1006,6 +1006,221 @@ public class IcebergGapReplayTest {
                         Collections.emptyList(), Collections.emptyMap(), LocalFileIO.create(), "w");
         fresh.append(fresh.disabled, 1);
         assertCleanupWaits(fresh, Collections.emptyMap(), fresh.identifier, "wipe", 0);
+
+        // Two callbacks can build metadata from the same snapshot, with different files, and only
+        // one of them is durable. The one that lost owns none of what the winner lists
+        assertLosingRebuildKeepsWhatTheWinnerLists();
+        assertLosingIncrementalBuildKeepsWhatTheWinnerLists();
+        // and a cleanup is for the metadata it was chosen for, not for any metadata of the commit
+        assertCleanupsLeaveAnotherGeneration();
+    }
+
+    /**
+     * A rebuild is paused right before it publishes snapshot 5, while the metadata of snapshot 4 is
+     * missing. Other callbacks publish snapshot 4, and then snapshot 5 on top of it. The write of
+     * the rebuild loses to that file, which lists what the older versions list. A rebuild deletes
+     * these files when it wins, so this one deletes nothing, and the catalog gets the metadata that
+     * stayed and not the one the rebuild built.
+     */
+    private void assertLosingRebuildKeepsWhatTheWinnerLists() throws Exception {
+        Map<String, String> rebuild =
+                Collections.singletonMap(
+                        IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(), "rebuild");
+        // Iceberg reads the table that is stored with the table
+        ReplayTable t =
+                new ReplayTable(
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        LocalFileIO.create(),
+                        "loser_rebuild");
+        assertLosingRebuild(t, rebuild);
+        assertIcebergReadsEverySnapshot(t);
+        assertThat(getIcebergResult(t.database))
+                .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, t.latest()));
+
+        // a catalog that is given the metadata itself, and not its path
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
+        RecordingIcebergMetadataCommitter.BASES.clear();
+        RecordingIcebergMetadataCommitter.commitsMetadata = true;
+        try {
+            ReplayTable catalog =
+                    new ReplayTable(
+                            Collections.emptyList(),
+                            Collections.singletonMap(
+                                    IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                                    IcebergOptions.StorageType.HADOOP_CATALOG.toString()),
+                            LocalFileIO.create(),
+                            "loser_catalog");
+            assertLosingRebuild(catalog, rebuild);
+            // the winner's commit, and then the commit of the rebuild that lost
+            List<Object> commits = RecordingIcebergMetadataCommitter.COMMITS;
+            assertThat(commits).hasSize(2);
+            IcebergMetadata durable = readMetadata(catalog.enabled, catalog.latest());
+            for (Object commit : commits) {
+                assertThat(commit).isInstanceOf(IcebergMetadata.class);
+                assertThat(((IcebergMetadata) commit).currentSnapshot().manifestList())
+                        .isEqualTo(durable.currentSnapshot().manifestList());
+            }
+        } finally {
+            RecordingIcebergMetadataCommitter.commitsMetadata = false;
+            RecordingIcebergMetadataCommitter.COMMITS.clear();
+            RecordingIcebergMetadataCommitter.BASES.clear();
+        }
+    }
+
+    private void assertLosingRebuild(ReplayTable t, Map<String, String> rebuild) throws Exception {
+        t.append(t.enabled, 1);
+        t.append(t.enabled, 2);
+        t.append(t.enabled, 3);
+        t.gap(4, 5);
+        long n = t.latest();
+        long identifier = t.identifier;
+        List<String> events = new ArrayList<>();
+        String[] winner = new String[1];
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
+        interruptOnce(
+                t,
+                rebuild,
+                identifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_WRITE,
+                -1,
+                () -> {
+                    t.replay(identifier - 1, new ArrayList<>(), NOTHING);
+                    t.replay(identifier, new ArrayList<>(), NOTHING);
+                    winner[0] = t.enabled.fileIO().readFileUtf8(metadataPath(t.enabled, n));
+                });
+        assertThat(events).contains("LOCKED:" + n);
+        assertThat(events).noneMatch(event -> event.startsWith("BEFORE_CLEANUP"));
+        assertThat(t.enabled.fileIO().readFileUtf8(metadataPath(t.enabled, n)))
+                .isEqualTo(winner[0]);
+        // the winner is the incremental one, which keeps every snapshot
+        assertThat(readMetadata(t.enabled, n).snapshots()).hasSize((int) n);
+        assertThat(readVersionHint(t.enabled)).isEqualTo(n);
+        assertEveryVersionIsComplete(t);
+    }
+
+    /**
+     * An incremental build that retention lets drop the older snapshots is paused right before it
+     * publishes. Another callback, with the retention of the table, publishes the same snapshot and
+     * keeps them. The write of the first loses, and it does not delete what it would have dropped.
+     */
+    private void assertLosingIncrementalBuildKeepsWhatTheWinnerLists() throws Exception {
+        ReplayTable t =
+                new ReplayTable(
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        LocalFileIO.create(),
+                        "loser_incremental");
+        for (int key = 1; key <= 4; key++) {
+            t.append(t.enabled, key);
+        }
+        t.append(t.disabled, 5);
+        long n = t.latest();
+        long identifier = t.identifier;
+        Map<String, String> tight = new HashMap<>();
+        tight.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "2");
+        tight.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "2");
+        List<String> events = new ArrayList<>();
+        interruptOnce(
+                t,
+                tight,
+                identifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_WRITE,
+                -1,
+                () -> t.replay(identifier, new ArrayList<>(), NOTHING));
+        assertThat(events).contains("LOCKED:" + n);
+        assertThat(events).noneMatch(event -> event.startsWith("BEFORE_CLEANUP"));
+        assertThat(readMetadata(t.enabled, n).snapshots()).hasSize((int) n);
+        assertThat(readVersionHint(t.enabled)).isEqualTo(n);
+        assertEveryVersionIsComplete(t);
+        assertIcebergReadsEverySnapshot(t);
+    }
+
+    /**
+     * A cleanup is paused right before it deletes. The metadata file of the head is replaced by
+     * another generation of the same commit: another list, the same files. That is what a callback
+     * that wrote the file again leaves after the first one was lost. Nothing is deleted, whichever
+     * callback the cleanup is of.
+     */
+    private void assertCleanupsLeaveAnotherGeneration() throws Exception {
+        ReplayTable t =
+                new ReplayTable(
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        LocalFileIO.create(),
+                        "generation");
+        t.append(t.enabled, 1);
+        t.append(t.enabled, 2);
+        t.gap(3, 4);
+        assertCleanupLeavesAnotherGeneration(
+                t,
+                Collections.singletonMap(
+                        IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(), "rebuild"),
+                t.identifier,
+                "rebuild");
+        t.append(t.enabled, 5);
+        t.append(t.disabled, 6);
+        assertCleanupLeavesAnotherGeneration(t, deletingVersions(1), t.identifier, "incremental");
+        t.append(t.enabled, 7);
+        t.gap(8, 9);
+        assertCleanupLeavesAnotherGeneration(t, deletingVersions(1), t.identifier, "replay");
+        t.append(t.enabled, 10);
+        assertCleanupLeavesAnotherGeneration(t, deletingVersions(0), t.identifier, "repair");
+    }
+
+    private void assertCleanupLeavesAnotherGeneration(
+            ReplayTable t, Map<String, String> options, long identifier, String cleanup)
+            throws Exception {
+        long n = t.latest();
+        List<String> events = new ArrayList<>();
+        Set<String> before = new HashSet<>();
+        interruptOnce(
+                t,
+                options,
+                identifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_CLEANUP,
+                -1,
+                () -> {
+                    rewriteCurrentList(t.enabled, n, metas -> {});
+                    before.addAll(metadataFileNames(t.enabled));
+                });
+        assertThat(events).as(cleanup).contains("BEFORE_CLEANUP:" + n);
+        assertThat(events).as(cleanup).noneMatch(event -> event.startsWith("CLEANUP_LOCKED"));
+        assertThat(metadataFileNames(t.enabled)).as(cleanup).containsAll(before);
+        assertThat(readVersionHint(t.enabled)).as(cleanup).isEqualTo(n);
+        assertThat(getIcebergResult(t.database))
+                .as(cleanup)
+                .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, n));
+    }
+
+    /** Every metadata version that is left has all the files it reaches. */
+    private void assertEveryVersionIsComplete(ReplayTable t) throws Exception {
+        Set<String> names = metadataFileNames(t.enabled);
+        for (String version : versionFiles(t.enabled)) {
+            long id = Long.parseLong(version.substring(1, version.indexOf('.')));
+            assertThat(names).as(version).containsAll(filesReachableFrom(t.enabled, id));
+        }
+    }
+
+    /** Iceberg plans the files that Paimon has for each of the snapshots the head lists. */
+    private void assertIcebergReadsEverySnapshot(ReplayTable t) throws Exception {
+        org.apache.iceberg.Table table = getIcebergTable(t.database);
+        for (org.apache.iceberg.Snapshot snapshot : table.snapshots()) {
+            List<String> planned = new ArrayList<>();
+            try (CloseableIterable<org.apache.iceberg.FileScanTask> tasks =
+                    table.newScan().useSnapshot(snapshot.snapshotId()).planFiles()) {
+                for (org.apache.iceberg.FileScanTask task : tasks) {
+                    planned.add(task.file().path().toString());
+                }
+            }
+            assertThat(planned)
+                    .as("snapshot " + snapshot.snapshotId())
+                    .containsExactlyInAnyOrderElementsOf(
+                            paimonFilePaths(t.enabled, snapshot.snapshotId()));
+        }
     }
 
     private static Map<String, String> deletingVersions(int kept) {
@@ -1543,6 +1758,7 @@ public class IcebergGapReplayTest {
     /** A table with Iceberg metadata on, and the same table with it off, to leave gaps. */
     private final class ReplayTable {
 
+        private final String database;
         private final FileStoreTable enabled;
         private final FileStoreTable disabled;
         private final String user = UUID.randomUUID().toString();
@@ -1561,6 +1777,7 @@ public class IcebergGapReplayTest {
                 FileIO fileIO,
                 String database)
                 throws Exception {
+            this.database = database;
             Map<String, String> created = new HashMap<>();
             // compaction happens only when a test asks for it
             created.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "100");
@@ -2048,13 +2265,23 @@ public class IcebergGapReplayTest {
     }
 
     private List<String> getIcebergResult() throws Exception {
+        return getIcebergResult("mydb");
+    }
+
+    private List<String> getIcebergResult(String database) throws Exception {
         return getIcebergResult(
-                icebergTable -> IcebergGenerics.read(icebergTable).build(), Record::toString);
+                database,
+                icebergTable -> IcebergGenerics.read(icebergTable).build(),
+                Record::toString);
     }
 
     private org.apache.iceberg.Table getIcebergTable() {
+        return getIcebergTable("mydb");
+    }
+
+    private org.apache.iceberg.Table getIcebergTable(String database) {
         HadoopCatalog icebergCatalog = new HadoopCatalog(new Configuration(), tempDir.toString());
-        TableIdentifier icebergIdentifier = TableIdentifier.of("mydb.db", "t");
+        TableIdentifier icebergIdentifier = TableIdentifier.of(database + ".db", "t");
         return icebergCatalog.loadTable(icebergIdentifier);
     }
 
@@ -2062,7 +2289,15 @@ public class IcebergGapReplayTest {
             Function<org.apache.iceberg.Table, CloseableIterable<Record>> query,
             Function<Record, String> icebergRecordToString)
             throws Exception {
-        org.apache.iceberg.Table icebergTable = getIcebergTable();
+        return getIcebergResult("mydb", query, icebergRecordToString);
+    }
+
+    private List<String> getIcebergResult(
+            String database,
+            Function<org.apache.iceberg.Table, CloseableIterable<Record>> query,
+            Function<Record, String> icebergRecordToString)
+            throws Exception {
+        org.apache.iceberg.Table icebergTable = getIcebergTable(database);
         CloseableIterable<Record> result = query.apply(icebergTable);
         List<String> actual = new ArrayList<>();
         for (Record record : result) {
