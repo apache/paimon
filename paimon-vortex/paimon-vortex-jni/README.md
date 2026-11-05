@@ -10,7 +10,7 @@ The Java source code under `src/main/java/dev/vortex/` is adapted from the upstr
 native method signatures in the pre-compiled Rust library.
 
 The Java declarations must match the JNI signatures of the native library version in
-`vortex.jni.version` (currently 0.89.0). A signature that differs still links, and then fails at
+`vortex.jni.version` (currently 0.91.0). A signature that differs still links, and then fails at
 run time, so update both together.
 
 Key adaptations from upstream:

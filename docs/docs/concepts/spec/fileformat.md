@@ -277,7 +277,7 @@ Format Options:
 |:---|:---|:---|:---|
 | `vortex.worker-threads` | 4 | Integer | Minimum number of native threads that decode and encode Vortex data in the background. The pool is shared by the whole JVM and only grows. With 0 threads, only the thread that reads or writes a file drives the native work for it. |
 | `vortex.compact-encodings` | false | Boolean | PyPaimon only. Write with the compact Vortex encodings, which make files smaller and reads somewhat slower. |
-| `vortex.write.edition` | core2025.10.0 | String | The Vortex edition that writers use. An edition sets the encodings and layouts that a file can contain. The default is readable by Vortex 0.73, which Paimon 2.1 uses. See the upgrade order below before you set a newer edition. |
+| `vortex.write.edition` | core2025.10.0 | String | The Vortex edition that writers use. An edition sets the encodings and layouts that a file can contain. The default is readable by Paimon 2.0 and 2.1 in Java and in PyPaimon. See the upgrade order below before you set a newer edition. |
 
 Java writers hand at least 8192 rows to Vortex in each batch, because every batch costs a native
 call and becomes a separate chunk. `write-batch-memory` still limits the memory of each batch.
@@ -286,9 +286,9 @@ Upgrade and rollback:
 
 Each Vortex edition has a minimum Vortex version that can read it. A newer Vortex version reads the
 files of all older editions, but an older version cannot read a file of an edition that it does not
-know. Paimon 2.1 reads Vortex with Vortex 0.73. With the default `vortex.write.edition`, Java and
-Python writers write files that Paimon 2.1 can read, so you can upgrade writers and readers in any
-order.
+know. Paimon 2.0 and 2.1 read Vortex with Vortex 0.73 in Java and with vortex-data 0.70 in PyPaimon.
+With the default `vortex.write.edition`, Java and Python writers write files that Paimon 2.0 and
+2.1 can read, so you can upgrade writers and readers in any order.
 
 The default edition is old, so writers do not use the newest encodings and layouts. Newer editions
 can make smaller files and faster reads. When all readers of the table use this Paimon version or a

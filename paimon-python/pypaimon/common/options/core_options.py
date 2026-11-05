@@ -426,8 +426,8 @@ class CoreOptions:
         .with_description(
             "The Vortex edition that writers use. An edition sets the encodings and layouts that "
             "a file can contain, and each edition has a minimum Vortex version that can read it. "
-            "The default, core2025.10.0, is readable by Vortex 0.73, which Paimon 2.1 uses. Set a "
-            "newer edition, for example core2026.08.3, only after all readers of the table use a "
+            "The default, core2025.10.0, is readable by Paimon 2.0 and 2.1 in Java and in "
+            "PyPaimon. Set a newer edition, for example core2026.08.3, only after all readers of the table use a "
             "Vortex version that reads it. After a file is written with a newer edition, older "
             "readers cannot read it, so a roll back of the readers then also needs a rewrite of "
             "these files.")

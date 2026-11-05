@@ -72,7 +72,10 @@ public class VortexFileFormat extends FileFormat {
                                     + "and only grows. With 0 threads, only the thread that "
                                     + "reads or writes a file drives the native work for it.");
 
-    /** The newest edition that Vortex 0.73 can read. Paimon 2.1 reads Vortex with 0.73. */
+    /**
+     * The newest edition that Paimon 2.0 and 2.1 can read. These versions read Vortex with Vortex
+     * 0.73 in Java and with vortex-data 0.70 in PyPaimon.
+     */
     private static final String DEFAULT_WRITE_EDITION = "core2025.10.0";
 
     public static final ConfigOption<String> WRITE_EDITION =
@@ -83,8 +86,8 @@ public class VortexFileFormat extends FileFormat {
                             "The Vortex edition that writers use. An edition sets the encodings "
                                     + "and layouts that a file can contain, and each edition has "
                                     + "a minimum Vortex version that can read it. The default, "
-                                    + "core2025.10.0, is readable by Vortex 0.73, which Paimon "
-                                    + "2.1 uses. Set a newer edition, for example core2026.08.3, "
+                                    + "core2025.10.0, is readable by Paimon 2.0 and 2.1 in "
+                                    + "Java and in PyPaimon. Set a newer edition, for example core2026.08.3, "
                                     + "only after all readers of the table use a Vortex version "
                                     + "that reads it. After a file is written with a newer "
                                     + "edition, older readers cannot read it, so a roll back of "
