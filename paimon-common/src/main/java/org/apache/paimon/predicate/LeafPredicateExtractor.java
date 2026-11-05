@@ -31,10 +31,10 @@ public class LeafPredicateExtractor implements PredicateVisitor<Map<String, Leaf
     @Override
     public Map<String, LeafPredicate> visit(LeafPredicate predicate) {
         Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
-        if (!fieldRefOptional.isPresent()) {
-            throw new UnsupportedOperationException();
-        }
-        return Collections.singletonMap(fieldRefOptional.get().name(), predicate);
+        // A leaf on a transform such as UPPER(name) does not constrain the field itself.
+        return fieldRefOptional
+                .map(fieldRef -> Collections.singletonMap(fieldRef.name(), predicate))
+                .orElse(Collections.emptyMap());
     }
 
     @Override
