@@ -111,6 +111,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -163,6 +164,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     private final IcebergOptions.StorageType storageType;
 
     private ReplayHook replayHook = (point, value) -> {};
+
+    /**
+     * The most files that a cleanup deletes while it holds the table lock. The lock keeps every
+     * commit and rollback of the table out, so a long cleanup takes it in several turns.
+     */
+    private static final int CLEANUP_BATCH_SIZE = 50;
+
+    private int cleanupBatchSize = CLEANUP_BATCH_SIZE;
 
     // -------------------------------------------------------------------------------------
     // Public interface
@@ -227,6 +236,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     @VisibleForTesting
     void setReplayHook(ReplayHook replayHook) {
         this.replayHook = replayHook;
+    }
+
+    @VisibleForTesting
+    void setCleanupBatchSize(int cleanupBatchSize) {
+        Preconditions.checkArgument(cleanupBatchSize > 0, "A batch has at least one file.");
+        this.cleanupBatchSize = cleanupBatchSize;
     }
 
     private void replayPoint(ReplayPoint point, long value) {
@@ -368,8 +383,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             if (snapshotId == Snapshot.FIRST_SNAPSHOT_ID) {
                 // If Iceberg metadata is stored separately in another directory, dropping the table
                 // will not delete old Iceberg metadata. So we delete them here, when the table is
-                // created again and the first snapshot is committed.
-                table.fileIO().delete(pathFactory.metadataDirectory(), true);
+                // created again and the first snapshot is committed. It runs under the lock,
+                // and only while this snapshot is the head: a callback that outlived the
+                // recreation of the table, or a later commit, must not wipe what that published
+                cleanUnderLock(
+                        snapshot,
+                        this::isCurrentHead,
+                        () -> table.fileIO().delete(pathFactory.metadataDirectory(), true));
             }
 
             String abandonedUuid = null;
@@ -385,13 +405,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         return;
                     }
                     // a failed earlier attempt skipped the normal post-publication cleanup
-                    deleteApplicableMetadataFiles(snapshotId);
-                    retireAbandonedSuffix();
-                    table.fileIO()
-                            .deleteQuietly(
-                                    new Path(
-                                            pathFactory.metadataDirectory(),
-                                            RETIRE_PENDING_FILENAME));
+                    String pending = readRetirePending();
+                    if (deleteUnderLock(snapshot, applicableMetadataFiles(snapshotId))
+                            && retireAbandonedSuffix(snapshot)) {
+                        clearRetirePending(snapshot, pending);
+                    }
                     return;
                 }
                 // a reused snapshot id: only the current head may replace the abandoned
@@ -414,6 +432,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             // steady-state commits skip the listing; anything suspicious lists the actual
             // files, because the hint alone can lag while readers still probe past it
             Path retirePending = new Path(pathFactory.metadataDirectory(), RETIRE_PENDING_FILENAME);
+            // what the marker holds before anything is listed: it is cleared at the end only if
+            // it still holds this, because a rollback since then may have left more behind
+            String pending = readRetirePending();
             boolean suspectRollback =
                     abandonedUuid != null
                             || readVersionHint() != snapshotId - 1
@@ -469,13 +490,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 }
             }
 
-            if (retireSuffix) {
-                // only after the replacement is durable, so readers keep a working head
-                retireAbandonedSuffix();
-            }
-            if (suspectRollback) {
+            // only after the replacement is durable, so readers keep a working head
+            boolean retired = !retireSuffix || retireAbandonedSuffix(snapshot);
+            if (suspectRollback && retired) {
                 // the listing ran and every leftover above the head is gone
-                table.fileIO().deleteQuietly(retirePending);
+                clearRetirePending(snapshot, pending);
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -688,8 +707,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         lock -> writeAndPoint(lock, paimonSnapshot, metadata, null, null));
         if (publication != null && publication.head) {
             // cleanup only after the catalog serves the new head: a skipped or failed
-            // publication must not delete files an external pointer still references
-            expireAllBefore(snapshotId);
+            // publication must not delete files an external pointer still references. The
+            // files are chosen here and deleted under the lock, while the publication stands
+            deleteUnderLock(paimonSnapshot, filesExpiredBefore(snapshotId));
         }
     }
 
@@ -839,32 +859,99 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
      * shadow the replaced timeline for readers probing past the hint. A failed deletion fails the
      * commit so a retry finishes the job; referenced manifests are left to orphan cleanup (the
      * shared prefix makes reference counting non-trivial).
+     *
+     * <p>The versions above the head are listed here, and deleted under the table lock, which
+     * checks the head again for every one of them: a commit that came after the listing makes its
+     * own version a valid one. Returns false, and deletes nothing more, when the publication of the
+     * snapshot was replaced.
      */
-    private void retireAbandonedSuffix() throws IOException {
+    private boolean retireAbandonedSuffix(Snapshot source) throws IOException {
+        List<Path> abandoned = new ArrayList<>();
+        Long latestNow = table.snapshotManager().latestSnapshotId();
         for (FileStatus status : table.fileIO().listStatus(pathFactory.metadataDirectory())) {
-            String name = status.getPath().getName();
-            if (!name.startsWith("v") || !name.endsWith(".metadata.json")) {
-                continue;
+            if (latestNow != null && metadataVersionOf(status.getPath()) > latestNow) {
+                abandoned.add(status.getPath());
             }
-            long version;
-            try {
-                version = Long.parseLong(name.substring(1, name.indexOf('.')));
-            } catch (NumberFormatException ignored) {
-                continue;
+        }
+        for (int from = 0; from < abandoned.size(); from += cleanupBatchSize) {
+            List<Path> batch =
+                    abandoned.subList(from, Math.min(abandoned.size(), from + cleanupBatchSize));
+            boolean done =
+                    cleanUnderLock(
+                            source,
+                            this::isPublished,
+                            () -> {
+                                Long head = table.snapshotManager().latestSnapshotId();
+                                for (Path path : batch) {
+                                    if (head == null || metadataVersionOf(path) <= head) {
+                                        continue;
+                                    }
+                                    table.fileIO().deleteQuietly(path);
+                                    if (table.fileIO().exists(path)) {
+                                        throw new IllegalStateException(
+                                                "Failed to retire abandoned Iceberg metadata "
+                                                        + path);
+                                    }
+                                }
+                            });
+            if (!done) {
+                return false;
             }
-            Long latestNow = table.snapshotManager().latestSnapshotId();
-            if (latestNow == null || version <= latestNow) {
-                continue;
-            }
-            table.fileIO().deleteQuietly(status.getPath());
-            if (table.fileIO().exists(status.getPath())) {
-                throw new IllegalStateException(
-                        "Failed to retire abandoned Iceberg metadata " + status.getPath());
-            }
+        }
+        return true;
+    }
+
+    /** The version of a metadata file such as v5.metadata.json, or -1 for any other file. */
+    private static long metadataVersionOf(Path path) {
+        String name = path.getName();
+        if (!name.startsWith("v") || !name.endsWith(".metadata.json")) {
+            return -1;
+        }
+        try {
+            return Long.parseLong(name.substring(1, name.indexOf('.')));
+        } catch (NumberFormatException ignored) {
+            return -1;
         }
     }
 
     static final String RETIRE_PENDING_FILENAME = "retire-pending";
+
+    /** What the marker of a rollback holds, or null when there is none or it cannot be read. */
+    @Nullable
+    private String readRetirePending() {
+        try {
+            return table.fileIO()
+                    .readFileUtf8(
+                            new Path(pathFactory.metadataDirectory(), RETIRE_PENDING_FILENAME))
+                    .trim();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Deletes the marker of a rollback once the leftovers of the rollback are retired, but only if
+     * it still holds what it held before they were listed. A rollback writes it again, and the
+     * leftovers of that one are not in the listing.
+     */
+    private void clearRetirePending(Snapshot source, @Nullable String seenBeforeListing)
+            throws IOException {
+        if (seenBeforeListing == null) {
+            return;
+        }
+        cleanUnderLock(
+                source,
+                this::isPublished,
+                () -> {
+                    if (seenBeforeListing.equals(readRetirePending())) {
+                        table.fileIO()
+                                .deleteQuietly(
+                                        new Path(
+                                                pathFactory.metadataDirectory(),
+                                                RETIRE_PENDING_FILENAME));
+                    }
+                });
+    }
 
     @FunctionalInterface
     private interface LockedAction<T> {
@@ -968,6 +1055,88 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
     }
 
+    /** Whether the Paimon snapshot on disk is still the head, and the one the metadata is from. */
+    private boolean isCurrentHead(Snapshot source) {
+        Long latest = table.snapshotManager().latestSnapshotId();
+        return isCurrentSource(source) && latest != null && latest == source.id();
+    }
+
+    /**
+     * Whether the metadata that was published for the snapshot is still in place: the snapshot is
+     * the one on disk, and the metadata file of its version is built from it.
+     */
+    private boolean isPublished(Snapshot source) {
+        return isCurrentSource(source) && metadataMatchesSnapshot(source.id(), source);
+    }
+
+    /** Deletions that run under the table lock. */
+    @FunctionalInterface
+    private interface Deletions {
+        void run() throws IOException;
+    }
+
+    /**
+     * Deletes the files that the publication of a snapshot made unneeded. The files are chosen
+     * outside the lock, from what the publication replaced. They are deleted under the lock that
+     * the commits and the rollbacks of the table take, in batches that keep a hold of it short.
+     * Before every batch the publication is checked again: a rollback and a replacement can
+     * complete between the publication and the deletion, and the files may belong to the new
+     * timeline then. The rest of the cleanup is abandoned in that case, and the files are left to
+     * orphan file cleaning.
+     *
+     * <p>Returns whether every file was handled, and false when the cleanup was abandoned.
+     */
+    private boolean deleteUnderLock(Snapshot source, List<Path> files) throws IOException {
+        for (int from = 0; from < files.size(); from += cleanupBatchSize) {
+            List<Path> batch = files.subList(from, Math.min(files.size(), from + cleanupBatchSize));
+            boolean done =
+                    cleanUnderLock(
+                            source,
+                            this::isPublished,
+                            () -> {
+                                for (Path file : batch) {
+                                    table.fileIO().deleteQuietly(file);
+                                }
+                            });
+            if (!done) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Runs deletions under the table lock, once the snapshot they are for passes the check. Returns
+     * false, with nothing deleted, when it does not.
+     */
+    private boolean cleanUnderLock(
+            Snapshot source, Predicate<Snapshot> stillCurrent, Deletions deletions)
+            throws IOException {
+        replayPoint(ReplayPoint.BEFORE_CLEANUP, source.id());
+        boolean done =
+                runUnderTableLock(
+                        table,
+                        commitUser,
+                        lock -> {
+                            if (!stillCurrent.test(source)) {
+                                return false;
+                            }
+                            lock.ensureValid();
+                            replayPoint(ReplayPoint.CLEANUP_LOCKED, source.id());
+                            deletions.run();
+                            return true;
+                        });
+        if (!done) {
+            LOG.info(
+                    "Iceberg metadata of snapshot {} of table {} was replaced before its cleanup "
+                            + "ran. The cleanup is abandoned, and its files stay for the cleaning "
+                            + "of orphan files.",
+                    source.id(),
+                    table.fullName());
+        }
+        return done;
+    }
+
     /**
      * Writes the metadata file of the snapshot and, when the snapshot is the head, moves the hint
      * and the pointer of the external catalog to it. Runs under {@link #publishUnderLock}.
@@ -1036,7 +1205,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         try {
             Path dir = catalogTableMetadataPath(table);
             if (table.fileIO().exists(dir)) {
-                table.fileIO().overwriteFileUtf8(new Path(dir, RETIRE_PENDING_FILENAME), "");
+                // every rollback leaves its own marker, so that a cleanup that listed the
+                // leftovers before it does not clear it
+                table.fileIO()
+                        .overwriteFileUtf8(
+                                new Path(dir, RETIRE_PENDING_FILENAME),
+                                UUID.randomUUID().toString());
             }
         } catch (Exception e) {
             // best-effort: the commit-time suspicion gate still covers the common cases
@@ -1608,11 +1782,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                         lock, snapshot, metadata, baseMetadata, baseMetadataPath));
         if (publication != null && publication.head) {
             // cleanup only after the catalog serves the new head: a skipped or failed
-            // publication must not delete files an external pointer still references
-            deleteApplicableMetadataFiles(snapshotId);
+            // publication must not delete files an external pointer still references. The
+            // files are chosen here and deleted under the lock, while the publication stands
+            List<Path> files = applicableMetadataFiles(snapshotId);
             for (int i = 0; i + 1 < toExpireExceptLast.size(); i++) {
-                expireSnapshot(toExpireExceptLast.get(i), toExpireExceptLast.get(i + 1));
+                collectExpired(files, toExpireExceptLast.get(i), toExpireExceptLast.get(i + 1));
             }
+            deleteUnderLock(snapshot, files);
         }
     }
 
@@ -1993,17 +2169,21 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
     }
 
-    /** Expires a snapshot that retention drops: its own files and its replay originals. */
-    private void expireSnapshot(IcebergSnapshot toExpire, IcebergSnapshot next) {
+    /**
+     * Adds the files of a snapshot that retention drops to the files to delete: its own files and
+     * its replay originals. Nothing is deleted here.
+     */
+    private void collectExpired(List<Path> files, IcebergSnapshot toExpire, IcebergSnapshot next) {
         Set<String> inUse = manifestPathsReachableFrom(next);
-        expireManifestList(new Path(toExpire.manifestList()).getName(), inUse);
-        expireReplayedOriginals(toExpire, inUse);
+        collectExpiredList(files, new Path(toExpire.manifestList()).getName(), inUse);
+        collectExpiredOriginals(files, toExpire, inUse);
     }
 
-    private void expireReplayedOriginals(IcebergSnapshot toExpire, Set<String> pathsInUse) {
+    private void collectExpiredOriginals(
+            List<Path> files, IcebergSnapshot toExpire, Set<String> pathsInUse) {
         for (String original : replayedOriginals(toExpire)) {
             if (existsUnchecked(pathFactory.toManifestListPath(original))) {
-                expireManifestList(original, pathsInUse);
+                collectExpiredList(files, original, pathsInUse);
             }
         }
     }
@@ -2018,17 +2198,22 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         return paths;
     }
 
-    private void expireManifestList(String toExpire, Set<String> pathsInUse) {
+    private void collectExpiredList(List<Path> files, String toExpire, Set<String> pathsInUse) {
         for (IcebergManifestFileMeta meta : manifestList.read(toExpire)) {
             if (pathsInUse.contains(meta.manifestPath())) {
                 continue;
             }
-            table.fileIO().deleteQuietly(new Path(meta.manifestPath()));
+            files.add(new Path(meta.manifestPath()));
         }
-        table.fileIO().deleteQuietly(pathFactory.toManifestListPath(toExpire));
+        files.add(pathFactory.toManifestListPath(toExpire));
     }
 
-    private void expireAllBefore(long snapshotId) throws IOException {
+    /**
+     * The files that a rebuild makes unneeded: what every older metadata file references, and then
+     * the older metadata files that retention drops. Nothing is deleted here.
+     */
+    private List<Path> filesExpiredBefore(long snapshotId) throws IOException {
+        List<Path> files = new ArrayList<>();
         Set<String> expiredManifestLists = new HashSet<>();
         Set<String> expiredManifestFileMetas = new HashSet<>();
         Iterator<Path> it =
@@ -2077,16 +2262,22 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             continue;
                         }
                         expiredManifestFileMetas.add(metaName);
-                        table.fileIO().deleteQuietly(new Path(meta.manifestPath()));
+                        files.add(new Path(meta.manifestPath()));
                     }
-                    table.fileIO().deleteQuietly(listPath);
+                    files.add(listPath);
                 }
             }
         }
-        deleteApplicableMetadataFiles(snapshotId);
+        files.addAll(applicableMetadataFiles(snapshotId));
+        return files;
     }
 
-    private void deleteApplicableMetadataFiles(long snapshotId) throws IOException {
+    /**
+     * The metadata files that the retention of previous versions drops once the metadata of the
+     * snapshot is published. Nothing is deleted here.
+     */
+    private List<Path> applicableMetadataFiles(long snapshotId) throws IOException {
+        List<Path> files = new ArrayList<>();
         Options options = new Options(table.options());
         if (options.get(IcebergOptions.METADATA_DELETE_AFTER_COMMIT)) {
             long earliestMetadataId =
@@ -2097,11 +2288,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                 .getAllMetadataPathBefore(table.fileIO(), earliestMetadataId)
                                 .iterator();
                 while (it.hasNext()) {
-                    Path path = it.next();
-                    table.fileIO().deleteQuietly(path);
+                    files.add(it.next());
                 }
             }
         }
+        return files;
     }
 
     @Override
@@ -2557,6 +2748,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         BEFORE_WRITE,
         /** A publication holds the table lock and checked its source, nothing is written yet. */
         LOCKED,
+        /** A cleanup of files that a publication made unneeded is about to take the lock. */
+        BEFORE_CLEANUP,
+        /** A cleanup holds the table lock and checked its publication, nothing is deleted yet. */
+        CLEANUP_LOCKED,
         /** The metadata file of the replay is durable. */
         EXPOSED,
         /** The replay was dropped and nothing was written for the snapshot. */
@@ -3264,10 +3459,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 deleteCreatedFiles();
             }
             if (publication.head) {
-                deleteApplicableMetadataFiles(snapshotId);
+                // chosen here, and deleted under the lock while the publication stands
+                List<Path> files = applicableMetadataFiles(snapshotId);
                 if (publication.ours) {
-                    expireDroppedOriginals(result, acquired);
+                    files.addAll(droppedOriginalFiles(result, acquired));
                 }
+                deleteUnderLock(snapshot, files);
             }
         }
 
@@ -3370,11 +3567,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
 
         /**
-         * Applies the usual retention cleanup to the base snapshots that the output dropped: their
-         * lists, the lists that earlier replays left for them, and the manifests that no kept
-         * original list still lists. The copies are never touched.
+         * The files that the usual retention cleanup deletes for the base snapshots that the output
+         * dropped: their lists, the lists that earlier replays left for them, and the manifests
+         * that no kept original list still lists. The copies are never touched. Nothing is deleted
+         * here.
          */
-        private void expireDroppedOriginals(IcebergMetadata result, Acquired acquired) {
+        private List<Path> droppedOriginalFiles(IcebergMetadata result, Acquired acquired) {
+            List<Path> files = new ArrayList<>();
             try {
                 Set<Long> keptIds = new HashSet<>();
                 for (IcebergSnapshot s : result.snapshots()) {
@@ -3387,7 +3586,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     }
                 }
                 if (dropped.isEmpty()) {
-                    return;
+                    return files;
                 }
                 IcebergSnapshot firstKept = result.snapshots().get(0);
                 // A kept snapshot that is a copy still has its original list, with the manifests
@@ -3405,15 +3604,18 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             i + 1 < dropped.size()
                                     ? manifestPathsReachableFrom(dropped.get(i + 1))
                                     : inUse;
-                    expireManifestList(new Path(dropped.get(i).manifestList()).getName(), next);
-                    expireReplayedOriginals(dropped.get(i), next);
+                    collectExpiredList(
+                            files, new Path(dropped.get(i).manifestList()).getName(), next);
+                    collectExpiredOriginals(files, dropped.get(i), next);
                 }
+                return files;
             } catch (RuntimeException e) {
                 LOG.warn(
                         "Failed to clean the metadata files that retention dropped for table {}. "
                                 + "They stay on storage.",
                         table.fullName(),
                         e);
+                return Collections.emptyList();
             }
         }
 

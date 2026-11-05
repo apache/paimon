@@ -364,7 +364,9 @@ public class IcebergGapReplayTest {
                         "CANDIDATE_REJECTED:3",
                         "REBUILD:10",
                         "BEFORE_WRITE:10",
-                        "LOCKED:10");
+                        "LOCKED:10",
+                        "BEFORE_CLEANUP:10",
+                        "CLEANUP_LOCKED:10");
         assertThat(getIcebergResult())
                 .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, m));
         assertThat(difference(avroFiles(metadataFileNames(t.enabled)), avroFiles(before)))
@@ -396,7 +398,9 @@ public class IcebergGapReplayTest {
                         "COPIED:" + baseManifests,
                         "REBUILD:" + n,
                         "BEFORE_WRITE:" + n,
-                        "LOCKED:" + n);
+                        "LOCKED:" + n,
+                        "BEFORE_CLEANUP:" + n,
+                        "CLEANUP_LOCKED:" + n);
         IcebergMetadata rebuilt = readMetadata(t.enabled, n);
         assertThat(rebuilt.tableUuid()).isEqualTo(base.tableUuid());
         assertThat(rebuilt.lastColumnId()).isGreaterThanOrEqualTo(base.lastColumnId());
@@ -413,7 +417,13 @@ public class IcebergGapReplayTest {
                 t.identifier,
                 events,
                 NOTHING);
-        assertThat(events).containsExactly("REBUILD:" + n, "BEFORE_WRITE:" + n, "LOCKED:" + n);
+        assertThat(events)
+                .containsExactly(
+                        "REBUILD:" + n,
+                        "BEFORE_WRITE:" + n,
+                        "LOCKED:" + n,
+                        "BEFORE_CLEANUP:" + n,
+                        "CLEANUP_LOCKED:" + n);
         assertRebuilt(t, n, events, before);
 
         // every limit sends the replay to the rebuild
@@ -516,7 +526,9 @@ public class IcebergGapReplayTest {
                 .containsExactly(
                         "REBUILD:" + keyed.latest(),
                         "BEFORE_WRITE:" + keyed.latest(),
-                        "LOCKED:" + keyed.latest());
+                        "LOCKED:" + keyed.latest(),
+                        "BEFORE_CLEANUP:" + keyed.latest(),
+                        "CLEANUP_LOCKED:" + keyed.latest());
         assertThat(versionFiles(keyed.enabled)).contains("v" + keyed.latest() + ".metadata.json");
 
         // the duration is also checked while the manifests of one snapshot are copied. Only the
@@ -559,6 +571,7 @@ public class IcebergGapReplayTest {
     public void testReplayDuringConcurrentChange() throws Exception {
         ReplayTable t = new ReplayTable(Collections.emptyMap());
         t.append(t.enabled, 1);
+        long firstIdentifier = t.identifier;
         t.append(t.enabled, 2);
         t.append(t.enabled, 3);
 
@@ -725,7 +738,10 @@ public class IcebergGapReplayTest {
                 });
         assertThat(events).contains("ABANDONED:" + n);
         assertThat(t.enabled.fileIO().readFileUtf8(stale)).isEqualTo(staleJson);
-        assertThat(metadataFileNames(t.enabled)).isEqualTo(before);
+        // the rollback left its marker, and the callback that was replaced does not clear it:
+        // it did not list what that rollback left behind
+        assertThat(metadataFileNames(t.enabled))
+                .isEqualTo(union(before, Collections.singleton("retire-pending")));
 
         // no version file is in the way, and the head is replaced after the replay finished
         // its work: the metadata of the replaced snapshot is not written, the hint and the
@@ -838,6 +854,228 @@ public class IcebergGapReplayTest {
         t.gap(57);
         assertWaitsForPublication(t, id -> t.enabled.deleteTag("waited"));
         assertThat(readMetadata(t.enabled, t.latest()).refs()).doesNotContainKey("waited");
+
+        // The files that a publication made unneeded are deleted under the lock too, and only
+        // while the publication stands. A rollback and a replacement can come between the
+        // publication and the cleanup: the cleanup is abandoned then, because what it would
+        // delete belongs to the new timeline. The rollback keeps the snapshot that comes before
+        // the ones that the old timeline still has, so the files of the two timelines overlap.
+        // A replay, which also drops the originals of the base snapshots:
+        t.append(t.enabled, 60);
+        t.append(t.enabled, 61);
+        t.gap(62, 63);
+        assertCleanupLeavesReplacedTimeline(t, deletingVersions(0), t.latest() - 3, 160);
+        // a rebuild, which deletes what every older metadata file references:
+        t.append(t.enabled, 64);
+        t.append(t.enabled, 65);
+        t.gap(66, 67);
+        assertCleanupLeavesReplacedTimeline(
+                t,
+                Collections.singletonMap(
+                        IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(), "rebuild"),
+                t.latest() - 3,
+                161);
+        // an incremental publication, which also expires snapshots by retention:
+        t.append(t.enabled, 68);
+        t.append(t.enabled, 69);
+        t.append(t.disabled, 70);
+        Map<String, String> expiring = deletingVersions(0);
+        expiring.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        expiring.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "2");
+        assertCleanupLeavesReplacedTimeline(t, expiring, t.latest() - 2, 162);
+        // the repair of a retry:
+        t.append(t.enabled, 71);
+        t.append(t.enabled, 72);
+        t.append(t.enabled, 73);
+        assertCleanupLeavesReplacedTimeline(t, deletingVersions(0), t.latest() - 2, 163);
+        // a cleanup that runs in several turns checks again in every one of them
+        t.append(t.enabled, 74);
+        t.append(t.enabled, 75);
+        t.gap(76, 77);
+        t.cleanupBatchSize = 1;
+        assertCleanupLeavesReplacedTimeline(t, deletingVersions(0), t.latest() - 3, 164, 1);
+        t.cleanupBatchSize = 0;
+
+        // The versions above the head are retired under the lock, and a version that a commit
+        // published after they were listed is kept
+        t.append(t.enabled, 78);
+        t.append(t.enabled, 79);
+        t.append(t.enabled, 80);
+        long retained = t.latest() - 1;
+        long retainedIdentifier = t.identifier - 1;
+        t.enabled.rollbackTo(retained);
+        assertThat(versionFiles(t.enabled)).contains("v" + (retained + 1) + ".metadata.json");
+        events = new ArrayList<>();
+        interruptOnce(
+                t,
+                Collections.emptyMap(),
+                retainedIdentifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_CLEANUP,
+                -1,
+                () -> t.append(t.enabled, 81));
+        assertThat(events).contains("CLEANUP_LOCKED:" + retained);
+        assertThat(t.latest()).isEqualTo(retained + 1);
+        assertThat(readVersionHint(t.enabled)).isEqualTo(retained + 1);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, retained + 1));
+
+        // and so is the marker that a rollback left, unless another rollback wrote it again
+        // after the versions were listed: that one left versions that are not in the listing
+        t.append(t.enabled, 82);
+        t.append(t.enabled, 83);
+        retained = t.latest() - 1;
+        retainedIdentifier = t.identifier - 1;
+        t.enabled.rollbackTo(retained);
+        long again = retained;
+        events = new ArrayList<>();
+        interruptOnce(
+                t,
+                Collections.emptyMap(),
+                retainedIdentifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_CLEANUP,
+                -1,
+                () -> {
+                    t.append(t.enabled, 84);
+                    t.enabled.rollbackTo(again);
+                });
+        assertThat(versionFiles(t.enabled)).doesNotContain("v" + (retained + 1) + ".metadata.json");
+        assertThat(metadataFileNames(t.enabled)).contains("retire-pending");
+
+        // the same holds when the callback publishes the metadata of the snapshot itself
+        t.append(t.enabled, 85);
+        t.append(t.enabled, 86);
+        t.append(t.enabled, 87);
+        long published = t.latest() - 1;
+        t.enabled.rollbackTo(published - 1);
+        t.append(t.disabled, 88);
+        events = new ArrayList<>();
+        interruptOnce(
+                t,
+                Collections.emptyMap(),
+                t.identifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_CLEANUP,
+                -1,
+                () -> {
+                    t.append(t.enabled, 89);
+                    t.enabled.rollbackTo(published);
+                });
+        assertThat(events).contains("CLEANUP_LOCKED:" + published);
+        assertThat(versionFiles(t.enabled))
+                .doesNotContain("v" + (published + 1) + ".metadata.json");
+        assertThat(metadataFileNames(t.enabled)).contains("retire-pending");
+
+        // the first snapshot wipes the metadata directory of an older table, and only while it
+        // is the head: a callback that comes late does not wipe what later commits published
+        Set<String> versions = versionFiles(t.enabled);
+        events = new ArrayList<>();
+        t.replay(firstIdentifier, events, NOTHING);
+        assertThat(events).contains("BEFORE_CLEANUP:1").doesNotContain("CLEANUP_LOCKED:1");
+        assertThat(versionFiles(t.enabled)).isEqualTo(versions);
+
+        // Every one of these deletions holds the lock while it runs
+        Map<String, String> rebuild =
+                Collections.singletonMap(
+                        IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(), "rebuild");
+        t.append(t.enabled, 90);
+        t.gap(91, 92);
+        assertCleanupWaits(t, rebuild, t.identifier, "rebuild", 0);
+        t.append(t.enabled, 93);
+        t.append(t.disabled, 94);
+        assertCleanupWaits(t, deletingVersions(1), t.identifier, "incremental", 0);
+        t.append(t.enabled, 95);
+        t.gap(96, 97);
+        assertCleanupWaits(t, deletingVersions(1), t.identifier, "replay", 0);
+        t.append(t.enabled, 98);
+        assertCleanupWaits(t, deletingVersions(0), t.identifier, "repair", 0);
+        // the versions above the head after a rollback, and then the marker of the rollback
+        t.append(t.enabled, 99);
+        t.append(t.enabled, 100);
+        t.append(t.enabled, 101);
+        t.enabled.rollbackTo(t.latest() - 1);
+        assertCleanupWaits(t, Collections.emptyMap(), t.identifier - 1, "retire", 0);
+        t.append(t.enabled, 102);
+        t.append(t.enabled, 103);
+        t.enabled.rollbackTo(t.latest() - 1);
+        assertCleanupWaits(t, Collections.emptyMap(), t.identifier - 1, "marker", 1);
+        // the wipe of the metadata directory by the first snapshot
+        ReplayTable fresh =
+                new ReplayTable(
+                        Collections.emptyList(), Collections.emptyMap(), LocalFileIO.create(), "w");
+        fresh.append(fresh.disabled, 1);
+        assertCleanupWaits(fresh, Collections.emptyMap(), fresh.identifier, "wipe", 0);
+    }
+
+    private static Map<String, String> deletingVersions(int kept) {
+        Map<String, String> options = new HashMap<>();
+        options.put(IcebergOptions.METADATA_DELETE_AFTER_COMMIT.key(), "true");
+        options.put(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX.key(), String.valueOf(kept));
+        return options;
+    }
+
+    /**
+     * A callback is paused after it published the metadata of the head, right before it deletes
+     * what the publication made unneeded. The table is rolled back to a snapshot that the files of
+     * the old timeline were built from, and another commit publishes the next snapshot. Then the
+     * paused callback goes on: it deletes nothing, and Iceberg shows the new timeline.
+     */
+    private void assertCleanupLeavesReplacedTimeline(
+            ReplayTable t, Map<String, String> options, long keep, int replacementKey)
+            throws Exception {
+        assertCleanupLeavesReplacedTimeline(t, options, keep, replacementKey, 0);
+    }
+
+    private void assertCleanupLeavesReplacedTimeline(
+            ReplayTable t,
+            Map<String, String> options,
+            long keep,
+            int replacementKey,
+            int turnsBefore)
+            throws Exception {
+        long n = t.latest();
+        List<String> events = new ArrayList<>();
+        interruptAt(
+                t,
+                options,
+                t.identifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_CLEANUP,
+                -1,
+                turnsBefore,
+                () -> {
+                    t.enabled.rollbackTo(keep);
+                    t.append(t.enabled, replacementKey);
+                });
+        assertThat(events).contains("BEFORE_CLEANUP:" + n);
+        assertThat(events)
+                .filteredOn(event -> event.startsWith("CLEANUP_LOCKED"))
+                .hasSize(turnsBefore);
+        long head = t.latest();
+        assertThat(head).isEqualTo(keep + 1);
+        assertThat(readVersionHint(t.enabled)).isEqualTo(head);
+        assertThat(versionFiles(t.enabled)).contains("v" + head + ".metadata.json");
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, head));
+    }
+
+    /**
+     * An operation on the table waits while a cleanup holds the lock, and runs when the cleanup is
+     * done. The callback is the one for the head, and the lock is taken for the (turn + 1)th time
+     * at the point.
+     */
+    private void assertCleanupWaits(
+            ReplayTable t, Map<String, String> options, long identifier, String cleanup, int turn)
+            throws Exception {
+        assertWaitsAt(
+                t,
+                options,
+                identifier,
+                IcebergCommitCallback.ReplayPoint.CLEANUP_LOCKED,
+                turn,
+                id -> t.enabled.createTag(cleanup, id));
+        assertThat(t.enabled.tagManager().tagExists(cleanup)).as(cleanup).isTrue();
     }
 
     /**
@@ -879,17 +1117,37 @@ public class IcebergGapReplayTest {
     private void assertWaitsForPublication(
             ReplayTable t, Map<String, String> options, LongConsumer operation) throws Exception {
         long n = t.latest();
+        assertWaitsAt(
+                t, options, t.identifier, IcebergCommitCallback.ReplayPoint.LOCKED, 0, operation);
+        assertThat(readVersionHint(t.enabled)).isEqualTo(n);
+    }
+
+    /**
+     * An operation on the table waits while a callback holds the lock at a point of its, and runs
+     * when the callback is done. The point is the one that the callback reaches for the (skipped +
+     * 1)th time. The operation is given the head at the start.
+     */
+    private void assertWaitsAt(
+            ReplayTable t,
+            Map<String, String> options,
+            long identifier,
+            IcebergCommitCallback.ReplayPoint point,
+            int skipped,
+            LongConsumer operation)
+            throws Exception {
+        long n = t.latest();
         List<String> events = new ArrayList<>();
         ExecutorService operations = Executors.newSingleThreadExecutor();
         try {
             AtomicReference<Future<?>> waiting = new AtomicReference<>();
-            interruptOnce(
+            interruptAt(
                     t,
                     options,
-                    t.identifier,
+                    identifier,
                     events,
-                    IcebergCommitCallback.ReplayPoint.LOCKED,
+                    point,
                     -1,
+                    skipped,
                     () -> {
                         waiting.set(operations.submit(() -> operation.accept(n)));
                         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
@@ -902,12 +1160,12 @@ public class IcebergGapReplayTest {
                         assertThat(waiting.get().isDone()).isFalse();
                         assertThat(t.latest()).isEqualTo(n);
                     });
+            assertThat(waiting.get()).as("the callback reached " + point).isNotNull();
             waiting.get().get(30, TimeUnit.SECONDS);
         } finally {
             operations.shutdownNow();
         }
-        assertThat(events).contains("LOCKED:" + n);
-        assertThat(readVersionHint(t.enabled)).isEqualTo(n);
+        assertThat(events).contains(point + ":" + n);
     }
 
     /** Runs the replay and, the first time it reaches a point, does something else first. */
@@ -932,7 +1190,21 @@ public class IcebergGapReplayTest {
             long atValue,
             ReplayInterruption interruption)
             throws Exception {
-        AtomicInteger interrupted = new AtomicInteger();
+        interruptAt(t, options, commitIdentifier, events, at, atValue, 0, interruption);
+    }
+
+    /** The same, at the (skipped + 1)th time that the replay reaches the point. */
+    private void interruptAt(
+            ReplayTable t,
+            Map<String, String> options,
+            long commitIdentifier,
+            List<String> events,
+            IcebergCommitCallback.ReplayPoint at,
+            long atValue,
+            int skipped,
+            ReplayInterruption interruption)
+            throws Exception {
+        AtomicInteger reached = new AtomicInteger();
         t.replay(
                 options,
                 commitIdentifier,
@@ -940,7 +1212,7 @@ public class IcebergGapReplayTest {
                 (point, value) -> {
                     if (point == at
                             && (atValue < 0 || value == atValue)
-                            && interrupted.getAndIncrement() == 0) {
+                            && reached.getAndIncrement() == skipped) {
                         interruption.run();
                     }
                 });
@@ -1276,6 +1548,8 @@ public class IcebergGapReplayTest {
         private final String user = UUID.randomUUID().toString();
         private final ReplayLock lock = new ReplayLock();
         private long identifier = 0;
+        /** How many files a cleanup deletes for each hold of the lock, the default when 0. */
+        private int cleanupBatchSize = 0;
 
         private ReplayTable(Map<String, String> options) throws Exception {
             this(Collections.emptyList(), options, LocalFileIO.create(), "mydb");
@@ -1393,6 +1667,9 @@ public class IcebergGapReplayTest {
             IcebergCommitCallback callback =
                     new IcebergCommitCallback(
                             options.isEmpty() ? enabled : enabled.copy(options), user);
+            if (cleanupBatchSize > 0) {
+                callback.setCleanupBatchSize(cleanupBatchSize);
+            }
             callback.setReplayHook(
                     (point, value) -> {
                         events.add(point + ":" + value);

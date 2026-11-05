@@ -84,8 +84,12 @@ it one by one from their delta manifests.
   the version hint and the external catalog entry under that lock, after it checked that the
   Paimon snapshot is still the one the metadata was built from. A rollback of the table takes the
   same lock through any handle of the table, whether Iceberg metadata is on for the handle or not.
-  The history is copied and checked outside the lock. A rollback that the catalog performs itself
-  is not coordinated.
+  The history is copied and checked outside the lock. The cleanup that follows a publication, such
+  as the removal of old metadata files, expired manifest lists and abandoned versions, chooses its
+  files outside the lock and deletes them under it, a batch of files for each hold. It checks again
+  before every batch that the publication still stands, and it is abandoned when a rollback
+  replaced the snapshot in the meantime. The files it leaves are for the cleaning of orphan files.
+  A rollback that the catalog performs itself is not coordinated.
 
 ## Prefixed Properties
 
