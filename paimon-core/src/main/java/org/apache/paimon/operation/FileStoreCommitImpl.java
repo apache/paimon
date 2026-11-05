@@ -30,7 +30,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
-import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
@@ -110,8 +109,8 @@ import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -183,7 +182,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private long lastCommittedSnapshotId = -1L;
     @Nullable private Snapshot.Operation operation;
     @Nullable private IOManager ioManager;
-    private Map<BinaryRow, Long> compactionCheckFromSnapshots = Collections.emptyMap();
 
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
@@ -358,7 +356,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int attempts = 0;
 
         List<CommitMessage> commitMessages = committable.fileCommittables();
-        configureConflictChecksFromMessages(commitMessages);
+        UnaryOperator<CommitChangesProvider> checkCompaction =
+                prepareConflictChecks(commitMessages);
         ManifestEntryChanges changes = collectChanges(commitMessages);
         List<ManifestEntry> committedCompactFiles = changes.compactTableFiles;
         Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
@@ -416,7 +415,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.compactChangelog.isEmpty()
                     || !changes.compactIndexFiles.isEmpty()) {
                 CommitChangesProvider compactProvider =
-                        compactChangesProvider(changes, materializedBuckets, commitMessages);
+                        checkCompaction.apply(
+                                compactChangesProvider(
+                                        changes, materializedBuckets, commitMessages));
                 attempts +=
                         tryCommit(
                                 compactProvider,
@@ -536,7 +537,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int generatedSnapshot = 0;
         int attempts = 0;
 
-        configureConflictChecksFromMessages(committable.fileCommittables());
+        UnaryOperator<CommitChangesProvider> checkCompaction =
+                prepareConflictChecks(committable.fileCommittables());
         ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
         if (!changes.appendChangelog.isEmpty() || !changes.compactChangelog.isEmpty()) {
             StringBuilder warnMessage =
@@ -608,13 +610,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (withCompact) {
                 attempts +=
                         tryCommit(
-                                dataEvolutionChangesProvider(
-                                        new CommitChanges(
-                                                changes.compactTableFiles,
-                                                emptyList(),
-                                                changes.compactIndexFiles),
-                                        CommitKind.COMPACT,
-                                        Collections.emptySet()),
+                                checkCompaction.apply(
+                                        dataEvolutionChangesProvider(
+                                                new CommitChanges(
+                                                        changes.compactTableFiles,
+                                                        emptyList(),
+                                                        changes.compactIndexFiles),
+                                                CommitKind.COMPACT,
+                                                Collections.emptySet())),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -811,52 +814,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return changes;
     }
 
-    private void configureConflictChecksFromMessages(List<CommitMessage> commitMessages) {
+    private UnaryOperator<CommitChangesProvider> prepareConflictChecks(
+            List<CommitMessage> commitMessages) {
         if (dvCompactionChecker != null) {
-            Map<BinaryRow, Long> baseSnapshots = new HashMap<>();
-            for (CommitMessage message : commitMessages) {
-                if (!changesDataOrDeletionVectors(
-                        ((CommitMessageImpl) message).compactIncrement())) {
-                    continue;
-                }
-                Long snapshotId = message.checkFromSnapshot();
-                checkArgument(
-                        snapshotId != null && snapshotId >= 0,
-                        "A primary-key deletion-vector compaction message is missing its "
-                                + "restored snapshot. Reload the partition and recompute compaction.");
-                baseSnapshots.merge(message.partition(), snapshotId, Math::min);
-            }
-            // A committer can be reused for messages from different writers and partitions.
-            compactionCheckFromSnapshots = baseSnapshots;
-        } else if (options.dataEvolutionEnabled()) {
+            return dvCompactionChecker.prepareCheck(commitMessages);
+        }
+        if (options.dataEvolutionEnabled()) {
             configureRowIdCheckFromMessages(commitMessages);
         }
-    }
-
-    private static boolean changesDataOrDeletionVectors(CompactIncrement compact) {
-        if (Stream.concat(compact.newIndexFiles().stream(), compact.deletedIndexFiles().stream())
-                .anyMatch(file -> DELETION_VECTORS_INDEX.equals(file.indexType()))) {
-            return true;
-        }
-        List<DataFileMeta> before = compact.compactBefore();
-        List<DataFileMeta> after = compact.compactAfter();
-        if (before.isEmpty() && after.isEmpty()) {
-            return false;
-        }
-        // File index rewrites replace only index metadata on a single file. Level upgrades
-        // keep the same file name too, but change the data layout and still need validation.
-        return before.size() != 1
-                || after.size() != 1
-                || !before.get(0).fileName().equals(after.get(0).fileName())
-                || !withoutFileIndex(before.get(0)).equals(withoutFileIndex(after.get(0)));
-    }
-
-    private static DataFileMeta withoutFileIndex(DataFileMeta file) {
-        List<String> otherExtraFiles =
-                file.extraFiles().stream()
-                        .filter(name -> !name.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
-                        .collect(Collectors.toList());
-        return file.copy(otherExtraFiles).copy((byte[]) null);
+        return UnaryOperator.identity();
     }
 
     private void configureRowIdCheckFromMessages(List<CommitMessage> commitMessages) {
@@ -1292,10 +1258,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         if (latestSnapshot == null) {
             conflictDetection.checkSameBucketWithinDelta(deltaFiles);
-        }
-
-        if (commitKind == CommitKind.COMPACT && dvCompactionChecker != null) {
-            dvCompactionChecker.check(newSnapshotId, compactionCheckFromSnapshots);
         }
 
         List<BinaryRow> changedPartitions = null;

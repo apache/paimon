@@ -21,13 +21,25 @@ package org.apache.paimon.operation.commit;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Checks primary-key compaction against the restored snapshot of each partition's writers. */
 public class PartitionCompactionChecker {
@@ -46,11 +58,61 @@ public class PartitionCompactionChecker {
         this.scanner = scanner;
     }
 
-    /** Checks each partition from its restored snapshot to the latest published snapshot. */
-    public void check(long newSnapshotId, Map<BinaryRow, Long> baseSnapshots) {
-        if (baseSnapshots.isEmpty()) {
-            return;
+    /** Captures the baselines before APPEND and checks them on every COMPACT attempt. */
+    public UnaryOperator<CommitChangesProvider> prepareCheck(List<CommitMessage> messages) {
+        Map<BinaryRow, Long> baseSnapshots = new HashMap<>();
+        for (CommitMessage message : messages) {
+            if (!changesDataOrDeletionVectors(((CommitMessageImpl) message).compactIncrement())) {
+                continue;
+            }
+            Long snapshotId = message.checkFromSnapshot();
+            checkArgument(
+                    snapshotId != null && snapshotId >= 0,
+                    "A primary-key deletion-vector compaction message is missing its "
+                            + "restored snapshot. Reload the partition and recompute compaction.");
+            baseSnapshots.merge(message.partition(), snapshotId, Math::min);
         }
+        if (baseSnapshots.isEmpty()) {
+            return UnaryOperator.identity();
+        }
+        return provider ->
+                latestSnapshot -> {
+                    long newSnapshotId =
+                            latestSnapshot == null
+                                    ? Snapshot.FIRST_SNAPSHOT_ID
+                                    : latestSnapshot.id() + 1;
+                    check(newSnapshotId, baseSnapshots);
+                    return provider.provide(latestSnapshot);
+                };
+    }
+
+    private static boolean changesDataOrDeletionVectors(CompactIncrement compact) {
+        if (Stream.concat(compact.newIndexFiles().stream(), compact.deletedIndexFiles().stream())
+                .anyMatch(file -> DELETION_VECTORS_INDEX.equals(file.indexType()))) {
+            return true;
+        }
+        List<DataFileMeta> before = compact.compactBefore();
+        List<DataFileMeta> after = compact.compactAfter();
+        if (before.isEmpty() && after.isEmpty()) {
+            return false;
+        }
+        // File index rewrites replace only index metadata on a single file. Level upgrades
+        // keep the same file name too, but change the data layout and still need validation.
+        return before.size() != 1
+                || after.size() != 1
+                || !before.get(0).fileName().equals(after.get(0).fileName())
+                || !withoutFileIndex(before.get(0)).equals(withoutFileIndex(after.get(0)));
+    }
+
+    private static DataFileMeta withoutFileIndex(DataFileMeta file) {
+        List<String> otherExtraFiles =
+                file.extraFiles().stream()
+                        .filter(name -> !name.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
+                        .collect(Collectors.toList());
+        return file.copy(otherExtraFiles).copy((byte[]) null);
+    }
+
+    private void check(long newSnapshotId, Map<BinaryRow, Long> baseSnapshots) {
         Map<BinaryRow, Range> ranges = new HashMap<>();
         for (Map.Entry<BinaryRow, Long> entry : baseSnapshots.entrySet()) {
             long base = entry.getValue();
