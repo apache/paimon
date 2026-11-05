@@ -623,10 +623,13 @@ class _PreFilterQuery(ScanQuery):
                override_num_blocks=None):
         """Return search rows as a Ray Dataset, with BLOB descriptors.
 
-        Search resolves candidates eagerly on one snapshot. Projected row data
-        is fetched lazily by Ray workers on that same snapshot. Retain its files
-        until the Dataset has finished executing.
+        ``execution`` selects where candidate search runs. Projected rows are
+        always fetched lazily by Ray workers on the search snapshot. Retain
+        that snapshot's files until the Dataset has finished executing.
         """
+        if isinstance(self, _RayTextQuery) and not self._table.options.data_evolution_enabled():
+            raise NotImplementedError("Ray Dataset output for text and hybrid search requires a data-evolution table.")
+
         from pypaimon.ray.search_result import read_search_result
         from pypaimon.ray.search_execution import execution_options
 
@@ -947,7 +950,12 @@ class BatchVectorQuery(_PreFilterQuery):
 
     def to_ray(self, *, execution="ray", concurrency=None, ray_remote_args=None,
                override_num_blocks=None):
-        """Return one lazy Ray Dataset per query, with distributed row lookup."""
+        """Return one lazy Ray Dataset per query, with distributed row lookup.
+
+        ``execution`` selects where candidate search runs. The Datasets share
+        that search snapshot and execute their lookups independently when
+        consumed. Retain its files until the Datasets have finished executing.
+        """
         from pypaimon.ray.batch_vector_search import _execute_batch_vector_search
         from pypaimon.ray.search_result import read_search_result
         from pypaimon.ray.search_execution import execution_options

@@ -656,11 +656,50 @@ def test_batch_physical_lookup_preserves_projections(table, ray_cluster, project
     assert all(result.equals(local) for result, local in zip(actual, expected))
 
 
-def test_batch_ray_dataset_output_remains_unsupported(table, ray_cluster):
-    from pypaimon.multimodal.query import BatchVectorQuery
+@pytest.mark.parametrize("execution", ["local", "ray"])
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("where,pre_filter", [("id >= 2", None), ("id = 999", None), (None, "id = 999")])
+def test_ray_dataset_matches_arrow_lookup(table, ray_cluster, execution, batch, where, pre_filter):
+    pytest.importorskip("paimon_vindex")
+    from pypaimon.multimodal.table import MultimodalTable
 
-    with pytest.raises(NotImplementedError, match="data-evolution"):
-        BatchVectorQuery(table, QUERIES, "embedding").to_ray(execution="local")
+    view = MultimodalTable(None, table.identifier.get_full_name(), table)
+    query = (view.search_vectors(QUERIES, pre_filter=pre_filter) if batch else
+             view.search(QUERIES[0], pre_filter=pre_filter))
+    # The filter column is deliberately absent from the requested projection.
+    query = query.select(["embedding"]).where(where).limit(3)
+    expected = query.to_arrow()
+    actual = query.to_ray(execution=execution, concurrency=2, override_num_blocks=2)
+    datasets, tables = (actual, expected) if batch else ([actual], [expected])
+    assert len(datasets) == len(tables)
+    for dataset, rows in zip(datasets, tables):
+        assert sorted(row["embedding"] for row in dataset.take_all()) == sorted(
+            rows.column("embedding").to_pylist())
+        assert dataset.schema().names == ["embedding"]
+
+
+def test_ray_dataset_defers_pk_lookup_to_workers(table, ray_cluster, tmp_path):
+    pytest.importorskip("paimon_vindex")
+    from pypaimon.filesystem.local_file_io import LocalFileIO
+
+    marker = tmp_path / "lookup-pids"
+
+    class ReportingFileIO(LocalFileIO):
+        def to_filesystem_path(self, path):
+            if path.endswith(".parquet"):
+                with marker.open("a") as output:
+                    output.write(f"{os.getpid()}\n")
+            return super().to_filesystem_path(path)
+
+    query = VectorQuery(table, QUERIES[0], "embedding").select(["id"]).limit(3)
+    expected = query.to_list()
+    with patch.object(table, "file_io", ReportingFileIO()):
+        dataset = query.to_ray(execution="local", override_num_blocks=2)
+        assert not marker.exists()
+        assert sorted(row["id"] for row in dataset.take_all()) == sorted(row["id"] for row in expected)
+    worker_pids = {int(pid) for pid in marker.read_text().splitlines()}
+    assert worker_pids
+    assert os.getpid() not in worker_pids
 
 
 def test_batch_split_only_read_requires_captured_snapshot(table):
