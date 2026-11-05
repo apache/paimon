@@ -256,6 +256,12 @@ class ModelTest(unittest.TestCase):
         catalog.drop_model(identifier, ignore_if_not_exists=True)
         api.drop_model.assert_called_once_with(identifier)
 
+        api.drop_model.side_effect = NoSuchResourceException(
+            "DATABASE", "quality", "not found"
+        )
+        with self.assertRaises(DatabaseNotExistException):
+            catalog.drop_model(identifier, ignore_if_not_exists=True)
+
 
 if __name__ == "__main__":
     unittest.main()
