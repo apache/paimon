@@ -95,8 +95,10 @@ class CsvSkipEmptyLinesTableTest extends TableTestBase {
         assertThatThrownBy(
                         () ->
                                 table.copy(
-                                        Collections.singletonMap(
-                                                CsvOptions.SKIP_EMPTY_LINES.key(), "true")))
+                                                Collections.singletonMap(
+                                                        CsvOptions.SKIP_EMPTY_LINES.key(), "true"))
+                                        .newReadBuilder()
+                                        .newScan())
                 .satisfies(anyCauseMatches(IllegalArgumentException.class, ERROR));
 
         // Without the option, the scan and the row count in the metadata agree.
