@@ -253,11 +253,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     @Override
-    protected boolean requiresCompactionBaseline() {
-        return options.deletionVectorsEnabled() && !options.writeOnly();
-    }
-
-    @Override
     protected Function<WriterContainer<KeyValue>, Boolean> createWriterCleanChecker() {
         return createConflictAwareWriterCleanChecker(commitUser, restore);
     }

@@ -252,7 +252,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
 
         List<CommitMessage> result = new ArrayList<>();
-        boolean requiresCompactionBaseline = requiresCompactionBaseline();
+        // Data Evolution uses the operation's read snapshot for explicit row-id checks.
+        boolean dataEvolution = options.dataEvolutionEnabled();
 
         Iterator<Map.Entry<BinaryRow, Map<Integer, WriterContainer<T>>>> partIter =
                 writers.entrySet().iterator();
@@ -291,7 +292,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 writerContainer.totalBuckets,
                                 newFilesIncrement,
                                 compactIncrement,
-                                requiresCompactionBaseline ? writerContainer.baseSnapshotId : null);
+                                dataEvolution ? null : writerContainer.baseSnapshotId);
                 result.add(committable);
 
                 if (committable.isEmpty()) {
@@ -337,10 +338,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     //
     // For writers with no conflicts, `commitUser` might be some random value.
     protected abstract Function<WriterContainer<T>, Boolean> createWriterCleanChecker();
-
-    protected boolean requiresCompactionBaseline() {
-        return false;
-    }
 
     protected static <T>
             Function<WriterContainer<T>, Boolean> createConflictAwareWriterCleanChecker(
@@ -607,7 +604,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         // An overwrite starts with empty files, but only commits after writer creation can
         // conflict with that new state.
         Snapshot baseSnapshot =
-                actualIgnorePreviousFiles && requiresCompactionBaseline()
+                actualIgnorePreviousFiles && dvMaintainerFactory != null && !options.writeOnly()
                         ? latestSnapshot
                         : restored.snapshot();
         return new WriterContainer<>(

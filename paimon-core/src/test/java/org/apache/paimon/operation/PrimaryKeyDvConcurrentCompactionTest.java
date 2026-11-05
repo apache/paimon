@@ -583,17 +583,38 @@ class PrimaryKeyDvConcurrentCompactionTest {
         assertConflict(newCommit("second"), roundTrip);
     }
 
+    @Test
+    void testWriteOnlyCommitAcceptsDifferentWriterBaselines() throws Exception {
+        seed(1, 0);
+        KeyValueFileStore writeOnlyStore = writeOnlyStore();
+        String user = "write-only";
+        AbstractFileStoreWrite<KeyValue> write = newWrite(user, writeOnlyStore);
+        long firstSnapshot = store.snapshotManager().latestSnapshotId();
+        write.write(BinaryRow.singleColumn(1), 0, kv(1, 1, "new"));
+
+        seed(2, 0);
+        long secondSnapshot = store.snapshotManager().latestSnapshotId();
+        write.write(BinaryRow.singleColumn(2), 0, kv(2, 1, "new"));
+
+        List<CommitMessage> messages = write.prepareCommit(true, 0);
+        assertThat(messages)
+                .extracting(CommitMessage::checkFromSnapshot)
+                .containsExactlyInAnyOrder(firstSnapshot, secondSnapshot);
+        try (FileStoreCommitImpl commit = writeOnlyStore.newCommit(user, null)) {
+            commit(commit, 0, messages);
+        }
+        Snapshot snapshot = store.snapshotManager().latestSnapshot();
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+        assertThat(snapshot.deltaRecordCount()).isEqualTo(2L);
+    }
+
     private void seed(int partition, int bucket) throws Exception {
         seed(partition, bucket, 3);
     }
 
     private void seed(int partition, int bucket, int level) throws Exception {
-        KeyValueFileStore seedStore =
-                ((PrimaryKeyFileStoreTable)
-                                table.copy(Collections.singletonMap("write-only", "true")))
-                        .store();
         String user = "seed-" + partition + "-" + bucket;
-        AbstractFileStoreWrite<KeyValue> write = seedStore.newWrite(user);
+        AbstractFileStoreWrite<KeyValue> write = writeOnlyStore().newWrite(user);
         write.withIOManager(ioManager);
         resources.add(0, write::close);
         for (int i = 1; i <= 1000; i++) {
@@ -616,6 +637,12 @@ class PrimaryKeyDvConcurrentCompactionTest {
                         2,
                         new DataIncrement(files, Collections.emptyList(), Collections.emptyList()),
                         CompactIncrement.emptyIncrement()));
+    }
+
+    private KeyValueFileStore writeOnlyStore() {
+        return ((PrimaryKeyFileStoreTable)
+                        table.copy(Collections.singletonMap("write-only", "true")))
+                .store();
     }
 
     private AbstractFileStoreWrite<KeyValue> newWrite(String user) {

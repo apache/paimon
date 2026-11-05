@@ -828,9 +828,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
             // A committer can be reused for messages from different writers and partitions.
             compactionCheckFromSnapshots = baseSnapshots;
-            return;
+        } else if (options.dataEvolutionEnabled()) {
+            configureRowIdCheckFromMessages(commitMessages);
         }
-        configureRowIdCheckFromMessages(commitMessages);
     }
 
     private static boolean changesDataOrDeletionVectors(CompactIncrement compact) {
