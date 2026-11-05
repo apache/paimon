@@ -444,7 +444,7 @@ Lookup metrics are available for local partial lookup. They are reported at look
         <tr>
             <td>compactionThreadBusy</td>
             <td>Gauge</td>
-            <td>The maximum business of compaction threads in this task. Currently, there is only one compaction thread in each parallelism, so value of business ranges from 0 (idle) to 100 (compaction running all the time).</td>
+            <td>The maximum busyness of compaction threads in this task, ranging from 0 (idle) to 100 when a single compaction thread is busy all the time. When <code>compaction.task-threads</code> is greater than 1 or set to <code>-1</code> (per-bucket executors), multiple workers may be busy concurrently, so this value can exceed 100.</td>
         </tr>
         <tr>
             <td>avgCompactionTime</td>
