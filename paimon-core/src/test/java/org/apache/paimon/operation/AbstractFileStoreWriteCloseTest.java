@@ -183,7 +183,7 @@ public class AbstractFileStoreWriteCloseTest {
         bucketWriters.put(
                 0,
                 new AbstractFileStoreWrite.WriterContainer<>(
-                        failingWriter, 1, null, null, null, null));
+                        failingWriter, 1, null, null, null, null, null));
         write.writers().put(partition(0), bucketWriters);
 
         AtomicBoolean factoryClosed = new AtomicBoolean();
@@ -214,7 +214,7 @@ public class AbstractFileStoreWriteCloseTest {
             bucketWriters.put(
                     i,
                     new AbstractFileStoreWrite.WriterContainer<>(
-                            writers[i], 1, null, null, null, null));
+                            writers[i], 1, null, null, null, null, null));
         }
         write.writers().put(partition(0), bucketWriters);
     }

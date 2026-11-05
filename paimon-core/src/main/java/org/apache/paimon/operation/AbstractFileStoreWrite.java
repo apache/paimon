@@ -289,7 +289,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 bucket,
                                 writerContainer.totalBuckets,
                                 newFilesIncrement,
-                                compactIncrement);
+                                compactIncrement,
+                                writerContainer.compactionCheckFromSnapshot);
                 result.add(committable);
 
                 if (committable.isEmpty()) {
@@ -335,6 +336,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     //
     // For writers with no conflicts, `commitUser` might be some random value.
     protected abstract Function<WriterContainer<T>, Boolean> createWriterCleanChecker();
+
+    @Nullable
+    protected Long compactionCheckFromSnapshot(@Nullable Snapshot snapshot) {
+        return null;
+    }
 
     protected static <T>
             Function<WriterContainer<T>, Boolean> createConflictAwareWriterCleanChecker(
@@ -434,6 +440,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 bucket,
                                 writerContainer.totalBuckets,
                                 writerContainer.baseSnapshotId,
+                                writerContainer.compactionCheckFromSnapshot,
                                 writerContainer.lastModifiedCommitIdentifier,
                                 dataFiles,
                                 writerContainer.writer.maxSequenceNumber(),
@@ -476,7 +483,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             state.indexMaintainer,
                             state.deletionVectorsMaintainer,
                             state.primaryKeyIndexMaintainer,
-                            state.baseSnapshotId);
+                            state.baseSnapshotId,
+                            state.compactionCheckFromSnapshot);
             writerContainer.lastModifiedCommitIdentifier = state.lastModifiedCommitIdentifier;
             writers.computeIfAbsent(state.partition, k -> new HashMap<>())
                     .put(state.bucket, writerContainer);
@@ -599,13 +607,17 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         notifyNewWriter(writer);
 
         Snapshot previousSnapshot = restored.snapshot();
+        // An overwrite starts with empty files, but only commits after writer creation can
+        // conflict with that new state. Keep the file restore baseline for notifications.
+        Snapshot compactionSnapshot = actualIgnorePreviousFiles ? latestSnapshot : previousSnapshot;
         return new WriterContainer<>(
                 writer,
                 firstNonNull(restored.totalBuckets(), expectedTotalBuckets),
                 indexMaintainer,
                 dvMaintainer,
                 primaryKeyIndexMaintainer,
-                previousSnapshot == null ? null : previousSnapshot.id());
+                previousSnapshot == null ? null : previousSnapshot.id(),
+                compactionCheckFromSnapshot(compactionSnapshot));
     }
 
     private long writerNumber() {
@@ -757,6 +769,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         @Nullable public final BucketedDvMaintainer deletionVectorsMaintainer;
         @Nullable public final BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer;
         protected final long baseSnapshotId;
+        @Nullable private final Long compactionCheckFromSnapshot;
         protected long lastModifiedCommitIdentifier;
 
         protected WriterContainer(
@@ -765,7 +778,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 @Nullable DynamicBucketIndexMaintainer dynamicBucketMaintainer,
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
                 @Nullable BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer,
-                Long baseSnapshotId) {
+                @Nullable Long baseSnapshotId,
+                @Nullable Long compactionCheckFromSnapshot) {
             this.writer = writer;
             this.totalBuckets = totalBuckets;
             this.dynamicBucketMaintainer = dynamicBucketMaintainer;
@@ -773,6 +787,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             this.primaryKeyIndexMaintainer = primaryKeyIndexMaintainer;
             this.baseSnapshotId =
                     baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;
+            this.compactionCheckFromSnapshot = compactionCheckFromSnapshot;
             this.lastModifiedCommitIdentifier = Long.MIN_VALUE;
         }
     }

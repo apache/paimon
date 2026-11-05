@@ -84,6 +84,11 @@ File validation also checks other table invariants. For example, primary-key tab
 standard LSM layout reject overlapping key ranges within the same partition, bucket, and level
 above level 0. Retrying an unchanged snapshot ID alone cannot fix incompatible file changes.
 
+Primary-key tables with deletion vectors and `write-only = false` also reject compaction based
+on a stale partition state after another writer's `COMPACT` or `OVERWRITE`, including changes
+to a different bucket in the same partition. See
+[Concurrent compaction](../primary-key-table/compaction#concurrent-compaction).
+
 In a streaming job, a failed commit can trigger recovery and a restart. Repeated conflicts can
 therefore cause repeated restarts even though the commit validation protects the table state.
 
