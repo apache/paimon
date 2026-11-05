@@ -185,9 +185,30 @@ class FileStoreCommit:
             self,
             commit_messages: List[CommitMessage],
             commit_identifier: int,
-            snapshot_properties: Optional[Dict[str, str]] = None):
-        """Commit the given commit messages in normal append mode."""
-        ignore_empty_commit = self.table.options.snapshot_ignore_empty_commit()
+            snapshot_properties: Optional[Dict[str, str]] = None,
+            recovery_snapshot_id: Optional[int] = None,
+            recovery_snapshot_uuid: Optional[str] = None):
+        """Commit prepared data, optionally recovering an identified append batch.
+
+        Persist the recovery snapshot ID/UUID before the first attempt and reuse
+        them, the commit identity and properties on every replay. Recovery needs
+        retained, uninterrupted snapshot history and a conditional SnapshotCommit.
+        """
+        if recovery_snapshot_id is not None:
+            if (isinstance(recovery_snapshot_id, bool)
+                    or not isinstance(recovery_snapshot_id, int)
+                    or recovery_snapshot_id < 0):
+                raise ValueError("Recovery snapshot ID must be a nonnegative integer.")
+            if ((recovery_snapshot_id > 0 and not recovery_snapshot_uuid)
+                    or (recovery_snapshot_id == 0 and recovery_snapshot_uuid is not None)):
+                raise ValueError("Recovery snapshot UUID must identify the nonempty base.")
+            if not isinstance(snapshot_properties, dict) or not snapshot_properties:
+                raise ValueError("Recovery requires nonempty snapshot properties.")
+        elif recovery_snapshot_uuid is not None:
+            raise ValueError("Recovery snapshot UUID requires a snapshot ID.")
+        # An empty recovered batch still needs a durable publication receipt.
+        ignore_empty_commit = (self.table.options.snapshot_ignore_empty_commit()
+                               and recovery_snapshot_id is None)
         if not commit_messages and ignore_empty_commit:
             return
 
@@ -243,6 +264,8 @@ class FileStoreCommit:
             # Detect concurrent bucket-count changes in postpone APPENDs.
             detect_conflicts = True
 
+        if recovery_snapshot_id is not None and commit_kind != "APPEND":
+            raise ValueError("Recovery commits are append-only.")
         self._try_commit(commit_kind=commit_kind,
                          commit_identifier=commit_identifier,
                          commit_entries_plan=lambda snapshot: commit_entries,
@@ -251,7 +274,9 @@ class FileStoreCommit:
                          index_deletes=index_deletes,
                          index_adds=index_adds,
                          snapshot_properties=snapshot_properties,
-                         allow_empty_commit=not ignore_empty_commit)
+                         allow_empty_commit=not ignore_empty_commit,
+                         recovery_snapshot_id=recovery_snapshot_id,
+                         recovery_snapshot_uuid=recovery_snapshot_uuid)
 
     def overwrite(
             self,
@@ -344,7 +369,8 @@ class FileStoreCommit:
                     detect_conflicts=False, index_deletes=None,
                     index_adds=None, changelog_entries=None,
                     snapshot_properties: Optional[Dict[str, str]] = None,
-                    allow_empty_commit=False):
+                    allow_empty_commit=False,
+                    recovery_snapshot_id=None, recovery_snapshot_uuid=None):
 
         retry_count = 0
         retry_result = None
@@ -354,6 +380,13 @@ class FileStoreCommit:
         start_time_ms = int(time.time() * 1000)
         while True:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+            if recovery_snapshot_id is not None:
+                recovered = self._find_recovered_commit(
+                    latest_snapshot, recovery_snapshot_id, recovery_snapshot_uuid,
+                    commit_identifier, commit_kind, snapshot_properties)
+                if recovered is not None:
+                    self._notify_recovered_commit(recovered, commit_identifier)
+                    break
             if retry_result is not None and self._is_duplicate_commit(
                     retry_result,
                     latest_snapshot,
@@ -374,6 +407,11 @@ class FileStoreCommit:
                 commit_entries = changes
                 attempt_index_adds = index_adds
                 attempt_index_deletes = index_deletes
+            if recovery_snapshot_id is not None:
+                # Check only unpublished batches: original files may have been
+                # compacted away after an already committed batch lost its ack.
+                self._validate_recovery_data_files(commit_entries)
+                self._validate_recovery_data_files(changelog_entries or [])
 
             # Callers opt in when the operation records an empty snapshot.
             if (not allow_empty_commit and not commit_entries and not changelog_entries
@@ -748,6 +786,59 @@ class FileStoreCommit:
         return self.manifest_file_manager.rolling_write(
             commit_entries, self.manifest_target_size, base_name)
 
+    def _validate_recovery_data_files(self, entries):
+        for entry in entries:
+            file = entry.file
+            path = file.physical_path() or canonical_data_file_path(
+                self.table, tuple(entry.partition.values), entry.bucket, file.file_name)
+            if not self.table.file_io.exists(path):
+                raise FileNotFoundError(f"Prepared data file is missing: {path}")
+            actual_size = self.table.file_io.get_file_size(path)
+            if actual_size != file.file_size:
+                raise RuntimeError(
+                    f"Prepared data file size changed: {path}; "
+                    f"expected {file.file_size}, found {actual_size}")
+            for name in file.extra_files:
+                sidecar = file.aligned_file_path(name, path.rsplit('/', 1)[0])
+                if not self.table.file_io.exists(sidecar):
+                    raise FileNotFoundError(f"Prepared data sidecar is missing: {sidecar}")
+
+    def _find_recovered_commit(
+            self, latest_snapshot, base_id, base_uuid, identifier, kind, properties):
+        latest_id = latest_snapshot.id if latest_snapshot is not None else 0
+        if latest_id < base_id:
+            raise RuntimeError("Cannot recover commit: base snapshot is newer than table history.")
+        if base_id:
+            base = self.snapshot_manager.get_snapshot_by_id(base_id)
+            if base is None or base.uuid != base_uuid:
+                raise RuntimeError("Cannot recover commit: base snapshot is missing or changed.")
+        for snapshot_id in range(base_id + 1, latest_id + 1):
+            snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                raise RuntimeError(
+                    "Cannot recover commit: snapshot {} cannot be found."
+                    .format(snapshot_id))
+            if (snapshot.commit_user == self.commit_user
+                    and snapshot.commit_identifier == identifier
+                    and snapshot.commit_kind == kind):
+                if snapshot.properties != properties:
+                    raise RuntimeError("Recovery commit identity has different properties.")
+                return snapshot
+        return None
+
+    def _notify_recovered_commit(self, snapshot, identifier):
+        if not self.commit_callbacks:
+            return
+        entries = []
+        for manifest in self.manifest_list_manager.read_delta(snapshot):
+            entries.extend(self.manifest_file_manager.read(
+                manifest.file_name, drop_stats=False, file_size=manifest.file_size))
+        for entry in entries:
+            file = entry.file
+            file.file_path = file.physical_path() if file.external_path else canonical_data_file_path(
+                self.table, tuple(entry.partition.values), entry.bucket, file.file_name)
+        self._notify_commit_callbacks(snapshot, entries, identifier)
+
     def _is_duplicate_commit(
             self,
             retry_result,
@@ -780,19 +871,8 @@ class FileStoreCommit:
                         f"Commit already completed (snapshot {snapshot_id}), "
                         f"user: {self.commit_user}, identifier: {commit_identifier}"
                     )
-                    if notify_callbacks and self.commit_callbacks:
-                        entries = []
-                        for manifest in self.manifest_list_manager.read_delta(
-                                snapshot):
-                            entries.extend(self.manifest_file_manager.read(
-                                manifest.file_name, drop_stats=False,
-                                file_size=manifest.file_size))
-                        for entry in entries:
-                            file = entry.file
-                            file.file_path = file.physical_path() if file.external_path else canonical_data_file_path(
-                                self.table, tuple(entry.partition.values), entry.bucket, file.file_name)
-                        self._notify_commit_callbacks(
-                            snapshot, entries, commit_identifier)
+                    if notify_callbacks:
+                        self._notify_recovered_commit(snapshot, commit_identifier)
                     return True
         return False
 

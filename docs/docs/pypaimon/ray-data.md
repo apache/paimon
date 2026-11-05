@@ -45,6 +45,7 @@ backend, see [Running Daft on Ray](./daft#running-daft-on-ray).
 | --- | --- |
 | Read a table into a Dataset | [Read](#read) |
 | Write a Dataset and publish its results | [Write](#write) |
+| Process fixed episode groups and resume from external checkpoints | [Recoverable episode writes](./recoverable-writes) |
 | Match rows across tables | [Joins and merge](./ray-joins) |
 | Fetch selected payloads or backfill features | [Row IDs and backfills](./ray-row-ids) |
 
