@@ -98,6 +98,13 @@ public class FileStoreTableFactory {
                         fileIO, tablePath, tableSchema, dynamicOptions, catalogEnvironment);
 
         Options options = new Options(table.options());
+        Options branchReadOptions = new Options(dynamicOptions.toMap());
+        // Reuse the resolved selector, including persisted options and numeric scan.version.
+        if (options.contains(CoreOptions.SCAN_SNAPSHOT_ID)) {
+            branchReadOptions.set(
+                    CoreOptions.SCAN_SNAPSHOT_ID, options.get(CoreOptions.SCAN_SNAPSHOT_ID));
+            branchReadOptions.set(CoreOptions.SCAN_VERSION.key(), null);
+        }
         String fallbackBranch = options.get(CoreOptions.SCAN_FALLBACK_BRANCH);
         String primaryBranch = options.get(CoreOptions.SCAN_PRIMARY_BRANCH);
         if (ChainTableUtils.isChainTable(options.toMap())) {
@@ -108,7 +115,7 @@ public class FileStoreTableFactory {
             if (otherTable != null) {
                 table =
                         new FallbackReadFileStoreTable(table, otherTable, true)
-                                .copy(dynamicOptions.toMap());
+                                .copy(branchReadOptions.toMap());
             } else {
                 LOG.error("Fallback branch {} not found for table {}", fallbackBranch, tablePath);
             }
@@ -118,7 +125,7 @@ public class FileStoreTableFactory {
             if (otherTable != null) {
                 table =
                         new FallbackReadFileStoreTable(table, otherTable, false)
-                                .copy(dynamicOptions.toMap());
+                                .copy(branchReadOptions.toMap());
             } else {
                 LOG.error("Primary branch {} not found for table {}", primaryBranch, tablePath);
             }

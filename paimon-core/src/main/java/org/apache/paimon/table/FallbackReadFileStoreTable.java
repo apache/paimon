@@ -273,14 +273,18 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
     }
 
     public DataTableScan newFallbackScan(Function<FileStoreTable, DataTableScan> scanCreator) {
-        validateSchema();
+        boolean otherIsEmpty =
+                !coreOptions().isChainTable()
+                        && Objects.equals(
+                                other.coreOptions().scanSnapshotId(), EMPTY_BRANCH_SNAPSHOT_ID);
+        if (!otherIsEmpty) {
+            validateSchema();
+        }
         FileStoreTable first = wrappedFirst ? wrapped : other;
         FileStoreTable second = wrappedFirst ? other : wrapped;
         if (coreOptions().isChainTable()) {
             return new FallbackReadScan(first, second, wrapped.schema(), scanCreator);
         }
-        boolean otherIsEmpty =
-                Objects.equals(other.coreOptions().scanSnapshotId(), EMPTY_BRANCH_SNAPSHOT_ID);
         if (otherIsEmpty) {
             LOG.warn(
                     "Skipping branch '{}' because it was empty when resolving this read of branch '{}'.",
