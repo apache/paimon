@@ -23,6 +23,7 @@ from typing import Dict, List, Optional
 import pyarrow
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.execution.python.format_table_json import JsonWriter
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.format.format_commit_message import (
     FormatTableCommitMessage,
@@ -114,6 +115,8 @@ class PythonFormatTableWrite:
         self._partition_only_value = opt.lower() == "true"
         self._file_format = table.format()
         options = CoreOptions.from_dict(table.options())
+        # As for the other formats, the files keep the partition columns, which the path cannot always hold.
+        self._text_writer = JsonWriter(table.fields, table.options()) if self._file_format == Format.JSON else None
         self._parquet_writer_options = (
             create_parquet_writer_options(options)
             if self._file_format == Format.PARQUET else {}
@@ -236,15 +239,7 @@ class PythonFormatTableWrite:
             csv.write_csv(tbl, buf)
             raw = buf.getvalue()
         elif fmt == Format.JSON:
-            import json
-            lines = []
-            for i in range(tbl.num_rows):
-                row = {
-                    tbl.column_names[j]: tbl.column(j)[i].as_py()
-                    for j in range(tbl.num_columns)
-                }
-                lines.append(json.dumps(row) + "\n")
-            raw = "".join(lines).encode("utf-8")
+            raw = self._text_writer.write(tbl)
         elif fmt == Format.ORC:
             import pyarrow.orc as orc
             buf = io.BytesIO()

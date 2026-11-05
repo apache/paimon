@@ -15,11 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from datetime import date, timezone
+from calendar import timegm
+from datetime import date, timedelta
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from pypaimon.utils.numeric_utils import java_floating_string
 from pypaimon.utils.row_to_string import cast_value_to_string, _format_timestamp, _is_unsupported
+from pypaimon.utils.temporal_utils import _local_offset
 from pypaimon.utils.path import resolve_path, to_file_io_path
 from pypaimon.schema.data_types import DataType
 from pypaimon.table.bucket_mode import BucketMode
@@ -64,6 +66,49 @@ def _escape_partition_component(value: str) -> str:
     return ''.join('%{:02X}'.format(ord(char))
                    if ord(char) < 32 or ord(char) == 127 or char in escape_chars else char
                    for char in value)
+
+
+def _format_partition_value(value, data_type, legacy, default_part_value):
+    type_name = str(data_type).split('(', 1)[0].split()[0]
+    if value is not None and type_name in ('BINARY', 'VARBINARY', 'BYTES'):
+        value = _decode_java_utf8(value)
+    if value is not None and _is_ltz_type(str(data_type).upper()):
+        # Legacy Timestamp.toString() uses UTC fields. Java's non-legacy
+        # cast uses TimeZone.getDefault(); neither includes an offset.
+        value = _normalize_ltz(value)
+        if not legacy:
+            value += timedelta(seconds=_local_offset(timegm(value.timetuple())))
+    if _is_null_or_whitespace_only(value):
+        text = default_part_value
+    elif type_name in ('FLOAT', 'REAL', 'DOUBLE'):
+        text = java_floating_string(value, type_name != 'DOUBLE')
+    elif legacy and type_name == 'DATE':
+        text = str((value - date(1970, 1, 1)).days)
+    elif legacy and type_name.startswith('TIMESTAMP'):
+        text = value.isoformat(timespec='minutes')
+        nanos = getattr(value, 'nanosecond', 0)
+        if nanos:
+            text = '{}.{:09d}'.format(
+                value.isoformat(timespec='seconds'), value.microsecond * 1000 + nanos)
+        elif value.second or value.microsecond:
+            text = value.isoformat(timespec='microseconds' if value.microsecond else 'seconds')
+            if value.microsecond and value.microsecond % 1000 == 0:
+                text = text[:-3]
+    elif type_name.startswith('TIMESTAMP'):
+        precision, _ = _parse_type_precision_scale(data_type)
+        text = _format_timestamp(value, precision)
+    elif legacy and type_name.startswith('TIME'):
+        text = str(((value.hour * 60 + value.minute) * 60 + value.second) * 1000
+                   + value.microsecond // 1000)
+    elif type_name in ('BINARY', 'VARBINARY', 'BYTES'):
+        # Java uses the binary-to-string cast even in legacy mode:
+        # byte[].toString contains a fresh allocation identity.
+        text = value
+    elif data_type is not None and not _is_unsupported(data_type):
+        text = cast_value_to_string(value, data_type)
+    else:
+        text = str(value).lower() if isinstance(value, bool) else str(value)
+    return text
 
 
 def canonical_data_file_path(table, partition, bucket, file_name):
@@ -161,50 +206,10 @@ class FileStorePathFactory:
         return self._relative_bucket_path(partition, bucket, canonical_partition)
 
     def _canonical_partition(self, partition: Tuple) -> Tuple[str, ...]:
-        values = []
-        for i, value in enumerate(partition):
-            data_type = self.partition_types[i] if self.partition_types is not None else None
-            type_name = str(data_type).split('(', 1)[0].split()[0]
-            if value is not None and type_name in ('BINARY', 'VARBINARY', 'BYTES'):
-                value = _decode_java_utf8(value)
-            if value is not None and _is_ltz_type(str(data_type).upper()):
-                # Legacy Timestamp.toString() uses UTC fields. Java's non-legacy
-                # cast uses TimeZone.getDefault(); neither includes an offset.
-                value = _normalize_ltz(value)
-                if not self.legacy_partition_name:
-                    value = value.replace(tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
-            if _is_null_or_whitespace_only(value):
-                text = self.default_part_value
-            elif type_name in ('FLOAT', 'REAL', 'DOUBLE'):
-                text = java_floating_string(value, type_name != 'DOUBLE')
-            elif self.legacy_partition_name and type_name == 'DATE':
-                text = str((value - date(1970, 1, 1)).days)
-            elif self.legacy_partition_name and type_name.startswith('TIMESTAMP'):
-                text = value.isoformat(timespec='minutes')
-                nanos = getattr(value, 'nanosecond', 0)
-                if nanos:
-                    text = '{}.{:09d}'.format(
-                        value.isoformat(timespec='seconds'), value.microsecond * 1000 + nanos)
-                elif value.second or value.microsecond:
-                    text = value.isoformat(timespec='microseconds' if value.microsecond else 'seconds')
-                    if value.microsecond and value.microsecond % 1000 == 0:
-                        text = text[:-3]
-            elif type_name.startswith('TIMESTAMP'):
-                precision, _ = _parse_type_precision_scale(data_type)
-                text = _format_timestamp(value, precision)
-            elif self.legacy_partition_name and type_name.startswith('TIME'):
-                text = str(((value.hour * 60 + value.minute) * 60 + value.second) * 1000
-                           + value.microsecond // 1000)
-            elif type_name in ('BINARY', 'VARBINARY', 'BYTES'):
-                # Java uses the binary-to-string cast even in legacy mode:
-                # byte[].toString contains a fresh allocation identity.
-                text = value
-            elif data_type is not None and not _is_unsupported(data_type):
-                text = cast_value_to_string(value, data_type)
-            else:
-                text = str(value).lower() if isinstance(value, bool) else str(value)
-            values.append(text)
-        return tuple(values)
+        return tuple(_format_partition_value(
+            value, self.partition_types[i] if self.partition_types is not None else None,
+            self.legacy_partition_name, self.default_part_value)
+            for i, value in enumerate(partition))
 
     def _relative_bucket_path(self, partition: Tuple, bucket: int, canonical_partition: bool) -> str:
         bucket_name = str(bucket)
