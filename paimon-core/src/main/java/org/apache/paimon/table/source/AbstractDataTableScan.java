@@ -301,6 +301,13 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
+    @Override
+    public final Optional<Set<String>> queryAuthMaskedColumns() {
+        TableQueryAuthResult result = authQuery();
+        return Optional.of(
+                result == null ? Collections.emptySet() : result.extractColumnMasking().keySet());
+    }
+
     @Nullable
     protected TableQueryAuthResult authQuery() {
         if (!options.queryAuthEnabled()) {

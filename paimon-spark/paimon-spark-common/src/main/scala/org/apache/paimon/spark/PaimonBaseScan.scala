@@ -27,8 +27,8 @@ import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonStatistics, PaimonSupportsRuntimeFiltering, SparkHybridSearchBuilderImpl, SparkVectorSearchBuilderImpl}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
-import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.{FullTextSearchBuilder, InnerTableScan, Split, VectorSearchBuilder}
+import org.apache.paimon.table.{DataTable, FallbackReadFileStoreTable, FileStoreTable, InnerTable}
+import org.apache.paimon.table.source.{DataTableScan, FullTextSearchBuilder, InnerTableScan, Split, VectorSearchBuilder}
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
@@ -50,6 +50,9 @@ abstract class PaimonBaseScan(table: InnerTable)
   private[spark] lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
   @transient private lazy val postponeMergeOnRead = new PostponeMergeOnRead(this)
+
+  @transient private lazy val queryAuthMaskedColumns =
+    readBuilder.newScan().asInstanceOf[DataTableScan].queryAuthMaskedColumns()
 
   protected def getInputSplits: Array[Split] = {
     val baseScan = readBuilder.newScan().asInstanceOf[InnerTableScan]
@@ -89,7 +92,25 @@ abstract class PaimonBaseScan(table: InnerTable)
   }
 
   override def filterAttributes(): Array[NamedReference] = {
-    if (postponeMergeOnRead.enabled) Array.empty else super.filterAttributes()
+    if (postponeMergeOnRead.enabled) {
+      return Array.empty
+    }
+
+    val candidates = super.filterAttributes()
+    table match {
+      // A fallback or chain scan can have different masks on each branch.
+      case _: FallbackReadFileStoreTable => candidates
+      case _: FileStoreTable if coreOptions.queryAuthEnabled() && candidates.nonEmpty =>
+        // Spark can ask during logical optimization, before a SQL execution starts.
+        val masks = queryAuthMaskedColumns
+        if (masks.isPresent) {
+          val maskedColumns = masks.get()
+          candidates.filterNot(field => maskedColumns.contains(field.fieldNames().head))
+        } else {
+          Array.empty
+        }
+      case _ => candidates
+    }
   }
 
   private def evalHybridSearch(): SearchResult = {
