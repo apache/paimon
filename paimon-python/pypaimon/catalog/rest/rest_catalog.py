@@ -676,9 +676,11 @@ class RESTCatalog(Catalog):
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_DATABASE:
                 raise DatabaseNotExistException(identifier.get_database_name()) from e
-            if ignore_if_not_exists:
-                return
-            raise ModelNotExistException(identifier) from e
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_MODEL:
+                if ignore_if_not_exists:
+                    return
+                raise ModelNotExistException(identifier) from e
+            raise
         except NotImplementedException as e:
             raise NotImplementedError("REST Catalog does not support models") from e
 

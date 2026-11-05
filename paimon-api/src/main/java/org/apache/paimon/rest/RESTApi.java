@@ -1785,6 +1785,9 @@ public class RESTApi {
     /** Create model metadata and return its persisted representation. */
     public GetModelResponse createModel(Identifier identifier, CreateModelRequest request) {
         checkArgument(
+                !".".equals(request.getName()) && !"..".equals(request.getName()),
+                "Model name must not be a dot segment");
+        checkArgument(
                 identifier.getObjectName().equals(request.getName()),
                 "Model request name must match the identifier");
         return client.post(
@@ -2071,7 +2074,7 @@ public class RESTApi {
             if (response.data() != null) {
                 results.addAll(response.data());
             }
-            if (pageToken == null || response.data() == null || response.data().isEmpty()) {
+            if (pageToken == null) {
                 break;
             }
         } while (StringUtils.isNotEmpty(pageToken));

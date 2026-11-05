@@ -225,6 +225,31 @@ class RESTApiCoverageTest {
         assertThat(errorResourceTypes).contains(ErrorResponse.RESOURCE_TYPE_MODEL);
     }
 
+    @Test
+    void testModelPathSegmentContract() throws Exception {
+        JsonNode spec = OpenApiSpec.catalogSpec();
+        String pathSegmentRef = "#/components/schemas/ModelPathSegment";
+        for (String path :
+                Arrays.asList(
+                        "/v1/{prefix}/databases/{database}/models",
+                        "/v1/{prefix}/databases/{database}/models/{model}")) {
+            JsonNode pathItem = spec.path("paths").path(path);
+            for (String method : Arrays.asList("get", pathItem.has("post") ? "post" : "delete")) {
+                for (JsonNode parameter : pathItem.path(method).path("parameters")) {
+                    if ("database".equals(parameter.path("name").asText())
+                            || "model".equals(parameter.path("name").asText())) {
+                        assertThat(parameter.path("schema").path("$ref").asText())
+                                .isEqualTo(pathSegmentRef);
+                    }
+                }
+            }
+        }
+        JsonNode modelPathSegment =
+                spec.path("components").path("schemas").path("ModelPathSegment");
+        assertThat(modelPathSegment.path("minLength").asInt()).isEqualTo(1);
+        assertThat(modelPathSegment.path("pattern").asText()).isEqualTo("^(?!\\.{1,2}$).+");
+    }
+
     /** Requests sent by each public method, by name; "RESTApi" holds the constructor's. */
     private Map<String, List<String[]>> sendEveryRequest() throws Exception {
         Map<String, List<String[]>> sent = new TreeMap<>();

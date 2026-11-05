@@ -1177,10 +1177,13 @@ public class RESTCatalog implements Catalog {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_DATABASE)) {
                 throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
             }
-            if (ignoreIfNotExists) {
-                return;
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_MODEL)) {
+                if (ignoreIfNotExists) {
+                    return;
+                }
+                throw new ModelNotExistException(identifier, e);
             }
-            throw new ModelNotExistException(identifier, e);
+            throw e;
         } catch (NotImplementedException e) {
             throw new UnsupportedOperationException("REST Catalog does not support models", e);
         }

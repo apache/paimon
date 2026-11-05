@@ -35,7 +35,11 @@ paths:
       operationId: listModels
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: database, in: path, required: true, schema: {type: string}}
+        - name: database
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
         - {name: pageToken, in: query, required: false, schema: {type: string}}
       responses:
         "200":
@@ -56,7 +60,11 @@ paths:
         prompts must not be stored in the model.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: database, in: path, required: true, schema: {type: string}}
+        - name: database
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
       requestBody:
         required: true
         content:
@@ -84,8 +92,16 @@ paths:
       operationId: getModel
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: database, in: path, required: true, schema: {type: string}}
-        - {name: model, in: path, required: true, schema: {type: string}}
+        - name: database
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+        - name: model
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
       responses:
         "200":
           description: Model metadata
@@ -102,8 +118,16 @@ paths:
       operationId: dropModel
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: database, in: path, required: true, schema: {type: string}}
-        - {name: model, in: path, required: true, schema: {type: string}}
+        - name: database
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+        - name: model
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
       responses:
         "200": {description: Model dropped}
         "404":
@@ -4389,6 +4413,11 @@ components:
           format: int64
         updatedBy:
           type: string
+    ModelPathSegment:
+      type: string
+      minLength: 1
+      pattern: '^(?!\.{1,2}$).+'
+      description: A non-empty path segment other than `.` or `..`.
     ModelField:
       type: object
       required: [dataType]
@@ -4406,8 +4435,7 @@ components:
       required: [name, provider, model, inputs]
       properties:
         name:
-          type: string
-          minLength: 1
+          $ref: '#/components/schemas/ModelPathSegment'
         provider:
           type: string
           minLength: 1
@@ -4432,8 +4460,7 @@ components:
       required: [name, provider, model, inputs]
       properties:
         name:
-          type: string
-          minLength: 1
+          $ref: '#/components/schemas/ModelPathSegment'
         provider:
           type: string
           minLength: 1

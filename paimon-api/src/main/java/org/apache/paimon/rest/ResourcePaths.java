@@ -151,13 +151,19 @@ public class ResourcePaths {
     }
 
     public String models(String databaseName) {
+        checkModelPathSegment(databaseName, "databaseName");
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), MODELS);
     }
 
     public String model(String databaseName, String modelName) {
-        checkArgument(
-                modelName != null && !modelName.trim().isEmpty(), "modelName must not be blank");
+        checkModelPathSegment(modelName, "modelName");
         return SLASH.join(models(databaseName), encodeString(modelName));
+    }
+
+    private static void checkModelPathSegment(String value, String name) {
+        checkArgument(value != null && !value.trim().isEmpty(), "%s must not be blank", name);
+        checkArgument(
+                !".".equals(value) && !"..".equals(value), "%s must not be a dot segment", name);
     }
 
     public String tables(String databaseName) {

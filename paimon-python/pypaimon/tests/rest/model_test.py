@@ -121,6 +121,7 @@ class ModelTest(unittest.TestCase):
 
     def test_rest_catalog_crud_and_errors(self):
         calls = []
+        content_types = []
         state = {"status": 200, "resource_type": None}
 
         class Handler(BaseHTTPRequestHandler):
@@ -150,6 +151,7 @@ class ModelTest(unittest.TestCase):
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                content_types.append(self.headers.get("Content-Type"))
                 calls.append(("POST", self.path, body))
                 self._send(_response())
 
@@ -190,6 +192,7 @@ class ModelTest(unittest.TestCase):
             self.assertEqual("a/b.qwen_vl", created.full_name)
             self.assertEqual("/v1/catalog/databases/a%2Fb/models", calls[-1][1])
             self.assertEqual("BLOB", calls[-1][2]["inputs"]["video"]["dataType"])
+            self.assertEqual("application/json", content_types[-1])
 
             self.assertEqual("qwen_vl", catalog.get_model("a/b.qwen_vl").name)
             self.assertEqual("/v1/catalog/databases/a%2Fb/models/qwen_vl", calls[-1][1])
@@ -261,6 +264,74 @@ class ModelTest(unittest.TestCase):
         )
         with self.assertRaises(DatabaseNotExistException):
             catalog.drop_model(identifier, ignore_if_not_exists=True)
+
+        api.drop_model.side_effect = NoSuchResourceException(
+            "", "", "route not found"
+        )
+        with self.assertRaises(NoSuchResourceException):
+            catalog.drop_model(identifier, ignore_if_not_exists=True)
+
+    def test_model_paths_reject_dot_segments_before_sending(self):
+        api = RESTApi(
+            {
+                "uri": "http://127.0.0.1:1",
+                "token.provider": "bear",
+                "token": "test",
+                "prefix": "catalog",
+            },
+            False,
+        )
+        api.client = Mock()
+        request = CreateModelRequest(
+            "qwen_vl", "bailian", "qwen3.8-flash", _inputs()
+        )
+
+        for segment in (".", ".."):
+            with self.subTest(segment=segment, operation="list"), self.assertRaises(ValueError):
+                api.list_models(segment)
+
+            invalid_model = Identifier.create("quality", segment)
+            invalid_request = CreateModelRequest(
+                segment, "bailian", "qwen3.8-flash", _inputs()
+            )
+            with self.subTest(segment=segment, operation="create"), self.assertRaises(ValueError):
+                api.create_model(invalid_model, invalid_request)
+            with self.subTest(segment=segment, operation="get"), self.assertRaises(ValueError):
+                api.get_model(invalid_model)
+            with self.subTest(segment=segment, operation="drop"), self.assertRaises(ValueError):
+                api.drop_model(invalid_model)
+
+            invalid_database = Identifier.create(segment, "qwen_vl")
+            with self.subTest(segment=segment, operation="database"), self.assertRaises(ValueError):
+                api.create_model(invalid_database, request)
+
+        api.client.get.assert_not_called()
+        api.client.get_with_params.assert_not_called()
+        api.client.post_with_response_type.assert_not_called()
+        api.client.delete.assert_not_called()
+
+    def test_list_models_follows_cursor_after_empty_page(self):
+        api = RESTApi(
+            {
+                "uri": "http://127.0.0.1:1",
+                "token.provider": "bear",
+                "token": "test",
+                "prefix": "catalog",
+            },
+            False,
+        )
+        api.client = Mock()
+        api.client.get_with_params.side_effect = [
+            ListModelsResponse([], "second"),
+            ListModelsResponse([_response()], None),
+        ]
+
+        self.assertEqual(["qwen_vl"], [model.name for model in api.list_models("quality")])
+        self.assertEqual(2, api.client.get_with_params.call_count)
+        self.assertEqual(
+            {"pageToken": "second"},
+            api.client.get_with_params.call_args_list[1][0][1],
+        )
 
 
 if __name__ == "__main__":

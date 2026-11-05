@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.Model;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -98,6 +99,62 @@ class RESTCatalogModelTest {
 
             server.enqueue(notFound("MODEL", "qwen_vl"));
             catalog.dropModel(identifier, true);
+
+            server.enqueue(new MockResponse().setResponseCode(404).setBody("Not Found"));
+            assertThatThrownBy(() -> catalog.dropModel(identifier, true))
+                    .isInstanceOf(NoSuchResourceException.class);
+        }
+    }
+
+    @Test
+    void testModelPathsRejectDotSegmentsBeforeSending() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            Catalog catalog = catalog(server);
+
+            for (String segment : new String[] {".", ".."}) {
+                Identifier invalidModel = Identifier.create("quality", segment);
+                Model metadata =
+                        new Model(
+                                invalidModel,
+                                "bailian",
+                                "qwen3.8-flash",
+                                inputs(),
+                                null,
+                                Collections.emptyMap());
+                assertThatThrownBy(() -> catalog.createModel(invalidModel, metadata, false))
+                        .isInstanceOf(IllegalArgumentException.class);
+                assertThatThrownBy(() -> catalog.getModel(invalidModel))
+                        .isInstanceOf(IllegalArgumentException.class);
+                assertThatThrownBy(() -> catalog.dropModel(invalidModel, false))
+                        .isInstanceOf(IllegalArgumentException.class);
+                assertThatThrownBy(() -> catalog.listModels(segment))
+                        .isInstanceOf(IllegalArgumentException.class);
+
+                Identifier invalidDatabase = Identifier.create(segment, "qwen_vl");
+                assertThatThrownBy(() -> catalog.getModel(invalidDatabase))
+                        .isInstanceOf(IllegalArgumentException.class);
+            }
+
+            assertThat(server.getRequestCount()).isZero();
+        }
+    }
+
+    @Test
+    void testListModelsFollowsCursorAfterEmptyPage() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            Catalog catalog = catalog(server);
+            server.enqueue(json("{\"models\":[],\"nextPageToken\":\"second\"}"));
+            server.enqueue(json("{\"models\":[" + modelJson() + "]}"));
+
+            assertThat(catalog.listModels("quality"))
+                    .extracting(Model::name)
+                    .containsExactly("qwen_vl");
+            assertThat(server.takeRequest(10, TimeUnit.SECONDS).getPath())
+                    .isEqualTo("/v1/catalog/databases/quality/models");
+            assertThat(server.takeRequest(10, TimeUnit.SECONDS).getPath())
+                    .isEqualTo("/v1/catalog/databases/quality/models?pageToken=second");
         }
     }
 

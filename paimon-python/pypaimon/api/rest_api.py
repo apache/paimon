@@ -169,7 +169,7 @@ class RESTApi:
 
             page_token = response.next_page_token
 
-            if not page_token or not response.data:
+            if not page_token:
                 break
 
         return results
@@ -564,9 +564,13 @@ class RESTApi:
         if resource_name is not None:
             components.append((resource_name, 'Resource name'))
         for value, label in components:
-            if not value or not value.strip() or value in ('.', '..'):
-                raise ValueError('{} must be a non-empty resource path component'.format(label))
+            RESTApi._validate_resource_path_component(value, label)
         return database_name, table_name
+
+    @staticmethod
+    def _validate_resource_path_component(value, label):
+        if not value or not value.strip() or value in ('.', '..'):
+            raise ValueError('{} must be a non-empty resource path component'.format(label))
 
     def create_branch(
             self,
@@ -743,8 +747,7 @@ class RESTApi:
         )
 
     def list_models(self, database_name: str) -> List[GetModelResponse]:
-        if not database_name or not database_name.strip():
-            raise ValueError("Database name cannot be empty")
+        self._validate_resource_path_component(database_name, "Database name")
         return self.__list_data_from_page_api(
             lambda query_params: self.client.get_with_params(
                 self.resource_paths.models(database_name),
