@@ -20,6 +20,8 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import Mock
 
+import pytest
+
 from pypaimon.api.model import (
     CreateModelRequest,
     GetModelResponse,
@@ -332,6 +334,50 @@ class ModelTest(unittest.TestCase):
             {"pageToken": "second"},
             api.client.get_with_params.call_args_list[1][0][1],
         )
+
+
+def test_model_crud_round_trip_with_rest_catalog_server(native_rest_catalog):
+    identifier = "default.qwen_vl"
+    outputs = {"result": {"data_type": "STRING"}}
+    properties = {"enable_thinking": False}
+
+    created = native_rest_catalog.create_model(
+        identifier,
+        "bailian",
+        "qwen3.8-flash",
+        _inputs(),
+        outputs=outputs,
+        properties=properties,
+    )
+    assert created.full_name == identifier
+    assert native_rest_catalog.get_model(identifier).outputs == outputs
+    assert [model.name for model in native_rest_catalog.list_models("default")] == [
+        "qwen_vl"
+    ]
+
+    with pytest.raises(ModelAlreadyExistException):
+        native_rest_catalog.create_model(
+            identifier, "bailian", "qwen3.8-flash", _inputs()
+        )
+    assert (
+        native_rest_catalog.create_model(
+            identifier,
+            "bailian",
+            "qwen3.8-flash",
+            _inputs(),
+            ignore_if_exists=True,
+        ).full_name
+        == identifier
+    )
+
+    native_rest_catalog.drop_model(identifier)
+    with pytest.raises(ModelNotExistException):
+        native_rest_catalog.get_model(identifier)
+    native_rest_catalog.drop_model(identifier, ignore_if_not_exists=True)
+
+    native_rest_catalog.drop_database("default")
+    with pytest.raises(DatabaseNotExistException):
+        native_rest_catalog.get_model(identifier)
 
 
 if __name__ == "__main__":
