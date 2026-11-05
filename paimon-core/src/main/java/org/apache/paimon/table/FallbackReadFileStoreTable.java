@@ -49,6 +49,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitSerializer;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -123,9 +124,29 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
+        Map<String, String> otherOptions = new HashMap<>(newTableSchema.options());
+        String snapshotKey = CoreOptions.SCAN_SNAPSHOT_ID.key();
+        String versionKey = CoreOptions.SCAN_VERSION.key();
+        if (!coreOptions().isChainTable()
+                && wrapped.coreOptions().scanSnapshotId() != null
+                && other.coreOptions().scanSnapshotId() != null
+                && Objects.equals(otherOptions.get(snapshotKey), wrapped.options().get(snapshotKey))
+                && Objects.equals(
+                        otherOptions.get(versionKey), wrapped.options().get(versionKey))) {
+            // A schema copy with the same selector keeps the already resolved branch snapshot.
+            otherOptions.remove(snapshotKey);
+            otherOptions.remove(versionKey);
+            otherOptions = rewriteOtherOptions(otherOptions);
+            otherOptions.put(snapshotKey, other.options().get(snapshotKey));
+        } else {
+            otherOptions = rewriteOtherOptions(otherOptions);
+        }
+        if (!coreOptions().isChainTable()) {
+            otherOptions.put(CoreOptions.BRANCH.key(), other.coreOptions().branch());
+        }
         return new FallbackReadFileStoreTable(
                 wrapped.copy(newTableSchema),
-                other.copy(newTableSchema.copy(rewriteOtherOptions(newTableSchema.options()))),
+                other.copy(newTableSchema.copy(otherOptions)),
                 wrappedFirst);
     }
 
@@ -252,6 +273,24 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                                         : EMPTY_BRANCH_SNAPSHOT_ID));
             } else {
                 result.put(scanSnapshotIdOptionKey, String.valueOf(otherSnapshot.id()));
+            }
+        } else if (!coreOptions().isChainTable()
+                && options.containsKey(
+                        CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key())
+                && !TimeTravelUtil.hasTimeTravelOptions(new Options(options))
+                && !new Options(wrapped.options(), options)
+                        .get(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT)) {
+            Long mainId = wrapped.coreOptions().scanSnapshotId();
+            Long otherId = other.coreOptions().scanSnapshotId();
+            if (mainId != null && otherId != null && otherId != EMPTY_BRANCH_SNAPSHOT_ID) {
+                Preconditions.checkArgument(
+                        other.snapshotManager().snapshot(otherId).timeMillis()
+                                <= wrapped.snapshotManager().snapshot(mainId).timeMillis(),
+                        "Snapshot %s of branch '%s' is later than the requested snapshot %s; '%s' is disabled.",
+                        otherId,
+                        other.coreOptions().branch(),
+                        mainId,
+                        CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
             }
         }
 

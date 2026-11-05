@@ -413,6 +413,15 @@ public class FallbackReadFileStoreTableTest {
         assertThat(readAndCollect(historical, scan -> {}))
                 .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 30));
         assertThat(historical.other().coreOptions().scanSnapshotId()).isEqualTo(1L);
+        historical =
+                (FallbackReadFileStoreTable)
+                        historical.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT
+                                                .key(),
+                                        "false"));
+        assertThat(readAndCollect(historical, scan -> {}))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 30));
 
         Options overrides = new Options();
         overrides.set(CoreOptions.PATH, tablePath.toString());
@@ -479,6 +488,7 @@ public class FallbackReadFileStoreTableTest {
                         table.copy(Collections.emptyMap()),
                         table.copyWithoutTimeTravel(Collections.emptyMap()),
                         table.copyWithLatestSchema(),
+                        table.copy(table.schema()),
                         InstantiationUtil.deserializeObject(
                                 InstantiationUtil.serializeObject(table),
                                 getClass().getClassLoader()))) {
@@ -503,14 +513,19 @@ public class FallbackReadFileStoreTableTest {
         assertThat(readAndCollect((FallbackReadFileStoreTable) table.copy(options), scan -> {}))
                 .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
         writeDataIntoTable(mainTable, 1, rowData(3, 30));
-        assertThat(
-                        readAndCollect(
-                                (FallbackReadFileStoreTable)
-                                        table.copy(
-                                                Collections.singletonMap(
-                                                        CoreOptions.SCAN_SNAPSHOT_ID.key(), "2")),
-                                scan -> {}))
-                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 30));
+        Map<String, String> newSelector =
+                Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
+        for (FileStoreTable copied :
+                Arrays.asList(
+                        table.copy(newSelector),
+                        table.copy(
+                                table.schema()
+                                        .copy(
+                                                new Options(table.options(), newSelector)
+                                                        .toMap())))) {
+            assertThat(readAndCollect((FallbackReadFileStoreTable) copied, scan -> {}))
+                    .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 30));
+        }
     }
 
     @ParameterizedTest
@@ -618,6 +633,16 @@ public class FallbackReadFileStoreTableTest {
             assertThatThrownBy(() -> historical.copy(options))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("No snapshot at or before");
+            assertThatThrownBy(
+                            () ->
+                                    historical.copy(
+                                            Collections.singletonMap(
+                                                    CoreOptions
+                                                            .SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT
+                                                            .key(),
+                                                    override)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("later than");
         }
     }
 
