@@ -23,6 +23,7 @@ from typing import Dict, List, Optional
 import pyarrow
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.execution.python.format_table_csv import CsvWriter
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.format.format_commit_message import (
     FormatTableCommitMessage,
@@ -114,6 +115,10 @@ class PythonFormatTableWrite:
         self._partition_only_value = opt.lower() == "true"
         self._file_format = table.format()
         options = CoreOptions.from_dict(table.options())
+        self._text_writer = (
+            CsvWriter([f for f in table.fields if f.name not in table.partition_keys], table.options())
+            if self._file_format == Format.CSV else None
+        )
         self._parquet_writer_options = (
             create_parquet_writer_options(options)
             if self._file_format == Format.PARQUET else {}
@@ -231,10 +236,7 @@ class PythonFormatTableWrite:
             pq.write_table(tbl, buf, compression="zstd", **self._parquet_writer_options)
             raw = buf.getvalue()
         elif fmt == Format.CSV:
-            import pyarrow.csv as csv
-            buf = io.BytesIO()
-            csv.write_csv(tbl, buf)
-            raw = buf.getvalue()
+            raw = self._text_writer.write(tbl)
         elif fmt == Format.JSON:
             import json
             lines = []

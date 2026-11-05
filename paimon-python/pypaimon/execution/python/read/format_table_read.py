@@ -19,6 +19,7 @@ from typing import Any, Dict, Iterator, List, Optional
 
 import pyarrow
 
+from pypaimon.execution.python.format_table_csv import CsvReader
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.format.format_data_split import FormatDataSplit
 from pypaimon.table.format.format_table import FormatTable, Format
@@ -47,12 +48,9 @@ def _read_file_to_arrow(
     partition_key_types: Optional[Dict[str, pyarrow.DataType]] = None,
     text_column_name: Optional[str] = None,
     text_line_delimiter: str = "\n",
+    text_reader: Optional[CsvReader] = None,
 ) -> pyarrow.Table:
     path = split.data_path()
-    csv_read_options = None
-    if fmt == Format.CSV:
-        import pyarrow.csv as csv
-        csv_read_options = csv.ReadOptions(block_size=1 << 20)
     try:
         with file_io.new_input_stream(path) as stream:
             chunks = []
@@ -82,13 +80,9 @@ def _read_file_to_arrow(
         except (pyarrow.ArrowException, OSError) as e:
             raise RuntimeError(f"Failed to read {path}") from e
     elif fmt == Format.CSV:
-        import pyarrow.csv as csv
         try:
-            tbl = csv.read_csv(
-                pyarrow.BufferReader(data),
-                read_options=csv_read_options,
-            )
-        except (pyarrow.ArrowException, OSError) as e:
+            tbl = text_reader.read(data)
+        except ValueError as e:
             raise RuntimeError(f"Failed to read {path}") from e
     elif fmt == Format.JSON:
         import json
@@ -150,6 +144,13 @@ def _read_file_to_arrow(
     return tbl
 
 
+def _text_reader(table: FormatTable, read_fields: Optional[List[str]]) -> Optional[CsvReader]:
+    if table.format() != Format.CSV:
+        return None
+    data_fields = [f for f in table.fields if f.name not in table.partition_keys]
+    return CsvReader(data_fields, read_fields, table.options())
+
+
 def _partition_key_types(
     table: FormatTable,
 ) -> Optional[Dict[str, pyarrow.DataType]]:
@@ -181,6 +182,7 @@ def to_arrow(
         if fmt == Format.TEXT
         else "\n"
     )
+    text_reader = _text_reader(self.table, read_fields)
     tables = []
     nrows = 0
     for split in splits:
@@ -193,6 +195,7 @@ def to_arrow(
             partition_key_types,
             text_column_name=text_col,
             text_line_delimiter=text_delim,
+            text_reader=text_reader,
         )
         if t.num_rows > 0:
             tables.append(t)
@@ -236,6 +239,7 @@ def to_iterator(
         if fmt == Format.TEXT
         else "\n"
     )
+    text_reader = _text_reader(self.table, self.projection)
     n_yielded = 0
     for split in splits:
         if self.limit is not None and n_yielded >= self.limit:
@@ -249,6 +253,7 @@ def to_iterator(
             partition_key_types,
             text_column_name=text_col,
             text_line_delimiter=text_delim,
+            text_reader=text_reader,
         )
         for batch in t.to_batches():
             for i in range(batch.num_rows):
