@@ -31,6 +31,7 @@ from unittest import mock
 
 import pyarrow.fs as pafs
 
+from pyarrow import PythonFile
 from pyarrow.fs import PyFileSystem
 from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
@@ -80,6 +81,19 @@ class _RecordingInputStream:
         self.closed = True
 
 
+_PREAD_MAX_SIZE = 4 * 1024 * 1024
+
+
+class _RecordingPreadStream(_RecordingInputStream):
+    def __init__(self, position=0):
+        super().__init__(position)
+        self.preads = []
+
+    def pread(self, size, offset):
+        self.preads.append((size, offset))
+        return b"x" * size
+
+
 class JindoInputFileTest(unittest.TestCase):
 
     def test_known_size_avoids_backend_seek_from_end(self):
@@ -95,6 +109,129 @@ class JindoInputFileTest(unittest.TestCase):
 
         self.assertEqual(b"x" * 60, input_file.read())
         self.assertEqual([60], stream.reads)
+
+    def test_read_after_seek_fetches_exact_range_with_pread(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=10000, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.seek(1000)
+        self.assertEqual(b"x" * 12, input_file.read(12))
+
+        self.assertEqual([(12, 1000)], stream.preads)
+        self.assertEqual([], stream.reads)
+        self.assertEqual([], stream.seeks)
+        self.assertEqual(1012, input_file.tell())
+
+    def test_read_continuing_after_pread_switches_to_stream(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=10000, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.seek(1000)
+        input_file.read(12)
+        input_file.read(20)
+        input_file.read(30)
+
+        self.assertEqual([(12, 1000)], stream.preads)
+        self.assertEqual([(1012, os.SEEK_SET)], stream.seeks)
+        self.assertEqual([20, 30], stream.reads)
+        self.assertEqual(1062, input_file.tell())
+
+    def test_sequential_reads_from_start_keep_stream_read(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=10000, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.read(10)
+        input_file.seek(10)
+        input_file.read(10)
+
+        self.assertEqual([], stream.preads)
+        self.assertEqual([], stream.seeks)
+        self.assertEqual([10, 10], stream.reads)
+
+    def test_short_forward_skip_keeps_stream(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=10 * 1024 * 1024, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.read(10)
+        input_file.seek(10 + 8192)
+        input_file.read(4)
+
+        self.assertEqual([], stream.preads)
+        self.assertEqual([(8202, os.SEEK_SET)], stream.seeks)
+        self.assertEqual([10, 4], stream.reads)
+
+    def test_long_or_backward_jump_uses_pread(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=10 * 1024 * 1024, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.read(10)
+        input_file.seek(2 * 1024 * 1024)
+        input_file.read(4)
+        input_file.seek(100)
+        input_file.read(4)
+
+        self.assertEqual([(4, 2 * 1024 * 1024), (4, 100)], stream.preads)
+        self.assertEqual([10], stream.reads)
+
+    def test_read_is_clamped_to_known_size(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=100, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.seek(95)
+        self.assertEqual(b"x" * 5, input_file.read(10))
+        self.assertEqual(b"", input_file.read(10))
+        self.assertEqual([(5, 95)], stream.preads)
+
+    def test_seek_from_current_position(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=100, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.read(10)
+        self.assertEqual(30, input_file.seek(20, os.SEEK_CUR))
+        self.assertEqual(30, input_file.tell())
+
+    def test_read_above_pread_max_size_keeps_stream(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(
+            stream, file_size=10000, owner=object(), pread_max_size=1000)
+        self.addCleanup(input_file.close)
+
+        input_file.seek(5000)
+        input_file.read(2000)
+
+        self.assertEqual([], stream.preads)
+        self.assertEqual([(5000, os.SEEK_SET)], stream.seeks)
+        self.assertEqual([2000], stream.reads)
+
+    def test_default_keeps_original_stream_behavior(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=10000, owner=object())
+        self.addCleanup(input_file.close)
+
+        input_file.seek(5000)
+        self.assertEqual([(5000, os.SEEK_SET)], stream.seeks)
+        input_file.read(12)
+
+        self.assertEqual([], stream.preads)
+        self.assertEqual([12], stream.reads)
+        self.assertEqual(5012, input_file.tell())
+
+    def test_pyarrow_read_at_reaches_pread(self):
+        # PythonFile.read_at calls seek + read on the wrapped file.
+        stream = _RecordingPreadStream()
+        python_file = PythonFile(
+            JindoInputFile(stream, file_size=10000, owner=object(), pread_max_size=_PREAD_MAX_SIZE), mode="r")
+
+        self.assertEqual(b"x" * 10, python_file.read_at(10, 500))
+        self.assertEqual([(10, 500)], stream.preads)
+        self.assertEqual([], stream.reads)
 
 
 class JindoStreamStatsTest(unittest.TestCase):
@@ -222,6 +359,14 @@ class JindoConfigTest(unittest.TestCase):
             if key != 'fs.oss.endpoint':
                 self.assertNotIn(key, config.values)
         self.assertEqual(config.values['fs.oss.endpoint'], 'oss-cn-test.example.com')
+
+    def test_pread_max_size_is_not_forwarded_to_jindo(self):
+        options = Options({'fs.oss.jindo.pread-max-size': '1mb',
+                           'fs.oss.endpoint': 'oss-cn-test.example.com'})
+        with mock.patch.object(jindo_module, 'JINDO_AVAILABLE', True), \
+                mock.patch.object(jindo_module, 'jutil', types.SimpleNamespace(Config=_RecordingConfig)):
+            config = jindo_module.build_jindo_config(options)
+        self.assertNotIn('fs.oss.jindo.pread-max-size', config.values)
 
     def test_forwards_native_options_to_connect(self):
         created_config = _RecordingConfig()
@@ -476,6 +621,27 @@ class JindoKeepAliveTest(unittest.TestCase):
             handler = JindoFileSystemHandler("oss://bucket/", options)
         return handler, weakref.ref(fake_fs), weakref.ref(handler)
 
+    def test_handler_passes_pread_max_size_to_input_files(self):
+        options = Options({
+            "fs.oss.impl": "jindo",
+            "fs.oss.endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+            "fs.oss.jindo.pread-max-size": "1kb",
+        })
+        fake_jfs = types.SimpleNamespace(
+            connect=lambda *a, **kw: _EvictionRecordingFileSystem([]))
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(jindo_module, "jfs", fake_jfs), \
+                mock.patch.object(jindo_module, "jutil",
+                                  types.SimpleNamespace(Config=_RecordingConfig)):
+            handler = JindoFileSystemHandler("oss://bucket/", options)
+        with mock.patch.object(jindo_module, "JindoInputFile",
+                               wraps=JindoInputFile) as input_file_class:
+            handler.open_input_file('object').close()
+            handler.open_input_stream('object').close()
+        for call in input_file_class.call_args_list:
+            self.assertEqual(1024, call.kwargs['pread_max_size'])
+        self.assertEqual(2, input_file_class.call_count)
+
     def test_evicted_filesystem_outlives_open_stream(self):
         events = []
         handler, fs_ref, handler_ref = self._handler_with_recording_fs(events)
@@ -609,6 +775,25 @@ class JindoTokenRefreshTest(unittest.TestCase):
             self.assertEqual(b"x", stream.read(1))
             stream.close()
             self.assertEqual(["stream-closed"], events)
+
+    def test_data_token_overrides_pread_max_size(self):
+        table_path = "oss://bucket/db.db/t"
+        token = self._token("sts-1", int(time.time() * 1000) + 7_200_000)
+        token.token["fs.oss.jindo.pread-max-size"] = "2mb"
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(pyarrow_file_io_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(jindo_module, "jfs", types.SimpleNamespace(
+                    connect=lambda *a, **kw: _EvictionRecordingFileSystem([]))), \
+                mock.patch.object(jindo_module, "jutil",
+                                  types.SimpleNamespace(Config=_RecordingConfig)), \
+                mock.patch.object(RESTTokenFileIO, "try_to_refresh_token"):
+            reader = RESTTokenFileIO(
+                Identifier.create("db", "t"), table_path,
+                Options({OssOptions.OSS_IMPL.key(): "jindo",
+                         "fs.oss.jindo.pread-max-size": "1mb"}))
+            reader.token = token
+            reader.file_io()
+            self.assertEqual(2 * 1024 * 1024, reader.filesystem.handler._pread_max_size)
 
 
 class JindoFileSystemTest(unittest.TestCase):

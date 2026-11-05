@@ -26,6 +26,7 @@ the delegate FileIO.
 """
 
 import hashlib
+import io
 import os
 import threading
 import uuid
@@ -169,7 +170,7 @@ class LocalDiskCacheManager:
         return self._block_size
 
     def _cache_path(self, file_path: str, block_index: int) -> str:
-        key = f"{file_path}:{block_index}"
+        key = f"{self._block_size}:{file_path}:{block_index}"
         h = hashlib.sha256(key.encode('utf-8')).hexdigest()
         prefix = h[:2]
         sub_dir = os.path.join(self._cache_dir, prefix)
@@ -262,7 +263,7 @@ class LocalDiskCacheManager:
         self._file_size_cache[file_path] = size
 
 
-class CachingInputStream:
+class CachingInputStream(io.RawIOBase):
     """Wraps a remote stream with block-level caching."""
 
     def __init__(self, file_io, file_path: str, cache, file_size=None):
@@ -273,7 +274,20 @@ class CachingInputStream:
         self._cache = cache
         self._pos = 0
         self._io_lock = threading.Lock()
+        self._open_lock = threading.Lock()
         self._remote_supports_pread = None
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def readinto(self, buffer):
+        view = memoryview(buffer).cast('B')
+        data = self.read(len(view))
+        view[:len(data)] = data
+        return len(data)
 
     def _get_file_size(self) -> int:
         if self._file_size == -1:
@@ -320,14 +334,14 @@ class CachingInputStream:
         first_block = offset // block_size
         last_block = (end - 1) // block_size
 
-        result = bytearray()
+        parts = []
         for bi, block_data in self._read_blocks(first_block, last_block):
             block_start = bi * block_size
             start_in_block = max(offset - block_start, 0)
             end_in_block = min(end - block_start, len(block_data))
-            result.extend(block_data[start_in_block:end_in_block])
+            parts.append(block_data[start_in_block:end_in_block])
 
-        return bytes(result)
+        return b''.join(parts)
 
     def _read_blocks(self, first: int, last: int):
         block_size = self._cache.block_size
@@ -385,14 +399,21 @@ class CachingInputStream:
         return bytes(buf)
 
     def _get_remote_stream(self):
+        # read_at is documented as thread-safe, so concurrent misses must not
+        # each open their own stream: only the first one is retained and the
+        # rest would leak. Kept separate from _io_lock, which serializes seek
+        # and read on an already open stream.
         if self._stream is None:
-            self._stream = self._file_io.new_input_stream(self._file_path)
+            with self._open_lock:
+                if self._stream is None:
+                    self._stream = self._file_io.new_input_stream(self._file_path)
         return self._stream
 
     def close(self):
         if self._stream is not None:
             self._stream.close()
             self._stream = None
+        super().close()
 
     def __enter__(self):
         return self
@@ -471,12 +492,17 @@ class CachingFileIO(FileIO):
     def properties(self):
         return self._delegate.properties
 
+    def _is_cacheable(self, path: str):
+        file_type = FileType.classify(path)
+        return (self._cache is not None
+                and file_type in self._whitelist
+                and not FileType.is_mutable(path))
+
     def new_input_stream(self, path: str):
         return self._new_input_stream_with_known_size(path, None)
 
     def _new_input_stream_with_known_size(self, path: str, file_size):
-        file_type = FileType.classify(path)
-        if self._cache is None or file_type not in self._whitelist or FileType.is_mutable(path):
+        if not self._is_cacheable(path):
             return self._delegate.new_input_stream(path)
         return CachingInputStream(self._delegate, path, self._cache, file_size)
 

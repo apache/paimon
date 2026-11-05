@@ -25,12 +25,73 @@ from urllib.parse import urlparse
 
 import pyarrow.fs as pafs
 
-from pypaimon.common.file_io import create_temp_path
+from pypaimon.common.file_io import FileIO, create_temp_path
 from pypaimon.common.options import Options
-from pypaimon.common.options.config import OssOptions
+from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO, _file_uri_path
 from pypaimon.filesystem.oss_file_io import OssFileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO, _pyarrow_lt_7
+
+
+class FileIOFactoryTest(unittest.TestCase):
+    def test_windows_drive_paths_use_local_file_io(self):
+        options = Options({})
+        paths = [r"C:\warehouse", "C:/warehouse", r"d:\warehouse", "D:/warehouse",
+                 "C:warehouse", "C:", r"C:\data set\episode%23#copy.txt"]
+        with patch.object(os, "name", "nt"), \
+                patch('pypaimon.filesystem.local_file_io.LocalFileIO') as local_io:
+            for location in paths:
+                with self.subTest(location=location):
+                    self.assertIs(FileIO.get(location, options), local_io.return_value)
+                    local_io.assert_called_with(location, options)
+
+    def test_local_paths_keep_their_original_spelling(self):
+        options = Options({})
+        paths = ["warehouse", "./warehouse", "/tmp/warehouse", "file:///tmp/warehouse",
+                 "file:///C:/warehouse", r"\\server\share\warehouse", "//server/share/warehouse"]
+        with patch('pypaimon.filesystem.local_file_io.LocalFileIO') as local_io:
+            for location in paths:
+                with self.subTest(location=location):
+                    self.assertIs(FileIO.get(location, options), local_io.return_value)
+                    local_io.assert_called_with(location, options)
+
+    def test_drive_letters_are_not_local_schemes_on_posix(self):
+        options = Options({})
+        with patch.object(os, "name", "posix"), \
+                patch('pypaimon.filesystem.pyarrow_file_io.PyArrowFileIO') as remote_io:
+            for location in [r"C:\warehouse", "C:/warehouse", "x:relative"]:
+                with self.subTest(location=location):
+                    self.assertIs(FileIO.get(location, options), remote_io.return_value)
+                    remote_io.assert_called_with(location, options)
+
+    def test_remote_uris_are_not_windows_drive_paths(self):
+        options = Options({})
+        with patch.object(os, "name", "nt"), \
+                patch('pypaimon.filesystem.pyarrow_file_io.PyArrowFileIO') as remote_io:
+            for location in ["c://server/warehouse", "s3://bucket/warehouse",
+                             "gs://bucket/warehouse", "custom://server/warehouse"]:
+                with self.subTest(location=location):
+                    self.assertIs(FileIO.get(location, options), remote_io.return_value)
+                    remote_io.assert_called_with(location, options)
+
+    @unittest.skipUnless(os.name == "nt", "Requires native Windows paths")
+    def test_windows_native_paths_read_and_write(self):
+        with tempfile.TemporaryDirectory(prefix="file io # ") as directory:
+            for resolving in [False, True]:
+                with self.subTest(resolving=resolving):
+                    options = Options({CatalogOptions.RESOLVING_FILE_IO_ENABLED.key(): resolving})
+                    file_io = FileIO.get(directory, options)
+                    location = os.path.join(directory, "episode%23-{}.txt".format(resolving))
+                    try:
+                        file_io.write_file(location, "native Windows path")
+                        self.assertEqual(file_io.read_file_utf8(location), "native Windows path")
+                        self.assertEqual(file_io.read_file_utf8(location.replace("\\", "/")),
+                                         "native Windows path")
+                        self.assertEqual(file_io.read_file_utf8(Path(location).as_uri()),
+                                         "native Windows path")
+                        self.assertTrue(Path(location).is_file())
+                    finally:
+                        file_io.close()
 
 
 class FileIOTest(unittest.TestCase):
@@ -182,29 +243,29 @@ class FileIOTest(unittest.TestCase):
 
         # Test file:// scheme
         self.assertEqual(file_io.to_filesystem_path("file:///tmp/path/to/file.txt"),
-                         "/tmp/path/to/file.txt")
+                         os.path.normpath("/tmp/path/to/file.txt"))
         self.assertEqual(file_io.to_filesystem_path("file:///path/to/file.txt"),
-                         "/path/to/file.txt")
+                         os.path.normpath("/path/to/file.txt"))
         self.assertEqual(
             file_io.to_filesystem_path(
                 "file:///tmp/episode%20%E4%B8%AD%E6%96%87.h5"),
-            "/tmp/episode 中文.h5",
+            os.path.normpath("/tmp/episode 中文.h5"),
         )
 
         # Test empty paths
         self.assertEqual(file_io.to_filesystem_path("file://"), ".")
-        self.assertEqual(file_io.to_filesystem_path("file:///"), "/")
+        self.assertEqual(file_io.to_filesystem_path("file:///"), os.path.normpath("/"))
 
         # Test paths without scheme
         self.assertEqual(file_io.to_filesystem_path("/tmp/path/to/file.txt"),
-                         "/tmp/path/to/file.txt")
+                         os.path.normpath("/tmp/path/to/file.txt"))
         self.assertEqual(file_io.to_filesystem_path("relative/path/to/file.txt"),
-                         "relative/path/to/file.txt")
+                         os.path.normpath("relative/path/to/file.txt"))
         self.assertEqual(file_io.to_filesystem_path("./relative/path/to/file.txt"),
-                         "./relative/path/to/file.txt")
+                         "./" + os.path.normpath("relative/path/to/file.txt"))
 
         # Test idempotency
-        converted_path = "/tmp/path/to/file.txt"
+        converted_path = os.path.normpath("/tmp/path/to/file.txt")
         self.assertEqual(file_io.to_filesystem_path(converted_path), converted_path)
         parent_str = str(Path(converted_path).parent)
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
@@ -216,16 +277,17 @@ class FileIOTest(unittest.TestCase):
         self.assertEqual(file_io.to_filesystem_path("C:\\path\\to\\file.txt"),
                          "C:\\path\\to\\file.txt")
         self.assertEqual(file_io.to_filesystem_path("C:/path/to/file.txt"),
-                         "C:/path/to/file.txt")
+                         os.path.normpath("C:/path/to/file.txt"))
         self.assertEqual(file_io.to_filesystem_path("C:"), "C:")
 
         # file:// scheme with Windows drive
         self.assertEqual(file_io.to_filesystem_path("file://C:/path/to/file.txt"),
-                         "C:/path/to/file.txt")
-        self.assertEqual(file_io.to_filesystem_path("file://C:/path"), "C:/path")
+                         os.path.normpath("C:/path/to/file.txt"))
+        self.assertEqual(file_io.to_filesystem_path("file://C:/path"), os.path.normpath("C:/path"))
         self.assertEqual(file_io.to_filesystem_path("file://C:"), "C:")
         self.assertEqual(file_io.to_filesystem_path("file:///C:/path/to/file.txt"),
-                         "/C:/path/to/file.txt")
+                         os.path.normpath("C:/path/to/file.txt") if os.name == "nt"
+                         else "/C:/path/to/file.txt")
 
         # Windows path with S3FileSystem (should preserve)
         s3_file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
@@ -244,6 +306,33 @@ class FileIOTest(unittest.TestCase):
                 urlparse("file://server/share/episode.h5"), windows=True),
         )
 
+    def test_local_file_status_uses_portable_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            location = Path(directory) / "schema-0"
+            location.write_text("{}", encoding="utf-8")
+            file_io = LocalFileIO(directory, Options({}))
+            expected = location.absolute().as_posix()
+            for path in [str(location), location.as_uri()]:
+                with self.subTest(path=path):
+                    status = file_io.get_file_status(path)
+                    self.assertEqual(status.path, expected)
+                    self.assertEqual(status.path.split('/')[-1], "schema-0")
+                    self.assertEqual(file_io.filesystem.get_file_info([expected])[0].path,
+                                     status.path)
+            self.assertEqual([entry.path for entry in file_io.list_status(directory)], [expected])
+            self.assertEqual(file_io.read_file_utf8(expected), "{}")
+
+    def test_copy_files_from_local_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            target = Path(directory) / "target"
+            source.mkdir()
+            (source / "data.txt").write_text("content", encoding="utf-8")
+            file_io = LocalFileIO(directory, Options({}))
+            file_io.copy_files(source.as_uri(), target.as_uri())
+            self.assertEqual((target / "data.txt").read_text(encoding="utf-8"), "content")
+            self.assertEqual([entry.name for entry in target.iterdir()], ["data.txt"])
+
     def test_local_directory_listing_propagates_permission_errors(self):
         with tempfile.TemporaryDirectory() as directory:
             file_io = LocalFileIO(directory, Options({}))
@@ -255,7 +344,7 @@ class FileIOTest(unittest.TestCase):
         """Test path normalization (multiple slashes)."""
         file_io = LocalFileIO("file:///tmp/warehouse", Options({}))
         self.assertEqual(file_io.to_filesystem_path("file://///tmp///path///file.txt"),
-                         "/tmp/path/file.txt")
+                         os.path.normpath("/tmp/path/file.txt"))
 
         s3_file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
         self.assertEqual(s3_file_io.to_filesystem_path("s3://my-bucket///path///to///file.txt"),

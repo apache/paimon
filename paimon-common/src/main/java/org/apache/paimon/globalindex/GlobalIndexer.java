@@ -18,9 +18,11 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Range;
 
@@ -50,6 +52,15 @@ public interface GlobalIndexer {
             ExecutorService executor);
 
     static GlobalIndexer create(String type, List<DataField> indexFields, Options options) {
-        return GlobalIndexerFactoryUtils.load(type).create(indexFields, options);
+        Options resolved = options;
+        if (!indexFields.isEmpty()) {
+            // The leading field owns the index; remaining fields are indexed payload columns.
+            String column = indexFields.get(0).name();
+            resolved =
+                    CoreOptions.isVectorIndexType(type)
+                            ? VectorIndexOptions.resolve(options, type, column).options()
+                            : new CoreOptions(options).globalIndexOptions(type, column);
+        }
+        return GlobalIndexerFactoryUtils.load(type).create(indexFields, resolved);
     }
 }

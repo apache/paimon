@@ -24,9 +24,11 @@ import org.apache.paimon.types.RowKind;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /** A data change message from the CDC source. */
 @Experimental
@@ -42,6 +44,25 @@ public class CdcRecord implements Serializable {
     public CdcRecord(RowKind kind, Map<String, String> data) {
         this.kind = kind;
         this.data = data;
+    }
+
+    /**
+     * Creates a record whose specified fields contain Base64-encoded binary values.
+     *
+     * <p>Non-null values of the specified fields must already be Base64-encoded. This method only
+     * records their encoding; it does not encode or decode values. Unmarked fields retain the usual
+     * CDC string conversion, including text mapped to VARBINARY.
+     */
+    public static CdcRecord withBase64EncodedFields(
+            RowKind kind, Map<String, String> data, Set<String> base64EncodedFields) {
+        return base64EncodedFields.isEmpty()
+                ? new CdcRecord(kind, data)
+                : new BinaryCdcRecord(kind, data, base64EncodedFields);
+    }
+
+    /** Names of fields whose non-null values contain Base64-encoded binary data. */
+    public Set<String> base64EncodedFields() {
+        return Collections.emptySet();
     }
 
     public static CdcRecord emptyRecord() {
@@ -64,7 +85,11 @@ public class CdcRecord implements Serializable {
             // silently null out the column on the record-schema join
             newData.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
         }
-        return new CdcRecord(kind, newData);
+        Set<String> newBase64EncodedFields = new HashSet<>();
+        for (String field : base64EncodedFields()) {
+            newBase64EncodedFields.add(field.toLowerCase(Locale.ROOT));
+        }
+        return withBase64EncodedFields(kind, newData, newBase64EncodedFields);
     }
 
     @Override
@@ -74,12 +99,35 @@ public class CdcRecord implements Serializable {
         }
 
         CdcRecord that = (CdcRecord) o;
-        return Objects.equals(kind, that.kind) && Objects.equals(data, that.data);
+        return Objects.equals(kind, that.kind)
+                && Objects.equals(data, that.data)
+                && Objects.equals(base64EncodedFields(), that.base64EncodedFields());
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, data);
+        return Objects.hash(kind, data, base64EncodedFields());
+    }
+
+    // Keep the serialized fields of ordinary CdcRecord unchanged. Only records with explicitly
+    // encoded binary values need the additional metadata.
+    private static class BinaryCdcRecord extends CdcRecord {
+
+        private static final long serialVersionUID = 1L;
+
+        // Keep the serialized field name unchanged.
+        private final Set<String> binaryFields;
+
+        private BinaryCdcRecord(
+                RowKind kind, Map<String, String> data, Set<String> base64EncodedFields) {
+            super(kind, data);
+            this.binaryFields = new HashSet<>(base64EncodedFields);
+        }
+
+        @Override
+        public Set<String> base64EncodedFields() {
+            return binaryFields;
+        }
     }
 
     @Override

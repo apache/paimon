@@ -50,6 +50,58 @@ class _FailingCloseDecoder(_Decoder):
         raise RuntimeError("decoder close failed")
 
 
+class RawVideoRemuxTest(unittest.TestCase):
+
+    def test_read_only_packet_duration(self):
+        from fractions import Fraction
+        from unittest.mock import MagicMock, patch
+        from pypaimon.multimodal.video import _remux_raw_hevc
+
+        class Packet:
+            size = 1
+
+            def __init__(self, duration):
+                self._duration = duration
+
+            @property
+            def duration(self):
+                return self._duration
+
+            def decode(self):
+                return [SimpleNamespace(pts=self.pts, is_corrupt=False)]
+
+        class Streams(list):
+            @property
+            def video(self):
+                return self
+
+        for duration in (48000, 0):
+            with self.subTest(duration=duration), tempfile.TemporaryDirectory() as directory:
+                packets = [Packet(24000), Packet(duration)]
+                first, second, output = MagicMock(), MagicMock(), MagicMock()
+                for container in (first, second, output):
+                    container.__enter__.return_value = container
+                    container.streams = Streams([SimpleNamespace()])
+                first.format.name = "hevc"
+                first.demux.return_value = [Packet(24000), Packet(48000)]
+                second.demux.return_value = packets
+                av = MagicMock()
+                av.open.side_effect = [first, second, output]
+                with patch("pypaimon.multimodal.video._require_video_av", return_value=av):
+                    if duration == 0:
+                        with self.assertRaisesRegex(ValueError, "no duration"):
+                            _remux_raw_hevc(io.BytesIO(b"source"), os.path.join(directory, "out.mp4"), Fraction(1, 30))
+                    else:
+                        self.assertEqual(2, _remux_raw_hevc(
+                            io.BytesIO(b"source"), os.path.join(directory, "out.mp4"), Fraction(1, 30)))
+                        self.assertEqual(2, output.mux.call_count)
+                        for i, packet in enumerate(packets):
+                            self.assertEqual(Fraction(i, 30), packet.pts * packet.time_base)
+                            self.assertEqual(Fraction(i, 30), packet.dts * packet.time_base)
+                            self.assertEqual(Fraction(1, 30), packet.duration * packet.time_base)
+                output.__exit__.assert_called_once()
+
+
 class ImageVideoEncoderTest(unittest.TestCase):
 
     def setUp(self):

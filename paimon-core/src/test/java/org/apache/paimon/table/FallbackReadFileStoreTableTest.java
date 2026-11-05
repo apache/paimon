@@ -38,6 +38,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -536,6 +537,38 @@ public class FallbackReadFileStoreTableTest {
                         .map(row -> row.getInt(0))
                         .collect(Collectors.toList());
         assertThat(mergedPartitions).containsExactlyInAnyOrder(1, 2, 3);
+    }
+
+    @Test
+    public void testReadPlainSplitWithPrimaryBranch() throws Exception {
+        String branchName = "bc";
+
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+
+        mainTable.createBranch(branchName);
+        FileStoreTable branchTable = createTableFromBranch(mainTable, branchName);
+        writeDataIntoTable(branchTable, 0, rowData(2, 20));
+
+        // evolve only the main branch, so its new files use a schema id the branch lacks
+        TableSchema newSchema =
+                new FileSystemSchemaManager(fileIO, tablePath)
+                        .commitChanges(SchemaChange.setOption("my-custom-key", "my-value"));
+        mainTable = mainTable.copy(newSchema);
+        writeDataIntoTable(mainTable, 1, rowData(3, 30));
+
+        FallbackReadFileStoreTable table =
+                new FallbackReadFileStoreTable(mainTable, branchTable, false);
+
+        // splits planned by newSnapshotReader() belong to the wrapped table
+        List<Pair<Integer, Integer>> result = new ArrayList<>();
+        for (Split split : table.newSnapshotReader().read().splits()) {
+            assertThat(split).isNotInstanceOf(FallbackReadFileStoreTable.FallbackSplit.class);
+            RecordReader<InternalRow> reader = table.newRead().createReader(split);
+            reader.forEachRemaining(r -> result.add(Pair.of(r.getInt(0), r.getInt(1))));
+            reader.close();
+        }
+        assertThat(result).containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(3, 30));
     }
 
     @Test

@@ -21,7 +21,47 @@ import re
 from typing import Optional
 
 from pypaimon.api.api_response import PagedList, Partition
+from pypaimon.catalog.catalog import Catalog
+from pypaimon.common.identifier import Identifier
 from pypaimon.table.table import Table
+
+
+def encoded_branch_name(identifier: Identifier) -> Optional[str]:
+    """The branch in the encoded name of ``identifier``, as in ``t$branch_dev``, or None.
+
+    ``Identifier(db, t, branch='main')``, in any case, is encoded as and equal to
+    ``db.t``, so it has none. ``t$branch_MAIN`` names a branch ``MAIN``.
+    """
+    without_branch = Identifier(
+        identifier.get_database_name(), identifier.get_table_name(),
+        system_table=identifier.get_system_table_name())
+    return None if identifier == without_branch else identifier.get_branch_name()
+
+
+def check_not_branch(identifier: Identifier, method: str) -> None:
+    """Mirrors Java ``CatalogUtils.checkNotBranch``.
+
+    Unlike Java, ``Identifier(db, t, branch='main')`` is accepted, see
+    ``encoded_branch_name``.
+    """
+    if encoded_branch_name(identifier) is not None:
+        raise ValueError(
+            "Cannot '{}' for branch table '{}', please modify the table with the default branch."
+            .format(method, identifier.get_full_name()))
+
+
+def check_not_system_database(name: str) -> None:
+    """Mirrors Java ``CatalogUtils.checkNotSystemDatabase``."""
+    if name == Catalog.SYSTEM_DATABASE_NAME:
+        raise ValueError("Can't do operation on system database.")
+
+
+def check_not_system_table(identifier: Identifier, method: str) -> None:
+    """Mirrors Java ``CatalogUtils.checkNotSystemTable``."""
+    if identifier.get_database_name() == Catalog.SYSTEM_DATABASE_NAME or identifier.is_system_table():
+        raise ValueError(
+            "Cannot '{}' for system table '{}', please use data table."
+            .format(method, identifier.get_full_name()))
 
 
 def list_partitions_from_file_system(
@@ -39,6 +79,7 @@ def list_partitions_from_file_system(
     """
     from pypaimon.manifest.manifest_file_manager import ManifestFileManager
     from pypaimon.manifest.manifest_list_manager import ManifestListManager
+    from pypaimon.table.row.generic_row import GenericRowSerializer
 
     snapshot = table.snapshot_manager().get_latest_snapshot()
     if snapshot is None:
@@ -50,22 +91,23 @@ def list_partitions_from_file_system(
     manifest_files = manifest_list_manager.read_all(snapshot)
     entries = manifest_file_manager.read_entries_parallel(manifest_files, drop_stats=True)
 
-    partition_map = {}  # spec_key -> aggregated stats
+    partition_map = {}  # serialized partition row -> aggregated stats
+    path_factory = table.path_factory()
     for entry in entries:
-        spec = {field.name: str(v) for field, v in
-                zip(entry.partition.fields, entry.partition.values)}
-        spec_key = tuple(sorted(spec.items()))
+        partition_key = GenericRowSerializer.to_bytes(entry.partition)
 
-        if spec_key not in partition_map:
-            partition_map[spec_key] = {
-                'spec': spec,
+        if partition_key not in partition_map:
+            partition_map[partition_key] = {
+                'spec': dict(zip(
+                    table.partition_keys,
+                    path_factory._canonical_partition(tuple(entry.partition.values)))),
                 'record_count': 0,
                 'file_size_in_bytes': 0,
                 'file_count': 0,
                 'last_file_creation_time': 0,
                 'buckets': set(),
             }
-        stats = partition_map[spec_key]
+        stats = partition_map[partition_key]
         stats['record_count'] += entry.file.row_count
         stats['file_size_in_bytes'] += entry.file.file_size
         stats['file_count'] += 1
@@ -75,6 +117,9 @@ def list_partitions_from_file_system(
                 stats['last_file_creation_time'] = ct
         stats['buckets'].add(entry.bucket)
 
+    # Break display-name ties with the raw partition key for stable pagination.
+    sorted_partitions = sorted(partition_map.items(), key=lambda item: (
+        ','.join(f'{k}={v}' for k, v in sorted(item[1]['spec'].items())), item[0]))
     partitions = [
         Partition(
             spec=stats['spec'],
@@ -84,7 +129,7 @@ def list_partitions_from_file_system(
             last_file_creation_time=stats['last_file_creation_time'],
             total_buckets=len(stats['buckets']),
         )
-        for stats in partition_map.values()
+        for _, stats in sorted_partitions
     ]
 
     # Apply pattern filter with proper regex escaping.
@@ -96,9 +141,6 @@ def list_partitions_from_file_system(
             p for p in partitions
             if regex.fullmatch(','.join(f'{k}={v}' for k, v in p.spec.items()))
         ]
-
-    # Sort partitions by name (partition spec string).
-    partitions.sort(key=lambda p: ','.join(f'{k}={v}' for k, v in sorted(p.spec.items())))
 
     # Apply pagination.
     start_index = 0

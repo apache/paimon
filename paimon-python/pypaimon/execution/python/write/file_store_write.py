@@ -24,7 +24,11 @@ import pyarrow as pa
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.data_types import is_blob_file_field
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.row_utils import inline_blob_value, require_columns, row_values_to_arrow_table
+from pypaimon.write.row_utils import (
+    normalize_inline_blob_row,
+    require_columns,
+    row_values_to_arrow_table,
+)
 from pypaimon.schema.arrow_schema import project_arrow_batch
 from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
@@ -65,6 +69,7 @@ class FileStoreWrite:
         self._ever_written = False
         self._prepared_writer_lifecycle = None
         self.max_seq_numbers: dict = {}
+        self._previous_total_buckets: dict = {}
         self.restore_snapshot_id = None
         self.write_cols = None
         self.blob_consumer = None
@@ -127,30 +132,36 @@ class FileStoreWrite:
         require_columns(values_by_name, column_names, 'write_row')
         writer = self.data_writers.get(key)
         data = None
-        if (writer is None and self._has_blob_columns()
-                and not self.table.is_primary_key_table):
-            # Dedicated writers consume live payloads themselves. Inline fields
-            # instead encode to Arrow before the writer captures its layout.
-            # Primary-key Blob tables use KeyValueDataWriter, which consumes
-            # an Arrow batch like every other key-value writer.
+        if self._has_blob_columns():
+            # Inline fields are normalized before either writer sees them.
+            # Append tables hand live payloads to DedicatedFormatWriter.
+            # Primary-key tables use KeyValueDataWriter, which consumes an
+            # Arrow batch like every other key-value writer.
             descriptor_fields = self.options.blob_descriptor_fields()
             view_fields = self.options.blob_view_fields()
             inline_columns = [name for name in column_names if name in descriptor_fields or name in view_fields]
-            if inline_columns:
-                values_by_name = dict(values_by_name)
-                for name in inline_columns:
-                    values_by_name[name] = inline_blob_value(
-                        values_by_name[name], name in descriptor_fields, name in view_fields)
-                # Reuse the encoded bytes in the dedicated row path. Keep the
-                # original event kind and leave unselected Blob objects alone.
-                from pypaimon.table.row.generic_row import GenericRow
-                row = GenericRow([values_by_name[name] for name in column_names],
-                                 [self.table.field_dict[name] for name in column_names], row.get_row_kind())
-            ordinary_columns = [name for name in column_names
-                                if name in inline_columns or not is_blob_file_field(self.table.field_dict[name])]
-            if ordinary_columns:
-                row_values_to_arrow_table(
-                    values_by_name, self.table.table_schema.fields, ordinary_columns)
+            row, values_by_name = normalize_inline_blob_row(
+                row,
+                values_by_name,
+                self.table.field_dict,
+                column_names,
+                descriptor_fields,
+                view_fields,
+            )
+            if not self.table.is_primary_key_table:
+                if writer is None:
+                    ordinary_columns = [
+                        name for name in column_names
+                        if name in inline_columns or not is_blob_file_field(self.table.field_dict[name])
+                    ]
+                    if ordinary_columns:
+                        row_values_to_arrow_table(
+                            values_by_name, self.table.table_schema.fields, ordinary_columns)
+            else:
+                data = row_values_to_arrow_table(
+                    values_by_name, self.table.table_schema.fields, column_names)
+                from pypaimon.write.row_kind import with_row_kind
+                data = with_row_kind(self.table, data, row)
         elif writer is None or not hasattr(writer, 'write_row'):
             data = row_values_to_arrow_table(
                 values_by_name, self.table.table_schema.fields, column_names)
@@ -199,6 +210,21 @@ class FileStoreWrite:
             )
         self._runtime_total_buckets[partition] = total_buckets
 
+    def _check_bucket_count(self, partition):
+        previous = self._previous_total_buckets.get(partition)
+        if previous is None:
+            return
+        part_info = "table"
+        if self.table.partition_keys:
+            values = self.table.path_factory()._canonical_partition(partition)
+            part_info = "partition {" + ", ".join(
+                "{}={}".format(key, value) for key, value in zip(self.table.partition_keys, values)) + "}"
+        expected = self._runtime_total_buckets.get(partition, self.options.bucket())
+        raise RuntimeError(
+            "Try to write {} with a new bucket num {}, but the previous bucket num is {}. "
+            "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.".format(
+                part_info, expected, previous))
+
     def _create_data_writer(self, partition: Tuple, bucket: int, options: CoreOptions) -> DataWriter:
         row_limit = options.target_file_row_num()
         max_value = CoreOptions.TARGET_FILE_ROW_NUM.default_value()
@@ -219,13 +245,19 @@ class FileStoreWrite:
                     "based file rolling only for data-evolution append and postpone tables; "
                     "unset it or write with Java/Flink/Spark.")
 
+        # As in Java, every writer of a restored bucket checks the bucket count.
+        if bucket >= 0 and self.table.bucket_mode() != BucketMode.BUCKET_UNAWARE:
+            self._seq_number_stats(partition)
+            self._check_bucket_count(partition)
+
         def max_seq_number():
             default = -1 if self.table.is_primary_key_table else 1
             return self._seq_number_stats(partition).get(bucket, default)
 
         # Dedicated Blob files are an append-table layout. Primary-key tables
-        # store descriptors in the key-value file and list packs in a .blobref
-        # sidecar written by KeyValueDataWriter.
+        # store managed BLOB descriptors in the key-value file and list packs
+        # in a .blobref sidecar written by KeyValueDataWriter. Inline fields
+        # (blob-descriptor-field and blob-view-field) stay in that same file.
         if self._has_blob_columns() and not self.table.is_primary_key_table:
             return DedicatedFormatWriter(
                 table=self.table,
@@ -469,6 +501,7 @@ class FileStoreWrite:
         # bucket opened after this checkpoint must restore from the latest
         # snapshot rather than reuse another bucket's earlier partition scan.
         self.max_seq_numbers.clear()
+        self._previous_total_buckets.clear()
 
     def close(self):
         """Close all data writers and clean up resources."""
@@ -517,6 +550,9 @@ class FileStoreWrite:
         return self.table._copy_with_snapshot(self.table.snapshot_manager().get_latest_snapshot())
 
     def _load_seq_number_stats(self, partition: Tuple) -> dict:
+        # Overwrite ignores previous files, like Java's ignorePreviousFiles.
+        if self.restore_snapshot_id == 0:
+            return {}
         read_builder = self._sequence_read_table().new_read_builder()
         predicate_builder = read_builder.new_predicate_builder()
         sub_predicates = []
@@ -535,11 +571,17 @@ class FileStoreWrite:
         scanner.skip_level0 = False
 
         max_seq_numbers = {}
+        previous = None
+        expected = self._runtime_total_buckets.get(partition, self.options.bucket())
         for entry in scanner.plan_files():
+            # Check the whole partition, skipping postpone and dynamic files, like Java.
+            if previous is None and 0 < entry.total_buckets != expected:
+                previous = entry.total_buckets
             current_seq_num = entry.file.max_sequence_number
             existing_max = max_seq_numbers.get(entry.bucket, -1)
             if current_seq_num > existing_max:
                 max_seq_numbers[entry.bucket] = current_seq_num
+        self._previous_total_buckets[partition] = previous
         return max_seq_numbers
 
 

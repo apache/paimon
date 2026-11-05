@@ -94,6 +94,11 @@ public class RenamingSnapshotCommit extends SnapshotCommit {
                 };
         // fs.rename may not return false if the target file already exists, or even be atomic.
         // The bound lock lets us check existence before publishing.
-        return !fileIO.exists(newSnapshotPath) && callable.call();
+        if (fileIO.exists(newSnapshotPath)) {
+            return false;
+        }
+        // Checking existence may outlast the lease, so check it again before writing.
+        ensureValid();
+        return callable.call();
     }
 }

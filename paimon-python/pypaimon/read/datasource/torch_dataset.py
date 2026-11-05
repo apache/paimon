@@ -282,6 +282,11 @@ class TorchDataset(Dataset):
             return False
         if self.table_read.nested_name_paths:
             return False
+        # Whole-column reads can still have nested result paths.
+        projection = self.table_read.output_projection
+        if (projection is not None and projection.named
+                and any(len(path) > 1 for _, path in projection.columns)):
+            return False
         if any(self._row_id_is_masked(split) for split in self.splits):
             return False
         return all(self._supports_indexed_split(split) for split in self.splits)
@@ -358,6 +363,12 @@ class TorchDataset(Dataset):
         return self.__getitems__([index])[0]
 
     def __getitems__(self, indices) -> List[dict]:
+        """Return one row per Dataset position, preserving order and repeats.
+
+        These are position indices in this Dataset, not Paimon ``_ROW_ID``s.
+        An empty batch returns an empty list; out-of-range positions raise
+        IndexError. Both lazy and materialized reads obey the same contract.
+        """
         normalized = [self._normalize_index(index) for index in indices]
         if not normalized:
             return []
@@ -374,12 +385,12 @@ class TorchDataset(Dataset):
             [Range(row_id, row_id) for row_id in set(row_ids)], True)
         splits = self._select_splits(ranges)
 
-        output_has_row_id = any(
+        read_has_row_id = any(
             field.name == SpecialFields.ROW_ID.name
             for field in self.table_read.read_type
         )
         read_type = list(self.table_read.read_type)
-        if not output_has_row_id:
+        if not read_has_row_id:
             read_type.append(SpecialFields.ROW_ID)
         batch_read = TableRead(
             self.table_read.table,
@@ -387,13 +398,16 @@ class TorchDataset(Dataset):
             read_type,
             include_row_kind=self.table_read.include_row_kind,
         )
-        rows = batch_read.to_arrow(splits).to_pylist()
-        by_row_id = {}
-        for row in rows:
-            row_id = row[SpecialFields.ROW_ID.name]
-            if not output_has_row_id:
-                del row[SpecialFields.ROW_ID.name]
-            by_row_id[row_id] = row
+        batch = batch_read.to_arrow(splits)
+        # Capture physical row IDs before aliases can hide or overwrite them.
+        batch_row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
+        projection = self.table_read.output_projection
+        if projection is None:
+            batch = batch.select([field.name for field in self.table_read.read_type])
+        else:
+            batch = batch.select([path[0] for _, path in projection.columns])
+            batch = batch.rename_columns([alias for alias, _ in projection.columns])
+        by_row_id = dict(zip(batch_row_ids, batch.to_pylist()))
         missing = set(row_ids) - set(by_row_id)
         if missing:
             raise RuntimeError(
@@ -588,7 +602,8 @@ class TorchIterDataset(_BaseTorchIterDataset):
         worker_info = torch.utils.data.get_worker_info()
         splits_to_process = self._worker_splits(worker_info)
 
-        if self.prefetch_concurrency > 1:
+        # A binding limit needs one reader quota across all selected splits.
+        if self.prefetch_concurrency > 1 and self._limit_covers_all_splits():
             yield from self._iter_rows(splits_to_process)
             return
 
@@ -1004,7 +1019,8 @@ class TorchShuffledIterDataset(_TorchShuffleMixin, _BaseTorchIterDataset):
         worker_id = worker_info.id if worker_info is not None else 0
         splits_to_process = self._worker_splits(worker_info)
 
-        if self.max_buffer_input_splits == 1:
+        # Select the limited prefix before shuffling, as in the batch dataset.
+        if self.max_buffer_input_splits == 1 or not self._limit_covers_all_splits():
             rows = self._iter_ordered_rows(splits_to_process)
         else:
             rows = self._iter_interleaved_rows(splits_to_process)

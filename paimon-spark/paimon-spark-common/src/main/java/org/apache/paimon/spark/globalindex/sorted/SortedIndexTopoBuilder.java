@@ -23,9 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
-import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ScanResult;
-import org.apache.paimon.globalindex.SortedGlobalIndexer;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
@@ -157,24 +155,21 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             return Collections.emptyList();
         }
 
+        SortedGlobalIndexWriter indexWriter =
+                new SortedGlobalIndexWriter(table, indexType, options).withIndexFields(indexNames);
+        Options indexOptions = indexWriter.indexOptions();
         // Calculate maximum parallelism bound
-        long recordsPerRange = options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE);
-        int maxParallelism = options.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
+        long recordsPerRange = indexOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE);
+        int maxParallelism =
+                indexOptions.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
 
         List<CommitMessage> allMessages = new ArrayList<>();
-        GlobalIndexer indexer = GlobalIndexer.create(indexType, indexFields, options);
-        if (!(indexer instanceof SortedGlobalIndexer)) {
-            throw new IllegalArgumentException(
-                    "Index algorithm " + indexType + " does not expose sorted index keys.");
-        }
-        GlobalIndexKeyExtractor keyExtractor = ((SortedGlobalIndexer) indexer).keyExtractor();
+        GlobalIndexKeyExtractor keyExtractor = indexWriter.keyExtractor();
         String taskIdField = buildTaskIdFieldName(readType);
         RowType normalizedReadType =
                 normalizedReadType(readType, taskIdField, indexField, keyExtractor.keyType());
         final int partitionKeyNum = table.partitionKeys().size();
         BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
-        SortedGlobalIndexWriter indexWriter =
-                new SortedGlobalIndexWriter(table, indexType, options).withIndexFields(indexNames);
         final byte[] serializedWriter = InstantiationUtil.serializeObject(indexWriter);
         if (keyExtractor.isIdentity()) {
             List<SortedBuildTask> buildTasks = new ArrayList<>();

@@ -44,6 +44,7 @@ def _file_store(writer, blob_consumer=None):
     file_store.data_writers = {((), 0): writer}
     file_store.commit_identifier = 0
     file_store.max_seq_numbers = {}
+    file_store._previous_total_buckets = {}
     file_store._runtime_total_buckets = {}
     file_store._last_modified_commit_identifiers = {}
     file_store._written_buckets = set()

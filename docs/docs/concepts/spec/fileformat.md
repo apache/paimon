@@ -155,6 +155,7 @@ Format Options:
 | `csv.escape-character` | `\` | String | The escape character for CSV format, must be single character. |
 | `csv.include-header` | false | Boolean | Whether to include header in CSV files. |
 | `csv.null-literal` | `""` | String | Null literal string that is interpreted as a null value (disabled by default). |
+| `csv.skip-empty-lines` | false | Boolean | Whether to skip empty lines when reading, the same way as Spark's CSV source. Only supported for format tables. A line is empty if nothing is left after `String#trim`, which removes spaces, tabs and other characters up to U+0020. By default such a line is read as a row of NULLs. Paimon itself writes a row whose values are all NULL as an empty line in a single-column table, or as a line of delimiters only (e.g. a tab), so such rows are also skipped when this option is enabled. |
 | `csv.mode` | `PERMISSIVE` | String | Allows a mode for dealing with corrupt records during reading. Currently supported values are `'PERMISSIVE'`, `'DROPMALFORMED'` and `'FAILFAST'`: <ul> <li>Option `'PERMISSIVE'` sets malformed fields to null.</li> <li>Option `'DROPMALFORMED'` ignores the whole corrupted records.</li> <li>Option `'FAILFAST'` throws an exception when it meets corrupted records.</li> </ul> |
 
 Paimon CSV format uses [jackson databind API](https://github.com/FasterXML/jackson-databind) to parse and generate CSV string.
@@ -413,7 +414,7 @@ trailers, or per-entry CRC. On-disk order:
 +----------------------------+
 | ...                        |
 +----------------------------+
-| Keyframe Index 1           |  Video metadata ranges and compressed keyframe entries
+| Keyframe Index 1           |  Video metadata ranges and keyframe entries
 +----------------------------+
 | Keyframe Index 2           |
 +----------------------------+
@@ -441,12 +442,25 @@ Run arrays have equal lengths. Non-negative references select a video; `-1` mean
 means a data-evolution placeholder. Row `r` in a run starting at `s` maps to frame
 `run_first_frame + r - s`; gaps start new runs.
 
-A keyframe-index block contains a 17-byte header (version `1`: uint8; magic `0x564944454F4B4649`:
-uint64; metadata-range and keyframe counts: uint32 each), metadata `(offset, length)` pairs
-(int64 each), and zlib-compressed `(frame ordinal, PTS, packet position)` entries (int64 each).
-Numeric fields are little endian; offsets are payload-relative. Limits: 65,536 metadata ranges
-and 65,536 keyframes, 16 MiB per block, 64 MiB per file. The index covers the first video
-stream; its time base stays in the video.
+Keyframe-index v1 is little endian; byte offsets are relative to the video payload.
+
+| Field | Size |
+| --- | ---: |
+| Version (`1`) | 1 byte |
+| Magic (`0x564944454F4B4649`) | 8 bytes |
+| Metadata-range count | 4 bytes |
+| Keyframe count | 8 bytes |
+| Metadata `(offset, length)` pairs | 16 bytes each |
+| Keyframe pages | Variable |
+
+Each page holds 4,096 uncompressed `(frame ordinal, PTS, packet position)` int64 triples
+and their 4-byte CRC32; the last page may be shorter. Page `p` starts at
+`21 + 16 * metadata_count + p * 98308`.
+Ordinals, PTS values and packet positions strictly increase; the first ordinal is zero.
+The index covers the first video stream; its time base remains in the video.
+
+Readers validate each accessed page and its adjacent page boundaries; writers validate all pages.
+Metadata ranges are limited to 65,536; keyframe count and total index size have no configured limit.
 
 An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
 

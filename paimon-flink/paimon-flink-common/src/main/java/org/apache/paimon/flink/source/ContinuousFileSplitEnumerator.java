@@ -158,6 +158,10 @@ public class ContinuousFileSplitEnumerator
         try {
             context.metricGroup()
                     .gauge(SOURCE_PARALLELISM_UPPER_BOUND, () -> sourceParallelismUpperBound);
+            context.metricGroup()
+                    // Split discovery is throttled to limit memory usage, so this count does not
+                    // capture the entire backlog. Some splits have not been discovered yet.
+                    .setUnassignedSplitsGauge(() -> (long) splitAssigner.numberOfRemainingSplits());
         } catch (Exception e) {
             LOG.warn("Failed to register enumerator metrics.", e);
         }

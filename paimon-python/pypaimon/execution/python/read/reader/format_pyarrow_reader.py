@@ -53,6 +53,7 @@ from pypaimon.data.variant_shredding import (
 )
 from pypaimon.execution.python.read.variant_shredding import assemble_shredded_column
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.schema.arrow_schema import parquet_storage_schema
 from pypaimon.schema.data_types import (
     ArrayType,
     AtomicType,
@@ -275,6 +276,18 @@ def _file_format_metadata_cache_max_size(file_io: FileIO) -> int:
         CatalogOptions.FILE_FORMAT_METADATA_CACHE_MAX_SIZE).get_bytes()
 
 
+def _uses_block_cache(file_io: FileIO, file_path: str) -> bool:
+    from pypaimon.filesystem.caching_file_io import CachingFileIO
+    return isinstance(file_io, CachingFileIO) and file_io._is_cacheable(file_path)
+
+
+def _open_pyarrow_input_file(file_io: FileIO, file_path: str, file_size=None):
+    if _uses_block_cache(file_io, file_path):
+        return pa.PythonFile(
+            file_io._new_input_stream_with_known_size(file_path, file_size), mode='r')
+    return file_io.filesystem.open_input_file(file_io.to_filesystem_path(file_path))
+
+
 def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
                          cache_max_size: int,
                          file_size: Optional[int] = None):
@@ -290,6 +303,11 @@ def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
     register_file_size = getattr(handler, "register_file_size", None)
     if known_size is not None and register_file_size is not None:
         register_file_size(file_path_for_pyarrow, known_size)
+
+    if _uses_block_cache(file_io, file_path):
+        from pypaimon.filesystem.caching_file_system import CachedFileSystemHandler
+        import pyarrow.fs as pafs
+        filesystem = pafs.PyFileSystem(CachedFileSystemHandler(file_io, file_path, known_size))
 
     def load():
         if file_format == 'parquet':
@@ -315,7 +333,8 @@ def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
             file_path_for_pyarrow, format=file_format, filesystem=filesystem)
 
     key = (
-        _FilesystemIdentity(filesystem), file_format, file_path_for_pyarrow,
+        _FilesystemIdentity(file_io if _uses_block_cache(file_io, file_path) else filesystem),
+        file_format, file_path_for_pyarrow,
         known_size)
     if cache_max_size <= 0:
         _reset_file_format_dataset_cache()
@@ -335,8 +354,7 @@ def _orc_schema_with_field_metadata(file_io: FileIO, file_path: str,
         return fallback
 
     import pyarrow.orc as orc
-    source = file_io.filesystem.open_input_file(
-        file_io.to_filesystem_path(file_path))
+    source = _open_pyarrow_input_file(file_io, file_path)
     try:
         metadata = orc.ORCFile(source).metadata
         arrow_schema = metadata.get(b"ARROW:schema")
@@ -383,7 +401,7 @@ class FormatPyArrowReader(RecordBatchReader):
         file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
         self._row_group_cache = row_group_cache
         self._row_group_cache_filesystem = _FilesystemIdentity(
-            file_io.filesystem)
+            file_io if _uses_block_cache(file_io, file_path) else file_io.filesystem)
         self._row_group_cache_path = file_path_for_pyarrow
         cache_max_size = _file_format_metadata_cache_max_size(file_io)
         self.dataset = _file_format_dataset(
@@ -451,6 +469,8 @@ class FormatPyArrowReader(RecordBatchReader):
         self._has_nested_path = has_nested_path
 
         file_schema = self.dataset.schema
+        physical_parquet_schema = parquet_storage_schema(file_schema) if file_format == 'parquet' else file_schema
+        has_fixed_size_lists = not file_schema.equals(physical_parquet_schema)
         has_logical_map = any(
             isinstance(field.type, MapType)
             or is_map_selected_keys_field(field)
@@ -556,15 +576,25 @@ class FormatPyArrowReader(RecordBatchReader):
         self._orc_file = None
         self._orc_source = None
         if (self._bounded_variant_read
+                or has_fixed_size_lists
                 or self._selected_parquet_row_groups is not None
                 or (file_format == 'parquet'
                     and self._selected_shared_map_paths)):
             import pyarrow.parquet as pq
             # ParquetFile(filesystem=...) is unavailable in PyArrow 6.
-            self._parquet_source = file_io.filesystem.open_input_file(
-                file_path_for_pyarrow)
+            self._parquet_source = _open_pyarrow_input_file(file_io, file_path, file_size)
             try:
-                self._parquet_file = pq.ParquetFile(self._parquet_source)
+                metadata = None
+                if has_fixed_size_lists:
+                    # Native/older writers can retain fixed-size lists in
+                    # ARROW:schema. Preserve every physical footer field,
+                    # including INT96/DECIMAL encodings and page-index offsets.
+                    from pypaimon.execution.python.read.reader.parquet_page_index_reader import (
+                        parquet_metadata_with_arrow_schema,
+                    )
+                    fragment = next(iter(self.dataset.get_fragments()))
+                    metadata = parquet_metadata_with_arrow_schema(fragment.metadata, physical_parquet_schema)
+                self._parquet_file = pq.ParquetFile(self._parquet_source, metadata=metadata)
                 if (self._selected_parquet_row_groups is not None
                         and options is not None
                         and options.parquet_column_index_enabled()
@@ -581,8 +611,7 @@ class FormatPyArrowReader(RecordBatchReader):
                 raise
         if file_format == 'orc' and self._selected_shared_map_paths:
             import pyarrow.orc as orc
-            self._orc_source = file_io.filesystem.open_input_file(
-                file_path_for_pyarrow)
+            self._orc_source = _open_pyarrow_input_file(file_io, file_path)
             self._orc_file = orc.ORCFile(self._orc_source)
         if self._exhausted:
             self._raw_batches = iter(())

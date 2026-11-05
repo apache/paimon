@@ -108,6 +108,7 @@ def test_worker_filters_overlapping_scalar_shards_at_planned_snapshot(tmp_path, 
     table = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
         "vectors", schema=schema, options={
             "file.format": "parquet", "vector.file.format": "parquet",
+            "deletion-vectors.enabled": "true",
             "global-index.filter.refine-from-data": "true"})
     for start in range(0, 12, 3):
         row_ids = list(range(start, start + 3))

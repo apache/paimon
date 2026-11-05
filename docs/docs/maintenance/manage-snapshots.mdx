@@ -242,7 +242,17 @@ batch mode, it is not recommended to use asynchronous expiration mode, as the ex
 may fail to complete successfully.
 
 ## Manually expire snapshot
-Manually expire a table's snapshots
+Manually expire a table's snapshots.
+
+Retention overrides such as `retain_max` and dynamic `options` apply only to that expiration
+operation; they do not update the table properties. An override can cause changelogs to be retained
+independently even though the persisted snapshot and changelog retention settings are equal.
+For example, with both maximum counts set to `4` and otherwise matching retention settings,
+calling `expire_snapshots` with `retain_max=1` can leave changelog history after its snapshots expire. A new streaming reader using the unchanged
+`4`/`4` settings does not discover that independent history. The reader must also use a configuration
+that enables independent changelog retention, such as a changelog maximum count greater than the
+snapshot maximum count. Retaining the files alone does not enable their discovery by that reader.
+
 <Tabs groupId="manually-expire-snapshot">
 
 <TabItem value="flink-sql" label="Flink SQL">
@@ -398,9 +408,10 @@ changelog producer.
 
 ## Remove Orphan Files
 
-Paimon files are deleted physically only when expiring snapshots. However, it is possible that some unexpected errors occurred
-when deleting files, so that there may exist files that are not used by Paimon snapshots (so-called "orphan files"). You can
-submit a `remove_orphan_files` job to clean them:
+Snapshot expiration physically deletes unused files. Deleting a tag only removes its tag file,
+and unexpected errors during file deletion can also leave unused files behind. Files that are no longer
+referenced by any snapshot, tag, or changelog are called "orphan files". You can submit a `remove_orphan_files` job
+to clean them:
 
 <Tabs groupId="remove-orphan-files">
 

@@ -63,9 +63,9 @@ FM performs exact substring matching without a configured gram size and accepts 
 byte length. Vector and Full Text expose dedicated ranked-search APIs in Spark, Flink, and Java.
 Full Text uses the fixed `full-text` implementation; Vector uses the configured ANN implementation.
 
-Different columns in one table can use different index families. One column can occur in at most
-one of `pk-vector.index.columns`, `pk-full-text.index.columns`, `pk-btree.index.columns`,
-`pk-bitmap.index.columns`, `pk-multivalue.index.columns`, and `pk-fm.index.columns`.
+Different columns in one table can use different index families. A primary-key table column can
+occur in at most one `global-index.<type>.index-columns` declaration, including declarations
+for different ANN implementations.
 
 ## Requirements
 
@@ -76,8 +76,9 @@ All primary-key indexes require:
 - `pk-clustering-override = false`.
 - An indexed column supported by the selected index implementation.
 
-Dynamic-bucket tables, append-only tables, compound indexes, and custom index families are not
-supported by this configuration.
+Primary-key index maintenance does not support dynamic-bucket tables, compound indexes, or
+custom index families. Data Evolution append tables share the configuration names and use
+their independent [global-index build lifecycle](../multimodal-table/global-index).
 
 <Tabs groupId="primary-key-index-requirements">
 
@@ -142,7 +143,7 @@ CREATE TABLE indexed_orders (
 ) WITH (
     'bucket' = '8',
     'deletion-vectors.enabled' = 'true',
-    'pk-btree.index.columns' = 'amount'
+    'global-index.btree.index-columns' = 'amount'
 );
 ```
 
@@ -158,7 +159,7 @@ TBLPROPERTIES (
     'primary-key' = 'id',
     'bucket' = '8',
     'deletion-vectors.enabled' = 'true',
-    'pk-btree.index.columns' = 'amount'
+    'global-index.btree.index-columns' = 'amount'
 );
 ```
 
@@ -200,20 +201,19 @@ CREATE TABLE items (
 ) WITH (
     'bucket' = '8',
     'deletion-vectors.enabled' = 'true',
-    'pk-vector.index.columns' = 'embedding',
-    'fields.embedding.pk-vector.index.type' = 'ivf-flat',
-    'fields.embedding.pk-vector.distance.metric' = 'cosine',
-    'fields.embedding.pk-vector.index.options' = '{"nlist":"256"}',
-    'pk-full-text.index.columns' = 'content',
-    'fields.content.pk-full-text.index.options' = '{"tokenizer":"jieba"}',
-    'pk-fm.index.columns' = 'raw_text',
-    'fields.raw_text.pk-fm.index.options' = '{"partition-row-count":"100000"}',
-    'pk-btree.index.columns' = 'amount',
-    'fields.amount.pk-btree.index.options' = '{"block-size":"64 kb"}',
-    'pk-bitmap.index.columns' = 'status',
-    'fields.status.pk-bitmap.index.options' = '{"dictionary-block-size":"16 kb"}',
-    'pk-multivalue.index.columns' = 'tags',
-    'fields.tags.pk-multivalue.index.options' = '{"dictionary-block-size":"16 kb"}'
+    'global-index.ivf-flat.index-columns' = 'embedding',
+    'ivf-flat.distance.metric' = 'cosine',
+    'fields.embedding.index-options' = '{"nlist":"256"}',
+    'global-index.full-text.index-columns' = 'content',
+    'fields.content.index-options' = '{"tokenizer":"jieba"}',
+    'global-index.fm.index-columns' = 'raw_text',
+    'fields.raw_text.index-options' = '{"partition-row-count":"100000"}',
+    'global-index.btree.index-columns' = 'amount',
+    'fields.amount.index-options' = '{"block-size":"64 kb"}',
+    'global-index.bitmap.index-columns' = 'status',
+    'fields.status.index-options' = '{"dictionary-block-size":"16 kb"}',
+    'global-index.multivalue.index-columns' = 'tags',
+    'fields.tags.index-options' = '{"dictionary-block-size":"16 kb"}'
 );
 ```
 
@@ -239,20 +239,19 @@ TBLPROPERTIES (
     'primary-key' = 'id',
     'bucket' = '8',
     'deletion-vectors.enabled' = 'true',
-    'pk-vector.index.columns' = 'embedding',
-    'fields.embedding.pk-vector.index.type' = 'ivf-flat',
-    'fields.embedding.pk-vector.distance.metric' = 'cosine',
-    'fields.embedding.pk-vector.index.options' = '{"nlist":"256"}',
-    'pk-full-text.index.columns' = 'content',
-    'fields.content.pk-full-text.index.options' = '{"tokenizer":"jieba"}',
-    'pk-fm.index.columns' = 'raw_text',
-    'fields.raw_text.pk-fm.index.options' = '{"partition-row-count":"100000"}',
-    'pk-btree.index.columns' = 'amount',
-    'fields.amount.pk-btree.index.options' = '{"block-size":"64 kb"}',
-    'pk-bitmap.index.columns' = 'status',
-    'fields.status.pk-bitmap.index.options' = '{"dictionary-block-size":"16 kb"}',
-    'pk-multivalue.index.columns' = 'tags',
-    'fields.tags.pk-multivalue.index.options' = '{"dictionary-block-size":"16 kb"}'
+    'global-index.ivf-flat.index-columns' = 'embedding',
+    'ivf-flat.distance.metric' = 'cosine',
+    'fields.embedding.index-options' = '{"nlist":"256"}',
+    'global-index.full-text.index-columns' = 'content',
+    'fields.content.index-options' = '{"tokenizer":"jieba"}',
+    'global-index.fm.index-columns' = 'raw_text',
+    'fields.raw_text.index-options' = '{"partition-row-count":"100000"}',
+    'global-index.btree.index-columns' = 'amount',
+    'fields.amount.index-options' = '{"block-size":"64 kb"}',
+    'global-index.bitmap.index-columns' = 'status',
+    'fields.status.index-options' = '{"dictionary-block-size":"16 kb"}',
+    'global-index.multivalue.index-columns' = 'tags',
+    'fields.tags.index-options' = '{"dictionary-block-size":"16 kb"}'
 );
 ```
 
@@ -260,35 +259,37 @@ TBLPROPERTIES (
 
 </Tabs>
 
-Duplicate, empty, unknown, unsupported, or cross-family duplicate columns are rejected during
-schema validation.
-
 </details>
 
 ### Options
 
 | Option | Default | Description |
 |---|---|---|
-| `pk-vector.index.columns` | Not set | Vector column to index. Exactly one vector column is currently supported. |
-| `fields.<column>.pk-vector.index.type` | Required | ANN implementation, such as `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, or `diskann`. |
-| `fields.<column>.pk-vector.distance.metric` | `inner_product` | Distance metric: `l2`, `cosine`, or `inner_product`. |
-| `fields.<column>.pk-vector.index.options` | Not set | JSON object containing build options for the selected ANN implementation. |
-| `pk-full-text.index.columns` | Not set | Character column to index. Exactly one full-text column is currently supported. |
-| `fields.<column>.pk-full-text.index.options` | Not set | JSON object containing native analyzer options. Unqualified keys are scoped to `full-text`. |
-| `pk-fm.index.columns` | Not set | Comma-separated character columns which own independent exact FM indexes. |
-| `fields.<column>.pk-fm.index.options` | Not set | JSON object containing FM build and read options. Unqualified keys are scoped to `fm-index`. |
-| `pk-btree.index.columns` | Not set | Comma-separated columns which own independent BTree indexes. |
-| `fields.<column>.pk-btree.index.options` | Not set | JSON object containing BTree build options. Unqualified keys are scoped to `btree-index`. |
-| `pk-bitmap.index.columns` | Not set | Comma-separated columns which own independent Bitmap indexes. |
-| `fields.<column>.pk-bitmap.index.options` | Not set | JSON object containing Bitmap build options. Unqualified keys are scoped to `bitmap-index`. |
-| `pk-multivalue.index.columns` | Not set | Comma-separated `ARRAY` columns which own independent Multivalue indexes. |
-| `fields.<column>.pk-multivalue.index.options` | Not set | JSON object containing Multivalue build options. Unqualified keys are scoped to `multivalue-index`. |
+| `global-index.<type>.index-columns` | Not set | Comma-separated columns, each owning an independent index. Types include `btree`, `bitmap`, `multivalue`, `fm`, `full-text`, and actual ANN implementations such as `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, or `diskann`. |
+| `fields.<column>.index-options` | Not set | JSON object of field overrides. Short keys are scoped to the selected implementation; for example, `{"nlist":64,"distance.metric":"cosine"}` for IVF-PQ. |
+| `<type>.dimension` | Implementation default | Vector dimension for the selected ANN implementation. A fixed-length `VECTOR` column also carries its dimension in the schema. |
+| `<type>.distance.metric` | `inner_product` | Vector distance metric: `l2`, `cosine`, or `inner_product`. Field overrides take precedence. |
 | `multivalue-index.dictionary-block-size` | `16 kb` | Target dictionary block size. |
 | `multivalue-index.compression` | `none` | Dictionary-block compression algorithm. |
 | `multivalue-index.compression-level` | `1` | Dictionary-block compression level. |
 | `global-index.search-mode` | Not set | Legacy fallback search mode. Family-specific options take precedence. |
 | `vector-index.search-mode` | `fast` | Search mode for primary-key Vector queries. `full` and `detail` search uncovered files exactly. |
 | `full-text-index.search-mode` | `fast` | Search mode for primary-key Full Text queries. Only `fast` is currently supported. |
+
+The plural `index-columns` spelling takes precedence over the singular
+`global-index.<type>.index-column` alias. Both take precedence over legacy
+`pk-<family>.index.columns` declarations. For legacy Vector configurations,
+`pk-vector.index.columns` and `fields.<column>.pk-vector.index.type` remain supported;
+a declaration such as `global-index.ivf-pq.index-columns` supplies the implementation
+directly and takes precedence over the legacy Vector declaration.
+
+Legacy `fields.<column>.pk-<family>.index.options` and
+`fields.<column>.pk-vector.distance.metric` remain supported. When present,
+`fields.<column>.index-options` replaces the legacy JSON option object. Its values
+override existing field parameters such as `fields.embedding.nlist`, then
+implementation-level defaults such as `ivf-pq.nlist`. Short JSON keys use
+`btree-index.`, `bitmap-index.`, `multivalue-index.`, `fm-index.`,
+`full-text.`, or the actual ANN implementation prefix.
 
 For algorithm-specific options, see the corresponding
 [BTree](../multimodal-table/global-index/btree),

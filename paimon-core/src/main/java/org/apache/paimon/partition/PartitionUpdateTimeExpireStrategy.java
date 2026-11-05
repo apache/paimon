@@ -25,6 +25,7 @@ import org.apache.paimon.types.RowType;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -36,17 +37,29 @@ public class PartitionUpdateTimeExpireStrategy extends PartitionExpireStrategy {
 
     private static final long serialVersionUID = 1L;
 
+    private final boolean retainLatest;
+
     public PartitionUpdateTimeExpireStrategy(CoreOptions options, RowType partitionType) {
         super(partitionType, options.partitionDefaultName());
+        this.retainLatest = options.partitionExpireRetainLatest();
     }
 
     @Override
     public List<PartitionEntry> selectExpiredPartitions(
             FileStoreScan scan, LocalDateTime expirationTime) {
+        List<PartitionEntry> partitions = scan.readPartitionEntries();
         long expirationMilli =
                 expirationTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        return scan.readPartitionEntries().stream()
-                .filter(partitionEntry -> expirationMilli > partitionEntry.lastFileCreationTime())
-                .collect(Collectors.toList());
+        List<PartitionEntry> expired =
+                partitions.stream()
+                        .filter(entry -> expirationMilli > entry.lastFileCreationTime())
+                        .collect(Collectors.toList());
+        if (retainLatest) {
+            retainLatestPartition(
+                    partitions,
+                    expired,
+                    Comparator.comparingLong(PartitionEntry::lastFileCreationTime));
+        }
+        return expired;
     }
 }

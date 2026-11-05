@@ -664,6 +664,164 @@ class LeRobotValidationTest(unittest.TestCase):
                 finally:
                     decoder.close()
 
+    @unittest.skipUnless(
+        av is not None and importlib.util.find_spec("torch") is not None,
+        "PyAV and Torch are required for video decoding",
+    )
+    def test_indexed_pyav_decoder_reuses_session_across_batches(self):
+        output = io.BytesIO()
+        with av.open(output, mode="w", format="mp4") as container:
+            stream = container.add_stream("libx264", rate=30)
+            stream.width = stream.height = 32
+            stream.pix_fmt = "yuv420p"
+            stream.options = {"x264-params":
+                              "keyint=12:min-keyint=12:scenecut=0:bframes=2:threads=1"}
+            for ordinal in range(48):
+                frame = av.VideoFrame.from_ndarray(
+                    np.full((32, 32, 3), ordinal * 4, dtype=np.uint8),
+                    format="rgb24")
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+        payload = output.getvalue()
+        index = VideoKeyframeIndex.inspect(io.BytesIO(payload), len(payload))
+        with av.open(io.BytesIO(payload)) as container:
+            expected = [frame.to_ndarray(format="rgb24")
+                        for frame in container.decode(video=0)]
+
+        source = io.BytesIO(payload)
+        decoder = _PyAVVideoDecoder(source, index, thread_count=1)
+        inputs = []
+        original_open = av.open
+
+        def open_container(value):
+            inputs.append(value)
+            return original_open(value)
+
+        try:
+            with patch.object(av, "open", side_effect=open_container):
+                for indices in ([31, 0, 12, 31], [45, 2, 17, 45], [0, 47, 1]):
+                    actual = decoder.get_frames_at(indices=indices).data
+                    np.testing.assert_array_equal(
+                        np.stack([expected[i] for i in indices]),
+                        actual.permute(0, 2, 3, 1).numpy())
+            self.assertEqual(1, len(inputs))
+            self.assertFalse(inputs[0].closed)
+            self.assertEqual([], inputs[0]._segments)
+        finally:
+            decoder.close()
+        self.assertTrue(inputs[0].closed)
+        self.assertEqual([], inputs[0]._segments)
+        self.assertIsNone(decoder._stream)
+        self.assertFalse(source.closed)
+
+    @unittest.skipUnless(av is not None, "PyAV is required")
+    def test_indexed_pyav_decoder_closes_failed_session_before_retry(self):
+        source = io.BytesIO(b"0123456789abcdef")
+        index = VideoKeyframeIndex([(0, 4)], [(0, 0, 4)])
+        decoder = _PyAVVideoDecoder(source, index)
+        inputs = []
+        containers = []
+
+        def open_container(value):
+            inputs.append(value)
+            container = Mock()
+            container.streams.video = [SimpleNamespace(thread_count=0)]
+            containers.append(container)
+            return container
+
+        with patch.object(av, "open", side_effect=open_container), patch.object(
+                decoder, "_decode_indexed_group", side_effect=ValueError("decode failed")) as decode:
+            with self.assertRaisesRegex(ValueError, "decode failed"):
+                decoder._decode_indexed([0])
+            self.assertTrue(inputs[0].closed)
+            containers[0].close.assert_called_once_with()
+
+            def read_group(container, stream, anchor, targets, decoded):
+                decoded[0] = b"frame"
+
+            decode.side_effect = read_group
+            self.assertEqual({0: b"frame"}, decoder._decode_indexed([0]))
+            self.assertEqual(2, len(inputs))
+            self.assertFalse(inputs[1].closed)
+        decoder.close()
+        decoder.close()
+        self.assertTrue(inputs[1].closed)
+        containers[1].close.assert_called_once_with()
+
+    @unittest.skipUnless(av is not None, "PyAV is required")
+    def test_indexed_plan_prefetches_requested_gops_with_bounded_lookahead(self):
+        source = io.BytesIO(b"")
+        source.video_length = 1000000
+        index = VideoKeyframeIndex(
+            [(900000, 100000)],
+            [(0, 0, 100000), (10, 10, 300000),
+             (20, 20, 500000), (30, 30, 700000)])
+        decoder = _PyAVVideoDecoder(source, index)
+        try:
+            self.assertEqual(({1: [12]}, [(300000, 232768)]),
+                             decoder._indexed_plan([12]))
+            self.assertEqual(({1: [19], 2: [20]}, [(300000, 432768)]),
+                             decoder._indexed_plan([19, 20]))
+            self.assertEqual(({0: [0], 3: [39]}, [(100000, 232768), (700000, 300000)]),
+                             decoder._indexed_plan([0, 39]))
+        finally:
+            decoder.close()
+
+    @unittest.skipUnless(av is not None, "PyAV is required")
+    def test_indexed_gop_boundary_avoids_extra_range_read(self):
+        output = io.BytesIO()
+        with av.open(output, mode="w", format="mp4") as container:
+            stream = container.add_stream("libx264", rate=30)
+            stream.width, stream.height = 160, 120
+            stream.pix_fmt = "yuv420p"
+            stream.options = {"x264-params":
+                              "keyint=12:min-keyint=12:scenecut=0:bframes=2:threads=1"}
+            rng = np.random.RandomState(12)
+            for ordinal in range(60):
+                frame = av.VideoFrame.from_ndarray(
+                    rng.randint(0, 256, (120, 160, 3), dtype=np.uint8),
+                    format="rgb24")
+                frame.pts, frame.time_base = ordinal, Fraction(1, 30)
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+        payload = output.getvalue()
+        index = VideoKeyframeIndex.inspect(io.BytesIO(payload), len(payload))
+        with av.open(io.BytesIO(payload)) as container:
+            expected = [frame.to_ndarray(format="rgb24")
+                        for frame in container.decode(video=0)]
+        for target in (23, 35):
+            counts = []
+            for lookahead in (False, True):
+                source = io.BytesIO(payload)
+                source.video_length = len(payload)
+                calls = []
+
+                def read_ranges(ranges):
+                    calls.extend(ranges)
+                    return [payload[start:start + size] for start, size in ranges]
+
+                source.video_read_ranges = read_ranges
+                decoder = _PyAVVideoDecoder(source, index)
+                if not lookahead:
+                    anchor = next(i for i, entry in enumerate(index.keyframes)
+                                  if entry[0] <= target < index.keyframes[i + 1][0])
+                    start = index.keyframes[anchor][2]
+                    end = index.keyframes[anchor + 1][2]
+                    decoder._indexed_plan = lambda indices: (
+                        {anchor: indices}, [(start, end - start)])
+                try:
+                    actual = decoder.get_frames_at(indices=[target]).data
+                    np.testing.assert_array_equal(
+                        expected[target], actual[0].permute(1, 2, 0).numpy())
+                    counts.append(len(calls))
+                finally:
+                    decoder.close()
+            self.assertLess(counts[1], counts[0])
+
     def test_default_video_backend_falls_back_on_os_error(self):
         stream = Mock()
         decoder = object()

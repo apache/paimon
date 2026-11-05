@@ -40,6 +40,7 @@ import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
@@ -53,6 +54,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -820,6 +822,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
         private void validate(BinaryRow partition) {
             Object[] array = partitionConverter.convert(partition);
+            RowType partitionType = partitionConverter.rowType();
+            for (int i = 0; i < array.length; i++) {
+                // DATE is stored as an epoch day, same as PartitionExpireStrategy#convertPartition.
+                if (array[i] != null
+                        && partitionType.getTypeAt(i).getTypeRoot() == DataTypeRoot.DATE) {
+                    array[i] = LocalDate.ofEpochDay((Integer) array[i]);
+                }
+            }
             try {
                 timeExtractor.extract(partitionKeys, Arrays.asList(array));
             } catch (DateTimeParseException e) {

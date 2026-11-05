@@ -137,6 +137,28 @@ public class ChainTableFileStoreTableTest {
                                                                                         keyRange))));
     }
 
+    @Test
+    public void testMetadataCopyDefersRuntimeValidation() throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable table = loadTable();
+        writeWithCommit(
+                table.switchToBranch(DELTA_BRANCH), row(1L, 1L, "value", "CN", "20250810", "20"));
+        Split split = table.newScan().plan().splits().get(0);
+        FileStoreTable invalid =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "missing"));
+        assertThat(invalid).isInstanceOf(ChainTableFileStoreTable.class);
+        assertThat(invalid.rowType()).isEqualTo(table.rowType());
+        assertThat(invalid.coreOptions().recordLevelTimeField()).isEqualTo("missing");
+        assertThatThrownBy(() -> invalid.newRead().createReader(split))
+                .hasStackTraceContaining("missing");
+        assertThatThrownBy(() -> invalid.newScan().plan()).hasMessageContaining("missing");
+        assertThatThrownBy(invalid::newStreamScan).hasMessageContaining("missing");
+        assertThatThrownBy(() -> invalid.newWrite("test")).hasMessageContaining("missing");
+        assertThatThrownBy(() -> invalid.newCommit("test")).hasMessageContaining("missing");
+    }
+
     @ParameterizedTest
     @MethodSource("filterPushdownParams")
     public void testFilterPushdownAcrossChainMerge(
@@ -837,6 +859,24 @@ public class ChainTableFileStoreTableTest {
                 .containsExactlyInAnyOrder(
                         row(1L, 2L, "CN", "CN", "20250810", "21"),
                         row(2L, 1L, "CN", "CN", "20250810", "21"));
+    }
+
+    @Test
+    public void testCopyWithoutQueryAuthPreservesChainBranches() throws Exception {
+        createChainTableWithQueryAuth();
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::maskValueAndFilterKey));
+        FileStoreTable copied = table.copyWithoutQueryAuth();
+
+        assertThat(copied).isInstanceOf(ChainTableFileStoreTable.class);
+        assertThat(((ChainTableFileStoreTable) copied).other())
+                .isInstanceOf(ChainGroupReadTable.class);
+        assertThat(copied.coreOptions().queryAuthEnabled()).isFalse();
+        assertThat(getResult(copied, QUERIED_PARTITION))
+                .containsExactlyInAnyOrder(
+                        row(1L, 2L, "1-1", "CN", "20250810", "21"),
+                        row(2L, 1L, "2", "CN", "20250810", "21"),
+                        row(4L, 1L, "4", "CN", "20250810", "21"));
+        assertThat(table.coreOptions().queryAuthEnabled()).isTrue();
     }
 
     /**

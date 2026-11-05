@@ -18,8 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.format.debezium;
 
+import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
+import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -38,10 +41,12 @@ import io.debezium.time.MicroTime;
 import io.debezium.time.MicroTimestamp;
 import io.debezium.time.Timestamp;
 import io.debezium.time.ZonedTimestamp;
+import org.apache.avro.Conversions;
 import org.apache.avro.LogicalType;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.util.Utf8;
 import org.apache.kafka.connect.json.JsonConverterConfig;
@@ -58,9 +63,11 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
@@ -116,14 +123,29 @@ public class DebeziumSchemaUtils {
 
     public static String transformAvroRawValue(
             @Nullable String rawValue,
-            String debeziumType,
-            @Nullable String className,
+            Schema schema,
             TypeMapping typeMapping,
             Object origin,
             ZoneId serverTimeZone) {
 
-        if (rawValue != null && "bytes".equals(debeziumType) && className == null) {
-            return new String(((ByteBuffer) origin).array());
+        String debeziumType = schema.getFullName();
+        String className = schema.getProp(CONNECT_NAME_PROP);
+        LogicalType logicalType = schema.getLogicalType();
+        if (rawValue != null && logicalType instanceof LogicalTypes.Decimal) {
+            Conversions.DecimalConversion conversion = new Conversions.DecimalConversion();
+            BigDecimal decimal =
+                    schema.getType() == Schema.Type.BYTES
+                            ? conversion.fromBytes(
+                                    ((ByteBuffer) origin).duplicate(), schema, logicalType)
+                            : conversion.fromFixed((GenericFixed) origin, schema, logicalType);
+            return decimal.toPlainString();
+        }
+
+        if (rawValue != null && isPlainBinaryType(debeziumType, className) && logicalType == null) {
+            ByteBuffer buffer = ((ByteBuffer) origin).duplicate();
+            byte[] bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+            return Base64.getEncoder().encodeToString(bytes);
         }
 
         return transformRawValue(
@@ -134,6 +156,31 @@ public class DebeziumSchemaUtils {
                 () -> (ByteBuffer) ((GenericRecord) origin).get(Geometry.WKB_FIELD),
                 origin,
                 serverTimeZone);
+    }
+
+    /** Plain binary values, excluding logical types such as BIT, DECIMAL and geometry. */
+    public static boolean isPlainBinaryType(String debeziumType, @Nullable String schemaName) {
+        return "bytes".equals(debeziumType) && schemaName == null;
+    }
+
+    /** Collect Base64-encoded source fields, excluding computed and metadata output columns. */
+    public static Set<String> extractBase64EncodedFields(
+            DebeziumEvent.Field schema,
+            List<ComputedColumn> computedColumns,
+            CdcMetadataConverter[] metadataConverters) {
+        Set<String> fields = new HashSet<>();
+        schema.beforeAndAfterFields()
+                .forEach(
+                        (name, field) -> {
+                            if (isPlainBinaryType(field.type(), field.name())) {
+                                fields.add(name);
+                            }
+                        });
+        computedColumns.forEach(column -> fields.remove(column.columnName()));
+        for (CdcMetadataConverter converter : metadataConverters) {
+            fields.remove(converter.columnName());
+        }
+        return fields;
     }
 
     /** Transform raw string value according to schema. */
@@ -164,9 +211,10 @@ public class DebeziumSchemaUtils {
             } else {
                 transformed = Base64.getEncoder().encodeToString(bigEndian);
             }
-        } else if (("bytes".equals(debeziumType) && className == null)) {
-            // MySQL binary, varbinary, blob
-            transformed = new String(Base64.getDecoder().decode(rawValue));
+        } else if (isPlainBinaryType(debeziumType, className)) {
+            // Keep binary values in Base64 until the sink converts them to bytes. The parser
+            // marks these fields in CdcRecord, without changing other CDC string conversions.
+            transformed = rawValue;
         } else if ("bytes".equals(debeziumType) && className.endsWith(decimalLogicalName())) {
             // MySQL numeric, fixed, decimal
             try {

@@ -410,11 +410,15 @@ public class LocalOrphanFilesCleanTest {
             Map<Long, List<TestPojo>> snapshotData,
             Map<Long, List<InternalRow>> changelogData)
             throws Exception {
+        // Deleted tags can leave additional orphan files beyond the manually added ones.
         assertThat(deleteFiles.stream().map(p -> p.toUri().getPath()))
-                .containsExactlyInAnyOrderElementsOf(
+                .containsAll(
                         manuallyAddedFiles.stream()
                                 .map(p -> p.toUri().getPath())
                                 .collect(Collectors.toList()));
+        for (Path path : deleteFiles) {
+            assertThat(fileIO.exists(path)).as("Deleted orphan file %s", path).isFalse();
+        }
 
         Set<Snapshot> snapshots = new HashSet<>();
         table.snapshotManager().snapshots().forEachRemaining(snapshots::add);

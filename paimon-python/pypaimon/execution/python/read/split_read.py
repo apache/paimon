@@ -1757,6 +1757,21 @@ class DataEvolutionSplitRead(SplitRead):
                 if not field.type.nullable:
                     raise ValueError(f"Field {field} is not null but can't find any file contains it.")
 
+        if not any(reader is not None for reader in file_record_readers):
+            # A projection of newly added columns still has one NULL per live
+            # row. Use a normal file's row IDs as the cardinality anchor, without
+            # reading unrelated BLOBs, and retain range/deletion filtering.
+            anchor = next(file for file in need_merge_files
+                          if not DataFileMeta.is_blob_file(file.file_name)
+                          and not DataFileMeta.is_vector_file(file.file_name))
+            saved_fields = self.read_fields
+            try:
+                self.read_fields = [SpecialFields.ROW_ID]
+                file_record_readers[0] = self._create_file_reader(
+                    anchor, [SpecialFields.ROW_ID.name], deletion_vector)
+            finally:
+                self.read_fields = saved_fields
+
         # Bunch readers use runtime nullability after schema evolution. Keep
         # the same nested types when assembling their columns into one batch.
         output_schema = read_arrow_schema(all_read_fields)

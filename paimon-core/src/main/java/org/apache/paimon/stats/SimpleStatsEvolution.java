@@ -45,6 +45,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /** Converter for array of {@link SimpleColStats}. */
 public class SimpleStatsEvolution {
 
+    private final RowType dataRowType;
     private final List<String> fieldNames;
     @Nullable private final int[] indexMapping;
     @Nullable private final CastFieldGetter[] castFieldGetters;
@@ -58,12 +59,18 @@ public class SimpleStatsEvolution {
             RowType rowType,
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castFieldGetters) {
+        this.dataRowType = rowType;
         this.fieldNames = rowType.getFieldNames();
         this.indexMapping = indexMapping;
         this.castFieldGetters = castFieldGetters;
         this.indexMappings = new ConcurrentHashMap<>();
         this.emptyValues = new GenericRow(fieldNames.size());
         this.emptyNullCounts = new GenericArray(new Object[fieldNames.size()]);
+    }
+
+    /** The row type of the files whose statistics this evolution reads, before any cast. */
+    public RowType dataRowType() {
+        return dataRowType;
     }
 
     public InternalRow evolution(InternalRow row, @Nullable List<String> denseFields) {

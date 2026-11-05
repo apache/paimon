@@ -258,6 +258,11 @@ class NativeTableScan:
         options = scan.table.options.options
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         unsupported_scan_keys = set(SCAN_KEYS) - _NATIVE_TIME_TRAVEL_OPTIONS
+        # Snapshot/tag ranges and explicit incremental modes use the Python scanner.
+        unsupported_scan_keys.update((
+            CoreOptions.INCREMENTAL_BETWEEN.key(), CoreOptions.INCREMENTAL_BETWEEN_SCAN_MODE.key(),
+            CoreOptions.INCREMENTAL_TO_AUTO_TAG.key(),
+        ))
         return not any(options.contains_key(k) for k in unsupported_scan_keys)
 
     def _native_global_index_result_supported(self, request: Optional[ScanRequest] = None) -> bool:

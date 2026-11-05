@@ -278,8 +278,12 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
         }
 
         // generate values of computed columns
+        Set<String> base64EncodedFields =
+                computedColumns.isEmpty() ? Collections.emptySet() : extractBase64EncodedFields();
         for (ComputedColumn computedColumn : computedColumns) {
-            resultMap.put(computedColumn.columnName(), computedColumn.evalFromRecord(resultMap));
+            resultMap.put(
+                    computedColumn.columnName(),
+                    computedColumn.evalFromRecord(resultMap, base64EncodedFields));
 
             // remember the computed column data type for later reference by other computed columns
             schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
@@ -294,8 +298,16 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
         return resultMap;
     }
 
+    private Set<String> extractBase64EncodedFields() {
+        return DebeziumSchemaUtils.extractBase64EncodedFields(
+                root.schema(), computedColumns, metadataConverters);
+    }
+
     protected RichCdcMultiplexRecord createRecord(RowKind rowKind, Map<String, String> data) {
         return new RichCdcMultiplexRecord(
-                databaseName, currentTable, null, new CdcRecord(rowKind, data));
+                databaseName,
+                currentTable,
+                null,
+                CdcRecord.withBase64EncodedFields(rowKind, data, extractBase64EncodedFields()));
     }
 }

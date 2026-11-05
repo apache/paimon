@@ -53,11 +53,17 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
                   |  (4, array(4.0f, 0.0f))
                   |""".stripMargin)
 
-      val builder = new SparkVectorSearchBuilderImpl(loadTable("T"))
+      val table = loadTable("T").copy(
+        Map(
+          s"global-index.${TestVectorGlobalIndexerFactory.IDENTIFIER}.index-columns" -> "",
+          "global-index.future-vector.index-columns" -> "embedding").asJava)
+      val builder = new SparkVectorSearchBuilderImpl(table)
       builder
         .withVectorColumn("embedding")
         .withVector(Array(0.0f, 0.0f))
         .withLimit(2)
+        .withOption("future-vector.refine_factor", "invalid")
+        .withOption(s"${TestVectorGlobalIndexerFactory.IDENTIFIER}.refine_factor", "2")
 
       val jobGroup = s"primary-key-vector-${System.nanoTime()}"
       spark.sparkContext.setJobGroup(jobGroup, jobGroup)

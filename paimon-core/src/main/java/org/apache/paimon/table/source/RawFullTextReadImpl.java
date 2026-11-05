@@ -27,7 +27,6 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
@@ -211,8 +210,8 @@ class RawFullTextReadImpl {
             indexType = checkNotNull(fallbackIndexType);
         }
         GlobalIndexer globalIndexer =
-                GlobalIndexerFactoryUtils.load(indexType)
-                        .create(Collections.singletonList(textColumn), rawSearchOptions());
+                GlobalIndexer.create(
+                        indexType, Collections.singletonList(textColumn), rawSearchOptions());
         try {
             RawFullTextIndexFileWriter fileWriter = new RawFullTextIndexFileWriter(column);
             GlobalIndexWriter indexWriter = globalIndexer.createWriter(fileWriter);

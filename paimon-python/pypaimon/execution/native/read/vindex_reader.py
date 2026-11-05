@@ -20,6 +20,7 @@
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, _completed_future
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.globalindex.vindex_input import VindexReaderResources, _filter_bytes
+from pypaimon.execution.native.table import _options_to_native
 
 
 def _native_reader_type():
@@ -47,7 +48,7 @@ class NativeVindexVectorGlobalIndexReader(VindexReaderResources, GlobalIndexRead
     def _create_reader(self, index_input, file_path):
         return self._reader_type(
             index_input, file_path, self._io_meta.file_size,
-            {str(key): str(value) for key, value in self._options.items()})
+            _options_to_native(self._options))
 
     def visit_vector_search(self, vector_search):
         results = self._run_search(
@@ -71,7 +72,7 @@ class NativeVindexVectorGlobalIndexReader(VindexReaderResources, GlobalIndexRead
         self._ensure_loaded()
         results = self._reader.search(
             vectors, limit, filter_bytes=_filter_bytes(include_row_ids),
-            options={str(key): str(value) for key, value in (query_options or {}).items()})
+            options=_options_to_native(query_options or {}))
         return [DictBasedScoredIndexResult(scores) if scores else None for scores in results]
 
     def vector_metric(self):

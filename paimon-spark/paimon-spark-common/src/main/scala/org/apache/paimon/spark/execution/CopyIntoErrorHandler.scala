@@ -145,7 +145,8 @@ private[execution] class CopyIntoErrorHandler(
 
         val results = filesToLoad.map {
           fileStatus =>
-            val baseName = fileStatus.getPath.getName
+            val baseName = CopyIntoUtils.encodedBaseName(fileStatus)
+            val displayName = fileStatus.getPath.getName
             val fullPath = fileStatus.getPath.toString
 
             if (filesWithErrors.contains(baseName)) {
@@ -158,7 +159,7 @@ private[execution] class CopyIntoErrorHandler(
                 .orElse(errorResult.firstCastError.get(baseName))
 
               CopyIntoResultBuilder.buildResultRow(
-                baseName,
+                displayName,
                 "LOAD_FAILED",
                 0L,
                 errorResult.totalRowsPerFile.getOrElse(baseName, 0L),
@@ -177,7 +178,13 @@ private[execution] class CopyIntoErrorHandler(
                   rowsLoaded = rowCount
                 ))
 
-              CopyIntoResultBuilder.buildResultRow(baseName, "LOADED", rowCount, rowCount, 0L, null)
+              CopyIntoResultBuilder.buildResultRow(
+                displayName,
+                "LOADED",
+                rowCount,
+                rowCount,
+                0L,
+                null)
             }
         }.toSeq
 

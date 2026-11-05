@@ -640,7 +640,7 @@ public class SchemaManagerTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("pk-vector.index.columns", "embedding");
         options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
         Schema schema =
                 new Schema(
@@ -669,7 +669,7 @@ public class SchemaManagerTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "name");
+        options.put(CoreOptions.GLOBAL_INDEX_BTREE_INDEX_COLUMNS.key(), "name");
         Schema schema =
                 new Schema(
                         Arrays.asList(
@@ -696,7 +696,7 @@ public class SchemaManagerTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(), "content");
+        options.put(CoreOptions.GLOBAL_INDEX_FULL_TEXT_INDEX_COLUMNS.key(), "content");
         Schema schema =
                 new Schema(
                         Arrays.asList(
@@ -732,7 +732,7 @@ public class SchemaManagerTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_FM_INDEX_COLUMNS.key(), "content");
+        options.put(CoreOptions.GLOBAL_INDEX_FM_INDEX_COLUMNS.key(), "content");
         Schema schema =
                 new Schema(
                         Arrays.asList(
@@ -768,7 +768,7 @@ public class SchemaManagerTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "status");
+        options.put(CoreOptions.GLOBAL_INDEX_BITMAP_INDEX_COLUMNS.key(), "status");
         Schema schema =
                 new Schema(
                         Arrays.asList(
@@ -791,7 +791,7 @@ public class SchemaManagerTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "status");
+        options.put(CoreOptions.GLOBAL_INDEX_BITMAP_INDEX_COLUMNS.key(), "status");
         Schema schema =
                 new Schema(
                         Arrays.asList(
@@ -818,7 +818,7 @@ public class SchemaManagerTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "tags");
+        options.put(CoreOptions.GLOBAL_INDEX_MULTIVALUE_INDEX_COLUMNS.key(), "tags");
         Schema schema =
                 new Schema(
                         Arrays.asList(

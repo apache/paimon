@@ -74,6 +74,11 @@ table = SimpleNamespace(
     options=options, identifier='db.table', is_primary_key_table=False,
     field_dict={'embedding': DataField(0, 'embedding', ArrayType('ARRAY', AtomicType('FLOAT')))},
 )
+def copy_table(values):
+    copied = SimpleNamespace(**vars(table))
+    copied.options = CoreOptions(Options(dict(table.options.options.to_map(), **values)))
+    return copied
+table.copy_without_time_travel = copy_table
 # An empty Native result is a successful build/drop, never a Python fallback.
 with patch.object(native_index_build, 'native_runtime_available', return_value=True), \
         patch.object(native_index_build, '_rest_catalog_supported', return_value=True), \
@@ -93,15 +98,28 @@ assert native.build.call_count == 2 * (3 + len(VINDEX_IDENTIFIERS))
 import io
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.vector_search import VectorSearch
+from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.vindex_reader import VindexVectorGlobalIndexReader
 from pypaimon.execution.native.read import vindex_reader
+
+reader_options = {
+    'vindex.read.parallelism': 1,
+    'global-index.ivf-pq.index-column': 'embedding',
+    'pk-vector.index.columns': 'embedding',
+    'fields.embedding.pk-vector.index.type': 'ivf-pq',
+    'fields.embedding.index-options': '{"nlist":64}',
+    'opaque.enabled': True,
+}
+wire_options = dict(reader_options, **{'vindex.read.parallelism': '1', 'opaque.enabled': 'true'})
+query_options = {'ivf.nprobe': 3, 'fields.embedding.index-options': '{"refine_factor":4}',
+                 'index_type': 'ignored', 'opaque.query.option': 'preserved'}
 
 class RustReader:
     failure_phase = None
 
     def __init__(self, input_, file_path, file_size, options):
         assert input_.pread_many([(0, 1)]) == [b'x']
-        assert (file_path, file_size, options) == ('/indexes/file', 1, {'vindex.read.parallelism': '1'})
+        assert (file_path, file_size, options) == ('/indexes/file', 1, wire_options)
         if self.failure_phase == 'open':
             raise failure
 
@@ -111,7 +129,8 @@ class RustReader:
         return 'inner_product'
 
     def search(self, vectors, limit, filter_bytes=None, options=None):
-        assert limit == 2 and filter_bytes is None and options == {'ivf.nprobe': '3'}
+        assert limit == 2 and filter_bytes is None
+        assert options == dict(query_options, **{'ivf.nprobe': '3'})
         if self.failure_phase == 'search':
             raise failure
         return [{7: .5} for _ in vectors]
@@ -126,18 +145,21 @@ with patch.object(vindex_reader, '_native_reader_type', return_value=RustReader)
         stream = io.BytesIO(b'x')
         reader = VindexVectorGlobalIndexReader(
             SimpleNamespace(new_input_stream=lambda path: stream),
-            '/indexes', [GlobalIndexIOMeta('file', 1)], {'vindex.read.parallelism': 1})
+            '/indexes', [GlobalIndexIOMeta('file', 1)], reader_options)
         try:
             if phase is None:
                 assert reader.vector_metric() == 'inner_product'
                 result = reader.visit_vector_search(VectorSearch([1., 2.], 2, 'embedding',
-                                                               options={'ivf.nprobe': 3})).result()
+                                                               options=query_options)).result()
                 assert list(result.results()) == [7] and result.score_getter()(7) == .5
+                results = reader.visit_batch_vector_search(BatchVectorSearch(
+                    [[1., 2.], [2., 1.]], 2, 'embedding', options=query_options)).result()
+                assert [list(result.results()) for result in results] == [[7], [7]]
             else:
                 try:
                     if phase == 'search':
                         reader.visit_vector_search(VectorSearch([1., 2.], 2, 'embedding',
-                                                                options={'ivf.nprobe': 3}))
+                                                                options=query_options))
                     else:
                         reader.vector_metric()
                 except OSError as error:

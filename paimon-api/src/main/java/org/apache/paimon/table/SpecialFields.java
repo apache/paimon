@@ -102,6 +102,9 @@ public class SpecialFields {
                             ROW_ID.name())
                     .collect(Collectors.toSet());
 
+    public static final Set<String> ROW_TRACKING_FIELD_NAMES =
+            Stream.of(ROW_ID.name(), SEQUENCE_NUMBER.name()).collect(Collectors.toSet());
+
     public static boolean isSystemField(int fieldId) {
         return fieldId >= SYSTEM_FIELD_ID_START;
     }
