@@ -101,6 +101,45 @@ def test_overlapping_queries_read_each_file_once(table, projection):
     assert opened[0][1] == ((0, 2),)
 
 
+@pytest.mark.parametrize("table", [3], indirect=True)
+def test_disjoint_queries_keep_multi_file_lookup(table, tmp_path):
+    from shutil import copyfile
+    from pypaimon.read.table_read import TableRead
+
+    plan = source_plan(table)
+    source = plan.splits()[0].data_split
+    sources = [source]
+    for bucket in range(1, 4):
+        split = copy.deepcopy(source)
+        split._bucket = bucket
+        file = split.files[0]
+        path = tmp_path / ("bucket-%s" % bucket) / file.file_name
+        path.parent.mkdir()
+        copyfile(file.file_path, path)
+        file.file_path = str(path)
+        sources.append(split)
+
+    results = []
+    for pair in (sources[:2], sources[2:]):
+        positions = [result(plan.snapshot_id, split, [position]).positions[0]
+                     for position, split in enumerate(pair)]
+        results.append(PrimaryKeyScoredResult(plan.snapshot_id, pair, positions))
+    execution = query(table, 2, ["id"])
+    expected = [execution._read_global_index_result(item) for item in results]
+    to_arrow = TableRead.to_arrow
+    split_counts = []
+
+    def read(reader, splits):
+        split_counts.append(len(splits))
+        return to_arrow(reader, splits)
+
+    with patch.object(TableRead, "to_arrow", read):
+        actual = execution._read_batch_results(results)
+
+    assert [item.to_pylist() for item in actual] == [item.to_pylist() for item in expected]
+    assert split_counts == [2, 2]
+
+
 def test_post_filter_keeps_per_query_membership_and_limit(table):
     plan = source_plan(table)
     source = plan.splits()[0].data_split

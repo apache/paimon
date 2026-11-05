@@ -71,6 +71,10 @@ def read_primary_key_batch(query, results):
             selected.append((key, positions))
         selections.append(selected)
 
+    # Preserve per-query read parallelism when every file is selected once.
+    if len(groups) == sum(len(selected) for selected in selections):
+        return None
+
     lookup = copy(query)
     # A shared file may contain more rows than any individual query's Top-K.
     lookup._limit = None
@@ -90,7 +94,7 @@ def read_primary_key_batch(query, results):
             return None
         shared[key] = (rows, {position: index for index, position in enumerate(ordered)})
 
-    empty = _take(next(iter(shared.values()))[0], []) if shared else reader.to_arrow([])
+    empty = _take(next(iter(shared.values()))[0], [])
     output = []
     for selected in selections:
         parts = []
