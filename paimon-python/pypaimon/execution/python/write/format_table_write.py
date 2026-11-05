@@ -21,8 +21,11 @@ from collections import defaultdict
 from typing import Dict, List, Optional
 
 import pyarrow
+import pyarrow.fs as pafs
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.execution.python.read.format_table_scan import _is_data_file_name
+from pypaimon.execution.python.format_table_json import JsonWriter
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.format.format_commit_message import (
     FormatTableCommitMessage,
@@ -80,10 +83,32 @@ def _partition_from_row(
     return tuple(out)
 
 
-def _write_arrow(writer, data: pyarrow.Table) -> None:
+def _data_files_in_path(file_io, path: str) -> List[str]:
+    """The data files that an overwrite of the directory replaces, as _delete_data_files_in_path deletes them."""
+    try:
+        infos = file_io.list_status(path)
+    except Exception:
+        return []
+    files = []
+    for info in infos:
+        name = info.path.split("/")[-1] if "/" in info.path else info.path
+        if info.type == pafs.FileType.Directory:
+            files.extend(_data_files_in_path(file_io, info.path))
+        elif info.type == pafs.FileType.File and _is_data_file_name(name):
+            files.append(info.path)
+    return files
+
+
+def _write_arrow(writer, data: pyarrow.Table, execution: 'PythonFormatTableWrite') -> None:
     """Fan out through the public batch hook, including caller overrides."""
-    for batch in data.to_batches():
-        writer.write_arrow_batch(batch)
+    # A value the writer refuses in a later batch must fail the write before an earlier batch deletes any file.
+    execution._check_before_overwrite(data)
+    execution._checked = True
+    try:
+        for batch in data.to_batches():
+            writer.write_arrow_batch(batch)
+    finally:
+        execution._checked = False
 
 
 def _write_pandas(writer, df) -> None:
@@ -108,12 +133,15 @@ class PythonFormatTableWrite:
         )
         self._written_paths: List[str] = []
         self._overwritten_dirs: set = set()
+        self._checked = False
         opt = table.options().get(
             "format-table.partition-path-only-value", "false"
         )
         self._partition_only_value = opt.lower() == "true"
         self._file_format = table.format()
         options = CoreOptions.from_dict(table.options())
+        # As for the other formats, the files keep the partition columns, which the path cannot always hold.
+        self._text_writer = JsonWriter(table.fields, table.options()) if self._file_format == Format.JSON else None
         self._parquet_writer_options = (
             create_parquet_writer_options(options)
             if self._file_format == Format.PARQUET else {}
@@ -142,9 +170,25 @@ class PythonFormatTableWrite:
         }.get(self._file_format.value, ".parquet")
 
     def write_arrow(self, data: pyarrow.Table) -> None:
-        return _write_arrow(self, data)
+        return _write_arrow(self, data, self)
+
+    def _check_before_overwrite(self, data) -> None:
+        """Convert the input once before an overwrite deletes anything.
+
+        The text formats refuse some values, such as a CSV value with the row separator or a VECTOR with a null
+        element. An overwrite deletes a partition's files when it first writes to it, so such a value in a later
+        batch or partition would otherwise fail the write after earlier files are gone.
+        """
+        if not self._overwrite or self._text_writer is None or self._checked:
+            return
+        batches = data.to_batches() if isinstance(data, pyarrow.Table) else [data]
+        for batch in batches:
+            # A file's rows at a time, as the write converts them, whose output is dropped.
+            for chunk in self._chunks(batch):
+                self._text_writer.write(pyarrow.Table.from_batches([chunk]))
 
     def write_arrow_batch(self, data: pyarrow.RecordBatch) -> None:
+        self._check_before_overwrite(data)
         partition_keys = self.table.partition_keys
         if not partition_keys:
             part_spec = {}
@@ -196,33 +240,38 @@ class PythonFormatTableWrite:
                 )
             )
             if should_delete:
-                if self.table.file_io.exists(dir_path):
-                    from pypaimon.execution.python.write.format_table_commit import (
-                        _delete_data_files_in_path,
-                    )
-                    _delete_data_files_in_path(self.table.file_io, dir_path)
+                # The new files are written before the old ones are deleted, one file at a time. A failure deletes the
+                # new files written so far and leaves the old ones.
+                file_io = self.table.file_io
+                old_files = _data_files_in_path(file_io, dir_path) if file_io.exists(dir_path) else []
+                file_io.check_or_mkdirs(dir_path)
+                written = []
+                try:
+                    for chunk in self._chunks(data):
+                        written.append(self._write_raw(self._serialize(chunk), dir_path))
+                except BaseException:
+                    for path in written:
+                        self._written_paths.remove(path)
+                        file_io.delete(path, False)
+                    raise
+                for path in old_files:
+                    try:
+                        file_io.delete(path, False)
+                    except Exception:
+                        pass
                 self._overwritten_dirs.add(dir_path)
+                return
         self.table.file_io.check_or_mkdirs(dir_path)
+        for chunk in self._chunks(data):
+            self._write_raw(self._serialize(chunk), dir_path)
 
+    def _chunks(self, data: pyarrow.RecordBatch) -> List[pyarrow.RecordBatch]:
         if data.num_rows <= self._target_file_row_num:
-            self._write_file(data, dir_path)
-            return
+            return [data]
+        return [data.slice(offset, self._target_file_row_num)
+                for offset in range(0, data.num_rows, self._target_file_row_num)]
 
-        for offset in range(
-                0, data.num_rows, self._target_file_row_num):
-            self._write_file(
-                data.slice(offset, self._target_file_row_num),
-                dir_path,
-            )
-
-    def _write_file(
-        self,
-        data: pyarrow.RecordBatch,
-        dir_path: str,
-    ) -> None:
-        file_name = f"{self._data_file_prefix}{uuid.uuid4().hex}{self._suffix}"
-        path = f"{dir_path}/{file_name}"
-
+    def _serialize(self, data: pyarrow.RecordBatch) -> bytes:
         fmt = self._file_format
         tbl = pyarrow.Table.from_batches([data])
         if fmt == Format.PARQUET:
@@ -236,15 +285,7 @@ class PythonFormatTableWrite:
             csv.write_csv(tbl, buf)
             raw = buf.getvalue()
         elif fmt == Format.JSON:
-            import json
-            lines = []
-            for i in range(tbl.num_rows):
-                row = {
-                    tbl.column_names[j]: tbl.column(j)[i].as_py()
-                    for j in range(tbl.num_columns)
-                }
-                lines.append(json.dumps(row) + "\n")
-            raw = "".join(lines).encode("utf-8")
+            raw = self._text_writer.write(tbl)
         elif fmt == Format.ORC:
             import pyarrow.orc as orc
             buf = io.BytesIO()
@@ -276,11 +317,15 @@ class PythonFormatTableWrite:
             raw = "".join(lines).encode("utf-8")
         else:
             raise ValueError(f"Format table write not implemented for {fmt}")
+        return raw
 
+    def _write_raw(self, raw: bytes, dir_path: str) -> str:
+        path = f"{dir_path}/{self._data_file_prefix}{uuid.uuid4().hex}{self._suffix}"
         with self.table.file_io.new_output_stream(path) as out:
             out.write(raw)
 
         self._written_paths.append(path)
+        return path
 
     def prepare_commit(self) -> List[FormatTableCommitMessage]:
         return [

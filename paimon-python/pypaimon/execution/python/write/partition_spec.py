@@ -116,9 +116,10 @@ def _partition_spec_value(value, data_type):
         if re.fullmatch(r'-?[0-9]+', value):
             millis = int(value)
         else:
-            # Java parseTime permits partial clocks and adds a signed offset.
+            # Java parseTime permits partial clocks and adds a signed offset. The fraction takes the whitespace
+            # after it, which is stripped below, so that no two groups match the same spaces.
             match = re.fullmatch(r'[\x00-\x20]*([0-9]+)[\x00-\x20]*(?::[\x00-\x20]*([0-9]+)[\x00-\x20]*'
-                                 r'(?::[\x00-\x20]*([0-9]+)(?:\.([^+\-]*))?[\x00-\x20]*)?)?'
+                                 r'(?::[\x00-\x20]*([0-9]+)(?:\.([^+\-]*)|[\x00-\x20]*))?)?'
                                  r'(?:([+-])[\x00-\x20]*([0-9]+)[\x00-\x20]*'
                                  r'(?::[\x00-\x20]*([0-9]+)[\x00-\x20]*)?)?', value)
             if match is None:
