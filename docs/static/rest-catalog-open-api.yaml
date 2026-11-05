@@ -44,7 +44,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListModelsResponse'
-        "404": {description: Database not found}
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "501": {description: Models are not supported}
     post:
       tags: [model]
@@ -69,9 +70,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetModelResponse'
-        "400": {description: Invalid model metadata}
-        "404": {description: Database not found}
-        "409": {description: Model already exists}
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "409":
+          $ref: '#/components/responses/ModelAlreadyExistErrorResponse'
         "501": {description: Models are not supported}
   /v1/{prefix}/databases/{database}/models/{model}:
     get:
@@ -89,7 +93,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetModelResponse'
-        "404": {description: Database or model not found}
+        "404":
+          $ref: '#/components/responses/DatabaseOrModelNotExistErrorResponse'
         "501": {description: Models are not supported}
     delete:
       tags: [model]
@@ -101,7 +106,8 @@ paths:
         - {name: model, in: path, required: true, schema: {type: string}}
       responses:
         "200": {description: Model dropped}
-        "404": {description: Database or model not found}
+        "404":
+          $ref: '#/components/responses/DatabaseOrModelNotExistErrorResponse'
         "501": {description: Models are not supported}
   /v1/config:
     get:
@@ -2774,6 +2780,34 @@ components:
             resourceType: DATABASE
             resourceName: db
             code: 404
+    DatabaseOrModelNotExistErrorResponse:
+      description: >-
+        The database or model does not exist. resourceType is required and must
+        be DATABASE when the database is absent or MODEL when the model is absent.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - type: object
+                required: [ resourceType ]
+                properties:
+                  resourceType:
+                    type: string
+                    enum: [ "DATABASE", "MODEL" ]
+          examples:
+            databaseNotFound:
+              value:
+                message: The given database does not exist
+                resourceType: DATABASE
+                resourceName: db
+                code: 404
+            modelNotFound:
+              value:
+                message: The given model does not exist
+                resourceType: MODEL
+                resourceName: model
+                code: 404
     TableNotExistErrorResponse:
       description:
         Not Found - TableNotExistException, the table does not exist
@@ -2923,6 +2957,17 @@ components:
             message: The given function already exists
             resourceType: FUNCTION
             resourceName: function
+            code: 409
+    ModelAlreadyExistErrorResponse:
+      description: Conflict - The model already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: The given model already exists
+            resourceType: MODEL
+            resourceName: model
             code: 409
     ServerErrorResponse:
       description:
@@ -3146,7 +3191,7 @@ components:
           type: string
         resourceType:
           type: [ string, "null" ]
-          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "DEFINITION", "UNKNOWN", null ]
+          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "MODEL", "DEFINITION", "UNKNOWN", null ]
         resourceName:
           type: [ string, "null" ]
         code:
