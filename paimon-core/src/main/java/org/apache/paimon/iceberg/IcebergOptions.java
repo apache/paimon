@@ -109,7 +109,9 @@ public class IcebergOptions {
                                     + "when that is not possible. Replay applies to append tables "
                                     + "without deletion vectors or data evolution, with Iceberg "
                                     + "format version 2, and with the hive-catalog, table-location "
-                                    + "or hadoop-catalog storage type.");
+                                    + "or hadoop-catalog storage type. Replay publishes under "
+                                    + "the lock of the catalog, and fails when none is "
+                                    + "configured.");
 
     public static final ConfigOption<Integer> REPLAY_MAX_SNAPSHOTS =
             key("metadata.iceberg.replay.max-snapshots")

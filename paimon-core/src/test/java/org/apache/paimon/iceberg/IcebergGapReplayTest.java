@@ -81,12 +81,13 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.LongConsumer;
 import java.util.function.Predicate;
 import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
@@ -361,7 +362,9 @@ public class IcebergGapReplayTest {
                         "BASE_SELECTED:3",
                         "LISTS_READ:3",
                         "CANDIDATE_REJECTED:3",
-                        "REBUILD:10");
+                        "REBUILD:10",
+                        "BEFORE_WRITE:10",
+                        "LOCKED:10");
         assertThat(getIcebergResult())
                 .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, m));
         assertThat(difference(avroFiles(metadataFileNames(t.enabled)), avroFiles(before)))
@@ -391,7 +394,9 @@ public class IcebergGapReplayTest {
                         "BASE_SELECTED:3",
                         "LISTS_READ:3",
                         "COPIED:" + baseManifests,
-                        "REBUILD:" + n);
+                        "REBUILD:" + n,
+                        "BEFORE_WRITE:" + n,
+                        "LOCKED:" + n);
         IcebergMetadata rebuilt = readMetadata(t.enabled, n);
         assertThat(rebuilt.tableUuid()).isEqualTo(base.tableUuid());
         assertThat(rebuilt.lastColumnId()).isGreaterThanOrEqualTo(base.lastColumnId());
@@ -408,7 +413,7 @@ public class IcebergGapReplayTest {
                 t.identifier,
                 events,
                 NOTHING);
-        assertThat(events).containsExactly("REBUILD:" + n);
+        assertThat(events).containsExactly("REBUILD:" + n, "BEFORE_WRITE:" + n, "LOCKED:" + n);
         assertRebuilt(t, n, events, before);
 
         // every limit sends the replay to the rebuild
@@ -494,7 +499,7 @@ public class IcebergGapReplayTest {
             assertRebuilt(t, n, events, before);
         }
 
-        // a table with a primary key is not replayed
+        // a table with a primary key is not replayed, and needs no lock for the rebuild
         ReplayTable keyed =
                 new ReplayTable(
                         Collections.singletonList("k"),
@@ -504,9 +509,14 @@ public class IcebergGapReplayTest {
         keyed.append(keyed.enabled, 1);
         keyed.append(keyed.enabled, 2);
         keyed.gap(3, 4);
+        keyed.lock.absent = true;
         events = new ArrayList<>();
         keyed.replay(keyed.identifier, events, NOTHING);
-        assertThat(events).containsExactly("REBUILD:" + keyed.latest());
+        assertThat(events)
+                .containsExactly(
+                        "REBUILD:" + keyed.latest(),
+                        "BEFORE_WRITE:" + keyed.latest(),
+                        "LOCKED:" + keyed.latest());
         assertThat(versionFiles(keyed.enabled)).contains("v" + keyed.latest() + ".metadata.json");
 
         // the duration is also checked while the manifests of one snapshot are copied. Only the
@@ -742,41 +752,162 @@ public class IcebergGapReplayTest {
         assertThat(readVersionHint(t.enabled)).isEqualTo(hint);
         assertThat(getIcebergResult()).isEqualTo(shown);
 
+        // A rebuild, an incremental publication and the repair of a retry publish like the replay
+        // does. The head is replaced after the metadata is built, and the callback of the
+        // replacement publishes first: the old metadata must not be written over it.
+        t.append(t.enabled, 38);
+        t.gap(39, 40);
+        assertReplacedHeadIsNotOverwritten(
+                t,
+                Collections.singletonMap(
+                        IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(), "rebuild"),
+                101);
+        t.append(t.enabled, 41);
+        t.append(t.disabled, 42);
+        assertReplacedHeadIsNotOverwritten(t, Collections.emptyMap(), 102);
+
+        // the repair of a retry moves the hint only while its snapshot is the head
+        t.append(t.enabled, 43);
+        n = t.latest();
+        long repairedId = n;
+        Path hintFile = new Path(metadataPath(t.enabled, n).getParent(), "version-hint.text");
+        t.enabled.fileIO().overwriteFileUtf8(hintFile, String.valueOf(n - 1));
+        events = new ArrayList<>();
+        interruptOnce(
+                t,
+                t.identifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_WRITE,
+                -1,
+                () -> t.enabled.rollbackTo(repairedId - 1));
+        assertThat(events).contains("BEFORE_WRITE:" + n);
+        assertThat(readVersionHint(t.enabled)).isEqualTo(n - 1);
+
+        // nor once a newer snapshot has published: the hint is not moved back to the older one
+        t.append(t.enabled, 58);
+        long olderId = t.latest();
+        t.enabled.fileIO().overwriteFileUtf8(hintFile, String.valueOf(olderId - 1));
+        events = new ArrayList<>();
+        interruptOnce(
+                t,
+                t.identifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_WRITE,
+                -1,
+                () -> t.append(t.enabled, 59));
+        assertThat(events).contains("BEFORE_WRITE:" + olderId);
+        assertThat(t.latest()).isEqualTo(olderId + 1);
+        assertThat(readVersionHint(t.enabled)).isEqualTo(olderId + 1);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, olderId + 1));
+
         // A rollback waits while the metadata of the snapshot is published through the pointer
-        // of the catalog, and runs when it is done
+        // of the catalog, and runs when it is done. It does not matter which handle rolls back:
+        // the same table has handles with Iceberg metadata on and off.
         t.append(t.enabled, 35);
         t.gap(36, 37);
-        n = t.latest();
-        long lockedId = n;
-        events = new ArrayList<>();
-        ExecutorService rollbacks = Executors.newSingleThreadExecutor();
+        assertWaitsForPublication(t, id -> t.enabled.rollbackTo(id - 1));
+        assertThat(t.latest()).isEqualTo(readVersionHint(t.enabled) - 1);
+        t.append(t.enabled, 44);
+        t.gap(45, 46);
+        assertWaitsForPublication(t, id -> t.disabled.rollbackTo(id - 1));
+        assertThat(t.latest()).isEqualTo(readVersionHint(t.enabled) - 1);
+
+        // so does the change of the refs in the metadata of the head, which is written in place
+        t.append(t.enabled, 47);
+        t.gap(48, 49);
+        assertWaitsForPublication(t, id -> t.enabled.createTag("waited", id));
+        assertThat(t.latest()).isEqualTo(readVersionHint(t.enabled));
+        assertThat(readMetadata(t.enabled, t.latest()).refs()).containsKey("waited");
+
+        // a rebuild, an incremental publication and the repair of a retry hold the lock as well
+        t.append(t.enabled, 50);
+        t.gap(51, 52);
+        assertWaitsForPublication(
+                t,
+                Collections.singletonMap(
+                        IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(), "rebuild"),
+                id -> t.enabled.createTag("rebuilt", id));
+        t.append(t.enabled, 53);
+        t.append(t.disabled, 54);
+        assertWaitsForPublication(t, id -> t.enabled.createTag("extended", id));
+        t.append(t.enabled, 55);
+        t.enabled.fileIO().overwriteFileUtf8(hintFile, String.valueOf(t.latest() - 1));
+        assertWaitsForPublication(t, id -> t.enabled.createTag("repaired", id));
+        t.append(t.enabled, 56);
+        t.gap(57);
+        assertWaitsForPublication(t, id -> t.enabled.deleteTag("waited"));
+        assertThat(readMetadata(t.enabled, t.latest()).refs()).doesNotContainKey("waited");
+    }
+
+    /**
+     * A callback is paused right before it publishes the metadata of the head. A rollback and
+     * another commit replace the head, and the callback of that commit publishes. Then the paused
+     * callback goes on, and what the replacement published is left as it is.
+     */
+    private void assertReplacedHeadIsNotOverwritten(
+            ReplayTable t, Map<String, String> options, int replacementKey) throws Exception {
+        long n = t.latest();
+        List<String> events = new ArrayList<>();
+        interruptOnce(
+                t,
+                options,
+                t.identifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_WRITE,
+                -1,
+                () -> {
+                    t.enabled.rollbackTo(n - 1);
+                    t.append(t.disabled, replacementKey);
+                    t.replay(t.identifier, new ArrayList<>(), NOTHING);
+                });
+        assertThat(events).contains("BEFORE_WRITE:" + n);
+        assertThat(events).noneMatch(event -> event.startsWith("EXPOSED"));
+        assertThat(readVersionHint(t.enabled)).isEqualTo(n);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, n));
+    }
+
+    /**
+     * An operation on the table waits for a publication that is under way, and runs when it is
+     * done. It is given the id of the snapshot that is published.
+     */
+    private void assertWaitsForPublication(ReplayTable t, LongConsumer operation) throws Exception {
+        assertWaitsForPublication(t, Collections.emptyMap(), operation);
+    }
+
+    private void assertWaitsForPublication(
+            ReplayTable t, Map<String, String> options, LongConsumer operation) throws Exception {
+        long n = t.latest();
+        List<String> events = new ArrayList<>();
+        ExecutorService operations = Executors.newSingleThreadExecutor();
         try {
-            AtomicReference<Future<?>> rollback = new AtomicReference<>();
+            AtomicReference<Future<?>> waiting = new AtomicReference<>();
             interruptOnce(
                     t,
+                    options,
                     t.identifier,
                     events,
-                    IcebergCommitCallback.ReplayPoint.EXPOSED,
+                    IcebergCommitCallback.ReplayPoint.LOCKED,
                     -1,
                     () -> {
-                        rollback.set(rollbacks.submit(() -> t.enabled.rollbackTo(lockedId - 1)));
+                        waiting.set(operations.submit(() -> operation.accept(n)));
                         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
                         while (!t.lock.lock.hasQueuedThreads()) {
                             assertThat(System.nanoTime())
-                                    .as("the rollback waits")
+                                    .as("the operation waits")
                                     .isLessThan(deadline);
                             Thread.sleep(10);
                         }
-                        assertThat(rollback.get().isDone()).isFalse();
-                        assertThat(t.latest()).isEqualTo(lockedId);
+                        assertThat(waiting.get().isDone()).isFalse();
+                        assertThat(t.latest()).isEqualTo(n);
                     });
-            rollback.get().get(30, TimeUnit.SECONDS);
+            waiting.get().get(30, TimeUnit.SECONDS);
         } finally {
-            rollbacks.shutdownNow();
+            operations.shutdownNow();
         }
-        assertThat(events).contains("EXPOSED:" + n);
+        assertThat(events).contains("LOCKED:" + n);
         assertThat(readVersionHint(t.enabled)).isEqualTo(n);
-        assertThat(t.latest()).isEqualTo(n - 1);
     }
 
     /** Runs the replay and, the first time it reaches a point, does something else first. */
@@ -837,6 +968,7 @@ public class IcebergGapReplayTest {
         COPY_CUT_SHORT,
         COPY_CUT_AT_BLOCK,
         LOCK_UNAVAILABLE,
+        NO_LOCK,
         BEFORE_WRITE,
         AFTER_WRITE,
         CATALOG
@@ -911,6 +1043,10 @@ public class IcebergGapReplayTest {
                 case LOCK_UNAVAILABLE:
                     t.lock.unavailable = true;
                     break;
+                case NO_LOCK:
+                    // the catalog has no lock, so nothing keeps a rollback out of the publication
+                    t.lock.absent = true;
+                    break;
                 case CATALOG:
                     RecordingIcebergMetadataCommitter.failNextCommit = true;
                     break;
@@ -941,9 +1077,10 @@ public class IcebergGapReplayTest {
                             failure == Failure.COPY_CUT_SHORT
                                             || failure == Failure.COPY_CUT_AT_BLOCK
                                     ? "ended before the end of the file"
-                                    : "injected");
+                                    : failure == Failure.NO_LOCK ? "needs a lock" : "injected");
             fileIO.stopFailing();
             t.lock.unavailable = false;
+            t.lock.absent = false;
             RecordingIcebergMetadataCommitter.failNextCommit = false;
 
             // a failure is no reason to read the whole table
@@ -956,6 +1093,7 @@ public class IcebergGapReplayTest {
                 case COPY_CUT_SHORT:
                 case COPY_CUT_AT_BLOCK:
                 case LOCK_UNAVAILABLE:
+                case NO_LOCK:
                 case BASE_METADATA_UNREADABLE:
                 case BASE_LIST_UNREADABLE:
                 case DELTA_LIST_UNREADABLE:
@@ -1048,11 +1186,15 @@ public class IcebergGapReplayTest {
         }
     }
 
-    /** A table lock that a test can watch and make unavailable. */
+    /**
+     * A table lock that a test can watch, make unavailable, and take away. It is not reentrant, so
+     * an operation that takes it while it holds it waits, and the wait fails the test.
+     */
     private static class ReplayLock implements CatalogLockFactory {
 
-        private final ReentrantLock lock = new ReentrantLock();
+        private final Semaphore lock = new Semaphore(1);
         private volatile boolean unavailable;
+        private volatile boolean absent;
 
         @Override
         public String identifier() {
@@ -1066,14 +1208,20 @@ public class IcebergGapReplayTest {
                 String tableUuid,
                 String commitUser,
                 Options tableOptions) {
+            if (absent) {
+                // a catalog that has no lock
+                return Lock.empty();
+            }
             return new Lock() {
                 @Override
                 public AutoCloseable acquire() throws Exception {
                     if (unavailable) {
                         throw new IOException("injected lock failure");
                     }
-                    lock.lock();
-                    return lock::unlock;
+                    if (!lock.tryAcquire(30, TimeUnit.SECONDS)) {
+                        throw new IOException("the lock was not released in 30 seconds");
+                    }
+                    return lock::release;
                 }
 
                 @Override

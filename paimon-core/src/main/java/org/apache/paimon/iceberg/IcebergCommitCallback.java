@@ -379,32 +379,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 if (metadataMatchesSnapshot(snapshotId, snapshot)) {
                     // a retry repairs hint, pointer and files only while this snapshot is
                     // still the head; a replay of an older committable must not move them back
-                    Long latestForRepair = table.snapshotManager().latestSnapshotId();
-                    if (latestForRepair == null || latestForRepair != snapshotId) {
+                    Boolean repaired =
+                            publishUnderLock(snapshot, lock -> repairPublication(lock, snapshot));
+                    if (repaired == null || !repaired) {
                         return;
-                    }
-                    if (readVersionHint() != snapshotId) {
-                        table.fileIO()
-                                .overwriteFileUtf8(
-                                        new Path(
-                                                pathFactory.metadataDirectory(),
-                                                VERSION_HINT_FILENAME),
-                                        String.valueOf(snapshotId));
-                    }
-                    if (metadataCommitter != null) {
-                        // recommit the pointer (previous version as base, so a lagging
-                        // catalog advances) before retiring files it may still reference
-                        Path existingPath = pathFactory.toMetadataPath(snapshotId);
-                        Path basePath = pathFactory.toMetadataPath(snapshotId - 1);
-                        IcebergMetadata base =
-                                table.fileIO().exists(basePath)
-                                        ? IcebergMetadata.fromPath(table.fileIO(), basePath)
-                                        : null;
-                        commitToExternalCatalog(
-                                IcebergMetadata.fromPath(table.fileIO(), existingPath),
-                                existingPath,
-                                base,
-                                base == null ? null : basePath);
                     }
                     // a failed earlier attempt skipped the normal post-publication cleanup
                     deleteApplicableMetadataFiles(snapshotId);
@@ -502,6 +480,44 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /**
+     * Moves the hint and the pointer of the catalog to the metadata that a snapshot already has,
+     * when the snapshot is the head. Returns whether it is. Runs under {@link #publishUnderLock},
+     * where the head and the file are checked again: they may have changed since the caller looked.
+     */
+    private boolean repairPublication(Lock lock, Snapshot snapshot) throws IOException {
+        long snapshotId = snapshot.id();
+        Long latest = table.snapshotManager().latestSnapshotId();
+        if (latest == null
+                || latest != snapshotId
+                || !metadataMatchesSnapshot(snapshotId, snapshot)) {
+            return false;
+        }
+        lock.ensureValid();
+        if (readVersionHint() != snapshotId) {
+            table.fileIO()
+                    .overwriteFileUtf8(
+                            new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
+                            String.valueOf(snapshotId));
+        }
+        if (metadataCommitter != null) {
+            // recommit the pointer (previous version as base, so a lagging
+            // catalog advances) before retiring files it may still reference
+            Path existingPath = pathFactory.toMetadataPath(snapshotId);
+            Path basePath = pathFactory.toMetadataPath(snapshotId - 1);
+            IcebergMetadata base =
+                    table.fileIO().exists(basePath)
+                            ? IcebergMetadata.fromPath(table.fileIO(), basePath)
+                            : null;
+            commitToExternalCatalog(
+                    IcebergMetadata.fromPath(table.fileIO(), existingPath),
+                    existingPath,
+                    base,
+                    base == null ? null : basePath);
+        }
+        return true;
     }
 
     // -------------------------------------------------------------------------------------
@@ -664,33 +680,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         nextRowId,
                         refs);
 
-        Path metadataPath = pathFactory.toMetadataPath(snapshotId);
-        // atomic-first: where rename overwrites, a stale twin is replaced with no window at
-        // all; otherwise fall back to delete-then-write, the smallest window available
-        boolean written = table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
-        if (!written
-                && table.fileIO().exists(metadataPath)
-                && !metadataMatchesSnapshot(snapshotId, paimonSnapshot)) {
-            table.fileIO().deleteQuietly(metadataPath);
-            written = table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
-        }
-        if (!written && !metadataMatchesSnapshot(snapshotId, paimonSnapshot)) {
-            // no twin published this snapshot's metadata; fail so the commit retries
-            throw new IllegalStateException(
-                    "Failed to replace Iceberg metadata "
-                            + metadataPath
-                            + " for table "
-                            + table.name());
-        }
-        // a delayed callback may still write its metadata (a newer commit extends it), but
-        // only the current head may move the hint and the external catalog
-        Long latestAtPublish = table.snapshotManager().latestSnapshotId();
-        if (latestAtPublish != null && latestAtPublish == snapshotId) {
-            table.fileIO()
-                    .overwriteFileUtf8(
-                            new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
-                            String.valueOf(snapshotId));
-            commitToExternalCatalog(metadata, metadataPath, null, null);
+        // the metadata is built from the snapshot that was read above, and it is published only
+        // while that snapshot is still the one on disk
+        Publication publication =
+                publishUnderLock(
+                        paimonSnapshot,
+                        lock -> writeAndPoint(lock, paimonSnapshot, metadata, null, null));
+        if (publication != null && publication.head) {
             // cleanup only after the catalog serves the new head: a skipped or failed
             // publication must not delete files an external pointer still references
             expireAllBefore(snapshotId);
@@ -898,16 +894,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     /**
-     * Runs the part of a rollback that deletes snapshots. A table with Iceberg metadata does it
-     * under the lock that the publication of the metadata takes, so a rollback never happens
-     * between the last check of a snapshot and the publication of its metadata.
+     * Runs the part of a rollback that deletes snapshots under the lock that the publication of
+     * Iceberg metadata takes, so a rollback never happens between the last check of a snapshot and
+     * the publication of its metadata. It takes the lock whatever the Iceberg setting of the handle
+     * that rolls back is, because one table can have handles with Iceberg metadata on and off, and
+     * a rollback through any of them replaces snapshots.
      */
     public static void runRollback(FileStoreTable table, Runnable rollback) {
-        if (table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
-                == IcebergOptions.StorageType.DISABLED) {
-            rollback.run();
-            return;
-        }
         try {
             runUnderTableLock(
                     table,
@@ -919,6 +912,105 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /** Whether the commits of the table take a lock that keeps other writers and rollbacks out. */
+    private boolean tableLockCoordinates() {
+        SnapshotCommit lock =
+                table.catalogEnvironment()
+                        .snapshotCommit(table.snapshotManager(), table.coreOptions(), commitUser);
+        try {
+            return lock.isCoordinating();
+        } finally {
+            IOUtils.closeQuietly(lock);
+        }
+    }
+
+    /**
+     * Publishes metadata under the lock that the commits and the rollbacks of the table take.
+     * Everything that decides what readers see goes through here: the metadata file, the version
+     * hint and the pointer of the external catalog. The source is checked again under the lock, so
+     * a rollback or a recreation cannot replace the snapshot between that check and the
+     * publication. Building the metadata stays outside the lock, and so does the cleanup that
+     * follows.
+     *
+     * <p>Returns null, and does not run the publication, when the snapshot is not the one on disk
+     * any more. The files that were built for it are left to orphan cleanup.
+     */
+    @Nullable
+    private <T> T publishUnderLock(Snapshot source, LockedAction<T> publication)
+            throws IOException {
+        replayPoint(ReplayPoint.BEFORE_WRITE, source.id());
+        return runUnderTableLock(
+                table,
+                commitUser,
+                lock -> {
+                    if (!isCurrentSource(source)) {
+                        return null;
+                    }
+                    lock.ensureValid();
+                    replayPoint(ReplayPoint.LOCKED, source.id());
+                    return publication.run(lock);
+                });
+    }
+
+    /** Whether the Paimon snapshot on disk is still the one that the metadata is built from. */
+    private boolean isCurrentSource(Snapshot source) {
+        // the snapshot cache may still hold a rolled-back timeline under reused ids
+        table.snapshotManager().invalidateCache();
+        try {
+            Snapshot onDisk =
+                    SnapshotManager.tryFromPath(
+                            table.fileIO(), table.snapshotManager().snapshotPath(source.id()));
+            return commitIdentity(onDisk).equals(commitIdentity(source));
+        } catch (FileNotFoundException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Writes the metadata file of the snapshot and, when the snapshot is the head, moves the hint
+     * and the pointer of the external catalog to it. Runs under {@link #publishUnderLock}.
+     */
+    private Publication writeAndPoint(
+            Lock lock,
+            Snapshot snapshot,
+            IcebergMetadata metadata,
+            @Nullable IcebergMetadata baseMetadata,
+            @Nullable Path baseMetadataPath)
+            throws IOException {
+        long snapshotId = snapshot.id();
+        Path metadataPath = pathFactory.toMetadataPath(snapshotId);
+        // atomic-first: where rename overwrites, a stale twin is replaced with no window at
+        // all; otherwise fall back to delete-then-write, the smallest window available
+        boolean written = table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
+        if (!written
+                && table.fileIO().exists(metadataPath)
+                && !metadataMatchesSnapshot(snapshotId, snapshot)) {
+            table.fileIO().deleteQuietly(metadataPath);
+            written = table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
+        }
+        if (!written && !metadataMatchesSnapshot(snapshotId, snapshot)) {
+            // no twin published this snapshot's metadata; fail so the commit retries
+            throw new IllegalStateException(
+                    "Failed to replace Iceberg metadata "
+                            + metadataPath
+                            + " for table "
+                            + table.name());
+        }
+        // a delayed callback may still write its metadata (a newer commit extends it), but
+        // only the current head may move the hint and the external catalog
+        Long latest = table.snapshotManager().latestSnapshotId();
+        boolean head = latest != null && latest == snapshotId;
+        if (head) {
+            lock.ensureValid();
+            table.fileIO()
+                    .overwriteFileUtf8(
+                            new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
+                            String.valueOf(snapshotId));
+            commitToExternalCatalog(metadata, metadataPath, baseMetadata, baseMetadataPath);
+        }
+        return new Publication(head, true);
     }
 
     private static final class Publication {
@@ -1508,32 +1600,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         IcebergMetadata metadata = result.metadata;
         List<IcebergSnapshot> toExpireExceptLast = result.toExpireExceptLast;
 
-        Path metadataPath = pathFactory.toMetadataPath(snapshotId);
-        // atomic-first: see the no-base path
-        boolean written = table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
-        if (!written
-                && table.fileIO().exists(metadataPath)
-                && !metadataMatchesSnapshot(snapshotId, snapshot)) {
-            table.fileIO().deleteQuietly(metadataPath);
-            written = table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
-        }
-        if (!written && !metadataMatchesSnapshot(snapshotId, snapshot)) {
-            // no twin published this snapshot's metadata; fail so the commit retries
-            throw new IllegalStateException(
-                    "Failed to replace Iceberg metadata "
-                            + metadataPath
-                            + " for table "
-                            + table.name());
-        }
-        // a delayed callback may still write its metadata (a newer commit extends it), but
-        // only the current head may move the hint and the external catalog
-        Long latestAtPublish = table.snapshotManager().latestSnapshotId();
-        if (latestAtPublish != null && latestAtPublish == snapshotId) {
-            table.fileIO()
-                    .overwriteFileUtf8(
-                            new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
-                            String.valueOf(snapshotId));
-            commitToExternalCatalog(metadata, metadataPath, baseMetadata, baseMetadataPath);
+        Publication publication =
+                publishUnderLock(
+                        snapshot,
+                        lock ->
+                                writeAndPoint(
+                                        lock, snapshot, metadata, baseMetadata, baseMetadataPath));
+        if (publication != null && publication.head) {
             // cleanup only after the catalog serves the new head: a skipped or failed
             // publication must not delete files an external pointer still references
             deleteApplicableMetadataFiles(snapshotId);
@@ -2050,140 +2123,163 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     @Override
     public void notifyCreation(String tagName, long snapshotId) {
         try {
-            Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
-            if (latestSnapshot == null) {
-                LOG.info(
-                        "Latest Iceberg snapshot not found when creating tag {} for snapshot {}. Unable to create tag.",
-                        tagName,
-                        snapshotId);
-                return;
-            }
-
-            Path baseMetadataPath = pathFactory.toMetadataPath(latestSnapshot.id());
-            if (!table.fileIO().exists(baseMetadataPath)) {
-                LOG.info(
-                        "Iceberg metadata file {} not found when creating tag {} for snapshot {}. Unable to create tag.",
-                        baseMetadataPath,
-                        tagName,
-                        snapshotId);
-                return;
-            }
-
-            IcebergMetadata baseMetadata =
-                    IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
-
-            // Tags can only be included in Iceberg if they point to an Iceberg snapshot that
-            // exists. Otherwise an Iceberg client fails to parse the metadata and all reads fail.
-            boolean tagSnapshotInIceberg = false;
-            for (IcebergSnapshot snapshot : baseMetadata.snapshots()) {
-                if (snapshot.snapshotId() == snapshotId) {
-                    tagSnapshotInIceberg = true;
-                    break;
-                }
-            }
-
-            if (!tagSnapshotInIceberg) {
-                LOG.warn(
-                        "Snapshot {} does not exist in Iceberg metadata. Unable to create tag {}.",
-                        snapshotId,
-                        tagName);
-                return;
-            }
-
-            baseMetadata.refs().put(tagName, new IcebergRef(snapshotId));
-
-            IcebergMetadata metadata =
-                    new IcebergMetadata(
-                            baseMetadata.formatVersion(),
-                            baseMetadata.tableUuid(),
-                            baseMetadata.location(),
-                            baseMetadata.currentSnapshotId(),
-                            baseMetadata.lastColumnId(),
-                            baseMetadata.schemas(),
-                            baseMetadata.currentSchemaId(),
-                            baseMetadata.partitionSpecs(),
-                            baseMetadata.lastPartitionId(),
-                            baseMetadata.snapshots(),
-                            baseMetadata.currentSnapshotId(),
-                            baseMetadata.nextRowId(),
-                            baseMetadata.refs());
-
-            /*
-            Overwrite the latest metadata file
-            Currently the Paimon table snapshot id value is the same as the Iceberg metadata
-            version number. Tag creation overwrites the latest metadata file to maintain this.
-            There is no need to update the catalog after overwrite.
-             */
-            table.fileIO().overwriteFileUtf8(baseMetadataPath, metadata.toJson());
-            LOG.info(
-                    "Iceberg metadata file {} overwritten to add tag {} for snapshot {}.",
-                    baseMetadataPath,
-                    tagName,
-                    snapshotId);
-
+            // the file of the head is read, changed and written back under the lock, so no
+            // publication or rollback of the table interleaves. The callbacks of a tag have no
+            // commit user, and a lock can ask for one
+            runUnderTableLock(
+                    table,
+                    UUID.randomUUID().toString(),
+                    lock -> {
+                        addRef(lock, tagName, snapshotId);
+                        return null;
+                    });
         } catch (IOException e) {
             throw new UncheckedIOException(
                     "Failed to create tag " + tagName + " for table " + table.name(), e);
         }
     }
 
+    private void addRef(Lock lock, String tagName, long snapshotId) throws IOException {
+        table.snapshotManager().invalidateCache();
+        Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
+        if (latestSnapshot == null) {
+            LOG.info(
+                    "Latest Iceberg snapshot not found when creating tag {} for snapshot {}. Unable to create tag.",
+                    tagName,
+                    snapshotId);
+            return;
+        }
+
+        Path baseMetadataPath = pathFactory.toMetadataPath(latestSnapshot.id());
+        if (!table.fileIO().exists(baseMetadataPath)) {
+            LOG.info(
+                    "Iceberg metadata file {} not found when creating tag {} for snapshot {}. Unable to create tag.",
+                    baseMetadataPath,
+                    tagName,
+                    snapshotId);
+            return;
+        }
+
+        IcebergMetadata baseMetadata = IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
+
+        // Tags can only be included in Iceberg if they point to an Iceberg snapshot that
+        // exists. Otherwise an Iceberg client fails to parse the metadata and all reads fail.
+        boolean tagSnapshotInIceberg = false;
+        for (IcebergSnapshot snapshot : baseMetadata.snapshots()) {
+            if (snapshot.snapshotId() == snapshotId) {
+                tagSnapshotInIceberg = true;
+                break;
+            }
+        }
+
+        if (!tagSnapshotInIceberg) {
+            LOG.warn(
+                    "Snapshot {} does not exist in Iceberg metadata. Unable to create tag {}.",
+                    snapshotId,
+                    tagName);
+            return;
+        }
+
+        baseMetadata.refs().put(tagName, new IcebergRef(snapshotId));
+
+        IcebergMetadata metadata =
+                new IcebergMetadata(
+                        baseMetadata.formatVersion(),
+                        baseMetadata.tableUuid(),
+                        baseMetadata.location(),
+                        baseMetadata.currentSnapshotId(),
+                        baseMetadata.lastColumnId(),
+                        baseMetadata.schemas(),
+                        baseMetadata.currentSchemaId(),
+                        baseMetadata.partitionSpecs(),
+                        baseMetadata.lastPartitionId(),
+                        baseMetadata.snapshots(),
+                        baseMetadata.currentSnapshotId(),
+                        baseMetadata.nextRowId(),
+                        baseMetadata.refs());
+
+        /*
+        Overwrite the latest metadata file
+        Currently the Paimon table snapshot id value is the same as the Iceberg metadata
+        version number. Tag creation overwrites the latest metadata file to maintain this.
+        There is no need to update the catalog after overwrite.
+         */
+        lock.ensureValid();
+        table.fileIO().overwriteFileUtf8(baseMetadataPath, metadata.toJson());
+        LOG.info(
+                "Iceberg metadata file {} overwritten to add tag {} for snapshot {}.",
+                baseMetadataPath,
+                tagName,
+                snapshotId);
+    }
+
     @Override
     public void notifyDeletion(String tagName) {
         try {
-            Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
-            if (latestSnapshot == null) {
-                LOG.info(
-                        "Latest Iceberg snapshot not found when deleting tag {}. Unable to delete tag.",
-                        tagName);
-                return;
-            }
-
-            Path baseMetadataPath = pathFactory.toMetadataPath(latestSnapshot.id());
-            if (!table.fileIO().exists(baseMetadataPath)) {
-                LOG.info(
-                        "Iceberg metadata file {} not found when deleting tag {}. Unable to delete tag.",
-                        baseMetadataPath,
-                        tagName);
-                return;
-            }
-
-            IcebergMetadata baseMetadata =
-                    IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
-
-            baseMetadata.refs().remove(tagName);
-
-            IcebergMetadata metadata =
-                    new IcebergMetadata(
-                            baseMetadata.formatVersion(),
-                            baseMetadata.tableUuid(),
-                            baseMetadata.location(),
-                            baseMetadata.currentSnapshotId(),
-                            baseMetadata.lastColumnId(),
-                            baseMetadata.schemas(),
-                            baseMetadata.currentSchemaId(),
-                            baseMetadata.partitionSpecs(),
-                            baseMetadata.lastPartitionId(),
-                            baseMetadata.snapshots(),
-                            baseMetadata.currentSnapshotId(),
-                            baseMetadata.nextRowId(),
-                            baseMetadata.refs());
-
-            /*
-            Overwrite the latest metadata file
-            Currently the Paimon table snapshot id value is the same as the Iceberg metadata
-            version number. Tag creation overwrites the latest metadata file to maintain this.
-            There is no need to update the catalog after overwrite.
-             */
-            table.fileIO().overwriteFileUtf8(baseMetadataPath, metadata.toJson());
-            LOG.info(
-                    "Iceberg metadata file {} overwritten to delete tag {}.",
-                    baseMetadataPath,
-                    tagName);
-
+            runUnderTableLock(
+                    table,
+                    UUID.randomUUID().toString(),
+                    lock -> {
+                        removeRef(lock, tagName);
+                        return null;
+                    });
         } catch (IOException e) {
             throw new UncheckedIOException(
-                    "Failed to create tag " + tagName + " for table " + table.name(), e);
+                    "Failed to delete tag " + tagName + " for table " + table.name(), e);
         }
+    }
+
+    private void removeRef(Lock lock, String tagName) throws IOException {
+        table.snapshotManager().invalidateCache();
+        Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
+        if (latestSnapshot == null) {
+            LOG.info(
+                    "Latest Iceberg snapshot not found when deleting tag {}. Unable to delete tag.",
+                    tagName);
+            return;
+        }
+
+        Path baseMetadataPath = pathFactory.toMetadataPath(latestSnapshot.id());
+        if (!table.fileIO().exists(baseMetadataPath)) {
+            LOG.info(
+                    "Iceberg metadata file {} not found when deleting tag {}. Unable to delete tag.",
+                    baseMetadataPath,
+                    tagName);
+            return;
+        }
+
+        IcebergMetadata baseMetadata = IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
+
+        baseMetadata.refs().remove(tagName);
+
+        IcebergMetadata metadata =
+                new IcebergMetadata(
+                        baseMetadata.formatVersion(),
+                        baseMetadata.tableUuid(),
+                        baseMetadata.location(),
+                        baseMetadata.currentSnapshotId(),
+                        baseMetadata.lastColumnId(),
+                        baseMetadata.schemas(),
+                        baseMetadata.currentSchemaId(),
+                        baseMetadata.partitionSpecs(),
+                        baseMetadata.lastPartitionId(),
+                        baseMetadata.snapshots(),
+                        baseMetadata.currentSnapshotId(),
+                        baseMetadata.nextRowId(),
+                        baseMetadata.refs());
+
+        /*
+        Overwrite the latest metadata file
+        Currently the Paimon table snapshot id value is the same as the Iceberg metadata
+        version number. Tag creation overwrites the latest metadata file to maintain this.
+        There is no need to update the catalog after overwrite.
+         */
+        lock.ensureValid();
+        table.fileIO().overwriteFileUtf8(baseMetadataPath, metadata.toJson());
+        LOG.info(
+                "Iceberg metadata file {} overwritten to delete tag {}.",
+                baseMetadataPath,
+                tagName);
     }
 
     // -------------------------------------------------------------------------------------
@@ -2457,8 +2553,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         COPIED,
         /** A snapshot was replayed, the value is its snapshot id. */
         STEP_DONE,
-        /** The replayed metadata is complete, its file is not written yet. */
+        /** The metadata is complete, its file is not written yet. */
         BEFORE_WRITE,
+        /** A publication holds the table lock and checked its source, nothing is written yet. */
+        LOCKED,
         /** The metadata file of the replay is durable. */
         EXPOSED,
         /** The replay was dropped and nothing was written for the snapshot. */
@@ -2566,6 +2664,23 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     table.fullName(),
                     reason);
             return rebuild;
+        }
+        // A rollback can replace the snapshot after the last check of it and before the metadata
+        // is written, and only a lock that the rollbacks and the commits of the table take closes
+        // that. Without one the replay would publish metadata of the wrong timeline, and a
+        // rebuild would too, so neither is attempted.
+        if (!tableLockCoordinates()) {
+            throw new IllegalStateException(
+                    String.format(
+                            "%s = %s needs a lock that keeps the other commits and rollbacks of "
+                                    + "table %s out while its Iceberg metadata is published, and "
+                                    + "no lock is configured for it. Configure a lock for the "
+                                    + "catalog, or set %s = %s.",
+                            IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(),
+                            IcebergOptions.MissingBaseStrategy.REPLAY,
+                            table.fullName(),
+                            IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(),
+                            IcebergOptions.MissingBaseStrategy.REBUILD));
         }
         return new GapReplay(snapshot, collector, rebuild).run();
     }
@@ -3133,14 +3248,16 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         private void finish(IcebergMetadata result, Acquired acquired) throws IOException {
             keepOnlyReachable(result);
-            replayPoint(ReplayPoint.BEFORE_WRITE, snapshotId);
 
-            // Everything that decides what readers see is done under the lock that the commits
-            // and the rollback of the table take: the last check of the source, the version file,
-            // the hint and the pointer of the external catalog. A rollback cannot replace the
-            // snapshot in between. The copying and the checks of the history stay outside.
-            Publication publication =
-                    runUnderTableLock(table, commitUser, lock -> publish(lock, result));
+            // The last check of the source, the version file, the hint and the pointer of the
+            // external catalog are done under the lock that the commits and the rollbacks of the
+            // table take, like every other publication. The copying and the checks of the
+            // history stay outside.
+            Publication publication = publishUnderLock(snapshot, lock -> publish(lock, result));
+            if (publication == null) {
+                throw new ReplaySourceReplaced(
+                        "snapshot " + snapshotId + " is not the snapshot that was committed");
+            }
             if (!publication.ours) {
                 // another writer's metadata won; it owns its files, and ours are not reachable
                 exposing = false;
@@ -3155,10 +3272,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
 
         private Publication publish(Lock lock, IcebergMetadata result) throws IOException {
-            table.snapshotManager().invalidateCache();
-            verifySource(snapshot);
-            lock.ensureValid();
-
             Path metadataPath = pathFactory.toMetadataPath(snapshotId);
             exposing = true;
             IcebergMetadata durable = writeMetadataFile(metadataPath, result);
