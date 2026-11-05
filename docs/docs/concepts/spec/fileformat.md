@@ -155,6 +155,7 @@ Format Options:
 | `csv.escape-character` | `\` | String | The escape character for CSV format, must be single character. |
 | `csv.include-header` | false | Boolean | Whether to include header in CSV files. |
 | `csv.null-literal` | `""` | String | Null literal string that is interpreted as a null value (disabled by default). |
+| `csv.skip-empty-lines` | false | Boolean | Whether to skip empty lines when reading, the same way as Spark's CSV source. Only supported for format tables. A line is empty if nothing is left after `String#trim`, which removes spaces, tabs and other characters up to U+0020. By default such a line is read as a row of NULLs. Paimon itself writes a row whose values are all NULL as an empty line in a single-column table, or as a line of delimiters only (e.g. a tab), so such rows are also skipped when this option is enabled. |
 | `csv.mode` | `PERMISSIVE` | String | Allows a mode for dealing with corrupt records during reading. Currently supported values are `'PERMISSIVE'`, `'DROPMALFORMED'` and `'FAILFAST'`: <ul> <li>Option `'PERMISSIVE'` sets malformed fields to null.</li> <li>Option `'DROPMALFORMED'` ignores the whole corrupted records.</li> <li>Option `'FAILFAST'` throws an exception when it meets corrupted records.</li> </ul> |
 
 Paimon CSV format uses [jackson databind API](https://github.com/FasterXML/jackson-databind) to parse and generate CSV string.

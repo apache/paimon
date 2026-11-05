@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT Case for {@link ExpireChangelogsProcedure}. */
 public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
@@ -69,8 +70,9 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
         // expected changelogs (1, 2, 3, 4, 5, 6)
         checkChangelogs(changelogManager, 1, 6);
 
-        // retain_max => 8, expected changelogs (3, 4, 5, 6)
-        sql("CALL sys.expire_changelogs(`table` => 'default.word_count', retain_max => 8)");
+        // Override both bounds because the table minimum is 10. Expected changelogs (3, 4, 5, 6).
+        sql(
+                "CALL sys.expire_changelogs(`table` => 'default.word_count', retain_max => 8, retain_min => 1)");
         checkChangelogs(changelogManager, 3, 6);
 
         // older_than => timestamp of snapshot 10, max_deletes => 1, expected snapshots (3, 4, 5, 6)
@@ -78,7 +80,7 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
         sql(
                 "CALL sys.expire_changelogs(`table` => 'default.word_count', older_than => '"
                         + ts7
-                        + "', max_deletes => 1)");
+                        + "', max_deletes => 1, retain_min => 1)");
         checkChangelogs(changelogManager, 4, 6);
 
         // older_than => timestamp of snapshot 7, retain_min => 6, expected snapshots (5, 6)
@@ -92,7 +94,7 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
         sql(
                 "CALL sys.expire_changelogs(`table`  => 'default.word_count', older_than => '"
                         + ts7
-                        + "')");
+                        + "', retain_min => 1)");
         checkChangelogs(changelogManager, 6, 6);
 
         // prepare 2 more snapshots
@@ -106,7 +108,8 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
 
         // retain_max => 4, same as snapshot.num-retained.max
         // expected changelogs (8), retain 1 latest changelog at least
-        sql("CALL sys.expire_changelogs(`table` => 'default.word_count', retain_max => 4)");
+        sql(
+                "CALL sys.expire_changelogs(`table` => 'default.word_count', retain_max => 4, retain_min => 1)");
         checkChangelogs(changelogManager, 8, 8);
         checkBatchRead(12);
 
@@ -255,6 +258,160 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkAllDeleted(changelogManager);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testExpireChangelogsUsesTableRetention(boolean action) throws Exception {
+        ChangelogManager cm = prepareRetainedChangelogs();
+        sql(
+                "ALTER TABLE word_count SET ('changelog.num-retained.min'='4', "
+                        + "'changelog.num-retained.max'='8')");
+        if (action) {
+            createAction(
+                            ExpireChangelogsAction.class,
+                            "expire_changelogs",
+                            "--warehouse",
+                            path,
+                            "--database",
+                            "default",
+                            "--table",
+                            "word_count")
+                    .run();
+        } else {
+            assertThat(sql("CALL sys.expire_changelogs(`table` => 'default.word_count')"))
+                    .containsExactly(Row.of("2"));
+        }
+        checkChangelogs(cm, 3, 6);
+        assertThat(cm.safelyGetAllChangelogs()).hasSize(4);
+        checkBatchRead(10);
+    }
+
+    @Test
+    public void testExpireChangelogsPartialOverrides() throws Exception {
+        ChangelogManager cm = prepareRetainedChangelogs();
+        sql(
+                "ALTER TABLE word_count SET ('changelog.num-retained.min'='8', "
+                        + "'snapshot.expire.limit'='1')");
+        String olderThan =
+                new Timestamp(
+                                paimonTable("word_count")
+                                                .snapshotManager()
+                                                .latestSnapshot()
+                                                .timeMillis()
+                                        + 1000)
+                        .toString();
+        // Explicit max overrides table max=10; omitted min=8 and delete limit=1 are inherited.
+        sql(
+                "CALL sys.expire_changelogs(`table` => 'default.word_count', retain_max => 8, "
+                        + "older_than => '"
+                        + olderThan
+                        + "')");
+        checkChangelogs(cm, 2, 6);
+        // Override the delete limit, but still respect the table's minimum retention.
+        sql(
+                "CALL sys.expire_changelogs(`table` => 'default.word_count', retain_max => 8, "
+                        + "older_than => '"
+                        + olderThan
+                        + "', max_deletes => 10)");
+        checkChangelogs(cm, 3, 6);
+        // Inheriting min=8 makes an explicit max=7 invalid.
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CALL sys.expire_changelogs(`table` => 'default.word_count', retain_max => 7)"))
+                .hasStackTraceContaining("retainMax (7) must not be less than retainMin (8)");
+        checkChangelogs(cm, 3, 6);
+        // Explicit min and max override the table values for this invocation only.
+        sql(
+                "CALL sys.expire_changelogs(`table` => 'default.word_count', retain_max => 4, "
+                        + "retain_min => 1, older_than => '"
+                        + olderThan
+                        + "', max_deletes => 10)");
+        checkChangelogs(cm, 6, 6);
+        assertThat(paimonTable("word_count").options())
+                .containsEntry("changelog.num-retained.min", "8")
+                .containsEntry("changelog.num-retained.max", "10");
+        checkBatchRead(10);
+    }
+
+    @Test
+    public void testExpireChangelogsUsesTableTimeRetention() throws Exception {
+        ChangelogManager cm = prepareRetainedChangelogs();
+        sql(
+                "ALTER TABLE word_count SET ('changelog.num-retained.min'='4', "
+                        + "'changelog.time-retained'='0 ms')");
+        // max=10 alone would retain all ten versions; time retention must trigger cleanup.
+        sql("CALL sys.expire_changelogs(`table` => 'default.word_count')");
+        checkChangelogs(cm, 6, 6);
+        assertThat(cm.safelyGetAllChangelogs()).hasSize(1);
+        checkBatchRead(10);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testExpireChangelogsRejectsBlankOlderThan(boolean action) throws Exception {
+        ChangelogManager cm = prepareRetainedChangelogs();
+        // Make logs eligible for deletion so treating blank as omitted would be destructive.
+        sql(
+                "ALTER TABLE word_count SET ('changelog.num-retained.min'='4', "
+                        + "'changelog.num-retained.max'='8')");
+        for (String olderThan : new String[] {"", "   ", "\t\n"}) {
+            for (boolean deleteAll : new boolean[] {false, true}) {
+                assertThatThrownBy(
+                                () -> {
+                                    if (action) {
+                                        createAction(
+                                                        ExpireChangelogsAction.class,
+                                                        "expire_changelogs",
+                                                        "--warehouse",
+                                                        path,
+                                                        "--database",
+                                                        "default",
+                                                        "--table",
+                                                        "word_count",
+                                                        "--older_than",
+                                                        olderThan,
+                                                        "--delete_all",
+                                                        Boolean.toString(deleteAll))
+                                                .run();
+                                    } else {
+                                        sql(
+                                                "CALL sys.expire_changelogs(`table` => 'default.word_count', older_than => '"
+                                                        + olderThan
+                                                        + "', delete_all => "
+                                                        + deleteAll
+                                                        + ")");
+                                    }
+                                })
+                        .hasStackTraceContaining(
+                                "older_than must not be empty or whitespace-only when specified.");
+                checkChangelogs(cm, 1, 6);
+                assertThat(cm.safelyGetAllChangelogs()).hasSize(6);
+                for (long id = 1; id <= 6; id++) {
+                    assertThat(cm.longLivedChangelogExists(id)).isTrue();
+                }
+            }
+        }
+        checkSnapshots(paimonTable("word_count").snapshotManager(), 7, 10);
+        checkBatchRead(10);
+    }
+
+    private ChangelogManager prepareRetainedChangelogs() throws Exception {
+        sql(
+                "CREATE TABLE word_count (word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
+                        + " WITH ('num-sorted-run.compaction-trigger'='9999', 'changelog-producer'='input',"
+                        + " 'snapshot.num-retained.min'='4', 'snapshot.num-retained.max'='4',"
+                        + " 'changelog.num-retained.min'='10', 'changelog.num-retained.max'='10')");
+        for (int i = 0; i < 10; i++) {
+            sql("INSERT INTO word_count VALUES ('" + i + "', " + i + ")");
+        }
+        FileStoreTable table = paimonTable("word_count");
+        checkSnapshots(table.snapshotManager(), 7, 10);
+        ChangelogManager cm = table.changelogManager();
+        checkChangelogs(cm, 1, 6);
+        assertThat(cm.safelyGetAllChangelogs()).hasSize(6);
+        return cm;
     }
 
     private void checkSnapshots(SnapshotManager sm, int earliest, int latest) throws IOException {

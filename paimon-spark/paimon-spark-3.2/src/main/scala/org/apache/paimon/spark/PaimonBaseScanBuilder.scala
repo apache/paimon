@@ -29,7 +29,7 @@ import org.apache.paimon.table.Table
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.connector.read.{SupportsPushDownFilters, SupportsPushDownRequiredColumns}
-import org.apache.spark.sql.sources.Filter
+import org.apache.spark.sql.sources.{Filter, IsNotNull}
 import org.apache.spark.sql.types.StructType
 
 import java.util.{List => JList}
@@ -102,6 +102,13 @@ abstract class PaimonBaseScanBuilder
         } else {
           val predicate = converter.convertIgnoreFailure(filter)
           if (predicate == null) {
+            postScan.append(filter)
+          } else if (
+            coreOptions.queryAuthEnabled() && filter.isInstanceOf[IsNotNull] &&
+            predicate.visit(partitionPredicateVisitor)
+          ) {
+            // Spark infers null checks for joins. Masks can null partition keys, so evaluate
+            // these checks on visible rows instead of using them for physical pruning.
             postScan.append(filter)
           } else {
             pushable.append(filter)

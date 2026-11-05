@@ -352,11 +352,9 @@ public class ChainTablePartitionExpire implements PartitionExpire {
                     for (List<Map<String, String>> batch :
                             Lists.partition(partitionSpecs, expireBatchSize)) {
                         partitionModification.dropPartitions(batch);
-                        partitionModification.dropPartitions(toDonePartitions(batch));
                     }
                 } else {
                     partitionModification.dropPartitions(partitionSpecs);
-                    partitionModification.dropPartitions(toDonePartitions(partitionSpecs));
                 }
             } catch (Catalog.TableNotExistException e) {
                 throw new RuntimeException(e);
@@ -371,23 +369,6 @@ public class ChainTablePartitionExpire implements PartitionExpire {
                 dropPartitions(table, partitionSpecs);
             }
         }
-    }
-
-    private List<Map<String, String>> toDonePartitions(
-            List<Map<String, String>> expiredPartitions) {
-        List<Map<String, String>> donePartitions = new ArrayList<>(expiredPartitions.size());
-        for (Map<String, String> partition : expiredPartitions) {
-            LinkedHashMap<String, String> donePartition = new LinkedHashMap<>(partition);
-            Map.Entry<String, String> lastEntry = null;
-            for (Map.Entry<String, String> entry : donePartition.entrySet()) {
-                lastEntry = entry;
-            }
-            if (lastEntry != null) {
-                donePartition.put(lastEntry.getKey(), lastEntry.getValue() + ".done");
-                donePartitions.add(donePartition);
-            }
-        }
-        return donePartitions;
     }
 
     private Map<BinaryRow, List<BinaryRow>> groupByGroupKey(List<PartitionEntry> partitionEntries) {

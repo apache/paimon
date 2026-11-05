@@ -53,6 +53,11 @@ import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
+import static org.apache.paimon.predicate.PredicateBuilder.andNullable;
+import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateReferencingFields;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.table.SpecialFields.ROW_TRACKING_FIELD_NAMES;
+
 /** {@link FileStoreTable} for append table. */
 public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
@@ -108,7 +113,16 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     protected BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer() {
-        return (scan, predicate) -> ((AppendOnlyFileStoreScan) scan).withFilter(predicate);
+        if (!coreOptions().rowTrackingEnabled() || coreOptions().dataEvolutionEnabled()) {
+            return (scan, predicate) -> ((AppendOnlyFileStoreScan) scan).withFilter(predicate);
+        }
+        // File stats have no row ids and sequence numbers, leave filters on them to the reader.
+        return (scan, predicate) ->
+                ((AppendOnlyFileStoreScan) scan)
+                        .withFilter(
+                                andNullable(
+                                        excludePredicateReferencingFields(
+                                                splitAnd(predicate), ROW_TRACKING_FIELD_NAMES)));
     }
 
     @Override

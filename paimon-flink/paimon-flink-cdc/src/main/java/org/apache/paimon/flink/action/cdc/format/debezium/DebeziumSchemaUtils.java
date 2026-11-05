@@ -18,8 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.format.debezium;
 
+import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
+import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -60,9 +63,11 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
@@ -156,6 +161,26 @@ public class DebeziumSchemaUtils {
     /** Plain binary values, excluding logical types such as BIT, DECIMAL and geometry. */
     public static boolean isPlainBinaryType(String debeziumType, @Nullable String schemaName) {
         return "bytes".equals(debeziumType) && schemaName == null;
+    }
+
+    /** Collect Base64-encoded source fields, excluding computed and metadata output columns. */
+    public static Set<String> extractBase64EncodedFields(
+            DebeziumEvent.Field schema,
+            List<ComputedColumn> computedColumns,
+            CdcMetadataConverter[] metadataConverters) {
+        Set<String> fields = new HashSet<>();
+        schema.beforeAndAfterFields()
+                .forEach(
+                        (name, field) -> {
+                            if (isPlainBinaryType(field.type(), field.name())) {
+                                fields.add(name);
+                            }
+                        });
+        computedColumns.forEach(column -> fields.remove(column.columnName()));
+        for (CdcMetadataConverter converter : metadataConverters) {
+            fields.remove(converter.columnName());
+        }
+        return fields;
     }
 
     /** Transform raw string value according to schema. */

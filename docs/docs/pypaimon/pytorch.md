@@ -90,8 +90,30 @@ Each sample uses the specified aliases in projection order. These requests
 materialize their Arrow result in memory when the dataset is constructed,
 including on Data Evolution tables. Indexing preserves the requested order
 and duplicate indices. Values and supported reads follow `to_arrow`, including
-its table, format, and authorization restrictions. VARIANT extraction
-expressions still require streaming.
+its table, format, and authorization restrictions.
+
+Map-style row datasets also support the existing float32 `variant_get` and
+`try_variant_get` projections, including mixtures with ordinary columns and
+nested paths:
+
+```python
+read_builder = table.new_read_builder().with_projection({
+    "user_id": "id",
+    "score": "try_variant_get(payload, '$.score', 'float')",
+})
+splits = read_builder.new_scan().plan().splits()
+dataset = read_builder.new_read().to_torch(splits, streaming=False, batch_format="row")
+sample = dataset[0]
+samples = dataset.__getitems__([2, 0, 2])
+```
+
+VARIANT extractions require a compatible Native reader. These requests
+materialize through `to_arrow` when the dataset is constructed, including on
+Data Evolution tables; they do not use lazy row-ID reads. Aliases, output order,
+repeated sources, extracted values and nulls follow the same Arrow request.
+`variant_get` cast errors propagate during construction, while `try_variant_get`
+returns null for failed casts. Initialization retains the Arrow result in memory.
+Batch formats (`"pyarrow"` and `"torch"`) still require `streaming=True`.
 
 ### Distributed Sharding
 
