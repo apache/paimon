@@ -355,6 +355,36 @@ class PrimaryKeyDvConcurrentCompactionTest {
         assertThat(values(1, 2)).isEmpty();
     }
 
+    @Test
+    void testEmptyRestoreCannotSkipPublishedCompaction() throws Exception {
+        seed(1, 0);
+        int key = 2001;
+        commit("first", prepare(newWrite("first"), 1, 0, key));
+
+        AbstractFileStoreWrite<KeyValue> write = newWrite("second");
+        write.withWriteRestore(
+                new WriteRestore() {
+                    @Override
+                    public long latestCommittedIdentifier(String user) {
+                        return Long.MIN_VALUE;
+                    }
+
+                    @Override
+                    public RestoreFiles restoreFiles(
+                            BinaryRow partition,
+                            int bucket,
+                            boolean scanDynamicBucketIndex,
+                            boolean scanDeleteVectorsIndex,
+                            boolean scanSourceIndexPayloads) {
+                        return RestoreFiles.empty();
+                    }
+                });
+        CommitMessageImpl pending = prepare(write, 1, 0, key);
+        assertThat(pending.checkFromSnapshot()).isZero();
+        assertConflict(newCommit("second"), pending);
+        assertThat(values(1, key)).containsExactly("new");
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void testOverwriteCompactionUsesWriterCreationSnapshot(boolean concurrent) throws Exception {

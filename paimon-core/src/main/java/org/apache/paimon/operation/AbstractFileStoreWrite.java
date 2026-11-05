@@ -558,11 +558,17 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         boolean actualIgnorePreviousFiles =
                 ignorePreviousFilesForWriter(
                         partition, bucket, latestSnapshot, ignorePreviousFiles);
-        RestoreFiles restored = RestoreFiles.empty();
-        if (!actualIgnorePreviousFiles) {
+        RestoreFiles restored;
+        Snapshot baseSnapshot;
+        if (actualIgnorePreviousFiles) {
+            restored = RestoreFiles.empty();
+            // An overwrite starts from empty files and checks commits made after writer creation.
+            baseSnapshot = requiresCompactionBaseline() ? latestSnapshot : null;
+        } else {
             restored =
                     scanExistingFileMetas(
                             partition, bucket, expectedTotalBuckets, validateNumBuckets);
+            baseSnapshot = restored.snapshot();
         }
 
         DynamicBucketIndexMaintainer indexMaintainer =
@@ -604,12 +610,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         actualIgnorePreviousFiles);
         notifyNewWriter(writer);
 
-        // An overwrite starts with empty files, but only commits after writer creation can
-        // conflict with that new state.
-        Snapshot baseSnapshot =
-                actualIgnorePreviousFiles && requiresCompactionBaseline()
-                        ? latestSnapshot
-                        : restored.snapshot();
         return new WriterContainer<>(
                 writer,
                 firstNonNull(restored.totalBuckets(), expectedTotalBuckets),
