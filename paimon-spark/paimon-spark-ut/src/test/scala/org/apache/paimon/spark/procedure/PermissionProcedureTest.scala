@@ -19,20 +19,27 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.catalog.Identifier
-import org.apache.paimon.data.BinaryString
+import org.apache.paimon.data.{BinaryString, GenericRow, Timestamp}
 import org.apache.paimon.management.{PermissionResource, ResourceType}
-import org.apache.paimon.predicate.{ConcatTransform, Equal, FieldRef, FieldTransform, LeafPredicate}
-import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSparkTestWithRestCatalogBase}
+import org.apache.paimon.predicate.{ConcatTransform, Equal, FieldRef, FieldTransform, LeafPredicate, LowerTransform, NotEqual}
+import org.apache.paimon.schema.Schema
+import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSparkTestWithRestCatalogBase, SparkTypeUtils}
+import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
 import org.apache.paimon.types.DataTypes
 import org.apache.paimon.utils.JsonSerdeUtil
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.assertThat
 
-import java.util.{Arrays, Collections}
+import java.time.LocalDateTime
+import java.util.{Arrays, Collections, Locale}
 
 /** End-to-end tests for permission and policy management procedures. */
 class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
+
+  override protected def sparkConf: SparkConf =
+    super.sparkConf.set("spark.sql.catalog.paimon.v1Function.enabled", "false")
 
   test("grant, list and idempotently revoke a permission") {
     checkAnswer(
@@ -506,6 +513,592 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
         "principal => 'analyst', column => 'email', if_exists => true)")
   }
 
+  test("create row-filter policies from SQL and enforce the complete condition") {
+    restCatalogServer.setQueryPrincipals(Collections.singleton("analyst"))
+    withTable("paimon.sales.sql_filter_orders") {
+      spark.sql("""CREATE TABLE paimon.sales.sql_filter_orders (
+                  |  id INT, region STRING, email STRING, amount BIGINT,
+                  |  order_date DATE, `quoted id` INT)
+                  |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                  |""".stripMargin)
+      val values = """(1, 'APAC', 'a@example.com', 10, DATE '2026-10-28', 1),
+                     |(2, 'EMEA', NULL, 20, DATE '2026-10-29', 2),
+                     |(3, 'APAC', NULL, 30, DATE '2026-10-29', 3),
+                     |(4, NULL, 'd@example.com', 40, DATE '2026-10-30', 4)
+                     |""".stripMargin
+      spark.sql(s"INSERT INTO paimon.sales.sql_filter_orders VALUES $values")
+
+      val conditions = Seq(
+        "REGION = 'APAC'",
+        "id >= 2 AND (region IN ('APAC', 'EMEA') OR region IS NULL)",
+        "(id <= 2 AND email IS NOT NULL) OR (id > 2 AND email IS NULL)",
+        "NOT (region = 'APAC')",
+        "region NOT IN ('EMEA', NULL)",
+        "region <=> NULL OR region <=> 'APAC'",
+        "amount = 20 AND order_date = DATE '2026-10-29'",
+        "id = CAST(floor(pi()) AS INT)",
+        "id >= CAST(1 + 1 AS INT)",
+        "true",
+        "false"
+      ) ++ (if (org.apache.spark.SPARK_VERSION >= "3.3") Seq("`quoted id` = 2") else Nil)
+      conditions.foreach {
+        condition =>
+          val expected = spark
+            .sql(s"""SELECT id FROM VALUES $values
+                    |AS raw(id, region, email, amount, order_date, `quoted id`)
+                    |WHERE $condition
+                    |""".stripMargin)
+            .collect()
+            .toSeq
+          checkAnswer(
+            spark.sql(s"""CALL sys.create_policy(
+                         |  database => 'sales', table => 'sql_filter_orders',
+                         |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                         |  filter_sql => ${sqlLiteral(condition)})
+                         |""".stripMargin),
+            Row(true)
+          )
+          try {
+            checkAnswer(spark.sql("SELECT id FROM paimon.sales.sql_filter_orders"), expected)
+            val stored = spark
+              .sql("CALL sys.list_policies(database => 'sales', table => 'sql_filter_orders')")
+              .head()
+              .getString(4)
+            assertThat(stored).contains("\"kind\":")
+          } finally {
+            spark.sql(
+              "CALL sys.drop_policy(database => 'sales', table => 'sql_filter_orders', " +
+                "policy_type => 'ROW_FILTER', principal => 'analyst')")
+          }
+      }
+    }
+  }
+
+  Seq("FLOAT", "DOUBLE").foreach {
+    dataType =>
+      test(s"SQL policy filters preserve $dataType signed-zero semantics") {
+        restCatalogServer.setQueryPrincipals(Collections.singleton("analyst"))
+        withTable("paimon.sales.sql_float_policy") {
+          spark.sql(s"""CREATE TABLE paimon.sales.sql_float_policy (id INT, v $dataType)
+                       |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                       |""".stripMargin)
+          def literal(value: String): String = s"CAST('$value' AS $dataType)"
+          val values =
+            Seq("-Infinity", "-1.0", "-0.0", "0.0", "1.0", "Infinity", "NaN").zipWithIndex
+              .map { case (value, index) => s"(${index + 1}, ${literal(value)})" }
+              .mkString(", ") + s", (8, CAST(NULL AS $dataType))"
+          spark.sql(s"INSERT INTO paimon.sales.sql_float_policy VALUES $values")
+
+          val zeroLiterals = Seq(literal("0.0"), literal("-0.0"))
+          val comparisons = for {
+            zero <- zeroLiterals
+            operator <- Seq("=", "<>", "<", "<=", ">", ">=", "<=>")
+          } yield s"v $operator $zero"
+          val combinations = zeroLiterals.flatMap {
+            zero =>
+              Seq(
+                s"v IN ($zero)",
+                s"v NOT IN ($zero)",
+                s"v IN ($zero, ${literal("1.0")}, CAST(NULL AS $dataType))",
+                s"v NOT IN ($zero, CAST(NULL AS $dataType))",
+                s"NOT (v <=> $zero)",
+                s"v >= $zero AND v <= $zero",
+                s"NOT (v >= $zero AND v <= $zero)",
+                s"v >= $zero AND v <= ${literal("1.0")}",
+                s"v >= ${literal("-1.0")} AND v <= $zero",
+                s"NOT (v >= $zero AND v <= ${literal("1.0")})",
+                s"NOT (v >= ${literal("-1.0")} AND v <= $zero)",
+                s"NOT (v = $zero OR id = 5)",
+                s"(v < $zero AND id <> 2) OR (v = $zero AND id = 3)"
+              )
+          }
+          // Keep enough literals to exercise IN leaves rather than expanded equality predicates.
+          val largeSet = (-10 to 10).map(value => literal(value.toString)).mkString(", ")
+          val conditions = comparisons ++ combinations ++ Seq(
+            s"v IN ($largeSet)",
+            s"v NOT IN ($largeSet)",
+            s"v IN (${zeroLiterals.mkString(", ")})",
+            s"v >= ${literal("0.0")} AND v <= ${literal("-0.0")}",
+            s"v >= ${literal("-0.0")} AND v <= ${literal("0.0")}",
+            s"NOT (v >= ${literal("0.0")} AND v <= ${literal("-0.0")})",
+            s"NOT (v >= ${literal("-0.0")} AND v <= ${literal("0.0")})",
+            s"v = ${literal("NaN")}"
+          )
+          conditions.foreach {
+            condition =>
+              withClue(s"$dataType policy: $condition: ") {
+                val expected = spark
+                  .sql(s"SELECT id FROM VALUES $values AS raw(id, v) WHERE $condition")
+                  .collect()
+                  .toSeq
+                checkSqlPolicy("sql_float_policy", condition, expected)
+              }
+          }
+
+          // Predicate JSON keeps Paimon's native floating-point ordering.
+          val nativePredicate = s"""{"kind":"LEAF","transform":{"name":"FIELD_REF",
+                                   |"fieldRef":{"index":1,"name":"v","type":"$dataType"}},
+                                   |"function":"NOT_EQUAL","literals":[0]}""".stripMargin
+          spark.sql(s"""CALL sys.create_policy(
+                       |  database => 'sales', table => 'sql_float_policy',
+                       |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                       |  predicate_json => ${sqlLiteral(nativePredicate)})
+                       |""".stripMargin)
+          checkAnswer(
+            spark.sql("SELECT id FROM paimon.sales.sql_float_policy"),
+            Seq(Row(1), Row(2), Row(3), Row(5), Row(6), Row(7)))
+        }
+      }
+  }
+
+  Seq(DataTypes.TIMESTAMP(9), DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9)).foreach {
+    timestampType =>
+      test(s"SQL policy filters preserve ${timestampType.asSQLString()} microsecond semantics") {
+        withSparkSQLConf(
+          "spark.sql.session.timeZone" -> "UTC",
+          "spark.paimon.legacy-timestamp-mapping.enabled" -> "false") {
+          assume(!treatPaimonTimestampTypeAsSparkTimestampType())
+          restCatalogServer.setQueryPrincipals(Collections.singleton("analyst"))
+          withTable("paimon.sales.sql_timestamp_policy") {
+            val identifier = Identifier.create("sales", "sql_timestamp_policy")
+            paimonCatalog.createTable(
+              identifier,
+              Schema
+                .newBuilder()
+                .column("id", DataTypes.INT())
+                .column("t", timestampType)
+                .column("nested", DataTypes.ROW(DataTypes.FIELD(0, "t", timestampType)))
+                .option("query-auth.enabled", "true")
+                .build(),
+              false
+            )
+            val timestamps = Seq(
+              "1969-12-31T23:59:59.999999900",
+              "1970-01-01T00:00:00.000000100",
+              "1970-01-01T00:00:00",
+              "1970-01-01T00:00:00.000001900",
+              "2025-12-31T23:59:59.999999999",
+              "2026-01-01T00:00:00.000000100",
+              "2026-01-01T00:00:00.123456789",
+              "2026-01-01T00:00:00.123456000",
+              "9999-12-31T23:59:59.999999999",
+              null
+            )
+            // Write through the SDK so Spark cannot truncate nanoseconds before storage.
+            val builder = paimonCatalog.getTable(identifier).newBatchWriteBuilder()
+            val writer = builder.newWrite()
+            val commit = builder.newCommit()
+            try {
+              timestamps.zipWithIndex.foreach {
+                case (value, index) =>
+                  val timestamp =
+                    if (value == null) null
+                    else Timestamp.fromLocalDateTime(LocalDateTime.parse(value))
+                  writer.write(
+                    GenericRow.of(Int.box(index + 1), timestamp, GenericRow.of(timestamp)))
+              }
+              commit.commit(writer.prepareCommit())
+            } finally {
+              writer.close()
+              commit.close()
+            }
+
+            val sparkType = SparkTypeUtils.fromPaimonType(timestampType).sql
+            def literal(value: String): String = s"CAST('$value' AS $sparkType)"
+            val values = timestamps.zipWithIndex
+              .map {
+                case (value, index) =>
+                  val timestamp = if (value == null) s"CAST(NULL AS $sparkType)" else literal(value)
+                  s"(${index + 1}, $timestamp)"
+              }
+              .mkString(", ")
+            val boundaries = Seq(
+              "1969-12-31T23:59:59.999999",
+              "1970-01-01T00:00:00",
+              "2026-01-01T00:00:00.123456",
+              "9999-12-31T23:59:59.999999").map(literal)
+            val comparisons = for {
+              boundary <- boundaries
+              operator <- Seq("=", "<>", "<", "<=", ">", ">=", "<=>")
+            } yield s"t $operator $boundary"
+            val boundary = boundaries(1)
+            val conditions = comparisons ++ Seq(
+              s"t IN ($boundary, ${boundaries(2)})",
+              s"t NOT IN ($boundary, ${boundaries(2)})",
+              s"t NOT IN ($boundary, CAST(NULL AS $sparkType))",
+              s"NOT (t <=> $boundary)",
+              s"t >= $boundary AND t <= ${boundaries(2)}",
+              s"NOT (t >= $boundary AND t <= ${boundaries(2)})",
+              s"t = $boundary OR t IS NULL",
+              "t IS NULL",
+              "t IS NOT NULL"
+            )
+            conditions.foreach {
+              condition =>
+                withClue(s"${timestampType.asSQLString()} policy: $condition: ") {
+                  val expected = spark
+                    .sql(s"SELECT id FROM VALUES $values AS raw(id, t) WHERE $condition")
+                    .collect()
+                    .toSeq
+                  checkSqlPolicy("sql_timestamp_policy", condition, expected)
+                }
+            }
+
+            val error = intercept[IllegalArgumentException] {
+              spark.sql(s"""CALL sys.create_policy(
+                           |  database => 'sales', table => 'sql_timestamp_policy',
+                           |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                           |  filter_sql => ${sqlLiteral(s"nested.t <> $boundary")})
+                           |""".stripMargin)
+            }
+            assertThat(error.getMessage).contains("nested timestamp fields")
+            checkSqlPolicy("sql_timestamp_policy", "nested.t IS NULL", Seq(Row(10)))
+          }
+        }
+      }
+  }
+
+  test("SQL policy filters reject timestamp value comparisons with legacy mapping") {
+    withSparkSQLConf("spark.paimon.legacy-timestamp-mapping.enabled" -> "true") {
+      withTimeZone("America/Los_Angeles") {
+        restCatalogServer.setQueryPrincipals(Collections.singleton("analyst"))
+        withTable("paimon.sales.legacy_sql_timestamp_policy") {
+          val identifier = Identifier.create("sales", "legacy_sql_timestamp_policy")
+          val timestampType = DataTypes.TIMESTAMP(9)
+          paimonCatalog.createTable(
+            identifier,
+            Schema
+              .newBuilder()
+              .column("id", DataTypes.INT())
+              .column("t", timestampType)
+              .column("t_micros", DataTypes.TIMESTAMP(6))
+              .column("t_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9))
+              .column("v", DataTypes.DOUBLE())
+              .column("nested", DataTypes.ROW(DataTypes.FIELD(0, "t", timestampType)))
+              .option("query-auth.enabled", "true")
+              .build(),
+            false
+          )
+          // The DST gap makes the first two stored local times appear identical in Spark.
+          val values = Seq(
+            "2026-03-08T02:30:00.000000100",
+            "2026-03-08T03:30:00.000000100",
+            "2026-03-08T04:30:00.000000100",
+            null)
+          val floats = Seq(Double.box(-0.0d), Double.box(0.0d), Double.box(1.0d), null)
+          val builder = paimonCatalog.getTable(identifier).newBatchWriteBuilder()
+          val writer = builder.newWrite()
+          val commit = builder.newCommit()
+          try {
+            values.zipWithIndex.foreach {
+              case (value, index) =>
+                val dateTime = if (value == null) null else LocalDateTime.parse(value)
+                val timestamp =
+                  if (dateTime == null) null else Timestamp.fromLocalDateTime(dateTime)
+                val micros =
+                  if (dateTime == null) null
+                  else Timestamp.fromLocalDateTime(dateTime.withNano(0))
+                writer.write(
+                  GenericRow.of(
+                    Int.box(index + 1),
+                    timestamp,
+                    micros,
+                    timestamp,
+                    floats(index),
+                    GenericRow.of(timestamp)))
+            }
+            commit.commit(writer.prepareCommit())
+          } finally {
+            writer.close()
+            commit.close()
+          }
+          checkAnswer(
+            spark.sql("SELECT id, CAST(t AS STRING) FROM paimon.sales.legacy_sql_timestamp_policy"),
+            Seq(
+              Row(1, "2026-03-08 03:30:00"),
+              Row(2, "2026-03-08 03:30:00"),
+              Row(3, "2026-03-08 04:30:00"),
+              Row(4, null))
+          )
+
+          val boundary = "TIMESTAMP '2026-03-08 03:30:00'"
+          val comparisons = for {
+            column <- Seq("t", "t_micros", "t_ltz", "nested.t")
+            operator <- Seq("=", "<>", "<", "<=", ">", ">=", "<=>")
+          } yield s"$column $operator $boundary"
+          val conditions = comparisons ++ Seq(
+            s"t IN ($boundary)",
+            s"t NOT IN ($boundary)",
+            s"NOT (t <=> $boundary)",
+            s"t >= $boundary AND t <= $boundary",
+            s"id = 3 AND t <> $boundary",
+            s"id = 3 OR t <> $boundary"
+          )
+          conditions.foreach {
+            condition =>
+              withClue(s"Legacy timestamp policy: $condition: ") {
+                val error = intercept[IllegalArgumentException] {
+                  spark
+                    .sql(s"""CALL sys.create_policy(
+                            |  database => 'sales', table => 'legacy_sql_timestamp_policy',
+                            |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                            |  filter_sql => ${sqlLiteral(condition)})
+                            |""".stripMargin)
+                    .collect()
+                }
+                assertThat(error.getMessage).contains("legacy timestamp mapping")
+                checkAnswer(
+                  spark.sql("CALL sys.list_policies(database => 'sales', " +
+                    "table => 'legacy_sql_timestamp_policy')"),
+                  Nil)
+              }
+          }
+          checkSqlPolicy("legacy_sql_timestamp_policy", "id >= 2", Seq(Row(2), Row(3), Row(4)))
+          checkSqlPolicy("legacy_sql_timestamp_policy", "t IS NULL", Seq(Row(4)))
+          checkSqlPolicy("legacy_sql_timestamp_policy", "t <=> NULL", Seq(Row(4)))
+          checkSqlPolicy(
+            "legacy_sql_timestamp_policy",
+            "t IS NOT NULL",
+            Seq(Row(1), Row(2), Row(3)))
+          checkSqlPolicy("legacy_sql_timestamp_policy", "nested.t IS NULL", Seq(Row(4)))
+          checkSqlPolicy("legacy_sql_timestamp_policy", "v <> CAST(0 AS DOUBLE)", Seq(Row(3)))
+
+          val nativePredicate = JsonSerdeUtil.toFlatJson(
+            LeafPredicate.of(
+              new FieldTransform(new FieldRef(1, "t", timestampType)),
+              NotEqual.INSTANCE,
+              Collections.singletonList(Timestamp.fromLocalDateTime(LocalDateTime.parse(values(1))))
+            ))
+          spark.sql(s"""CALL sys.create_policy(
+                       |  database => 'sales', table => 'legacy_sql_timestamp_policy',
+                       |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                       |  predicate_json => ${sqlLiteral(nativePredicate)})
+                       |""".stripMargin)
+          checkAnswer(
+            spark.sql("SELECT id FROM paimon.sales.legacy_sql_timestamp_policy"),
+            Seq(Row(1), Row(3)))
+        }
+      }
+    }
+  }
+
+  test("SQL policy filters reject locale-sensitive case conversion after constant folding") {
+    restCatalogServer.setQueryPrincipals(Collections.singleton("analyst"))
+    withTable("paimon.sales.sql_locale_policy") {
+      spark.sql("""CREATE TABLE paimon.sales.sql_locale_policy (id INT, region STRING)
+                  |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                  |""".stripMargin)
+      // The non-ASCII suffix forces Spark 3's locale-sensitive fallback for the entire string.
+      val values = Seq("I\u00e9", "i\u00e9", "APAC", "apac").zipWithIndex
+        .map { case (value, index) => s"(${index + 1}, ${sqlLiteral(value)})" }
+        .mkString(", ") + ", (5, CAST(NULL AS STRING))"
+      spark.sql(s"INSERT INTO paimon.sales.sql_locale_policy VALUES $values")
+      val turkishLower = sqlLiteral("\u0131\u00e9")
+      val turkishUpper = sqlLiteral("\u0130\u00c9")
+      val previousLocale = Locale.getDefault
+      try {
+        Seq(Locale.ROOT, new Locale("tr", "TR")).foreach {
+          locale =>
+            Locale.setDefault(locale)
+            // Spark 3 uses the JVM locale for non-ASCII case conversion; Spark 4 has other paths.
+            if (locale.getLanguage == "tr" && org.apache.spark.SPARK_VERSION < "4.0") {
+              Seq(
+                s"id = 1 AND lower(region) <> $turkishLower",
+                s"id = 2 AND upper(region) <> $turkishUpper").foreach {
+                condition =>
+                  checkAnswer(
+                    spark.sql(s"SELECT id FROM VALUES $values AS raw(id, region) WHERE $condition"),
+                    Nil)
+              }
+            }
+            val conditions = Seq(
+              s"lower(region) <> $turkishLower",
+              s"upper(region) <> $turkishUpper",
+              "lower(region) = 'apac'",
+              "upper(region) IN ('APAC')",
+              "lower(region) IS NULL",
+              "upper(region) IS NOT NULL",
+              "NOT (lower(region) = 'apac')",
+              "id = 3 AND lower(region) = 'apac'",
+              "id = 3 OR upper(region) = 'APAC'",
+              "length(lower(region)) = 4",
+              "lower(lower(region)) = 'apac'",
+              "upper(concat(region, 'x')) = 'APACX'"
+            )
+            conditions.foreach {
+              condition =>
+                withClue(s"$locale policy: $condition: ") {
+                  val error = intercept[IllegalArgumentException] {
+                    spark
+                      .sql(s"""CALL sys.create_policy(
+                              |  database => 'sales', table => 'sql_locale_policy',
+                              |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                              |  filter_sql => ${sqlLiteral(condition)})
+                              |""".stripMargin)
+                      .collect()
+                  }
+                  assertThat(error.getMessage).contains(
+                    "LOWER or UPPER on non-constant expressions")
+                  checkAnswer(
+                    spark.sql("CALL sys.list_policies(database => 'sales', " +
+                      "table => 'sql_locale_policy')"),
+                    Nil)
+                }
+            }
+
+            // Only the folded literal is persisted, so its conversion runs in Spark at creation.
+            Seq(
+              "region = lower('APAC')",
+              "region = upper('apac')",
+              s"region = lower(${sqlLiteral("I\u00e9")})",
+              s"region = upper(${sqlLiteral("i\u00e9")})",
+              "region IS NULL"
+            ).foreach {
+              condition =>
+                val expected = spark
+                  .sql(s"SELECT id FROM VALUES $values AS raw(id, region) WHERE $condition")
+                  .collect()
+                  .toSeq
+                checkSqlPolicy("sql_locale_policy", condition, expected)
+            }
+        }
+
+        // Native Predicate JSON continues to use Paimon's Locale.ROOT conversion.
+        val nativePredicate = JsonSerdeUtil.toFlatJson(
+          LeafPredicate.of(
+            new LowerTransform(
+              Collections.singletonList(new FieldRef(1, "region", DataTypes.STRING()))),
+            Equal.INSTANCE,
+            Collections.singletonList(BinaryString.fromString("i\u00e9"))
+          ))
+        spark.sql(s"""CALL sys.create_policy(
+                     |  database => 'sales', table => 'sql_locale_policy',
+                     |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                     |  predicate_json => ${sqlLiteral(nativePredicate)})
+                     |""".stripMargin)
+        checkAnswer(spark.sql("SELECT id FROM paimon.sales.sql_locale_policy"), Seq(Row(1), Row(2)))
+      } finally {
+        // Locale is process-wide; restore it before other tests run.
+        Locale.setDefault(previousLocale)
+      }
+    }
+  }
+
+  test("SQL policy filters reject invalid and partially convertible conditions") {
+    withTable("paimon.sales.rejected_sql_filters") {
+      spark.sql("""CREATE TABLE paimon.sales.rejected_sql_filters (
+                  |  id INT, region STRING, `quoted id` INT)
+                  |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                  |""".stripMargin)
+      val conditions = Seq(
+        "id = 1 AND abs(id) = 1",
+        "id = 1 OR abs(id) = 1",
+        "id = 1 OR (id = 2 AND abs(id) = 1)",
+        "id = 1 AND (region = 'APAC' OR abs(id) = 1)",
+        "missing = 1",
+        "id",
+        "id =",
+        "id = 1 AND rand() < 0.5",
+        "id = (SELECT 1)"
+      ) ++ (if (org.apache.spark.SPARK_VERSION < "3.3") Seq("`quoted id` = 2") else Nil)
+      conditions.foreach {
+        condition =>
+          intercept[Exception] {
+            spark
+              .sql(s"""CALL sys.create_policy(
+                      |  database => 'sales', table => 'rejected_sql_filters',
+                      |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                      |  filter_sql => ${sqlLiteral(condition)})
+                      |""".stripMargin)
+              .collect()
+          }
+          checkAnswer(
+            spark.sql(
+              "CALL sys.list_policies(database => 'sales', " +
+                "table => 'rejected_sql_filters')"),
+            Nil)
+      }
+    }
+  }
+
+  test("SQL policy filters reject query context before constant folding") {
+    withTable("paimon.sales.context_sql_filters") {
+      spark.sql("""CREATE TABLE paimon.sales.context_sql_filters (id INT, region STRING)
+                  |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                  |""".stripMargin)
+      val conditions = Seq(
+        "id = dayofmonth(current_date())",
+        "id = year(current_timestamp())",
+        "id = year(localtimestamp())",
+        "region = current_user()",
+        "region = current_database()",
+        "region = current_catalog()",
+        "region = current_timezone()"
+      ) ++ (if (org.apache.spark.SPARK_VERSION >= "4.1") {
+              Seq("current_time() IS NOT NULL")
+            } else {
+              Nil
+            })
+      conditions.foreach {
+        condition =>
+          val error = intercept[IllegalArgumentException] {
+            spark
+              .sql(s"""CALL sys.create_policy(
+                      |  database => 'sales', table => 'context_sql_filters',
+                      |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                      |  filter_sql => ${sqlLiteral(condition)})
+                      |""".stripMargin)
+              .collect()
+          }
+          assertThat(error.getMessage).contains("depend on the current query context")
+      }
+      checkAnswer(
+        spark.sql("CALL sys.list_policies(database => 'sales', table => 'context_sql_filters')"),
+        Nil)
+    }
+  }
+
+  test("SQL policy filter arguments preserve the predicate JSON interface") {
+    withTable("paimon.sales.sql_filter_arguments") {
+      spark.sql("""CREATE TABLE paimon.sales.sql_filter_arguments (id INT)
+                  |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                  |""".stripMargin)
+      val predicate = sqlLiteral(intEqualsPredicate(0, "id", 1))
+      Seq(
+        ("ROW_FILTER", "", "exactly one of predicate_json or filter_sql"),
+        ("ROW_FILTER", ", filter_sql => ' '", "exactly one of predicate_json or filter_sql"),
+        (
+          "ROW_FILTER",
+          s", predicate_json => $predicate, filter_sql => 'id = 1'",
+          "exactly one of predicate_json or filter_sql"),
+        ("COLUMN_MASKING", ", filter_sql => 'id = 1'", "cannot specify filter_sql")
+      ).foreach {
+        case (policyType, arguments, message) =>
+          val error = intercept[IllegalArgumentException] {
+            spark
+              .sql(s"""CALL sys.create_policy(
+                      |  database => 'sales', table => 'sql_filter_arguments',
+                      |  policy_type => '$policyType', principal => 'analyst'$arguments)
+                      |""".stripMargin)
+              .collect()
+          }
+          assertThat(error.getMessage).contains(message)
+      }
+
+      checkAnswer(
+        spark.sql(
+          s"CALL sys.create_policy('sales', 'sql_filter_arguments', " +
+            s"'ROW_FILTER', 'analyst', $predicate)"),
+        Row(true)
+      )
+      assertThat(
+        spark
+          .sql("CALL sys.list_policies(database => 'sales', table => 'sql_filter_arguments')")
+          .head()
+          .getString(4)).contains("\"name\":\"id\"")
+    }
+  }
+
   test("policy creation validates query authorization, JSON and columns") {
     val validFilter = intEqualsPredicate(0, "id", 1)
     spark.sql("CREATE TABLE paimon.sales.disabled_orders (id INT)")
@@ -716,6 +1309,25 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
+  // Read without WHERE so a Spark residual cannot hide an incorrect authorization predicate.
+  private def checkSqlPolicy(table: String, condition: String, expected: Seq[Row]): Unit = {
+    checkAnswer(
+      spark.sql(s"""CALL sys.create_policy(
+                   |  database => 'sales', table => '$table',
+                   |  policy_type => 'ROW_FILTER', principal => 'analyst',
+                   |  filter_sql => ${sqlLiteral(condition)})
+                   |""".stripMargin),
+      Row(true)
+    )
+    try {
+      checkAnswer(spark.sql(s"SELECT id FROM paimon.sales.$table"), expected)
+    } finally {
+      spark.sql(
+        s"CALL sys.drop_policy(database => 'sales', table => '$table', " +
+          "policy_type => 'ROW_FILTER', principal => 'analyst')")
+    }
+  }
+
   private def grantCatalogPermission(principal: String): Unit = {
     checkAnswer(
       spark.sql(s"""CALL sys.grant_permission(
@@ -765,7 +1377,7 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
   }
 
   private def sqlLiteral(value: String): String = {
-    "'" + value.replace("'", "''") + "'"
+    "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
   }
 }
 
