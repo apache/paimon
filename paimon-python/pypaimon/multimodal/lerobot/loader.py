@@ -110,6 +110,11 @@ def _abort_messages(table, messages):
 def _prepare_dataset(
         table, dataset, info, source, source_schema, batch_size, metadata,
         video_fields=(), episode_indices=None):
+    from pypaimon.common.options import CoreOptions
+    remux_videos = table.options.options.get(CoreOptions.WRITE_LEROBOT_REMUX_EPISODES)
+    if video_fields and remux_videos:
+        from pypaimon.multimodal.video_remux import _require_remux_av
+        _require_remux_av()
     target_schema = _target_schema(table)
     write_builder = table.new_batch_write_builder()
     table_write = None
@@ -122,11 +127,20 @@ def _prepare_dataset(
     expected_tasks = set()
     observed_tasks = set()
     video_sources = {}
+    source_factory = None
 
     try:
         table_write = write_builder.new_write()
         reader_factory = getattr(
             dataset, "video_uri_reader_factory", None)
+        if video_fields and remux_videos:
+            from pypaimon.common.uri_reader import UriReaderFactory
+            from pypaimon.multimodal.video_remux import _EpisodeVideoSources
+            if reader_factory is None:
+                source_factory = UriReaderFactory({})
+                reader_factory = source_factory
+            video_sources = _EpisodeVideoSources(reader_factory)
+            reader_factory = video_sources
         if video_fields and reader_factory is not None:
             table_write.with_blob_uri_reader_factory(reader_factory)
         for source_episode, episode_index, episode_begin, task_indices, \
@@ -147,6 +161,8 @@ def _prepare_dataset(
                 if video_fields:
                     table_write.roll_before_group_if_needed(
                         int(source_episode["length"]))
+                    if remux_videos:
+                        video_sources.next_episode()
             batch = _read_batch(
                 dataset,
                 info,
@@ -194,18 +210,22 @@ def _prepare_dataset(
             table_write.abort()
         raise
     finally:
-        if table_write is not None:
-            try:
-                table_write.close()
-            except BaseException:
-                # prepare_commit handed off these files; writer.abort() no
-                # longer owns them, and no caller has received the messages.
-                if messages is not None:
-                    try:
-                        _abort_messages(table, messages)
-                    except Exception:
-                        _LOGGER.exception("Failed to abort prepared LeRobot files.")
-                raise
+        try:
+            if table_write is not None:
+                try:
+                    table_write.close()
+                except BaseException:
+                    # prepare_commit handed off these files; writer.abort() no
+                    # longer owns them, and no caller has received the messages.
+                    if messages is not None:
+                        try:
+                            _abort_messages(table, messages)
+                        except Exception:
+                            _LOGGER.exception("Failed to abort prepared LeRobot files.")
+                    raise
+        finally:
+            if source_factory is not None:
+                source_factory.close()
 
 
 def _episode_batches(
@@ -450,6 +470,16 @@ def _video_frame_descriptors(
         source = (uri, length, _video_sample_timestamps(dataset, uri))
         cache[source_key] = source
     uri, length, sample_timestamps = source
+    from pypaimon.multimodal.video_remux import _EpisodeVideoSources
+    if isinstance(cache, _EpisodeVideoSources):
+        ordinals = [
+            _video_frame_ordinal(sample_timestamps, timestamp, from_timestamp,
+                                 timestamp_type, name)
+            for unused_frame_index, timestamp in video_rows
+        ]
+        return cache.descriptors(
+            uri, from_timestamp, to_timestamp,
+            [sample_timestamps[ordinal] for ordinal in ordinals])
     return [
         VideoFrameDescriptor(
             uri,
