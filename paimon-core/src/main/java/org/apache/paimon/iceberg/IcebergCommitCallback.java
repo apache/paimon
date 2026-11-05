@@ -21,6 +21,7 @@ package org.apache.paimon.iceberg;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -54,6 +55,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -76,6 +78,7 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
@@ -866,6 +869,68 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     static final String RETIRE_PENDING_FILENAME = "retire-pending";
+
+    @FunctionalInterface
+    private interface LockedAction<T> {
+        T run(Lock lock) throws IOException;
+    }
+
+    /**
+     * Runs an operation under the lock that the commits of the table take, so that the operation
+     * and a rollback or a commit of the table cannot interleave. The lock comes from the catalog of
+     * the table, and a table without one is not protected.
+     */
+    private static <T> T runUnderTableLock(
+            FileStoreTable table, String commitUser, LockedAction<T> action) throws IOException {
+        SnapshotCommit lock =
+                table.catalogEnvironment()
+                        .snapshotCommit(table.snapshotManager(), table.coreOptions(), commitUser);
+        try {
+            return lock.runWithLock(() -> action.run(lock));
+        } catch (IOException | RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to run an operation with the lock of table " + table.fullName(), e);
+        } finally {
+            IOUtils.closeQuietly(lock);
+        }
+    }
+
+    /**
+     * Runs the part of a rollback that deletes snapshots. A table with Iceberg metadata does it
+     * under the lock that the publication of the metadata takes, so a rollback never happens
+     * between the last check of a snapshot and the publication of its metadata.
+     */
+    public static void runRollback(FileStoreTable table, Runnable rollback) {
+        if (table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            rollback.run();
+            return;
+        }
+        try {
+            runUnderTableLock(
+                    table,
+                    UUID.randomUUID().toString(),
+                    lock -> {
+                        rollback.run();
+                        return null;
+                    });
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static final class Publication {
+
+        private final boolean head;
+        private final boolean ours;
+
+        private Publication(boolean head, boolean ours) {
+            this.head = head;
+            this.ours = ours;
+        }
+    }
 
     /**
      * Marks that a rollback may have left abandoned metadata behind; written before the rollback
@@ -3067,12 +3132,32 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         // ---------------------------------------------------------------------------------
 
         private void finish(IcebergMetadata result, Acquired acquired) throws IOException {
-            table.snapshotManager().invalidateCache();
             keepOnlyReachable(result);
-            // the last check comes after all the work that can take long, and writeMetadataFile
-            // repeats it before it replaces a version file
-            verifySource(snapshot);
             replayPoint(ReplayPoint.BEFORE_WRITE, snapshotId);
+
+            // Everything that decides what readers see is done under the lock that the commits
+            // and the rollback of the table take: the last check of the source, the version file,
+            // the hint and the pointer of the external catalog. A rollback cannot replace the
+            // snapshot in between. The copying and the checks of the history stay outside.
+            Publication publication =
+                    runUnderTableLock(table, commitUser, lock -> publish(lock, result));
+            if (!publication.ours) {
+                // another writer's metadata won; it owns its files, and ours are not reachable
+                exposing = false;
+                deleteCreatedFiles();
+            }
+            if (publication.head) {
+                deleteApplicableMetadataFiles(snapshotId);
+                if (publication.ours) {
+                    expireDroppedOriginals(result, acquired);
+                }
+            }
+        }
+
+        private Publication publish(Lock lock, IcebergMetadata result) throws IOException {
+            table.snapshotManager().invalidateCache();
+            verifySource(snapshot);
+            lock.ensureValid();
 
             Path metadataPath = pathFactory.toMetadataPath(snapshotId);
             exposing = true;
@@ -3083,23 +3168,17 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     durable.currentSnapshot()
                             .manifestList()
                             .equals(result.currentSnapshot().manifestList());
-            if (!ours) {
-                // another writer's metadata won; it owns its files, and ours are not reachable
-                exposing = false;
-                deleteCreatedFiles();
-            }
             Long latest = table.snapshotManager().latestSnapshotId();
-            if (latest != null && latest == snapshotId) {
+            boolean head = latest != null && latest == snapshotId;
+            if (head) {
+                lock.ensureValid();
                 table.fileIO()
                         .overwriteFileUtf8(
                                 new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
                                 String.valueOf(snapshotId));
                 commitToExternalCatalog(durable, metadataPath, null, null);
-                deleteApplicableMetadataFiles(snapshotId);
-                if (ours) {
-                    expireDroppedOriginals(result, acquired);
-                }
             }
+            return new Publication(head, ours);
         }
 
         /** Deletes the files the replay created that the final metadata does not reach. */
@@ -3150,11 +3229,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 if (!written
                         && table.fileIO().exists(metadataPath)
                         && !metadataMatchesSnapshot(snapshotId, snapshot)) {
-                    // The version file of another commit is in the way. It is only stale if
-                    // this snapshot is still the one on disk. Otherwise it is the file of the
-                    // commit that replaced this snapshot, and it stays.
-                    table.snapshotManager().invalidateCache();
-                    verifySource(snapshot);
+                    // a version file of an older timeline is in the way. The source was
+                    // checked under the lock that this write runs under
                     table.fileIO().deleteQuietly(metadataPath);
                     written = table.fileIO().tryToWriteAtomic(metadataPath, json);
                 }

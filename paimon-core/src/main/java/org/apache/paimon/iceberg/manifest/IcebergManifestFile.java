@@ -241,14 +241,12 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
             if (e == fromCheck[0]) {
                 throw (RuntimeException) e;
             }
-            if (watch.failure != null) {
-                throw watch.failure;
-            }
-            if (watch.endedShort) {
-                throw new IOException("A read of " + path + " ended before the end of the file", e);
-            }
+            watch.throwIfStorageFailed(path, e);
             throw new CorruptManifestException(path + " cannot be decoded: " + e, e);
         }
+        // A reader can take a read that ended early, at the end of a block, for the end of the
+        // file, and then the counters below differ. That is the storage failing, not damage.
+        watch.throwIfStorageFailed(path, null);
 
         long[] expected =
                 new long[] {
@@ -295,6 +293,17 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         private ReadWatch(FileIO delegate, long fileSize) {
             this.delegate = delegate;
             this.fileSize = fileSize;
+        }
+
+        /** Fails when a read failed, or ended before the end of the file, whatever was decoded. */
+        private void throwIfStorageFailed(Path path, @Nullable Throwable cause) throws IOException {
+            if (failure != null) {
+                throw failure;
+            }
+            if (endedShort) {
+                throw new IOException(
+                        "A read of " + path + " ended before the end of the file", cause);
+            }
         }
 
         @Override

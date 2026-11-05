@@ -20,6 +20,8 @@ package org.apache.paimon.iceberg;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
@@ -35,10 +37,13 @@ import org.apache.paimon.iceberg.manifest.IcebergManifestList;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
@@ -63,6 +68,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -72,10 +78,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -703,6 +716,67 @@ public class IcebergGapReplayTest {
         assertThat(events).contains("ABANDONED:" + n);
         assertThat(t.enabled.fileIO().readFileUtf8(stale)).isEqualTo(staleJson);
         assertThat(metadataFileNames(t.enabled)).isEqualTo(before);
+
+        // no version file is in the way, and the head is replaced after the replay finished
+        // its work: the metadata of the replaced snapshot is not written, the hint and the
+        // catalog do not move, and Iceberg keeps showing what it showed
+        t.append(t.enabled, 32);
+        t.gap(33, 34);
+        n = t.latest();
+        long createdId = n;
+        long hint = readVersionHint(t.enabled);
+        List<String> shown = getIcebergResult();
+        before = metadataFileNames(t.enabled);
+        events = new ArrayList<>();
+        interruptOnce(
+                t,
+                t.identifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_WRITE,
+                -1,
+                () -> {
+                    t.enabled.rollbackTo(createdId - 1);
+                    t.append(t.disabled, 100);
+                });
+        assertAbandoned(t, n, events, before);
+        assertThat(readVersionHint(t.enabled)).isEqualTo(hint);
+        assertThat(getIcebergResult()).isEqualTo(shown);
+
+        // A rollback waits while the metadata of the snapshot is published through the pointer
+        // of the catalog, and runs when it is done
+        t.append(t.enabled, 35);
+        t.gap(36, 37);
+        n = t.latest();
+        long lockedId = n;
+        events = new ArrayList<>();
+        ExecutorService rollbacks = Executors.newSingleThreadExecutor();
+        try {
+            AtomicReference<Future<?>> rollback = new AtomicReference<>();
+            interruptOnce(
+                    t,
+                    t.identifier,
+                    events,
+                    IcebergCommitCallback.ReplayPoint.EXPOSED,
+                    -1,
+                    () -> {
+                        rollback.set(rollbacks.submit(() -> t.enabled.rollbackTo(lockedId - 1)));
+                        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                        while (!t.lock.lock.hasQueuedThreads()) {
+                            assertThat(System.nanoTime())
+                                    .as("the rollback waits")
+                                    .isLessThan(deadline);
+                            Thread.sleep(10);
+                        }
+                        assertThat(rollback.get().isDone()).isFalse();
+                        assertThat(t.latest()).isEqualTo(lockedId);
+                    });
+            rollback.get().get(30, TimeUnit.SECONDS);
+        } finally {
+            rollbacks.shutdownNow();
+        }
+        assertThat(events).contains("EXPOSED:" + n);
+        assertThat(readVersionHint(t.enabled)).isEqualTo(n);
+        assertThat(t.latest()).isEqualTo(n - 1);
     }
 
     /** Runs the replay and, the first time it reaches a point, does something else first. */
@@ -761,6 +835,8 @@ public class IcebergGapReplayTest {
         DELTA_LIST_UNREADABLE,
         COPY_UNREADABLE,
         COPY_CUT_SHORT,
+        COPY_CUT_AT_BLOCK,
+        LOCK_UNAVAILABLE,
         BEFORE_WRITE,
         AFTER_WRITE,
         CATALOG
@@ -823,7 +899,17 @@ public class IcebergGapReplayTest {
                     // a read that ends early may be a file that is damaged, or a stream that
                     // closed early, and the replay cannot tell which
                     fileIO.cutReadsOf(
-                            name -> name.matches(".*-m\\d+\\.avro") && !before.contains(name));
+                            name -> name.matches(".*-m\\d+\\.avro") && !before.contains(name),
+                            IcebergGapReplayTest::halfOf);
+                    break;
+                case COPY_CUT_AT_BLOCK:
+                    // the same, where a block ends, which a reader can take for the end of file
+                    fileIO.cutReadsOf(
+                            name -> name.matches(".*-m\\d+\\.avro") && !before.contains(name),
+                            IcebergGapReplayTest::avroHeaderEnd);
+                    break;
+                case LOCK_UNAVAILABLE:
+                    t.lock.unavailable = true;
                     break;
                 case CATALOG:
                     RecordingIcebergMetadataCommitter.failNextCommit = true;
@@ -853,9 +939,11 @@ public class IcebergGapReplayTest {
                     .as(failure.toString())
                     .hasStackTraceContaining(
                             failure == Failure.COPY_CUT_SHORT
+                                            || failure == Failure.COPY_CUT_AT_BLOCK
                                     ? "ended before the end of the file"
                                     : "injected");
             fileIO.stopFailing();
+            t.lock.unavailable = false;
             RecordingIcebergMetadataCommitter.failNextCommit = false;
 
             // a failure is no reason to read the whole table
@@ -866,6 +954,8 @@ public class IcebergGapReplayTest {
                 case BEFORE_WRITE:
                 case COPY_UNREADABLE:
                 case COPY_CUT_SHORT:
+                case COPY_CUT_AT_BLOCK:
+                case LOCK_UNAVAILABLE:
                 case BASE_METADATA_UNREADABLE:
                 case BASE_LIST_UNREADABLE:
                 case DELTA_LIST_UNREADABLE:
@@ -905,7 +995,7 @@ public class IcebergGapReplayTest {
 
         private volatile Predicate<String> failing = name -> false;
         private volatile IOException failure;
-        private volatile boolean cutShort;
+        private volatile ToLongFunction<Path> cutAt;
         private volatile long copyDelayMillis;
         private final AtomicInteger copies = new AtomicInteger();
 
@@ -916,14 +1006,14 @@ public class IcebergGapReplayTest {
         private void failReadsOf(Predicate<String> names, IOException failure) {
             this.failing = names;
             this.failure = failure;
-            this.cutShort = false;
+            this.cutAt = null;
         }
 
-        /** Reads of the files end after half of their bytes, with no error. */
-        private void cutReadsOf(Predicate<String> names) {
+        /** Reads of the files end at a position before their end, with no error. */
+        private void cutReadsOf(Predicate<String> names, ToLongFunction<Path> position) {
             this.failing = names;
             this.failure = null;
-            this.cutShort = true;
+            this.cutAt = position;
         }
 
         private void stopFailing() {
@@ -936,11 +1026,12 @@ public class IcebergGapReplayTest {
             if (!failing.test(path.getName())) {
                 return in;
             }
-            if (!cutShort) {
+            ToLongFunction<Path> position = cutAt;
+            if (position == null) {
                 in.close();
                 throw failure;
             }
-            return new CutShortStream(in, getFileSize(path) / 2);
+            return new CutShortStream(in, position.applyAsLong(path));
         }
 
         @Override
@@ -954,6 +1045,40 @@ public class IcebergGapReplayTest {
                 throw new IOException(e);
             }
             super.copyFile(sourcePath, targetPath, overwrite);
+        }
+    }
+
+    /** A table lock that a test can watch and make unavailable. */
+    private static class ReplayLock implements CatalogLockFactory {
+
+        private final ReentrantLock lock = new ReentrantLock();
+        private volatile boolean unavailable;
+
+        @Override
+        public String identifier() {
+            return "replay-test-lock";
+        }
+
+        @Override
+        public Lock createLock(
+                CatalogLockContext context,
+                Identifier identifier,
+                String tableUuid,
+                String commitUser,
+                Options tableOptions) {
+            return new Lock() {
+                @Override
+                public AutoCloseable acquire() throws Exception {
+                    if (unavailable) {
+                        throw new IOException("injected lock failure");
+                    }
+                    lock.lock();
+                    return lock::unlock;
+                }
+
+                @Override
+                public void close() {}
+            };
         }
     }
 
@@ -1001,6 +1126,7 @@ public class IcebergGapReplayTest {
         private final FileStoreTable enabled;
         private final FileStoreTable disabled;
         private final String user = UUID.randomUUID().toString();
+        private final ReplayLock lock = new ReplayLock();
         private long identifier = 0;
 
         private ReplayTable(Map<String, String> options) throws Exception {
@@ -1030,6 +1156,22 @@ public class IcebergGapReplayTest {
                             primaryKeys,
                             1,
                             created);
+            // the table takes the lock of a catalog, as a table of a catalog that has one does
+            CatalogEnvironment plain = table.catalogEnvironment();
+            table =
+                    FileStoreTableFactory.create(
+                            fileIO,
+                            table.location(),
+                            table.schema(),
+                            new CatalogEnvironment(
+                                    plain.identifier(),
+                                    plain.uuid(),
+                                    null,
+                                    lock,
+                                    null,
+                                    null,
+                                    false,
+                                    false));
             Map<String, String> all = new HashMap<>();
             all.put(IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(), "replay");
             all.put(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX.key(), "100");
@@ -1370,21 +1512,39 @@ public class IcebergGapReplayTest {
 
     /**
      * Zeroes what a manifest holds after its header, and keeps its length, so only decoding the
-     * file shows it. An Avro file ends every block with the sync marker of its header.
+     * file shows it.
      */
     private void damageManifest(Path manifest) throws IOException {
         java.nio.file.Path file = java.nio.file.Paths.get(manifest.toUri().getPath());
         byte[] bytes = java.nio.file.Files.readAllBytes(file);
-        byte[] sync = Arrays.copyOfRange(bytes, bytes.length - 16, bytes.length);
-        int headerEnd = -1;
-        for (int i = 0; headerEnd < 0; i++) {
-            if (Arrays.equals(Arrays.copyOfRange(bytes, i, i + 16), sync)) {
-                headerEnd = i + 16;
-            }
-        }
+        int headerEnd = avroHeaderEnd(bytes);
         assertThat(headerEnd).isLessThan(bytes.length - 16 - 32);
         Arrays.fill(bytes, headerEnd, bytes.length - 16, (byte) 0);
         java.nio.file.Files.write(file, bytes);
+    }
+
+    /** Where the first block of an Avro file starts. Every block ends with the sync marker. */
+    private static int avroHeaderEnd(byte[] bytes) {
+        byte[] sync = Arrays.copyOfRange(bytes, bytes.length - 16, bytes.length);
+        for (int i = 0; ; i++) {
+            if (Arrays.equals(Arrays.copyOfRange(bytes, i, i + 16), sync)) {
+                return i + 16;
+            }
+        }
+    }
+
+    private static long avroHeaderEnd(Path file) {
+        try {
+            return avroHeaderEnd(
+                    java.nio.file.Files.readAllBytes(
+                            java.nio.file.Paths.get(file.toUri().getPath())));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static long halfOf(Path file) {
+        return new java.io.File(file.toUri().getPath()).length() / 2;
     }
 
     /** The rows of a Paimon snapshot, the way Iceberg prints them. */

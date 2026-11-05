@@ -78,8 +78,11 @@ it one by one from their delta manifests.
   Paimon's. A snapshot that is no longer the latest one is not rebuilt after a failed replay.
 - The limits bound the amount of work. They do not bound the heap that a step uses or how long
   one step takes.
-- Publication to the version hint and to the external catalog is unchanged, so replay makes no
-  additional promise about concurrent writers.
+- Replay writes the metadata file, the version hint and the external catalog entry while it holds
+  the lock of the table that commits take, after it checked that its snapshot is still the one it
+  started from. A rollback of a table with Iceberg metadata takes the same lock, so it cannot run
+  in between. This needs a lock that the catalog provides: a table without one is not protected,
+  and neither is a rollback that the catalog performs itself.
 
 ## Prefixed Properties
 

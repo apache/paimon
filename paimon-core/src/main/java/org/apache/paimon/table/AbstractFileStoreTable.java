@@ -716,7 +716,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         } catch (UnsupportedOperationException e) {
             try {
                 Snapshot snapshot = snapshotManager.tryGetSnapshot(snapshotId);
-                rollbackHelper().cleanLargerThan(snapshot);
+                IcebergCommitCallback.runRollback(
+                        this, () -> rollbackHelper().cleanLargerThan(snapshot));
             } catch (FileNotFoundException ex) {
                 // try to get snapshot from tag
                 TagManager tagManager = tagManager();
@@ -742,8 +743,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         } catch (UnsupportedOperationException e) {
             Snapshot taggedSnapshot = tagManager().getOrThrow(tagName).trimToSnapshot();
             RollbackHelper rollbackHelper = rollbackHelper();
-            rollbackHelper.cleanLargerThan(taggedSnapshot);
-            rollbackHelper.createSnapshotFileIfNeeded(taggedSnapshot);
+            IcebergCommitCallback.runRollback(
+                    this,
+                    () -> {
+                        rollbackHelper.cleanLargerThan(taggedSnapshot);
+                        rollbackHelper.createSnapshotFileIfNeeded(taggedSnapshot);
+                    });
         }
     }
 
