@@ -72,23 +72,10 @@ keep up with sustained input will keep falling behind; relaxing waits does not a
 
 ## Concurrent compaction
 
-For primary-key tables with `deletion-vectors.enabled = true` and `write-only = false`,
-compaction commits are checked against the snapshot from which each writer restored its files
-and deletion vectors. A replacement writer that skips this restore uses the snapshot it observed
-when it started writing the bucket. A later `COMPACT` or `OVERWRITE` by another writer in the
-same partition invalidates the prepared compaction. This check applies even
-when the two compactions use different buckets or do not replace the same input files.
-Compactions of different partitions can commit independently.
-
-An `APPEND` commit or a snapshot publication retry does not refresh the compaction's restored
-state or its baseline. After a conflict, reload the partition and recompute compaction. The
-preceding `APPEND` may already have committed Level-0 files, which remain available for
-subsequent compaction. The check reads existing Snapshot manifests and caches verified ranges
-in the committer's memory.
-
-Compaction messages that change data files or deletion vectors require a restored-snapshot
-baseline. When upgrading writers that produced such messages without a baseline, regenerate
-their compaction work from the current table state.
+File-level conflict checks can miss conflicts between concurrent compactions. For primary-key
+tables with deletion vectors and `write-only = false`, Paimon therefore rejects concurrent
+compaction commits from different writers on the same partition. Different partitions can
+compact independently.
 
 ## Dedicated compaction job
 
