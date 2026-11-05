@@ -170,7 +170,6 @@ class PrimaryKeyVectorIndexWriteTest {
                                     null,
                                     null,
                                     BucketedPrimaryKeyIndexMaintainer.ofVector(vectorMaintainer),
-                                    null,
                                     null));
         }
 

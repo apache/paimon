@@ -253,12 +253,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     @Override
-    @Nullable
-    protected Long compactionCheckFromSnapshot(@Nullable Snapshot snapshot) {
-        if (!options.deletionVectorsEnabled() || options.writeOnly()) {
-            return null;
-        }
-        return snapshot == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshot.id();
+    protected boolean requiresCompactionBaseline() {
+        return options.deletionVectorsEnabled() && !options.writeOnly();
     }
 
     @Override

@@ -162,7 +162,6 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
         protected final int totalBuckets;
 
         protected final long baseSnapshotId;
-        @Nullable protected final Long compactionCheckFromSnapshot;
         protected final long lastModifiedCommitIdentifier;
         protected final List<DataFileMeta> dataFiles;
         protected final long maxSequenceNumber;
@@ -176,7 +175,6 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
                 int bucket,
                 int totalBuckets,
                 long baseSnapshotId,
-                @Nullable Long compactionCheckFromSnapshot,
                 long lastModifiedCommitIdentifier,
                 Collection<DataFileMeta> dataFiles,
                 long maxSequenceNumber,
@@ -188,7 +186,6 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
             this.bucket = bucket;
             this.totalBuckets = totalBuckets;
             this.baseSnapshotId = baseSnapshotId;
-            this.compactionCheckFromSnapshot = compactionCheckFromSnapshot;
             this.lastModifiedCommitIdentifier = lastModifiedCommitIdentifier;
             this.dataFiles = new ArrayList<>(dataFiles);
             this.maxSequenceNumber = maxSequenceNumber;
