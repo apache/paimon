@@ -27,8 +27,8 @@ import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonStatistics, PaimonSupportsRuntimeFiltering, SparkHybridSearchBuilderImpl, SparkVectorSearchBuilderImpl}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
-import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.{InnerTableScan, Split}
+import org.apache.paimon.table.{DataTable, FallbackReadFileStoreTable, FileStoreTable, InnerTable, Table}
+import org.apache.paimon.table.source.{InnerTableScan, Split, Splits}
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
@@ -91,7 +91,28 @@ abstract class PaimonBaseScan(table: InnerTable)
   }
 
   override def filterAttributes(): Array[NamedReference] = {
-    if (postponeMergeOnRead.enabled) Array.empty else super.filterAttributes()
+    if (postponeMergeOnRead.enabled) {
+      return Array.empty
+    }
+
+    val candidates = super.filterAttributes()
+    table match {
+      // Fallback and chain scans can read branches with different authorization rules.
+      case t: FallbackReadFileStoreTable if PaimonBaseScan.hasAuthorizedBranch(t) => Array.empty
+      case _: FileStoreTable if coreOptions.queryAuthEnabled() && candidates.nonEmpty =>
+        // An ordinary table plan attaches the same authorization result to every split.
+        inputSplits.headOption match {
+          case Some(split) =>
+            val auth = Splits.authResult(split)
+            if (auth == null) candidates
+            else {
+              val masks = auth.extractColumnMasking()
+              candidates.filterNot(field => masks.containsKey(field.fieldNames().head))
+            }
+          case None => Array.empty
+        }
+      case _ => candidates
+    }
   }
 
   private def evalVectorSearch(): GlobalIndexResult = {
@@ -207,6 +228,13 @@ abstract class PaimonBaseScan(table: InnerTable)
 }
 
 object PaimonBaseScan {
+
+  private[spark] def hasAuthorizedBranch(table: Table): Boolean = table match {
+    case t: FallbackReadFileStoreTable =>
+      hasAuthorizedBranch(t.wrapped()) || hasAuthorizedBranch(t.other())
+    case t: FileStoreTable => t.coreOptions().queryAuthEnabled()
+    case _ => CoreOptions.fromMap(table.options()).queryAuthEnabled()
+  }
 
   private[spark] def evalVectorSearch(
       table: InnerTable,

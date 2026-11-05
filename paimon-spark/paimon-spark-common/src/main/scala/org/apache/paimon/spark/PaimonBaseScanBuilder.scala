@@ -103,8 +103,9 @@ abstract class PaimonBaseScanBuilder
           case None =>
             converter.convert(predicate) match {
               case Some(paimonPredicate)
-                  if coreOptions.queryAuthEnabled() && predicate.name() == "IS_NOT_NULL" &&
-                    paimonPredicate.visit(partitionPredicateVisitor) =>
+                  if predicate.name() == "IS_NOT_NULL" &&
+                    paimonPredicate.visit(partitionPredicateVisitor) &&
+                    PaimonBaseScan.hasAuthorizedBranch(table) =>
                 // Spark infers null checks for joins. Masks can null partition keys, so evaluate
                 // these checks on visible rows instead of using them for physical pruning.
                 postScan.append(predicate)

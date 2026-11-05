@@ -34,12 +34,15 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
+import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.RowFactory;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.Table;
+import org.apache.spark.sql.connector.expressions.NamedReference;
+import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -227,6 +230,100 @@ public class SparkPartitionMetadataAuthTest {
                             ? Collections.emptyList()
                             : Arrays.asList(RowFactory.create(1), RowFactory.create(2)));
         }
+    }
+
+    @Test
+    public void testDynamicPartitionPruningOnMaskedJoinKey(@TempDir Path warehouse) {
+        try (SparkSession spark = createSession(warehouse)) {
+            createTable(spark, false);
+            setPolicy(spark, false, "constant", "id,region,dt");
+            spark.sql(
+                    "CREATE TABLE spark_test.default.D (region STRING, dt STRING, k INT) "
+                            + "USING paimon TBLPROPERTIES ('bucket'='-1')");
+            spark.sql("INSERT INTO spark_test.default.D VALUES ('CN','***',1),('US','other',0)");
+            spark.conf().set("spark.sql.optimizer.dynamicPartitionPruning.enabled", true);
+
+            String join = "FROM spark_test.default.T l JOIN spark_test.default.D r ON l.dt = r.dt ";
+            assertRows(
+                    spark,
+                    "SELECT l.id " + join + "WHERE r.k = 1",
+                    Arrays.asList(RowFactory.create(1), RowFactory.create(2)));
+
+            // The fact scan receives a runtime filter on region even though dt is masked.
+            Dataset<Row> result =
+                    spark.sql(
+                            "SELECT /*+ BROADCAST(r) */ l.id "
+                                    + join
+                                    + "AND l.region = r.region WHERE r.k = 1");
+            assertThat(result.collectAsList()).containsExactly(RowFactory.create(1));
+            assertThat(result.queryExecution().executedPlan().toString())
+                    .contains("PaimonScan: [T], RuntimePartitionFilters: [Equal(region, CN)]");
+        }
+    }
+
+    @ParameterizedTest(name = "chain={0}")
+    @ValueSource(booleans = {false, true})
+    public void testRuntimeFilteringWithAuthorizedBranch(boolean chain, @TempDir Path warehouse)
+            throws Exception {
+        try (SparkSession spark = createSession(warehouse)) {
+            createTable(spark, chain);
+            if (!chain) {
+                spark.sql("CALL spark_test.sys.create_branch('default.T', 'backup')");
+                spark.sql(
+                        "ALTER TABLE spark_test.default.T SET TBLPROPERTIES ('scan.fallback-branch'='backup')");
+            }
+            SparkCatalog catalog =
+                    (SparkCatalog) spark.sessionState().catalogManager().catalog("spark_test");
+            Identifier id = Identifier.of(new String[] {"default"}, "T");
+            assertThat(runtimeFilterAttributes(catalog, id)).hasSize(2);
+
+            // Enable authorization only on the secondary branch, nested one level deeper for delta.
+            String branch = chain ? "delta" : "backup";
+            spark.sql(
+                    "ALTER TABLE spark_test.default.`T$branch_"
+                            + branch
+                            + "` SET TBLPROPERTIES ('query-auth.enabled'='true', "
+                            + "'test.auth-mode'='constant', 'test.allowed'='id,dt,region')");
+            assertThat(runtimeFilterAttributes(catalog, id)).isEmpty();
+        }
+    }
+
+    @Test
+    public void testJoinOnNullablePartitionMaskedOnlyOnBackup(@TempDir Path warehouse) {
+        try (SparkSession spark = createSession(warehouse)) {
+            spark.sql(
+                    "CREATE TABLE spark_test.default.T (id INT, dt STRING) USING paimon "
+                            + "PARTITIONED BY (dt) TBLPROPERTIES ('bucket'='-1')");
+            spark.sql("CALL spark_test.sys.create_branch('default.T', 'backup')");
+            spark.sql("INSERT INTO spark_test.default.T VALUES (1, 'A')");
+            spark.sql("INSERT INTO spark_test.default.`T$branch_backup` VALUES (2, NULL)");
+            spark.sql(
+                    "ALTER TABLE spark_test.default.`T$branch_backup` SET TBLPROPERTIES "
+                            + "('query-auth.enabled'='true')");
+            spark.sql(
+                    "ALTER TABLE spark_test.default.T SET TBLPROPERTIES "
+                            + "('scan.fallback-branch'='backup', 'test.auth-mode'='constant', "
+                            + "'test.allowed'='id,dt')");
+            spark.sql(
+                    "CREATE TABLE spark_test.default.D (dt STRING, k INT) USING paimon "
+                            + "TBLPROPERTIES ('bucket'='-1')");
+            spark.sql("INSERT INTO spark_test.default.D VALUES ('***', 1), ('other', 0)");
+            spark.conf().set("spark.sql.optimizer.dynamicPartitionPruning.enabled", true);
+
+            // The backup row's stored NULL becomes '***' before the inferred IS NOT NULL check.
+            assertRows(
+                    spark,
+                    "SELECT l.id FROM spark_test.default.T l JOIN spark_test.default.D r "
+                            + "ON l.dt = r.dt WHERE r.k = 1",
+                    Collections.singletonList(RowFactory.create(2)));
+        }
+    }
+
+    private static NamedReference[] runtimeFilterAttributes(SparkCatalog catalog, Identifier id)
+            throws NoSuchTableException {
+        SparkTable table = (SparkTable) catalog.loadTable(id);
+        return ((PaimonBaseScan) table.newScanBuilder(CaseInsensitiveStringMap.empty()).build())
+                .filterAttributes();
     }
 
     @ParameterizedTest(name = "chain={0}, nestedPruning={1}")
@@ -600,10 +697,11 @@ public class SparkPartitionMetadataAuthTest {
                 throws NoSuchTableException {
             SparkTable sparkTable = (SparkTable) super.loadSparkTable(identifier, extraOptions);
             FileStoreTable table = (FileStoreTable) sparkTable.table();
-            if (!table.coreOptions().queryAuthEnabled()) {
+            // The catalog can supply rules even when only a secondary branch enables them.
+            String mode = table.options().get("test.auth-mode");
+            if (mode == null || "disabled".equals(mode)) {
                 return sparkTable;
             }
-            String mode = table.options().get("test.auth-mode");
             List<String> allowed = Arrays.asList(table.options().get("test.allowed").split(","));
             List<String> filters =
                     "no-rules".equals(mode)

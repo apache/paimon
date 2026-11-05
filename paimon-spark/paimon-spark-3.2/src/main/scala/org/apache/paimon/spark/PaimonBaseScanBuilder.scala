@@ -104,8 +104,8 @@ abstract class PaimonBaseScanBuilder
           if (predicate == null) {
             postScan.append(filter)
           } else if (
-            coreOptions.queryAuthEnabled() && filter.isInstanceOf[IsNotNull] &&
-            predicate.visit(partitionPredicateVisitor)
+            filter.isInstanceOf[IsNotNull] && predicate.visit(partitionPredicateVisitor) &&
+            PaimonBaseScan.hasAuthorizedBranch(table)
           ) {
             // Spark infers null checks for joins. Masks can null partition keys, so evaluate
             // these checks on visible rows instead of using them for physical pruning.
