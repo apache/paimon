@@ -18,11 +18,23 @@
 
 package org.apache.paimon.table.source;
 
+import java.util.Optional;
+import java.util.Set;
+
 /** Table scan for data table. */
 public interface DataTableScan extends InnerTableScan {
 
     /** Specify the shard to be read, and allocate sharded files to read records. */
     DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
+
+    /**
+     * Resolves the masked columns for this scan's projection and filters without planning splits.
+     * An empty optional means the scan cannot report its masks. A present empty set means the query
+     * has no masks.
+     */
+    default Optional<Set<String>> queryAuthMaskedColumns() {
+        return Optional.empty();
+    }
 
     /**
      * Stops the partition part of an authorization rule from pruning here, for a scan whose
