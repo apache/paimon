@@ -39,8 +39,9 @@ from pypaimon.write.update_validation import _authorize_update
 class ColumnUpdateResult:
     """Schema and data versions produced by a successful column operation.
 
-    ``updated_rows`` is available for ``add_columns`` and is ``None`` for
-    ``merge_columns``, whose MERGE executor does not return logical row counts.
+    ``updated_rows`` is available for ``add_columns`` and ``compute_columns``
+    and is ``None`` for ``merge_columns``, whose MERGE executor does not return
+    logical row counts.
     """
 
     source_snapshot_id: Optional[int]
@@ -161,6 +162,22 @@ def _canonical_field(field):
     return field.with_type(PyarrowFieldParser.from_paimon_type(data_type))
 
 
+def _validate_batch_size(batch_size):
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+        raise ValueError("batch_size must be a positive integer.")
+
+
+def _validate_inputs(raw, inputs, fn):
+    if not callable(fn) or inputs is None:
+        raise ValueError("A callable fn and explicit inputs are required for column computation.")
+    inputs = [inputs] if isinstance(inputs, str) else list(inputs)
+    _validate_names(inputs, "inputs")
+    missing = set(inputs).difference(raw.field_names)
+    if missing:
+        raise ValueError("Input columns do not exist: %s" % sorted(missing))
+    return inputs
+
+
 def _normalize_output(data, schema):
     if not isinstance(data, (pa.Table, pa.RecordBatch)):
         raise ValueError("Column function must return a pyarrow.Table or RecordBatch.")
@@ -220,8 +237,7 @@ def add_columns(owner, schema, *, inputs, fn, batch_size):
     if not isinstance(schema, pa.Schema):
         raise ValueError("schema must be a pyarrow.Schema.")
     _validate_names(schema.names, "Schema")
-    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
-        raise ValueError("batch_size must be a positive integer.")
+    _validate_batch_size(batch_size)
     if any(not field.nullable for field in schema):
         raise ValueError("New columns must be nullable until backfill is complete.")
     fields = [_canonical_field(field) for field in schema]
@@ -234,38 +250,56 @@ def add_columns(owner, schema, *, inputs, fn, batch_size):
         if inputs is not None:
             raise ValueError("inputs requires fn.")
     else:
-        if not callable(fn) or inputs is None:
-            raise ValueError("A callable fn and explicit inputs are required for backfill.")
-        inputs = [inputs] if isinstance(inputs, str) else list(inputs)
-        _validate_names(inputs, "inputs")
-        missing = set(inputs).difference(raw.field_names)
-        if missing:
-            raise ValueError("Input columns do not exist: %s" % sorted(missing))
+        inputs = _validate_inputs(raw, inputs, fn)
     with _ColumnUpdate(owner, raw) as operation:
         operation.add_schema(fields)
         if fn is None:
             return operation.finish(0)
-        operation.phase = "compute"
-        table = operation.raw.copy_without_time_travel({
-            "blob-as-descriptor": "false", "read.batch-size": str(batch_size),
-        })._copy_with_snapshot(operation.snapshot)
-        builder = table.new_batch_write_builder()
-        commit = operation.keep(builder.new_commit())
-        update = builder.new_update().with_update_type(schema.names)
-        update.with_read_projection(inputs)
-        shard = operation.keep(update.new_shard_updator(0, 1))
-        updated_rows = 0
-        for batch in shard.arrow_reader():
-            for start in range(0, batch.num_rows, batch_size):
-                operation.phase = "compute"
-                piece = batch.slice(start, batch_size)
-                output = _normalize_output(fn(piece), pa.schema(fields))
-                if output.num_rows != piece.num_rows:
-                    raise ValueError("Column function must return one output row per input row, in input order.")
-                operation.phase = "write"
-                for output_batch in output.to_batches(max_chunksize=batch_size):
-                    shard.update_by_arrow_batch(output_batch)
-                updated_rows += output.num_rows
-        operation.phase = "write"
-        messages = shard.prepare_commit()
-        return operation.finish(updated_rows, commit=commit, messages=messages)
+        return _compute_columns(operation, pa.schema(fields), inputs, fn, batch_size)
+
+
+def compute_columns(owner, columns, *, inputs, fn, batch_size):
+    columns = [columns] if isinstance(columns, str) else list(columns)
+    _validate_names(columns, "Output")
+    _validate_batch_size(batch_size)
+    raw = owner.raw_table
+    _validate_update(raw)
+    missing = set(columns).difference(raw.field_names)
+    if missing:
+        raise ValueError("Output columns do not exist: %s" % sorted(missing))
+    if set(columns).intersection(raw.partition_keys):
+        raise ValueError("compute_columns cannot update partition columns.")
+    if set(columns).intersection(raw.options.video_frame_fields()):
+        raise ValueError("Use replace_video() to update video-frame columns.")
+    inputs = _validate_inputs(raw, inputs, fn)
+    target_schema = _target_schema(raw)
+    schema = pa.schema([target_schema.field(name) for name in columns])
+    with _ColumnUpdate(owner, raw) as operation:
+        return _compute_columns(operation, schema, inputs, fn, batch_size)
+
+
+def _compute_columns(operation, schema, inputs, fn, batch_size):
+    operation.phase = "compute"
+    table = operation.raw.copy_without_time_travel({
+        "blob-as-descriptor": "false", "read.batch-size": str(batch_size),
+    })._copy_with_snapshot(operation.snapshot)
+    builder = table.new_batch_write_builder()
+    commit = operation.keep(builder.new_commit())
+    update = builder.new_update().with_update_type(schema.names)
+    update.with_read_projection(inputs)
+    shard = operation.keep(update.new_shard_updator(0, 1))
+    updated_rows = 0
+    for batch in shard.arrow_reader():
+        for start in range(0, batch.num_rows, batch_size):
+            operation.phase = "compute"
+            piece = batch.slice(start, batch_size)
+            output = _normalize_output(fn(piece), schema)
+            if output.num_rows != piece.num_rows:
+                raise ValueError("Column function must return one output row per input row, in input order.")
+            operation.phase = "write"
+            for output_batch in output.to_batches(max_chunksize=batch_size):
+                shard.update_by_arrow_batch(output_batch)
+            updated_rows += output.num_rows
+    operation.phase = "write"
+    messages = shard.prepare_commit()
+    return operation.finish(updated_rows, commit=commit, messages=messages)
