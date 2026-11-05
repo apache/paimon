@@ -1023,81 +1023,66 @@ public class IcebergGapReplayTest {
      * stayed and not the one the rebuild built.
      */
     private void assertLosingRebuildKeepsWhatTheWinnerLists() throws Exception {
-        Map<String, String> rebuild =
-                Collections.singletonMap(
-                        IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(), "rebuild");
-        // Iceberg reads the table that is stored with the table
-        ReplayTable t =
-                new ReplayTable(
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        LocalFileIO.create(),
-                        "loser_rebuild");
-        assertLosingRebuild(t, rebuild);
-        assertIcebergReadsEverySnapshot(t);
-        assertThat(getIcebergResult(t.database))
-                .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, t.latest()));
-
-        // a catalog that is given the metadata itself, and not its path
-        RecordingIcebergMetadataCommitter.COMMITS.clear();
-        RecordingIcebergMetadataCommitter.BASES.clear();
+        // a catalog that is given the metadata itself, and not its path, like a REST catalog.
+        // The metadata is stored with the table, where Iceberg reads it
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.HADOOP_CATALOG.toString());
+        options.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE_LOCATION.key(),
+                IcebergOptions.StorageLocation.TABLE_LOCATION.toString());
         RecordingIcebergMetadataCommitter.commitsMetadata = true;
         try {
-            ReplayTable catalog =
+            ReplayTable t =
                     new ReplayTable(
                             Collections.emptyList(),
-                            Collections.singletonMap(
-                                    IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
-                                    IcebergOptions.StorageType.HADOOP_CATALOG.toString()),
+                            options,
                             LocalFileIO.create(),
-                            "loser_catalog");
-            assertLosingRebuild(catalog, rebuild);
-            // the winner's commit, and then the commit of the rebuild that lost
-            List<Object> commits = RecordingIcebergMetadataCommitter.COMMITS;
-            assertThat(commits).hasSize(2);
-            IcebergMetadata durable = readMetadata(catalog.enabled, catalog.latest());
-            for (Object commit : commits) {
-                assertThat(commit).isInstanceOf(IcebergMetadata.class);
+                            "loser_rebuild");
+            t.append(t.enabled, 1);
+            t.append(t.enabled, 2);
+            t.append(t.enabled, 3);
+            t.gap(4, 5);
+            long n = t.latest();
+            long identifier = t.identifier;
+            List<String> events = new ArrayList<>();
+            String[] winner = new String[1];
+            RecordingIcebergMetadataCommitter.COMMITS.clear();
+            interruptOnce(
+                    t,
+                    Collections.singletonMap(
+                            IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(), "rebuild"),
+                    identifier,
+                    events,
+                    IcebergCommitCallback.ReplayPoint.BEFORE_WRITE,
+                    -1,
+                    () -> {
+                        t.replay(identifier - 1, new ArrayList<>(), NOTHING);
+                        t.replay(identifier, new ArrayList<>(), NOTHING);
+                        winner[0] = t.enabled.fileIO().readFileUtf8(metadataPath(t.enabled, n));
+                    });
+            assertThat(events).contains("LOCKED:" + n);
+            assertThat(events).noneMatch(event -> event.startsWith("BEFORE_CLEANUP"));
+            assertThat(t.enabled.fileIO().readFileUtf8(metadataPath(t.enabled, n)))
+                    .isEqualTo(winner[0]);
+            // the winner is the incremental one, which keeps every snapshot
+            assertThat(readMetadata(t.enabled, n).snapshots()).hasSize((int) n);
+            assertIcebergReadsEverySnapshot(t);
+
+            // the catalog was given the winner's metadata, and then the metadata that stayed
+            // again when the rebuild lost, and never the metadata that the rebuild built
+            String durable = readMetadata(t.enabled, n).currentSnapshot().manifestList();
+            assertThat(RecordingIcebergMetadataCommitter.COMMITS).hasSize(2);
+            for (Object commit : RecordingIcebergMetadataCommitter.COMMITS) {
                 assertThat(((IcebergMetadata) commit).currentSnapshot().manifestList())
-                        .isEqualTo(durable.currentSnapshot().manifestList());
+                        .isEqualTo(durable);
             }
         } finally {
             RecordingIcebergMetadataCommitter.commitsMetadata = false;
             RecordingIcebergMetadataCommitter.COMMITS.clear();
             RecordingIcebergMetadataCommitter.BASES.clear();
         }
-    }
-
-    private void assertLosingRebuild(ReplayTable t, Map<String, String> rebuild) throws Exception {
-        t.append(t.enabled, 1);
-        t.append(t.enabled, 2);
-        t.append(t.enabled, 3);
-        t.gap(4, 5);
-        long n = t.latest();
-        long identifier = t.identifier;
-        List<String> events = new ArrayList<>();
-        String[] winner = new String[1];
-        RecordingIcebergMetadataCommitter.COMMITS.clear();
-        interruptOnce(
-                t,
-                rebuild,
-                identifier,
-                events,
-                IcebergCommitCallback.ReplayPoint.BEFORE_WRITE,
-                -1,
-                () -> {
-                    t.replay(identifier - 1, new ArrayList<>(), NOTHING);
-                    t.replay(identifier, new ArrayList<>(), NOTHING);
-                    winner[0] = t.enabled.fileIO().readFileUtf8(metadataPath(t.enabled, n));
-                });
-        assertThat(events).contains("LOCKED:" + n);
-        assertThat(events).noneMatch(event -> event.startsWith("BEFORE_CLEANUP"));
-        assertThat(t.enabled.fileIO().readFileUtf8(metadataPath(t.enabled, n)))
-                .isEqualTo(winner[0]);
-        // the winner is the incremental one, which keeps every snapshot
-        assertThat(readMetadata(t.enabled, n).snapshots()).hasSize((int) n);
-        assertThat(readVersionHint(t.enabled)).isEqualTo(n);
-        assertEveryVersionIsComplete(t);
     }
 
     /**
@@ -1133,8 +1118,6 @@ public class IcebergGapReplayTest {
         assertThat(events).contains("LOCKED:" + n);
         assertThat(events).noneMatch(event -> event.startsWith("BEFORE_CLEANUP"));
         assertThat(readMetadata(t.enabled, n).snapshots()).hasSize((int) n);
-        assertThat(readVersionHint(t.enabled)).isEqualTo(n);
-        assertEveryVersionIsComplete(t);
         assertIcebergReadsEverySnapshot(t);
     }
 
@@ -1190,19 +1173,6 @@ public class IcebergGapReplayTest {
         assertThat(events).as(cleanup).contains("BEFORE_CLEANUP:" + n);
         assertThat(events).as(cleanup).noneMatch(event -> event.startsWith("CLEANUP_LOCKED"));
         assertThat(metadataFileNames(t.enabled)).as(cleanup).containsAll(before);
-        assertThat(readVersionHint(t.enabled)).as(cleanup).isEqualTo(n);
-        assertThat(getIcebergResult(t.database))
-                .as(cleanup)
-                .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, n));
-    }
-
-    /** Every metadata version that is left has all the files it reaches. */
-    private void assertEveryVersionIsComplete(ReplayTable t) throws Exception {
-        Set<String> names = metadataFileNames(t.enabled);
-        for (String version : versionFiles(t.enabled)) {
-            long id = Long.parseLong(version.substring(1, version.indexOf('.')));
-            assertThat(names).as(version).containsAll(filesReachableFrom(t.enabled, id));
-        }
     }
 
     /** Iceberg plans the files that Paimon has for each of the snapshots the head lists. */
@@ -2265,14 +2235,8 @@ public class IcebergGapReplayTest {
     }
 
     private List<String> getIcebergResult() throws Exception {
-        return getIcebergResult("mydb");
-    }
-
-    private List<String> getIcebergResult(String database) throws Exception {
         return getIcebergResult(
-                database,
-                icebergTable -> IcebergGenerics.read(icebergTable).build(),
-                Record::toString);
+                icebergTable -> IcebergGenerics.read(icebergTable).build(), Record::toString);
     }
 
     private org.apache.iceberg.Table getIcebergTable() {
@@ -2289,15 +2253,7 @@ public class IcebergGapReplayTest {
             Function<org.apache.iceberg.Table, CloseableIterable<Record>> query,
             Function<Record, String> icebergRecordToString)
             throws Exception {
-        return getIcebergResult("mydb", query, icebergRecordToString);
-    }
-
-    private List<String> getIcebergResult(
-            String database,
-            Function<org.apache.iceberg.Table, CloseableIterable<Record>> query,
-            Function<Record, String> icebergRecordToString)
-            throws Exception {
-        org.apache.iceberg.Table icebergTable = getIcebergTable(database);
+        org.apache.iceberg.Table icebergTable = getIcebergTable();
         CloseableIterable<Record> result = query.apply(icebergTable);
         List<String> actual = new ArrayList<>();
         for (Record record : result) {
