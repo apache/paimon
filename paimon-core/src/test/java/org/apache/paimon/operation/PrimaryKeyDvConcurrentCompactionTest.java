@@ -76,6 +76,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -522,19 +523,30 @@ class PrimaryKeyDvConcurrentCompactionTest {
         assertThat(values(1, 2)).containsExactly("old");
     }
 
-    @Test
-    void testOtherPartitionCommitDoesNotAdvancePendingBaseline() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testOtherPartitionCommitDoesNotAdvancePendingBaseline(boolean strictMode)
+            throws Exception {
         seed(1, 0);
         seed(2, 0);
         AbstractFileStoreWrite<KeyValue> secondWrite = newWrite("second");
         CommitMessageImpl pending = prepare(secondWrite, 1, 0, 2);
         commit("first", prepare(newWrite("first"), 1, 0, 1));
 
-        FileStoreCommitImpl secondCommit = newCommit("second");
-        CommitMessageImpl otherPartition = prepare(secondWrite, 2, 0, 1);
-        commit(secondCommit, 0, otherPartition);
-        assertThat(values(2, 1)).containsExactly("new");
-        assertConflict(secondCommit, pending);
+        Map<String, String> commitOptions =
+                strictMode
+                        ? Collections.singletonMap(
+                                COMMIT_LAST_SAFE_SNAPSHOT.key(),
+                                String.valueOf(pending.checkFromSnapshot()))
+                        : Collections.emptyMap();
+        KeyValueFileStore secondStore =
+                ((PrimaryKeyFileStoreTable) table.copy(commitOptions)).store();
+        try (FileStoreCommitImpl secondCommit = secondStore.newCommit("second", null)) {
+            CommitMessageImpl otherPartition = prepare(secondWrite, 2, 0, 1);
+            commit(secondCommit, 0, otherPartition);
+            assertThat(values(2, 1)).containsExactly("new");
+            assertConflict(secondCommit, pending);
+        }
     }
 
     @ParameterizedTest

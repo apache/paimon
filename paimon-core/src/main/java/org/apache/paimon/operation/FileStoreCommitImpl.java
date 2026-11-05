@@ -54,14 +54,13 @@ import org.apache.paimon.operation.commit.DataEvolutionChangesProvider;
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException;
 import org.apache.paimon.operation.commit.DiscardingCompactChangesProvider;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
-import org.apache.paimon.operation.commit.PartitionCompactionChecker;
 import org.apache.paimon.operation.commit.PrimaryKeyConflictDetection;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
 import org.apache.paimon.operation.commit.RowIdConflictChecker;
 import org.apache.paimon.operation.commit.RowTrackingCommitUtils.RowTrackingAssigned;
-import org.apache.paimon.operation.commit.StrictModeChecker;
+import org.apache.paimon.operation.commit.SnapshotConflictChecker;
 import org.apache.paimon.operation.commit.SuccessCommitResult;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.operation.metrics.CommitStats;
@@ -108,11 +107,11 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.function.LongConsumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
+import static java.util.Collections.emptyMap;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestEntry.nullableRecordCount;
@@ -170,8 +169,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final BucketMode bucketMode;
     private final RetryWaiter retryWaiter;
     private final InternalRowPartitionComputer partitionComputer;
-    @Nullable private final StrictModeChecker strictModeChecker;
-    @Nullable private final PartitionCompactionChecker dvCompactionChecker;
+    private final SnapshotConflictChecker snapshotConflictChecker;
     private final ConflictDetection conflictDetection;
     private final CommitCleaner commitCleaner;
 
@@ -231,25 +229,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitMetrics = null;
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
-        this.strictModeChecker =
-                options.commitLastSafeSnapshot()
-                        .filter(ignored -> options.commitStrictModeEnabled())
-                        .map(
-                                id ->
-                                        new StrictModeChecker(
-                                                snapshotManager,
-                                                commitUser,
-                                                scanner,
-                                                options.dataEvolutionEnabled(),
-                                                id))
-                        .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
-        this.dvCompactionChecker =
-                conflictDetection instanceof PrimaryKeyConflictDetection
+        this.snapshotConflictChecker =
+                new SnapshotConflictChecker(
+                        snapshotManager,
+                        commitUser,
+                        scanner,
+                        options.dataEvolutionEnabled(),
+                        options.commitLastSafeSnapshot()
+                                .filter(ignored -> options.commitStrictModeEnabled())
+                                .orElse(null),
+                        conflictDetection instanceof PrimaryKeyConflictDetection
                                 && options.deletionVectorsEnabled()
-                                && !options.writeOnly()
-                        ? new PartitionCompactionChecker(snapshotManager, commitUser, scanner)
-                        : null;
+                                && !options.writeOnly());
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
 
@@ -356,7 +348,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int attempts = 0;
 
         List<CommitMessage> commitMessages = committable.fileCommittables();
-        LongConsumer partitionCompactionCheck = prepareConflictChecks(commitMessages);
+        Map<BinaryRow, Long> compactionBaselines = prepareConflictChecks(commitMessages);
         ManifestEntryChanges changes = collectChanges(commitMessages);
         List<ManifestEntry> committedCompactFiles = changes.compactTableFiles;
         Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
@@ -400,7 +392,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 changes.appendIndexFiles),
                                         commitKind,
                                         Collections.emptySet()),
-                                null,
+                                emptyMap(),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -419,7 +411,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 attempts +=
                         tryCommit(
                                 compactProvider,
-                                partitionCompactionCheck,
+                                compactionBaselines,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -536,7 +528,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int generatedSnapshot = 0;
         int attempts = 0;
 
-        LongConsumer partitionCompactionCheck =
+        Map<BinaryRow, Long> compactionBaselines =
                 prepareConflictChecks(committable.fileCommittables());
         ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
         if (!changes.appendChangelog.isEmpty() || !changes.compactChangelog.isEmpty()) {
@@ -616,7 +608,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 changes.compactIndexFiles),
                                         CommitKind.COMPACT,
                                         Collections.emptySet()),
-                                partitionCompactionCheck,
+                                compactionBaselines,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -787,7 +779,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         String statsFileName = statsFileHandler.writeStats(stats);
         tryCommit(
                 CommitChangesProvider.provider(emptyList(), emptyList(), emptyList()),
-                null,
+                emptyMap(),
                 commitIdentifier,
                 null,
                 Collections.emptyMap(),
@@ -814,15 +806,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return changes;
     }
 
-    @Nullable
-    private LongConsumer prepareConflictChecks(List<CommitMessage> commitMessages) {
-        if (dvCompactionChecker != null) {
-            return dvCompactionChecker.prepareCheck(commitMessages);
-        }
+    private Map<BinaryRow, Long> prepareConflictChecks(List<CommitMessage> commitMessages) {
         if (options.dataEvolutionEnabled()) {
             configureRowIdCheckFromMessages(commitMessages);
         }
-        return null;
+        return snapshotConflictChecker.prepareCompactionBaselines(commitMessages);
     }
 
     private void configureRowIdCheckFromMessages(List<CommitMessage> commitMessages) {
@@ -998,7 +986,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private int tryCommit(
             CommitChangesProvider changesProvider,
-            @Nullable LongConsumer partitionCompactionCheck,
+            Map<BinaryRow, Long> compactionBaselines,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -1016,7 +1004,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         tryCommitOnce(
                                 retryResult,
                                 changesProvider,
-                                partitionCompactionCheck,
+                                compactionBaselines,
                                 identifier,
                                 watermark,
                                 properties,
@@ -1121,7 +1109,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return tryCommit(
                 scanner.overwriteChangesProvider(
                         options.bucket(), changes, indexFiles, partitionFilter),
-                null,
+                emptyMap(),
                 identifier,
                 watermark,
                 properties,
@@ -1160,7 +1148,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 tryCommitOnce(
                         retryResult,
                         CommitChangesProvider.provider(deltaFiles, changelogFiles, indexFiles),
-                        null,
+                        emptyMap(),
                         identifier,
                         watermark,
                         properties,
@@ -1176,7 +1164,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private CommitResult tryCommitOnce(
             @Nullable RetryCommitResult retryResult,
             CommitChangesProvider changesProvider,
-            @Nullable LongConsumer partitionCompactionCheck,
+            Map<BinaryRow, Long> compactionBaselines,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -1192,7 +1180,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             tryCommitOnceWithoutLock(
                                     retryResult,
                                     changesProvider,
-                                    partitionCompactionCheck,
+                                    compactionBaselines,
                                     identifier,
                                     watermark,
                                     properties,
@@ -1211,7 +1199,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private CommitResult tryCommitOnceWithoutLock(
             @Nullable RetryCommitResult retryResult,
             CommitChangesProvider changesProvider,
-            @Nullable LongConsumer partitionCompactionCheck,
+            Map<BinaryRow, Long> compactionBaselines,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -1268,16 +1256,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         // Check snapshot history even when the file-level conflict scan can be skipped.
-        if (partitionCompactionCheck != null) {
-            partitionCompactionCheck.accept(newSnapshotId);
-        }
-        List<BinaryRow> changedPartitions = null;
-        if (strictModeChecker != null) {
-            changedPartitions = changedPartitions(deltaFiles, indexFiles);
-            strictModeChecker.check(
-                    newSnapshotId, commitKind, changedPartitions, rebasedReassignments);
-            strictModeChecker.update(newSnapshotId - 1);
-        }
+        List<BinaryRow> changedPartitions =
+                snapshotConflictChecker.check(
+                        newSnapshotId,
+                        commitKind,
+                        changes,
+                        rebasedReassignments,
+                        compactionBaselines);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ready to commit table files to snapshot {}", newSnapshotId);
@@ -1592,9 +1577,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 commitUser,
                 identifier,
                 commitKind.name());
-        if (strictModeChecker != null) {
-            strictModeChecker.update(newSnapshotId);
-        }
+        snapshotConflictChecker.onCommitSuccess(newSnapshotId);
         lastCommittedSnapshotId = newSnapshotId;
         CommitCallback.Context context =
                 new CommitCallback.Context(
