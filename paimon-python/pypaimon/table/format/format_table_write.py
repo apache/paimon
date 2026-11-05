@@ -49,7 +49,7 @@ class FormatTableWrite:
     def write_arrow(self, data: pyarrow.Table) -> None:
         from pypaimon.execution.python.write.format_table_write import _write_arrow
 
-        return _write_arrow(self, data)
+        return _write_arrow(self, data, self._execution)
 
     def write_arrow_batch(self, data: pyarrow.RecordBatch) -> None:
         return self._execution.write_arrow_batch(data)
