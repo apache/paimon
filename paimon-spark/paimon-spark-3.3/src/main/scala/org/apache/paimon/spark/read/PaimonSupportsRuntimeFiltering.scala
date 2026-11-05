@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.read
 
 import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.predicate.PredicateVisitor
 import org.apache.paimon.spark.{PaimonInputPartition, SparkFilterConverter}
 import org.apache.paimon.table.source.Split
 
@@ -48,16 +49,27 @@ trait PaimonSupportsRuntimeFiltering extends BaseScan with SupportsRuntimeFilter
     _inputPartitions
   }
 
-  override def filterAttributes(): Array[NamedReference] = {
-    // Fields read only to construct metadata are not ordinary attributes in the scan output.
+  // Determine runtime-filterable fields once from the initial scan plan.
+  // Do not recompute them from the remaining splits after runtime pruning.
+  private lazy val runtimeFilterFields: Set[String] = {
+    // Only ordinary scan output columns are eligible. Exclude partition columns
+    // read solely to produce metadata.
     val requiredFields = readTableRowType.getFieldNames.asScala
-    table
-      .partitionKeys()
-      .asScala
-      .toArray
-      .filter(requiredFields.contains)
-      .map(fieldReference)
+    val requiredPartitionFields =
+      table.partitionKeys().asScala.filter(requiredFields.contains).toSet
+    if (coreOptions.queryAuthEnabled() && requiredPartitionFields.nonEmpty) {
+      QueryAuthRuntimeFiltering.filterableFields(inputSplits, requiredPartitionFields)
+    } else {
+      requiredPartitionFields
+    }
   }
+
+  override def filterAttributes(): Array[NamedReference] = {
+    table.partitionKeys().asScala.filter(runtimeFilterFields.contains).map(fieldReference).toArray
+  }
+
+  // Updates metrics after runtime pruning of the cached authorized split plan.
+  protected def updateRuntimePruningMetrics(splits: Array[Split]): Unit = {}
 
   override def filter(filters: Array[Filter]): Unit = {
     val partitionType = table.rowType().project(table.partitionKeys())
@@ -65,15 +77,28 @@ trait PaimonSupportsRuntimeFiltering extends BaseScan with SupportsRuntimeFilter
     val runtimePartitionFilters = filters.toSeq
       .map(converter.convertIgnoreFailure)
       .filter(_ != null)
+      .filter(
+        predicate =>
+          !coreOptions.queryAuthEnabled() ||
+            PredicateVisitor
+              .collectFieldNames(predicate)
+              .asScala
+              .forall(runtimeFilterFields.contains))
       .map(PartitionPredicate.fromPredicate(partitionType, _))
     if (runtimePartitionFilters.nonEmpty) {
       pushedRuntimePartitionFilters.appendAll(runtimePartitionFilters)
-      readBuilder.withPartitionFilter(
-        PartitionPredicate.and(
-          (pushedPartitionFilters ++ pushedRuntimePartitionFilters).toList.asJava))
-      // set inputPartitions null to trigger to get the new splits.
+      if (coreOptions.queryAuthEnabled()) {
+        // Reuse the authorized plan and retain its wrappers and chain dependencies. Re-planning
+        // would authorize again and route visible join keys through raw partition selection.
+        _inputSplits = QueryAuthRuntimeFiltering.filter(inputSplits, runtimePartitionFilters)
+        updateRuntimePruningMetrics(_inputSplits)
+      } else {
+        readBuilder.withPartitionFilter(
+          PartitionPredicate.and(
+            (pushedPartitionFilters ++ pushedRuntimePartitionFilters).toList.asJava))
+        _inputSplits = null
+      }
       _inputPartitions = null
-      _inputSplits = null
     }
   }
 }
