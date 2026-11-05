@@ -1170,7 +1170,8 @@ public interface Catalog extends AutoCloseable {
     }
 
     /** Get model metadata by identifier. */
-    default Model getModel(Identifier identifier) throws ModelNotExistException {
+    default Model getModel(Identifier identifier)
+            throws ModelNotExistException, DatabaseNotExistException {
         throw new UnsupportedOperationException("Current Catalog does not support models");
     }
 
@@ -1188,7 +1189,7 @@ public interface Catalog extends AutoCloseable {
 
     /** Drop model metadata. */
     default void dropModel(Identifier identifier, boolean ignoreIfNotExists)
-            throws ModelNotExistException {
+            throws ModelNotExistException, DatabaseNotExistException {
         throw new UnsupportedOperationException("Current Catalog does not support models");
     }
 

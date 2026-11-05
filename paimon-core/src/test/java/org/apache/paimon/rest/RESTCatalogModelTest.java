@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** REST catalog tests for database-scoped model metadata. */
 class RESTCatalogModelTest {
@@ -43,12 +44,7 @@ class RESTCatalogModelTest {
     void testModelCrudUsesTheSharedRestContract() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
             server.start();
-            Options options = new Options();
-            options.set(RESTCatalogOptions.URI, server.url("/").toString());
-            options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
-            options.set(RESTCatalogOptions.TOKEN, "token");
-            options.set(RESTCatalogInternalOptions.PREFIX, "catalog");
-            Catalog catalog = new RESTCatalog(CatalogContext.create(options), false);
+            Catalog catalog = catalog(server);
 
             Identifier identifier = Identifier.create("quality", "qwen_vl");
             Model metadata =
@@ -81,6 +77,39 @@ class RESTCatalogModelTest {
         }
     }
 
+    @Test
+    void testDatabaseAndModelNotFoundAreDistinct() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            Catalog catalog = catalog(server);
+            Identifier identifier = Identifier.create("quality", "qwen_vl");
+
+            server.enqueue(notFound("DATABASE", "quality"));
+            assertThatThrownBy(() -> catalog.getModel(identifier))
+                    .isInstanceOf(Catalog.DatabaseNotExistException.class);
+
+            server.enqueue(notFound("MODEL", "qwen_vl"));
+            assertThatThrownBy(() -> catalog.getModel(identifier))
+                    .isInstanceOf(Catalog.ModelNotExistException.class);
+
+            server.enqueue(notFound("DATABASE", "quality"));
+            assertThatThrownBy(() -> catalog.dropModel(identifier, true))
+                    .isInstanceOf(Catalog.DatabaseNotExistException.class);
+
+            server.enqueue(notFound("MODEL", "qwen_vl"));
+            catalog.dropModel(identifier, true);
+        }
+    }
+
+    private static Catalog catalog(MockWebServer server) {
+        Options options = new Options();
+        options.set(RESTCatalogOptions.URI, server.url("/").toString());
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
+        options.set(RESTCatalogOptions.TOKEN, "token");
+        options.set(RESTCatalogInternalOptions.PREFIX, "catalog");
+        return new RESTCatalog(CatalogContext.create(options), false);
+    }
+
     private static Map<String, Map<String, Object>> inputs() {
         Map<String, Object> field = new HashMap<>();
         field.put("dataType", "BLOB");
@@ -101,5 +130,14 @@ class RESTCatalogModelTest {
                 .setResponseCode(200)
                 .setHeader("Content-Type", "application/json")
                 .setBody(body);
+    }
+
+    private static MockResponse notFound(String resourceType, String resourceName) {
+        return json("{\"resourceType\":\""
+                        + resourceType
+                        + "\",\"resourceName\":\""
+                        + resourceName
+                        + "\",\"message\":\"not found\",\"code\":404}")
+                .setResponseCode(404);
     }
 }

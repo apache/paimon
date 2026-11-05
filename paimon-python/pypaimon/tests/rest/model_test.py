@@ -196,6 +196,15 @@ class ModelTest(unittest.TestCase):
             self.assertEqual(["qwen_vl"], [model.name for model in catalog.list_models("a/b")])
             catalog.drop_model(Identifier.create("a/b", "qwen_vl"))
 
+            catalog.create_model(
+                "quality.123", "bailian", "qwen3.8-flash", _inputs()
+            )
+            self.assertEqual("/v1/catalog/databases/quality/models", calls[-1][1])
+            catalog.get_model("quality.123")
+            self.assertEqual("/v1/catalog/databases/quality/models/123", calls[-1][1])
+            catalog.drop_model("quality.123")
+            self.assertEqual("/v1/catalog/databases/quality/models/123", calls[-1][1])
+
             state.update(status=409, resource_type="MODEL")
             with self.assertRaises(ModelAlreadyExistException):
                 catalog.create_model(

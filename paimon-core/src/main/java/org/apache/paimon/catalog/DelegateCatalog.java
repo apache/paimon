@@ -390,7 +390,8 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public Model getModel(Identifier identifier) throws ModelNotExistException {
+    public Model getModel(Identifier identifier)
+            throws ModelNotExistException, DatabaseNotExistException {
         return wrapped.getModel(identifier);
     }
 
@@ -402,7 +403,7 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public void dropModel(Identifier identifier, boolean ignoreIfNotExists)
-            throws ModelNotExistException {
+            throws ModelNotExistException, DatabaseNotExistException {
         wrapped.dropModel(identifier, ignoreIfNotExists);
     }
 
