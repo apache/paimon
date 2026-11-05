@@ -1297,7 +1297,7 @@ class TestVariantPaimonTable(unittest.TestCase):
                 self.assertTrue(splits)
                 read = builder.new_read()
 
-                with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
+                with self.assertRaisesRegex(RuntimeError, 'Variant extraction requires a compatible native reader'):
                     read.to_torch(splits, streaming=False)
 
                 dataset = read.to_torch(splits, streaming=True)
@@ -1307,11 +1307,14 @@ class TestVariantPaimonTable(unittest.TestCase):
                 builder = table.copy({'read.native.enabled': 'true'}).new_read_builder().with_projection(projection)
                 read = builder.new_read()
                 with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=False):
+                    with self.assertRaisesRegex(RuntimeError, 'Variant extraction requires a compatible native reader'):
+                        read.to_torch(splits, streaming=False)
                     dataset = read.to_torch(splits, streaming=True)
                     with self.assertRaisesRegex(RuntimeError, 'Variant extraction requires a compatible native reader'):
                         list(dataset)
 
                 if _native_variant_projection_available():
+                    self.assertEqual(read.to_torch(splits, streaming=False)[0], {'ratio': 1.25})
                     self.assertEqual(list(read.to_torch(splits, streaming=True)), [{'ratio': 1.25}])
 
     def _check_variant_projection_literal_top_level_names(

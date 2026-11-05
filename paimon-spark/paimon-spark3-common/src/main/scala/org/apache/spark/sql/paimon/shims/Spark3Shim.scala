@@ -43,7 +43,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, CTERe
 import org.apache.spark.sql.catalyst.plans.physical.Distribution
 // NOTE: `MergeRows` / `MergeRows.Keep` were introduced in Spark 3.4. We access them only via
 // reflection inside the `mergeRowsKeep*` method bodies so that loading `Spark3Shim` does not fail
-// on Spark 3.2 / 3.3 runtimes that still ship `paimon-spark3-common` (the module targets 3.5.8 at
+// on Spark 3.2 / 3.3 runtimes that still ship `paimon-spark3-common` (the module targets 3.5.9 at
 // compile time but must also run on 3.2 / 3.3).
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, ResolveDefaultColumns}

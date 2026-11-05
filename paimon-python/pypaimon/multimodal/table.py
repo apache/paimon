@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Sequence
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.query import (
@@ -502,6 +503,42 @@ class MultimodalTable:
     def merge(self, on):
         return _MergeBuilder(self, on)
 
+    def merge_columns(self, data, *, on):
+        """Match external column values without inserting rows or rewriting other columns.
+
+        Missing output columns are added as nullable columns using the input
+        Arrow types. Matching follows an update-only MERGE: unmatched source
+        rows are ignored, one source row may update multiple target rows, and
+        multiple source rows matching the same target row are rejected.
+        Existing output types must match the table types. Execution reuses
+        the standard MERGE backend, including native execution when enabled.
+        Schema publication and data commit are separate operations. Requires
+        a current full-table view and a single writer for the operation.
+        Returns :class:`pypaimon.multimodal.ColumnUpdateResult` with
+        ``updated_rows=None`` because MERGE does not return logical row counts.
+        """
+        from pypaimon.multimodal.columns import merge_columns
+        return merge_columns(self, data, on=on)
+
+    def add_columns(self, schema, *, inputs=None, fn=None, batch_size=1024):
+        """Add nullable columns, optionally computing their values in batches.
+
+        ``schema`` declares new columns. If supplied, ``fn`` receives an
+        Arrow RecordBatch containing only ``inputs`` and returns a Table or
+        RecordBatch of the declared columns in the same row order and count.
+        Ordinary BLOB inputs are payload bytes. Video-frame inputs retain
+        their descriptor semantics; decoding belongs in the function.
+        The function may run repeatedly and must be side-effect-free.
+
+        Outputs are grouped by the original file row-ID ranges before being
+        written. Untouched columns, including media, retain their files.
+        Schema publication precedes computation; failures leave new columns
+        visible as NULL. Requires a current full-table view and a single
+        writer. Returns :class:`pypaimon.multimodal.ColumnUpdateResult`.
+        """
+        from pypaimon.multimodal.columns import add_columns
+        return add_columns(self, schema, inputs=inputs, fn=fn, batch_size=batch_size)
+
     def map_with_blobs(self, dataset, columns, fn, **kwargs):
         from pypaimon.ray import map_with_blobs
 
@@ -532,9 +569,17 @@ class MultimodalTable:
             *,
             snapshot_id: Optional[int] = None,
             tag_name: Optional[str] = None):
+        """Return a scan filtering rows by Paimon row ID; requires row tracking.
+
+        Input order and duplicates do not affect this membership query.
+        Missing or deleted IDs are omitted. Use ``take_batch`` for ordered
+        sampling with replacement.
+        """
         row_ids = _coerce_row_ids(row_ids)
         read_table = _time_travel_table(
             self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
+        if not read_table.options.row_tracking_enabled():
+            raise ValueError("Row ID reads require row-tracking.enabled=true.")
         read_builder = read_table.new_read_builder().with_projection(
             [field.name for field in read_table.fields]
             + [SpecialFields.ROW_ID.name]
@@ -544,6 +589,44 @@ class MultimodalTable:
         query = ScanQuery(read_table)
         query._predicate = predicate
         return query
+
+    def take_batch(
+            self,
+            row_ids,
+            *,
+            columns=None,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None) -> pa.Table:
+        """Fetch an ordered batch by Paimon row ID, preserving duplicates.
+
+        Returns an Arrow table with one row per input ID, in input order.
+        ``columns`` defaults to all table columns; include ``_ROW_ID``
+        explicitly to return it. Missing, deleted, or filtered-out IDs raise
+        KeyError instead of shortening the batch. An empty input returns an
+        empty table with the projected schema.
+
+        Requires row tracking. IDs are table row handles, not Dataset position
+        indices. Pass the source snapshot or tag when sampling a saved manifest.
+        BLOB columns follow the table's read options, as in ``scan()``.
+        """
+        row_ids = _coerce_row_ids(row_ids)
+        query = self.take_row_ids(
+            row_ids, snapshot_id=snapshot_id, tag_name=tag_name)
+        if columns is None:
+            columns = [field.name for field in query._table.fields]
+        elif isinstance(columns, str):
+            columns = [columns]
+        else:
+            columns = list(columns)
+
+        batch = query.select(columns).with_row_id().to_arrow()
+        requested = pa.array(row_ids, type=pa.int64())
+        positions = pc.index_in(
+            requested, value_set=batch.column(SpecialFields.ROW_ID.name))
+        if positions.null_count:
+            missing = requested.filter(pc.is_null(positions)).to_pylist()
+            raise KeyError("Row IDs not found: %s" % list(dict.fromkeys(missing)))
+        return batch.take(positions).select(columns)
 
     def blobs(self, *, column: Optional[str] = None, key_column: Optional[str] = None):
         from pypaimon.multimodal.blob_store import BlobStore

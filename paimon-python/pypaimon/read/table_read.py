@@ -487,8 +487,10 @@ class TableRead:
                 prefix.
             batch_format: ``"row"``, ``"pyarrow"``, or ``"torch"``. Batch
                 formats require streaming. Map-style row format supports named
-                top-level columns. Streaming row format also supports paths
-                and float32 VARIANT extractions through native reading.
+                columns, nested paths and float32 VARIANT extractions. Named
+                nested paths and VARIANT extractions materialize through Arrow
+                with its existing read restrictions. VARIANT extractions require
+                native reading in both map-style and streaming row formats.
             batch_size: Rows per batch; ``None`` preserves reader batches when
                 unshuffled, or emits shuffle blocks of at most buffer_size rows.
             to_tensor_fn: Optional RecordBatch converter for Torch batches.
@@ -516,12 +518,6 @@ class TableRead:
         ):
             raise ValueError("batch_size must be a positive int or None")
         if batch_format == "row":
-            if (not streaming and self.output_projection is not None
-                    and self.output_projection.named
-                    and any(len(path) > 1 for _, path in self.output_projection.columns)):
-                raise RuntimeError(
-                    "Named nested paths and VARIANT expressions are not supported by Torch row format; "
-                    "use streaming=True")
             if batch_size is not None:
                 raise ValueError(
                     "batch_size requires batch_format='pyarrow' or 'torch'"

@@ -28,6 +28,13 @@ Use `Catalog` to manage databases and tables, and to load a `Table` for reading 
 Catalog configuration and table options have different scopes: configure the warehouse and metastore
 on the catalog; put storage and read/write behavior in the table schema's options.
 
+For file-store tables, `getTable()` loads the table definition without initializing the runtime
+store. Metadata access and `copy(options)` can therefore succeed even if stored options are invalid
+for reading or writing. Runtime options are validated when a scan, reader, writer, committer, or
+explicit `FileStoreTable.store()` call initializes the store. `copy(options)` still rejects immutable
+option changes immediately. CREATE and ALTER validate the resulting schema before committing it,
+so an invalid existing configuration can be inspected, repaired, or dropped.
+
 ## Set up the examples
 
 Add the [Java dependency](java-api#dependency) and save the

@@ -125,6 +125,56 @@ finally:
 For stream updates, use `table.new_stream_write_builder()` and pass the stream
 commit identifier to `new_update().new_update_by_row_id(commit_identifier)`.
 
+# Multimodal column enrichment
+
+Multimodal Data Evolution tables provide two local column-enrichment methods:
+
+```python
+# labels is a typed Arrow table containing sample_id and the columns to fill.
+# New columns are added automatically; existing media columns retain their files.
+result = table.merge_columns(labels, on="sample_id")
+
+# Compute new nullable columns from selected inputs, in input row order.
+result = table.add_columns(
+    schema=feature_schema, inputs=["image"], fn=compute_features, batch_size=128)
+
+# Without fn, only the schema is changed; existing rows read as NULL.
+result = table.add_columns(schema=nullable_columns)
+```
+
+`table` is a `pypaimon.multimodal.MultimodalTable`. `merge_columns` uses ordinary
+update-only MERGE semantics: unmatched source rows are ignored, NULL keys do not
+match, and one source row can update multiple target rows. Multiple source rows
+matching the same target row are rejected by the MERGE executor. Key type
+conversion follows `merge`.
+Outputs must have the declared/existing types. A fixed-size Arrow list declares
+a VECTOR column, for example `pa.list_(pa.float32(), 768)` for an embedding.
+
+These methods require a current full-table view and a single writer during the
+operation. They do not provide distributed execution or automatic retries.
+`add_columns` reads only its inputs, materializing ordinary BLOB inputs as bytes;
+video-frame columns keep their descriptor semantics. Function calls have at most
+`batch_size` rows; outputs are buffered per original file group before writing.
+`merge_columns` materializes the source as an Arrow table and delegates target
+matching and updates to the standard MERGE backend. Supported routes use native
+MERGE when `write.native.enabled=true` and a compatible `pypaimon_rust` is available.
+`add_columns` can use the native shard reader and writer; its `fn` runs in Python.
+
+`ColumnUpdateResult` reports `updated_rows`, `added_columns`, `source_snapshot_id`,
+`snapshot_id`, and `schema_id`. `updated_rows` is the backfilled row count for
+`add_columns` (zero for schema-only additions) and `None` for `merge_columns`.
+Schema publication and data
+commit are separate. A schema-only call does not create a data snapshot.
+Failures during publication or data preparation raise `ColumnUpdateError` with `phase`,
+`schema_changed`, `schema_id`, `source_snapshot_id`, and `commit_outcome`;
+the original exception remains in `__cause__`. New columns can remain visible as
+NULL after failed computation. If schema publication or data commit has an
+unknown outcome, inspect the table before retrying. Prepared files are preserved
+on failure and may require ordinary orphan-file maintenance.
+
+See [Multimodal Column Enrichment](../docs/docs/pypaimon/multimodal-tables.mdx#column-enrichment) for a
+complete example and the column update contract.
+
 # Parquet page-index reads
 
 For row-tracking tables with a Parquet OffsetIndex, PyPaimon can read a

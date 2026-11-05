@@ -576,6 +576,7 @@ def _execute_and_commit(
                 for m in insert_msgs
                 for f in m.new_files
                 if not DataFileMeta.is_blob_file(f.file_name)
+                and not DataFileMeta.is_vector_file(f.file_name)
             )
 
         all_msgs: list = list(commit_messages)

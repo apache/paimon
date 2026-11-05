@@ -156,6 +156,10 @@ public interface Catalog extends AutoCloseable {
      *
      * <p>System tables can be got by '$' splitter.
      *
+     * <p>File-store tables load their definition without initializing the runtime store. Runtime
+     * option validation happens when a read, scan, write, commit, or explicit store access first
+     * initializes that store. Loading a table is not a runtime configuration check.
+     *
      * @param identifier Path of the table
      * @return The requested table
      * @throws TableNotExistException if the target does not exist

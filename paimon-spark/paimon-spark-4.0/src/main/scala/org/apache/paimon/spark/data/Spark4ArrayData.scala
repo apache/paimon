@@ -27,7 +27,7 @@ import org.apache.spark.unsafe.types.VariantVal
  * getters on `SpecializedGetters` differ in every 4.x minor: the `paimon-spark4-common` copy
  * implements `getBinaryView`, whose `BinaryView` return type arrived in Spark 4.2 (SPARK-57058),
  * and `paimon-spark-4.1` forks the class to implement the 4.1 pair `getGeography` / `getGeometry`
- * returning the 4.1-only `GeographyVal` / `GeometryVal`. Spark 4.0.3 declares neither shape, so
+ * returning the 4.1-only `GeographyVal` / `GeometryVal`. Spark 4.0.5 declares neither shape, so
  * this copy publishes a slim variant with neither. The maven-shade-plugin pulls both jars into the
  * final paimon-spark-4.0 bundle and the local `target/classes` copy takes precedence at runtime,
  * satisfying the Spark 4.0 class loader, which would otherwise refuse to load bytecode referencing

@@ -22,6 +22,7 @@ import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils;
 import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.CdcSchema;
@@ -62,10 +63,12 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
@@ -226,7 +229,8 @@ public class PostgresRecordParser
                             databaseName,
                             currentTable,
                             schema,
-                            new CdcRecord(RowKind.INSERT, after)));
+                            CdcRecord.withBase64EncodedFields(
+                                    RowKind.INSERT, after, extractBase64EncodedFields())));
         }
 
         return records;
@@ -274,7 +278,8 @@ public class PostgresRecordParser
                 }
             } else if (("bytes".equals(postgresSqlType) && className == null)) {
                 // binary, varbinary
-                newValue = new String(Base64.getDecoder().decode(oldValue));
+                // Retain Base64 until the sink converts this marked field to bytes.
+                newValue = oldValue;
             } else if ("bytes".equals(postgresSqlType)
                     && className.endsWith(decimalLogicalName())) {
                 // numeric, decimal
@@ -351,8 +356,12 @@ public class PostgresRecordParser
         }
 
         // generate values of computed columns
+        Set<String> base64EncodedFields =
+                computedColumns.isEmpty() ? Collections.emptySet() : extractBase64EncodedFields();
         for (ComputedColumn computedColumn : computedColumns) {
-            resultMap.put(computedColumn.columnName(), computedColumn.evalFromRecord(resultMap));
+            resultMap.put(
+                    computedColumn.columnName(),
+                    computedColumn.evalFromRecord(resultMap, base64EncodedFields));
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
@@ -364,8 +373,16 @@ public class PostgresRecordParser
         return resultMap;
     }
 
+    private Set<String> extractBase64EncodedFields() {
+        return DebeziumSchemaUtils.extractBase64EncodedFields(
+                root.schema(), computedColumns, metadataConverters);
+    }
+
     protected RichCdcMultiplexRecord createRecord(RowKind rowKind, Map<String, String> data) {
         return new RichCdcMultiplexRecord(
-                databaseName, currentTable, null, new CdcRecord(rowKind, data));
+                databaseName,
+                currentTable,
+                null,
+                CdcRecord.withBase64EncodedFields(rowKind, data, extractBase64EncodedFields()));
     }
 }

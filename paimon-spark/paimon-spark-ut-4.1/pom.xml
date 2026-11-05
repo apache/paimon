@@ -32,7 +32,7 @@ under the License.
     <name>Paimon : Spark : UT : 4.1 : ${scala.binary.version}</name>
 
     <!--
-      A second compilation of `paimon-spark-ut`'s test sources, against Spark 4.1.2 instead of the
+      A second compilation of `paimon-spark-ut`'s test sources, against Spark 4.1.4 instead of the
       `spark4` profile baseline. Owns no sources of its own: `build-helper` adds
       `../paimon-spark-ut/src/test/scala` and `src/test/java` as test-source roots, and
       `<testResources>` points at that module's test resources, so there is exactly one copy of every
@@ -52,10 +52,10 @@ under the License.
       compatibility (4.0-compiled runs on 4.1) holds for `src/main`, which reaches version-specific
       Spark APIs through `SparkShim`. Test sources do not — they construct Spark's internals
       directly. `PaimonOptimizationTestBase` builds a `CTERelationDef`, whose constructor takes 5
-      arguments on 4.0.3 and 6 on 4.1.2, so a 4.0.3-compiled call raises `NoSuchMethodError` on 4.1.
+      arguments on 4.0.5 and 6 on 4.1.4, so a 4.0.5-compiled call raises `NoSuchMethodError` on 4.1.
     -->
     <properties>
-        <spark.version>4.1.2</spark.version>
+        <spark.version>4.1.4</spark.version>
         <ut.module.dir>${project.basedir}/../paimon-spark-ut</ut.module.dir>
         <!-- Spark 4 only supports Scala 2.13. Pin it locally so this _2.13 module resolves its
              dependencies to _2.13 even when the spark4 profile is inactive (see issue #6682);

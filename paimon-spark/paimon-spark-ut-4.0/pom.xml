@@ -32,7 +32,7 @@ under the License.
     <name>Paimon : Spark : UT : 4.0 : ${scala.binary.version}</name>
 
     <!--
-      A second compilation of `paimon-spark-ut`'s test sources, against Spark 4.0.3 instead of the
+      A second compilation of `paimon-spark-ut`'s test sources, against Spark 4.0.5 instead of the
       `spark4` profile baseline. Owns no sources of its own: `build-helper` adds
       `../paimon-spark-ut/src/test/scala` and `src/test/java` as test-source roots, and
       `<testResources>` points at that module's test resources, so there is exactly one copy of every
@@ -46,15 +46,15 @@ under the License.
       (SPARK-55910). `PaimonSparkTestBase extends QueryTest with SharedSparkSession`, so a
       4.2-compiled `PaimonSparkTestBase` lists `QueryTest` among its interfaces and fails to load on
       a 4.0 runtime with `IncompatibleClassChangeError`. Same-FQCN override files cannot fix it: they
-      only apply to `src/main`, and this is a test-jar. Classfiles compiled against 4.0.3 name only
-      what 4.0.3 has, which is also why `StreamTestCheckAnswerWithTimeoutStub` is deleted here.
+      only apply to `src/main`, and this is a test-jar. Classfiles compiled against 4.0.5 name only
+      what 4.0.5 has, which is also why `StreamTestCheckAnswerWithTimeoutStub` is deleted here.
 
       Serves `paimon-spark-4.0` only. `paimon-spark-4.1` gets the same treatment from
       `paimon-spark-ut-4.1/pom.xml`, because under this baseline neither version matches the build
       `paimon-spark-ut` produces.
     -->
     <properties>
-        <spark.version>4.0.3</spark.version>
+        <spark.version>4.0.5</spark.version>
         <ut.module.dir>${project.basedir}/../paimon-spark-ut</ut.module.dir>
         <!-- Spark 4 only supports Scala 2.13. Pin it locally so this _2.13 module resolves its
              dependencies to _2.13 even when the spark4 profile is inactive (see issue #6682);
@@ -88,7 +88,7 @@ under the License.
           `${paimon-sparkx-common}` transitively pulls in `spark-sql-api` at the `spark4` profile
           baseline (4.2.0), so every Spark artifact is pinned to ${spark.version} here to keep the
           whole compile classpath on 4.0. Same reasoning as `paimon-spark-4.0`, and the same
-          `spark-connect-shims` exclusion on `spark-sql-api` and `spark-sql`: Spark 4.0.3's shims jar
+          `spark-connect-shims` exclusion on `spark-sql-api` and `spark-sql`: Spark 4.0.5's shims jar
           carries a stub `org.apache.spark.SparkConf` with only `getAll()`, which scalac resolves in
           preference to spark-core's real one, failing with `value set is not a member of
           org.apache.spark.SparkConf`.

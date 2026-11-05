@@ -1789,6 +1789,9 @@ def _open_video_decoder(stream, backend=None, codec_threads=0):
             stream.seek(0)
         else:
             return _FallbackVideoDecoder(stream, decoder)
+    if backend == "torchcodec" and keyframe_index is not None:
+        from pypaimon.multimodal.lerobot.indexed_torchcodec import _IndexedTorchCodecDecoder
+        return _IndexedTorchCodecDecoder(stream, keyframe_index, codec_threads)
     if backend in (None, "torchcodec"):
         try:
             return _open_torchcodec_decoder(stream)
@@ -1924,8 +1927,11 @@ class _RangeBackedVideo(io.RawIOBase):
                 remaining -= size
         self._ensure(selected)
 
-    def close(self):
+    def clear_cache(self):
         self._segments.clear()
+
+    def close(self):
+        self.clear_cache()
         super().close()
 
     def _ensure(self, ranges):
@@ -2009,6 +2015,7 @@ class _PyAVVideoDecoder:
             keyframe_index.ordinals
             if keyframe_index is not None else [])
         self._container = None
+        self._indexed_source = None
         self._stream = None
         self._next_index = 0
         self._timestamps = []
@@ -2108,26 +2115,32 @@ class _PyAVVideoDecoder:
         import av
         groups, unused_ranges = self._indexed_plan(indices)
         decoded = {}
-        source = _RangeBackedVideo(
-            self._video_length(), self._read_video_ranges)
         try:
-            source.prefetch(self._keyframe_index.metadata_ranges)
-            with av.open(source) as container:
-                stream = container.streams.video[0]
-                stream.thread_count = self._thread_count
-                for anchor, targets in sorted(groups.items()):
-                    unused_groups, ranges = self._indexed_plan(targets)
-                    source.prefetch(ranges)
-                    self._decode_indexed_group(
-                        container,
-                        stream,
-                        anchor,
-                        sorted(targets),
-                        decoded,
-                    )
+            if self._container is None:
+                self._indexed_source = _RangeBackedVideo(
+                    self._video_length(), self._read_video_ranges)
+                self._indexed_source.prefetch(self._keyframe_index.metadata_ranges)
+                self._container = av.open(self._indexed_source)
+                self._stream = self._container.streams.video[0]
+                self._stream.thread_count = self._thread_count
+            for anchor, targets in sorted(groups.items()):
+                unused_groups, ranges = self._indexed_plan(targets)
+                self._indexed_source.prefetch(ranges)
+                self._decode_indexed_group(
+                    self._container,
+                    self._stream,
+                    anchor,
+                    sorted(targets),
+                    decoded,
+                )
             return decoded
+        except BaseException:
+            self.close()
+            raise
         finally:
-            source.close()
+            if self._indexed_source is not None:
+                # Reuse the demuxer without retaining media bytes between batches.
+                self._indexed_source.clear_cache()
 
     def _indexed_plan(self, indices):
         mapping = self._keyframe_index
@@ -2268,8 +2281,15 @@ class _PyAVVideoDecoder:
         return torch.from_numpy(array).permute(2, 0, 1)
 
     def close(self):
-        if self._container is not None:
-            self._container.close()
+        container, self._container = self._container, None
+        source, self._indexed_source = self._indexed_source, None
+        try:
+            if container is not None:
+                container.close()
+        finally:
+            if source is not None:
+                self._stream = None
+                source.close()
 
 
 def _merge_video_ranges(ranges):

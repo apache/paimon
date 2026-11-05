@@ -36,11 +36,13 @@ import javax.annotation.Nullable;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.CONNECT_NAME_PROP;
@@ -70,6 +72,8 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
     private static final Logger LOG = LoggerFactory.getLogger(DebeziumAvroRecordParser.class);
 
     private static final Schema NULL_AVRO_SCHEMA = Schema.create(Schema.Type.NULL);
+
+    private final Set<String> base64EncodedFields = new HashSet<>();
 
     private GenericRecord keyRecord;
     private GenericRecord valueRecord;
@@ -130,6 +134,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
 
     private Map<String, String> extractRowData(
             GenericRecord record, CdcSchema.Builder schemaBuilder) {
+        base64EncodedFields.clear();
         Schema payloadSchema = sanitizedSchema(record.getSchema());
 
         LinkedHashMap<String, String> resultMap = new LinkedHashMap<>();
@@ -147,14 +152,13 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
                                                     SCHEMA_PARAMETER_COLUMN_NAME, field.name()));
             String rawValue = Objects.toString(record.get(fieldName), null);
             String className = schema.getProp(CONNECT_NAME_PROP);
+            if (DebeziumSchemaUtils.isPlainBinaryType(schema.getFullName(), className)
+                    && schema.getLogicalType() == null) {
+                base64EncodedFields.add(fieldName);
+            }
             String transformed =
                     DebeziumSchemaUtils.transformAvroRawValue(
-                            rawValue,
-                            schema.getFullName(),
-                            className,
-                            typeMapping,
-                            record.get(fieldName),
-                            ZoneOffset.UTC);
+                            rawValue, schema, typeMapping, record.get(fieldName), ZoneOffset.UTC);
             resultMap.put(fieldName, transformed);
             schemaBuilder.column(fieldName, avroToPaimonDataType(schema), field.doc());
         }
@@ -162,6 +166,11 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
         evalComputedColumns(resultMap, schemaBuilder);
         evalMetadataColumns(resultMap, schemaBuilder);
         return resultMap;
+    }
+
+    @Override
+    protected Set<String> extractBase64EncodedFields() {
+        return base64EncodedFields;
     }
 
     @Override

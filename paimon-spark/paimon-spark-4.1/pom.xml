@@ -32,7 +32,7 @@ under the License.
     <name>Paimon : Spark : 4.1 : 2.13</name>
 
     <properties>
-        <spark.version>4.1.2</spark.version>
+        <spark.version>4.1.4</spark.version>
         <!-- This module resolves `log4j-slf4j2-impl` onto the test classpath, and that binding
              needs SLF4J 2.x (`org.slf4j.spi.LoggingEventBuilder` is 2.x-only). Override the Paimon
              parent pom's default `slf4j.version=1.7.32` so the classpath is uniformly 2.x;
@@ -70,7 +70,7 @@ under the License.
           `SqlApiConf` added abstract `singleCharacterPipeOperatorEnabled()`, which Spark 4.1's
           concrete anonymous subclasses (e.g. `WithTestConf$$anon$4`) don't implement. Mixing those
           jars produces `AbstractMethodError` at parser configuration time. Pin `spark-sql-api` to
-          `${spark.version}` (4.1.2) so the classpath is uniformly 4.1 — the same pin
+          `${spark.version}` (4.1.4) so the classpath is uniformly 4.1 — the same pin
           `paimon-spark-4.0` carries for the same reason.
         -->
         <dependency>
