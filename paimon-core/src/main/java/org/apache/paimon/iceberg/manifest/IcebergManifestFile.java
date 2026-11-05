@@ -20,6 +20,7 @@ package org.apache.paimon.iceberg.manifest;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FileFormat;
@@ -28,7 +29,10 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.iceberg.IcebergPathFactory;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta.Content;
@@ -45,6 +49,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
@@ -53,6 +58,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -67,7 +73,11 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
 
     private static final long UNASSIGNED_SEQ = -1L;
 
+    /** How many entries {@link #validate} decodes between two runs of its check. */
+    public static final int VALIDATE_CHECK_INTERVAL = 1024;
+
     private final RowType partitionType;
+    private final FormatReaderFactory readerFactory;
     private final FormatWriterFactory writerFactory;
     private final MemorySize targetFileSize;
 
@@ -90,6 +100,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                 pathFactory,
                 null);
         this.partitionType = partitionType;
+        this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
     }
@@ -168,6 +179,228 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
             return result;
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Decodes the whole file one entry at a time, drops each entry at once, and compares the number
+     * of files and rows that it found with the counters of its manifest list entry. Memory use does
+     * not depend on the size of the file.
+     *
+     * <p>A manifest list records the counters when it is written, and a step that only adds files
+     * trusts them, so the length of a file says nothing about its contents.
+     *
+     * @param betweenEntries runs every {@link #VALIDATE_CHECK_INTERVAL} entries, and may throw to
+     *     stop the scan. What it throws is not taken for damage.
+     * @throws CorruptManifestException when the storage delivered the whole file and it does not
+     *     decode, or when the counts differ
+     * @throws IOException when the storage failed, or ended the read before the end of the file, so
+     *     that a failing read is never reported as damage
+     */
+    public void validate(IcebergManifestFileMeta meta, long fileSize, Runnable betweenEntries)
+            throws IOException {
+        Path path = pathFactory.toPath(new Path(meta.manifestPath()).getName());
+        ReadWatch watch = new ReadWatch(fileIO, fileSize);
+        RuntimeException[] fromCheck = new RuntimeException[1];
+        long[] counts = new long[6];
+        try (CloseableIterator<InternalRow> iterator =
+                FileUtils.createFormatReader(watch, readerFactory, path, fileSize)
+                        .toCloseableIterator()) {
+            IcebergManifestEntrySerializer entrySerializer =
+                    (IcebergManifestEntrySerializer) serializer;
+            long entries = 0;
+            while (iterator.hasNext()) {
+                IcebergManifestEntry entry = entrySerializer.fromRow(iterator.next(), meta);
+                long rows = entry.file().recordCount();
+                switch (entry.status()) {
+                    case ADDED:
+                        counts[0]++;
+                        counts[3] += rows;
+                        break;
+                    case EXISTING:
+                        counts[1]++;
+                        counts[4] += rows;
+                        break;
+                    case DELETED:
+                        counts[2]++;
+                        counts[5] += rows;
+                        break;
+                    default:
+                        throw new IllegalStateException("Unknown status " + entry.status());
+                }
+                if (++entries % VALIDATE_CHECK_INTERVAL == 0) {
+                    try {
+                        betweenEntries.run();
+                    } catch (RuntimeException e) {
+                        fromCheck[0] = e;
+                        throw e;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            if (e == fromCheck[0]) {
+                throw (RuntimeException) e;
+            }
+            if (watch.failure != null) {
+                throw watch.failure;
+            }
+            if (watch.endedShort) {
+                throw new IOException("A read of " + path + " ended before the end of the file", e);
+            }
+            throw new CorruptManifestException(path + " cannot be decoded: " + e, e);
+        }
+
+        long[] expected =
+                new long[] {
+                    meta.addedFilesCount(),
+                    meta.existingFilesCount(),
+                    meta.deletedFilesCount(),
+                    meta.addedRowsCount(),
+                    meta.existingRowsCount(),
+                    meta.deletedRowsCount()
+                };
+        if (!Arrays.equals(counts, expected)) {
+            throw new CorruptManifestException(
+                    path
+                            + " holds (added, existing, deleted files and rows) "
+                            + Arrays.toString(counts)
+                            + ", and its manifest list records "
+                            + Arrays.toString(expected));
+        }
+    }
+
+    /** The bytes of a manifest were delivered by the storage, and they are not a valid manifest. */
+    public static class CorruptManifestException extends RuntimeException {
+
+        public CorruptManifestException(String message) {
+            super(message);
+        }
+
+        public CorruptManifestException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /**
+     * Passes every call on to the file system and notes whether a read failed or ended early, so
+     * that a decoder error can be told from a storage error.
+     */
+    private static class ReadWatch implements FileIO {
+
+        private final FileIO delegate;
+        private final long fileSize;
+        private volatile IOException failure;
+        private volatile boolean endedShort;
+
+        private ReadWatch(FileIO delegate, long fileSize) {
+            this.delegate = delegate;
+            this.fileSize = fileSize;
+        }
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            SeekableInputStream in;
+            try {
+                in = delegate.newInputStream(path);
+            } catch (IOException e) {
+                failure = e;
+                throw e;
+            }
+            return new SeekableInputStream() {
+                @Override
+                public void seek(long desired) throws IOException {
+                    try {
+                        in.seek(desired);
+                    } catch (IOException e) {
+                        failure = e;
+                        throw e;
+                    }
+                }
+
+                @Override
+                public long getPos() throws IOException {
+                    return in.getPos();
+                }
+
+                @Override
+                public int read() throws IOException {
+                    try {
+                        int b = in.read();
+                        if (b < 0 && in.getPos() < fileSize) {
+                            endedShort = true;
+                        }
+                        return b;
+                    } catch (IOException e) {
+                        failure = e;
+                        throw e;
+                    }
+                }
+
+                @Override
+                public int read(byte[] b, int off, int len) throws IOException {
+                    try {
+                        int n = in.read(b, off, len);
+                        if (n < 0 && in.getPos() < fileSize) {
+                            endedShort = true;
+                        }
+                        return n;
+                    } catch (IOException e) {
+                        failure = e;
+                        throw e;
+                    }
+                }
+
+                @Override
+                public void close() throws IOException {
+                    in.close();
+                }
+            };
+        }
+
+        @Override
+        public boolean isObjectStore() {
+            return delegate.isObjectStore();
+        }
+
+        @Override
+        public void configure(CatalogContext context) {
+            delegate.configure(context);
+        }
+
+        @Override
+        public PositionOutputStream newOutputStream(Path path, boolean overwrite)
+                throws IOException {
+            return delegate.newOutputStream(path, overwrite);
+        }
+
+        @Override
+        public FileStatus getFileStatus(Path path) throws IOException {
+            return delegate.getFileStatus(path);
+        }
+
+        @Override
+        public FileStatus[] listStatus(Path path) throws IOException {
+            return delegate.listStatus(path);
+        }
+
+        @Override
+        public boolean exists(Path path) throws IOException {
+            return delegate.exists(path);
+        }
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            return delegate.delete(path, recursive);
+        }
+
+        @Override
+        public boolean mkdirs(Path path) throws IOException {
+            return delegate.mkdirs(path);
+        }
+
+        @Override
+        public boolean rename(Path src, Path dst) throws IOException {
+            return delegate.rename(src, dst);
         }
     }
 

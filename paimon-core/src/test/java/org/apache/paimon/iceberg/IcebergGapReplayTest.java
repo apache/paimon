@@ -64,6 +64,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -72,7 +73,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -171,10 +174,14 @@ public class IcebergGapReplayTest {
         assertThat(icebergFilePaths(null))
                 .containsExactlyInAnyOrderElementsOf(paimonFilePaths(t.enabled, n));
 
-        // the originals are not needed any more
+        // the copies stand alone: with the originals out of the way, every snapshot still reads
         Path metadataDirectory = IcebergCommitCallback.catalogTableMetadataPath(t.enabled);
         for (String name : avroFiles(before)) {
-            t.enabled.fileIO().delete(new Path(metadataDirectory, name), false);
+            t.enabled
+                    .fileIO()
+                    .rename(
+                            new Path(metadataDirectory, name),
+                            new Path(metadataDirectory, name + ".aside"));
         }
         for (long id = 1; id <= n; id++) {
             long snapshotId = id;
@@ -186,6 +193,13 @@ public class IcebergGapReplayTest {
                                                     .build(),
                                     Record::toString))
                     .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, id));
+        }
+        for (String name : avroFiles(before)) {
+            t.enabled
+                    .fileIO()
+                    .rename(
+                            new Path(metadataDirectory, name + ".aside"),
+                            new Path(metadataDirectory, name));
         }
 
         // the replayed version is a base like any other: the next commit extends it
@@ -205,7 +219,6 @@ public class IcebergGapReplayTest {
             headLists.add(new Path(snapshot.manifestList()).getName());
         }
         Set<String> headManifests = listedBy(t.enabled, head.currentSnapshot());
-        Set<String> beforeRetention = metadataFileNames(t.enabled);
         Map<String, String> retention = new HashMap<>();
         retention.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "2");
         retention.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
@@ -220,18 +233,48 @@ public class IcebergGapReplayTest {
                 .containsExactly(m - 2, m - 1, m);
         assertThat(getIcebergResult())
                 .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, m));
-        // the copies of the base are gone, nothing else is left behind
-        assertThat(difference(avroFiles(metadataFileNames(t.enabled)), avroFiles(beforeRetention)))
+        // Retention drops the base snapshots with their lists and manifests, and the original
+        // lists that the first replay left for them, which only their snapshots kept. The
+        // copies that the result does not use are gone, and nothing but the result is left.
+        assertThat(avroFiles(metadataFileNames(t.enabled)))
                 .isEqualTo(filesReachableFrom(t.enabled, m));
-        // retention drops the lists of the dropped snapshots, as it does for every commit, and
-        // the manifests that the result still uses stay
         IcebergPathFactory pathFactory = new IcebergPathFactory(metadataDirectory);
         for (String list : headLists) {
             assertThat(t.enabled.fileIO().exists(pathFactory.toManifestListPath(list))).isFalse();
         }
         for (String manifest : headManifests) {
             assertThat(t.enabled.fileIO().exists(pathFactory.toManifestFilePath(manifest)))
-                    .isTrue();
+                    .isFalse();
+        }
+        assertThat(difference(avroFiles(before), avroFiles(metadataFileNames(t.enabled))))
+                .isEqualTo(avroFiles(before));
+
+        // A replay that keeps the snapshots of its base copies them again, and the originals
+        // stay for readers of older versions. Once those version files are deleted, only the
+        // snapshots that record them reach them. A rebuild deletes them with the older versions.
+        List<Path> originals = replayAndPrune(t, 32, 33);
+        t.gap(34, 35);
+        t.replay(
+                Collections.singletonMap(
+                        IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(), "rebuild"),
+                t.identifier,
+                new ArrayList<>(),
+                NOTHING);
+        assertThat(avroFiles(metadataFileNames(t.enabled)))
+                .isEqualTo(filesReachableFrom(t.enabled, t.latest()));
+        for (Path original : originals) {
+            assertThat(t.enabled.fileIO().exists(original)).isFalse();
+        }
+
+        // Retention drops a snapshot, and the originals that it records go with it. They stay
+        // while the snapshot is kept.
+        originals = replayAndPrune(t, 36, 37);
+        t.gap(38);
+        Map<String, String> keepThree = new HashMap<>(retention);
+        t.replay(keepThree, t.identifier, new ArrayList<>(), NOTHING);
+        assertThat(readMetadata(t.enabled, t.latest()).snapshots()).hasSize(3);
+        for (Path original : originals) {
+            assertThat(t.enabled.fileIO().exists(original)).isFalse();
         }
     }
 
@@ -253,8 +296,9 @@ public class IcebergGapReplayTest {
                 .fileIO()
                 .overwriteFileUtf8(
                         metadataPath(t.enabled, 4), "{\"format-version\": 2, \"snapshots\": [");
-        // version 3 lists a manifest that is gone, which shows only when its history is copied
-        t.enabled.fileIO().delete(manifestCreatedAt(t.enabled, 3, 3), false);
+        // version 3 lists a manifest that kept its length and lost its contents, which shows
+        // only when the copy of its history is decoded
+        damageManifest(manifestCreatedAt(t.enabled, 3, 3));
         Set<String> before = metadataFileNames(t.enabled);
 
         List<String> events = new ArrayList<>();
@@ -359,16 +403,21 @@ public class IcebergGapReplayTest {
                 new String[] {
                     "max-snapshots=1",
                     "max-delta-entries=1",
-                    "max-base-manifest-bytes=1 b",
+                    "max-base-manifest-bytes=bytes-of-the-base",
                     "max-duration=0 ms"
                 }) {
             String[] parts = budget.split("=");
             t.gap(key++, key++);
             n = t.latest();
+            // the bytes of the base manifests pay for copying them, and not for checking them too
+            String limit =
+                    parts[1].equals("bytes-of-the-base")
+                            ? manifestBytes(t.enabled, n - 2) + " b"
+                            : parts[1];
             before = metadataFileNames(t.enabled);
             events = new ArrayList<>();
             t.replay(
-                    Collections.singletonMap("metadata.iceberg.replay." + parts[0], parts[1]),
+                    Collections.singletonMap("metadata.iceberg.replay." + parts[0], limit),
                     t.identifier,
                     events,
                     NOTHING);
@@ -406,6 +455,29 @@ public class IcebergGapReplayTest {
                             t.enabled.fileIO().delete(delta, false);
                         }
                     });
+            assertRebuilt(t, n, events, before);
+        }
+
+        // a manifest that is damaged where only its contents show it: one that kept its length
+        // and lost what it holds, and one that holds other counts than its list records
+        for (boolean miscounted : new boolean[] {false, true}) {
+            t.gap(key++, key++);
+            n = t.latest();
+            long baseVersion = n - 2;
+            if (miscounted) {
+                miscountFiles(t.enabled, baseVersion);
+            } else {
+                damageManifest(firstManifestOf(t.enabled, baseVersion));
+            }
+            before = metadataFileNames(t.enabled);
+            events = new ArrayList<>();
+            t.replay(t.identifier, events, NOTHING);
+            assertThat(events)
+                    .containsSubsequence(
+                            "BASE_SELECTED:" + baseVersion,
+                            "LISTS_READ:" + baseVersion,
+                            "CANDIDATE_REJECTED:" + baseVersion,
+                            "REBUILD:" + n);
             assertRebuilt(t, n, events, before);
         }
 
@@ -601,6 +673,36 @@ public class IcebergGapReplayTest {
                     t.append(t.disabled, 27);
                 });
         assertAbandoned(t, n, events, before);
+
+        // the version file of an old timeline is in the way, and it is deleted only while this
+        // snapshot is the one on disk. The head is replaced after the last check, so the file
+        // stays: it belongs to the commit that replaced the snapshot
+        t.append(t.enabled, 28);
+        t.gap(29, 31);
+        n = t.latest();
+        long staleId = n;
+        long staleIdentifier = t.identifier;
+        Path stale = metadataPath(t.enabled, n);
+        String staleJson =
+                t.enabled
+                        .fileIO()
+                        .readFileUtf8(metadataPath(t.enabled, readVersionHint(t.enabled)));
+        t.enabled.fileIO().writeFile(stale, staleJson, false);
+        before = metadataFileNames(t.enabled);
+        events = new ArrayList<>();
+        interruptOnce(
+                t,
+                staleIdentifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_WRITE,
+                -1,
+                () -> {
+                    t.enabled.rollbackTo(staleId - 1);
+                    t.append(t.disabled, 30);
+                });
+        assertThat(events).contains("ABANDONED:" + n);
+        assertThat(t.enabled.fileIO().readFileUtf8(stale)).isEqualTo(staleJson);
+        assertThat(metadataFileNames(t.enabled)).isEqualTo(before);
     }
 
     /** Runs the replay and, the first time it reaches a point, does something else first. */
@@ -657,6 +759,8 @@ public class IcebergGapReplayTest {
         BASE_METADATA_UNREADABLE,
         BASE_LIST_UNREADABLE,
         DELTA_LIST_UNREADABLE,
+        COPY_UNREADABLE,
+        COPY_CUT_SHORT,
         BEFORE_WRITE,
         AFTER_WRITE,
         CATALOG
@@ -709,6 +813,18 @@ public class IcebergGapReplayTest {
                             t.enabled.snapshotManager().snapshot(prev + 1).deltaManifestList(),
                             new EOFException("injected storage failure"));
                     break;
+                case COPY_UNREADABLE:
+                    // the copies are new files, and the read that checks one of them fails
+                    fileIO.failReadsOf(
+                            name -> name.matches(".*-m\\d+\\.avro") && !before.contains(name),
+                            new IOException("injected storage failure"));
+                    break;
+                case COPY_CUT_SHORT:
+                    // a read that ends early may be a file that is damaged, or a stream that
+                    // closed early, and the replay cannot tell which
+                    fileIO.cutReadsOf(
+                            name -> name.matches(".*-m\\d+\\.avro") && !before.contains(name));
+                    break;
                 case CATALOG:
                     RecordingIcebergMetadataCommitter.failNextCommit = true;
                     break;
@@ -735,7 +851,10 @@ public class IcebergGapReplayTest {
                                                 }
                                             }))
                     .as(failure.toString())
-                    .hasStackTraceContaining("injected");
+                    .hasStackTraceContaining(
+                            failure == Failure.COPY_CUT_SHORT
+                                    ? "ended before the end of the file"
+                                    : "injected");
             fileIO.stopFailing();
             RecordingIcebergMetadataCommitter.failNextCommit = false;
 
@@ -745,6 +864,8 @@ public class IcebergGapReplayTest {
             Set<String> failed = metadataFileNames(t.enabled);
             switch (failure) {
                 case BEFORE_WRITE:
+                case COPY_UNREADABLE:
+                case COPY_CUT_SHORT:
                 case BASE_METADATA_UNREADABLE:
                 case BASE_LIST_UNREADABLE:
                 case DELTA_LIST_UNREADABLE:
@@ -777,31 +898,49 @@ public class IcebergGapReplayTest {
     }
 
     /**
-     * A file system that fails every read of one file, to look like a storage failure, and that can
-     * make copies slow.
+     * A file system that fails, or cuts short, every read of the files that match a name, to look
+     * like a storage failure, and that can make copies slow.
      */
     private static class FaultyFileIO extends LocalFileIO {
 
-        private volatile String failingName;
+        private volatile Predicate<String> failing = name -> false;
         private volatile IOException failure;
+        private volatile boolean cutShort;
         private volatile long copyDelayMillis;
         private final AtomicInteger copies = new AtomicInteger();
 
         private void failReadsOf(String name, IOException failure) {
-            this.failingName = name;
+            failReadsOf(name::equals, failure);
+        }
+
+        private void failReadsOf(Predicate<String> names, IOException failure) {
+            this.failing = names;
             this.failure = failure;
+            this.cutShort = false;
+        }
+
+        /** Reads of the files end after half of their bytes, with no error. */
+        private void cutReadsOf(Predicate<String> names) {
+            this.failing = names;
+            this.failure = null;
+            this.cutShort = true;
         }
 
         private void stopFailing() {
-            failReadsOf(null, null);
+            failReadsOf(name -> false, null);
         }
 
         @Override
         public SeekableInputStream newInputStream(Path path) throws IOException {
-            if (path.getName().equals(failingName)) {
+            SeekableInputStream in = super.newInputStream(path);
+            if (!failing.test(path.getName())) {
+                return in;
+            }
+            if (!cutShort) {
+                in.close();
                 throw failure;
             }
-            return super.newInputStream(path);
+            return new CutShortStream(in, getFileSize(path) / 2);
         }
 
         @Override
@@ -815,6 +954,44 @@ public class IcebergGapReplayTest {
                 throw new IOException(e);
             }
             super.copyFile(sourcePath, targetPath, overwrite);
+        }
+    }
+
+    /** A stream that reports the end of the file at a position before its real end. */
+    private static class CutShortStream extends SeekableInputStream {
+
+        private final SeekableInputStream in;
+        private final long limit;
+
+        private CutShortStream(SeekableInputStream in, long limit) {
+            this.in = in;
+            this.limit = limit;
+        }
+
+        @Override
+        public void seek(long desired) throws IOException {
+            in.seek(desired);
+        }
+
+        @Override
+        public long getPos() throws IOException {
+            return in.getPos();
+        }
+
+        @Override
+        public int read() throws IOException {
+            return in.getPos() >= limit ? -1 : in.read();
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            long left = limit - in.getPos();
+            return left <= 0 ? -1 : in.read(b, off, (int) Math.min(len, left));
+        }
+
+        @Override
+        public void close() throws IOException {
+            in.close();
         }
     }
 
@@ -1045,6 +1222,63 @@ public class IcebergGapReplayTest {
         return all;
     }
 
+    /** The bytes of the manifests that the snapshots of a metadata version list. */
+    private long manifestBytes(FileStoreTable table, long version) throws IOException {
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(IcebergCommitCallback.catalogTableMetadataPath(table));
+        long bytes = 0;
+        for (String name : manifestNames(table, version)) {
+            bytes += table.fileIO().getFileSize(pathFactory.toManifestFilePath(name));
+        }
+        return bytes;
+    }
+
+    /**
+     * Leaves a gap and replays it, with the version files that are older than the result deleted
+     * afterwards. Returns the original lists that the retained snapshots of the result record,
+     * which no version file reaches any more.
+     */
+    private List<Path> replayAndPrune(ReplayTable t, int... keys) throws Exception {
+        t.gap(keys);
+        t.replay(
+                Collections.singletonMap(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX.key(), "0"),
+                t.identifier,
+                new ArrayList<>(),
+                NOTHING);
+        long n = t.latest();
+        assertThat(versionFiles(t.enabled)).containsExactly("v" + n + ".metadata.json");
+        List<Path> originals = new ArrayList<>();
+        for (IcebergSnapshot snapshot : readMetadata(t.enabled, n).snapshots()) {
+            String json =
+                    snapshot.summary().get(IcebergCommitCallback.SNAPSHOT_SUMMARY_REPLAY_ORIGINALS);
+            if (json != null) {
+                for (String original : JsonSerdeUtil.fromJson(json, String[].class)) {
+                    originals.add(
+                            new IcebergPathFactory(
+                                            IcebergCommitCallback.catalogTableMetadataPath(
+                                                    t.enabled))
+                                    .toManifestListPath(original));
+                }
+            }
+        }
+        assertThat(originals).isNotEmpty();
+        for (Path original : originals) {
+            assertThat(t.enabled.fileIO().exists(original)).isTrue();
+            assertThat(filesReachableFrom(t.enabled, n)).doesNotContain(original.getName());
+        }
+        return originals;
+    }
+
+    /** The first manifest of the oldest snapshot that a metadata version keeps. */
+    private Path firstManifestOf(FileStoreTable table, long version) {
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(IcebergCommitCallback.catalogTableMetadataPath(table));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
+        IcebergSnapshot oldest = readMetadata(table, version).snapshots().get(0);
+        return new Path(
+                manifestList.read(new Path(oldest.manifestList()).getName()).get(0).manifestPath());
+    }
+
     /** The manifest that was written for a snapshot, as a metadata version lists it. */
     private Path manifestCreatedAt(FileStoreTable table, long version, long sequenceNumber) {
         IcebergPathFactory pathFactory =
@@ -1081,6 +1315,40 @@ public class IcebergGapReplayTest {
 
     /** Makes the list of the current snapshot of a metadata version lose its last manifest. */
     private void dropLastManifest(FileStoreTable table, long version) throws Exception {
+        rewriteCurrentList(table, version, metas -> metas.remove(metas.size() - 1));
+    }
+
+    /** Makes the list of the current snapshot record one more added file than a manifest has. */
+    private void miscountFiles(FileStoreTable table, long version) throws Exception {
+        rewriteCurrentList(
+                table,
+                version,
+                metas -> {
+                    IcebergManifestFileMeta meta = metas.get(0);
+                    metas.set(
+                            0,
+                            new IcebergManifestFileMeta(
+                                    meta.manifestPath(),
+                                    meta.manifestLength(),
+                                    meta.partitionSpecId(),
+                                    meta.content(),
+                                    meta.sequenceNumber(),
+                                    meta.minSequenceNumber(),
+                                    meta.addedSnapshotId(),
+                                    meta.addedFilesCount() + 1,
+                                    meta.existingFilesCount(),
+                                    meta.deletedFilesCount(),
+                                    meta.addedRowsCount(),
+                                    meta.existingRowsCount(),
+                                    meta.deletedRowsCount(),
+                                    meta.partitions(),
+                                    meta.firstRowId()));
+                });
+    }
+
+    private void rewriteCurrentList(
+            FileStoreTable table, long version, Consumer<List<IcebergManifestFileMeta>> change)
+            throws Exception {
         IcebergPathFactory pathFactory =
                 new IcebergPathFactory(IcebergCommitCallback.catalogTableMetadataPath(table));
         IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
@@ -1088,7 +1356,7 @@ public class IcebergGapReplayTest {
         IcebergSnapshot current = metadata.currentSnapshot();
         List<IcebergManifestFileMeta> metas =
                 new ArrayList<>(manifestList.read(new Path(current.manifestList()).getName()));
-        metas.remove(metas.size() - 1);
+        change.accept(metas);
         String listName = manifestList.writeWithoutRolling(metas);
         List<IcebergSnapshot> snapshots = new ArrayList<>(metadata.snapshots());
         snapshots.set(
@@ -1098,6 +1366,25 @@ public class IcebergGapReplayTest {
                 .overwriteFileUtf8(
                         pathFactory.toMetadataPath(version),
                         metadata.withSnapshots(snapshots).toJson());
+    }
+
+    /**
+     * Zeroes what a manifest holds after its header, and keeps its length, so only decoding the
+     * file shows it. An Avro file ends every block with the sync marker of its header.
+     */
+    private void damageManifest(Path manifest) throws IOException {
+        java.nio.file.Path file = java.nio.file.Paths.get(manifest.toUri().getPath());
+        byte[] bytes = java.nio.file.Files.readAllBytes(file);
+        byte[] sync = Arrays.copyOfRange(bytes, bytes.length - 16, bytes.length);
+        int headerEnd = -1;
+        for (int i = 0; headerEnd < 0; i++) {
+            if (Arrays.equals(Arrays.copyOfRange(bytes, i, i + 16), sync)) {
+                headerEnd = i + 16;
+            }
+        }
+        assertThat(headerEnd).isLessThan(bytes.length - 16 - 32);
+        Arrays.fill(bytes, headerEnd, bytes.length - 16, (byte) 0);
+        java.nio.file.Files.write(file, bytes);
     }
 
     /** The rows of a Paimon snapshot, the way Iceberg prints them. */

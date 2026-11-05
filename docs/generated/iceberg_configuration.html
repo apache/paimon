@@ -114,7 +114,7 @@ under the License.
             <td><h5>metadata.iceberg.replay.max-base-manifest-bytes</h5></td>
             <td style="word-wrap: break-word;">512 mb</td>
             <td>MemorySize</td>
-            <td>The most manifest bytes a replay may copy and read. The copy of the retained history counts once for each unique manifest. A replay over this limit is rebuilt. This is a work limit, not a bound on heap.</td>
+            <td>The most manifest bytes a replay may copy and read. The retained history counts twice for each unique manifest, once to copy it and once to check the copy. A replay over this limit is rebuilt. This is a work limit, not a bound on heap.</td>
         </tr>
         <tr>
             <td><h5>metadata.iceberg.replay.max-delta-entries</h5></td>

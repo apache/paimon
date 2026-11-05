@@ -140,6 +140,20 @@ public class IcebergSnapshot {
                 addedRows);
     }
 
+    /** The same snapshot with another summary. */
+    public IcebergSnapshot withSummary(IcebergSnapshotSummary newSummary) {
+        return new IcebergSnapshot(
+                sequenceNumber,
+                snapshotId,
+                parentSnapshotId,
+                timestampMs,
+                newSummary,
+                manifestList,
+                schemaId,
+                firstRowId,
+                addedRows);
+    }
+
     @JsonGetter(FIELD_SCHEMA_ID)
     public int schemaId() {
         return schemaId;

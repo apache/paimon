@@ -66,8 +66,12 @@ it one by one from their delta manifests.
   format version 2 and the `table-location`, `hive-catalog` or `hadoop-catalog` storage. Every
   other table keeps the rebuild.
 - Replay copies the manifest lists and manifests of the retained Iceberg history, so the result
-  does not depend on files that another cleanup may delete. Until retention drops them, the copies
-  add to the size of the metadata. The original files stay under the usual retention cleanup.
+  does not depend on files that another cleanup may delete. It decodes every copy and checks it
+  against its manifest list, and a base with a damaged manifest is not used. Until retention drops
+  the copies, they add to the size of the metadata. The original lists of the snapshots that stay
+  are left in place, because readers of older metadata may still use them. Each of those snapshots
+  records its originals, and they are deleted when retention drops it or when a rebuild cleans up
+  the older versions.
 - When replay cannot be used, Paimon rebuilds. That happens when no valid base is within
   `metadata.iceberg.replay.max-snapshots`, when one of the `metadata.iceberg.replay.*` limits is
   exceeded, when a file of the base is missing, or when the replayed row count differs from

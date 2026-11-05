@@ -131,10 +131,11 @@ public class IcebergOptions {
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(512))
                     .withDescription(
-                            "The most manifest bytes a replay may copy and read. The copy of the "
-                                    + "retained history counts once for each unique manifest. A "
-                                    + "replay over this limit is rebuilt. This is a work limit, "
-                                    + "not a bound on heap.");
+                            "The most manifest bytes a replay may copy and read. The retained "
+                                    + "history counts twice for each unique manifest, once to "
+                                    + "copy it and once to check the copy. A replay over this "
+                                    + "limit is rebuilt. This is a work limit, not a bound on "
+                                    + "heap.");
 
     public static final ConfigOption<Duration> REPLAY_MAX_DURATION =
             key("metadata.iceberg.replay.max-duration")

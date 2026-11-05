@@ -76,6 +76,7 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -1472,9 +1473,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             // publication must not delete files an external pointer still references
             deleteApplicableMetadataFiles(snapshotId);
             for (int i = 0; i + 1 < toExpireExceptLast.size(); i++) {
-                expireManifestList(
-                        new Path(toExpireExceptLast.get(i).manifestList()).getName(),
-                        new Path(toExpireExceptLast.get(i + 1).manifestList()).getName());
+                expireSnapshot(toExpireExceptLast.get(i), toExpireExceptLast.get(i + 1));
             }
         }
     }
@@ -1808,8 +1807,67 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         - options.get(CoreOptions.SNAPSHOT_TIME_RETAINED).toMillis();
     }
 
-    private void expireManifestList(String toExpire, String next) {
-        expireManifestList(toExpire, manifestPathsIn(next));
+    /**
+     * The names of the lists that a replay replaced for the snapshot, oldest replay first. A name
+     * stands for the list of the metadata directory of this table, whatever the record says.
+     */
+    private static List<String> replayedOriginals(IcebergSnapshot snapshot) {
+        String json =
+                snapshot.summary() == null
+                        ? null
+                        : snapshot.summary().get(SNAPSHOT_SUMMARY_REPLAY_ORIGINALS);
+        if (json == null) {
+            return Collections.emptyList();
+        }
+        try {
+            List<String> names = new ArrayList<>();
+            for (String original : JsonSerdeUtil.fromJson(json, String[].class)) {
+                names.add(new Path(original).getName());
+            }
+            return names;
+        } catch (RuntimeException e) {
+            // a record that cannot be read names nothing that can be deleted
+            LOG.warn("Cannot read the replay record of Iceberg snapshot {}", snapshot.snapshotId());
+            return Collections.emptyList();
+        }
+    }
+
+    private boolean existsUnchecked(Path path) {
+        try {
+            return table.fileIO().exists(path);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** The manifests that stay needed while the snapshot does, including its replay originals. */
+    private Set<String> manifestPathsReachableFrom(IcebergSnapshot snapshot) {
+        Set<String> paths = manifestPathsIn(new Path(snapshot.manifestList()).getName());
+        addManifestPathsOfOriginals(snapshot, paths);
+        return paths;
+    }
+
+    private void addManifestPathsOfOriginals(IcebergSnapshot snapshot, Set<String> paths) {
+        for (String original : replayedOriginals(snapshot)) {
+            if (existsUnchecked(pathFactory.toManifestListPath(original))) {
+                paths.addAll(manifestPathsIn(original));
+            }
+        }
+    }
+
+    /** Expires a snapshot that retention drops: its own files and its replay originals. */
+    private void expireSnapshot(IcebergSnapshot toExpire, IcebergSnapshot next) {
+        Set<String> inUse = manifestPathsReachableFrom(next);
+        expireManifestList(new Path(toExpire.manifestList()).getName(), inUse);
+        expireReplayedOriginals(toExpire, inUse);
+    }
+
+    private void expireReplayedOriginals(IcebergSnapshot toExpire, Set<String> pathsInUse) {
+        for (String original : replayedOriginals(toExpire)) {
+            if (existsUnchecked(pathFactory.toManifestListPath(original))) {
+                expireManifestList(original, pathsInUse);
+            }
+        }
     }
 
     private Set<String> manifestPathsIn(String manifestListName) {
@@ -1855,29 +1913,36 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             }
 
             for (IcebergSnapshot snapshot : metadata.snapshots()) {
-                Path listPath = new Path(snapshot.manifestList());
-                String listName = listPath.getName();
-                if (expiredManifestLists.contains(listName)) {
-                    continue;
+                // a replay left the lists it copied, and they go with the snapshot
+                List<Path> lists = new ArrayList<>();
+                lists.add(new Path(snapshot.manifestList()));
+                for (String original : replayedOriginals(snapshot)) {
+                    lists.add(pathFactory.toManifestListPath(original));
                 }
-                expiredManifestLists.add(listName);
-
-                // A retained metadata JSON can reference a list an earlier rebuild already
-                // deleted. Reading it must not fail: we only open it to delete what it
-                // points at, and that earlier pass already did so.
-                if (!table.fileIO().exists(listPath)) {
-                    continue;
-                }
-
-                for (IcebergManifestFileMeta meta : manifestList.read(listName)) {
-                    String metaName = new Path(meta.manifestPath()).getName();
-                    if (expiredManifestFileMetas.contains(metaName)) {
+                for (Path listPath : lists) {
+                    String listName = listPath.getName();
+                    if (expiredManifestLists.contains(listName)) {
                         continue;
                     }
-                    expiredManifestFileMetas.add(metaName);
-                    table.fileIO().deleteQuietly(new Path(meta.manifestPath()));
+                    expiredManifestLists.add(listName);
+
+                    // A retained metadata JSON can reference a list an earlier rebuild already
+                    // deleted. Reading it must not fail: we only open it to delete what it
+                    // points at, and that earlier pass already did so.
+                    if (!table.fileIO().exists(listPath)) {
+                        continue;
+                    }
+
+                    for (IcebergManifestFileMeta meta : manifestList.read(listName)) {
+                        String metaName = new Path(meta.manifestPath()).getName();
+                        if (expiredManifestFileMetas.contains(metaName)) {
+                            continue;
+                        }
+                        expiredManifestFileMetas.add(metaName);
+                        table.fileIO().deleteQuietly(new Path(meta.manifestPath()));
+                    }
+                    table.fileIO().deleteQuietly(listPath);
                 }
-                table.fileIO().deleteQuietly(listPath);
             }
         }
         deleteApplicableMetadataFiles(snapshotId);
@@ -2185,6 +2250,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
      * metadata from metadata a rollback abandoned.
      */
     static final String SNAPSHOT_SUMMARY_PAIMON_COMMIT_IDENTITY = "paimon-commit-identity";
+
+    /**
+     * The manifest lists that a replay replaced with copies for a snapshot, as a JSON array of file
+     * names in the metadata directory. Readers of older metadata may still use them, so the replay
+     * leaves them. They go with the snapshot, when retention expires it, and this record is how
+     * that cleanup finds them after the metadata versions that listed them are deleted.
+     */
+    static final String SNAPSHOT_SUMMARY_REPLAY_ORIGINALS = "paimon-replay-originals";
 
     private static String commitIdentity(Snapshot snapshot) {
         // snapshot uuid when present; legacy snapshots fall back to user/identifier/time
@@ -2763,7 +2836,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             for (long length : unique.values()) {
                 bytes += length;
             }
-            charge(bytes);
+            // every manifest is read twice, to copy it and to validate the copy
+            charge(2 * bytes);
             replayPoint(ReplayPoint.LISTS_READ, base.version);
 
             Map<String, String> copied = new HashMap<>();
@@ -2784,7 +2858,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 }
                 String listName = manifestList.writeWithoutRolling(owned);
                 IcebergSnapshot copy =
-                        s.withManifestList(pathFactory.toManifestListPath(listName).toString());
+                        recordingOriginal(
+                                s.withManifestList(
+                                        pathFactory.toManifestListPath(listName).toString()),
+                                s);
                 originalLists.put(s.snapshotId(), new Path(s.manifestList()).getName());
                 if (s.snapshotId() == working.snapshotId()) {
                     workingCopy = copy;
@@ -2801,6 +2878,15 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             }
             return new Acquired(
                     base, base.metadata.withSnapshots(ownedSnapshots), originalLists, copied);
+        }
+
+        /** The copy names the list it replaces, which only the cleanup of its snapshot deletes. */
+        private IcebergSnapshot recordingOriginal(IcebergSnapshot copy, IcebergSnapshot original) {
+            List<String> originals = new ArrayList<>(replayedOriginals(original));
+            originals.add(new Path(original.manifestList()).getName());
+            Map<String, String> summary = original.summary().getSummary();
+            summary.put(SNAPSHOT_SUMMARY_REPLAY_ORIGINALS, JsonSerdeUtil.toFlatJson(originals));
+            return copy.withSummary(new IcebergSnapshotSummary(summary));
         }
 
         private List<IcebergManifestFileMeta> readBaseList(IcebergSnapshot icebergSnapshot) {
@@ -2838,6 +2924,15 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                 + length
                                 + " bytes, its list records "
                                 + meta.manifestLength());
+            }
+            // the length says nothing about the contents, and a step that only adds files
+            // trusts the counters of the list, so the copy is decoded before it is relied on
+            try {
+                manifestFile.validate(
+                        meta.withManifestPath(target.toString()), length, this::checkDuration);
+            } catch (IcebergManifestFile.CorruptManifestException e) {
+                throw new BrokenHistory(
+                        "the copy of manifest " + source + " is corrupt: " + e.getMessage(), e);
             }
             return target.toString();
         }
@@ -2973,8 +3068,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         private void finish(IcebergMetadata result, Acquired acquired) throws IOException {
             table.snapshotManager().invalidateCache();
-            verifySource(snapshot);
             keepOnlyReachable(result);
+            // the last check comes after all the work that can take long, and writeMetadataFile
+            // repeats it before it replaces a version file
+            verifySource(snapshot);
             replayPoint(ReplayPoint.BEFORE_WRITE, snapshotId);
 
             Path metadataPath = pathFactory.toMetadataPath(snapshotId);
@@ -3053,6 +3150,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 if (!written
                         && table.fileIO().exists(metadataPath)
                         && !metadataMatchesSnapshot(snapshotId, snapshot)) {
+                    // The version file of another commit is in the way. It is only stale if
+                    // this snapshot is still the one on disk. Otherwise it is the file of the
+                    // commit that replaced this snapshot, and it stays.
+                    table.snapshotManager().invalidateCache();
+                    verifySource(snapshot);
                     table.fileIO().deleteQuietly(metadataPath);
                     written = table.fileIO().tryToWriteAtomic(metadataPath, json);
                 }
@@ -3079,9 +3181,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
 
         /**
-         * Applies the usual retention cleanup to the originals of the base snapshots that the
-         * output dropped. The copies are never touched, and the originals that readers of older
-         * metadata can still reach are only deleted when retention would delete them anyway.
+         * Applies the usual retention cleanup to the base snapshots that the output dropped: their
+         * lists, the lists that earlier replays left for them, and the manifests that no kept
+         * original list still lists. The copies are never touched.
          */
         private void expireDroppedOriginals(IcebergMetadata result, Acquired acquired) {
             try {
@@ -3099,28 +3201,23 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     return;
                 }
                 IcebergSnapshot firstKept = result.snapshots().get(0);
-                Set<String> inUse;
+                // A kept snapshot that is a copy still has its original list, with the manifests
+                // it lists. A kept snapshot that a step built lists only files of the replay, so
+                // no original stays in use when every base snapshot is dropped.
+                Set<String> inUse = new HashSet<>();
                 String keptOriginal = acquired.originalLists.get(firstKept.snapshotId());
                 if (keptOriginal != null) {
-                    inUse = manifestPathsIn(keptOriginal);
-                } else {
-                    Map<String, String> copyToOriginal = new HashMap<>();
-                    for (Map.Entry<String, String> entry : acquired.copied.entrySet()) {
-                        copyToOriginal.put(entry.getValue(), entry.getKey());
-                    }
-                    inUse = new HashSet<>();
-                    for (String path :
-                            manifestPathsIn(new Path(firstKept.manifestList()).getName())) {
-                        inUse.add(copyToOriginal.getOrDefault(path, path));
-                    }
+                    inUse.addAll(manifestPathsIn(keptOriginal));
                 }
+                // what the kept snapshot still keeps of the older replays
+                addManifestPathsOfOriginals(firstKept, inUse);
                 for (int i = 0; i < dropped.size(); i++) {
                     Set<String> next =
                             i + 1 < dropped.size()
-                                    ? manifestPathsIn(
-                                            new Path(dropped.get(i + 1).manifestList()).getName())
+                                    ? manifestPathsReachableFrom(dropped.get(i + 1))
                                     : inUse;
                     expireManifestList(new Path(dropped.get(i).manifestList()).getName(), next);
+                    expireReplayedOriginals(dropped.get(i), next);
                 }
             } catch (RuntimeException e) {
                 LOG.warn(
