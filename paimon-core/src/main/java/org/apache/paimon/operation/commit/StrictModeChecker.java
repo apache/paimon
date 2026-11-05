@@ -22,51 +22,31 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.manifest.IndexManifestFile;
-import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.table.source.ScanMode;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
-import javax.annotation.Nullable;
-
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-import java.util.function.Supplier;
 
 /** A checker to check strict mode based on last safe snapshot. */
 public class StrictModeChecker {
 
     private final SnapshotManager snapshotManager;
     private final String commitUser;
-    private final Supplier<FileStoreScan> scanSupplier;
-    private final IndexManifestFile indexManifestFile;
+    private final CommitScanner scanner;
     private final boolean dataEvolutionEnabled;
-
-    // Successfully checked intervals (from, to], independently of the writers' immutable bases.
-    private final Map<BinaryRow, Range> checkedCompactionSnapshots = new HashMap<>();
 
     private long lastSafeSnapshot;
 
     public StrictModeChecker(
             SnapshotManager snapshotManager,
             String commitUser,
-            Supplier<FileStoreScan> scanSupplier,
-            IndexManifestFile indexManifestFile,
+            CommitScanner scanner,
             boolean dataEvolutionEnabled,
             long lastSafeSnapshot) {
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
-        this.scanSupplier = scanSupplier;
-        this.indexManifestFile = indexManifestFile;
+        this.scanner = scanner;
         this.dataEvolutionEnabled = dataEvolutionEnabled;
         this.lastSafeSnapshot = lastSafeSnapshot;
     }
@@ -88,13 +68,13 @@ public class StrictModeChecker {
             }
             if (snapshot.commitKind() == CommitKind.COMPACT
                     || snapshot.commitKind() == CommitKind.OVERWRITE) {
-                boolean hasOverlap = hasOverlappedDataPartition(snapshot, newPartitions);
+                boolean hasOverlap = scanner.hasDataChanges(snapshot, newPartitions, false);
                 // OVERWRITE may contain logical changes represented only by deletion vectors,
                 // while an index-only COMPACT on a data evolution table does not change data.
                 if (!hasOverlap
                         && (snapshot.commitKind() == CommitKind.OVERWRITE
                                 || !dataEvolutionEnabled)) {
-                    hasOverlap = hasOverlappedIndexPartition(snapshot, newPartitions, false);
+                    hasOverlap = scanner.hasIndexChanges(snapshot, newPartitions, false);
                 }
                 if (hasOverlap) {
                     throw new RuntimeException(
@@ -111,158 +91,21 @@ public class StrictModeChecker {
                 }
             }
             if (snapshot.commitKind() == CommitKind.APPEND
-                    && newCommitKind == CommitKind.OVERWRITE) {
-                Iterator<ManifestEntry> entries =
-                        scanSupplier
-                                .get()
-                                .withSnapshot(snapshot)
-                                .withKind(ScanMode.DELTA)
-                                .onlyReadRealBuckets()
-                                .dropStats()
-                                .readFileIterator();
-                if (hasOverlappedPartition(entries, newPartitions)) {
-                    throw new RuntimeException(
-                            String.format(
-                                    "When trying to commit snapshot %d, "
-                                            + "commit user %s has found a APPEND snapshot (id: %d) by another user %s "
-                                            + "which committed files to fixed bucket on the same partition. "
-                                            + "Giving up committing as %s is true.",
-                                    newSnapshotId,
-                                    commitUser,
-                                    id,
-                                    snapshot.commitUser(),
-                                    CoreOptions.COMMIT_STRICT_MODE_ENABLED.key()));
-                }
-            }
-        }
-    }
-
-    /**
-     * Check compaction against each partition's restored writer state. These baselines must not be
-     * advanced by APPEND, another partition's commit, or a failed publication attempt.
-     */
-    public void checkCompaction(long newSnapshotId, Map<BinaryRow, Long> baseSnapshots) {
-        if (baseSnapshots.isEmpty()) {
-            return;
-        }
-        Map<BinaryRow, Range> ranges = new HashMap<>();
-        for (Map.Entry<BinaryRow, Long> entry : baseSnapshots.entrySet()) {
-            long base = entry.getValue();
-            Range checked = checkedCompactionSnapshots.get(entry.getKey());
-            // A newer writer may have skipped an earlier conflicting COMPACT. Its checked
-            // interval cannot be reused for a subsequently received older writer state.
-            ranges.put(
-                    entry.getKey(),
-                    checked != null && checked.from <= base && base <= checked.to
-                            ? checked
-                            : new Range(base, base));
-        }
-        long firstSnapshot =
-                ranges.values().stream().mapToLong(range -> range.to).min().getAsLong() + 1;
-        for (long id = firstSnapshot; id < newSnapshotId; id++) {
-            Snapshot snapshot = snapshotManager.snapshot(id);
-            if (snapshot.commitUser().equals(commitUser)
-                    || (snapshot.commitKind() != CommitKind.COMPACT
-                            && snapshot.commitKind() != CommitKind.OVERWRITE)) {
-                continue;
-            }
-            Set<BinaryRow> partitions = new HashSet<>();
-            for (Map.Entry<BinaryRow, Range> entry : ranges.entrySet()) {
-                if (entry.getValue().to < id) {
-                    partitions.add(entry.getKey());
-                }
-            }
-            if (hasOverlappedDataPartition(snapshot, partitions)
-                    || hasOverlappedIndexPartition(snapshot, partitions, true)) {
+                    && newCommitKind == CommitKind.OVERWRITE
+                    && scanner.hasDataChanges(snapshot, newPartitions, true)) {
                 throw new RuntimeException(
                         String.format(
-                                "Concurrent compaction conflict when committing snapshot %d: "
-                                        + "%s snapshot %d by user %s modified the same partition "
-                                        + "after this writer restored its state. Reload the partition "
-                                        + "and recompute compaction.",
-                                newSnapshotId, snapshot.commitKind(), id, snapshot.commitUser()));
+                                "When trying to commit snapshot %d, "
+                                        + "commit user %s has found a APPEND snapshot (id: %d) by another user %s "
+                                        + "which committed files to fixed bucket on the same partition. "
+                                        + "Giving up committing as %s is true.",
+                                newSnapshotId,
+                                commitUser,
+                                id,
+                                snapshot.commitUser(),
+                                CoreOptions.COMMIT_STRICT_MODE_ENABLED.key()));
             }
         }
-        // Only cache a fully verified interval. Publishing may still fail afterwards, but a
-        // retry must inspect all snapshots committed after this verified endpoint.
-        ranges.forEach(
-                (partition, range) ->
-                        checkedCompactionSnapshots.put(
-                                partition.copy(), new Range(range.from, newSnapshotId - 1)));
-    }
-
-    private boolean hasOverlappedDataPartition(Snapshot snapshot, Set<BinaryRow> newPartitions) {
-        if (newPartitions.isEmpty()) {
-            return false;
-        }
-        Iterator<ManifestEntry> entries =
-                scanSupplier
-                        .get()
-                        .withSnapshot(snapshot)
-                        .withKind(ScanMode.DELTA)
-                        .withPartitionFilter(new ArrayList<>(newPartitions))
-                        .dropStats()
-                        .readFileIterator();
-        return hasOverlappedPartition(entries, newPartitions);
-    }
-
-    private boolean hasOverlappedIndexPartition(
-            Snapshot snapshot, Set<BinaryRow> newPartitions, boolean requirePredecessor) {
-        if (newPartitions.isEmpty()) {
-            return false;
-        }
-        String indexManifest = snapshot.indexManifest();
-        // Fast exit: if this snapshot's indexManifest file name equals the
-        // previous snapshot's, no index file was added/removed by this commit
-        // (writeIndexFiles reuses the previous file when newIndexFiles is empty).
-        String prevIndexManifest = null;
-        long prevId = snapshot.id() - 1;
-        if (prevId >= Snapshot.FIRST_SNAPSHOT_ID
-                && (requirePredecessor || snapshotManager.snapshotExists(prevId))) {
-            prevIndexManifest = snapshotManager.snapshot(prevId).indexManifest();
-        }
-        if (Objects.equals(indexManifest, prevIndexManifest)) {
-            return false;
-        }
-        // Count only the index entries this commit added, replaced or removed relative to
-        // the previous snapshot (every entry if that snapshot is gone). Removals matter
-        // because an OVERWRITE such as rollbackToAsLatest can drop a DV entry without any
-        // data-file delta.
-        Set<IndexManifestEntry> previousEntries =
-                readEntriesInPartitions(prevIndexManifest, newPartitions);
-        for (IndexManifestEntry entry : readEntriesInPartitions(indexManifest, newPartitions)) {
-            if (!previousEntries.remove(entry)) {
-                return true;
-            }
-        }
-        return !previousEntries.isEmpty();
-    }
-
-    private Set<IndexManifestEntry> readEntriesInPartitions(
-            @Nullable String indexManifest, Set<BinaryRow> partitions) {
-        Set<IndexManifestEntry> entries = new HashSet<>();
-        if (indexManifest != null) {
-            for (IndexManifestEntry entry : indexManifestFile.read(indexManifest)) {
-                if (partitions.contains(entry.partition())) {
-                    entries.add(entry);
-                }
-            }
-        }
-        return entries;
-    }
-
-    private boolean hasOverlappedPartition(
-            Iterator<ManifestEntry> entries, Set<BinaryRow> newPartitions) {
-        if (newPartitions.isEmpty()) {
-            return false;
-        }
-        while (entries.hasNext()) {
-            ManifestEntry entry = entries.next();
-            if (newPartitions.contains(entry.partition())) {
-                return true;
-            }
-        }
-        return false;
     }
 
     public void update(long newSafeSnapshot) {

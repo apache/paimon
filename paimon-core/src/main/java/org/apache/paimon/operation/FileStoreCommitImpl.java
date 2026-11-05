@@ -55,6 +55,7 @@ import org.apache.paimon.operation.commit.DataEvolutionChangesProvider;
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException;
 import org.apache.paimon.operation.commit.DiscardingCompactChangesProvider;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
+import org.apache.paimon.operation.commit.PartitionCompactionChecker;
 import org.apache.paimon.operation.commit.PrimaryKeyConflictDetection;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
@@ -171,7 +172,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final RetryWaiter retryWaiter;
     private final InternalRowPartitionComputer partitionComputer;
     @Nullable private final StrictModeChecker strictModeChecker;
-    @Nullable private final StrictModeChecker dvCompactionChecker;
+    @Nullable private final PartitionCompactionChecker dvCompactionChecker;
     private final ConflictDetection conflictDetection;
     private final CommitCleaner commitCleaner;
 
@@ -240,8 +241,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                         new StrictModeChecker(
                                                 snapshotManager,
                                                 commitUser,
-                                                scanSupplier,
-                                                indexManifestFile,
+                                                scanner,
                                                 options.dataEvolutionEnabled(),
                                                 id))
                         .orElse(null);
@@ -250,13 +250,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 conflictDetection instanceof PrimaryKeyConflictDetection
                                 && options.deletionVectorsEnabled()
                                 && !options.writeOnly()
-                        ? new StrictModeChecker(
-                                snapshotManager,
-                                commitUser,
-                                scanSupplier,
-                                indexManifestFile,
-                                false,
-                                Snapshot.FIRST_SNAPSHOT_ID - 1)
+                        ? new PartitionCompactionChecker(snapshotManager, commitUser, scanner)
                         : null;
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
@@ -1301,7 +1295,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         if (commitKind == CommitKind.COMPACT && dvCompactionChecker != null) {
-            dvCompactionChecker.checkCompaction(newSnapshotId, compactionCheckFromSnapshots);
+            dvCompactionChecker.check(newSnapshotId, compactionCheckFromSnapshots);
         }
 
         List<BinaryRow> changedPartitions = null;
