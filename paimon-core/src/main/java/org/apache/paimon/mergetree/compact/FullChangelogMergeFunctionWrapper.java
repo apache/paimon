@@ -49,8 +49,7 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
     private KeyValue topLevelKv;
     private KeyValue initialKv;
     private boolean isInitialized;
-    private int realInputs;
-    @Nullable private Function<KeyValue, KeyValue> beforeImageResolver;
+    @Nullable private Function<KeyValue, KeyValue> guardResolver;
 
     private final ChangelogResult reusedResult = new ChangelogResult();
     private final KeyValue reusedBefore = new KeyValue();
@@ -72,43 +71,25 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
         topLevelKv = null;
         initialKv = null;
         isInitialized = false;
-        realInputs = 0;
     }
 
     @Override
     public void add(KeyValue kv) {
-        realInputs++;
         if (maxLevel == kv.level()) {
             Preconditions.checkState(
                     topLevelKv == null, "Top level key-value already exists! This is unexpected.");
             topLevelKv = kv;
         }
 
-        if (isInitialized) {
-            merge(kv);
-        } else if (initialKv == null) {
+        if (initialKv == null) {
             initialKv = kv;
         } else {
-            merge(initialKv);
-            isInitialized = true;
+            if (!isInitialized) {
+                merge(initialKv);
+                isInitialized = true;
+            }
             merge(kv);
         }
-    }
-
-    @Override
-    public void addDeleteOrderingGuard(KeyValue guard) {
-        if (!isInitialized) {
-            if (initialKv != null) {
-                merge(initialKv);
-            }
-            isInitialized = true;
-        }
-        mergeFunction.addDeleteOrderingGuard(guard);
-    }
-
-    @Override
-    public void withDeleteOrderingGuardBeforeImage(Function<KeyValue, KeyValue> resolver) {
-        beforeImageResolver = resolver;
     }
 
     private void merge(KeyValue kv) {
@@ -118,42 +99,33 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
     @Override
     public ChangelogResult getResult() {
         reusedResult.reset();
-        if (isInitialized) {
-            KeyValue merged = mergeFunction.getResult();
-            if (realInputs == 1 && topLevelKv != null) {
-                return reusedResult.setResultIfNotRetract(merged);
-            }
-            if (beforeImageResolver != null) {
-                topLevelKv = beforeImageResolver.apply(topLevelKv);
-                if (topLevelKv != null && !topLevelKv.isAdd()) {
-                    topLevelKv = null;
-                }
-            }
-            if (topLevelKv == null) {
-                if (merged.isAdd()) {
-                    reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, merged));
-                }
-            } else {
-                if (!merged.isAdd()) {
-                    reusedResult.addChangelog(replace(reusedBefore, RowKind.DELETE, topLevelKv));
-                } else if (valueEqualiser == null
-                        || !valueEqualiser.equals(topLevelKv.value(), merged.value())) {
-                    reusedResult
-                            .addChangelog(replace(reusedBefore, RowKind.UPDATE_BEFORE, topLevelKv))
-                            .addChangelog(replace(reusedAfter, RowKind.UPDATE_AFTER, merged));
-                }
-            }
-            return reusedResult.setResultIfNotRetract(merged);
-        } else {
-            if (topLevelKv == null && initialKv.isAdd()) {
-                reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, initialKv));
-            }
-            // either topLevelKv is not null, but there is only one kv,
-            // so topLevelKv must be the only kv, which means there is no change
-            //
-            // or initialKv is not an ADD kv, so no new key is added
-            return reusedResult.setResultIfNotRetract(initialKv);
+        KeyValue merged = isInitialized ? mergeFunction.getResult() : initialKv;
+        if (guardResolver != null) {
+            merged = guardResolver.apply(merged);
         }
+        if (!isInitialized && topLevelKv != null) {
+            // A lone top-level record has no new inputs and produces no changelog.
+            return reusedResult.setResultIfNotRetract(merged);
+        }
+        KeyValue before = guardResolver == null ? topLevelKv : guardResolver.apply(topLevelKv);
+        if (before == null || !before.isAdd()) {
+            if (merged != null && merged.isAdd()) {
+                reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, merged));
+            }
+        } else if (merged == null || !merged.isAdd()) {
+            reusedResult.addChangelog(replace(reusedBefore, RowKind.DELETE, before));
+        } else if (valueEqualiser == null
+                || !valueEqualiser.equals(before.value(), merged.value())) {
+            reusedResult
+                    .addChangelog(replace(reusedBefore, RowKind.UPDATE_BEFORE, before))
+                    .addChangelog(replace(reusedAfter, RowKind.UPDATE_AFTER, merged));
+        }
+        return reusedResult.setResultIfNotRetract(merged);
+    }
+
+    @Override
+    public void withDeleteOrderingGuardResolver(Function<KeyValue, KeyValue> resolver) {
+        guardResolver = resolver;
     }
 
     private KeyValue replace(KeyValue reused, RowKind valueKind, KeyValue from) {

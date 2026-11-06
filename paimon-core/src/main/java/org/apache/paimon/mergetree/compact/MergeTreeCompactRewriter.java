@@ -133,9 +133,7 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
                 guardState == null || guardState.isEmpty() ? null : guardState.open();
         try {
             if (guards != null) {
-                mergeFunctionWrapper =
-                        guards.wrap(
-                                mergeFunctionWrapper, mfFactory, null, userDefinedSeqComparator);
+                mergeFunctionWrapper = guards.wrap(mergeFunctionWrapper, userDefinedSeqComparator);
             }
             RecordReader<T> reader =
                     MergeTreeReaders.readerForMergeTree(

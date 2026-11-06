@@ -19,12 +19,14 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.types.RowType;
 
@@ -45,6 +47,17 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class DeleteOrderingGuardPolicy {
 
     private DeleteOrderingGuardPolicy() {}
+
+    public static void validateRescale(FileStoreTable table, Snapshot snapshot) {
+        checkArgument(
+                !table.coreOptions().deleteOrderingGuardsEnabled()
+                        && (!DeleteOrderingGuardFile.mayContainGuards(snapshot)
+                                || table.store()
+                                        .newIndexFileHandler()
+                                        .scan(snapshot, DELETE_ORDERING_GUARD)
+                                        .isEmpty()),
+                "Rescaling tables with delete ordering guards is not supported.");
+    }
 
     /** Payload schema evolution and capture toggles do not change the interpretation of a bound. */
     public static void validateCompatible(TableSchema source, TableSchema target) {

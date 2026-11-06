@@ -132,7 +132,6 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
-import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * Default implementation of {@link FileStoreCommit}.
@@ -527,81 +526,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return overwritePartition(
                 () -> PartitionPredicate.fromMultiple(partitionType, staticPartitions),
                 committable);
-    }
-
-    /** Publish a native rescale without rebasing its pinned inputs over concurrent commits. */
-    public int rescale(
-            Snapshot sourceSnapshot,
-            long schemaId,
-            @Nullable PartitionPredicate partitionFilter,
-            ManifestCommittable committable) {
-        // A restarted job may repeat a successful publication with its original input snapshot.
-        if (filterCommitted(Collections.singletonList(committable)).isEmpty()) {
-            return 0;
-        }
-        ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
-        checkArgument(
-                changes.compactTableFiles.isEmpty()
-                        && changes.compactIndexFiles.isEmpty()
-                        && changes.appendChangelog.isEmpty()
-                        && changes.compactChangelog.isEmpty(),
-                "Rescaling publishes only replacement data and guard files.");
-        for (ManifestEntry entry : changes.appendTableFiles) {
-            checkArgument(
-                    partitionFilter == null || partitionFilter.test(entry.partition()),
-                    "Rescale output is outside the selected partitions.");
-        }
-        for (IndexManifestEntry entry : changes.appendIndexFiles) {
-            checkArgument(
-                    partitionFilter == null || partitionFilter.test(entry.partition()),
-                    "Rescale guard output is outside the selected partitions.");
-        }
-        CommitChangesProvider overwrite =
-                scanner.overwriteChangesProvider(
-                        options.bucket(),
-                        changes.appendTableFiles,
-                        changes.appendIndexFiles,
-                        partitionFilter);
-        CommitChangesProvider provider =
-                new CommitChangesProvider() {
-                    @Override
-                    public CommitChanges provide(@Nullable Snapshot latestSnapshot) {
-                        checkState(
-                                sourceSnapshot.equals(latestSnapshot),
-                                "Table changed during delete ordering guard rescaling. "
-                                        + "Restart rescaling from the current snapshot.");
-                        checkState(
-                                schemaManager.latestOrThrow("Missing rescale schema").id()
-                                        == schemaId,
-                                "Table schema changed during delete ordering guard rescaling.");
-                        return overwrite.provide(latestSnapshot);
-                    }
-
-                    @Override
-                    public boolean resetsDeleteOrderingGuards() {
-                        return true;
-                    }
-
-                    @Override
-                    public boolean rescalesDeleteOrderingGuards() {
-                        return true;
-                    }
-
-                    @Nullable
-                    @Override
-                    public PartitionPredicate deleteOrderingGuardResetFilter() {
-                        return partitionFilter;
-                    }
-                };
-        return tryCommit(
-                provider,
-                committable.identifier(),
-                committable.watermark(),
-                committable.properties(),
-                CommitKind.OVERWRITE,
-                false,
-                true,
-                null);
     }
 
     private int overwritePartition(
@@ -1398,8 +1322,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                         && commitKind == CommitKind.COMPACT
                                         && replacesGuards
                                 ? indexManifestFile.read(latestSnapshot.indexManifest())
-                                : Collections.emptyList(),
-                        changesProvider.rescalesDeleteOrderingGuards());
+                                : Collections.emptyList());
         long validatedGuardSchemaId =
                 validateDeleteOrderingGuardPolicy(latestSnapshot, deltaFiles, indexFiles);
         Set<Long> rebasedReassignments = changesProvider.rebasedReassignments();
@@ -1671,17 +1594,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             partitionType);
             properties =
                     DeleteOrderingGuardPartitions.merge(
-                            properties,
-                            latestSnapshot,
-                            deltaFiles,
-                            indexFiles,
-                            options.bucket(),
-                            changesProvider.rescalesDeleteOrderingGuards(),
-                            () ->
-                                    latestSnapshot == null || latestSnapshot.indexManifest() == null
-                                            ? Collections.emptyList()
-                                            : indexManifestFile.read(
-                                                    latestSnapshot.indexManifest()));
+                            properties, latestSnapshot, deltaFiles, indexFiles, options.bucket());
             newSnapshot =
                     new Snapshot(
                             newSnapshotId,
@@ -2036,6 +1949,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         true,
                         null,
                         partitionType);
+        rollbackProperties =
+                DeleteOrderingGuardPartitions.merge(
+                        rollbackProperties,
+                        targetSnapshot,
+                        emptyList(),
+                        emptyList(),
+                        options.bucket());
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,

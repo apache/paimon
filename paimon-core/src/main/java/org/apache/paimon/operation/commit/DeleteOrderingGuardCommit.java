@@ -54,17 +54,6 @@ public class DeleteOrderingGuardCommit {
             List<ManifestEntry> dataChanges,
             List<IndexManifestEntry> indexChanges,
             List<IndexManifestEntry> activeIndexFiles) {
-        return validate(
-                latestSnapshot, commitKind, dataChanges, indexChanges, activeIndexFiles, false);
-    }
-
-    public static boolean validate(
-            @Nullable Snapshot latestSnapshot,
-            Snapshot.CommitKind commitKind,
-            List<ManifestEntry> dataChanges,
-            List<IndexManifestEntry> indexChanges,
-            List<IndexManifestEntry> activeIndexFiles,
-            boolean rescale) {
         boolean publishesGuards = false;
         Set<Pair<BinaryRow, Integer>> sourceBuckets =
                 dataChanges.stream()
@@ -102,16 +91,6 @@ public class DeleteOrderingGuardCommit {
                 continue;
             }
             publishesGuards = true;
-            if (rescale) {
-                checkArgument(
-                        commitKind == Snapshot.CommitKind.OVERWRITE && latestSnapshot != null,
-                        "Guard rescaling requires an existing snapshot and atomic overwrite.");
-                checkArgument(
-                        retiredBuckets.stream()
-                                .anyMatch(bucket -> bucket.getLeft().equals(entry.partition())),
-                        "Guard rescaling must replace committed guards in the same partition.");
-                continue;
-            }
             checkArgument(
                     commitKind == Snapshot.CommitKind.COMPACT && latestSnapshot != null,
                     "Delete ordering guards must be published by compaction of committed data.");

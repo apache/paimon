@@ -437,11 +437,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     private void addGuardOnlyBuckets(Snapshot snapshot, List<DataSplit> splits) {
         Map<BinaryRow, PartitionEntry> guardPartitions =
-                DeleteOrderingGuardPartitions.read(
-                        snapshot,
-                        () ->
-                                indexFileHandler.scan(
-                                        snapshot, DeleteOrderingGuardFile.DELETE_ORDERING_GUARD));
+                DeleteOrderingGuardPartitions.read(snapshot);
         Set<Pair<BinaryRow, Integer>> planned =
                 splits.stream()
                         .map(split -> Pair.of(split.partition(), split.bucket()))

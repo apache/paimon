@@ -409,31 +409,18 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         .collect(Collectors.toList()));
         Map<BinaryRow, PartitionEntry> guardPartitions =
                 includeDeleteOrderingGuardPartitions && scanMode == ScanMode.ALL
-                        ? readDeleteOrderingGuardPartitions(manifestResult.snapshot)
+                        ? DeleteOrderingGuardPartitions.read(manifestResult.snapshot)
                         : Collections.emptyMap();
         PartitionPredicate filter = manifestsReader.partitionFilter();
         guardPartitions.forEach(
                 (partition, entry) -> {
                     if (filter == null || filter.test(partition)) {
-                        partitions.merge(
-                                partition,
-                                entry,
-                                (data, guard) ->
-                                        guard.totalBuckets()
-                                                        == DeleteOrderingGuardPartitions
-                                                                .UNKNOWN_BUCKETS
-                                                ? guard.merge(data)
-                                                : data.merge(guard));
+                        partitions.merge(partition, entry, PartitionEntry::merge);
                     }
                 });
         return partitions.values().stream()
                 .filter(p -> p.fileCount() > 0 || guardPartitions.containsKey(p.partition()))
                 .collect(Collectors.toList());
-    }
-
-    protected Map<BinaryRow, PartitionEntry> readDeleteOrderingGuardPartitions(
-            @Nullable Snapshot snapshot) {
-        return DeleteOrderingGuardPartitions.read(snapshot);
     }
 
     @Override

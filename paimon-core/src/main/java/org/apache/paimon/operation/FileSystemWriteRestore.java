@@ -111,20 +111,8 @@ public class FileSystemWriteRestore implements WriteRestore {
         Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
         if (totalBuckets == null) {
             PartitionEntry guardedPartition =
-                    DeleteOrderingGuardPartitions.read(
-                                    snapshot,
-                                    () ->
-                                            indexFileHandler.scan(
-                                                    snapshot,
-                                                    DeleteOrderingGuardFile.DELETE_ORDERING_GUARD))
-                            .get(partition);
+                    DeleteOrderingGuardPartitions.read(snapshot).get(partition);
             if (guardedPartition != null) {
-                if (guardedPartition.totalBuckets()
-                        == DeleteOrderingGuardPartitions.UNKNOWN_BUCKETS) {
-                    throw new IllegalStateException(
-                            "The retained delete ordering guards have no recorded bucket layout. "
-                                    + "Run sys.rescale in batch mode to bootstrap this partition before writing or compacting it.");
-                }
                 totalBuckets = guardedPartition.totalBuckets();
             }
         }

@@ -73,15 +73,8 @@ public class DeleteOrderingGuardConsolidator implements Closeable {
                 DeleteOrderingGuardFile.Writer writer = file.createWriter()) {
             IndexFileMeta replacement = null;
             try {
-                List<KeyValue> bounds;
-                while ((bounds = reader.nextKey()) != null) {
-                    // This bound dominates every older retract in native source/internal order.
-                    KeyValue strongest = bounds.get(0);
-                    for (int i = 1; i < bounds.size(); i++) {
-                        if (sequenceComparator.compare(bounds.get(i), strongest) > 0) {
-                            strongest = bounds.get(i);
-                        }
-                    }
+                KeyValue strongest;
+                while ((strongest = reader.nextKey(sequenceComparator)) != null) {
                     writer.write(extract(strongest));
                 }
                 replacement = writer.finish();

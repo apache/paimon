@@ -31,6 +31,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 
@@ -151,8 +152,7 @@ public class DeleteOrderingGuardReaderFactory {
                 }
             }
             return new KeyValue()
-                    .replace(guard.key(), guard.sequenceNumber(), guard.valueKind(), sparse)
-                    .setLevel(guard.level());
+                    .replace(guard.key(), guard.sequenceNumber(), RowKind.DELETE, sparse);
         };
     }
 }

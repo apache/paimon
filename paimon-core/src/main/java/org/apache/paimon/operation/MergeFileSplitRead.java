@@ -374,11 +374,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                             overlappedSectionFactory,
                             nonOverlappedSectionFactory,
                             keepDelete,
-                            guards.wrap(
-                                    mergeFunction,
-                                    mfFactory,
-                                    actualReadType(),
-                                    createUdsComparator())));
+                            guards.wrap(mergeFunction, createUdsComparator())));
         } catch (IOException | RuntimeException | Error failure) {
             try {
                 guards.close();
