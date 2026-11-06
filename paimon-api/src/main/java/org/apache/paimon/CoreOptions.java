@@ -1169,6 +1169,16 @@ public class CoreOptions implements Serializable {
                                     + "This changelog file keeps the details of data changes, "
                                     + "it can be read directly during stream reads. This can be applied to tables with primary keys. ");
 
+    public static final ConfigOption<Integer> CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE =
+            key("changelog-on-read.lookup-state.max-size")
+                    .intType()
+                    .defaultValue(2048)
+                    .withDescription(
+                            "Maximum number of partition-bucket lookup states cached by each reader "
+                                    + "with changelog-producer=on-read. Must be greater than 0. "
+                                    + "Least recently used states and their local lookup files are "
+                                    + "evicted when the limit is exceeded.");
+
     public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_IGNORE_UPDATE_BEFORE =
             key("changelog-producer.ignore-update-before")
                     .booleanType()
@@ -4088,6 +4098,15 @@ public class CoreOptions implements Serializable {
 
     public ChangelogProducer changelogProducer() {
         return options.get(CHANGELOG_PRODUCER);
+    }
+
+    public int changelogOnReadLookupStateMaxSize() {
+        int maxSize = options.get(CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE);
+        checkArgument(
+                maxSize > 0,
+                "The option %s must be greater than 0.",
+                CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.key());
+        return maxSize;
     }
 
     public boolean needLookup() {
