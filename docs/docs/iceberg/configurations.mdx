@@ -93,9 +93,9 @@ it one by one from their delta manifests.
   deletes nothing that only its own metadata made unneeded, such as the files of the older versions
   after a rebuild or the manifest lists that retention dropped, because the metadata that stayed
   may still list them. It gives the catalog the metadata that stayed, and every batch of a cleanup
-  is also checked against the metadata file the cleanup was chosen for. The files it leaves are
-  for the cleaning of orphan files. A rollback that the catalog performs itself is not
-  coordinated.
+  is also checked against the metadata file the cleanup was chosen for. The files it leaves stay
+  on storage, because the cleaning of orphan files does not look at the Iceberg metadata. A
+  rollback that the catalog performs itself is not coordinated.
 
 ## Prefixed Properties
 

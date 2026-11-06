@@ -20,7 +20,6 @@ package org.apache.paimon.iceberg.manifest;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FileFormat;
@@ -29,10 +28,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.iceberg.IcebergPathFactory;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta.Content;
@@ -307,7 +303,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
          * from list to list is listed the same way every time.
          */
         @Nullable
-        public String disagreement(IcebergManifestFileMeta entry) {
+        public String disagreement(IcebergManifestFileMeta entry, long listedBy) {
             if (entry.manifestLength() != length) {
                 return "its list records "
                         + entry.manifestLength()
@@ -345,6 +341,17 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                 return "the lists that name it record its sequence numbers, snapshot or partition "
                         + "spec differently";
             }
+            // what every manifest of Paimon is written with, so a list that names the manifest
+            // once is held to it as well: there is one partition spec, and a manifest is
+            // written for a snapshot at or before the one whose list names it
+            if (entry.partitionSpecId() != IcebergPartitionSpec.SPEC_ID
+                    || entry.sequenceNumber() != entry.addedSnapshotId()
+                    || entry.sequenceNumber() > listedBy
+                    || entry.minSequenceNumber() > entry.sequenceNumber()) {
+                return "its partition spec, sequence numbers or snapshot do not fit the snapshot "
+                        + listedBy
+                        + " that lists it";
+            }
             return null;
         }
     }
@@ -358,165 +365,6 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
 
         public CorruptManifestException(String message, Throwable cause) {
             super(message, cause);
-        }
-    }
-
-    /** A call on the storage. */
-    @FunctionalInterface
-    private interface StorageCall<T> {
-        T run() throws IOException;
-    }
-
-    /**
-     * Passes every call on to the file system and notes whether any of them failed, or a read ended
-     * early, so that a decoder error can be told from a storage error. A failure that surfaces from
-     * closing a stream, from asking for its position or from a call on the file system is a storage
-     * failure as much as one that surfaces from a read.
-     */
-    private static class ReadWatch implements FileIO {
-
-        private final FileIO delegate;
-        private final long fileSize;
-        private volatile Exception failure;
-        private volatile boolean endedShort;
-
-        private ReadWatch(FileIO delegate, long fileSize) {
-            this.delegate = delegate;
-            this.fileSize = fileSize;
-        }
-
-        /** Runs a call on the storage, and notes what it throws before it passes it on. */
-        private <T> T watched(StorageCall<T> call) throws IOException {
-            try {
-                return call.run();
-            } catch (IOException | RuntimeException e) {
-                note(e);
-                throw e;
-            }
-        }
-
-        private void note(Exception e) {
-            if (failure == null) {
-                failure = e;
-            }
-        }
-
-        /** Fails when a call failed, or a read ended before the end of the file. */
-        private void throwIfStorageFailed(Path path, @Nullable Throwable cause) throws IOException {
-            Exception failed = failure;
-            if (failed instanceof IOException) {
-                throw (IOException) failed;
-            }
-            if (failed != null) {
-                throw new IOException("A read of " + path + " failed", failed);
-            }
-            if (endedShort) {
-                throw new IOException(
-                        "A read of " + path + " ended before the end of the file", cause);
-            }
-        }
-
-        @Override
-        public SeekableInputStream newInputStream(Path path) throws IOException {
-            SeekableInputStream in = watched(() -> delegate.newInputStream(path));
-            return new SeekableInputStream() {
-                @Override
-                public void seek(long desired) throws IOException {
-                    watched(
-                            () -> {
-                                in.seek(desired);
-                                return null;
-                            });
-                }
-
-                @Override
-                public long getPos() throws IOException {
-                    return watched(in::getPos);
-                }
-
-                @Override
-                public int read() throws IOException {
-                    try {
-                        int b = in.read();
-                        if (b < 0 && in.getPos() < fileSize) {
-                            endedShort = true;
-                        }
-                        return b;
-                    } catch (IOException | RuntimeException e) {
-                        note(e);
-                        throw e;
-                    }
-                }
-
-                @Override
-                public int read(byte[] b, int off, int len) throws IOException {
-                    try {
-                        int n = in.read(b, off, len);
-                        if (n < 0 && in.getPos() < fileSize) {
-                            endedShort = true;
-                        }
-                        return n;
-                    } catch (IOException | RuntimeException e) {
-                        note(e);
-                        throw e;
-                    }
-                }
-
-                @Override
-                public void close() throws IOException {
-                    watched(
-                            () -> {
-                                in.close();
-                                return null;
-                            });
-                }
-            };
-        }
-
-        @Override
-        public boolean isObjectStore() {
-            return delegate.isObjectStore();
-        }
-
-        @Override
-        public void configure(CatalogContext context) {
-            delegate.configure(context);
-        }
-
-        @Override
-        public PositionOutputStream newOutputStream(Path path, boolean overwrite)
-                throws IOException {
-            return watched(() -> delegate.newOutputStream(path, overwrite));
-        }
-
-        @Override
-        public FileStatus getFileStatus(Path path) throws IOException {
-            return watched(() -> delegate.getFileStatus(path));
-        }
-
-        @Override
-        public FileStatus[] listStatus(Path path) throws IOException {
-            return watched(() -> delegate.listStatus(path));
-        }
-
-        @Override
-        public boolean exists(Path path) throws IOException {
-            return watched(() -> delegate.exists(path));
-        }
-
-        @Override
-        public boolean delete(Path path, boolean recursive) throws IOException {
-            return watched(() -> delegate.delete(path, recursive));
-        }
-
-        @Override
-        public boolean mkdirs(Path path) throws IOException {
-            return watched(() -> delegate.mkdirs(path));
-        }
-
-        @Override
-        public boolean rename(Path src, Path dst) throws IOException {
-            return watched(() -> delegate.rename(src, dst));
         }
     }
 
