@@ -21,7 +21,7 @@ package dev.vortex.jni;
 import java.util.List;
 import java.util.Map;
 
-/** Native methods for Vortex file listing and deletion. */
+/** Native methods for Vortex file listing, deletion and metadata reads. */
 public final class NativeFiles {
 
     static {
@@ -35,4 +35,10 @@ public final class NativeFiles {
 
     private static native void delete(
             long sessionPtr, String[] uris, Map<String, String> options);
+
+    private static native Map<String, byte[]> readMetadata(
+            long sessionPtr, String uri, Map<String, String> options);
+
+    private static native Map<String, byte[]> readMetadataFromReadable(
+            long sessionPtr, Object readable, String name, long length);
 }

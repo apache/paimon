@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Set
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import AtomicType, DataField
 
 _UNSAFE_ARROW_FILTER_METHODS = frozenset([
     'startsWith',
@@ -27,6 +27,8 @@ _UNSAFE_ARROW_FILTER_METHODS = frozenset([
     'contains',
     'like',
 ])
+
+_FLOATING_POINT_TYPES = frozenset(['FLOAT', 'DOUBLE'])
 
 # Large boolean trees can overflow or crash native Dataset scanners even when
 # balanced. Keep complex predicates on Paimon's exact row-filter path instead.
@@ -269,3 +271,37 @@ def exclude_predicate_with_fields(predicate: Optional[Predicate], fields: Set[st
     if _get_all_fields(predicate) & fields:
         return None
     return predicate
+
+
+def vortex_pushdown_loses_rows(predicate: Optional[Predicate], fields: List[DataField]) -> bool:
+    """Whether a Vortex scan with this predicate can drop rows that Paimon matches.
+
+    Vortex compares floating point values by their bits in a total order, and
+    PyArrow compares them as IEEE values. The two agree on every value except
+    the signed zeros, which Vortex tells apart, and NaN, which Vortex orders
+    above every number. A filter that only returns extra rows is repaired by
+    the row filter after the scan, but a row that Vortex drops is gone. So a
+    floating point leaf with a zero or NaN literal must not be pushed down.
+    """
+    if predicate is None:
+        return False
+
+    floating_fields = {
+        field.name for field in fields
+        if isinstance(field.type, AtomicType) and field.type.type in _FLOATING_POINT_TYPES
+    }
+    if not floating_fields:
+        return False
+
+    pending = [predicate]
+    while pending:
+        current = pending.pop()
+        if current.method == 'and' or current.method == 'or':
+            pending.extend(current.literals or [])
+            continue
+        if current.field not in floating_fields:
+            continue
+        for literal in current.literals or []:
+            if isinstance(literal, float) and (literal == 0.0 or literal != literal):
+                return True
+    return False

@@ -20,13 +20,10 @@
 FileIO supplies streams and locations; it does not construct table codecs.
 """
 
-import os
-
 import pyarrow as pa
 
 from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 from pypaimon.execution.python.write.writer.format_row_writer import FormatRowWriter
-from pypaimon.filesystem.vortex_utils import to_vortex_specified
 from pypaimon.schema.arrow_schema import parquet_storage_schema
 from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
 
@@ -83,20 +80,10 @@ def write_blob_file(file_io, path, data):
         raise RuntimeError("Failed to write blob file {}: {}".format(path, error)) from error
 
 
-def write_vortex_file(file_io, path, data):
+def write_vortex_file(file_io, path, data, compact=False, edition=None):
     try:
-        import vortex
-
-        file_path, store_kwargs = to_vortex_specified(file_io, path)
-        scheme, _, _ = file_io.parse_location(path)
-        if scheme in {'file', None} or not scheme:
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        if store_kwargs:
-            from vortex import store
-            store.from_url(file_path, **store_kwargs).write(vortex.array(data))
-        else:
-            from vortex._lib.io import write
-            write(vortex.array(data), file_path)
+        from pypaimon.filesystem import vortex_utils
+        vortex_utils.write_vortex_file(file_io, path, data, compact=compact, edition=edition)
     except Exception as error:
         file_io.delete_quietly(path)
         raise RuntimeError("Failed to write Vortex file {}: {}".format(path, error)) from error

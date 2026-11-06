@@ -81,6 +81,18 @@ public class TableReadBenchmark extends TableBenchmark {
     }
 
     @Test
+    public void testVortexRead() throws Exception {
+        innerTest(Collections.singletonMap("vortex", prepareData(vortex(), "vortex")));
+    }
+
+    @Test
+    public void testVortexReadProjection() throws Exception {
+        innerTestProjection(
+                Collections.singletonMap("vortex", prepareData(vortex(), "vortex")),
+                new int[] {0, 5, 10, 14});
+    }
+
+    @Test
     public void testOrcReadProjection() throws Exception {
         innerTestProjection(
                 Collections.singletonMap("orc", prepareData(orc(), "orc")),
@@ -144,6 +156,12 @@ public class TableReadBenchmark extends TableBenchmark {
     private Options parquet() {
         Options options = new Options();
         options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_PARQUET);
+        return options;
+    }
+
+    private Options vortex() {
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, "vortex");
         return options;
     }
 

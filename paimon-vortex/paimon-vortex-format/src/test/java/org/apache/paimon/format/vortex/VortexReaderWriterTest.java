@@ -788,23 +788,23 @@ public class VortexReaderWriterTest {
             }
         }
 
-        long[] selectedRows = new long[firstRangeRowCount + 1];
+        RoaringBitmap32 selectedRows = new RoaringBitmap32();
         for (int i = 0; i < firstRangeRowCount; i++) {
-            selectedRows[i] = i;
+            selectedRows.add(i);
         }
-        selectedRows[firstRangeRowCount] = lastSelectedRow;
+        selectedRows.add(lastSelectedRow);
 
         int previousWorkerCount = NativeRuntime.workerCount();
         NativeRuntime.setWorkerThreads(2);
         try {
             try (VortexRecordsReader reader =
                     new VortexRecordsReader(
+                            VortexInput.of(fileIO, testFile, fileIO.getFileSize(testFile)),
                             testFile,
                             rowType,
                             rowType,
                             selectedRows,
-                            null,
-                            Collections.emptyMap())) {
+                            null)) {
                 int readCount = 0;
                 FileRecordIterator<InternalRow> batch;
                 while ((batch = reader.readBatch()) != null) {
@@ -814,7 +814,7 @@ public class VortexReaderWriterTest {
                         readCount++;
                     }
                 }
-                assertEquals(selectedRows.length, readCount);
+                assertEquals(selectedRows.getCardinality(), readCount);
             }
         } finally {
             NativeRuntime.setWorkerThreads(previousWorkerCount);
