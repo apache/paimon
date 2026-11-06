@@ -28,9 +28,9 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.LazyField;
 
+import java.io.IOException;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
@@ -45,38 +45,64 @@ public class IncrementalChangelogReadProvider implements SplitReadProvider {
         this.splitRead =
                 new LazyField<>(
                         () -> {
-                            SplitRead<InternalRow> read = create(supplier);
+                            SplitRead<InternalRow> read = create(supplier, splitReadConfig);
                             splitReadConfig.config(read);
                             return read;
                         });
     }
 
-    private SplitRead<InternalRow> create(Supplier<MergeFileSplitRead> supplier) {
+    private SplitRead<InternalRow> create(
+            Supplier<MergeFileSplitRead> supplier, SplitReadConfig config) {
         final MergeFileSplitRead read = supplier.get().withReadKeyType(RowType.of());
-        IOFunction<Split, RecordReader<InternalRow>> convertedFactory =
+        // A guard merge needs the complete primary key. Keep the existing key-free raw path
+        // for ordinary splits, and configure the guarded reader only when one is encountered.
+        LazyField<SplitRead<InternalRow>> guarded =
+                new LazyField<>(
+                        () -> {
+                            MergeFileSplitRead merge = supplier.get();
+                            SplitRead<InternalRow> converted =
+                                    SplitRead.convert(
+                                            merge,
+                                            split -> createReader(merge, (IncrementalSplit) split));
+                            config.config(converted);
+                            return converted;
+                        });
+        return SplitRead.convert(
+                read,
                 split -> {
-                    IncrementalSplit incrementalSplit = (IncrementalSplit) split;
-                    RecordReader<KeyValue> reader =
-                            ConcatRecordReader.create(
-                                    () ->
-                                            new ReverseReader(
-                                                    read.createMergeReader(
-                                                            incrementalSplit.partition(),
-                                                            incrementalSplit.bucket(),
-                                                            incrementalSplit.beforeFiles(),
-                                                            incrementalSplit.beforeDeletionFiles(),
-                                                            false)),
-                                    () ->
-                                            read.createMergeReader(
-                                                    incrementalSplit.partition(),
-                                                    incrementalSplit.bucket(),
-                                                    incrementalSplit.afterFiles(),
-                                                    incrementalSplit.afterDeletionFiles(),
-                                                    false));
-                    return unwrap(reader, read.tableSchema().options());
-                };
+                    IncrementalSplit incremental = (IncrementalSplit) split;
+                    if (incremental.beforeDeleteOrderingGuards().isEmpty()
+                            && incremental.afterDeleteOrderingGuards().isEmpty()) {
+                        return createReader(read, incremental);
+                    }
+                    SplitRead<InternalRow> guardRead = guarded.get();
+                    config.config(guardRead);
+                    return guardRead.createReader(split);
+                });
+    }
 
-        return SplitRead.convert(read, convertedFactory);
+    private RecordReader<InternalRow> createReader(MergeFileSplitRead read, IncrementalSplit split)
+            throws IOException {
+        RecordReader<KeyValue> reader =
+                ConcatRecordReader.create(
+                        () ->
+                                new ReverseReader(
+                                        read.createMergeReader(
+                                                split.partition(),
+                                                split.bucket(),
+                                                split.beforeFiles(),
+                                                split.beforeDeletionFiles(),
+                                                false,
+                                                split.beforeDeleteOrderingGuards())),
+                        () ->
+                                read.createMergeReader(
+                                        split.partition(),
+                                        split.bucket(),
+                                        split.afterFiles(),
+                                        split.afterDeletionFiles(),
+                                        false,
+                                        split.afterDeleteOrderingGuards()));
+        return unwrap(reader, read.tableSchema().options());
     }
 
     @Override

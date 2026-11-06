@@ -21,6 +21,8 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMeta09Serializer;
@@ -49,6 +51,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -64,7 +67,7 @@ public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 9;
+    private static final int VERSION = 10;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -73,6 +76,8 @@ public class DataSplit implements Split {
     @Nullable private Integer totalBuckets;
 
     private List<DataFileMeta> dataFiles;
+    // Serialized explicitly below; keep the Java descriptor compatible for ordinary splits.
+    private transient List<IndexFileMeta> deleteOrderingGuards = Collections.emptyList();
 
     /**
      * This list should have the same size as dataFiles. For data evolution tables, only anchor
@@ -109,6 +114,11 @@ public class DataSplit implements Split {
         return dataFiles;
     }
 
+    /** Immutable segment references pinned when planning this split's snapshot. */
+    public List<IndexFileMeta> deleteOrderingGuards() {
+        return deleteOrderingGuards;
+    }
+
     @Override
     public Optional<List<DeletionFile>> deletionFiles() {
         return Optional.ofNullable(dataDeletionFiles);
@@ -119,7 +129,7 @@ public class DataSplit implements Split {
     }
 
     public boolean rawConvertible() {
-        return rawConvertible;
+        return rawConvertible && deleteOrderingGuards.isEmpty();
     }
 
     public OptionalLong earliestFileCreationEpochMillis() {
@@ -349,6 +359,7 @@ public class DataSplit implements Split {
                 && bucket == dataSplit.bucket
                 && isStreaming == dataSplit.isStreaming
                 && rawConvertible == dataSplit.rawConvertible
+                && Objects.equals(deleteOrderingGuards, dataSplit.deleteOrderingGuards)
                 && Objects.equals(partition, dataSplit.partition)
                 && Objects.equals(bucketPath, dataSplit.bucketPath)
                 && Objects.equals(totalBuckets, dataSplit.totalBuckets)
@@ -367,7 +378,8 @@ public class DataSplit implements Split {
                 dataFiles,
                 dataDeletionFiles,
                 isStreaming,
-                rawConvertible);
+                rawConvertible,
+                deleteOrderingGuards);
     }
 
     @Override
@@ -404,11 +416,12 @@ public class DataSplit implements Split {
         this.dataDeletionFiles = other.dataDeletionFiles;
         this.isStreaming = other.isStreaming;
         this.rawConvertible = other.rawConvertible;
+        this.deleteOrderingGuards = other.deleteOrderingGuards;
     }
 
     public void serialize(DataOutputView out) throws IOException {
         out.writeLong(MAGIC);
-        out.writeInt(VERSION);
+        out.writeInt(deleteOrderingGuards.isEmpty() ? 9 : VERSION);
         out.writeLong(snapshotId);
         SerializationUtils.serializeBinaryRow(partition, out);
         out.writeInt(bucket);
@@ -436,6 +449,13 @@ public class DataSplit implements Split {
         out.writeBoolean(isStreaming);
 
         out.writeBoolean(rawConvertible);
+        if (!deleteOrderingGuards.isEmpty()) {
+            out.writeInt(deleteOrderingGuards.size());
+            IndexFileMetaSerializer guardSerializer = new IndexFileMetaSerializer();
+            for (IndexFileMeta guard : deleteOrderingGuards) {
+                guardSerializer.serialize(guard, out);
+            }
+        }
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
@@ -474,6 +494,14 @@ public class DataSplit implements Split {
 
         boolean isStreaming = in.readBoolean();
         boolean rawConvertible = in.readBoolean();
+        List<IndexFileMeta> guards = new ArrayList<>();
+        if (version >= 10) {
+            int count = SerializationUtils.readCount(in, "DataSplit delete ordering guards");
+            IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
+            for (int i = 0; i < count; i++) {
+                guards.add(serializer.deserialize(in));
+            }
+        }
 
         DataSplit.Builder builder =
                 builder()
@@ -484,7 +512,8 @@ public class DataSplit implements Split {
                         .withTotalBuckets(totalBuckets)
                         .withDataFiles(dataFiles)
                         .isStreaming(isStreaming)
-                        .rawConvertible(rawConvertible);
+                        .rawConvertible(rawConvertible)
+                        .withDeleteOrderingGuards(guards);
 
         if (dataDeletionFiles != null) {
             builder.withDataDeletionFiles(dataDeletionFiles);
@@ -514,7 +543,7 @@ public class DataSplit implements Split {
             DataFileMetaWriteColsLegacySerializer serializer =
                     new DataFileMetaWriteColsLegacySerializer();
             return serializer::deserialize;
-        } else if (version == 9) {
+        } else if (version == 9 || version == 10) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {
@@ -569,6 +598,11 @@ public class DataSplit implements Split {
 
         public Builder withDataFiles(List<DataFileMeta> dataFiles) {
             this.split.dataFiles = new ArrayList<>(dataFiles);
+            return this;
+        }
+
+        public Builder withDeleteOrderingGuards(List<IndexFileMeta> guards) {
+            this.split.deleteOrderingGuards = Collections.unmodifiableList(new ArrayList<>(guards));
             return this;
         }
 

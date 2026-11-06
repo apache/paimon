@@ -94,30 +94,64 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     @Override
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
         IncrementalSplit split = (IncrementalSplit) s;
-        RecordReader<KeyValue> reader =
-                readDiff(
-                        mergeRead.createMergeReader(
-                                split.partition(),
-                                split.bucket(),
-                                split.beforeFiles(),
-                                split.beforeDeletionFiles(),
-                                forceKeepDelete),
-                        mergeRead.createMergeReader(
-                                split.partition(),
-                                split.bucket(),
-                                split.afterFiles(),
-                                split.afterDeletionFiles(),
-                                forceKeepDelete),
-                        mergeRead.keyComparator(),
-                        mergeRead.createUdsComparator(),
-                        mergeRead.mergeSorter(),
-                        forceKeepDelete);
-        if (readType != null) {
-            // project from the merge read's actual output, which may itself be projected
-            ProjectedRow projectedRow = ProjectedRow.from(readType, mergeRead.actualReadType());
-            reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
+        RecordReader<KeyValue> before =
+                mergeRead.createMergeReader(
+                        split.partition(),
+                        split.bucket(),
+                        split.beforeFiles(),
+                        split.beforeDeletionFiles(),
+                        forceKeepDelete,
+                        split.beforeDeleteOrderingGuards());
+        RecordReader<KeyValue> after;
+        RecordReader<KeyValue> reader;
+        try {
+            after =
+                    mergeRead.createMergeReader(
+                            split.partition(),
+                            split.bucket(),
+                            split.afterFiles(),
+                            split.afterDeletionFiles(),
+                            forceKeepDelete,
+                            split.afterDeleteOrderingGuards());
+        } catch (IOException | RuntimeException | Error failure) {
+            closeOnFailure(before, failure);
+            throw failure;
         }
-        return KeyValueTableRead.unwrap(reader, mergeRead.tableSchema().options());
+        try {
+            reader =
+                    readDiff(
+                            before,
+                            after,
+                            mergeRead.keyComparator(),
+                            mergeRead.createUdsComparator(),
+                            mergeRead.mergeSorter(),
+                            forceKeepDelete);
+        } catch (IOException | RuntimeException | Error failure) {
+            closeOnFailure(before, failure);
+            closeOnFailure(after, failure);
+            throw failure;
+        }
+        try {
+            if (readType != null) {
+                // project from the merge read's actual output, which may itself be projected
+                ProjectedRow projectedRow = ProjectedRow.from(readType, mergeRead.actualReadType());
+                reader =
+                        reader.transform(
+                                kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
+            }
+            return KeyValueTableRead.unwrap(reader, mergeRead.tableSchema().options());
+        } catch (RuntimeException | Error failure) {
+            closeOnFailure(reader, failure);
+            throw failure;
+        }
+    }
+
+    private static void closeOnFailure(RecordReader<?> reader, Throwable failure) {
+        try {
+            reader.close();
+        } catch (Throwable cleanup) {
+            failure.addSuppressed(cleanup);
+        }
     }
 
     private static RecordReader<KeyValue> readDiff(

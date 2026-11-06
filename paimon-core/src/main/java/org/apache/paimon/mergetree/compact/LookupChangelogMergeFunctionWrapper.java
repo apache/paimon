@@ -64,6 +64,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
     private final LookupStrategy lookupStrategy;
     private final @Nullable BucketedDvMaintainer deletionVectorsMaintainer;
     private final Comparator<KeyValue> comparator;
+    @Nullable private Function<KeyValue, KeyValue> guardResolver;
 
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
@@ -101,6 +102,11 @@ public class LookupChangelogMergeFunctionWrapper<T>
     }
 
     @Override
+    public void withDeleteOrderingGuardResolver(Function<KeyValue, KeyValue> resolver) {
+        guardResolver = resolver;
+    }
+
+    @Override
     public ChangelogResult getResult() {
         // 1. Find the latest high level record and compute containLevel0
         KeyValue highLevel = mergeFunction.pickHighLevel();
@@ -134,24 +140,28 @@ public class LookupChangelogMergeFunctionWrapper<T>
         }
 
         // 3. Calculate result
+        KeyValue before = guardResolver == null ? highLevel : guardResolver.apply(highLevel);
         KeyValue result = mergeFunction.getResult();
+        if (guardResolver != null) {
+            result = guardResolver.apply(result);
+        }
 
         // 4. Set changelog when there's level-0 records
         reusedResult.reset();
         if (containLevel0 && lookupStrategy.produceChangelog) {
-            setChangelog(highLevel, result);
+            setChangelog(before, result);
         }
 
         return reusedResult.setResult(result);
     }
 
-    private void setChangelog(@Nullable KeyValue before, KeyValue after) {
+    private void setChangelog(@Nullable KeyValue before, @Nullable KeyValue after) {
         if (before == null || !before.isAdd()) {
-            if (after.isAdd()) {
+            if (after != null && after.isAdd()) {
                 reusedResult.addChangelog(replaceAfter(RowKind.INSERT, after));
             }
         } else {
-            if (!after.isAdd()) {
+            if (after == null || !after.isAdd()) {
                 reusedResult.addChangelog(replaceBefore(RowKind.DELETE, before));
             } else if (valueEqualiser == null
                     || !valueEqualiser.equals(before.value(), after.value())) {

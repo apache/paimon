@@ -56,6 +56,100 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SchemaValidationTest {
 
+    @ParameterizedTest
+    @CsvSource({
+        "merge-engine,first-row,only the deduplicate merge engine",
+        "merge-engine,aggregation,only the deduplicate merge engine",
+        "merge-engine,partial-update,only the deduplicate merge engine",
+        "fields.payload.aggregate-function,last_non_null_value,field aggregate functions",
+        "bucket,-1,fixed buckets",
+        "bucket,-2,fixed buckets",
+        "delete-ordering-guards.compaction.min-file-num,1,requires at least 2 files",
+        "deletion-vectors.enabled,true,deletion vectors",
+        "chain-table.enabled,true,chain tables",
+        "metadata.iceberg.storage,table-location,Iceberg compatibility",
+        "pk-vector.index.columns,payload,primary-key indexes",
+        "pk-full-text.index.columns,payload,primary-key indexes",
+        "pk-btree.index.columns,payload,primary-key indexes",
+        "pk-bitmap.index.columns,payload,primary-key indexes",
+        "pk-multivalue.index.columns,payload,primary-key indexes",
+        "pk-fm.index.columns,payload,primary-key indexes",
+        "global-index.hnsw.index-columns,payload,primary-key indexes",
+        "global-index.full-text.index-columns,payload,primary-key indexes",
+        "global-index.btree.index-columns,payload,primary-key indexes",
+        "global-index.bitmap.index-columns,payload,primary-key indexes",
+        "global-index.multivalue.index-columns,payload,primary-key indexes",
+        "global-index.fm.index-columns,payload,primary-key indexes"
+    })
+    void testDeleteOrderingGuardUnsupportedOptions(String key, String value, String message) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETE_ORDERING_GUARDS_ENABLED.key(), "true");
+        options.put(BUCKET.key(), "1");
+        options.put(key, value);
+        assertThatThrownBy(() -> validateTableSchema(deleteOrderingGuardSchema(options)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(message);
+    }
+
+    @Test
+    void testDeleteOrderingGuardSupportsDeduplicate() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETE_ORDERING_GUARDS_ENABLED.key(), "true");
+        options.put(BUCKET.key(), "1");
+        options.put("merge-engine", "deduplicate");
+        assertThatCode(() -> validateTableSchema(deleteOrderingGuardSchema(options)))
+                .doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"first-row", "aggregation", "partial-update"})
+    void testDisabledDeleteOrderingGuardsAllowOtherEngines(String engine) {
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", engine);
+        if (engine.equals("partial-update")) {
+            options.put("fields.seq.sequence-group", "payload");
+            options.put("partial-update.remove-record-on-sequence-group", "seq");
+        }
+        assertThatCode(() -> validateTableSchema(deleteOrderingGuardSchema(options)))
+                .doesNotThrowAnyException();
+        options.put(CoreOptions.DELETE_ORDERING_GUARDS_ENABLED.key(), "false");
+        assertThatCode(() -> validateTableSchema(deleteOrderingGuardSchema(options)))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void testDeleteOrderingGuardsRequirePrimaryKeys() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETE_ORDERING_GUARDS_ENABLED.key(), "true");
+        TableSchema schema =
+                new TableSchema(
+                        0,
+                        singletonList(new DataField(0, "k", DataTypes.INT())),
+                        0,
+                        emptyList(),
+                        emptyList(),
+                        options,
+                        "");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "delete-ordering-guards.enabled requires a primary-key table");
+    }
+
+    private TableSchema deleteOrderingGuardSchema(Map<String, String> options) {
+        return new TableSchema(
+                0,
+                Arrays.asList(
+                        new DataField(0, "k", DataTypes.INT()),
+                        new DataField(1, "seq", DataTypes.INT()),
+                        new DataField(2, "payload", DataTypes.STRING())),
+                2,
+                emptyList(),
+                singletonList("k"),
+                options,
+                "");
+    }
+
     @Test
     void testNullablePrimaryKeyRequiresPrimaryKeyTable() {
         Map<String, String> options = new HashMap<>();

@@ -23,7 +23,9 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
 import org.apache.paimon.manifest.ExpireFileEntry;
+import org.apache.paimon.operation.DeleteOrderingGuardBranchRetention;
 import org.apache.paimon.operation.FileDeletionBase.DataFileDeletionPlan;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ExpireConfig;
@@ -43,6 +45,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -217,6 +220,11 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         // tags to create data file skipper
         List<Snapshot> taggedSnapshots = collectTaggedSnapshots();
+
+        snapshotDeletion.protectSnapshots(
+                snapshotsIncludingEnd.stream().anyMatch(DeleteOrderingGuardFile::mayContainGuards)
+                        ? DeleteOrderingGuardBranchRetention.snapshots(snapshotManager)
+                        : Collections.emptyList());
 
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of

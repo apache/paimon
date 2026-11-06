@@ -29,6 +29,11 @@ tune bucket numbers by `ALTER TABLE` command and reorganize data layout by `INSE
 without recreating the table/partition. When executing overwrite jobs, the framework will automatically 
 scan the data with the old bucket number and hash the record according to the current bucket number.
 
+The Flink and Spark `sys.rescale` procedures reject tables with
+[delete ordering guards](../primary-key-table/sequence-rowkind#preserving-delete-ordering) while
+capture is enabled or guards remain active. Ordinary `INSERT OVERWRITE ... SELECT` resets delete
+ordering history in the replaced scope.
+
 ## Rescale Overwrite
 ```sql
 -- rescale number of total buckets
@@ -42,8 +47,8 @@ FROM table_identifier
 ``` 
 
 Please note that
-- `ALTER TABLE` only modifies the table's metadata and will **NOT** reorganize or reformat existing data. 
-  Reorganize existing data must be achieved by `INSERT OVERWRITE`.
+- `ALTER TABLE` only modifies the table's metadata and will **NOT** reorganize or reformat existing data.
+  Use `INSERT OVERWRITE` to reorganize existing data.
 - Rescale bucket number does not influence the read and running write jobs.
 - Once the bucket number is changed, any newly scheduled `INSERT INTO` jobs which write to without-reorganized 
   existing table/partition will throw a `TableException` with message like 

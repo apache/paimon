@@ -24,6 +24,7 @@ import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
@@ -169,6 +170,8 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
         @Nullable protected final BucketedDvMaintainer deletionVectorsMaintainer;
         @Nullable protected final BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer;
         protected final CommitIncrement commitIncrement;
+        protected final List<IndexFileMeta> deleteOrderingGuards;
+        @Nullable protected final String deleteOrderingGuardGeneration;
 
         protected State(
                 BinaryRow partition,
@@ -181,7 +184,38 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
                 @Nullable DynamicBucketIndexMaintainer indexMaintainer,
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
                 @Nullable BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer,
-                CommitIncrement commitIncrement) {
+                CommitIncrement commitIncrement,
+                List<IndexFileMeta> deleteOrderingGuards) {
+            this(
+                    partition,
+                    bucket,
+                    totalBuckets,
+                    baseSnapshotId,
+                    lastModifiedCommitIdentifier,
+                    dataFiles,
+                    maxSequenceNumber,
+                    indexMaintainer,
+                    deletionVectorsMaintainer,
+                    primaryKeyIndexMaintainer,
+                    commitIncrement,
+                    deleteOrderingGuards,
+                    null);
+        }
+
+        protected State(
+                BinaryRow partition,
+                int bucket,
+                int totalBuckets,
+                long baseSnapshotId,
+                long lastModifiedCommitIdentifier,
+                Collection<DataFileMeta> dataFiles,
+                long maxSequenceNumber,
+                @Nullable DynamicBucketIndexMaintainer indexMaintainer,
+                @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
+                @Nullable BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer,
+                CommitIncrement commitIncrement,
+                List<IndexFileMeta> deleteOrderingGuards,
+                @Nullable String deleteOrderingGuardGeneration) {
             this.partition = partition;
             this.bucket = bucket;
             this.totalBuckets = totalBuckets;
@@ -193,6 +227,8 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
             this.deletionVectorsMaintainer = deletionVectorsMaintainer;
             this.primaryKeyIndexMaintainer = primaryKeyIndexMaintainer;
             this.commitIncrement = commitIncrement;
+            this.deleteOrderingGuards = new ArrayList<>(deleteOrderingGuards);
+            this.deleteOrderingGuardGeneration = deleteOrderingGuardGeneration;
         }
 
         @Override

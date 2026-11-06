@@ -26,6 +26,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.DeleteOrderingGuardReaderFactory;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.ChainKeyValueFileReaderFactory;
 import org.apache.paimon.io.ChainReadContext;
 import org.apache.paimon.io.DataFileMeta;
@@ -36,6 +38,7 @@ import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortBufferWriteBuffer;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.mergetree.compact.DeleteOrderingGuardReader;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
@@ -98,6 +101,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Nullable private List<Predicate> filtersForAll;
 
     private boolean forceKeepDelete = false;
+    @Nullable private DeleteOrderingGuardReaderFactory guardReaderFactory;
+
+    public MergeFileSplitRead withDeleteOrderingGuards(DeleteOrderingGuardReaderFactory factory) {
+        this.guardReaderFactory = factory;
+        return this;
+    }
 
     public MergeFileSplitRead(
             CoreOptions options,
@@ -251,6 +260,10 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
         if (split.isStreaming() || split.bucket() == BucketMode.POSTPONE_BUCKET) {
+            if (!split.isStreaming() && !split.deleteOrderingGuards().isEmpty()) {
+                throw new UnsupportedOperationException(
+                        "Postpone reads cannot resolve delete ordering guards.");
+            }
             return createNoMergeReader(
                     split.partition(),
                     split.bucket(),
@@ -263,7 +276,8 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                     split.bucket(),
                     split.dataFiles(),
                     split.deletionFiles().orElse(null),
-                    forceKeepDelete);
+                    forceKeepDelete,
+                    split.deleteOrderingGuards());
         }
     }
 
@@ -312,19 +326,63 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             @Nullable List<DeletionFile> deletionFiles,
             boolean keepDelete)
             throws IOException {
+        return createMergeReader(
+                partition, bucket, files, deletionFiles, keepDelete, Collections.emptyList());
+    }
+
+    public RecordReader<KeyValue> createMergeReader(
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> files,
+            @Nullable List<DeletionFile> deletionFiles,
+            boolean keepDelete,
+            List<IndexFileMeta> guardFiles)
+            throws IOException {
         // Sections are read by SortMergeReader, which sorts and merges records by keys.
         // So we cannot project keys or else the sorting will be incorrect.
         DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);
         KeyValueFileReaderFactory overlappedSectionFactory =
                 readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForKeys);
         KeyValueFileReaderFactory nonOverlappedSectionFactory =
-                readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForAll);
-        return createMergeReader(
-                files,
-                overlappedSectionFactory,
-                nonOverlappedSectionFactory,
-                keepDelete,
-                new ReducerMergeFunctionWrapper(mfFactory.create(actualReadType())));
+                readerFactoryBuilder.build(
+                        partition,
+                        bucket,
+                        dvFactory,
+                        false,
+                        guardFiles.isEmpty() ? filtersForAll : filtersForKeys);
+        MergeFunctionWrapper<KeyValue> mergeFunction =
+                new ReducerMergeFunctionWrapper(mfFactory.create(actualReadType()));
+        if (guardFiles.isEmpty()) {
+            return createMergeReader(
+                    files,
+                    overlappedSectionFactory,
+                    nonOverlappedSectionFactory,
+                    keepDelete,
+                    mergeFunction);
+        }
+        if (guardReaderFactory == null) {
+            throw new IllegalStateException(
+                    "Guarded splits require a delete ordering guard reader factory.");
+        }
+        DeleteOrderingGuardReader guards =
+                guardReaderFactory.open(
+                        partition, bucket, guardFiles, actualReadType(), keyComparator);
+        try {
+            return guards.withDataReader(
+                    createMergeReader(
+                            files,
+                            overlappedSectionFactory,
+                            nonOverlappedSectionFactory,
+                            keepDelete,
+                            guards.wrap(mergeFunction, createUdsComparator())));
+        } catch (IOException | RuntimeException | Error failure) {
+            try {
+                guards.close();
+            } catch (Throwable cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
+        }
     }
 
     public RecordReader<KeyValue> createMergeReader(

@@ -76,6 +76,7 @@ public class NormalPartitionExpire implements PartitionExpire {
         this.checkInterval = checkInterval;
         this.strategy = strategy;
         this.scan = scan;
+        scan.withDeleteOrderingGuardPartitions();
         this.commit = commit;
         this.partitionModification = partitionModification;
         // Avoid the execution time of stream jobs from being too short and preventing partition

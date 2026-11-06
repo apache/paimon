@@ -25,6 +25,8 @@ import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
+import java.util.function.Function;
+
 /**
  * Wrapper for {@link MergeFunction}s to produce changelog during a full compaction.
  *
@@ -47,6 +49,7 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
     private KeyValue topLevelKv;
     private KeyValue initialKv;
     private boolean isInitialized;
+    @Nullable private Function<KeyValue, KeyValue> guardResolver;
 
     private final ChangelogResult reusedResult = new ChangelogResult();
     private final KeyValue reusedBefore = new KeyValue();
@@ -96,33 +99,33 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
     @Override
     public ChangelogResult getResult() {
         reusedResult.reset();
-        if (isInitialized) {
-            KeyValue merged = mergeFunction.getResult();
-            if (topLevelKv == null) {
-                if (merged.isAdd()) {
-                    reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, merged));
-                }
-            } else {
-                if (!merged.isAdd()) {
-                    reusedResult.addChangelog(replace(reusedBefore, RowKind.DELETE, topLevelKv));
-                } else if (valueEqualiser == null
-                        || !valueEqualiser.equals(topLevelKv.value(), merged.value())) {
-                    reusedResult
-                            .addChangelog(replace(reusedBefore, RowKind.UPDATE_BEFORE, topLevelKv))
-                            .addChangelog(replace(reusedAfter, RowKind.UPDATE_AFTER, merged));
-                }
-            }
-            return reusedResult.setResultIfNotRetract(merged);
-        } else {
-            if (topLevelKv == null && initialKv.isAdd()) {
-                reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, initialKv));
-            }
-            // either topLevelKv is not null, but there is only one kv,
-            // so topLevelKv must be the only kv, which means there is no change
-            //
-            // or initialKv is not an ADD kv, so no new key is added
-            return reusedResult.setResultIfNotRetract(initialKv);
+        KeyValue merged = isInitialized ? mergeFunction.getResult() : initialKv;
+        if (guardResolver != null) {
+            merged = guardResolver.apply(merged);
         }
+        if (!isInitialized && topLevelKv != null) {
+            // A lone top-level record has no new inputs and produces no changelog.
+            return reusedResult.setResultIfNotRetract(merged);
+        }
+        KeyValue before = guardResolver == null ? topLevelKv : guardResolver.apply(topLevelKv);
+        if (before == null || !before.isAdd()) {
+            if (merged != null && merged.isAdd()) {
+                reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, merged));
+            }
+        } else if (merged == null || !merged.isAdd()) {
+            reusedResult.addChangelog(replace(reusedBefore, RowKind.DELETE, before));
+        } else if (valueEqualiser == null
+                || !valueEqualiser.equals(before.value(), merged.value())) {
+            reusedResult
+                    .addChangelog(replace(reusedBefore, RowKind.UPDATE_BEFORE, before))
+                    .addChangelog(replace(reusedAfter, RowKind.UPDATE_AFTER, merged));
+        }
+        return reusedResult.setResultIfNotRetract(merged);
+    }
+
+    @Override
+    public void withDeleteOrderingGuardResolver(Function<KeyValue, KeyValue> resolver) {
+        guardResolver = resolver;
     }
 
     private KeyValue replace(KeyValue reused, RowKind valueKind, KeyValue from) {
