@@ -42,6 +42,16 @@ public class FieldFirstNonNullValueAgg extends FieldAggregator {
     }
 
     @Override
+    public Object aggReversed(Object accumulator, Object inputField) {
+        // the input precedes the accumulator, so a non-null input is the first one
+        if (inputField != null) {
+            initialized = true;
+            return inputField;
+        }
+        return accumulator;
+    }
+
+    @Override
     public void reset() {
         this.initialized = false;
     }
