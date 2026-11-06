@@ -67,6 +67,7 @@ import static org.apache.paimon.utils.ChangelogManager.CHANGELOG_PREFIX;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
+import static org.apache.paimon.utils.SensitiveConfigUtils.sanitizeUri;
 import static org.apache.paimon.utils.SnapshotManager.SNAPSHOT_PREFIX;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
@@ -145,7 +146,7 @@ public abstract class OrphanFilesClean implements Serializable {
         try (MaintenanceProgress progress =
                 new MaintenanceProgress(
                         "operation=remove-orphans table="
-                                + location
+                                + sanitizeUri(location.toUri().toString())
                                 + " branch="
                                 + branch
                                 + " dry_run="
@@ -377,7 +378,8 @@ public abstract class OrphanFilesClean implements Serializable {
             String dataFileExternalPaths) {
         try (MaintenanceProgress progress =
                 new MaintenanceProgress(
-                        "operation=remove-orphans table=" + location,
+                        "operation=remove-orphans table="
+                                + sanitizeUri(location.toUri().toString()),
                         "discover-partition-and-bucket-directories")) {
             LOG.info("Start: listing paimon file directories for table [{}]", tableName);
             long start = System.currentTimeMillis();
@@ -411,7 +413,7 @@ public abstract class OrphanFilesClean implements Serializable {
      * depth.
      */
     private List<Path> listFileDirs(Path dir, int level, MaintenanceProgress progress) {
-        long item = progress.startItem(dir.toString());
+        long item = progress.startItem(sanitizeUri(dir.toUri().toString()));
         List<FileStatus> dirs;
         try {
             dirs = tryBestListingDirs(dir);
@@ -473,7 +475,7 @@ public abstract class OrphanFilesClean implements Serializable {
         } catch (IOException e) {
             LOG.warn(
                     "Failed to list directory {}, skip it; orphan cleanup may be incomplete.",
-                    dir,
+                    sanitizeUri(dir.toUri().toString()),
                     e);
             return emptyList();
         }

@@ -61,6 +61,13 @@ import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.Configurator;
+import org.apache.logging.log4j.core.config.Property;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
@@ -83,6 +90,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -124,6 +132,59 @@ public class ExpireSnapshotsTest {
                                 TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
                         store.options().toMap(),
                         null));
+    }
+
+    @Test
+    public void testExpireProgressRedactsStorageCredentials() {
+        Path credentialPath = new Path("oss://user:password@bucket/table");
+        SnapshotManager credentialSnapshotManager =
+                new SnapshotManager(fileIO, credentialPath, null, null, null) {
+                    @Override
+                    public Long latestSnapshotId() {
+                        return null;
+                    }
+                };
+        ExpireSnapshotsImpl expire =
+                new ExpireSnapshotsImpl(
+                        credentialSnapshotManager,
+                        changelogManager,
+                        store.newSnapshotDeletion(),
+                        new TagManager(fileIO, credentialPath),
+                        1);
+
+        List<String> messages = new CopyOnWriteArrayList<>();
+        Logger logger = (Logger) LogManager.getLogger(MaintenanceProgress.class);
+        Level previousLevel = logger.getLevel();
+        boolean previousAdditive = logger.isAdditive();
+        AbstractAppender appender =
+                new AbstractAppender(
+                        "expire-redaction-test", null, null, false, Property.EMPTY_ARRAY) {
+                    @Override
+                    public void append(LogEvent event) {
+                        messages.add(event.getMessage().getFormattedMessage());
+                    }
+                };
+
+        try {
+            Configurator.setLevel(logger.getName(), Level.INFO);
+            logger.setAdditive(false);
+            appender.start();
+            logger.addAppender(appender);
+            assertThat(expire.expire()).isZero();
+        } finally {
+            logger.removeAppender(appender);
+            appender.stop();
+            Configurator.setLevel(logger.getName(), previousLevel);
+            logger.setAdditive(previousAdditive);
+        }
+
+        assertThat(messages).isNotEmpty();
+        assertThat(messages)
+                .allSatisfy(
+                        message ->
+                                assertThat(message)
+                                        .contains("table=oss://bucket/table")
+                                        .doesNotContain("user", "password"));
     }
 
     @Test

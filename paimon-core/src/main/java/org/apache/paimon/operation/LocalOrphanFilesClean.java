@@ -55,6 +55,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.SensitiveConfigUtils.sanitizeUri;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
@@ -99,7 +100,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         try (MaintenanceProgress progress =
                 new MaintenanceProgress(
                         "operation=remove-orphans table="
-                                + location
+                                + sanitizeUri(location.toUri().toString())
                                 + " mode=local dry_run="
                                 + dryRun,
                         "validate-branches")) {
@@ -134,7 +135,10 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             progress.phase("delete-orphan-files");
             for (String candidate : candidateDeletes) {
                 Pair<Path, Long> deleteFileInfo = candidates.get(candidate);
-                long item = progress.startItem("delete-file " + deleteFileInfo.getLeft());
+                long item =
+                        progress.startItem(
+                                "delete-file "
+                                        + sanitizeUri(deleteFileInfo.getLeft().toUri().toString()));
                 try {
                     deletedFilesLenInBytes.addAndGet(deleteFileInfo.getRight());
                     cleanFile(deleteFileInfo.getLeft());
@@ -178,7 +182,10 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         randomlyOnlyExecute(
                 executor,
                 path -> {
-                    long item = progress.startItem("delete-empty-directory " + path);
+                    long item =
+                            progress.startItem(
+                                    "delete-empty-directory "
+                                            + sanitizeUri(path.toUri().toString()));
                     try {
                         tryDeleteEmptyDirectory(path);
                     } finally {
@@ -301,7 +308,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
     private Function<Path, List<Pair<Path, Long>>> pathProcessor(
             Set<Path> emptyDirs, MaintenanceProgress progress) {
         return path -> {
-            long item = progress.startItem("list-candidates " + path);
+            long item =
+                    progress.startItem("list-candidates " + sanitizeUri(path.toUri().toString()));
             try {
                 List<FileStatus> files = tryBestListingDirs(path);
 
@@ -312,7 +320,10 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                             emptyDirs.add(path);
                         }
                     } catch (IOException e) {
-                        LOG.warn("IOException during check dirStatus for {}, ignore it", path, e);
+                        LOG.warn(
+                                "IOException during check dirStatus for {}, ignore it",
+                                sanitizeUri(path.toUri().toString()),
+                                e);
                     }
                     return Collections.emptyList();
                 }

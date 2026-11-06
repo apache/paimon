@@ -58,6 +58,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.SensitiveConfigUtils.sanitizeUri;
 import static org.apache.paimon.utils.SnapshotManager.findPreviousOrEqualSnapshot;
 import static org.apache.paimon.utils.SnapshotManager.findPreviousSnapshot;
 
@@ -581,7 +582,9 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             futures.add(
                     CompletableFuture.supplyAsync(
                             () -> {
-                                long item = progress.startItem("load-tag " + path);
+                                long item =
+                                        progress.startItem(
+                                                "load-tag " + sanitizeUri(path.toUri().toString()));
                                 try {
                                     return Optional.of(
                                             Tag.tryFromPath(snapshotManager.fileIO(), path)
@@ -631,7 +634,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
     private String progressContext() {
         return "operation=expire-snapshots table="
-                + snapshotManager.tablePath()
+                + sanitizeUri(snapshotManager.tablePath().toUri().toString())
                 + " branch="
                 + snapshotManager.branch();
     }

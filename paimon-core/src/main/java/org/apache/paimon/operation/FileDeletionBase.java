@@ -71,6 +71,7 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 import static org.apache.paimon.append.dataevolution.SerializationAssignment.planFile;
+import static org.apache.paimon.utils.SensitiveConfigUtils.sanitizeUri;
 
 /**
  * Base class for file deletion including methods for clean data files, manifest files and empty
@@ -688,7 +689,9 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
         try (MaintenanceProgress progress =
                 new MaintenanceProgress(
-                        "operation=file-deletion table=" + pathFactory.root(), phase)) {
+                        "operation=file-deletion table="
+                                + sanitizeUri(pathFactory.root().toUri().toString()),
+                        phase)) {
             progress.add("total_calls", files.size());
             List<CompletableFuture<Void>> futures = new ArrayList<>(files.size());
             for (F file : files) {
@@ -697,7 +700,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                 futures.add(
                         CompletableFuture.runAsync(
                                 () -> {
-                                    long item = progress.startItem(String.valueOf(file));
+                                    long item = progress.startItem(progressDescription(file));
                                     progress.add("queued_calls", -1);
                                     progress.add("started_calls", 1);
                                     try {
@@ -707,8 +710,8 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                                         progress.add("visible_failures", 1);
                                         LOG.warn(
                                                 "Deletion call failed for {} in table {}",
-                                                file,
-                                                pathFactory.root(),
+                                                progressDescription(file),
+                                                sanitizeUri(pathFactory.root().toUri().toString()),
                                                 e);
                                         throw e;
                                     } finally {
@@ -736,7 +739,9 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
         try (MaintenanceProgress progress =
                 new MaintenanceProgress(
-                        "operation=file-deletion table=" + pathFactory.root(), "delete-batch")) {
+                        "operation=file-deletion table="
+                                + sanitizeUri(pathFactory.root().toUri().toString()),
+                        "delete-batch")) {
             progress.add("total_calls", tasks.size());
             List<CompletableFuture<Void>> futures = new ArrayList<>(tasks.size());
             int taskNumber = 0;
@@ -773,6 +778,12 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                 throw new RuntimeException(e.getCause());
             }
         }
+    }
+
+    private String progressDescription(Object file) {
+        return file instanceof Path
+                ? sanitizeUri(((Path) file).toUri().toString())
+                : String.valueOf(file);
     }
 
     /** Candidate data files from one snapshot delta manifest. */

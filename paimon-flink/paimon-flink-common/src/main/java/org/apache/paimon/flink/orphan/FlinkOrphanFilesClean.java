@@ -72,6 +72,7 @@ import java.util.function.Consumer;
 import static org.apache.flink.api.common.typeinfo.BasicTypeInfo.STRING_TYPE_INFO;
 import static org.apache.flink.util.Preconditions.checkState;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.SensitiveConfigUtils.sanitizeUri;
 
 /** Flink {@link OrphanFilesClean}, it will submit a job for a table. */
 public class FlinkOrphanFilesClean extends OrphanFilesClean {
@@ -167,7 +168,8 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                         try (MaintenanceProgress progress =
                                                 new MaintenanceProgress(
                                                         "operation=remove-orphans table="
-                                                                + location
+                                                                + sanitizeUri(
+                                                                        location.toUri().toString())
                                                                 + " branch="
                                                                 + branch,
                                                         "enumerate-snapshots-tags-changelogs")) {
@@ -204,7 +206,8 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                         try (MaintenanceProgress progress =
                                                 new MaintenanceProgress(
                                                         "operation=remove-orphans table="
-                                                                + location
+                                                                + sanitizeUri(
+                                                                        location.toUri().toString())
                                                                 + " branch="
                                                                 + branch
                                                                 + " snapshot="
@@ -244,7 +247,8 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                         try (MaintenanceProgress progress =
                                                 new MaintenanceProgress(
                                                         "operation=remove-orphans table="
-                                                                + location
+                                                                + sanitizeUri(
+                                                                        location.toUri().toString())
                                                                 + " task="
                                                                 + RuntimeContextUtils
                                                                         .getTaskNameWithSubtasks(
@@ -343,15 +347,20 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             ProcessFunction<String, Tuple2<String, Long>>.Context
                                                     ctx,
                                             Collector<Tuple2<String, Long>> out) {
+                                        Path dirPath = new Path(dir);
                                         try (MaintenanceProgress progress =
                                                 new MaintenanceProgress(
                                                         "operation=remove-orphans table="
-                                                                + location
+                                                                + sanitizeUri(
+                                                                        location.toUri().toString())
                                                                 + " directory="
-                                                                + dir,
+                                                                + sanitizeUri(
+                                                                        dirPath.toUri().toString()),
                                                         "list-candidate-files")) {
-                                            long item = progress.startItem(dir);
-                                            Path dirPath = new Path(dir);
+                                            long item =
+                                                    progress.startItem(
+                                                            sanitizeUri(
+                                                                    dirPath.toUri().toString()));
                                             List<FileStatus> files;
                                             try {
                                                 files = tryBestListingDirs(dirPath);
@@ -380,7 +389,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                 } catch (IOException e) {
                                                     LOG.warn(
                                                             "IOException during check dirStatus for {}, ignore it",
-                                                            dirPath,
+                                                            sanitizeUri(dirPath.toUri().toString()),
                                                             e);
                                                 }
                                             }
@@ -409,7 +418,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                 try (MaintenanceProgress progress =
                                         new MaintenanceProgress(
                                                 "operation=remove-orphans table="
-                                                        + location
+                                                        + sanitizeUri(location.toUri().toString())
                                                         + " dry_run="
                                                         + dryRun,
                                                 "clean-empty-directories")) {
@@ -421,10 +430,16 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             if (table.location().equals(emptyDir)) {
                                                 continue;
                                             }
-                                            long item = progress.startItem(emptyDir.toString());
+                                            long item =
+                                                    progress.startItem(
+                                                            sanitizeUri(
+                                                                    emptyDir.toUri().toString()));
                                             try {
                                                 if (fileIO.delete(emptyDir, false)) {
-                                                    LOG.info("Clean empty dir: {}", emptyDir);
+                                                    LOG.info(
+                                                            "Clean empty dir: {}",
+                                                            sanitizeUri(
+                                                                    emptyDir.toUri().toString()));
                                                     output.collect(
                                                             new StreamRecord<>(
                                                                     emptyDir.toString()));
@@ -433,7 +448,9 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                     newEmptyDir.add(emptyDir.getParent());
                                                 }
                                             } catch (IOException ignored) {
-                                                LOG.warn("Clean empty dir failed: {}", emptyDir);
+                                                LOG.warn(
+                                                        "Clean empty dir failed: {}",
+                                                        sanitizeUri(emptyDir.toUri().toString()));
                                             } finally {
                                                 progress.finishItem(item);
                                             }
@@ -474,7 +491,8 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                         progress =
                                                 new MaintenanceProgress(
                                                         "operation=remove-orphans table="
-                                                                + location
+                                                                + sanitizeUri(
+                                                                        location.toUri().toString())
                                                                 + " dry_run="
                                                                 + dryRun
                                                                 + " task="
@@ -513,7 +531,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                 checkState(!buildEnd, "Should not build ended.");
                                                 LOG.info(
                                                         "Finish build phase; table={} unique_references={}",
-                                                        location,
+                                                        sanitizeUri(location.toUri().toString()),
                                                         used.size());
                                                 progress.phase("match-and-delete-candidates");
                                                 buildEnd = true;
@@ -524,7 +542,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                 progress.close();
                                                 LOG.info(
                                                         "Finish probe phase; table={} dry_run={}",
-                                                        location,
+                                                        sanitizeUri(location.toUri().toString()),
                                                         dryRun);
                                                 LOG.info(
                                                         "Clean files count : {}",
@@ -560,7 +578,9 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             emittedFilesLen += fileInfo.f1;
                                             progress.add("candidate_files", 1);
                                             progress.add("candidate_bytes", fileInfo.f1);
-                                            long item = progress.startItem(path.toString());
+                                            long item =
+                                                    progress.startItem(
+                                                            sanitizeUri(path.toUri().toString()));
                                             try {
                                                 cleanFile(path);
                                             } finally {
@@ -573,9 +593,9 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                     1);
                                             LOG.debug(
                                                     "Orphan candidate handled: table={} dry_run={} path={}",
-                                                    location,
+                                                    sanitizeUri(location.toUri().toString()),
                                                     dryRun,
-                                                    path);
+                                                    sanitizeUri(path.toUri().toString()));
                                         }
                                     }
                                 });
