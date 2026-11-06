@@ -31,6 +31,9 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.Model;
+import org.apache.paimon.catalog.Prediction;
+import org.apache.paimon.catalog.PredictionSpec;
+import org.apache.paimon.catalog.PredictionStatus;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.catalog.TableQueryAuthResult;
@@ -58,6 +61,7 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.CreateModelRequest;
+import org.apache.paimon.rest.requests.SubmitPredictionRequest;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -1186,6 +1190,77 @@ public class RESTCatalog implements Catalog {
             throw e;
         } catch (NotImplementedException e) {
             throw new UnsupportedOperationException("REST Catalog does not support models", e);
+        }
+    }
+
+    @Override
+    public Prediction submitPrediction(Identifier identifier, PredictionSpec spec)
+            throws TableNotExistException, ModelNotExistException {
+        try {
+            return api.submitPrediction(identifier, new SubmitPredictionRequest(spec))
+                    .toPrediction();
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_MODEL)) {
+                throw new ModelNotExistException(Identifier.fromString(spec.model()), e);
+            }
+            throw new TableNotExistException(identifier, e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
+        }
+    }
+
+    @Override
+    public Prediction getPrediction(Identifier identifier, String jobId)
+            throws TableNotExistException, PredictionNotExistException {
+        try {
+            return api.getPrediction(identifier, jobId).toPrediction();
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_PREDICTION)) {
+                throw new PredictionNotExistException(identifier, jobId, e);
+            }
+            throw new TableNotExistException(identifier, e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
+        }
+    }
+
+    @Override
+    public PagedList<Prediction> listPredictions(
+            Identifier identifier,
+            @Nullable String name,
+            @Nullable PredictionStatus status,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken)
+            throws TableNotExistException {
+        try {
+            PagedList<org.apache.paimon.rest.responses.GetPredictionResponse> response =
+                    api.listPredictions(identifier, name, status, maxResults, pageToken);
+            return new PagedList<>(
+                    response.getElements().stream()
+                            .map(
+                                    org.apache.paimon.rest.responses.GetPredictionResponse
+                                            ::toPrediction)
+                            .collect(Collectors.toList()),
+                    response.getNextPageToken());
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier, e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
+        }
+    }
+
+    @Override
+    public Prediction cancelPrediction(Identifier identifier, String jobId)
+            throws TableNotExistException, PredictionNotExistException {
+        try {
+            return api.cancelPrediction(identifier, jobId).toPrediction();
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_PREDICTION)) {
+                throw new PredictionNotExistException(identifier, jobId, e);
+            }
+            throw new TableNotExistException(identifier, e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
         }
     }
 

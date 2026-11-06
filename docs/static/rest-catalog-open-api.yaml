@@ -133,6 +133,110 @@ paths:
         "404":
           $ref: '#/components/responses/DatabaseOrModelNotExistErrorResponse'
         "501": {description: Models are not supported}
+  /v1/{prefix}/databases/{database}/tables/{table}/predictions:
+    post:
+      tags: [prediction]
+      summary: Submit an asynchronous table prediction
+      operationId: submitPrediction
+      description: >-
+        Durably accepts a prediction after fixing the table snapshot and model
+        version. Repeating a requestId in the same table scope returns the same
+        job when the request is identical, and returns 409 when its payload is
+        different. The response never waits for model execution to finish.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - {name: database, in: path, required: true, schema: {type: string}}
+        - {name: table, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitPredictionRequest'
+      responses:
+        "202":
+          description: Prediction durably accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPredictionResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableOrModelNotExistErrorResponse'
+        "409":
+          $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+        "501": {description: Predictions are not supported}
+    get:
+      tags: [prediction]
+      summary: List table predictions
+      operationId: listPredictions
+      description: Results are ordered by creation time, newest first.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - {name: database, in: path, required: true, schema: {type: string}}
+        - {name: table, in: path, required: true, schema: {type: string}}
+        - {name: name, in: query, required: false, schema: {type: string}}
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PredictionStatus'
+        - {name: maxResults, in: query, required: false, schema: {type: integer, format: int32, minimum: 1}}
+        - {name: pageToken, in: query, required: false, schema: {type: string}}
+      responses:
+        "200":
+          description: Prediction metadata for the table
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPredictionsResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "501": {description: Predictions are not supported}
+  /v1/{prefix}/databases/{database}/tables/{table}/predictions/{jobId}:
+    get:
+      tags: [prediction]
+      summary: Get a table prediction
+      operationId: getPrediction
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - {name: database, in: path, required: true, schema: {type: string}}
+        - {name: table, in: path, required: true, schema: {type: string}}
+        - {name: jobId, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        "200":
+          description: Prediction metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPredictionResponse'
+        "404":
+          $ref: '#/components/responses/TableOrPredictionNotExistErrorResponse'
+        "501": {description: Predictions are not supported}
+  /v1/{prefix}/databases/{database}/tables/{table}/predictions/{jobId}/cancel:
+    post:
+      tags: [prediction]
+      summary: Cancel a table prediction
+      operationId: cancelPrediction
+      description: >-
+        Requests best-effort cancellation and returns the latest durable state.
+        A job already in a terminal state is returned unchanged.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - {name: database, in: path, required: true, schema: {type: string}}
+        - {name: table, in: path, required: true, schema: {type: string}}
+        - {name: jobId, in: path, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        "200":
+          description: Latest prediction metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPredictionResponse'
+        "404":
+          $ref: '#/components/responses/TableOrPredictionNotExistErrorResponse'
+        "501": {description: Predictions are not supported}
   /v1/config:
     get:
       tags:
@@ -2832,6 +2936,36 @@ components:
                 resourceType: MODEL
                 resourceName: model
                 code: 404
+    TableOrModelNotExistErrorResponse:
+      description: >-
+        The database, table or model does not exist. resourceType is required
+        so clients can preserve the corresponding catalog exception.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - type: object
+                required: [ resourceType ]
+                properties:
+                  resourceType:
+                    type: string
+                    enum: [ "DATABASE", "TABLE", "MODEL" ]
+    TableOrPredictionNotExistErrorResponse:
+      description: >-
+        The database, table or prediction does not exist. resourceType is
+        required and must identify the missing resource.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - type: object
+                required: [ resourceType ]
+                properties:
+                  resourceType:
+                    type: string
+                    enum: [ "DATABASE", "TABLE", "PREDICTION" ]
     TableNotExistErrorResponse:
       description:
         Not Found - TableNotExistException, the table does not exist
@@ -3215,7 +3349,7 @@ components:
           type: string
         resourceType:
           type: [ string, "null" ]
-          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "MODEL", "DEFINITION", "UNKNOWN", null ]
+          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "MODEL", "PREDICTION", "DEFINITION", "UNKNOWN", null ]
         resourceName:
           type: [ string, "null" ]
         code:
@@ -4486,6 +4620,91 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/GetModelResponse'
+        nextPageToken:
+          type: [ string, "null" ]
+    PredictionStatus:
+      type: string
+      enum: [PENDING, RUNNING, SUCCEEDED, PARTIAL_SUCCESS, FAILED, CANCELLED]
+    SubmitPredictionRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId, model, inputs, resultColumns, prompt, outputSchema]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Optional repeatable business label; jobId remains the identity.
+        requestId:
+          type: string
+          minLength: 1
+          description: Idempotency key scoped to this table.
+        model:
+          type: string
+          minLength: 1
+          description: Database-qualified model identifier.
+        inputs:
+          type: object
+          minProperties: 1
+          additionalProperties:
+            type: string
+            minLength: 1
+          description: Maps model input names to table column names.
+        resultColumns:
+          type: array
+          uniqueItems: true
+          items: {type: string, minLength: 1}
+        prompt:
+          type: string
+          minLength: 1
+        outputSchema:
+          type: object
+          minProperties: 1
+          additionalProperties:
+            type: string
+            minLength: 1
+          description: Output columns expressed with Paimon data types.
+        where:
+          type: string
+          minLength: 1
+        snapshotId:
+          type: integer
+          format: int64
+          minimum: 1
+        tagName:
+          type: string
+          minLength: 1
+        options:
+          type: object
+          additionalProperties: true
+      description: snapshotId and tagName are mutually exclusive.
+    GetPredictionResponse:
+      type: object
+      additionalProperties: false
+      required: [jobId, status, snapshotId, model, modelVersion, outputTable, createdAt]
+      properties:
+        jobId: {type: string, minLength: 1}
+        name: {type: string, minLength: 1}
+        status:
+          $ref: '#/components/schemas/PredictionStatus'
+        snapshotId: {type: integer, format: int64, minimum: 1}
+        model: {type: string, minLength: 1}
+        modelVersion: {type: string, minLength: 1}
+        outputTable: {type: string, minLength: 1}
+        createdAt: {type: integer, format: int64, minimum: 0}
+        startedAt: {type: integer, format: int64, minimum: 0}
+        finishedAt: {type: integer, format: int64, minimum: 0}
+        error: {type: string}
+        total: {type: integer, format: int64, minimum: 0}
+        succeeded: {type: integer, format: int64, minimum: 0}
+        failed: {type: integer, format: int64, minimum: 0}
+    ListPredictionsResponse:
+      type: object
+      required: [predictions]
+      properties:
+        predictions:
+          type: array
+          items:
+            $ref: '#/components/schemas/GetPredictionResponse'
         nextPageToken:
           type: [ string, "null" ]
     ConsumerInfo:

@@ -19,6 +19,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional, Union
 from pypaimon.api.api_response import ErrorResponse, GetTableResponse, GetTagResponse, PagedList, Partition
 from pypaimon.api.model import CreateModelRequest
+from pypaimon.api.prediction import SubmitPredictionRequest
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_permission_management import RESTPermissionManagement
 from pypaimon.api.rest_policy_management import RESTPolicyManagement
@@ -38,12 +39,14 @@ from pypaimon.catalog.catalog_exception import (
     TableIdNotExistException, TableIdNoPermissionException,
     FunctionNotExistException, FunctionAlreadyExistException,
     ModelNotExistException, ModelAlreadyExistException,
+    PredictionNotExistException,
     DefinitionAlreadyExistException, DefinitionNotExistException,
     TagNotExistException, TagAlreadyExistException,
     BranchNotExistException, BranchAlreadyExistException,
 )
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.model import Model
+from pypaimon.catalog.prediction import Prediction, PredictionSpec, PredictionStatus
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.catalog.rest.table_metadata import TableMetadata
@@ -683,6 +686,84 @@ class RESTCatalog(Catalog):
             raise
         except NotImplementedException as e:
             raise NotImplementedError("REST Catalog does not support models") from e
+
+    def submit_prediction(
+            self,
+            identifier: Union[str, Identifier],
+            spec: PredictionSpec,
+    ) -> Prediction:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        check_not_branch(identifier, "submit_prediction")
+        check_not_system_table(identifier, "submit_prediction")
+        try:
+            return self.rest_api.submit_prediction(
+                identifier, SubmitPredictionRequest.from_spec(spec)).to_prediction()
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_MODEL:
+                raise ModelNotExistException(Identifier.from_string(spec.model)) from e
+            raise TableNotExistException(identifier) from e
+        except NotImplementedException as e:
+            raise NotImplementedError(
+                "REST Catalog does not support predictions") from e
+
+    def get_prediction(
+            self,
+            identifier: Union[str, Identifier],
+            job_id: str,
+    ) -> Prediction:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            return self.rest_api.get_prediction(identifier, job_id).to_prediction()
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_PREDICTION:
+                raise PredictionNotExistException(identifier, job_id) from e
+            raise TableNotExistException(identifier) from e
+        except NotImplementedException as e:
+            raise NotImplementedError(
+                "REST Catalog does not support predictions") from e
+
+    def list_predictions(
+            self,
+            identifier: Union[str, Identifier],
+            name: Optional[str] = None,
+            status: Optional[PredictionStatus] = None,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+    ) -> PagedList[Prediction]:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            page = self.rest_api.list_predictions(
+                identifier, name, status, max_results, page_token)
+            return PagedList(
+                [value.to_prediction() for value in page.elements],
+                page.next_page_token,
+            )
+        except NoSuchResourceException as e:
+            raise TableNotExistException(identifier) from e
+        except NotImplementedException as e:
+            raise NotImplementedError(
+                "REST Catalog does not support predictions") from e
+
+    def cancel_prediction(
+            self,
+            identifier: Union[str, Identifier],
+            job_id: str,
+    ) -> Prediction:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            return self.rest_api.cancel_prediction(
+                identifier, job_id).to_prediction()
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_PREDICTION:
+                raise PredictionNotExistException(identifier, job_id) from e
+            raise TableNotExistException(identifier) from e
+        except NotImplementedException as e:
+            raise NotImplementedError(
+                "REST Catalog does not support predictions") from e
 
     # Tag CRUD: mirrors Java RESTCatalog tag handlers.
     def create_tag(self, identifier: Union[str, Identifier], tag_name: str,

@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PredictionStatus;
 import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.management.DataPolicy;
@@ -72,6 +73,7 @@ import org.apache.paimon.rest.requests.ResetConsumerRequest;
 import org.apache.paimon.rest.requests.RevokePermissionRequest;
 import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
+import org.apache.paimon.rest.requests.SubmitPredictionRequest;
 import org.apache.paimon.rest.requests.UpsertLabelRequest;
 import org.apache.paimon.rest.requests.UpsertSemanticViewRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -86,6 +88,7 @@ import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetLabelResponse;
 import org.apache.paimon.rest.responses.GetModelResponse;
+import org.apache.paimon.rest.responses.GetPredictionResponse;
 import org.apache.paimon.rest.responses.GetSchemaResponse;
 import org.apache.paimon.rest.responses.GetSemanticViewResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
@@ -105,6 +108,7 @@ import org.apache.paimon.rest.responses.ListModelsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
+import org.apache.paimon.rest.responses.ListPredictionsResponse;
 import org.apache.paimon.rest.responses.ListSchemasResponse;
 import org.apache.paimon.rest.responses.ListSemanticViewsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
@@ -204,6 +208,8 @@ public class RESTApi {
     public static final String TAG_NAME_PREFIX = "tagNamePrefix";
     public static final String ENTITY_TYPE = "entityType";
     public static final String ENTITY_NAME = "entityName";
+    public static final String PREDICTION_NAME = "name";
+    public static final String PREDICTION_STATUS = "status";
 
     public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
 
@@ -1801,6 +1807,58 @@ public class RESTApi {
     public void dropModel(Identifier identifier) {
         client.delete(
                 resourcePaths.model(identifier.getDatabaseName(), identifier.getObjectName()),
+                restAuthFunction);
+    }
+
+    /** Submit an asynchronous prediction over a table. */
+    public GetPredictionResponse submitPrediction(
+            Identifier identifier, SubmitPredictionRequest request) {
+        return client.post(
+                resourcePaths.predictions(identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                GetPredictionResponse.class,
+                restAuthFunction);
+    }
+
+    /** Get one asynchronous table prediction by its unique job id. */
+    public GetPredictionResponse getPrediction(Identifier identifier, String jobId) {
+        return client.get(
+                resourcePaths.prediction(
+                        identifier.getDatabaseName(), identifier.getObjectName(), jobId),
+                GetPredictionResponse.class,
+                restAuthFunction);
+    }
+
+    /** List asynchronous predictions for a table, ordered newest first by the server. */
+    public PagedList<GetPredictionResponse> listPredictions(
+            Identifier identifier,
+            @Nullable String name,
+            @Nullable PredictionStatus status,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        Map<String, String> queryParams =
+                buildPagedQueryParams(
+                        maxResults,
+                        pageToken,
+                        Pair.of(PREDICTION_NAME, name),
+                        Pair.of(PREDICTION_STATUS, status == null ? null : status.name()));
+        ListPredictionsResponse response =
+                client.get(
+                        resourcePaths.predictions(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        queryParams,
+                        ListPredictionsResponse.class,
+                        restAuthFunction);
+        return new PagedList<>(response.getPredictions(), response.getNextPageToken());
+    }
+
+    /** Request cancellation and return the updated prediction metadata. */
+    public GetPredictionResponse cancelPrediction(Identifier identifier, String jobId) {
+        return client.post(
+                resourcePaths.cancelPrediction(
+                        identifier.getDatabaseName(), identifier.getObjectName(), jobId),
+                null,
+                GetPredictionResponse.class,
                 restAuthFunction);
     }
 

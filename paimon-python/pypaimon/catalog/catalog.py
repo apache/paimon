@@ -114,6 +114,45 @@ class Catalog(ABC):
         """
         raise NotImplementedError("drop_model is not supported by this catalog.")
 
+    def submit_prediction(
+            self,
+            identifier: Union[str, Identifier],
+            spec: 'PredictionSpec',
+    ) -> 'Prediction':
+        """Submit an asynchronous prediction over a table snapshot."""
+        raise NotImplementedError(
+            "submit_prediction is not supported by this catalog.")
+
+    def get_prediction(
+            self,
+            identifier: Union[str, Identifier],
+            job_id: str,
+    ) -> 'Prediction':
+        """Get one prediction by its unique job id."""
+        raise NotImplementedError(
+            "get_prediction is not supported by this catalog.")
+
+    def list_predictions(
+            self,
+            identifier: Union[str, Identifier],
+            name: Optional[str] = None,
+            status: Optional['PredictionStatus'] = None,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+    ) -> PagedList['Prediction']:
+        """List predictions for a table, optionally filtered by name or status."""
+        raise NotImplementedError(
+            "list_predictions is not supported by this catalog.")
+
+    def cancel_prediction(
+            self,
+            identifier: Union[str, Identifier],
+            job_id: str,
+    ) -> 'Prediction':
+        """Request cancellation and return the updated prediction."""
+        raise NotImplementedError(
+            "cancel_prediction is not supported by this catalog.")
+
     def alter_database(self, name: str, changes: List[PropertyChange]) -> None:
         """Alter database properties.
 
