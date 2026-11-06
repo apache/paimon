@@ -44,6 +44,11 @@ public class ESIndexGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
+    public boolean supportsGroupedIndexScalarQueries() {
+        return true;
+    }
+
+    @Override
     public GlobalIndexer create(List<DataField> indexFields, Options options) {
         return new ESIndexGlobalIndexer(indexFields, options);
     }

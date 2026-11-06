@@ -172,6 +172,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
                             }
                             assertResult(result.result(), expected);
                             assertThat(result.contributingFieldIds()).containsExactly(1);
+                            assertThat(result.fullyEvaluated()).isTrue();
                             if (comparator.compare(bounds[0], bounds[1]) <= 0) {
                                 verify(btreeReader)
                                         .visitRange(

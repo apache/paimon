@@ -32,6 +32,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -79,12 +80,14 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
             return empty;
         }
 
-        GlobalIndexer globalIndexer =
-                indexSplits.isEmpty() ? null : createGlobalIndexer(indexSplits);
+        List<GlobalIndexer> globalIndexers =
+                indexSplits.isEmpty() ? Collections.emptyList() : createGlobalIndexers(indexSplits);
         ScoredGlobalIndexResult[] indexedResults =
                 indexSplits.isEmpty()
                         ? emptyScoredResults(n)
-                        : readIndexedBatch(indexSplits, globalIndexer);
+                        : readIndexedBatch(indexSplits, globalIndexers);
+        GlobalIndexer globalIndexer =
+                globalIndexers.isEmpty() ? null : metricIndexer(globalIndexers);
 
         List<GlobalIndexResult> results = new ArrayList<>(n);
         RoaringNavigableMap64 rawPreFilter = rawPreFilter(rawSplits);
@@ -97,7 +100,7 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
     }
 
     protected ScoredGlobalIndexResult[] readIndexedBatch(
-            List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
+            List<IndexVectorSearchSplit> splits, List<GlobalIndexer> globalIndexers) {
         int n = vectors.length;
         List<RoaringNavigableMap64> preFilters = preFilters(splits);
         String indexType = vectorIndexType(splits);
@@ -114,7 +117,7 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
             IndexVectorSearchSplit split = splits.get(i);
             futures.add(
                     evalBatch(
-                            globalIndexer,
+                            globalIndexers.get(i),
                             indexPathFactory,
                             split.rowRangeStart(),
                             split.rowRangeEnd(),
@@ -145,7 +148,7 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
         for (int i = 0; i < n; i++) {
             merged[i] = ScoredGlobalIndexResult.merge(resultsByQuery.get(i));
         }
-        return maybeRerankIndexedBatchResults(merged, indexType, globalIndexer);
+        return maybeRerankIndexedBatchResults(merged, indexType, metricIndexer(globalIndexers));
     }
 
     protected ScoredGlobalIndexResult[] maybeRerankIndexedBatchResults(

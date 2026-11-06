@@ -24,9 +24,14 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator;
+import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.VectorGlobalIndexer;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
@@ -52,12 +57,21 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.MockedStatic;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 /**
  * Vector search with a row filter must rank an exact match set: candidate-only scalar index answers
@@ -65,6 +79,40 @@ import static org.assertj.core.api.Assertions.assertThat;
  * slot, and the engine-side filter cannot recover the matching row afterwards.
  */
 public class VectorSearchRowFilterExactnessTest extends TableTestBase {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"full", "detail"})
+    public void testDeclinedScalarShardFallsBackBeforeVectorRanking(String mode) throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "declined_scalar_" + mode,
+                        schemaBuilder(true)
+                                .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), mode));
+        String[] names = {"alpha", "beta", "gamma"};
+        float[][] vectors = {{1.0f, 0.0f}, {0.6f, 0.8f}, {0.0f, 1.0f}};
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        buildAndCommitNameBTreeIndex(table, names);
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("beta"));
+        GlobalIndexEvaluator.Evaluation evaluation = mock(GlobalIndexEvaluator.Evaluation.class);
+        when(evaluation.result()).thenReturn(GlobalIndexResult.createEmpty());
+        when(evaluation.contributingFieldIds()).thenReturn(Collections.singleton(1));
+        when(evaluation.coveredRanges()).thenReturn(Collections.singletonList(new Range(0, 0)));
+        DataEvolutionGlobalIndexScanner scanner = mock(DataEvolutionGlobalIndexScanner.class);
+        when(scanner.scanWithCoverage(filter)).thenReturn(Optional.of(evaluation));
+        when(scanner.unindexedRowsForEvaluation(evaluation))
+                .thenReturn(GlobalIndexResult.fromRange(new Range(1, 2)));
+        try (MockedStatic<DataEvolutionGlobalIndexScanner> scanners =
+                mockStatic(DataEvolutionGlobalIndexScanner.class, CALLS_REAL_METHODS)) {
+            scanners.when(
+                            () ->
+                                    DataEvolutionGlobalIndexScanner.createForScalarFilters(
+                                            any(), any(), any(), any()))
+                    .thenReturn(Optional.of(scanner));
+            assertThat(search(table, filter, 1)).containsExactly(1L);
+        }
+    }
 
     @Override
     protected Schema schemaDefault() {
@@ -479,6 +527,71 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
         if (scalarMode.equals("full")) {
             assertThat(result.results()).containsExactly(1L);
         }
+    }
+
+    @Test
+    public void testRawFallbackPreservesBackendMetricConflictPolicy() throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "vector_fallback_metric_policy",
+                        schemaBuilder(false)
+                                .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full"));
+        float[][] vectors = {{100.0f, 0.0f}, {0.9f, 0.1f}};
+        write(table, new String[] {"keep", "keep"}, vectors);
+        buildAndCommitVectorIndex(table, vectors, new Range(0, 0));
+        buildAndCommitVectorIndex(table, vectors, new Range(1, 1));
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("keep"));
+        AtomicInteger indexerCount = new AtomicInteger();
+        AtomicInteger readerCount = new AtomicInteger();
+        DataEvolutionVectorRead read =
+                new DataEvolutionVectorRead(
+                        table,
+                        null,
+                        filter,
+                        1,
+                        table.rowType().getField("vec"),
+                        new float[] {1.0f, 0.0f},
+                        Collections.emptyMap()) {
+                    @Override
+                    protected GlobalIndexer createGlobalIndexer(
+                            List<IndexVectorSearchSplit> splits) {
+                        indexerCount.incrementAndGet();
+                        AtomicInteger registeredShards = new AtomicInteger();
+                        VectorGlobalIndexer indexer = mock(VectorGlobalIndexer.class);
+                        when(indexer.createReader(any(), any(), anyLong(), any(), any()))
+                                .thenAnswer(
+                                        invocation -> {
+                                            readerCount.incrementAndGet();
+                                            registeredShards.incrementAndGet();
+                                            return mock(GlobalIndexReader.class);
+                                        });
+                        // Model a backend such as Lumina: after conflicting metadata is
+                        // registered, it chooses the configured metric instead of throwing.
+                        when(indexer.metric())
+                                .thenAnswer(
+                                        invocation ->
+                                                registeredShards.get() == 1
+                                                        ? "l2"
+                                                        : "inner_product");
+                        return indexer;
+                    }
+                };
+        VectorScan.Plan plan =
+                table.newVectorSearchBuilder()
+                        .withVectorColumn("vec")
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(1)
+                        .withFilter(filter)
+                        .newVectorScan()
+                        .scan();
+        assertThat(read.read(plan).results()).containsExactly(0L);
+        assertThat(indexerCount.get()).isEqualTo(1);
+        assertThat(readerCount.get()).isEqualTo(2);
+        // A read object may be reused: no previous read's metric or indexer should leak into it.
+        assertThat(read.read(plan).results()).containsExactly(0L);
+        assertThat(indexerCount.get()).isEqualTo(2);
+        assertThat(readerCount.get()).isEqualTo(4);
     }
 
     private void write(FileStoreTable table, String[] names, float[][] vectors) throws Exception {
