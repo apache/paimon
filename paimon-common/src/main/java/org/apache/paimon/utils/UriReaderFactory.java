@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
 
 import javax.annotation.Nullable;
 
@@ -96,7 +97,8 @@ public class UriReaderFactory implements Serializable {
 
         try {
             FileIO createdFileIO = FileIO.get(new Path(uri), Objects.requireNonNull(context));
-            return UriReader.fromFile(createdFileIO);
+            // no table owns what a descriptor points at here, and its writer may replace it
+            return UriReader.fromFile(IoCacheViewableFileIO.originOnly(createdFileIO));
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
