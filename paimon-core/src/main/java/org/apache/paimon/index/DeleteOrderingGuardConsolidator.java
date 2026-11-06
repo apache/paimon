@@ -29,7 +29,6 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -44,7 +43,6 @@ public class DeleteOrderingGuardConsolidator implements Closeable {
     private final DeleteOrderingGuardSerializer serializer;
     private final DeleteOrderingGuardFile file;
     private final Comparator<KeyValue> sequenceComparator;
-    private final boolean deduplicate;
     private final int minFileNum;
     private final Set<IndexFileMeta> pending = new HashSet<>();
     private boolean closed;
@@ -54,13 +52,11 @@ public class DeleteOrderingGuardConsolidator implements Closeable {
             DeleteOrderingGuardSerializer serializer,
             DeleteOrderingGuardFile file,
             @Nullable FieldsComparator sourceComparator,
-            boolean deduplicate,
             int minFileNum) {
         this.state = state;
         this.serializer = serializer;
         this.file = file;
         this.sequenceComparator = DeleteOrderingGuardReader.sequenceComparator(sourceComparator);
-        this.deduplicate = deduplicate;
         this.minFileNum = minFileNum;
     }
 
@@ -79,27 +75,14 @@ public class DeleteOrderingGuardConsolidator implements Closeable {
             try {
                 List<KeyValue> bounds;
                 while ((bounds = reader.nextKey()) != null) {
-                    if (deduplicate) {
-                        // This bound dominates every older retract in native source/internal order.
-                        KeyValue strongest = bounds.get(0);
-                        for (int i = 1; i < bounds.size(); i++) {
-                            if (sequenceComparator.compare(bounds.get(i), strongest) > 0) {
-                                strongest = bounds.get(i);
-                            }
-                        }
-                        writer.write(extract(strongest));
-                    } else {
-                        // Partial-update groups can disagree about which retract is strongest.
-                        // Retire only byte-identical metadata; retain every distinct group bound,
-                        // including whole-row deletes and null/directional ordering semantics.
-                        Set<Identity> retained = new HashSet<>();
-                        for (KeyValue bound : bounds) {
-                            DeleteOrderingGuard guard = extract(bound);
-                            if (retained.add(new Identity(serializer.serializeValue(guard)))) {
-                                writer.write(guard);
-                            }
+                    // This bound dominates every older retract in native source/internal order.
+                    KeyValue strongest = bounds.get(0);
+                    for (int i = 1; i < bounds.size(); i++) {
+                        if (sequenceComparator.compare(bounds.get(i), strongest) > 0) {
+                            strongest = bounds.get(i);
                         }
                     }
+                    writer.write(extract(strongest));
                 }
                 replacement = writer.finish();
                 checkState(replacement != null, "Guard consolidation cannot discard all bounds.");
@@ -160,23 +143,5 @@ public class DeleteOrderingGuardConsolidator implements Closeable {
             pending.clear();
         }
         outputs.forEach(file::delete);
-    }
-
-    private static class Identity {
-        private final byte[] bytes;
-
-        private Identity(byte[] bytes) {
-            this.bytes = bytes;
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            return other instanceof Identity && Arrays.equals(bytes, ((Identity) other).bytes);
-        }
-
-        @Override
-        public int hashCode() {
-            return Arrays.hashCode(bytes);
-        }
     }
 }

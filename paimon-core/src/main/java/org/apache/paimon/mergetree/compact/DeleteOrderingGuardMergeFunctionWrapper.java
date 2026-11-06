@@ -33,7 +33,7 @@ import java.util.function.Function;
  * Captures explicit retract ordering before a compaction merge can discard it.
  *
  * <p>Install on sorted compaction inputs after record TTL filtering. Capturing only a merged DELETE
- * would miss sequence-group bounds when another group makes the result live. The collector receives
+ * would miss stale deletes when a newer insert makes the result live. The collector receives
  * detached, payload-free records in primary-key order, including multiple retracts for one key.
  * Ignored deletes produce no guards.
  *

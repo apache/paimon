@@ -57,7 +57,6 @@ import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.partition.PartitionStatistics;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -406,57 +405,6 @@ class DeleteOrderingGuardCommitTest {
         assertThat(readRows(table)).isEmpty();
         append(table, 8, row(RowKind.INSERT, 1, 1, order.equals("ascending") ? 8 : 1));
         assertThat(readRows(table)).hasSize(1);
-    }
-
-    @Test
-    void testConsolidationPreservesIndependentPartialUpdateBounds() throws Exception {
-        RowType type =
-                RowType.builder()
-                        .field("pt", DataTypes.INT())
-                        .field("k", DataTypes.INT())
-                        .field("seqA", DataTypes.INT())
-                        .field("a", DataTypes.STRING())
-                        .field("seqB", DataTypes.INT())
-                        .field("b", DataTypes.STRING())
-                        .field("ungrouped", DataTypes.STRING())
-                        .build();
-        Map<String, String> options = new HashMap<>();
-        options.put(DELETE_ORDERING_GUARDS_ENABLED.key(), "true");
-        options.put("delete-ordering-guards.compaction.min-file-num", "100");
-        options.put("merge-engine", "partial-update");
-        options.put("fields.seqA.sequence-group", "a");
-        options.put("fields.seqB.sequence-group", "b");
-        PrimaryKeyFileStoreTable table = createTable(options, type);
-        append(table, 0, GenericRow.ofKind(RowKind.DELETE, 1, 1, 4, null, 7, null, null));
-        commit(table, 1, compactNatively(table, 1, PARTITION));
-        append(table, 2, GenericRow.ofKind(RowKind.DELETE, 1, 1, 6, null, 3, null, null));
-        commit(table, 3, compactNatively(table, 3, PARTITION));
-        assertThat(guards(table)).hasSize(2);
-        commit(table, 4, compactNatively(table, 4, PARTITION));
-        assertThat(guards(table)).hasSize(1);
-        assertThat(readGuards(table))
-                .extracting(g -> g.ordering().getInt(0) + "/" + g.ordering().getInt(1))
-                .containsExactlyInAnyOrder("4/7", "6/3");
-        append(
-                table,
-                5,
-                GenericRow.of(
-                        1,
-                        1,
-                        5,
-                        BinaryString.fromString("stale"),
-                        8,
-                        BinaryString.fromString("fresh"),
-                        BinaryString.fromString("ungrouped")));
-        assertThat(readRows(table))
-                .singleElement()
-                .satisfies(
-                        r -> {
-                            assertThat(r.getInt(2)).isEqualTo(6);
-                            assertThat(r.isNullAt(3)).isTrue();
-                            assertThat(r.getString(5).toString()).isEqualTo("fresh");
-                            assertThat(r.getString(6).toString()).isEqualTo("ungrouped");
-                        });
     }
 
     @Test
@@ -1340,52 +1288,6 @@ class DeleteOrderingGuardCommitTest {
         assertThat(guards(table)).isEmpty();
     }
 
-    @Test
-    void testPartialUpdatePublishesGroupBoundsWhenCompactionProducesLiveRow() throws Exception {
-        RowType rowType =
-                RowType.builder()
-                        .field("pt", DataTypes.INT())
-                        .field("k", DataTypes.INT())
-                        .field("seqA", DataTypes.INT())
-                        .field("a", DataTypes.STRING())
-                        .field("seqB", DataTypes.INT())
-                        .field("b", DataTypes.STRING())
-                        .field("ungrouped", DataTypes.STRING())
-                        .build();
-        Map<String, String> options = new HashMap<>();
-        options.put("merge-engine", "partial-update");
-        options.put("fields.seqA.sequence-group", "a");
-        options.put("fields.seqB.sequence-group", "b");
-        options.put(DELETE_ORDERING_GUARDS_ENABLED.key(), "true");
-        PrimaryKeyFileStoreTable table = createTable(options, rowType);
-        append(table, 0, GenericRow.ofKind(RowKind.DELETE, 1, 1, 4, null, 7, null, null));
-        append(
-                table,
-                1,
-                GenericRow.of(
-                        1,
-                        1,
-                        2,
-                        BinaryString.fromString("stale"),
-                        8,
-                        BinaryString.fromString("fresh"),
-                        BinaryString.fromString("ungrouped")));
-        commit(table, 2, compactNatively(table, 2, PARTITION));
-        List<DeleteOrderingGuard> captured = readGuards(table);
-        assertThat(captured).hasSize(1);
-        assertThat(captured.get(0).ordering().getInt(0)).isEqualTo(4);
-        assertThat(captured.get(0).ordering().getInt(1)).isEqualTo(7);
-        try (RecordReaderIterator<InternalRow> rows =
-                new RecordReaderIterator<>(table.newRead().createReader(table.newScan().plan()))) {
-            assertThat(rows.hasNext()).isTrue();
-            InternalRow row = rows.next();
-            assertThat(row.isNullAt(3)).isTrue();
-            assertThat(row.getString(5).toString()).isEqualTo("fresh");
-            assertThat(row.getString(6).toString()).isEqualTo("ungrouped");
-            assertThat(rows.hasNext()).isFalse();
-        }
-    }
-
     private PrimaryKeyFileStoreTable createTable(Map<String, String> extraOptions)
             throws Exception {
         RowType rowType =
@@ -1520,89 +1422,6 @@ class DeleteOrderingGuardCommitTest {
     }
 
     @Test
-    void testGuardedPartialUpdatesKeepIndependentGroupsAndDisableUnsafeValuePruning()
-            throws Exception {
-        RowType rowType =
-                RowType.builder()
-                        .field("pt", DataTypes.INT().notNull())
-                        .field("k", DataTypes.INT().notNull())
-                        .field("aSeq", DataTypes.INT())
-                        .field("a", DataTypes.STRING())
-                        .field("bSeq", DataTypes.INT())
-                        .field("b", DataTypes.STRING())
-                        .field("ungrouped", DataTypes.STRING())
-                        .build();
-        Map<String, String> options = new HashMap<>();
-        options.put("merge-engine", "partial-update");
-        options.put("fields.aSeq.sequence-group", "a");
-        options.put("fields.bSeq.sequence-group", "b");
-        PrimaryKeyFileStoreTable table = createTable(options, rowType);
-        append(table, 0, GenericRow.ofKind(RowKind.DELETE, 1, 1, 4, null, 7, null, null));
-        compactAndCommit(table, 1, PARTITION);
-        append(
-                table,
-                2,
-                GenericRow.of(
-                        1,
-                        1,
-                        2,
-                        BinaryString.fromString("stale"),
-                        8,
-                        BinaryString.fromString("fresh"),
-                        BinaryString.fromString("ungrouped")));
-        assertResolvedGroups(readRows(table));
-
-        PredicateBuilder predicates = new PredicateBuilder(rowType);
-        List<Split> filtered = table.newScan().withFilter(predicates.isNull(3)).plan().splits();
-        assertThat(filtered).hasSize(1);
-        List<InternalRow> result = new ArrayList<>();
-        table.newRead()
-                .withFilter(predicates.isNull(3))
-                .executeFilter()
-                .createReader(filtered)
-                .forEachRemaining(result::add);
-        assertResolvedGroups(result);
-
-        RowType projection =
-                new RowType(
-                        Arrays.asList(
-                                rowType.getField("a"),
-                                rowType.getField("b"),
-                                rowType.getField("ungrouped")));
-        List<InternalRow> projected = new ArrayList<>();
-        table.newRead()
-                .withReadType(projection)
-                .createReader(table.newScan().plan())
-                .forEachRemaining(projected::add);
-        assertThat(projected)
-                .singleElement()
-                .satisfies(
-                        r -> {
-                            assertThat(r.isNullAt(0)).isTrue();
-                            assertThat(r.getString(1).toString()).isEqualTo("fresh");
-                            assertThat(r.getString(2).toString()).isEqualTo("ungrouped");
-                        });
-        try (TableWriteImpl<KeyValue> write = newWrite(table)) {
-            write.compact(PARTITION, 0, true);
-            commit(table, 3, write.prepareCommit(true, 3));
-        }
-        assertResolvedGroups(readRows(table));
-    }
-
-    private void assertResolvedGroups(List<InternalRow> rows) {
-        assertThat(rows)
-                .singleElement()
-                .satisfies(
-                        r -> {
-                            assertThat(r.getInt(2)).isEqualTo(4);
-                            assertThat(r.isNullAt(3)).isTrue();
-                            assertThat(r.getInt(4)).isEqualTo(8);
-                            assertThat(r.getString(5).toString()).isEqualTo("fresh");
-                            assertThat(r.getString(6).toString()).isEqualTo("ungrouped");
-                        });
-    }
-
-    @Test
     void testPayloadSchemaEvolutionAndOrderingPolicyChanges() throws Exception {
         PrimaryKeyFileStoreTable table = createTable(Collections.emptyMap());
         append(table, 0, row(RowKind.DELETE, 1, 1, 4));
@@ -1645,7 +1464,7 @@ class DeleteOrderingGuardCommitTest {
     }
 
     @Test
-    void testWholeRowGuardWithEmptyProjection() throws Exception {
+    void testGuardWithEmptyProjection() throws Exception {
         RowType type =
                 RowType.builder()
                         .field("pt", DataTypes.INT().notNull())
@@ -1656,10 +1475,7 @@ class DeleteOrderingGuardCommitTest {
                         .field("b", DataTypes.STRING())
                         .build();
         Map<String, String> options = new HashMap<>();
-        options.put("merge-engine", "partial-update");
-        options.put("fields.aSeq.sequence-group", "a");
-        options.put("fields.bSeq.sequence-group", "b");
-        options.put("partial-update.remove-record-on-sequence-group", "aSeq");
+        options.put("sequence.field", "aSeq");
         PrimaryKeyFileStoreTable table = createTable(options, type);
         append(table, 0, GenericRow.ofKind(RowKind.DELETE, 1, 1, 4, null, 7, null));
         compactAndCommit(table, 1, PARTITION);

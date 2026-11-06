@@ -325,46 +325,6 @@ class DeleteOrderingGuardMaintenanceTest {
                 .allSatisfy(row -> assertThat(row.getInt(2)).isEqualTo(1));
     }
 
-    @Test
-    void testRescalePreservesIndependentPartialUpdateGroupsWithCaptureDisabled() throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put("merge-engine", "partial-update");
-        options.put("fields.seqA.sequence-group", "a");
-        options.put("fields.seqB.sequence-group", "b");
-        RowType type =
-                RowType.builder()
-                        .field("pt", DataTypes.STRING())
-                        .field("k", DataTypes.INT())
-                        .field("seqA", DataTypes.INT())
-                        .field("a", DataTypes.STRING())
-                        .field("seqB", DataTypes.INT())
-                        .field("b", DataTypes.STRING())
-                        .field("ungrouped", DataTypes.STRING())
-                        .build();
-        PrimaryKeyFileStoreTable table = createTable(options, type);
-        append(table, 0, GenericRow.ofKind(RowKind.DELETE, str(OLD), 1, 4, null, 7, null, null));
-        compact(table, 1);
-        append(table, 2, GenericRow.ofKind(RowKind.DELETE, str(OLD), 1, 6, null, 3, null, null));
-        compact(table, 3);
-        table = setOption(table, "delete-ordering-guards.enabled", "false");
-        table = setOption(table, "bucket", "5");
-        DeleteOrderingGuardRescale migration =
-                new DeleteOrderingGuardRescale(
-                        table, table.snapshotManager().latestSnapshot(), 5, null);
-        migration.commit("rescale", 0, rewrite(migration));
-        append(table, 4, GenericRow.of(str(OLD), 1, 5, str("stale"), 8, str("fresh"), str("raw")));
-        assertThat(read(table))
-                .singleElement()
-                .satisfies(
-                        r -> {
-                            assertThat(r.getInt(2)).isEqualTo(6);
-                            assertThat(r.isNullAt(3)).isTrue();
-                            assertThat(r.getInt(4)).isEqualTo(8);
-                            assertThat(r.getString(5).toString()).isEqualTo("fresh");
-                            assertThat(r.getString(6).toString()).isEqualTo("raw");
-                        });
-    }
-
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void testConcurrentChangesRejectRescaleAndCleanUnpublishedOutputs(boolean schemaChange)

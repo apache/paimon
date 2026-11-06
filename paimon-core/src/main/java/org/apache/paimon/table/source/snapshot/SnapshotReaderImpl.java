@@ -619,7 +619,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
             @Nullable Long afterWatermark,
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles) {
         // Diff must resolve the complete logical state at each endpoint. Removing a shared
-        // data file can hide a before-image or a partial-update contribution needed by guards.
+        // data file can hide a before-image needed to compare the visible rows after guard
+        // resolution.
         boolean resolveGuards =
                 !isStreaming || DeleteOrderingGuardFile.mayContainGuards(afterSnapshot);
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> beforeGuards =
