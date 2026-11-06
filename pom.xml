@@ -522,12 +522,22 @@ under the License.
         </profile>
 
         <profile>
-            <!-- paimon-eslib and its external ESLib/Lucene dependencies require Java 11+. Keep
+            <!-- paimon-elasticsearch and its external ESLib/Lucene dependencies require Java 11+. Keep
                  this module opt-in so the default reactor is independent of the external ESLib
-                 repository. Build it explicitly with -Ppaimon-eslib on JDK 11+. -->
+                 repository. Build it explicitly with -Ppaimon-elasticsearch on JDK 11+. -->
+            <id>paimon-elasticsearch</id>
+            <modules>
+                <module>paimon-elasticsearch</module>
+                <module>paimon-elasticsearch/compat</module>
+            </modules>
+        </profile>
+
+        <profile>
+            <!-- Deprecated alias retained for the module-renaming release. -->
             <id>paimon-eslib</id>
             <modules>
-                <module>paimon-eslib</module>
+                <module>paimon-elasticsearch</module>
+                <module>paimon-elasticsearch/compat</module>
             </modules>
         </profile>
 

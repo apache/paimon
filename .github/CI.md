@@ -28,7 +28,7 @@ oversized files do not block the full CI run.
 | `paimon-spark/**` | Spark 3/4, core and integrations, Flink 1/Spark E2E |
 | `paimon-flink/**` | Flink 1/2, core and integrations, both E2E groups, Iceberg GA |
 | `paimon-e2e-tests/**` | Both E2E groups |
-| `paimon-eslib/**` | ESLib |
+| `paimon-elasticsearch/**` | ESLib |
 | `paimon-iceberg/**` | Core and integrations, Iceberg GA |
 | `paimon-full-text/**` | Core and integrations, full text |
 | Shared modules, root/build configuration, unclassified source paths | All Java groups |

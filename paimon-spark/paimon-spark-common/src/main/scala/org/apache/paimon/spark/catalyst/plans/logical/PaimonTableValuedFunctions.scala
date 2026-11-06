@@ -59,6 +59,7 @@ object PaimonTableValuedFunctions {
   val VECTOR_SEARCH = "vector_search"
   val HYBRID_SEARCH = "hybrid_search"
   val FULL_TEXT_SEARCH = "full_text_search"
+  val PAIMON_ES_SEARCH = "paimon_es_search"
 
   val supportedFnNames: Seq[String] =
     Seq(
@@ -67,7 +68,8 @@ object PaimonTableValuedFunctions {
       INCREMENTAL_TO_AUTO_TAG,
       VECTOR_SEARCH,
       HYBRID_SEARCH,
-      FULL_TEXT_SEARCH)
+      FULL_TEXT_SEARCH,
+      PAIMON_ES_SEARCH)
 
   def parsePositiveLimit(value: Any): Int = {
     val limit = value match {
@@ -100,6 +102,8 @@ object PaimonTableValuedFunctions {
         FunctionRegistryBase.build[VectorSearchQuery](fnName, since = None)
       case HYBRID_SEARCH =>
         FunctionRegistryBase.build[HybridSearchQuery](fnName, since = None)
+      case PAIMON_ES_SEARCH =>
+        FunctionRegistryBase.build[PaimonEsSearchQuery](fnName, since = None)
       case FULL_TEXT_SEARCH =>
         FunctionRegistryBase.build[FullTextSearchQuery](fnName, since = None)
       case _ =>
@@ -112,6 +116,10 @@ object PaimonTableValuedFunctions {
   def resolvePaimonTableValuedFunction(
       spark: SparkSession,
       tvf: PaimonTableValueFunction): LogicalPlan = {
+    tvf match {
+      case search: PaimonEsSearchQuery => return search.resolveSearch()
+      case _ =>
+    }
     val args = tvf.expressions
 
     val sessionState = spark.sessionState

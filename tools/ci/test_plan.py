@@ -91,7 +91,7 @@ class SelectionTest(unittest.TestCase):
         self.assertFalse(plan.select(['paimon-api/src/main/java/org/apache/paimon/rest/RESTApi.java'])['python'])
 
     def test_leaf_modules_and_workflows(self):
-        self.assertEqual(self.suites(['paimon-eslib/pom.xml']), {'eslib'})
+        self.assertEqual(self.suites(['paimon-elasticsearch/pom.xml']), {'eslib'})
         self.assertEqual(self.suites(['paimon-e2e-tests/pom.xml']),
                          {'e2e-flink1', 'e2e-flink2'})
         self.assertTrue(plan.select(['.github/workflows/ci-python.yml'])['python'])
