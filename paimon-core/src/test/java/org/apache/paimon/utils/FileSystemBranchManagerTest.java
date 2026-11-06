@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -30,6 +31,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.ExpireConfig;
@@ -60,6 +62,7 @@ import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
@@ -460,6 +463,263 @@ class FileSystemBranchManagerTest {
         assertThat(readRows(reloaded))
                 .containsExactlyInAnyOrder("1,10,100", "2,20,200", "3,30,300", "4,40,400");
         assertThat(reloaded.tagManager().tagExists("late-tag")).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFastForwardFailsOnBranchSnapshotWithUnlistedSchema(boolean mainDiverged)
+            throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        if (mainDiverged) {
+            commitRow(table, 5);
+        }
+
+        // Right before the fast-forward reads the branch's snapshot 4, the branch is rolled back
+        // to snapshot 3, adds a column and commits a row, which reuses snapshot id 4 on a schema
+        // created after the listing. The fast-forward fails without publishing it, and a retry
+        // publishes the branch.
+        AtomicBoolean rolledBack = new AtomicBoolean();
+        io.onOpen(
+                table.switchToBranch("b1").snapshotManager().snapshotPath(4),
+                () -> {
+                    try {
+                        table.switchToBranch("b1").rollbackTo(3);
+                        table.switchToBranch("b1")
+                                .schemaManager()
+                                .commitChanges(SchemaChange.addColumn("late", DataTypes.INT()));
+                        commitWideRow(table.switchToBranch("b1"), 6);
+                        rolledBack.set(true);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+        assertThatThrownBy(() -> table.fastForward("b1"))
+                .hasStackTraceContaining("Snapshot 4 of the branch uses schema 2");
+        assertThat(rolledBack).isTrue();
+        FileStoreTable failed = FileStoreTableFactory.create(io, tablePath);
+        assertThat(failed.snapshotManager().latestSnapshotId()).isEqualTo(3L);
+        assertThat(readRows(failed)).containsExactlyInAnyOrder("1,10,100", "2,20,200", "3,30,300");
+
+        table.fastForward("b1");
+        FileStoreTable reloaded = FileStoreTableFactory.create(io, tablePath);
+        assertThat(reloaded.snapshotManager().latestSnapshot())
+                .isEqualTo(table.switchToBranch("b1").snapshotManager().latestSnapshot());
+        assertThat(reloaded.schema().fieldNames()).contains("late");
+        assertThat(readRows(reloaded))
+                .containsExactlyInAnyOrder("1,10,100", "2,20,200", "3,30,300", "6,60,600");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFastForwardFailsOnBranchSnapshotWithReusedSchemaId(boolean mainDiverged)
+            throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        if (mainDiverged) {
+            commitRow(table, 5);
+        }
+        // Schema 2 adds an INT column that no snapshot uses yet.
+        table.switchToBranch("b1")
+                .schemaManager()
+                .commitChanges(SchemaChange.addColumn("late", DataTypes.INT()));
+
+        // Right before the fast-forward reads the branch's snapshot 4, the branch is rolled back
+        // to snapshot 3 and to schema 1, adds the column as STRING, which reuses schema id 2, and
+        // commits snapshot id 4 again. The fast-forward has already published the INT schema 2,
+        // so it fails before publishing the new snapshot 4.
+        AtomicBoolean rolledBack = new AtomicBoolean();
+        io.onOpen(
+                table.switchToBranch("b1").snapshotManager().snapshotPath(4),
+                () -> {
+                    try {
+                        FileStoreTable branch = table.switchToBranch("b1");
+                        branch.rollbackTo(3);
+                        branch.rollbackSchema(1);
+                        branch.schemaManager()
+                                .commitChanges(SchemaChange.addColumn("late", DataTypes.STRING()));
+                        commit(
+                                table.switchToBranch("b1"),
+                                GenericRow.of(6, 60, 600, BinaryString.fromString("six")));
+                        rolledBack.set(true);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+        assertThatThrownBy(() -> table.fastForward("b1"))
+                .hasStackTraceContaining("Snapshot 4 of the branch uses schema 2");
+        assertThat(rolledBack).isTrue();
+        FileStoreTable failed = FileStoreTableFactory.create(io, tablePath);
+        assertThat(failed.snapshotManager().latestSnapshotId()).isEqualTo(3L);
+        assertThat(readRows(failed)).containsExactlyInAnyOrder("1,10,100", "2,20,200", "3,30,300");
+
+        table.fastForward("b1");
+        FileStoreTable reloaded = FileStoreTableFactory.create(io, tablePath);
+        assertThat(reloaded.schema().fields().get(3).type()).isEqualTo(DataTypes.STRING());
+        assertThat(readRows(reloaded))
+                .containsExactlyInAnyOrder("1,10,100", "2,20,200", "3,30,300", "6,60,600");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFastForwardSkipsBranchTagWithReusedSchemaId(boolean mainDiverged) throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        if (mainDiverged) {
+            commitRow(table, 5);
+        }
+        // Schema 2 adds an INT column that no snapshot uses yet.
+        table.switchToBranch("b1")
+                .schemaManager()
+                .commitChanges(SchemaChange.addColumn("late", DataTypes.INT()));
+
+        // After the fast-forward has read the branch's snapshot 4, and while it checks main's
+        // snapshot 4, the branch is rolled back to snapshot 3 and to schema 1, adds the column as
+        // STRING, which reuses schema id 2, commits snapshot id 4 again and tags it. Main gets
+        // the snapshot 4 that was read, and not the tag.
+        AtomicBoolean rolledBack = new AtomicBoolean();
+        io.onExists(
+                table.snapshotManager().snapshotPath(4),
+                () -> {
+                    try {
+                        FileStoreTable branch = table.switchToBranch("b1");
+                        branch.rollbackTo(3);
+                        branch.rollbackSchema(1);
+                        branch.schemaManager()
+                                .commitChanges(SchemaChange.addColumn("late", DataTypes.STRING()));
+                        FileStoreTable widened = table.switchToBranch("b1");
+                        commit(widened, GenericRow.of(6, 60, 600, BinaryString.fromString("six")));
+                        widened.createTag("late-tag", 4);
+                        rolledBack.set(true);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+        table.fastForward("b1");
+        assertThat(rolledBack).isTrue();
+        assertThat(table.switchToBranch("b1").tagManager().getOrThrow("late-tag").schemaId())
+                .isEqualTo(2L);
+
+        FileStoreTable reloaded = FileStoreTableFactory.create(io, tablePath);
+        assertThat(reloaded.snapshotManager().latestSnapshotId()).isEqualTo(4L);
+        assertThat(reloaded.tagManager().tagExists("late-tag")).isFalse();
+        assertThat(reloaded.schema().fields().get(3).type()).isEqualTo(DataTypes.INT());
+        assertThat(readRows(reloaded))
+                .containsExactlyInAnyOrder("1,10,100", "2,20,200", "3,30,300", "4,40,400");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFastForwardSkipsBranchTagWithUnlistedSchema(boolean mainDiverged) throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        if (mainDiverged) {
+            commitRow(table, 5);
+        }
+
+        // After the fast-forward has read the branch's snapshot 4, and while it checks main's
+        // snapshot 4, the branch is rolled back to snapshot 3, adds a column, commits a row,
+        // which reuses snapshot id 4, and tags it. Main gets the snapshot 4 that was read, and
+        // not the tag.
+        AtomicBoolean rolledBack = new AtomicBoolean();
+        io.onExists(
+                table.snapshotManager().snapshotPath(4),
+                () -> {
+                    try {
+                        FileStoreTable branch = table.switchToBranch("b1");
+                        branch.rollbackTo(3);
+                        branch.schemaManager()
+                                .commitChanges(SchemaChange.addColumn("late", DataTypes.INT()));
+                        FileStoreTable widened = table.switchToBranch("b1");
+                        commitWideRow(widened, 6);
+                        widened.createTag("late-tag", 4);
+                        rolledBack.set(true);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+        table.fastForward("b1");
+        assertThat(rolledBack).isTrue();
+        assertThat(table.switchToBranch("b1").tagManager().getOrThrow("late-tag").schemaId())
+                .isEqualTo(2L);
+
+        FileStoreTable reloaded = FileStoreTableFactory.create(io, tablePath);
+        assertThat(reloaded.snapshotManager().latestSnapshotId()).isEqualTo(4L);
+        assertThat(reloaded.tagManager().tagExists("late-tag")).isFalse();
+        assertThat(readRows(reloaded))
+                .containsExactlyInAnyOrder("1,10,100", "2,20,200", "3,30,300", "4,40,400");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFastForwardPublishesBranchTagAsChecked(boolean mainDiverged) throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        if (mainDiverged) {
+            commitRow(table, 5);
+        }
+
+        // Right after the fast-forward has first read the branch's tag2, a writer on the branch
+        // adds a column, commits a row and moves tag2 to that commit. The fast-forward publishes
+        // tag2 as it read it.
+        AtomicBoolean tagMoved = new AtomicBoolean();
+        io.afterRead(
+                table.switchToBranch("b1").tagManager().tagPath("tag2"),
+                () -> {
+                    try {
+                        table.switchToBranch("b1")
+                                .schemaManager()
+                                .commitChanges(SchemaChange.addColumn("late", DataTypes.INT()));
+                        commitWideRow(table.switchToBranch("b1"), 6);
+                        table.switchToBranch("b1").replaceTag("tag2", null, null);
+                        tagMoved.set(true);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+        table.fastForward("b1");
+        assertThat(tagMoved).isTrue();
+        FileStoreTable branch = table.switchToBranch("b1");
+        assertThat(branch.tagManager().getOrThrow("tag2").id())
+                .isEqualTo(branch.snapshotManager().latestSnapshotId())
+                .isGreaterThan(4L);
+
+        FileStoreTable reloaded = FileStoreTableFactory.create(io, tablePath);
+        assertThat(reloaded.snapshotManager().latestSnapshotId()).isEqualTo(4L);
+        assertThat(reloaded.tagManager().getOrThrow("tag2").id()).isEqualTo(2L);
+        assertThat(
+                        readRows(
+                                reloaded.copy(
+                                        Collections.singletonMap(
+                                                CoreOptions.SCAN_TAG_NAME.key(), "tag2"))))
+                .containsExactlyInAnyOrder("1,10,100", "2,20,200");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFastForwardSkipsBranchTagDeletedAfterListing(boolean mainDiverged) throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        if (mainDiverged) {
+            commitRow(table, 5);
+        }
+
+        // The branch's tag2 is deleted after the fast-forward has listed the branch's tags, right
+        // before it reads tag2. The branch's tag3, listed after it, is still copied.
+        table.switchToBranch("b1").createTag("tag3", 3);
+        io.onOpen(
+                table.switchToBranch("b1").tagManager().tagPath("tag2"),
+                () -> table.switchToBranch("b1").deleteTag("tag2"));
+        table.fastForward("b1");
+
+        FileStoreTable reloaded = FileStoreTableFactory.create(io, tablePath);
+        assertThat(reloaded.snapshotManager().latestSnapshotId()).isEqualTo(4L);
+        assertThat(readRows(reloaded))
+                .containsExactlyInAnyOrder("1,10,100", "2,20,200", "3,30,300", "4,40,400");
+        // Replacing main deletes main's tags from the branch's earliest snapshot on, tag2
+        // included; appending keeps main's tag2.
+        assertThat(reloaded.tagManager().tagExists("tag2")).isEqualTo(!mainDiverged);
+        assertThat(reloaded.tagManager().getOrThrow("tag3").id()).isEqualTo(3L);
     }
 
     @Test
@@ -922,6 +1182,8 @@ class FileSystemBranchManagerTest {
         private volatile Runnable afterInjectedFailure = () -> {};
         @Nullable private volatile Path openTrigger;
         private volatile Runnable onOpenAction = () -> {};
+        @Nullable private volatile Path readTrigger;
+        private volatile Runnable afterReadAction = () -> {};
         @Nullable private volatile Path existsTrigger;
         private volatile Runnable onExistsAction = () -> {};
         @Nullable private volatile Path undeletable;
@@ -932,6 +1194,12 @@ class FileSystemBranchManagerTest {
         void onOpen(Path path, Runnable action) {
             onOpenAction = action;
             openTrigger = path;
+        }
+
+        /** Run the action once, when the file is next read and its stream is closed. */
+        void afterRead(Path path, Runnable action) {
+            afterReadAction = action;
+            readTrigger = path;
         }
 
         /** Run the action once, when the file's existence is next checked. */
@@ -1013,7 +1281,18 @@ class FileSystemBranchManagerTest {
                 openTrigger = null;
                 onOpenAction.run();
             }
-            return super.newInputStream(path);
+            SeekableInputStream in = super.newInputStream(path);
+            if (!sameFile(path, readTrigger)) {
+                return in;
+            }
+            readTrigger = null;
+            return new SeekableInputStreamWrapper(in) {
+                @Override
+                public void close() throws IOException {
+                    super.close();
+                    afterReadAction.run();
+                }
+            };
         }
 
         @Override

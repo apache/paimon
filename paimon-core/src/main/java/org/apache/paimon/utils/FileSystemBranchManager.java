@@ -35,11 +35,17 @@ import org.apache.paimon.tag.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InterruptedIOException;
+import java.nio.channels.ClosedByInterruptException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -57,6 +63,9 @@ import static org.apache.paimon.utils.SnapshotManager.SNAPSHOT_PREFIX;
 public class FileSystemBranchManager implements BranchManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileSystemBranchManager.class);
+
+    /** How many of the branch's snapshots are read before their schemas are checked. */
+    private static final int SNAPSHOT_BATCH_SIZE = 1000;
 
     private final FileIO fileIO;
     private final Path tablePath;
@@ -282,8 +291,15 @@ public class FileSystemBranchManager implements BranchManager {
                         schemaManager.toSchemaPath(schemaId));
             }
         }
-        copySnapshots(branchSnapshotManager, latestId + 1, branchLatestId, lock);
-        copyBranchTags(branchName, branchLatestId, lock);
+        Map<Long, TableSchema> schemas = publishedSchemas(branchSchemaIds);
+        copySnapshots(
+                branchSnapshotManager,
+                branchSchemaManager,
+                latestId + 1,
+                branchLatestId,
+                schemas,
+                lock);
+        copyBranchTags(branchName, branchLatestId, schemas, lock);
         commitHint(lock, HintFileUtils.LATEST, branchLatestId);
         return true;
     }
@@ -395,8 +411,8 @@ public class FileSystemBranchManager implements BranchManager {
         }
 
         for (long id : branchSchemaIds) {
-            replaceAtomically(
-                    lock, branchSchemaManager.toSchemaPath(id), schemaManager.toSchemaPath(id));
+            Path source = branchSchemaManager.toSchemaPath(id);
+            replaceAtomically(lock, source, readExactly(source), schemaManager.toSchemaPath(id));
         }
         for (long id : schemaManager.listAllIds()) {
             if (id >= earliestSchemaId && !branchSchemaIds.contains(id)) {
@@ -404,34 +420,144 @@ public class FileSystemBranchManager implements BranchManager {
             }
         }
 
-        copySnapshots(branchSnapshotManager, earliestSnapshotId, branchLatestId, lock);
-        copyBranchTags(branchName, branchLatestId, lock);
+        Map<Long, TableSchema> schemas = publishedSchemas(branchSchemaIds);
+        copySnapshots(
+                branchSnapshotManager,
+                branchSchemaManager,
+                earliestSnapshotId,
+                branchLatestId,
+                schemas,
+                lock);
+        copyBranchTags(branchName, branchLatestId, schemas, lock);
         commitHint(lock, HintFileUtils.LATEST, branchLatestId);
     }
 
-    private void copySnapshots(
-            SnapshotManager branchSnapshotManager, long fromId, long toId, Lock lock)
+    /** The listed schemas of the branch as main now holds them. */
+    private Map<Long, TableSchema> publishedSchemas(List<Long> ids) throws IOException {
+        Map<Long, TableSchema> schemas = new HashMap<>();
+        for (long id : ids) {
+            schemas.put(id, TableSchema.fromJson(readExactly(schemaManager.toSchemaPath(id))));
+        }
+        return schemas;
+    }
+
+    /**
+     * The ids among {@code ids} whose schema the branch holds as main now does. Call it after
+     * reading the snapshots or tags that use them: a branch rolled back in between can commit a
+     * listed snapshot id again on a newer schema, or, after rolling back its schemas, on another
+     * schema with a listed id.
+     */
+    private Set<Long> publishedSchemaIds(
+            SchemaManager branchSchemaManager, Map<Long, TableSchema> schemas, Set<Long> ids)
             throws IOException {
-        for (long id = fromId; id <= toId; id++) {
-            copyAtomically(
-                    lock, branchSnapshotManager.snapshotPath(id), snapshotManager.snapshotPath(id));
+        Set<Long> published = new HashSet<>();
+        for (long id : ids) {
+            TableSchema schema = schemas.get(id);
+            String branchContent =
+                    schema == null ? null : readIfExists(branchSchemaManager.toSchemaPath(id));
+            if (branchContent != null && schema.equals(TableSchema.fromJson(branchContent))) {
+                published.add(id);
+            }
+        }
+        return published;
+    }
+
+    /** Copies the branch's snapshots, failing on one whose schema main does not hold. */
+    private void copySnapshots(
+            SnapshotManager branchSnapshotManager,
+            SchemaManager branchSchemaManager,
+            long fromId,
+            long toId,
+            Map<Long, TableSchema> schemas,
+            Lock lock)
+            throws IOException {
+        for (long start = fromId; start <= toId; start += SNAPSHOT_BATCH_SIZE) {
+            long end = Math.min(toId, start + SNAPSHOT_BATCH_SIZE - 1);
+            List<String> contents = new ArrayList<>();
+            List<Long> schemaIds = new ArrayList<>();
+            for (long id = start; id <= end; id++) {
+                String content = readExactly(branchSnapshotManager.snapshotPath(id));
+                contents.add(content);
+                schemaIds.add(Snapshot.fromJson(content).schemaId());
+            }
+            Set<Long> published =
+                    publishedSchemaIds(branchSchemaManager, schemas, new HashSet<>(schemaIds));
+            for (int i = 0; i < contents.size(); i++) {
+                long id = start + i;
+                long schemaId = schemaIds.get(i);
+                if (!published.contains(schemaId)) {
+                    throw new IOException(
+                            String.format(
+                                    "Snapshot %s of the branch uses schema %s, which the branch did"
+                                            + " not have, or had with other content, when its"
+                                            + " schemas were listed; run the fast-forward again.",
+                                    id, schemaId));
+                }
+                writeAtomically(
+                        lock,
+                        branchSnapshotManager.snapshotPath(id),
+                        contents.get(i),
+                        snapshotManager.snapshotPath(id));
+            }
         }
     }
 
-    /** Copies the branch's tags on snapshots up to {@code latestId}. */
-    private void copyBranchTags(String branchName, long latestId, Lock lock) throws IOException {
+    /** Copies the branch's tags on snapshots up to {@code latestId} whose schema main holds. */
+    private void copyBranchTags(
+            String branchName, long latestId, Map<Long, TableSchema> schemas, Lock lock)
+            throws IOException {
+        // Read each tag once and publish what was checked, as the branch may replace it.
+        Map<Path, String> contents = new LinkedHashMap<>();
+        Map<Path, Long> schemaIds = new HashMap<>();
         // Only tag files: a writer killed before renaming leaves a temporary file in the directory.
-        for (Path tag :
-                tagManager
-                        .copyWithBranch(branchName)
-                        .tagPaths(path -> Tag.fromPath(fileIO, path).id() <= latestId)) {
-            replaceAtomically(lock, tag, new Path(tagManager.tagDirectory(), tag.getName()));
+        for (Path tag : tagManager.copyWithBranch(branchName).tagPaths(path -> true)) {
+            String content = readIfExists(tag);
+            if (content == null) {
+                // deleted from the branch since it was listed
+                continue;
+            }
+            Tag parsed = Tag.fromJson(content);
+            if (parsed.id() <= latestId) {
+                contents.put(tag, content);
+                schemaIds.put(tag, parsed.schemaId());
+            }
+        }
+        Set<Long> published =
+                publishedSchemaIds(
+                        schemaManager.copyWithBranch(branchName),
+                        schemas,
+                        new HashSet<>(schemaIds.values()));
+        for (Map.Entry<Path, String> entry : contents.entrySet()) {
+            Path tag = entry.getKey();
+            if (published.contains(schemaIds.get(tag))) {
+                replaceAtomically(
+                        lock,
+                        tag,
+                        entry.getValue(),
+                        new Path(tagManager.tagDirectory(), tag.getName()));
+            }
         }
     }
 
     /** Copies a file without exposing partial content, accepting a target already copied. */
     private void copyAtomically(Lock lock, Path source, Path target) throws IOException {
-        String content = readExactly(source);
+        writeAtomically(lock, source, readExactly(source), target);
+    }
+
+    /**
+     * Like {@link #copyAtomically}, with {@code content} read from {@code source}, but first
+     * deletes a target that holds other content.
+     */
+    private void replaceAtomically(Lock lock, Path source, String content, Path target)
+            throws IOException {
+        if (fileIO.exists(target) && !content.equals(readExactly(target))) {
+            delete(lock, target);
+        }
+        writeAtomically(lock, source, content, target);
+    }
+
+    private void writeAtomically(Lock lock, Path source, String content, Path target)
+            throws IOException {
         if (!fileIO.exists(target)) {
             // Reading the source and checking the target may outlast the lease, so check it right
             // before writing.
@@ -446,14 +572,6 @@ public class FileSystemBranchManager implements BranchManager {
                             "Cannot copy %s to %s, because the target holds other content.",
                             source, target));
         }
-    }
-
-    /** Like {@link #copyAtomically}, but first deletes a target that holds other content. */
-    private void replaceAtomically(Lock lock, Path source, Path target) throws IOException {
-        if (fileIO.exists(target) && !readExactly(source).equals(readExactly(target))) {
-            delete(lock, target);
-        }
-        copyAtomically(lock, source, target);
     }
 
     /** Writes a hint file of the current branch, checking the lease before every attempt. */
@@ -489,6 +607,36 @@ public class FileSystemBranchManager implements BranchManager {
     /** Reads a file with its line breaks, unlike {@link FileIO#readFileUtf8}. */
     private String readExactly(Path path) throws IOException {
         return new String(IOUtils.readFully(fileIO.newInputStream(path), true), UTF_8);
+    }
+
+    /**
+     * Like {@link #readExactly}, but returns null if the file is gone, deciding that as {@link
+     * FileIO#readFileUtf8} does.
+     */
+    @Nullable
+    private String readIfExists(Path path) throws IOException {
+        try {
+            return readExactly(path);
+        } catch (FileNotFoundException e) {
+            return null;
+        } catch (InterruptedIOException | ClosedByInterruptException e) {
+            throw e;
+        } catch (IOException e) {
+            // Some object stores throw a plain IOException for a file deleted during reading.
+            boolean exists;
+            try {
+                exists = fileIO.exists(path);
+            } catch (IOException | RuntimeException checkFailure) {
+                if (checkFailure != e) {
+                    e.addSuppressed(checkFailure);
+                }
+                throw e;
+            }
+            if (exists) {
+                throw e;
+            }
+            return null;
+        }
     }
 
     private static List<Long> sorted(List<Long> ids) {
