@@ -40,6 +40,12 @@ public class TestVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
     @Override
     public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        String metric = options.getString(IDENTIFIER + ".metric", null);
+        // Existing test fixtures may explicitly select their metric with the test-only option.
+        if (metric != null && options.get(TestVectorGlobalIndexer.OPT_METRIC) == null) {
+            options = new Options(options.toMap());
+            options.setString(TestVectorGlobalIndexer.OPT_METRIC, metric);
+        }
         if (indexFields.size() == 1) {
             return new TestVectorGlobalIndexer(indexFields.get(0).type(), options);
         }

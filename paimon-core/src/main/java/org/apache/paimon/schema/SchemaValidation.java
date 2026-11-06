@@ -407,6 +407,8 @@ public class SchemaValidation {
                 fieldNamesSpecifiedAsVector.isEmpty(),
                 "Some of the columns specified as vector-field are unknown.");
 
+        options.primaryKeyIndexBuildParallelism();
+
         validateMergeFunctionFactory(schema);
 
         validateMapStorageLayout(schema, options);
