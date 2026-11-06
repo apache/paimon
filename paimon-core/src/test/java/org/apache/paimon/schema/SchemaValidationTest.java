@@ -2331,6 +2331,20 @@ class SchemaValidationTest {
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "input", "full-compaction"})
+    public void testPreserveFieldOnRetractWithUnsupportedChangelogProducer(
+            String changelogProducer) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), changelogProducer);
+        options.put(CoreOptions.CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), "f2");
+
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "'changelog-producer.preserve-field-on-retract' is only supported with 'changelog-producer' = 'lookup'.");
+    }
+
     @Test
     public void testFullCompactionDeltaCommitsWithLookupChangelogProducer() {
         Map<String, String> options = new HashMap<>();

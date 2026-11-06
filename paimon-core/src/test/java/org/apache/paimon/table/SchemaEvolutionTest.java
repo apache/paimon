@@ -26,10 +26,12 @@ import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -39,12 +41,14 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LazyField;
 
@@ -56,6 +60,8 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -68,6 +74,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT;
 import static org.apache.paimon.CoreOptions.DISTINCT;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.IGNORE_RETRACT;
@@ -1157,6 +1164,121 @@ public class SchemaEvolutionTest {
                         .toArray(new Map.Entry[0]);
 
         assertThat(newSchema.options()).contains(entries);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRenamePreservedFieldsAndWriteChangelog(boolean multipleFields)
+            throws Exception {
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField(0, "id", DataTypes.INT()),
+                                        new DataField(1, "payload", DataTypes.STRING()),
+                                        new DataField(2, "event_ts", DataTypes.BIGINT()),
+                                        new DataField(3, "metadata", DataTypes.BIGINT()))
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        ImmutableMap.of(
+                                "bucket",
+                                "1",
+                                "merge-engine",
+                                "deduplicate",
+                                "changelog-producer",
+                                "lookup",
+                                SEQUENCE_FIELD.key(),
+                                "event_ts",
+                                CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(),
+                                multipleFields ? "metadata, event_ts" : "event_ts"),
+                        ""));
+
+        try (IOManager ioManager = IOManager.create(tempDir.resolve("io").toString())) {
+            FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+            try (StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, BinaryString.fromString("before"), 10L, 100L));
+                write.write(GenericRow.of(2, BinaryString.fromString("before"), 10L, 100L));
+                commit.commit(0, write.prepareCommit(true, 0));
+            }
+
+            schemaManager.commitChanges(
+                    SchemaChange.renameColumn("event_ts", "renamed_event_ts"),
+                    SchemaChange.renameColumn("metadata", "renamed_metadata"));
+
+            FileStoreTable renamedTable =
+                    FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+            try (StreamTableWrite write =
+                            renamedTable.newWrite(commitUser).withIOManager(ioManager);
+                    TableCommitImpl commit = renamedTable.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, BinaryString.fromString("after"), 20L, 200L));
+                write.write(GenericRow.ofKind(RowKind.DELETE, 2, null, 30L, 300L));
+                commit.commit(1, write.prepareCommit(true, 1));
+            }
+
+            assertThat(renamedTable.options())
+                    .containsEntry(SEQUENCE_FIELD.key(), "renamed_event_ts")
+                    .containsEntry(
+                            CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(),
+                            multipleFields
+                                    ? "renamed_metadata,renamed_event_ts"
+                                    : "renamed_event_ts");
+            assertThat(readRecords(renamedTable, null)).containsExactly("1, after, 20, 200");
+
+            List<String> changelog = new ArrayList<>();
+            for (Split split :
+                    renamedTable
+                            .newSnapshotReader()
+                            .withMode(ScanMode.CHANGELOG)
+                            .read()
+                            .dataSplits()) {
+                try (RecordReader<InternalRow> reader =
+                        renamedTable.newRead().createReader(split)) {
+                    reader.forEachRemaining(
+                            row ->
+                                    changelog.add(
+                                            row.getRowKind().shortString()
+                                                    + " "
+                                                    + DataFormatTestUtil.toStringNoRowKind(
+                                                            row, renamedTable.rowType())));
+                }
+            }
+            assertThat(changelog)
+                    .containsExactlyInAnyOrder(
+                            "-U 1, before, 20, " + (multipleFields ? 200 : 100),
+                            "+U 1, after, 20, 200",
+                            "-D 2, before, 30, " + (multipleFields ? 300 : 100));
+        }
+    }
+
+    @Test
+    public void testRenameNestedFieldKeepsPreservedParentColumn() throws Exception {
+        schemaManager.createTable(
+                new Schema(
+                        ImmutableList.of(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(
+                                        1,
+                                        "payload",
+                                        DataTypes.ROW(
+                                                new DataField(2, "metadata", DataTypes.BIGINT())))),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        ImmutableMap.of(
+                                "changelog-producer",
+                                "lookup",
+                                CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(),
+                                "payload"),
+                        ""));
+
+        TableSchema renamed =
+                schemaManager.commitChanges(
+                        SchemaChange.renameColumn(
+                                new String[] {"payload", "metadata"}, "renamed_metadata"));
+        assertThat(renamed.options())
+                .containsEntry(CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), "payload");
+        assertThat(((RowType) renamed.logicalRowType().getTypeAt(1)).getFieldNames())
+                .containsExactly("renamed_metadata");
     }
 
     @Test
