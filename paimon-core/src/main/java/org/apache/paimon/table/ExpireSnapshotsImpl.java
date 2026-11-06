@@ -22,6 +22,7 @@ import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.FileDeletionBase.DataFileDeletionPlan;
@@ -72,6 +73,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private final Executor fileExecutor;
     private final TagManager tagManager;
     private final int snapshotExpireBatchSize;
+    @Nullable private final OtherBranchesLiveFiles otherBranchesLiveFiles;
 
     private ExpireConfig expireConfig;
     private Supplier<Long> currentTimeMillis = System::currentTimeMillis;
@@ -82,6 +84,22 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             SnapshotDeletion snapshotDeletion,
             TagManager tagManager,
             @Nullable Integer scanManifestParallelism) {
+        this(
+                snapshotManager,
+                changelogManager,
+                snapshotDeletion,
+                tagManager,
+                scanManifestParallelism,
+                null);
+    }
+
+    public ExpireSnapshotsImpl(
+            SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
+            SnapshotDeletion snapshotDeletion,
+            TagManager tagManager,
+            @Nullable Integer scanManifestParallelism,
+            @Nullable OtherBranchesLiveFiles otherBranchesLiveFiles) {
         this.snapshotManager = snapshotManager;
         this.changelogManager = changelogManager;
         this.consumerManager =
@@ -93,6 +111,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         this.tagManager = tagManager;
         this.expireConfig = ExpireConfig.builder().build();
         this.fileExecutor = snapshotDeletion.fileExecutor();
+        this.otherBranchesLiveFiles = otherBranchesLiveFiles;
         this.snapshotExpireBatchSize =
                 scanManifestParallelism == null || scanManifestParallelism <= 0
                         ? Runtime.getRuntime().availableProcessors()
@@ -248,6 +267,11 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         try {
             Set<String> builtSkippingSet = ConcurrentHashMap.newKeySet();
             builtSkippingSet.addAll(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
+            // Manifest, index and statistics files live in the shared table directory too, so
+            // keep every manifest referenced by another branch's live snapshots and tags.
+            if (otherBranchesLiveFiles != null) {
+                builtSkippingSet.addAll(otherBranchesLiveFiles.manifestSkippingSet());
+            }
             skippingSet = builtSkippingSet;
         } catch (Exception e) {
             LOG.info("Skip cleaning manifest files due to failed to build skipping set.", e);
@@ -339,6 +363,13 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         Map<Long, Optional<Predicate<ExpireFileEntry>>> skippers =
                 collectTagSkippers(tags, plansByTag);
+
+        // All branches of a table share the same physical data files; a file this branch is
+        // about to delete may still be referenced by another branch (for example main, when this
+        // branch was created from a tag and its own copy of that tag has since been deleted).
+        // Build a skipper that keeps any candidate file still live on another branch.
+        Predicate<ExpireFileEntry> retainedByOtherBranches = buildOtherBranchesSkipper(plans);
+
         Predicate<ExpireFileEntry> deleteAll = entry -> false;
         List<Path> paths = new ArrayList<>();
         for (int i = 0; i < snapshots.size(); i++) {
@@ -354,10 +385,69 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                         snapshot.id());
                 continue;
             }
-            paths.addAll(snapshotDeletion.dataFilesToDelete(plans.get(i), skipper.get()));
+            Predicate<ExpireFileEntry> effectiveSkipper = skipper.get();
+            if (retainedByOtherBranches != null) {
+                Predicate<ExpireFileEntry> ownSkipper = effectiveSkipper;
+                effectiveSkipper =
+                        entry -> ownSkipper.test(entry) || retainedByOtherBranches.test(entry);
+            }
+            paths.addAll(snapshotDeletion.dataFilesToDelete(plans.get(i), effectiveSkipper));
         }
         snapshotDeletion.cleanDataFiles(paths);
         snapshots.clear();
+    }
+
+    @Nullable
+    private Predicate<ExpireFileEntry> buildOtherBranchesSkipper(List<DataFileDeletionPlan> plans) {
+        if (otherBranchesLiveFiles == null) {
+            return null;
+        }
+        Map<BinaryRow, Map<Integer, Set<String>>> candidates = new HashMap<>();
+        for (DataFileDeletionPlan plan : plans) {
+            for (ExpireFileEntry entry : plan.candidateEntries()) {
+                snapshotDeletion.addCandidateDataFile(candidates, entry);
+            }
+        }
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        try {
+            Map<BinaryRow, Map<Integer, Set<String>>> referenced =
+                    otherBranchesLiveFiles.collect(candidates);
+            if (referenced.isEmpty()) {
+                return null;
+            }
+            return entry -> snapshotDeletion.containsDataFileEntry(referenced, entry);
+        } catch (Exception e) {
+            // A failure to read another branch must never turn into deleting a file that branch
+            // may still reference. Keep the whole batch by skipping all candidate files.
+            LOG.info(
+                    "Failed to collect data files referenced by other branches. "
+                            + "Skip cleaning this batch to avoid deleting files still in use.",
+                    e);
+            return entry -> true;
+        }
+    }
+
+    /**
+     * Collects files referenced by all branches other than the one being expired. Every branch of a
+     * table shares the same physical data, manifest, index and statistics files, so expiring one
+     * branch must not delete files another branch still references.
+     */
+    public interface OtherBranchesLiveFiles {
+
+        /**
+         * Data files referenced by other branches, restricted to {@code candidates} to keep memory
+         * proportional to the current expiration batch.
+         */
+        Map<BinaryRow, Map<Integer, Set<String>>> collect(
+                Map<BinaryRow, Map<Integer, Set<String>>> candidates) throws Exception;
+
+        /**
+         * Names of manifest, manifest list, index and statistics files referenced by other
+         * branches' live snapshots and tags.
+         */
+        Set<String> manifestSkippingSet() throws Exception;
     }
 
     private Map<Long, Optional<Predicate<ExpireFileEntry>>> collectTagSkippers(
