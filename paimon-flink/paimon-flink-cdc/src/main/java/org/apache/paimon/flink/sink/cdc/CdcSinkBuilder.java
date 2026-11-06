@@ -27,6 +27,7 @@ import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -150,9 +151,14 @@ public class CdcSinkBuilder<T> {
 
     private DataStreamSink<?> buildForFixedBucket(DataStream<CdcRecord> parsed) {
         FileStoreTable dataTable = (FileStoreTable) table;
+        PartitionBucketMapping partitionBucketMapping =
+                PartitionBucketMapping.loadFromTable(dataTable);
         DataStream<CdcRecord> partitioned =
-                partition(parsed, new CdcRecordChannelComputer(dataTable.schema()), parallelism);
-        return new CdcFixedBucketSink(dataTable).sinkFrom(partitioned);
+                partition(
+                        parsed,
+                        new CdcRecordChannelComputer(dataTable.schema(), partitionBucketMapping),
+                        parallelism);
+        return new CdcFixedBucketSink(dataTable, partitionBucketMapping).sinkFrom(partitioned);
     }
 
     private DataStreamSink<?> buildForPostponeBucket(DataStream<CdcRecord> parsed) {
