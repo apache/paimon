@@ -333,6 +333,25 @@ jobs:
           assert not any(case.find("skipped") is not None for case in cases), "Indexed TorchCodec tests must not skip"
           PYTEST_REPORT
 
+  video-minimum:
+    name: Video / PyAV 14.2
+    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: Install minimum video dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e './paimon-python[video]' 'av==14.2.0' --group ./paimon-python/pyproject.toml:test
+          python -m pip check
+          python -c 'import av; assert av.__version__ == "14.2.0"'
+      - name: Test Episode remux
+        working-directory: paimon-python
+        run: python -m pytest -q pypaimon/tests/video_remux_test.py
+
   torch:
     name: PyTorch / Python 3.10
     timeout-minutes: 60
