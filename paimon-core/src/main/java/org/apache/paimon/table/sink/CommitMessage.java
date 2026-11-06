@@ -51,4 +51,10 @@ public interface CommitMessage extends Serializable {
     default Long checkFromSnapshot() {
         return null;
     }
+
+    /** Ordering-history generation observed when the bucket writer restored its inputs. */
+    @Nullable
+    default String deleteOrderingGuardGeneration() {
+        return null;
+    }
 }

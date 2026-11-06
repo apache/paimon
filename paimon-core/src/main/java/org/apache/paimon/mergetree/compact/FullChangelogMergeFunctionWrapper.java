@@ -25,6 +25,8 @@ import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
+import java.util.function.Function;
+
 /**
  * Wrapper for {@link MergeFunction}s to produce changelog during a full compaction.
  *
@@ -47,6 +49,8 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
     private KeyValue topLevelKv;
     private KeyValue initialKv;
     private boolean isInitialized;
+    private int realInputs;
+    @Nullable private Function<KeyValue, KeyValue> beforeImageResolver;
 
     private final ChangelogResult reusedResult = new ChangelogResult();
     private final KeyValue reusedBefore = new KeyValue();
@@ -68,25 +72,43 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
         topLevelKv = null;
         initialKv = null;
         isInitialized = false;
+        realInputs = 0;
     }
 
     @Override
     public void add(KeyValue kv) {
+        realInputs++;
         if (maxLevel == kv.level()) {
             Preconditions.checkState(
                     topLevelKv == null, "Top level key-value already exists! This is unexpected.");
             topLevelKv = kv;
         }
 
-        if (initialKv == null) {
+        if (isInitialized) {
+            merge(kv);
+        } else if (initialKv == null) {
             initialKv = kv;
         } else {
-            if (!isInitialized) {
-                merge(initialKv);
-                isInitialized = true;
-            }
+            merge(initialKv);
+            isInitialized = true;
             merge(kv);
         }
+    }
+
+    @Override
+    public void addDeleteOrderingGuard(KeyValue guard) {
+        if (!isInitialized) {
+            if (initialKv != null) {
+                merge(initialKv);
+            }
+            isInitialized = true;
+        }
+        mergeFunction.addDeleteOrderingGuard(guard);
+    }
+
+    @Override
+    public void withDeleteOrderingGuardBeforeImage(Function<KeyValue, KeyValue> resolver) {
+        beforeImageResolver = resolver;
     }
 
     private void merge(KeyValue kv) {
@@ -98,6 +120,15 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
         reusedResult.reset();
         if (isInitialized) {
             KeyValue merged = mergeFunction.getResult();
+            if (realInputs == 1 && topLevelKv != null) {
+                return reusedResult.setResultIfNotRetract(merged);
+            }
+            if (beforeImageResolver != null) {
+                topLevelKv = beforeImageResolver.apply(topLevelKv);
+                if (topLevelKv != null && !topLevelKv.isAdd()) {
+                    topLevelKv = null;
+                }
+            }
             if (topLevelKv == null) {
                 if (merged.isAdd()) {
                     reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, merged));

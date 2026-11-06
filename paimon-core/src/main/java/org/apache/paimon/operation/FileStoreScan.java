@@ -119,6 +119,11 @@ public interface FileStoreScan {
 
     List<PartitionEntry> readPartitionEntries();
 
+    /** Include hidden guard-only partitions when discovering expiration candidates. */
+    default FileStoreScan withDeleteOrderingGuardPartitions() {
+        return this;
+    }
+
     List<BucketEntry> readBucketEntries();
 
     Iterator<ManifestEntry> readFileIterator();

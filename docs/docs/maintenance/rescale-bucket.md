@@ -29,6 +29,51 @@ tune bucket numbers by `ALTER TABLE` command and reorganize data layout by `INSE
 without recreating the table/partition. When executing overwrite jobs, the framework will automatically 
 scan the data with the old bucket number and hash the record according to the current bucket number.
 
+For tables using [delete ordering guards](../primary-key-table/sequence-rowkind#preserving-delete-ordering),
+use the native `sys.rescale` procedure described below to preserve hidden delete history. Ordinary
+`INSERT OVERWRITE ... SELECT` resets that history in the replaced scope.
+
+## Rescale with Delete Ordering Guards
+
+The native procedure moves both physical data records and hidden guards to the new buckets,
+including partitions containing only guards. It preserves source sequences and internal ordering
+ties and publishes the replacements in one snapshot. This also applies after guard capture has
+been disabled, while previously committed guards remain active.
+
+First stop concurrent writes and schema changes, then set the new bucket count. For Flink, run
+the procedure in batch mode:
+
+```sql
+ALTER TABLE guarded_orders SET ('bucket' = '8');
+SET 'execution.runtime-mode' = 'batch';
+CALL sys.rescale(`table` => 'default.guarded_orders');
+
+-- Rescale one partition instead of the entire table.
+CALL sys.rescale(`table` => 'default.guarded_orders', `partition` => 'dt=2026-11-01');
+```
+
+For Spark:
+
+```sql
+ALTER TABLE guarded_orders SET TBLPROPERTIES ('bucket' = '8');
+CALL sys.rescale(table => 'guarded_orders');
+
+-- Rescale one partition instead of the entire table.
+CALL sys.rescale(table => 'guarded_orders', partitions => 'dt=2026-11-01');
+```
+
+Choose either the whole-table call or the partition call. Unselected partitions retain their
+existing bucket layouts. Publication checks the pinned source snapshot and table schema on every
+attempt; if either changes, restart rescaling from current state. After rescaling, affected writers
+must reopen from current state. Pending writes and checkpoints from the old ordering generation
+cannot publish into the new layout.
+
+After upgrading an older guard snapshot without recorded bucket-layout metadata, guard-only
+partitions require this procedure before writes or compaction can resume. Run it even when the
+configured bucket count stays the same. Native reads remain available. The procedure records
+the destination layout while preserving delete bounds and any unknown logical activity time;
+guard file creation time is not used to infer partition activity.
+
 ## Rescale Overwrite
 ```sql
 -- rescale number of total buckets
@@ -42,8 +87,9 @@ FROM table_identifier
 ``` 
 
 Please note that
-- `ALTER TABLE` only modifies the table's metadata and will **NOT** reorganize or reformat existing data. 
-  Reorganize existing data must be achieved by `INSERT OVERWRITE`.
+- `ALTER TABLE` only modifies the table's metadata and will **NOT** reorganize or reformat existing data.
+  Use the rescale procedure or `INSERT OVERWRITE` to reorganize existing data. Guarded tables
+  should use the procedure to retain delete history.
 - Rescale bucket number does not influence the read and running write jobs.
 - Once the bucket number is changed, any newly scheduled `INSERT INTO` jobs which write to without-reorganized 
   existing table/partition will throw a `TableException` with message like 

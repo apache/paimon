@@ -87,7 +87,9 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     protected final TableSchema schema;
 
     private Snapshot specifiedSnapshot = null;
+    @Nullable protected Snapshot currentSnapshot;
     private boolean onlyReadRealBuckets = false;
+    private boolean includeDeleteOrderingGuardPartitions;
     private Integer specifiedBucket = null;
     private Filter<Integer> bucketFilter = null;
     private TriFilter<BinaryRow, Integer, Integer> totalAwareBucketFilter = null;
@@ -302,6 +304,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         long started = System.nanoTime();
         ManifestsReader.Result manifestsResult = readManifests();
         Snapshot snapshot = manifestsResult.snapshot;
+        currentSnapshot = snapshot;
         List<ManifestFileMeta> manifests = manifestsResult.filteredManifests;
 
         Iterator<ManifestEntry> iterator = readManifestEntries(manifests, false);
@@ -368,7 +371,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public List<PartitionEntry> readPartitionEntries() {
-        List<ManifestFileMeta> manifests = readManifests().filteredManifests;
+        ManifestsReader.Result manifestResult = readManifests();
+        List<ManifestFileMeta> manifests = manifestResult.filteredManifests;
         Set<Identifier> deletedEntries =
                 FileEntry.readDeletedEntries(
                         manifest ->
@@ -403,9 +407,39 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 manifests.stream()
                         .filter(manifest -> manifest.numAddedFiles() > 0)
                         .collect(Collectors.toList()));
+        Map<BinaryRow, PartitionEntry> guardPartitions =
+                includeDeleteOrderingGuardPartitions && scanMode == ScanMode.ALL
+                        ? readDeleteOrderingGuardPartitions(manifestResult.snapshot)
+                        : Collections.emptyMap();
+        PartitionPredicate filter = manifestsReader.partitionFilter();
+        guardPartitions.forEach(
+                (partition, entry) -> {
+                    if (filter == null || filter.test(partition)) {
+                        partitions.merge(
+                                partition,
+                                entry,
+                                (data, guard) ->
+                                        guard.totalBuckets()
+                                                        == DeleteOrderingGuardPartitions
+                                                                .UNKNOWN_BUCKETS
+                                                ? guard.merge(data)
+                                                : data.merge(guard));
+                    }
+                });
         return partitions.values().stream()
-                .filter(p -> p.fileCount() > 0)
+                .filter(p -> p.fileCount() > 0 || guardPartitions.containsKey(p.partition()))
                 .collect(Collectors.toList());
+    }
+
+    protected Map<BinaryRow, PartitionEntry> readDeleteOrderingGuardPartitions(
+            @Nullable Snapshot snapshot) {
+        return DeleteOrderingGuardPartitions.read(snapshot);
+    }
+
+    @Override
+    public FileStoreScan withDeleteOrderingGuardPartitions() {
+        includeDeleteOrderingGuardPartitions = true;
+        return this;
     }
 
     @Override

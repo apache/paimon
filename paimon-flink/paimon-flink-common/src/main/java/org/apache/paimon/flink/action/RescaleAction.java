@@ -23,9 +23,12 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.DeleteOrderingGuardRescale;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.PrimaryKeyFileStoreTable;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -38,6 +41,7 @@ import javax.annotation.Nullable;
 
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -99,6 +103,27 @@ public class RescaleAction extends TableActionBase {
                         fileStoreTable.schema().logicalPartitionType(),
                         partition,
                         fileStoreTable.coreOptions().partitionDefaultName());
+
+        if (DeleteOrderingGuardRescale.isRequired(fileStoreTable, snapshot)) {
+            DeleteOrderingGuardRescale migration =
+                    new DeleteOrderingGuardRescale(
+                            (PrimaryKeyFileStoreTable) fileStoreTable,
+                            snapshot,
+                            bucketNum == null ? fileStoreTable.coreOptions().bucket() : bucketNum,
+                            partitionPredicate);
+            List<DataSplit> tasks = migration.plan();
+            Preconditions.checkArgument(
+                    !tasks.isEmpty(),
+                    "The specified partitions have no data or guards. No need to rescale.");
+            DeleteOrderingGuardRescaleBuilder.build(
+                    env,
+                    migration,
+                    tasks,
+                    sinkParallelism != null
+                            ? sinkParallelism
+                            : scanParallelism != null ? scanParallelism : env.getParallelism());
+            return;
+        }
 
         DataStream<RowData> source =
                 new FlinkSourceBuilder(fileStoreTable)

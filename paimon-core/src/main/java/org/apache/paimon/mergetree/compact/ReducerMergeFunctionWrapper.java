@@ -51,15 +51,26 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
     /** Adds the given {@link KeyValue} to the {@link MergeFunction} helper. */
     @Override
     public void add(KeyValue kv) {
-        if (initialKv == null) {
+        if (isInitialized) {
+            merge(kv);
+        } else if (initialKv == null) {
             initialKv = kv;
         } else {
-            if (!isInitialized) {
-                merge(initialKv);
-                isInitialized = true;
-            }
+            merge(initialKv);
+            isInitialized = true;
             merge(kv);
         }
+    }
+
+    @Override
+    public void addDeleteOrderingGuard(KeyValue guard) {
+        if (!isInitialized) {
+            if (initialKv != null) {
+                merge(initialKv);
+            }
+            isInitialized = true;
+        }
+        mergeFunction.addDeleteOrderingGuard(guard);
     }
 
     private void merge(KeyValue kv) {
@@ -69,6 +80,10 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
     /** Get current value of the {@link MergeFunction} helper. */
     @Override
     public KeyValue getResult() {
-        return isInitialized ? mergeFunction.getResult() : initialKv;
+        if (!isInitialized) {
+            return initialKv;
+        }
+        KeyValue result = mergeFunction.getResult();
+        return mergeFunction.isDeleteOrderingGuardResult() ? null : result;
     }
 }

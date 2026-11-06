@@ -18,10 +18,13 @@
 
 package org.apache.paimon.compact;
 
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 
 import java.io.Closeable;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
@@ -37,6 +40,11 @@ public interface CompactManager extends Closeable {
     void addNewFile(DataFileMeta file);
 
     Collection<DataFileMeta> allFiles();
+
+    /** Guard references for the same delivered data state as {@link #allFiles()}. */
+    default List<IndexFileMeta> deleteOrderingGuards() {
+        return Collections.emptyList();
+    }
 
     /**
      * Trigger a new compaction task.

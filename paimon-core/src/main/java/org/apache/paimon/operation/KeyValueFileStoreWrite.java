@@ -31,6 +31,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
@@ -58,6 +59,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -215,6 +217,29 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             ExecutorService compactExecutor,
             @Nullable BucketedDvMaintainer dvMaintainer,
             boolean ignorePreviousFiles) {
+        return createWriter(
+                partition,
+                bucket,
+                restoreFiles,
+                restoredMaxSeqNumber,
+                restoreIncrement,
+                compactExecutor,
+                dvMaintainer,
+                ignorePreviousFiles,
+                Collections.emptyList());
+    }
+
+    @Override
+    protected MergeTreeWriter createWriter(
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> restoreFiles,
+            long restoredMaxSeqNumber,
+            @Nullable CommitIncrement restoreIncrement,
+            ExecutorService compactExecutor,
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            boolean ignorePreviousFiles,
+            List<IndexFileMeta> deleteOrderingGuards) {
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Creating merge tree writer for partition {} bucket {} from restored files {}",
@@ -233,7 +258,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         compactExecutor,
                         restoreFiles,
                         dvMaintainer,
-                        ignorePreviousFiles);
+                        ignorePreviousFiles,
+                        deleteOrderingGuards);
 
         return new MergeTreeWriter(
                 options.writeBufferSpillable(),
