@@ -385,6 +385,29 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public List<Model> listModels(String databaseName) throws DatabaseNotExistException {
+        return wrapped.listModels(databaseName);
+    }
+
+    @Override
+    public Model getModel(Identifier identifier)
+            throws ModelNotExistException, DatabaseNotExistException {
+        return wrapped.getModel(identifier);
+    }
+
+    @Override
+    public Model createModel(Identifier identifier, Model model, boolean ignoreIfExists)
+            throws ModelAlreadyExistException, DatabaseNotExistException, ModelNotExistException {
+        return wrapped.createModel(identifier, model, ignoreIfExists);
+    }
+
+    @Override
+    public void dropModel(Identifier identifier, boolean ignoreIfNotExists)
+            throws ModelNotExistException, DatabaseNotExistException {
+        wrapped.dropModel(identifier, ignoreIfNotExists);
+    }
+
+    @Override
     public List<String> listFunctions(String databaseName) throws DatabaseNotExistException {
         return wrapped.listFunctions(databaseName);
     }

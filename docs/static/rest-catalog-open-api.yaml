@@ -28,6 +28,111 @@ servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
 paths:
+  /v1/{prefix}/databases/{database}/models:
+    get:
+      tags: [model]
+      summary: List models in a database
+      operationId: listModels
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - name: database
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+        - {name: pageToken, in: query, required: false, schema: {type: string}}
+      responses:
+        "200":
+          description: Model metadata in the database
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListModelsResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "501": {description: Models are not supported}
+    post:
+      tags: [model]
+      summary: Create a model
+      operationId: createModel
+      description: >-
+        Registers provider-neutral model metadata. Credentials and task-specific
+        prompts must not be stored in the model.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - name: database
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateModelRequest'
+      responses:
+        "200":
+          description: Persisted model metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetModelResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "409":
+          $ref: '#/components/responses/ModelAlreadyExistErrorResponse'
+        "501": {description: Models are not supported}
+  /v1/{prefix}/databases/{database}/models/{model}:
+    get:
+      tags: [model]
+      summary: Get a model
+      operationId: getModel
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - name: database
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+        - name: model
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+      responses:
+        "200":
+          description: Model metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetModelResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseOrModelNotExistErrorResponse'
+        "501": {description: Models are not supported}
+    delete:
+      tags: [model]
+      summary: Drop a model
+      operationId: dropModel
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - name: database
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+        - name: model
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+      responses:
+        "200": {description: Model dropped}
+        "404":
+          $ref: '#/components/responses/DatabaseOrModelNotExistErrorResponse'
+        "501": {description: Models are not supported}
   /v1/config:
     get:
       tags:
@@ -2699,6 +2804,34 @@ components:
             resourceType: DATABASE
             resourceName: db
             code: 404
+    DatabaseOrModelNotExistErrorResponse:
+      description: >-
+        The database or model does not exist. resourceType is required and must
+        be DATABASE when the database is absent or MODEL when the model is absent.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - type: object
+                required: [ resourceType ]
+                properties:
+                  resourceType:
+                    type: string
+                    enum: [ "DATABASE", "MODEL" ]
+          examples:
+            databaseNotFound:
+              value:
+                message: The given database does not exist
+                resourceType: DATABASE
+                resourceName: db
+                code: 404
+            modelNotFound:
+              value:
+                message: The given model does not exist
+                resourceType: MODEL
+                resourceName: model
+                code: 404
     TableNotExistErrorResponse:
       description:
         Not Found - TableNotExistException, the table does not exist
@@ -2848,6 +2981,17 @@ components:
             message: The given function already exists
             resourceType: FUNCTION
             resourceName: function
+            code: 409
+    ModelAlreadyExistErrorResponse:
+      description: Conflict - The model already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: The given model already exists
+            resourceType: MODEL
+            resourceName: model
             code: 409
     ServerErrorResponse:
       description:
@@ -3071,7 +3215,7 @@ components:
           type: string
         resourceType:
           type: [ string, "null" ]
-          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "DEFINITION", "UNKNOWN", null ]
+          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "MODEL", "DEFINITION", "UNKNOWN", null ]
         resourceName:
           type: [ string, "null" ]
         code:
@@ -4269,6 +4413,81 @@ components:
           format: int64
         updatedBy:
           type: string
+    ModelPathSegment:
+      type: string
+      minLength: 1
+      pattern: '^(?!\.{1,2}$).+'
+      description: A non-empty path segment other than `.` or `..`.
+    ModelField:
+      type: object
+      required: [dataType]
+      properties:
+        dataType:
+          type: string
+          minLength: 1
+        modality:
+          type: string
+          minLength: 1
+      additionalProperties: true
+    CreateModelRequest:
+      type: object
+      additionalProperties: false
+      required: [name, provider, model, inputs]
+      properties:
+        name:
+          $ref: '#/components/schemas/ModelPathSegment'
+        provider:
+          type: string
+          minLength: 1
+        model:
+          type: string
+          minLength: 1
+        inputs:
+          type: object
+          minProperties: 1
+          additionalProperties:
+            $ref: '#/components/schemas/ModelField'
+        outputs:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ModelField'
+        properties:
+          type: object
+          additionalProperties: true
+    GetModelResponse:
+      type: object
+      additionalProperties: false
+      required: [name, provider, model, inputs]
+      properties:
+        name:
+          $ref: '#/components/schemas/ModelPathSegment'
+        provider:
+          type: string
+          minLength: 1
+        model:
+          type: string
+          minLength: 1
+        inputs:
+          type: object
+          minProperties: 1
+          additionalProperties:
+            $ref: '#/components/schemas/ModelField'
+        outputs:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ModelField'
+        properties:
+          type: object
+          additionalProperties: true
+    ListModelsResponse:
+      type: object
+      properties:
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/GetModelResponse'
+        nextPageToken:
+          type: [ string, "null" ]
     ConsumerInfo:
       type: object
       properties:
