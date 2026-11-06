@@ -277,7 +277,9 @@ Copied files keep the columns they were written with, and Paimon reads them by c
 - An existing target must have every source field, nested fields included, with the same type.
   It may have more fields at the top level or inside structs, also structs in arrays and maps, in
   any position, which read as null for the copied files. All its fields must be nullable, otherwise clone fails before copying.
-- A partition whose metastore columns have other types than the table columns fails the clone.
+- An ORC target must not set `orc.force.positional.evolution`, which reads columns by position.
+- A partition with another format than the table, or whose metastore columns have other types
+  than the table columns, fails the clone.
   Columns missing from a partition are read as null.
 - The column names inside the files must match the metastore columns exactly. Positional names,
   such as `_col0` in old Hive ORC files, and names that differ only in case are not mapped to the

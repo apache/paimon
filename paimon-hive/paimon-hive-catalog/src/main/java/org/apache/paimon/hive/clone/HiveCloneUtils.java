@@ -160,6 +160,13 @@ public class HiveCloneUtils {
         }
     }
 
+    /** The partition value Hive uses for null. */
+    public static String defaultPartitionName(HiveCatalog hiveCatalog) throws Exception {
+        return hiveCatalog
+                .getHmsClient()
+                .getConfigValue("hive.exec.default.partition.name", "__HIVE_DEFAULT_PARTITION__");
+    }
+
     /**
      * Converts a Hive table to a Paimon schema.
      *
@@ -189,10 +196,7 @@ public class HiveCloneUtils {
         List<String> partitionKeys = extractor.extractPartitionKeys(hiveTable);
         Map<String, String> options = extractor.extractOptions(hiveTable, copyFiles);
         if (hiveTable.isSetPartitionKeys()) {
-            options.put(
-                    PARTITION_DEFAULT_NAME.key(),
-                    client.getConfigValue(
-                            "hive.exec.default.partition.name", "__HIVE_DEFAULT_PARTITION__"));
+            options.put(PARTITION_DEFAULT_NAME.key(), defaultPartitionName(hiveCatalog));
         }
 
         Schema.Builder schemaBuilder =
@@ -252,7 +256,8 @@ public class HiveCloneUtils {
                         recursive);
     }
 
-    private static String parseFormat(StorageDescriptor sd) {
+    @Nullable
+    static String parseFormat(StorageDescriptor sd) {
         SerDeInfo serdeInfo = sd.getSerdeInfo();
         if (serdeInfo == null) {
             return null;

@@ -42,6 +42,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link CloneAction} with {@code copy_files} and {@code recursive_listing}. */
 public class CloneHiveCopyFilesITCase extends ActionITCaseBase {
@@ -88,7 +89,12 @@ public class CloneHiveCopyFilesITCase extends ActionITCaseBase {
                 tEnv,
                 "CREATE TABLE test.t (extra INT, id STRING, s ROW<b INT, a INT>, "
                         + "tags ARRAY<ROW<b INT, a INT>>, m MAP<STRING, ROW<b INT, a INT>>) "
-                        + "WITH ('bucket' = '-1', 'file.format' = 'orc')");
+                        + "WITH ('bucket' = '-1', 'file.format' = 'orc', "
+                        + "'orc.force.positional.evolution' = 'true')");
+        assertThatThrownBy(() -> cloneWithCopyFiles(dbName, "t"))
+                .hasStackTraceContaining("reads ORC files by position");
+
+        sql(tEnv, "ALTER TABLE test.t SET ('orc.force.positional.evolution' = 'false')");
         cloneWithCopyFiles(dbName, "t");
 
         assertThat(
@@ -110,18 +116,25 @@ public class CloneHiveCopyFilesITCase extends ActionITCaseBase {
                 "CREATE TABLE %s.t (id STRING) PARTITIONED BY (p1 STRING, p2 STRING) STORED AS orc",
                 dbName);
         sql(tEnv, "INSERT INTO %s.t PARTITION (p1 = 'A', p2 = 'B') VALUES ('a')", dbName);
+        // Hive's default partition, which the target names differently
+        sql(
+                tEnv,
+                "INSERT INTO %s.t PARTITION (p1 = 'A', p2) SELECT 'n', CAST(NULL AS STRING)",
+                dbName);
 
         usePaimonCatalog(tEnv);
         sql(
                 tEnv,
                 "CREATE TABLE test.t (id STRING, p1 STRING, p2 STRING) PARTITIONED BY (p2, p1) "
-                        + "WITH ('bucket' = '-1', 'file.format' = 'orc')");
+                        + "WITH ('bucket' = '-1', 'file.format' = 'orc', "
+                        + "'dynamic-partition-overwrite' = 'false')");
         // the partition the source values land in when they are read in the wrong order
         sql(tEnv, "INSERT INTO test.t VALUES ('keep', 'B', 'A')");
         cloneWithCopyFiles(dbName, "t");
 
         assertThat(sql(tEnv, "SELECT * FROM test.t"))
-                .containsExactlyInAnyOrder(Row.of("a", "A", "B"), Row.of("keep", "B", "A"));
+                .containsExactlyInAnyOrder(
+                        Row.of("a", "A", "B"), Row.of("n", "A", null), Row.of("keep", "B", "A"));
     }
 
     @Test

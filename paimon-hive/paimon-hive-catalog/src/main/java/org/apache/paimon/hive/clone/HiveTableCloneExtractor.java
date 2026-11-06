@@ -31,10 +31,12 @@ import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
+import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.slf4j.Logger;
@@ -141,7 +143,11 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
     @Override
     public Map<String, String> extractOptions(Table table, boolean copyFiles) {
         Map<String, String> hiveTableOptions = table.getParameters();
-        if (copyFiles && "true".equalsIgnoreCase(hiveTableOptions.get("transactional"))) {
+        // Hive also reads the upper case key
+        String transactional =
+                hiveTableOptions.getOrDefault(
+                        "transactional", hiveTableOptions.get("TRANSACTIONAL"));
+        if (copyFiles && "true".equalsIgnoreCase(transactional)) {
             // ACID files wrap rows with transaction metadata, and aborted writes leave files behind
             throw new UnsupportedOperationException(
                     "Copying data files is not supported for transactional tables.");
@@ -240,7 +246,7 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
                                 valueSetters,
                                 defaultPartitionName);
                 if (predicate == null || predicate.test(partitionRow)) {
-                    checkPartitionColumns(identifier, sourceTable, partition);
+                    checkPartition(identifier, sourceTable, partition, format);
                     results.add(listFiles(fileIO, location, partitionRow, format, recursive));
                 }
             }
@@ -275,11 +281,28 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
     }
 
     /**
-     * Copied files are read with the table columns, so a partition must not declare a column of the
-     * table with another type. Columns missing from a partition are read as null.
+     * Copied files are read with the format and columns of the table, so a partition must not have
+     * another format or declare a column of the table with another type. Columns missing from a
+     * partition are read as null.
      */
-    private static void checkPartitionColumns(
-            Identifier identifier, Table table, Partition partition) {
+    @VisibleForTesting
+    static void checkPartition(
+            Identifier identifier, Table table, Partition partition, String format) {
+        SerDeInfo serde = partition.getSd().getSerdeInfo();
+        if (serde != null && !StringUtils.isNullOrWhitespaceOnly(serde.getSerializationLib())) {
+            String partitionFormat = parseFormat(partition.getSd());
+            if (!format.equals(partitionFormat)) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Can not copy the files of partition %s of table %s: it has format '%s' but the table has format '%s'.",
+                                partition.getValues(),
+                                identifier,
+                                partitionFormat == null
+                                        ? serde.getSerializationLib()
+                                        : partitionFormat,
+                                format));
+            }
+        }
         if (!partition.getSd().isSetCols()) {
             return;
         }

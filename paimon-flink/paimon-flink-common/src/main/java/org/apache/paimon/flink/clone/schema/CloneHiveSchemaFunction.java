@@ -177,6 +177,12 @@ public class CloneHiveSchemaFunction
 
             targetCatalog.createTable(tuple.f1, schema, false);
         }
+        if (copyFiles) {
+            // the catalog may have added default options to a created table
+            Table targetTable = targetCatalog.getTable(tuple.f1);
+            checkNotReadByPosition(
+                    options.get(FILE_FORMAT.key()), targetTable.options(), targetTable.fullName());
+        }
 
         CloneSchemaInfo schemaInfo = new CloneSchemaInfo(tuple, supportCloneSplits);
         collector.collect(schemaInfo);
@@ -242,6 +248,30 @@ public class CloneHiveSchemaFunction
 
     private static boolean canReadElement(DataType source, DataType existed) {
         return existed.isNullable() && canRead(source, existed);
+    }
+
+    /**
+     * A table forcing positional schema evolution reads the fields of ORC files by position. Only
+     * the selected non-partition fields of a file are read, so which column of a copied file a
+     * field gets would depend on the query.
+     */
+    private static void checkNotReadByPosition(
+            String format, Map<String, String> options, String tableName) {
+        if (!"orc".equals(format)) {
+            return;
+        }
+        String prefix = "orc.";
+        for (Map.Entry<String, String> option : options.entrySet()) {
+            String key = option.getKey();
+            checkState(
+                    !(key.regionMatches(true, 0, prefix, 0, prefix.length())
+                            && key.substring(prefix.length()).equals("force.positional.evolution")
+                            && Boolean.parseBoolean(option.getValue().trim())),
+                    "Can not copy data files to paimon table %s because it reads ORC files by "
+                            + "position, as option '%s' is true.",
+                    tableName,
+                    key);
+        }
     }
 
     private void checkCompatible(Schema sourceSchema, FileStoreTable existedTable) {

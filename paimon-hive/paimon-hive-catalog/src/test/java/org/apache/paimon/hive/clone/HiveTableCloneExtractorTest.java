@@ -25,6 +25,10 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.apache.hadoop.hive.metastore.api.FieldSchema;
+import org.apache.hadoop.hive.metastore.api.Partition;
+import org.apache.hadoop.hive.metastore.api.SerDeInfo;
+import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -160,12 +164,60 @@ class HiveTableCloneExtractorTest {
     }
 
     @Test
-    void copyingFilesOfTransactionalTablesIsRejected() {
+    void partitionsWithAnotherFormatOrColumnTypeAreRejected() {
+        Identifier identifier = Identifier.create("db", "t");
         Table table = new Table();
-        table.setParameters(Collections.singletonMap("transactional", "true"));
+        table.setSd(storage("orc", "int"));
 
-        assertThatThrownBy(() -> HiveTableCloneExtractor.INSTANCE.extractOptions(table, true))
-                .isInstanceOf(UnsupportedOperationException.class);
+        HiveTableCloneExtractor.checkPartition(
+                identifier, table, partition(storage("orc", "int")), "orc");
+        HiveTableCloneExtractor.checkPartition(
+                identifier, table, partition(new StorageDescriptor()), "orc");
+        // a serde unknown to the clone, such as RCFile, is not taken for the table format
+        for (String format : Arrays.asList("parquet", "rcfile")) {
+            assertThatThrownBy(
+                            () ->
+                                    HiveTableCloneExtractor.checkPartition(
+                                            identifier,
+                                            table,
+                                            partition(storage(format, "int")),
+                                            "orc"))
+                    .hasMessageContaining("format '" + format);
+        }
+        assertThatThrownBy(
+                        () ->
+                                HiveTableCloneExtractor.checkPartition(
+                                        identifier,
+                                        table,
+                                        partition(storage("orc", "bigint")),
+                                        "orc"))
+                .hasMessageContaining("type 'bigint'");
+    }
+
+    @Test
+    void copyingFilesOfTransactionalTablesIsRejected() {
+        for (String key : Arrays.asList("transactional", "TRANSACTIONAL")) {
+            Table table = new Table();
+            table.setParameters(Collections.singletonMap(key, "true"));
+
+            assertThatThrownBy(() -> HiveTableCloneExtractor.INSTANCE.extractOptions(table, true))
+                    .isInstanceOf(UnsupportedOperationException.class);
+        }
+    }
+
+    private static StorageDescriptor storage(String format, String idType) {
+        StorageDescriptor sd = new StorageDescriptor();
+        sd.setSerdeInfo(new SerDeInfo());
+        sd.getSerdeInfo().setSerializationLib(format + "Serde");
+        sd.setCols(Collections.singletonList(new FieldSchema("id", idType, null)));
+        return sd;
+    }
+
+    private static Partition partition(StorageDescriptor sd) {
+        Partition partition = new Partition();
+        partition.setValues(Collections.singletonList("1"));
+        partition.setSd(sd);
+        return partition;
     }
 
     private static List<String> recursivelyListedFiles(FileIO fileIO, String location)

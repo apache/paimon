@@ -81,7 +81,7 @@ public class ListCloneFilesFunction
                             hiveCatalog,
                             tuple.f0,
                             table.schema().logicalPartitionType(),
-                            table.coreOptions().partitionDefaultName(),
+                            HiveCloneUtils.defaultPartitionName(hiveCatalog),
                             predicate,
                             recursive);
             for (HivePartitionFiles partitionFiles : allPartitions) {
