@@ -34,7 +34,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -157,63 +156,91 @@ public class NormalPartitionExpire implements PartitionExpire {
             LocalDateTime expireDateTime, long commitIdentifier) {
         List<PartitionEntry> partitionEntries =
                 strategy.selectExpiredPartitions(scan, expireDateTime);
-        List<List<String>> expiredPartValues = new ArrayList<>(partitionEntries.size());
+        List<ExpiredPartition> expiredPartitions = new ArrayList<>(partitionEntries.size());
         for (PartitionEntry partition : partitionEntries) {
             Object[] array = strategy.convertPartition(partition.partition());
-            // DATE values are normalized for time extraction; use the stored names for dropping.
+            // DATE and TIMESTAMP values are normalized for time extraction; report the stored
+            // names instead.
             Map<String, String> partitionSpec =
                     commit.pathFactory()
                             .partitionComputer()
                             .generatePartValues(partition.partition());
             int index = 0;
             for (String value : partitionSpec.values()) {
-                if (array[index] instanceof LocalDate) {
+                if (array[index] != null && strategy.isNormalizedForTimeExtraction(index)) {
                     array[index] = value;
                 }
                 index++;
             }
-            expiredPartValues.add(strategy.toPartitionValue(array));
+            List<String> values = strategy.toPartitionValue(array);
+            // Sort on the joined form, but build the partition from the original values: a
+            // value may itself contain DELIMITER, and splitting the joined string back apart
+            // would then shift every following field by one.
+            expiredPartitions.add(
+                    new ExpiredPartition(
+                            partition.partition(),
+                            String.join(DELIMITER, values),
+                            strategy.toPartitionString(values.toArray())));
         }
 
-        List<Map<String, String>> expired = new ArrayList<>();
-        if (!expiredPartValues.isEmpty()) {
-            // convert partition value to partition string, and limit the partition num
-            expired = convertToPartitionString(expiredPartValues);
+        List<ExpiredPartition> selected =
+                expiredPartitions.stream()
+                        .sorted(Comparator.comparing(p -> p.sortKey))
+                        .limit(Math.min(expiredPartitions.size(), maxExpireNum))
+                        .collect(Collectors.toList());
+        List<Map<String, String>> expired =
+                selected.stream().map(p -> p.name).collect(Collectors.toList());
+        if (!selected.isEmpty()) {
             LOG.info("Expire Partitions: {}", expired);
-            if (expireBatchSize > 0 && expireBatchSize < expired.size()) {
-                Lists.partition(expired, expireBatchSize)
+            if (expireBatchSize > 0 && expireBatchSize < selected.size()) {
+                Lists.partition(selected, expireBatchSize)
                         .forEach(
                                 expiredBatchPartitions ->
                                         doBatchExpire(expiredBatchPartitions, commitIdentifier));
             } else {
-                doBatchExpire(expired, commitIdentifier);
+                doBatchExpire(selected, commitIdentifier);
             }
         }
         return expired;
     }
 
     private void doBatchExpire(
-            List<Map<String, String>> expiredBatchPartitions, long commitIdentifier) {
+            List<ExpiredPartition> expiredBatchPartitions, long commitIdentifier) {
         if (partitionModification != null) {
+            // the metastore identifies partitions by their stored names
+            List<Map<String, String>> names =
+                    expiredBatchPartitions.stream().map(p -> p.name).collect(Collectors.toList());
             try {
-                partitionModification.dropPartitions(expiredBatchPartitions);
+                partitionModification.dropPartitions(names);
             } catch (Catalog.TableNotExistException e) {
                 throw new RuntimeException(e);
             }
         } else {
-            commit.dropPartitions(expiredBatchPartitions, commitIdentifier);
+            // Drop the selected partitions themselves: a stored name is not always parsed back
+            // to the same partition, e.g. when it equals the default partition name or is a
+            // TIMESTAMP_LTZ value spelled in UTC but parsed in the local time zone.
+            commit.dropBinaryPartitions(
+                    expiredBatchPartitions.stream()
+                            .map(p -> p.partition)
+                            .collect(Collectors.toList()),
+                    commitIdentifier);
         }
     }
 
-    private List<Map<String, String>> convertToPartitionString(
-            List<List<String>> expiredPartValues) {
-        // Sort on the joined form, but build the partition from the original values: a value
-        // may itself contain DELIMITER, and splitting the joined string back apart would then
-        // shift every following field by one.
-        return expiredPartValues.stream()
-                .sorted(Comparator.comparing(values -> String.join(DELIMITER, values)))
-                .map(values -> strategy.toPartitionString(values.toArray()))
-                .limit(Math.min(expiredPartValues.size(), maxExpireNum))
-                .collect(Collectors.toList());
+    /**
+     * A partition selected for expiration. The stored name is for reporting and the metastore,
+     * while local deletion uses the original partition.
+     */
+    private static class ExpiredPartition {
+
+        private final BinaryRow partition;
+        private final String sortKey;
+        private final Map<String, String> name;
+
+        private ExpiredPartition(BinaryRow partition, String sortKey, Map<String, String> name) {
+            this.partition = partition;
+            this.sortKey = sortKey;
+            this.name = name;
+        }
     }
 }

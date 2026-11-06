@@ -717,6 +717,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
+    public void dropBinaryPartitions(List<BinaryRow> partitions, long commitIdentifier) {
+        checkArgument(!partitions.isEmpty(), "Partitions list cannot be empty.");
+        tryOverwritePartition(
+                PartitionPredicate.fromMultiple(partitionType, partitions),
+                emptyList(),
+                emptyList(),
+                commitIdentifier,
+                null,
+                new HashMap<>());
+    }
+
+    @Override
     public void truncateTable(long commitIdentifier) {
         tryOverwritePartition(
                 null, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
