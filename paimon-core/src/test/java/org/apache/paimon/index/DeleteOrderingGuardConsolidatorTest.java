@@ -142,7 +142,7 @@ class DeleteOrderingGuardConsolidatorTest {
                         new DeleteOrderingGuardReader(
                                 Collections.singletonList(input),
                                 (a, b) -> Integer.compare(a.getInt(0), b.getInt(0))));
-        return new DeleteOrderingGuardConsolidator(state, serializer, file, null, false, 2);
+        return new DeleteOrderingGuardConsolidator(state, serializer, file, null, 2);
     }
 
     private List<IndexFileMeta> sources(

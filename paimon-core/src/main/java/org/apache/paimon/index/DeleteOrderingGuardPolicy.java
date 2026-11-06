@@ -22,8 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
@@ -118,13 +116,9 @@ public class DeleteOrderingGuardPolicy {
                                 CoreOptions.SEQUENCE_FIELD.key(),
                                 CoreOptions.SEQUENCE_FIELD_SORT_ORDER.key(),
                                 CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(),
-                                CoreOptions.IGNORE_DELETE.key(),
-                                CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE.key(),
-                                CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP.key()));
+                                CoreOptions.IGNORE_DELETE.key()));
         for (String key : keys) {
-            if (!explicit.contains(key)
-                    && (fixed.contains(key)
-                            || PartialUpdateMergeFunction.isSequenceGroupOptionCandidate(key))) {
+            if (!explicit.contains(key) && fixed.contains(key)) {
                 if (historical.options().containsKey(key)) {
                     options.put(key, historical.options().get(key));
                 } else {
@@ -141,21 +135,6 @@ public class DeleteOrderingGuardPolicy {
         result.put("direction", options.sequenceFieldSortOrderIsAscending());
         result.put("ignore-delete", options.ignoreDelete());
         result.put("snapshot-ordering", options.snapshotSequenceOrdering());
-        Options values = Options.fromMap(options.toMap());
-        result.put("remove-record", values.get(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE));
-        result.put(
-                "remove-group",
-                values.get(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP));
-        options.toMap()
-                .forEach(
-                        (key, value) -> {
-                            if (PartialUpdateMergeFunction.isSequenceGroupOptionCandidate(key)) {
-                                result.put(key, value);
-                            }
-                        });
-        result.put(
-                "group-directions",
-                PartialUpdateMergeFunction.parseSequenceGroupSortOrders(values));
         return result;
     }
 }

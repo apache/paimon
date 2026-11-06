@@ -282,8 +282,6 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                                         guardSerializer,
                                         guardFile,
                                         userDefinedSeqComparator,
-                                        options.mergeEngine()
-                                                == CoreOptions.MergeEngine.DEDUPLICATE,
                                         options.deleteOrderingGuardsCompactionMinFileNum()));
     }
 

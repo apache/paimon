@@ -26,10 +26,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /**
  * Ordering metadata of an explicit retract, without its value payload.
  *
- * <p>The ordering row contains only the source sequence and sequence-group ordering fields. The
- * schema that produced the guard defines their comparison and whole-row deletion semantics.
- * Internal sequence numbers, input levels, and retract kinds are retained independently of those
- * fields. Guards must not be exposed as ordinary data or changelog records.
+ * <p>The ordering row contains only the source sequence fields. The schema that produced the guard
+ * defines their comparison and deletion semantics. Internal sequence numbers, input levels, and
+ * retract kinds are retained independently of those fields. Guards must not be exposed as ordinary
+ * data or changelog records.
  */
 public class DeleteOrderingGuard {
 
