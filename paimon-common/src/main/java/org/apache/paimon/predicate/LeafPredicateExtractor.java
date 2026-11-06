@@ -21,7 +21,6 @@ package org.apache.paimon.predicate;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 
 /** Extract leaf predicate for field names. */
 public class LeafPredicateExtractor implements PredicateVisitor<Map<String, LeafPredicate>> {
@@ -30,9 +29,9 @@ public class LeafPredicateExtractor implements PredicateVisitor<Map<String, Leaf
 
     @Override
     public Map<String, LeafPredicate> visit(LeafPredicate predicate) {
-        Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
         // A leaf on a transform such as UPPER(name) does not constrain the field itself.
-        return fieldRefOptional
+        return predicate
+                .fieldRefOptional()
                 .map(fieldRef -> Collections.singletonMap(fieldRef.name(), predicate))
                 .orElse(Collections.emptyMap());
     }
