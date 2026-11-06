@@ -25,8 +25,10 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -37,6 +39,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Projection;
 
@@ -45,6 +48,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
@@ -115,6 +119,20 @@ public class BucketsTableTest extends TableTestBase {
 
         filter = builder.equal(0, BinaryString.fromString("{999}"));
         assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4})).isEmpty();
+    }
+
+    @Test
+    public void testBucketsTableWithPartitionTransformFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(BucketsTable.TABLE_TYPE);
+        DataField partitionField = BucketsTable.TABLE_TYPE.getFields().get(0);
+        UpperTransform upperPartition =
+                new UpperTransform(
+                        Collections.singletonList(
+                                new FieldRef(0, partitionField.name(), partitionField.type())));
+
+        Predicate filter = builder.equal(upperPartition, BinaryString.fromString("{2}"));
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {1, 2, 4}))
+                .containsExactlyInAnyOrder(GenericRow.of(0, 2L, 2L));
     }
 
     @Test
