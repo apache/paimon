@@ -1791,6 +1791,52 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
+    public void testAggregationRemoveRecordOnDeleteThenInsert() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "aggregation");
+                            options.set("aggregation.remove-record-on-delete", "true");
+                            options.set("fields.b.aggregate-function", "sum");
+                            options.set("fields.c.aggregate-function", "first_value");
+                        },
+                        rowType);
+        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
+        SnapshotReader snapshotReader = table.newSnapshotReader();
+        TableRead read = table.newRead();
+        StreamTableWrite write = table.newWrite("");
+        StreamTableCommit commit = table.newCommit("");
+
+        write.write(GenericRow.of(1, 1, 10, 1));
+        commit.commit(0, write.prepareCommit(true, 0));
+        assertThat(getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString))
+                .containsExactly("+I[1, 1, 10, 1]");
+
+        // the delete removes the record, carrying the old image like a CDC delete
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 10, 1));
+        commit.commit(1, write.prepareCommit(true, 1));
+        assertThat(getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString))
+                .isEmpty();
+
+        // later inserts start a new aggregation, the deleted values must not survive
+        write.write(GenericRow.of(1, 1, 3, 7));
+        commit.commit(2, write.prepareCommit(true, 2));
+        write.write(GenericRow.of(1, 1, 4, 8));
+        commit.commit(3, write.prepareCommit(true, 3));
+        assertThat(getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString))
+                .containsExactly("+I[1, 1, 7, 7]");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testAggregationRemoveRecordOnDelete() throws Exception {
         RowType rowType =
                 RowType.of(

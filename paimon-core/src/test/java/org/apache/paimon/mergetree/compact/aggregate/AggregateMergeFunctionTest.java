@@ -171,6 +171,40 @@ class AggregateMergeFunctionTest {
         assertThat(aggregateFunction.getResult().value()).isEqualTo(GenericRow.of(1, 2, 2, null));
     }
 
+    @Test
+    void testInsertAfterRemovingDeleteStartsFresh() {
+        Options options = new Options();
+        options.set(FIELDS_DEFAULT_AGG_FUNC, "sum");
+        options.set("fields.c.aggregate-function", "first_value");
+        options.set("aggregation.remove-record-on-delete", "true");
+        MergeFunction<KeyValue> aggregateFunction =
+                AggregateMergeFunction.factory(
+                                options,
+                                RowType.builder()
+                                        .fields(
+                                                new DataType[] {
+                                                    DataTypes.INT().notNull(),
+                                                    DataTypes.INT(),
+                                                    DataTypes.INT(),
+                                                    DataTypes.INT()
+                                                },
+                                                new String[] {"k", "a", "b", "c"})
+                                        .build(),
+                                Collections.singletonList("k"))
+                        .create();
+        aggregateFunction.reset();
+
+        aggregateFunction.add(value(1, 10, 10, 1));
+        // the delete carries the old image of the record, as a CDC delete does
+        aggregateFunction.add(deleteValue(1, 10, 10, 1));
+        // the record was removed, so the new records aggregate from scratch
+        aggregateFunction.add(value(1, 3, null, 7));
+        aggregateFunction.add(value(1, 4, 5, 8));
+        KeyValue result = aggregateFunction.getResult();
+        assertThat(result.valueKind()).isEqualTo(RowKind.INSERT);
+        assertThat(result.value()).isEqualTo(GenericRow.of(1, 7, 5, 7));
+    }
+
     private KeyValue value(Integer... values) {
         return new KeyValue()
                 .replace(GenericRow.of(values[0]), RowKind.INSERT, GenericRow.of(values));
