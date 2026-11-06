@@ -439,6 +439,36 @@ def test_compute_columns_restores_nested_nullability(tmp_path, data_type, value,
     assert _rows(table, ["id", "value"]) == [{"id": 0, "value": value}, {"id": 1, "value": None}]
 
 
+@pytest.mark.parametrize("as_table", [False, True])
+@pytest.mark.parametrize("canonical", [False, True])
+def test_compute_columns_preserves_hidden_null_children(tmp_path, as_table, canonical):
+    connection = pmm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    data_type = pa.struct([pa.field("x", pa.int64(), nullable=False)])
+    schema = pa.schema([("id", pa.int64()), ("value", data_type)])
+    table = connection.create_table(
+        "nested", schema=schema,
+        data=pa.table({"id": [0, 1], "value": [{"x": 2}, None]}, schema=schema),
+        options={"file.format": "parquet"})
+    snapshot = _snapshot(table)
+
+    def compute(batch):
+        ids = batch["id"].to_pylist()
+        array = pa.StructArray.from_arrays(
+            [pa.array([2 if value == 0 else None for value in ids], type=pa.int64())],
+            fields=[pa.field("x", pa.int64(), nullable=not canonical)],
+            mask=pa.array([value != 0 for value in ids]))
+        array.validate(full=True)
+        factory = pa.Table if as_table else pa.RecordBatch
+        return factory.from_arrays([array], names=["value"])
+
+    result = table.compute_columns(["value"], inputs=["id"], fn=compute)
+    assert result.source_snapshot_id == snapshot
+    assert result.snapshot_id > snapshot
+    assert result.updated_rows == 2
+    assert result.added_columns == ()
+    assert _rows(table, ["id", "value"]) == [{"id": 0, "value": {"x": 2}}, {"id": 1, "value": None}]
+
+
 def test_compute_columns_normalizes_reordered_outputs_with_null_siblings(tmp_path):
     connection = pmm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     data_type = pa.struct([pa.field("x", pa.int64(), nullable=False)])

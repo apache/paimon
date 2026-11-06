@@ -190,15 +190,18 @@ def _normalize_output(data, schema):
         array = data[field.name]
         if not pa.types.is_null(array.type):
             source_type = _canonical_field(pa.field(field.name, array.type)).type
+            # Same-type casts can reject child NULLs hidden by a NULL parent.
+            if array.type != source_type:
+                array = array.cast(source_type)
             # Read schemas relax nested nullability; restore it before comparing types.
-            source = pa.Table.from_arrays([array.cast(source_type)], names=[field.name])
+            source = pa.Table.from_arrays([array], names=[field.name])
             array = normalize_arrow_write_nullability(source, pa.schema([field]))[field.name]
             if array.type != field.type:
                 raise ValueError("Incompatible type for column %s: %s != %s"
                                  % (field.name, array.type, field.type))
         if not field.nullable and array.null_count:
             raise ValueError("Cannot write null to non-null column %s." % field.name)
-        arrays.append(array.cast(field.type))
+        arrays.append(array if array.type == field.type else array.cast(field.type))
     return pa.Table.from_arrays(arrays, schema=schema)
 
 
