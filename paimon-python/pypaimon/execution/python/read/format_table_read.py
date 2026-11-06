@@ -19,6 +19,7 @@ from typing import Any, Dict, Iterator, List, Optional
 
 import pyarrow
 
+from pypaimon.execution.python.format_table_json import JsonReader
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.format.format_data_split import FormatDataSplit
 from pypaimon.table.format.format_table import FormatTable, Format
@@ -47,6 +48,7 @@ def _read_file_to_arrow(
     partition_key_types: Optional[Dict[str, pyarrow.DataType]] = None,
     text_column_name: Optional[str] = None,
     text_line_delimiter: str = "\n",
+    text_reader: Optional[JsonReader] = None,
 ) -> pyarrow.Table:
     path = split.data_path()
     csv_read_options = None
@@ -91,16 +93,7 @@ def _read_file_to_arrow(
         except (pyarrow.ArrowException, OSError) as e:
             raise RuntimeError(f"Failed to read {path}") from e
     elif fmt == Format.JSON:
-        import json
-        text = data.decode("utf-8") if isinstance(data, bytes) else data
-        records = []
-        for line in text.strip().split("\n"):
-            line = line.strip()
-            if line:
-                records.append(json.loads(line))
-        if not records:
-            return pyarrow.table({})
-        tbl = pyarrow.Table.from_pylist(records)
+        tbl = text_reader.read(data)
     elif fmt == Format.ORC:
         import io
         import pyarrow.orc as orc
@@ -150,6 +143,16 @@ def _read_file_to_arrow(
     return tbl
 
 
+def _text_reader(table: FormatTable, read_fields: Optional[List[str]]) -> Optional[JsonReader]:
+    if table.format() != Format.JSON:
+        return None
+    fields = {f.name: f for f in table.fields}
+    data_fields = [f for f in table.fields if f.name not in table.partition_keys]
+    # PyPaimon's files hold the partition columns too, Java's do not.
+    partition_fields = [fields[key] for key in table.partition_keys]
+    return JsonReader(data_fields + partition_fields, read_fields, table.options(), table.partition_keys)
+
+
 def _partition_key_types(
     table: FormatTable,
 ) -> Optional[Dict[str, pyarrow.DataType]]:
@@ -181,6 +184,7 @@ def to_arrow(
         if fmt == Format.TEXT
         else "\n"
     )
+    text_reader = _text_reader(self.table, read_fields)
     tables = []
     nrows = 0
     for split in splits:
@@ -193,6 +197,7 @@ def to_arrow(
             partition_key_types,
             text_column_name=text_col,
             text_line_delimiter=text_delim,
+            text_reader=text_reader,
         )
         if t.num_rows > 0:
             tables.append(t)
@@ -236,6 +241,7 @@ def to_iterator(
         if fmt == Format.TEXT
         else "\n"
     )
+    text_reader = _text_reader(self.table, self.projection)
     n_yielded = 0
     for split in splits:
         if self.limit is not None and n_yielded >= self.limit:
@@ -249,6 +255,7 @@ def to_iterator(
             partition_key_types,
             text_column_name=text_col,
             text_line_delimiter=text_delim,
+            text_reader=text_reader,
         )
         for batch in t.to_batches():
             for i in range(batch.num_rows):
