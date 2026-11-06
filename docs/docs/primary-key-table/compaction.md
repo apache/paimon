@@ -70,6 +70,13 @@ publishes it. MOW batch readers can opt into merging pending data with
 For `changelog-producer = lookup`, generated changelogs are also delayed. A compactor that cannot
 keep up with sustained input will keep falling behind; relaxing waits does not add capacity.
 
+## Concurrent compaction
+
+File-level conflict checks can miss conflicts between concurrent compactions. For primary-key
+tables with deletion vectors and `write-only = false`, Paimon therefore rejects concurrent
+compaction commits from different writers on the same partition. Different partitions can
+compact independently.
+
 ## Dedicated compaction job
 
 Set `write-only = true` on ingest writers and run a

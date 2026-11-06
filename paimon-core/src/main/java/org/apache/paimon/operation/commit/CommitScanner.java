@@ -40,6 +40,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -89,6 +90,69 @@ public class CommitScanner {
                 .withPartitionFilter(changedPartitions)
                 .plan()
                 .files();
+    }
+
+    boolean hasDataChanges(Snapshot snapshot, Set<BinaryRow> partitions, boolean onlyRealBuckets) {
+        if (partitions.isEmpty()) {
+            return false;
+        }
+        FileStoreScan deltaScan =
+                scanSupplier
+                        .get()
+                        .withSnapshot(snapshot)
+                        .withKind(ScanMode.DELTA)
+                        .withPartitionFilter(new ArrayList<>(partitions))
+                        .dropStats();
+        if (onlyRealBuckets) {
+            deltaScan.onlyReadRealBuckets();
+        }
+        Iterator<ManifestEntry> entries = deltaScan.readFileIterator();
+        while (entries.hasNext()) {
+            if (partitions.contains(entries.next().partition())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    boolean hasIndexChanges(
+            Snapshot snapshot, Set<BinaryRow> partitions, boolean requirePreviousSnapshot) {
+        if (partitions.isEmpty()) {
+            return false;
+        }
+        String indexManifest = snapshot.indexManifest();
+        String previousIndexManifest = null;
+        long previousId = snapshot.id() - 1;
+        if (previousId >= Snapshot.FIRST_SNAPSHOT_ID
+                && (requirePreviousSnapshot || snapshotManager.snapshotExists(previousId))) {
+            previousIndexManifest = snapshotManager.snapshot(previousId).indexManifest();
+        }
+        if (Objects.equals(indexManifest, previousIndexManifest)) {
+            return false;
+        }
+        // Compare both sides. An OVERWRITE such as rollbackToAsLatest can drop a DV entry
+        // without any data-file delta.
+        Set<IndexManifestEntry> previousEntries =
+                readIndexEntries(previousIndexManifest, partitions);
+        for (IndexManifestEntry entry : readIndexEntries(indexManifest, partitions)) {
+            if (!previousEntries.remove(entry)) {
+                return true;
+            }
+        }
+        return !previousEntries.isEmpty();
+    }
+
+    private Set<IndexManifestEntry> readIndexEntries(
+            @Nullable String indexManifest, Set<BinaryRow> partitions) {
+        Set<IndexManifestEntry> entries = new HashSet<>();
+        if (indexManifest != null) {
+            for (IndexManifestEntry entry : indexManifestFile.read(indexManifest)) {
+                if (partitions.contains(entry.partition())) {
+                    entries.add(entry);
+                }
+            }
+        }
+        return entries;
     }
 
     public List<SimpleFileEntry> readAllEntriesFromChangedPartitions(

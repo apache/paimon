@@ -37,8 +37,6 @@ import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.memory.HeapMemorySegmentPool;
-import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
@@ -48,13 +46,10 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.InternalRowUtils;
-import org.apache.paimon.utils.RecordWriter;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -186,59 +181,28 @@ class PrimaryKeySortedIndexMaintenanceTest {
             long identifier)
             throws Exception {
         AbstractFileStoreWrite<KeyValue> write = store.newWrite();
-        write.withIOManager(ioManager);
-        AbstractFileStoreWrite.WriterContainer<KeyValue> container =
-                write.createWriterContainer(partition, bucket);
-        RecordWriter<KeyValue> writer = container.writer;
-        ((MemoryOwner) writer)
-                .setMemoryPool(
-                        new HeapMemorySegmentPool(
-                                TestFileStore.WRITE_BUFFER_SIZE.getBytes(),
-                                (int) TestFileStore.PAGE_SIZE.getBytes()));
-        for (KeyValue record : records) {
-            writer.write(record);
+        try {
+            write.withIOManager(ioManager);
+            for (KeyValue record : records) {
+                write.write(partition, bucket, record);
+            }
+            commit(store, write.prepareCommit(true, identifier), identifier);
+        } finally {
+            write.close();
         }
-        commit(
-                store,
-                Collections.singletonList(prepareCommit(container, partition, bucket)),
-                identifier);
-        container.writer.close();
-        container.primaryKeyIndexMaintainer.close();
-        write.close();
     }
 
     private void compactAndCommit(
             TestFileStore store, BinaryRow partition, int bucket, long identifier)
             throws Exception {
         AbstractFileStoreWrite<KeyValue> write = store.newWrite();
-        write.withIOManager(ioManager);
-        AbstractFileStoreWrite.WriterContainer<KeyValue> container =
-                write.createWriterContainer(partition, bucket);
-        ((MemoryOwner) container.writer)
-                .setMemoryPool(
-                        new HeapMemorySegmentPool(
-                                TestFileStore.WRITE_BUFFER_SIZE.getBytes(),
-                                (int) TestFileStore.PAGE_SIZE.getBytes()));
-        container.writer.compact(true);
-        commit(
-                store,
-                Collections.singletonList(prepareCommit(container, partition, bucket)),
-                identifier);
-        container.writer.close();
-        container.primaryKeyIndexMaintainer.close();
-        write.close();
-    }
-
-    private CommitMessage prepareCommit(
-            AbstractFileStoreWrite.WriterContainer<KeyValue> container,
-            BinaryRow partition,
-            int bucket)
-            throws Exception {
-        CommitIncrement increment = container.writer.prepareCommit(true);
-        container.primaryKeyIndexMaintainer.prepareCommit(
-                increment.newFilesIncrement(), increment.compactIncrement(), true);
-        return new CommitMessageImpl(
-                partition, bucket, 1, increment.newFilesIncrement(), increment.compactIncrement());
+        try {
+            write.withIOManager(ioManager);
+            write.compact(partition, bucket, true);
+            commit(store, write.prepareCommit(true, identifier), identifier);
+        } finally {
+            write.close();
+        }
     }
 
     private void commit(TestFileStore store, List<CommitMessage> messages, long identifier) {
