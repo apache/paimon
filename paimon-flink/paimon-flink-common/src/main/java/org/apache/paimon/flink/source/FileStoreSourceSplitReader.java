@@ -56,6 +56,8 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** The {@link SplitReader} implementation for the file store source. */
 public class FileStoreSourceSplitReader
         implements SplitReader<BulkFormat.RecordIterator<RowData>, FileStoreSourceSplit> {
@@ -79,6 +81,9 @@ public class FileStoreSourceSplitReader
     private final AtomicBoolean wakeup;
     private final FileStoreSourceReaderMetrics metrics;
     private final boolean blobAsDescriptor;
+    private final int maxRecordsPerPoll;
+
+    @Nullable private FlinkRecordsWithSplitIds budgetedBatch;
 
     public FileStoreSourceSplitReader(
             TableRead tableRead,
@@ -86,6 +91,17 @@ public class FileStoreSourceSplitReader
             FileStoreSourceReaderMetrics metrics,
             @Nullable RowType readType,
             boolean blobAsDescriptor) {
+        this(tableRead, limiter, metrics, readType, blobAsDescriptor, 0);
+    }
+
+    public FileStoreSourceSplitReader(
+            TableRead tableRead,
+            @Nullable RecordLimiter limiter,
+            FileStoreSourceReaderMetrics metrics,
+            @Nullable RowType readType,
+            boolean blobAsDescriptor,
+            int maxRecordsPerPoll) {
+        checkArgument(maxRecordsPerPoll >= 0, "scan.max-records-per-poll must not be negative.");
         this.tableRead = tableRead;
         this.limiter = limiter;
         this.splits = new LinkedList<>();
@@ -95,6 +111,7 @@ public class FileStoreSourceSplitReader
         this.metrics = metrics;
         this.wakeup = new AtomicBoolean(false);
         this.blobAsDescriptor = blobAsDescriptor;
+        this.maxRecordsPerPoll = maxRecordsPerPoll;
     }
 
     @Override
@@ -127,7 +144,13 @@ public class FileStoreSourceSplitReader
             pool.recycler().recycle(iterator);
             return finishSplit();
         }
-        return FlinkRecordsWithSplitIds.forRecords(currentSplitId, iterator.replace(nextBatch));
+        FlinkRecordsWithSplitIds records =
+                FlinkRecordsWithSplitIds.forRecords(
+                        currentSplitId, iterator.replace(nextBatch), maxRecordsPerPoll);
+        if (maxRecordsPerPoll > 0) {
+            budgetedBatch = records;
+        }
+        return records;
     }
 
     private boolean reachLimit() {
@@ -193,6 +216,10 @@ public class FileStoreSourceSplitReader
     @Override
     public void close() throws Exception {
         try {
+            if (budgetedBatch != null) {
+                budgetedBatch.recycle();
+                budgetedBatch = null;
+            }
             if (currentFirstBatch != null) {
                 try {
                     currentFirstBatch.releaseBatch();

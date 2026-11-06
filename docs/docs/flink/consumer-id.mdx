@@ -97,6 +97,34 @@ does not provide end-to-end recovery of a stateful pipeline; retain Flink state 
 
 :::
 
+## Yield within a read batch
+
+The native streaming Flink source checkpoints both its assigned splits and the number of
+records already emitted from each split. With a consumer ID, select `consumer.mode=at-least-once`
+to use this source rather than the snapshot-exact MonitorSource / ReadOperator topology.
+
+By default, one source poll emits a complete physical reader batch. Set
+`scan.max-records-per-poll` to a positive integer to limit that emission; `1` returns control
+to Flink after each emitted row. The default `0` preserves whole-batch emission. Negative
+values are rejected. This option is supported only by the native streaming source, not
+bounded reads, dedicated split generation or checkpoint-aligned reads.
+
+```sql
+SELECT * FROM t /*+ OPTIONS(
+    'consumer-id' = 'myid',
+    'consumer.mode' = 'at-least-once',
+    'scan.max-records-per-poll' = '1'
+) */;
+```
+
+This setting is independent of `read.batch-size`, snapshot limits and split planning. It
+retains the same physical batch until consumption finishes, and reuses the existing split
+position state and serializers. Restoring Flink state can resume within a batch; restarting
+from only the table consumer cursor can replay data. Do not restore state from the monitor
+topology into the native topology. Smaller emission budgets increase polling overhead and
+provide checkpoint opportunities, not a completion-time guarantee: a single blocked output
+or downstream operator can still delay checkpoints and savepoints.
+
 ## Reset Consumer
 
 Stop the streaming reader using this consumer ID before resetting or deleting its progress.

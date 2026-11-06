@@ -30,8 +30,11 @@ import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -74,6 +77,112 @@ public class FlinkRecordsWithSplitIdsTest {
         assertThat(output.getEmittedRecords()).containsExactly(rows);
         assertThat(state.recordsToSkip()).isEqualTo(2);
         assertThat(records.nextRecordFromSplit()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2, 3, 8})
+    void testEmissionBudgetPreservesOrderAndPositions(int budget) {
+        RowData[] input = {
+            GenericRowData.of(1),
+            GenericRowData.of(2),
+            GenericRowData.of(3),
+            GenericRowData.of(4),
+            GenericRowData.of(5)
+        };
+        iter.set(input, input.length, CheckpointedPosition.NO_OFFSET, 0);
+        FlinkRecordsWithSplitIds records = FlinkRecordsWithSplitIds.forRecords("s", iter, budget);
+        assertThat(records.nextSplit()).isEqualTo("s");
+        int emitted = 0;
+        BulkFormat.RecordIterator<RowData> view;
+        while ((view = records.nextRecordFromSplit()) != null) {
+            int expected = Math.min(budget, input.length - emitted);
+            FlinkRecordsWithSplitIds.emitRecord(
+                    new TestingReaderContext(),
+                    view,
+                    output,
+                    state,
+                    new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
+                    null);
+            emitted += expected;
+            assertThat(output.getEmittedRecords()).hasSize(emitted);
+            assertThat(state.recordsToSkip()).isEqualTo(emitted);
+        }
+        assertThat(output.getEmittedRecords()).containsExactly(input);
+        assertThat(records.nextSplit()).isNull();
+        records.recycle();
+    }
+
+    @Test
+    void testViewDoesNotRecyclePhysicalBatch() {
+        AtomicBoolean recycled = new AtomicBoolean();
+        SingletonResultIterator<RowData> delegate =
+                new SingletonResultIterator<>(() -> recycled.set(true));
+        delegate.set(GenericRowData.of(1), CheckpointedPosition.NO_OFFSET, 1);
+        FlinkRecordsWithSplitIds records = FlinkRecordsWithSplitIds.forRecords("s", delegate, 1);
+        records.nextSplit();
+        BulkFormat.RecordIterator<RowData> view = records.nextRecordFromSplit();
+        assertThat(view.next()).isNotNull();
+        assertThat(view.next()).isNull();
+        view.releaseBatch();
+        assertThat(recycled).isFalse();
+        assertThat(records.nextRecordFromSplit()).isNull();
+        records.recycle();
+        assertThat(recycled).isTrue();
+    }
+
+    @Test
+    void testRecyclePartlyEmittedBudgetedBatch() {
+        AtomicBoolean recycled = new AtomicBoolean();
+        ArrayResultIterator<RowData> delegate = new ArrayResultIterator<>(() -> recycled.set(true));
+        delegate.set(rows, rows.length, CheckpointedPosition.NO_OFFSET, 0);
+        FlinkRecordsWithSplitIds records = FlinkRecordsWithSplitIds.forRecords("s", delegate, 1);
+        records.nextSplit();
+        assertThat(records.nextRecordFromSplit().next()).isNotNull();
+        records.recycle();
+        assertThat(recycled).isTrue();
+    }
+
+    @Test
+    void testEmptyBudgetedBatch() {
+        iter.set(rows, 0, CheckpointedPosition.NO_OFFSET, 0);
+        FlinkRecordsWithSplitIds records = FlinkRecordsWithSplitIds.forRecords("s", iter, 1);
+        records.nextSplit();
+        assertThat(records.nextRecordFromSplit()).isNull();
+        records.recycle();
+    }
+
+    @Test
+    void testBudgetPreservesChangelogOrder() {
+        RowData[] changes = {
+            GenericRowData.ofKind(RowKind.INSERT, 100),
+            GenericRowData.ofKind(RowKind.UPDATE_BEFORE, 100),
+            GenericRowData.ofKind(RowKind.UPDATE_AFTER, 200),
+            GenericRowData.ofKind(RowKind.DELETE, 200)
+        };
+        iter.set(changes, changes.length, CheckpointedPosition.NO_OFFSET, 0);
+        FlinkRecordsWithSplitIds records = FlinkRecordsWithSplitIds.forRecords("s", iter, 1);
+        records.nextSplit();
+        for (int i = 0; i < changes.length; i++) {
+            FlinkRecordsWithSplitIds.emitRecord(
+                    new TestingReaderContext(),
+                    records.nextRecordFromSplit(),
+                    output,
+                    state,
+                    new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
+                    null);
+            assertThat(output.getEmittedRecords()).hasSize(i + 1);
+            assertThat(output.getEmittedRecords().get(i).getRowKind())
+                    .isEqualTo(changes[i].getRowKind());
+        }
+        assertThat(records.nextRecordFromSplit()).isNull();
+        assertThat(output.getEmittedRecords()).containsExactly(changes);
+        records.recycle();
+    }
+
+    @Test
+    void testNegativeBudget() {
+        assertThatThrownBy(() -> FlinkRecordsWithSplitIds.forRecords("s", iter, -1))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
