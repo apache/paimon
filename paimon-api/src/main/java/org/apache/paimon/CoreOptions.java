@@ -788,8 +788,8 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether compaction preserves keys and ordering metadata from explicit deletes "
                                     + "to reject stale updates after delete records are pruned. "
-                                    + "Supported for fixed-bucket primary-key tables using deduplicate or "
-                                    + "partial-update without field aggregate functions, deletion vectors, "
+                                    + "Supported for fixed-bucket primary-key tables using the deduplicate "
+                                    + "merge engine without field aggregate functions, deletion vectors, "
                                     + "primary-key indexes, chain tables or Iceberg compatibility. "
                                     + "Disabling this option stops capturing new guards; existing guards "
                                     + "continue to protect reads and compaction. Record TTL expiry creates no guards.");

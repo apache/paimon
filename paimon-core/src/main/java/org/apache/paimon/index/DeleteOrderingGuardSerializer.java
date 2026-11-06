@@ -26,7 +26,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.memory.MemorySlice;
-import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -46,7 +45,6 @@ import java.util.Set;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
-import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
 import static org.apache.paimon.types.DataTypeChecks.getNestedTypes;
 import static org.apache.paimon.types.DataTypeFamily.CONSTRUCTED;
 import static org.apache.paimon.types.DataTypeRoot.BLOB;
@@ -56,13 +54,13 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /**
  * Projects and serializes payload-free {@link DeleteOrderingGuard}s for one table schema.
  *
- * <p>Source and group ordering fields are stored in schema order, retaining their original field
- * ids. Group membership, sort direction, and whole-row deletion rules belong to the table schema,
- * identified by {@link #schemaId()}. Readers must use that schema, rather than the latest schema.
+ * <p>Source ordering fields are stored in schema order, retaining their original field ids. Sort
+ * direction and deletion rules belong to the table schema, identified by {@link #schemaId()}.
+ * Readers must use that schema, rather than the latest schema.
  *
  * <p>SST keys append a segment-local ordinal to the primary key. This preserves multiple retracts
- * for the same key, including independent group bounds, without relying on equal-key SST seeks or
- * prematurely discarding history. The ordinal is not an event ordering watermark.
+ * for the same key without relying on equal-key SST seeks or prematurely discarding history. The
+ * ordinal is not an event ordering watermark.
  */
 public class DeleteOrderingGuardSerializer {
 
@@ -82,8 +80,9 @@ public class DeleteOrderingGuardSerializer {
             long schemaId, RowType keyType, RowType valueType, CoreOptions options) {
         checkArgument(keyType.getFieldCount() > 0, "Delete ordering guards require primary keys.");
         checkArgument(
-                options.mergeEngine() == DEDUPLICATE || options.mergeEngine() == PARTIAL_UPDATE,
-                "Delete ordering guards support only deduplicate and partial-update merge engines.");
+                options.mergeEngine() == DEDUPLICATE,
+                "Delete ordering guards support only the deduplicate merge engine, but found '%s'.",
+                options.mergeEngine());
         checkArgument(
                 !options.definedAggFunc(),
                 "Delete ordering guards do not support configured field aggregate functions.");
@@ -135,16 +134,7 @@ public class DeleteOrderingGuardSerializer {
     }
 
     public static Set<String> orderingFields(CoreOptions options) {
-        Set<String> orderingFields = new HashSet<>(options.sequenceField());
-        if (options.mergeEngine() == PARTIAL_UPDATE) {
-            for (String option : options.toMap().keySet()) {
-                if (PartialUpdateMergeFunction.isSequenceGroupOptionCandidate(option)) {
-                    orderingFields.addAll(
-                            PartialUpdateMergeFunction.sequenceGroupOrderingFields(option));
-                }
-            }
-        }
-        return orderingFields;
+        return new HashSet<>(options.sequenceField());
     }
 
     public long schemaId() {

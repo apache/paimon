@@ -105,8 +105,7 @@ CREATE TABLE guarded_order_status (
 
 For example, after compaction processes an explicit delete at version `4`, a later insert at
 version `2` stays deleted. An insert at version `5` is accepted. Guards retain the primary key
-and ordering metadata without retaining the deleted payload. Partial updates compare each
-sequence group independently and still accept updates to ungrouped fields.
+and ordering metadata without retaining the deleted payload.
 
 The option controls capture during compaction, including dedicated compaction for
 `write-only = true` tables. It cannot recover deletes already pruned before capture was enabled.
@@ -118,8 +117,7 @@ Disable record TTL when ordering must hold across expiry.
 Compaction consolidates existing guard segments, including buckets with no remaining payload rows.
 Periodic consolidation starts at `delete-ordering-guards.compaction.min-file-num` segments
 (default `4`, minimum `2`); full compaction consolidates two or more segments. This maintenance
-continues when capture is disabled. Deduplicate retains the strongest delete bound for each key.
-Partial-update consolidation removes exact duplicate metadata and preserves distinct group bounds.
+continues when capture is disabled and retains the strongest delete bound for each key.
 Retained snapshots and tags, including those in other branches, keep their original segments
 and payload files readable. Snapshot expiration and orphan file cleanup reclaim replaced files
 after their last retained reference is removed. Deleting a tag removes only its metadata.
@@ -137,9 +135,9 @@ rows. Values-time expiration uses the partition values. Update-time expiration r
 data-file activity time when only guards remain; consolidating guard files does not refresh it.
 
 Native incremental diff queries resolve guards at both endpoint snapshots before comparing rows.
-They preserve partial-update group contributions and return the visible before-image when a
-delete is requested. Streaming overwrite and all-delta reads also resolve retained guards.
-Raw input changelogs continue to report the original input events. Upgrade job coordinators and
+They return the visible before-image when a delete is requested. Streaming overwrite and all-delta
+reads also resolve retained guards. Raw input changelogs continue to report the original input events.
+Upgrade job coordinators and
 workers together before using guarded incremental splits.
 
 Older guard snapshots may lack durable partition activity and bucket-layout metadata. Native
@@ -156,19 +154,19 @@ checkpoint does not bypass this check. Generation state stays in the current sna
 of older snapshots cannot let a stale write cross a reset.
 
 Retained guards require their original ordering and deletion policy. ALTER operations cannot
-change sequence fields, sort directions, sequence-group membership or delete handling while
+change the merge engine, sequence fields, sort directions or delete handling while
 those guards remain, including when capture is disabled. Writer options cannot override the
 persisted ordering policy. To change it, stop writers, explicitly truncate the table to reset its active ordering
 history, persist the new policy, reopen writers and reload authoritative source data. This
 discards the old bounds; it does not reconstruct versions already pruned. Retained tags and
 time-travel snapshots keep their original policy. Payload-only schema evolution is supported.
 
-The initial opt-in supports fixed-bucket primary-key tables with `deduplicate` or `partial-update`.
-Configured field aggregate functions, deletion vectors, primary-key indexes, chain tables and
-Iceberg compatibility are rejected when enabling it and while guards are retained. Use native
+The initial opt-in supports fixed-bucket primary-key tables with the `deduplicate` merge engine.
+Other merge engines, including `partial-update`, are rejected. Configured field aggregate functions,
+deletion vectors, primary-key indexes, chain tables and Iceberg compatibility are rejected when
+enabling it and while guards are retained. Use native
 snapshot and incremental reads and the native input, lookup or full-compaction changelog
-producers. Distinct partial-update bounds are retained conservatively, so their metadata can
-still grow with explicit deletes.
+producers. Guard metadata grows with the number of distinct deleted keys.
 
 ## Row Kind Field
 

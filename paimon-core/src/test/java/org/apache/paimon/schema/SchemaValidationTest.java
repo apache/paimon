@@ -58,8 +58,9 @@ class SchemaValidationTest {
 
     @ParameterizedTest
     @CsvSource({
-        "merge-engine,first-row,only deduplicate and partial-update",
-        "merge-engine,aggregation,only deduplicate and partial-update",
+        "merge-engine,first-row,only the deduplicate merge engine",
+        "merge-engine,aggregation,only the deduplicate merge engine",
+        "merge-engine,partial-update,only the deduplicate merge engine",
         "fields.payload.aggregate-function,last_non_null_value,field aggregate functions",
         "bucket,-1,fixed buckets",
         "bucket,-2,fixed buckets",
@@ -90,25 +91,25 @@ class SchemaValidationTest {
                 .hasMessageContaining(message);
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"deduplicate", "partial-update"})
-    void testDeleteOrderingGuardSupportedEngines(String engine) {
+    @Test
+    void testDeleteOrderingGuardSupportsDeduplicate() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.DELETE_ORDERING_GUARDS_ENABLED.key(), "true");
         options.put(BUCKET.key(), "1");
-        options.put("merge-engine", engine);
-        if (engine.equals("partial-update")) {
-            options.put("fields.seq.sequence-group", "payload");
-        }
+        options.put("merge-engine", "deduplicate");
         assertThatCode(() -> validateTableSchema(deleteOrderingGuardSchema(options)))
                 .doesNotThrowAnyException();
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"first-row", "aggregation"})
+    @ValueSource(strings = {"first-row", "aggregation", "partial-update"})
     void testDisabledDeleteOrderingGuardsAllowOtherEngines(String engine) {
         Map<String, String> options = new HashMap<>();
         options.put("merge-engine", engine);
+        if (engine.equals("partial-update")) {
+            options.put("fields.seq.sequence-group", "payload");
+            options.put("partial-update.remove-record-on-sequence-group", "seq");
+        }
         assertThatCode(() -> validateTableSchema(deleteOrderingGuardSchema(options)))
                 .doesNotThrowAnyException();
         options.put(CoreOptions.DELETE_ORDERING_GUARDS_ENABLED.key(), "false");

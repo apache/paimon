@@ -75,7 +75,7 @@ class DeleteOrderingGuardMergeFunctionWrapperTest {
                     .field("a", DataTypes.STRING())
                     .field("seqB", DataTypes.INT())
                     .field("b", DataTypes.STRING())
-                    .field("ungrouped", DataTypes.STRING())
+                    .field("payload", DataTypes.STRING())
                     .field("eventTime", DataTypes.BIGINT())
                     .build();
 
@@ -109,14 +109,12 @@ class DeleteOrderingGuardMergeFunctionWrapperTest {
 
     @ParameterizedTest
     @CsvSource({"MIN_HEAP,false", "MIN_HEAP,true", "LOSER_TREE,false", "LOSER_TREE,true"})
-    void testCapturesGroupDeleteEvenWhenMergedResultIsLive(SortEngine engine, boolean spill)
+    void testCapturesStaleDeleteEvenWhenMergedResultIsLive(SortEngine engine, boolean spill)
             throws Exception {
         Options options = options(engine);
-        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
-        options.set("fields.seqA.sequence-group", "a");
-        options.set("fields.seqB.sequence-group", "b");
+        options.set(CoreOptions.SEQUENCE_FIELD, "seqA");
         KeyValue delete = row(1, 4, RowKind.DELETE, 4, 7, "delete-payload");
-        KeyValue mixedUpdate = row(1, 8, RowKind.INSERT, 2, 8, "fresh");
+        KeyValue update = row(1, 8, RowKind.INSERT, 5, 8, "fresh");
         List<DeleteOrderingGuard> guards = new ArrayList<>();
         List<KeyValue> result =
                 merge(
@@ -125,19 +123,18 @@ class DeleteOrderingGuardMergeFunctionWrapperTest {
                         guards,
                         Arrays.asList(
                                 Collections.singletonList(delete),
-                                Collections.singletonList(mixedUpdate)),
+                                Collections.singletonList(update)),
                         null);
 
         assertThat(result).hasSize(1);
         InternalRow value = result.get(0).value();
-        assertThat(value.getInt(1)).isEqualTo(4);
-        assertThat(value.isNullAt(2)).isTrue();
+        assertThat(value.getInt(1)).isEqualTo(5);
+        assertThat(value.getString(2)).isEqualTo(BinaryString.fromString("fresh"));
         assertThat(value.getInt(3)).isEqualTo(8);
         assertThat(value.getString(4)).isEqualTo(BinaryString.fromString("fresh"));
         assertThat(value.getString(5)).isEqualTo(BinaryString.fromString("fresh"));
         assertThat(guards).hasSize(1);
         assertThat(guards.get(0).ordering().getInt(0)).isEqualTo(4);
-        assertThat(guards.get(0).ordering().getInt(1)).isEqualTo(7);
         assertThat(delete.value().getString(2))
                 .isEqualTo(BinaryString.fromString("delete-payload"));
         assertThat(delete.valueKind()).isEqualTo(RowKind.DELETE);
@@ -214,11 +211,7 @@ class DeleteOrderingGuardMergeFunctionWrapperTest {
             RecordLevelExpire ttl)
             throws Exception {
         CoreOptions coreOptions = new CoreOptions(options);
-        MergeFunctionFactory<KeyValue> factory =
-                coreOptions.mergeEngine() == CoreOptions.MergeEngine.PARTIAL_UPDATE
-                        ? PartialUpdateMergeFunction.factory(
-                                options, VALUE_TYPE, Collections.singletonList("id"))
-                        : DeduplicateMergeFunction.factory(options);
+        MergeFunctionFactory<KeyValue> factory = DeduplicateMergeFunction.factory(options);
         MergeFunctionWrapper<KeyValue> wrapper =
                 new DeleteOrderingGuardMergeFunctionWrapper<>(
                         new ReducerMergeFunctionWrapper(factory.create()),

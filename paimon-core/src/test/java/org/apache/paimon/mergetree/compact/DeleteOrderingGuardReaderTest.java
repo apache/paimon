@@ -60,7 +60,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** Exercises persisted bounds through native merge ordering, spilling and group visibility. */
+/** Exercises persisted bounds through native merge ordering, spilling and row visibility. */
 class DeleteOrderingGuardReaderTest {
 
     private static final RowType KEY_TYPE = RowType.of(DataTypes.INT());
@@ -71,7 +71,7 @@ class DeleteOrderingGuardReaderTest {
                     .field("a", DataTypes.STRING())
                     .field("seqB", DataTypes.INT())
                     .field("b", DataTypes.STRING())
-                    .field("ungrouped", DataTypes.STRING().notNull())
+                    .field("payload", DataTypes.STRING().notNull())
                     .build();
     private static final Comparator<InternalRow> KEYS = Comparator.comparingInt(r -> r.getInt(0));
 
@@ -110,64 +110,6 @@ class DeleteOrderingGuardReaderTest {
         assertThat(captured).isEmpty();
     }
 
-    @ParameterizedTest
-    @CsvSource({"MIN_HEAP,false", "MIN_HEAP,true", "LOSER_TREE,false", "LOSER_TREE,true"})
-    void testIndependentPartialGroupsAndUngroupedPayload(SortEngine engine, boolean spill)
-            throws Exception {
-        Options options = partialOptions(engine);
-        List<DeleteOrderingGuard> captured = new ArrayList<>();
-        List<KeyValue> result =
-                merge(
-                        options,
-                        spill,
-                        Arrays.asList(
-                                Collections.singletonList(guard(1, 1, 4, null)),
-                                Collections.singletonList(guard(1, 2, null, 7))),
-                        captured,
-                        Arrays.asList(
-                                Collections.singletonList(row(1, 10, 2, 8, "accepted")),
-                                Collections.emptyList(),
-                                Collections.emptyList()));
-        assertThat(result)
-                .singleElement()
-                .satisfies(
-                        kv -> {
-                            assertThat(kv.value().getInt(1)).isEqualTo(4);
-                            assertThat(kv.value().isNullAt(2)).isTrue();
-                            assertThat(kv.value().getInt(3)).isEqualTo(8);
-                            assertThat(kv.value().getString(4).toString()).isEqualTo("accepted");
-                            assertThat(kv.value().getString(5).toString()).isEqualTo("accepted");
-                        });
-        assertThat(captured).isEmpty();
-    }
-
-    @ParameterizedTest
-    @CsvSource({"MIN_HEAP,false", "MIN_HEAP,true", "LOSER_TREE,false", "LOSER_TREE,true"})
-    void testWholeRowVisibilityFollowsDesignatedGroup(SortEngine engine, boolean spill)
-            throws Exception {
-        Options options = partialOptions(engine);
-        options.set(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP, "seqA");
-        List<KeyValue> result =
-                merge(
-                        options,
-                        spill,
-                        Collections.singletonList(
-                                Arrays.asList(guard(1, 1, 4, 7), guard(2, 1, 4, 7))),
-                        new ArrayList<>(),
-                        Arrays.asList(
-                                Collections.singletonList(row(1, 10, 2, 8, "hidden")),
-                                Collections.singletonList(row(2, 10, 5, 2, "live")),
-                                Collections.emptyList()));
-        assertThat(result)
-                .singleElement()
-                .satisfies(
-                        kv -> {
-                            assertThat(kv.key().getInt(0)).isEqualTo(2);
-                            assertThat(kv.value().getString(2).toString()).isEqualTo("live");
-                            assertThat(kv.value().isNullAt(4)).isTrue();
-                        });
-    }
-
     @Test
     void testDescendingCompositeSourceOrderAndNulls() throws Exception {
         Options options = options(SortEngine.MIN_HEAP);
@@ -197,12 +139,12 @@ class DeleteOrderingGuardReaderTest {
                 "ASCENDING,NULL,NULL,false", "DESCENDING,NULL,NULL,false"
             },
             nullValues = "NULL")
-    void testCompositeGroupDirectionAndNullHandling(
+    void testCompositeSourceDirectionAndNullHandling(
             String direction, Integer a, Integer b, boolean accepted) throws Exception {
         Options options = options(SortEngine.MIN_HEAP);
-        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
-        options.setString("fields.seqA,seqB.sequence-group", "a,b");
-        options.setString("fields.seqA,seqB.sequence-group.sort-order", direction);
+        options.set(CoreOptions.SEQUENCE_FIELD, "seqA,seqB");
+        options.set(
+                CoreOptions.SEQUENCE_FIELD_SORT_ORDER, CoreOptions.SortOrder.valueOf(direction));
         List<KeyValue> result =
                 merge(
                         options,
@@ -213,21 +155,15 @@ class DeleteOrderingGuardReaderTest {
                                 Collections.singletonList(row(1, 10, a, b, "candidate")),
                                 Collections.emptyList(),
                                 Collections.emptyList()));
-        assertThat(result)
-                .singleElement()
-                .satisfies(
-                        kv -> {
-                            assertThat(kv.value().isNullAt(2)).isEqualTo(!accepted);
-                            assertThat(kv.value().isNullAt(4)).isEqualTo(!accepted);
-                            assertThat(kv.value().getString(5).toString()).isEqualTo("candidate");
-                        });
+        assertThat(result).hasSize(accepted ? 1 : 0);
+        if (accepted) {
+            assertThat(result.get(0).value().getString(2).toString()).isEqualTo("candidate");
+        }
     }
 
     @Test
-    void testWholeRowDeleteWithoutGroups() throws Exception {
+    void testWholeRowDelete() throws Exception {
         Options options = options(SortEngine.MIN_HEAP);
-        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
-        options.set(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE, true);
         options.set(CoreOptions.SEQUENCE_FIELD, "seqA");
         List<KeyValue> result =
                 merge(
@@ -247,12 +183,10 @@ class DeleteOrderingGuardReaderTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"lookup", "full"})
-    void testGuardedChangelogBeforeImageUsesResolvedPartialGroups(String producer)
-            throws Exception {
-        Options options = partialOptions(SortEngine.MIN_HEAP);
-        MergeFunctionFactory<KeyValue> factory =
-                PartialUpdateMergeFunction.factory(
-                        options, VALUE_TYPE, Collections.singletonList("id"));
+    void testGuardedChangelogBeforeImageUsesVisibleRow(String producer) throws Exception {
+        Options options = options(SortEngine.MIN_HEAP);
+        options.set(CoreOptions.SEQUENCE_FIELD, "seqA");
+        MergeFunctionFactory<KeyValue> factory = DeduplicateMergeFunction.factory(options);
         MergeFunctionWrapper<ChangelogResult> nativeWrapper =
                 changelogWrapper(producer, factory, options);
         try (DeleteOrderingGuardReader guards =
@@ -262,15 +196,20 @@ class DeleteOrderingGuardReaderTest {
                                         Collections.singletonList(guard(1, 1, 4, 7)).iterator())),
                         KEYS)) {
             MergeFunctionWrapper<ChangelogResult> resolver =
-                    guards.wrap(nativeWrapper, factory, null, null);
+                    guards.wrap(
+                            nativeWrapper,
+                            factory,
+                            null,
+                            UserDefinedSeqComparator.create(VALUE_TYPE, new CoreOptions(options)));
             resolver.reset();
-            resolver.add(row(1, 0, 2, 8, "before").setLevel(2));
-            resolver.add(row(1, 10, 5, 8, "after"));
+            resolver.add(row(1, 0, 5, 8, "before").setLevel(2));
+            resolver.add(row(1, 10, 6, 8, "after"));
             ChangelogResult result = resolver.getResult();
             assertThat(result.changelogs())
                     .extracting(KeyValue::valueKind)
                     .containsExactly(RowKind.UPDATE_BEFORE, RowKind.UPDATE_AFTER);
-            assertThat(result.changelogs().get(0).value().isNullAt(2)).isTrue();
+            assertThat(result.changelogs().get(0).value().getString(2).toString())
+                    .isEqualTo("before");
             assertThat(result.changelogs().get(0).value().getString(4).toString())
                     .isEqualTo("before");
             assertThat(result.changelogs().get(1).value().getString(2).toString())
@@ -333,8 +272,9 @@ class DeleteOrderingGuardReaderTest {
     }
 
     @Test
-    void testAllNullGroupDoesNotRetractAndRealDeletesStillCaptured() throws Exception {
-        Options options = partialOptions(SortEngine.MIN_HEAP);
+    void testNullSourceSequenceAndRealDeletesStillCaptured() throws Exception {
+        Options options = options(SortEngine.MIN_HEAP);
+        options.set(CoreOptions.SEQUENCE_FIELD, "seqA");
         KeyValue delete = row(1, 9, 5, null, "real-delete");
         delete.replace(delete.key(), delete.sequenceNumber(), RowKind.DELETE, delete.value());
         List<DeleteOrderingGuard> captured = new ArrayList<>();
@@ -349,14 +289,7 @@ class DeleteOrderingGuardReaderTest {
                                 Collections.singletonList(row(1, 8, 4, 8, "old")),
                                 Collections.singletonList(delete),
                                 Collections.emptyList()));
-        assertThat(result)
-                .singleElement()
-                .satisfies(
-                        kv -> {
-                            assertThat(kv.value().isNullAt(2)).isTrue();
-                            assertThat(kv.value().getString(4).toString()).isEqualTo("old");
-                            assertThat(kv.value().getString(5).toString()).isEqualTo("old");
-                        });
+        assertThat(result).isEmpty();
         assertThat(captured).hasSize(1);
         assertThat(captured.get(0).ordering().getInt(0)).isEqualTo(5);
     }
@@ -404,11 +337,7 @@ class DeleteOrderingGuardReaderTest {
             List<List<KeyValue>> runs)
             throws Exception {
         CoreOptions core = new CoreOptions(options);
-        MergeFunctionFactory<KeyValue> factory =
-                core.mergeEngine() == CoreOptions.MergeEngine.PARTIAL_UPDATE
-                        ? PartialUpdateMergeFunction.factory(
-                                options, VALUE_TYPE, Collections.singletonList("id"))
-                        : DeduplicateMergeFunction.factory(options);
+        MergeFunctionFactory<KeyValue> factory = DeduplicateMergeFunction.factory(options);
         List<RecordReader<KeyValue>> guardReaders = new ArrayList<>();
         segments.forEach(
                 segment -> guardReaders.add(new IteratorRecordReader<>(segment.iterator())));
@@ -464,14 +393,6 @@ class DeleteOrderingGuardReaderTest {
         Options options = new Options();
         options.set(CoreOptions.SORT_ENGINE, engine);
         options.set(CoreOptions.SORT_SPILL_THRESHOLD, 2);
-        return options;
-    }
-
-    private static Options partialOptions(SortEngine engine) {
-        Options options = options(engine);
-        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
-        options.setString("fields.seqA.sequence-group", "a");
-        options.setString("fields.seqB.sequence-group", "b");
         return options;
     }
 

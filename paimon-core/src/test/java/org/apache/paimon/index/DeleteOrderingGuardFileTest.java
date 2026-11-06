@@ -146,7 +146,7 @@ class DeleteOrderingGuardFileTest {
     }
 
     @Test
-    void testCompositeKeyAndGroupMetadataRoundTrip() throws Exception {
+    void testCompositeKeyAndSourceSequenceMetadataRoundTrip() throws Exception {
         RowType keyType = RowType.of(DataTypes.BYTES(), RowType.of(DataTypes.INT()));
         RowType valueType =
                 RowType.builder()
@@ -155,9 +155,8 @@ class DeleteOrderingGuardFileTest {
                         .field("payload", DataTypes.BLOB())
                         .build();
         Options options = new Options();
-        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
-        options.set("fields.a,b.sequence-group", "payload");
-        options.set("fields.a,b.sequence-group.sort-order", "descending");
+        options.set(CoreOptions.SEQUENCE_FIELD, "a,b");
+        options.set(CoreOptions.SEQUENCE_FIELD_SORT_ORDER, CoreOptions.SortOrder.DESCENDING);
         DeleteOrderingGuardSerializer serializer =
                 new DeleteOrderingGuardSerializer(7, keyType, valueType, new CoreOptions(options));
         DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer, false);

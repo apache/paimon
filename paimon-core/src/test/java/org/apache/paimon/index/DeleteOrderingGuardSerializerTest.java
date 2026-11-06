@@ -75,7 +75,7 @@ class DeleteOrderingGuardSerializerTest {
     }
 
     @Test
-    void testSequenceGroupsCopyOnlyOrderingFields() {
+    void testCompositeSequenceCopiesOnlyOrderingFields() {
         RowType valueType =
                 RowType.builder()
                         .field("a", DataTypes.INT())
@@ -86,11 +86,8 @@ class DeleteOrderingGuardSerializerTest {
                         .field("payload", DataTypes.STRING())
                         .build();
         Options options = new Options();
-        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
-        options.set("fields.bMajor,bMinor.sequence-group", "embedding,payload");
-        options.set("fields.bMajor,bMinor.sequence-group.sort-order", "descending");
-        options.set("fields.a.sequence-group", "blob");
-        options.set(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP, "a");
+        options.set(CoreOptions.SEQUENCE_FIELD, "bMajor,bMinor,a");
+        options.set(CoreOptions.SEQUENCE_FIELD_SORT_ORDER, CoreOptions.SortOrder.DESCENDING);
         DeleteOrderingGuardSerializer serializer = serializer(valueType, options);
         InternalRow value = mock(InternalRow.class);
         when(value.getRowKind()).thenReturn(RowKind.INSERT);
@@ -161,21 +158,20 @@ class DeleteOrderingGuardSerializerTest {
     @ParameterizedTest
     @EnumSource(
             value = CoreOptions.MergeEngine.class,
-            names = {"DEDUPLICATE", "PARTIAL_UPDATE"},
+            names = {"DEDUPLICATE"},
             mode = EnumSource.Mode.EXCLUDE)
     void testUnsupportedMergeEnginesRejected(CoreOptions.MergeEngine engine) {
         Options options = new Options();
         options.set(CoreOptions.MERGE_ENGINE, engine);
         assertThatThrownBy(() -> serializer(RowType.of(DataTypes.INT()), options))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("only deduplicate and partial-update");
+                .hasMessageContaining("only the deduplicate merge engine");
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"fields.f0.aggregate-function", "fields.default-aggregate-function"})
     void testConfiguredFieldAggregationRejected(String key) {
         Options options = new Options();
-        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
         options.set(key, "sum");
         assertThatThrownBy(() -> serializer(RowType.of(DataTypes.INT()), options))
                 .isInstanceOf(IllegalArgumentException.class)

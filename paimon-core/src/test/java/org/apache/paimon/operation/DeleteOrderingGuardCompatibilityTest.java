@@ -163,65 +163,6 @@ class DeleteOrderingGuardCompatibilityTest {
     }
 
     @Test
-    void testPartialUpdateDiffRetainsSharedContributionsAndGroupBounds() throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put("merge-engine", "partial-update");
-        options.put("fields.seqA.sequence-group", "a");
-        options.put("fields.seqB.sequence-group", "b");
-        RowType type =
-                RowType.builder()
-                        .field("pt", DataTypes.INT())
-                        .field("k", DataTypes.INT())
-                        .field("seqA", DataTypes.INT())
-                        .field("a", DataTypes.STRING())
-                        .field("seqB", DataTypes.INT())
-                        .field("b", DataTypes.STRING())
-                        .field("ungrouped", DataTypes.STRING())
-                        .build();
-        PrimaryKeyFileStoreTable table = createTable(options, type);
-        append(table, 0, GenericRow.ofKind(RowKind.DELETE, 1, 1, 4, null, 7, null, null));
-        compact(table, 1);
-        append(table, 2, GenericRow.of(1, 1, 2, str("stale-a"), 8, str("keep-b"), str("old")));
-        Snapshot before = table.snapshotManager().latestSnapshot();
-        append(table, 3, GenericRow.of(1, 1, 5, str("fresh-a"), 6, str("stale-b"), str("new")));
-        assertThat(diff(table, before, false))
-                .singleElement()
-                .satisfies(
-                        r -> {
-                            assertThat(r.getInt(2)).isEqualTo(5);
-                            assertThat(r.getString(3).toString()).isEqualTo("fresh-a");
-                            assertThat(r.getInt(4)).isEqualTo(8);
-                            assertThat(r.getString(5).toString()).isEqualTo("keep-b");
-                            assertThat(r.getString(6).toString()).isEqualTo("new");
-                        });
-        InnerTableRead projected = table.newRead();
-        RowType projection =
-                new RowType(Arrays.asList(type.getFields().get(3), type.getFields().get(5)));
-        projected.withReadType(projection);
-        List<InternalRow> rows = new ArrayList<>();
-        InternalRowSerializer serializer = new InternalRowSerializer(projection);
-        projected
-                .createReader(table.newSnapshotReader().readIncrementalDiff(before).splits())
-                .forEachRemaining(r -> rows.add(serializer.copy(r)));
-        assertThat(rows)
-                .singleElement()
-                .satisfies(
-                        r -> {
-                            assertThat(r.getString(0).toString()).isEqualTo("fresh-a");
-                            assertThat(r.getString(1).toString()).isEqualTo("keep-b");
-                        });
-        assertThatThrownBy(
-                        () ->
-                                setOption(
-                                        table,
-                                        "fields.seqA.sequence-group.sort-order",
-                                        "descending"))
-                .hasStackTraceContaining("ordering migration");
-        assertThatThrownBy(() -> setOption(table, "fields.seqA.sequence-group", "a,ungrouped"))
-                .hasStackTraceContaining("ordering migration");
-    }
-
-    @Test
     void testOrdinaryIncrementalSplitsKeepTheirVersionTwoEncoding() throws Exception {
         PrimaryKeyFileStoreTable table = createTable(Collections.emptyMap());
         append(table, 0, row(RowKind.INSERT, 1, 1));
@@ -397,6 +338,34 @@ class DeleteOrderingGuardCompatibilityTest {
         assertThatThrownBy(unsupported::newRead).hasMessageContaining("fixed buckets");
         append(table, 2, row(RowKind.INSERT, 1, 2));
         assertThat(read(table, table.newScan().plan().splits(), false)).isEmpty();
+    }
+
+    @Test
+    void testRetainedGuardsRejectPartialUpdateAfterCaptureIsDisabled() throws Exception {
+        PrimaryKeyFileStoreTable table = createTable(Collections.emptyMap());
+        append(table, 0, row(RowKind.DELETE, 1, 4));
+        compact(table, 1);
+        PrimaryKeyFileStoreTable retained =
+                setOption(table, "delete-ordering-guards.enabled", "false");
+        assertThatThrownBy(() -> setOption(retained, "merge-engine", "partial-update"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Change 'merge-engine' is not supported");
+
+        assertThatThrownBy(
+                        () ->
+                                retained.copy(
+                                        Collections.singletonMap("merge-engine", "partial-update")))
+                .isInstanceOf(UnsupportedOperationException.class);
+        Map<String, String> overriddenOptions = new HashMap<>(retained.options());
+        overriddenOptions.put("merge-engine", "partial-update");
+        PrimaryKeyFileStoreTable overridden =
+                (PrimaryKeyFileStoreTable) retained.copy(retained.schema().copy(overriddenOptions));
+        assertThatThrownBy(overridden::newRead)
+                .hasMessageContaining("only the deduplicate merge engine");
+        assertThatThrownBy(() -> append(overridden, 2, row(RowKind.INSERT, 1, 2)))
+                .hasStackTraceContaining("ordering migration");
+        append(retained, 2, row(RowKind.INSERT, 1, 2));
+        assertThat(read(retained, retained.newScan().plan().splits(), false)).isEmpty();
     }
 
     @Test
