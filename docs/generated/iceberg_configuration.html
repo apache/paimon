@@ -99,10 +99,40 @@ under the License.
             <td>Should use the legacy manifest version to generate Iceberg's 1.4 manifest files.</td>
         </tr>
         <tr>
+            <td><h5>metadata.iceberg.missing-base-strategy</h5></td>
+            <td style="word-wrap: break-word;">rebuild</td>
+            <td><p>Enum</p></td>
+            <td>What to do when the Iceberg metadata of the previous snapshot is missing. 'rebuild' creates the metadata from every data file of the table. 'replay' extends the newest valid older metadata one snapshot at a time and falls back to 'rebuild' when that is not possible. Replay applies to append tables without deletion vectors or data evolution, with Iceberg format version 2, and with the hive-catalog, table-location or hadoop-catalog storage type. Replay publishes under the lock of the catalog, and fails when none is configured.<br /><br />Possible values:<ul><li>"rebuild": Create the metadata of the snapshot from every data file of the table.</li><li>"replay": Extend the newest valid older metadata one snapshot at a time, and rebuild when that is not possible.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>metadata.iceberg.previous-versions-max</h5></td>
             <td style="word-wrap: break-word;">0</td>
             <td>Integer</td>
             <td>The number of old metadata files to keep after each table commit. For rest-catalog, it will keep 1 old metadata at least.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.replay.max-base-manifest-bytes</h5></td>
+            <td style="word-wrap: break-word;">512 mb</td>
+            <td>MemorySize</td>
+            <td>The most manifest bytes a replay may copy and read. The retained history counts twice for each unique manifest, once to copy it and once to check the copy. A replay over this limit is rebuilt. This is a work limit, not a bound on heap.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.replay.max-delta-entries</h5></td>
+            <td style="word-wrap: break-word;">1000000</td>
+            <td>Long</td>
+            <td>The most added and deleted files, summed over the snapshots of a replay. A larger gap is rebuilt.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.replay.max-duration</h5></td>
+            <td style="word-wrap: break-word;">5 min</td>
+            <td>Duration</td>
+            <td>The longest a replay may run, checked between steps and before each manifest that is copied. A replay over this limit is rebuilt.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.replay.max-snapshots</h5></td>
+            <td style="word-wrap: break-word;">100</td>
+            <td>Integer</td>
+            <td>The most Paimon snapshots a replay may cover. A larger gap is rebuilt.</td>
         </tr>
         <tr>
             <td><h5>metadata.iceberg.storage</h5></td>

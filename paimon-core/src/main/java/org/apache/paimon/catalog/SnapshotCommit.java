@@ -39,6 +39,14 @@ public abstract class SnapshotCommit implements Lock {
                 Lock.reentrant(checkNotNull(lock, "Snapshot publication requires a bound lock."));
     }
 
+    /**
+     * Whether the bound lock keeps other writers out. It does not when no lock is configured, and
+     * what is done under it is then not protected from them.
+     */
+    public final boolean isCoordinating() {
+        return !(lock instanceof Lock.EmptyLock);
+    }
+
     /** Publish with the bound lock, reusing an enclosing preparation scope when present. */
     public final boolean commit(
             @Nullable String baseSnapshotUuid,
