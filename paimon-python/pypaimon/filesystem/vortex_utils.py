@@ -93,9 +93,15 @@ def _store_for(url: str, store_kwargs: Dict[str, str]) -> Tuple[Any, str]:
     cache_key = (root, tuple(sorted((k, str(v)) for k, v in store_kwargs.items())))
     with _cache_lock:
         vortex_store = _store_cache.get(cache_key)
-        if vortex_store is None:
-            vortex_store = store.from_url(root, **store_kwargs)
-            _store_cache[cache_key] = vortex_store
+
+    if vortex_store is not None:
+        return vortex_store, key
+
+    # Make the client outside the lock. A fork waits for this lock, so it must stay short.
+    # If two threads race, both make a client and the first one into the cache is kept.
+    new_store = store.from_url(root, **store_kwargs)
+    with _cache_lock:
+        vortex_store = _store_cache.setdefault(cache_key, new_store)
     return vortex_store, key
 
 
@@ -113,6 +119,32 @@ def _cache_footer(cache_key: str, footer: Any) -> None:
         _footer_cache.move_to_end(cache_key)
         while len(_footer_cache) > _FOOTER_CACHE_SIZE:
             _footer_cache.popitem(last=False)
+
+
+def _before_fork() -> None:
+    _cache_lock.acquire()
+
+
+def _after_fork_in_parent() -> None:
+    _cache_lock.release()
+
+
+def _after_fork_in_child() -> None:
+    global _cache_lock, _store_cache
+
+    # The parent thread that held the lock does not exist in the child, so use a new lock.
+    _cache_lock = threading.Lock()
+
+    # A store client uses connections and runtime threads of the parent. The child makes its own.
+    _store_cache = {}
+
+
+if hasattr(os, 'register_at_fork'):
+    # Like logging: a fork waits for the cache lock, and the child starts with a free lock.
+    # DataLoader workers are usually forked, and they open Vortex files through this module.
+    os.register_at_fork(before=_before_fork,
+                        after_in_parent=_after_fork_in_parent,
+                        after_in_child=_after_fork_in_child)
 
 
 def open_vortex_file(file_io: FileIO, file_path: str) -> Any:

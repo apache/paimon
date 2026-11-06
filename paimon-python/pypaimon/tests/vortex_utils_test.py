@@ -67,6 +67,53 @@ class VortexUtilsTest(unittest.TestCase):
         write(vortex.array(pa.table({'x': [1, 2]})), key, store=store)
         self.assertEqual(len(vortex.open(key, store=store)), 2)
 
+    @unittest.skipIf(not hasattr(os, 'fork'), "needs os.fork")
+    def test_forked_worker_reads_when_another_thread_held_the_cache_lock(self):
+        import threading
+        import time
+
+        path = os.path.join(self.temp_dir, 'fork.vortex')
+        vortex_utils.write_vortex_file(self.file_io, path, pa.table({'id': [1, 2, 3]}))
+
+        # A different thread holds the cache lock when the fork starts, as a reader thread can
+        # when a DataLoader forks its workers.
+        locked = threading.Event()
+
+        def hold_lock():
+            with vortex_utils._cache_lock:
+                locked.set()
+                time.sleep(0.2)
+
+        holder = threading.Thread(target=hold_lock)
+        holder.start()
+        locked.wait()
+
+        pid = os.fork()
+        if pid == 0:
+            try:
+                vortex_file = vortex_utils.open_vortex_file(self.file_io, path)
+                rows = vortex_file.to_arrow(schema=pa.schema([('id', pa.int64())])).read_all()
+                os._exit(0 if rows.column('id').to_pylist() == [1, 2, 3] else 1)
+            except BaseException:
+                os._exit(2)
+
+        holder.join()
+
+        deadline = time.monotonic() + 30
+        status = None
+        while time.monotonic() < deadline:
+            done, status = os.waitpid(pid, os.WNOHANG)
+            if done:
+                break
+            time.sleep(0.05)
+        else:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+            self.fail("forked worker deadlocked on the inherited cache lock")
+
+        self.assertTrue(os.WIFEXITED(status))
+        self.assertEqual(os.WEXITSTATUS(status), 0)
+
     def test_compact_encodings_make_smaller_files_with_the_same_rows(self):
         table = pa.table({'email': [f'user-{i * 7919 % 100003}@example.com' for i in range(200_000)]})
         default_path = os.path.join(self.temp_dir, 'default.vortex')
