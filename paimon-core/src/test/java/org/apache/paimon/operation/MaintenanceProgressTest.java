@@ -177,4 +177,44 @@ class MaintenanceProgressTest {
                                             "active_calls=0");
                         });
     }
+
+    @Test
+    void reusesReporterAndKeepsFastSlowOperationsQuiet() throws Exception {
+        long threadsBefore = MaintenanceProgress.reporterThreadsCreated();
+        for (int i = 0; i < 100; i++) {
+            try (MaintenanceProgress progress =
+                    MaintenanceProgress.slowOperation("test-table", "evaluate-retention")) {
+                progress.complete();
+            }
+        }
+
+        assertThat(messages).isEmpty();
+        assertThat(MaintenanceProgress.reporterThreadsCreated() - threadsBefore)
+                .isLessThanOrEqualTo(1);
+
+        try (MaintenanceProgress progress =
+                MaintenanceProgress.slowOperation(
+                        "test-table", "evaluate-retention", reporter, 10)) {
+            long item = progress.startItem("blocked-manifest");
+            assertThat(activeHeartbeat.await(10, TimeUnit.SECONDS)).isTrue();
+            progress.finishItem(item);
+            progress.complete();
+        }
+        assertThat(messages).noneMatch(message -> message.contains("event=START"));
+        assertThat(messages).anyMatch(message -> message.contains("event=PROGRESS"));
+        assertThat(messages).anyMatch(message -> message.contains("event=END"));
+    }
+
+    @Test
+    void doesNotCreateReporterThreadWhenInfoLoggingIsDisabled() {
+        Configurator.setLevel(logger.getName(), Level.OFF);
+        try (MaintenanceProgress progress =
+                new MaintenanceProgress("test-table", "evaluate-retention", reporter, 10)) {
+            progress.complete();
+        }
+
+        assertThat(reporter.getPoolSize()).isZero();
+        assertThat(reporter.getQueue()).isEmpty();
+        assertThat(messages).isEmpty();
+    }
 }

@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class MaintenanceProgress implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(MaintenanceProgress.class);
     private static ScheduledThreadPoolExecutor sharedReporter;
-    private static int reporterUsers;
+    private static final AtomicLong REPORTER_THREADS_CREATED = new AtomicLong();
 
     private final String operationId = UUID.randomUUID().toString();
     private final String context;
@@ -45,14 +45,28 @@ public final class MaintenanceProgress implements AutoCloseable {
     private final Map<String, AtomicLong> counters = new ConcurrentSkipListMap<>();
     private final Map<Long, Item> active = new ConcurrentHashMap<>();
     private final ScheduledFuture<?> heartbeat;
-    private final boolean shared;
+    private final AtomicBoolean reported = new AtomicBoolean();
     private volatile String phase;
     private volatile long phaseStarted = started;
     private boolean completed;
     private final AtomicBoolean closed = new AtomicBoolean();
 
     public MaintenanceProgress(String context, String phase) {
-        this(context, phase, acquireReporter(), TimeUnit.SECONDS.toMillis(60), true);
+        this(context, phase, sharedReporter(), TimeUnit.SECONDS.toMillis(60), true);
+    }
+
+    /** Creates progress diagnostics which stay quiet unless the operation reaches a heartbeat. */
+    public static MaintenanceProgress slowOperation(String context, String phase) {
+        return new MaintenanceProgress(
+                context, phase, sharedReporter(), TimeUnit.SECONDS.toMillis(60), false);
+    }
+
+    static MaintenanceProgress slowOperation(
+            String context,
+            String phase,
+            ScheduledThreadPoolExecutor reporter,
+            long intervalMillis) {
+        return new MaintenanceProgress(context, phase, reporter, intervalMillis, false);
     }
 
     MaintenanceProgress(
@@ -60,7 +74,7 @@ public final class MaintenanceProgress implements AutoCloseable {
             String phase,
             ScheduledThreadPoolExecutor reporter,
             long intervalMillis) {
-        this(context, phase, reporter, intervalMillis, false);
+        this(context, phase, reporter, intervalMillis, true);
     }
 
     private MaintenanceProgress(
@@ -68,33 +82,31 @@ public final class MaintenanceProgress implements AutoCloseable {
             String phase,
             ScheduledThreadPoolExecutor reporter,
             long intervalMillis,
-            boolean shared) {
-        this.shared = shared;
+            boolean reportImmediately) {
         this.context = context;
         this.phase = phase;
-        report("START");
+        if (reportImmediately) {
+            report("START");
+        }
         heartbeat =
-                reporter.scheduleAtFixedRate(
-                        () -> report("PROGRESS"),
-                        intervalMillis,
-                        intervalMillis,
-                        TimeUnit.MILLISECONDS);
+                LOG.isInfoEnabled()
+                        ? reporter.scheduleAtFixedRate(
+                                () -> {
+                                    if (!closed.get()) {
+                                        report("PROGRESS");
+                                    }
+                                },
+                                intervalMillis,
+                                intervalMillis,
+                                TimeUnit.MILLISECONDS)
+                        : null;
     }
 
-    private static synchronized ScheduledThreadPoolExecutor acquireReporter() {
+    private static synchronized ScheduledThreadPoolExecutor sharedReporter() {
         if (sharedReporter == null) {
             sharedReporter = reporter();
         }
-        reporterUsers++;
         return sharedReporter;
-    }
-
-    private static synchronized void releaseReporter() {
-        if (--reporterUsers == 0) {
-            // Do not leave a job classloader or reporter thread alive after maintenance finishes.
-            sharedReporter.shutdown();
-            sharedReporter = null;
-        }
     }
 
     private static ScheduledThreadPoolExecutor reporter() {
@@ -102,19 +114,38 @@ public final class MaintenanceProgress implements AutoCloseable {
                 new ScheduledThreadPoolExecutor(
                         1,
                         runnable -> {
+                            REPORTER_THREADS_CREATED.incrementAndGet();
                             Thread thread = new Thread(runnable, "paimon-maintenance-progress");
                             thread.setDaemon(true);
                             return thread;
                         });
         executor.setRemoveOnCancelPolicy(true);
+        // Stay alive across bursts of maintenance calls, but release the classloader root when
+        // there are no scheduled heartbeats. Keep-alive exceeds the heartbeat interval so a slow
+        // operation always has a worker available when its first report becomes due.
+        executor.setKeepAliveTime(2, TimeUnit.MINUTES);
+        executor.allowCoreThreadTimeOut(true);
         return executor;
     }
 
+    static long reporterThreadsCreated() {
+        return REPORTER_THREADS_CREATED.get();
+    }
+
     public void phase(String phase) {
-        report("PHASE_END");
-        this.phase = phase;
-        phaseStarted = System.nanoTime();
-        report("PHASE_START");
+        synchronized (this) {
+            if (closed.get()) {
+                return;
+            }
+            if (reported.get()) {
+                reportInternal("PHASE_END");
+            }
+            this.phase = phase;
+            phaseStarted = System.nanoTime();
+            if (reported.get()) {
+                reportInternal("PHASE_START");
+            }
+        }
     }
 
     public void add(String counter, long value) {
@@ -141,6 +172,16 @@ public final class MaintenanceProgress implements AutoCloseable {
     }
 
     void report(String event) {
+        synchronized (this) {
+            if (closed.get()) {
+                return;
+            }
+            reportInternal(event);
+        }
+    }
+
+    private void reportInternal(String event) {
+        reported.set(true);
         long now = System.nanoTime();
         Item oldest = null;
         for (Item item : active.values()) {
@@ -170,14 +211,12 @@ public final class MaintenanceProgress implements AutoCloseable {
 
     @Override
     public void close() {
-        if (closed.compareAndSet(false, true)) {
+        if (heartbeat != null) {
             heartbeat.cancel(false);
-            try {
-                report(completed ? "END" : "ABORTED");
-            } finally {
-                if (shared) {
-                    releaseReporter();
-                }
+        }
+        synchronized (this) {
+            if (closed.compareAndSet(false, true) && reported.get()) {
+                reportInternal(completed ? "END" : "ABORTED");
             }
         }
     }

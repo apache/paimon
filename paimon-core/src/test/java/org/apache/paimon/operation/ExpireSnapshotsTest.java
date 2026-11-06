@@ -135,13 +135,19 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testExpireProgressRedactsStorageCredentials() {
+    public void testExpireProgressRedactsStorageCredentials() throws Exception {
+        commit(1, new ArrayList<>(), new ArrayList<>());
         Path credentialPath = new Path("oss://user:password@bucket/table");
         SnapshotManager credentialSnapshotManager =
                 new SnapshotManager(fileIO, credentialPath, null, null, null) {
                     @Override
                     public Long latestSnapshotId() {
                         return null;
+                    }
+
+                    @Override
+                    public boolean earliestFileNotExists() {
+                        return false;
                     }
                 };
         ExpireSnapshotsImpl expire =
@@ -170,7 +176,11 @@ public class ExpireSnapshotsTest {
             logger.setAdditive(false);
             appender.start();
             logger.addAppender(appender);
+            assertThat(store.newExpire(1, 1, Long.MAX_VALUE).expire()).isZero();
+            assertThat(messages).isEmpty();
             assertThat(expire.expire()).isZero();
+            assertThat(messages).isEmpty();
+            assertThat(expire.expireUntil(1, 1)).isZero();
         } finally {
             logger.removeAppender(appender);
             appender.stop();

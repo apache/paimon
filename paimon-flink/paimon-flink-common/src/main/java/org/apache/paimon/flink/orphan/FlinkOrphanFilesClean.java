@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.BoundedTwoInputOperator;
+import org.apache.paimon.flink.utils.OpenableProcessFunction;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -157,7 +158,30 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                 env.fromCollection(branches)
                         .name("branch-source")
                         .process(
-                                new ProcessFunction<String, Tuple2<String, String>>() {
+                                new OpenableProcessFunction<String, Tuple2<String, String>>() {
+
+                                    private transient MaintenanceProgress progress;
+
+                                    @Override
+                                    protected void openFunction() {
+                                        progress =
+                                                new MaintenanceProgress(
+                                                        subtaskProgressContext(),
+                                                        "enumerate-snapshots-tags-changelogs");
+                                    }
+
+                                    @Override
+                                    public void close() throws Exception {
+                                        try {
+                                            if (progress != null) {
+                                                progress.complete();
+                                                progress.close();
+                                            }
+                                        } finally {
+                                            super.close();
+                                        }
+                                    }
+
                                     @Override
                                     public void processElement(
                                             String branch,
@@ -165,28 +189,57 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                     ctx,
                                             Collector<Tuple2<String, String>> out)
                                             throws Exception {
-                                        try (MaintenanceProgress progress =
-                                                new MaintenanceProgress(
-                                                        "operation=remove-orphans table="
-                                                                + sanitizeUri(
-                                                                        location.toUri().toString())
-                                                                + " branch="
-                                                                + branch,
-                                                        "enumerate-snapshots-tags-changelogs")) {
+                                        long item = progress.startItem("branch=" + branch);
+                                        try {
                                             for (Snapshot snapshot :
                                                     safelyGetAllSnapshots(branch)) {
                                                 out.collect(
                                                         new Tuple2<>(branch, snapshot.toJson()));
                                                 progress.add("snapshot_references_emitted", 1);
                                             }
-                                            progress.complete();
+                                            progress.add("branches_processed", 1);
+                                        } finally {
+                                            progress.finishItem(item);
                                         }
+                                    }
+
+                                    private String subtaskProgressContext() {
+                                        return "operation=remove-orphans table="
+                                                + sanitizeUri(location.toUri().toString())
+                                                + " task="
+                                                + RuntimeContextUtils.getTaskNameWithSubtasks(
+                                                        getRuntimeContext())
+                                                + " attempt="
+                                                + RuntimeContextUtils.getAttemptNumber(
+                                                        getRuntimeContext());
                                     }
                                 })
                         .name("collect-snapshots")
                         .rebalance()
                         .process(
-                                new ProcessFunction<Tuple2<String, String>, String>() {
+                                new OpenableProcessFunction<Tuple2<String, String>, String>() {
+
+                                    private transient MaintenanceProgress progress;
+
+                                    @Override
+                                    protected void openFunction() {
+                                        progress =
+                                                new MaintenanceProgress(
+                                                        subtaskProgressContext(),
+                                                        "read-snapshot-manifest-lists");
+                                    }
+
+                                    @Override
+                                    public void close() throws Exception {
+                                        try {
+                                            if (progress != null) {
+                                                progress.complete();
+                                                progress.close();
+                                            }
+                                        } finally {
+                                            super.close();
+                                        }
+                                    }
 
                                     @Override
                                     public void processElement(
@@ -203,23 +256,33 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                             new Tuple2<>(branch, manifest);
                                                     ctx.output(manifestOutputTag, tuple2);
                                                 };
-                                        try (MaintenanceProgress progress =
-                                                new MaintenanceProgress(
-                                                        "operation=remove-orphans table="
-                                                                + sanitizeUri(
-                                                                        location.toUri().toString())
-                                                                + " branch="
+                                        long item =
+                                                progress.startItem(
+                                                        "branch="
                                                                 + branch
                                                                 + " snapshot="
-                                                                + snapshot.id(),
-                                                        "read-snapshot-manifest-lists")) {
+                                                                + snapshot.id());
+                                        try {
                                             collectWithoutDataFile(
                                                     branch,
                                                     snapshot,
                                                     out::collect,
                                                     manifestConsumer);
-                                            progress.complete();
+                                            progress.add("snapshots_read", 1);
+                                        } finally {
+                                            progress.finishItem(item);
                                         }
+                                    }
+
+                                    private String subtaskProgressContext() {
+                                        return "operation=remove-orphans table="
+                                                + sanitizeUri(location.toUri().toString())
+                                                + " task="
+                                                + RuntimeContextUtils.getTaskNameWithSubtasks(
+                                                        getRuntimeContext())
+                                                + " attempt="
+                                                + RuntimeContextUtils.getAttemptNumber(
+                                                        getRuntimeContext());
                                     }
                                 })
                         .name("collect-manifests");
@@ -340,7 +403,30 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                         .name("list-dirs")
                         .forceNonParallel()
                         .process(
-                                new ProcessFunction<String, Tuple2<String, Long>>() {
+                                new OpenableProcessFunction<String, Tuple2<String, Long>>() {
+
+                                    private transient MaintenanceProgress progress;
+
+                                    @Override
+                                    protected void openFunction() {
+                                        progress =
+                                                new MaintenanceProgress(
+                                                        subtaskProgressContext(),
+                                                        "list-candidate-files");
+                                    }
+
+                                    @Override
+                                    public void close() throws Exception {
+                                        try {
+                                            if (progress != null) {
+                                                progress.complete();
+                                                progress.close();
+                                            }
+                                        } finally {
+                                            super.close();
+                                        }
+                                    }
+
                                     @Override
                                     public void processElement(
                                             String dir,
@@ -348,25 +434,12 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                     ctx,
                                             Collector<Tuple2<String, Long>> out) {
                                         Path dirPath = new Path(dir);
-                                        try (MaintenanceProgress progress =
-                                                new MaintenanceProgress(
-                                                        "operation=remove-orphans table="
-                                                                + sanitizeUri(
-                                                                        location.toUri().toString())
-                                                                + " directory="
-                                                                + sanitizeUri(
-                                                                        dirPath.toUri().toString()),
-                                                        "list-candidate-files")) {
-                                            long item =
-                                                    progress.startItem(
-                                                            sanitizeUri(
-                                                                    dirPath.toUri().toString()));
-                                            List<FileStatus> files;
-                                            try {
-                                                files = tryBestListingDirs(dirPath);
-                                            } finally {
-                                                progress.finishItem(item);
-                                            }
+                                        long item =
+                                                progress.startItem(
+                                                        sanitizeUri(dirPath.toUri().toString()));
+                                        try {
+                                            List<FileStatus> files = tryBestListingDirs(dirPath);
+                                            progress.add("directories_listed", 1);
                                             progress.add("files_listed", files.size());
                                             for (FileStatus file : files) {
                                                 if (!file.isDir()
@@ -393,8 +466,20 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                             e);
                                                 }
                                             }
-                                            progress.complete();
+                                        } finally {
+                                            progress.finishItem(item);
                                         }
+                                    }
+
+                                    private String subtaskProgressContext() {
+                                        return "operation=remove-orphans table="
+                                                + sanitizeUri(location.toUri().toString())
+                                                + " task="
+                                                + RuntimeContextUtils.getTaskNameWithSubtasks(
+                                                        getRuntimeContext())
+                                                + " attempt="
+                                                + RuntimeContextUtils.getAttemptNumber(
+                                                        getRuntimeContext());
                                     }
                                 })
                         .name("collect-candidate-files");
@@ -591,17 +676,27 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                             ? "dry_run_files"
                                                             : "delete_calls_completed",
                                                     1);
-                                            LOG.debug(
-                                                    "Orphan candidate handled: table={} dry_run={} path={}",
-                                                    sanitizeUri(location.toUri().toString()),
-                                                    dryRun,
-                                                    sanitizeUri(path.toUri().toString()));
+                                            logOrphanCandidate(dryRun, location, path);
                                         }
                                     }
                                 });
         deleted = deleted.union(branchSnapshotDirDeleted);
 
         return deleted;
+    }
+
+    static void logOrphanCandidate(boolean dryRun, Path tablePath, Path path) {
+        if (dryRun) {
+            LOG.info(
+                    "Orphan file would be removed: table={} path={}",
+                    sanitizeUri(tablePath.toUri().toString()),
+                    sanitizeUri(path.toUri().toString()));
+        } else {
+            LOG.debug(
+                    "Orphan file removed: table={} path={}",
+                    sanitizeUri(tablePath.toUri().toString()),
+                    sanitizeUri(path.toUri().toString()));
+        }
     }
 
     public static CleanOrphanFilesResult executeDatabaseOrphanFiles(

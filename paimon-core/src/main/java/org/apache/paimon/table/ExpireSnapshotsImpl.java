@@ -115,7 +115,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     @Override
     public int expire() {
         try (MaintenanceProgress progress =
-                new MaintenanceProgress(progressContext(), "evaluate-retention")) {
+                MaintenanceProgress.slowOperation(progressContext(), "evaluate-retention")) {
             int expired = expire(progress);
             progress.add("snapshots_expired", expired);
             progress.complete();
