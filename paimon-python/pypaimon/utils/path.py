@@ -115,3 +115,20 @@ def to_file_io_path(path):
     if _WINDOWS and _has_drive(local_path):
         local_path = local_path.lstrip('/')
     return local_path
+
+
+def path_identity(path, file_io):
+    """Compare local paths independently of qualification, preserving remote URIs."""
+    path = str(path)
+    scheme, authority, local_path = _parts(path)
+    if scheme not in ('', 'file:') or authority not in ('', '//localhost'):
+        return path
+    if scheme == 'file:':
+        # Match the FileIO that will read/delete the path. Only URI inputs are
+        # decoded; percent characters in plain local names remain literal.
+        local_path = file_io.to_filesystem_path(path)
+        if local_path.startswith('file:'):
+            raise ValueError('FileIO cannot resolve local file URI: %s' % path)
+    if _WINDOWS and _has_drive(local_path):
+        local_path = local_path.lstrip('/')
+    return os.path.abspath(local_path).replace(os.sep, '/')

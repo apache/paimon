@@ -27,12 +27,16 @@ class OffsetRow(InternalRow):
                  file_io=None, blob_field_indices: Optional[Iterable[int]] = None,
                  vector_field_indices: Optional[Iterable[int]] = None,
                  descriptor_field_indices: Optional[Iterable[int]] = None,
-                 blob_view_lookup=None):
+                 blob_view_lookup=None,
+                 blob_base_path=None,
+                 resolved_blob_field_indices: Optional[Iterable[int]] = None):
         self.row_tuple = row_tuple
         self.offset = offset
         self.arity = arity
         self.row_kind_byte: int = RowKind.INSERT.value
         self._file_io = file_io
+        self._blob_base_path = blob_base_path
+        self._resolved_blob_field_indices = frozenset(resolved_blob_field_indices or ())
         self._blob_field_indices: FrozenSet[int] = (
             frozenset(blob_field_indices) if blob_field_indices is not None else frozenset()
         )
@@ -105,12 +109,15 @@ class OffsetRow(InternalRow):
         if value is None:
             return None
         raw = self._normalize_blob_bytes(value)
+        if pos in self._resolved_blob_field_indices:
+            return Blob.from_data(raw)
         if raw is not None and BlobViewStruct.is_blob_view_struct(raw):
             return self._resolve_blob_view_struct(BlobViewStruct.deserialize(raw))
         if pos in self._descriptor_field_indices:
             return self._blob_from_descriptor_field_bytes(raw)
         return Blob.from_bytes(
-            raw, self._file_io, uri_reader_factory=self._uri_reader_factory())
+            raw, self._file_io, uri_reader_factory=self._uri_reader_factory(),
+            table_path=self._blob_base_path)
 
     def get_vector(self, pos: int):
         from pypaimon.table.row.vector import Vector
