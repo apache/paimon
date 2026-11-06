@@ -276,6 +276,7 @@ public class FileSystemSchemaManager implements SchemaManager {
             SchemaValidation.validateGeneratedColumnEvolution(previous.get(), newSchema);
         }
         SchemaValidation.validateTableSchema(newSchema);
+        SchemaValidation.validateAggregationFunctionTypes(newSchema);
         SchemaValidation.validateHistoricalIcebergTypes(
                 this::listAll, new CoreOptions(newSchema.options()));
         SchemaValidation.validateFallbackBranch(this, newSchema);
