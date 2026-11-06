@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import logging
 from typing import List, Optional, Any, Set, Tuple
 
 import pyarrow as pa
@@ -24,6 +25,8 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
+
+LOG = logging.getLogger(__name__)
 
 
 class FormatVortexReader(RecordBatchReader):
@@ -60,14 +63,18 @@ class FormatVortexReader(RecordBatchReader):
 
         columns_for_vortex = self.existing_fields if self.existing_fields else None
 
-        # Try to convert Arrow predicate to Vortex expr for native push-down
+        # Try to convert Arrow predicate to Vortex expr for native push-down. The caller
+        # filters the rows again after the scan, so a predicate that Vortex cannot take
+        # only costs time.
         vortex_expr = None
         if push_down_predicate is not None:
             try:
                 from vortex.arrow.expression import arrow_to_vortex
                 vortex_expr = arrow_to_vortex(push_down_predicate, file_schema)
-            except Exception:
-                pass
+            except Exception as e:
+                LOG.warning(
+                    "Vortex cannot push down the filter %s of %s, the scan reads every row: %s",
+                    push_down_predicate, file_path, e)
 
         indices = None
         if row_indices is not None:
