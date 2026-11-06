@@ -281,17 +281,36 @@ public class FilesTable implements ReadonlyTable {
         }
     }
 
+    private static final Set<String> SCAN_PUSHDOWN_FIELDS = scanPushdownFields();
+
+    private static Set<String> scanPushdownFields() {
+        Set<String> fields = new HashSet<>();
+        fields.add("partition");
+        fields.add("bucket");
+        fields.add("level");
+        return Collections.unmodifiableSet(fields);
+    }
+
+    /**
+     * Returns the conjuncts that the scan does not push down. The scan only pushes top-level leaves
+     * on a plain partition, bucket or level field, so transforms and OR predicates on these fields
+     * must still be evaluated on the rows.
+     */
+    static List<Predicate> scanResidualPredicates(Predicate predicate) {
+        return PredicateBuilder.splitAnd(predicate).stream()
+                .filter(p -> !isScanPushdown(p))
+                .collect(Collectors.toList());
+    }
+
+    private static boolean isScanPushdown(Predicate predicate) {
+        return predicate instanceof LeafPredicate
+                && ((LeafPredicate) predicate)
+                        .fieldRefOptional()
+                        .filter(ref -> SCAN_PUSHDOWN_FIELDS.contains(ref.name()))
+                        .isPresent();
+    }
+
     private static class FilesRead implements InnerTableRead {
-
-        private static final Set<String> SCAN_PUSHDOWN_FIELDS = scanPushdownFields();
-
-        private static Set<String> scanPushdownFields() {
-            Set<String> fields = new HashSet<>();
-            fields.add("partition");
-            fields.add("bucket");
-            fields.add("level");
-            return Collections.unmodifiableSet(fields);
-        }
 
         private final SchemaManager schemaManager;
 
@@ -312,9 +331,7 @@ public class FilesTable implements ReadonlyTable {
                 this.predicate = null;
                 return this;
             }
-            List<Predicate> remaining =
-                    PredicateBuilder.excludePredicateWithFields(
-                            PredicateBuilder.splitAnd(predicate), SCAN_PUSHDOWN_FIELDS);
+            List<Predicate> remaining = scanResidualPredicates(predicate);
             this.predicate = remaining.isEmpty() ? null : PredicateBuilder.and(remaining);
             return this;
         }
