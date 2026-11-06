@@ -422,8 +422,27 @@ Lookup metrics are available for local partial lookup. They are reported at look
 
 ### Blob Payload Transfer Metrics
 
-Raw, array and map BLOB writers expose the following metrics in the `blobTransfer` group,
-scoped by `table` and `sourceKind`:
+Payload transfer metrics are **disabled by default**. To enable them for an append writer
+with a metric registry, set the following table option when creating a table or before
+creating a new writer:
+
+```sql
+ALTER TABLE my_table SET ('blob-transfer-metrics.enabled' = 'true');
+```
+
+Existing writers keep their original setting; create a new writer from the updated table
+configuration for the change to take effect.
+
+The option controls only the additional `blobTransfer` group. The existing `blobFetch`
+counters, including fetch outcomes and successful payload bytes, remain enabled whenever
+the writer has a metric registry. With the option disabled, writers skip transfer timing,
+source classification and per-copy transfer-byte accounting. Enabling the option adds
+per-payload instrumentation overhead; it does not change the fetch or write policy.
+
+Instrumented append paths for raw, array and map BLOB fields expose the following metrics,
+scoped by `table` and `sourceKind`. This includes Data Evolution append writes; it does not
+enable instrumentation in primary-key BLOB externalization or Data Evolution BLOB compaction,
+which do not attach this reporter.
 
 | Metric | Type | Description |
 | --- | --- | --- |
@@ -432,7 +451,7 @@ scoped by `table` and `sourceKind`:
 | `blobTransferDurationNanos` | Counter | Cumulative elapsed nanoseconds for reported transfer outcomes. |
 | `blobTransferCompleted` | Counter | Payload copies that completed, before record-footer writing, descriptor callbacks, flushing or snapshot commit. |
 | `blobTransferFailed` | Counter | Failures obtaining or opening a source, or copying its payload. |
-| `blobTransferLatencyMillis` | Histogram | Elapsed milliseconds for completed and failed transfers, with a fixed 1024-sample window per source kind. |
+| `blobTransferLatencyMillis` | Histogram | Elapsed milliseconds for every reported completed and failed transfer, with a fixed 1024-sample window per source kind. |
 
 `sourceKind` describes the reader API used by the writer: `inline` for an in-memory BLOB,
 `http` for the standard HTTP reader, `file` for the standard FileIO reader, and `custom`
@@ -447,7 +466,11 @@ stream close where applicable; final closure of a reused underlying source is ou
 interval. Record-footer writing, descriptor callbacks, flush and snapshot commit are excluded.
 Errors in surrounding record framing are outside these payload-copy outcome counters. User NULLs,
 placeholders and prechecked missing resources do not attempt a payload copy and are excluded.
-Specialized video range-copy paths retain their existing metrics.
+The video writer's shared full-payload copy path also respects the option, but its separate
+keyframe-index reads are not included in these transfer metrics and retain their existing
+fetch counters. A reused physical video payload is counted when copied, rather than once
+per logical frame reference. No transfer outcomes are sampled: the histogram retains the
+latest 1024 elapsed-time observations for each reporter and source-kind group.
 
 Byte counts exclude file framing, checksums, protocol headers and lower-layer retries or
 transport overhead. A failed write may have changed the destination before throwing; those

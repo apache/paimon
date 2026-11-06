@@ -65,6 +65,7 @@ public class BlobFetchMetrics implements BlobFetchMetricReporter {
 
     private final MetricRegistry registry;
     private final String tableName;
+    private final boolean transferMetricsEnabled;
     // An enum bounds the number of dynamic groups, independently of URI or user-provided data.
     private final Map<BlobTransferSource, TransferMetrics> transferGroups =
             new EnumMap<>(BlobTransferSource.class);
@@ -86,8 +87,14 @@ public class BlobFetchMetrics implements BlobFetchMetricReporter {
     private final Counter otherErrorCounter;
 
     public BlobFetchMetrics(MetricRegistry registry, String tableName) {
+        this(registry, tableName, false);
+    }
+
+    public BlobFetchMetrics(
+            MetricRegistry registry, String tableName, boolean transferMetricsEnabled) {
         this.registry = registry;
         this.tableName = tableName;
+        this.transferMetricsEnabled = transferMetricsEnabled;
         this.metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
         this.totalCounter = metricGroup.counter(BLOB_FETCH_TOTAL);
         this.successCounter = metricGroup.counter(BLOB_FETCH_SUCCESS);
@@ -145,39 +152,56 @@ public class BlobFetchMetrics implements BlobFetchMetricReporter {
     }
 
     @Override
-    public synchronized void recordTransfer(
+    public boolean isTransferMetricsEnabled() {
+        return transferMetricsEnabled;
+    }
+
+    @Override
+    public void recordTransfer(
             BlobTransferSource source,
             long readBytes,
             long writtenBytes,
             long durationNanos,
             boolean completed) {
-        if (closed) {
+        if (!transferMetricsEnabled) {
             return;
         }
-        BlobTransferSource kind = source == null ? BlobTransferSource.UNKNOWN : source;
-        TransferMetrics transfer = transferGroups.get(kind);
-        if (transfer == null) {
-            Map<String, String> variables = new LinkedHashMap<>();
-            variables.put("table", tableName);
-            variables.put("sourceKind", kind.metricValue());
-            MetricGroup candidate = registry.createMetricGroup(TRANSFER_GROUP_NAME, variables);
-            try {
-                transfer = new TransferMetrics(candidate);
-            } catch (RuntimeException | Error e) {
-                try {
-                    candidate.close();
-                } catch (RuntimeException | Error closeFailure) {
-                    ExceptionUtils.firstOrSuppressed(closeFailure, e);
-                }
-                throw e;
+        synchronized (this) {
+            if (closed) {
+                return;
             }
-            transferGroups.put(kind, transfer);
+            BlobTransferSource kind = source == null ? BlobTransferSource.UNKNOWN : source;
+            TransferMetrics transfer = transferGroups.get(kind);
+            if (transfer == null) {
+                Map<String, String> variables = new LinkedHashMap<>();
+                variables.put("table", tableName);
+                variables.put("sourceKind", kind.metricValue());
+                MetricGroup candidate = registry.createMetricGroup(TRANSFER_GROUP_NAME, variables);
+                try {
+                    transfer = new TransferMetrics(candidate);
+                } catch (RuntimeException | Error e) {
+                    try {
+                        candidate.close();
+                    } catch (RuntimeException | Error closeFailure) {
+                        ExceptionUtils.firstOrSuppressed(closeFailure, e);
+                    }
+                    throw e;
+                }
+                transferGroups.put(kind, transfer);
+            }
+            if (readBytes > 0) {
+                transfer.readBytes.inc(readBytes);
+            }
+            if (writtenBytes > 0) {
+                transfer.writtenBytes.inc(writtenBytes);
+            }
+            long nonNegativeDuration = Math.max(0, durationNanos);
+            if (nonNegativeDuration > 0) {
+                transfer.durationNanos.inc(nonNegativeDuration);
+            }
+            transfer.latencyMillis.update(nonNegativeDuration / 1_000_000L);
+            (completed ? transfer.completed : transfer.failed).inc();
         }
-        transfer.readBytes.inc(Math.max(0, readBytes));
-        transfer.writtenBytes.inc(Math.max(0, writtenBytes));
-        transfer.durationNanos.inc(Math.max(0, durationNanos));
-        transfer.latencyMillis.update(Math.max(0, durationNanos) / 1_000_000L);
-        (completed ? transfer.completed : transfer.failed).inc();
     }
 
     public synchronized void close() {

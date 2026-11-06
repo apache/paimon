@@ -373,6 +373,92 @@ public class BlobFormatWriterTest {
     }
 
     @Test
+    public void testLegacyReporterDoesNotEnableTransferMetrics(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        long[] successes = new long[2];
+        BlobFetchMetricReporter legacyReporter =
+                new BlobFetchMetricReporter() {
+                    @Override
+                    public void recordSuccess(long bytes) {
+                        successes[0]++;
+                        successes[1] += bytes;
+                    }
+
+                    @Override
+                    public void recordMissingFileNullWritten(boolean httpNotFound) {}
+
+                    @Override
+                    public void recordFetchFailureNullWritten(Throwable throwable) {}
+
+                    @Override
+                    public void recordFetchFailure(Throwable throwable) {}
+
+                    @Override
+                    public void recordTransfer(
+                            BlobTransferSource source,
+                            long readBytes,
+                            long writtenBytes,
+                            long durationNanos,
+                            boolean completed) {
+                        throw new AssertionError("Legacy reporter must not receive transfers");
+                    }
+                };
+        assertThat(legacyReporter.isTransferMetricsEnabled()).isFalse();
+        assertThat(BlobFetchMetricReporter.NOOP.isTransferMetricsEnabled()).isFalse();
+        byte[] payload = new byte[] {1, 2, 3, 4, 5};
+        java.nio.file.Path input = tempDir.resolve("source");
+        Files.write(input, payload);
+        java.nio.file.Path output = tempDir.resolve("legacy.out");
+        BlobFormatWriter writer =
+                newWriter(output, RowType.of(DataTypes.BLOB()), false, false, legacyReporter, 2);
+        try {
+            // Both the unbounded and bounded disabled copy paths retain payload and old metrics.
+            writer.addElement(GenericRow.of(Blob.fromData(payload)));
+            writer.addElement(
+                    GenericRow.of(
+                            Blob.fromFile(
+                                    new LocalFileIO(),
+                                    input.toUri().toString(),
+                                    0,
+                                    payload.length)));
+        } finally {
+            writer.close();
+        }
+        assertThat(successes).containsExactly(2, 10);
+        assertThat(readBackBlobs(output, 2)).containsExactly(payload, payload);
+    }
+
+    @Test
+    public void testTransferCapabilityIsReadOnlyWhenCreatingTheWriter(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        int[] capabilityReads = new int[1];
+        TestingBlobFetchMetricReporter reporter =
+                new TestingBlobFetchMetricReporter() {
+                    @Override
+                    public boolean isTransferMetricsEnabled() {
+                        capabilityReads[0]++;
+                        return true;
+                    }
+                };
+        BlobFormatWriter writer =
+                newWriter(
+                        tempDir.resolve("capability.out"),
+                        RowType.of(DataTypes.BLOB()),
+                        false,
+                        false,
+                        reporter);
+        try {
+            for (int i = 0; i < 3; i++) {
+                writer.addElement(GenericRow.of(Blob.fromData(new byte[] {1, 2, 3})));
+            }
+        } finally {
+            writer.close();
+        }
+        assertThat(capabilityReads).containsExactly(1);
+        assertThat(reporter.transfersCompleted).isEqualTo(3);
+    }
+
+    @Test
     public void testBlobFetchMetricReporterForSuccessAndNullWritten(
             @TempDir java.nio.file.Path tempDir) throws Exception {
         RowType rowType = RowType.of(DataTypes.BLOB());
@@ -508,6 +594,170 @@ public class BlobFormatWriterTest {
         assertThat(reporter.transferWrittenBytes).isEqualTo(3);
         assertThat(reporter.transfersFailed).isEqualTo(1);
         assertThat(reporter.transfersCompleted).isZero();
+    }
+
+    @Test
+    public void testBoundedTransferPreservesPartialBytesOnEof(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        TestingBlobFetchMetricReporter reporter = new TestingBlobFetchMetricReporter();
+        String uri = "mem://short-source";
+        RecordingUriReader reader =
+                new RecordingUriReader(singleFile(uri, new byte[] {1, 2, 3, 4, 5}));
+        BlobFormatWriter writer =
+                newWriter(
+                        tempDir.resolve("short.out"),
+                        RowType.of(DataTypes.BLOB()),
+                        false,
+                        true,
+                        reporter,
+                        3);
+        try {
+            assertThatThrownBy(
+                            () ->
+                                    writer.addElement(
+                                            GenericRow.of(
+                                                    new BlobRef(
+                                                            reader,
+                                                            new BlobDescriptor(uri, 0, 100)))))
+                    .isInstanceOf(EOFException.class)
+                    .hasMessageContaining("95 bytes early");
+        } finally {
+            writer.close();
+        }
+        assertThat(reporter.transferReadBytes).isEqualTo(5);
+        assertThat(reporter.transferWrittenBytes).isEqualTo(5);
+        assertThat(reporter.transfersFailed).isEqualTo(1);
+        assertThat(reporter.transfersCompleted).isZero();
+        assertThat(reporter.failure).isEqualTo(1);
+        assertThat(reporter.fetchFailureNullWritten).isZero();
+        assertThat(reader.opened.get(0).closeCount).isEqualTo(1);
+    }
+
+    @Test
+    public void testBoundedZeroReadStillFailsWithAndWithoutTransferMetrics(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        for (boolean enabled : new boolean[] {false, true}) {
+            TestingBlobFetchMetricReporter reporter =
+                    new TestingBlobFetchMetricReporter() {
+                        @Override
+                        public boolean isTransferMetricsEnabled() {
+                            return enabled;
+                        }
+                    };
+            BlobRef source =
+                    new BlobRef(
+                            uri ->
+                                    SeekableInputStream.wrap(
+                                            new InputStream() {
+                                                @Override
+                                                public int read() {
+                                                    return 0;
+                                                }
+
+                                                @Override
+                                                public int read(byte[] b, int off, int len) {
+                                                    return 0;
+                                                }
+                                            }),
+                            new BlobDescriptor("mem://zero-read", 0, 5));
+            BlobFormatWriter writer =
+                    newWriter(
+                            tempDir.resolve("zero-read-" + enabled + ".out"),
+                            RowType.of(DataTypes.BLOB()),
+                            false,
+                            true,
+                            reporter);
+            try {
+                assertThatThrownBy(() -> writer.addElement(GenericRow.of(source)))
+                        .isInstanceOf(IOException.class)
+                        .hasMessageContaining("Source returned 0 bytes");
+            } finally {
+                writer.close();
+            }
+            assertThat(reporter.failure).isEqualTo(1);
+            assertThat(reporter.fetchFailureNullWritten).isZero();
+            assertThat(reporter.transfersFailed).isEqualTo(enabled ? 1 : 0);
+            assertThat(reporter.transfersCompleted).isZero();
+            assertThat(reporter.transferReadBytes).isZero();
+            assertThat(reporter.transferWrittenBytes).isZero();
+        }
+    }
+
+    @Test
+    public void testBoundedTransferPreservesConfirmedBytesOnDestinationFailure(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        TestingBlobFetchMetricReporter reporter = new TestingBlobFetchMetricReporter();
+        String uri = "mem://source";
+        RecordingUriReader reader = new RecordingUriReader(singleFile(uri, new byte[9]));
+        try (PositionOutputStream out =
+                new PositionOutputStreamWrapper(
+                        new LocalFileIO.LocalPositionOutputStream(
+                                tempDir.resolve("bounded-failed.out").toFile())) {
+                    private boolean failed;
+
+                    @Override
+                    public void write(byte[] b, int off, int len) throws IOException {
+                        if (!failed && getPos() >= 7) {
+                            failed = true;
+                            throw new IOException("bounded destination failed");
+                        }
+                        super.write(b, off, len);
+                    }
+                }) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out, null, RowType.of(DataTypes.BLOB()), false, true, reporter, 3);
+            try {
+                assertThatThrownBy(
+                                () ->
+                                        writer.addElement(
+                                                GenericRow.of(
+                                                        new BlobRef(
+                                                                reader,
+                                                                new BlobDescriptor(uri, 0, 9)))))
+                        .isInstanceOf(IOException.class)
+                        .hasMessage("bounded destination failed");
+            } finally {
+                writer.close();
+            }
+        }
+        assertThat(reporter.transferReadBytes).isEqualTo(6);
+        assertThat(reporter.transferWrittenBytes).isEqualTo(3);
+        assertThat(reporter.transfersFailed).isEqualTo(1);
+        assertThat(reporter.transfersCompleted).isZero();
+        assertThat(reporter.fetchFailureNullWritten).isZero();
+        assertThat(reader.opened.get(0).closeCount).isEqualTo(1);
+    }
+
+    @Test
+    public void testUnboundedTransferReportsFullBytesWhenSourceCloseFails(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        TestingBlobFetchMetricReporter reporter = new TestingBlobFetchMetricReporter();
+        BlobFormatWriter writer =
+                newWriter(
+                        tempDir.resolve("close-failed.out"),
+                        RowType.of(DataTypes.BLOB()),
+                        false,
+                        true,
+                        reporter,
+                        2);
+        BlobRef source =
+                new BlobRef(
+                        uri -> new CloseFailingStream(new byte[] {1, 2, 3, 4, 5}),
+                        new BlobDescriptor("mem://close-failed", 0, -1));
+        try {
+            assertThatThrownBy(() -> writer.addElement(GenericRow.of(source)))
+                    .isInstanceOf(IOException.class)
+                    .hasMessage("close failed");
+        } finally {
+            writer.close();
+        }
+        assertThat(reporter.transferReadBytes).isEqualTo(5);
+        assertThat(reporter.transferWrittenBytes).isEqualTo(5);
+        assertThat(reporter.transfersFailed).isEqualTo(1);
+        assertThat(reporter.transfersCompleted).isZero();
+        assertThat(reporter.failure).isEqualTo(1);
+        assertThat(reporter.fetchFailureNullWritten).isZero();
     }
 
     @Test
@@ -1159,6 +1409,11 @@ public class BlobFormatWriterTest {
         private long transferDurationNanos;
         private int transfersCompleted;
         private int transfersFailed;
+
+        @Override
+        public boolean isTransferMetricsEnabled() {
+            return true;
+        }
 
         @Override
         public void recordTransfer(

@@ -85,7 +85,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         this.writeNullOnMissingFile = writeNullOnMissingFile;
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
         this.blobFetchMetricReporter = blobFetchMetricReporter;
-        this.transferMetricsEnabled = blobFetchMetricReporter != BlobFetchMetricReporter.NOOP;
+        this.transferMetricsEnabled = blobFetchMetricReporter.isTransferMetricsEnabled();
         this.crc32 = new CRC32();
         this.copyBuffer = new byte[copyBufferSize];
         this.reuseSource = new ReusingBlobRefStreamProvider();
@@ -212,7 +212,11 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         long blobPosition = out.getPos();
         if (source.reused()) {
             try {
-                copyExactly(source.stream(), source.length());
+                if (transferMetricsEnabled) {
+                    copyExactlyWithMetrics(source.stream(), source.length());
+                } else {
+                    copyExactly(source.stream(), source.length());
+                }
             } catch (IOException | RuntimeException e) {
                 recordTransfer(false);
                 blobFetchMetricReporter.recordFetchFailure(e);
@@ -222,16 +226,10 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             }
         } else {
             try (SeekableInputStream stream = source.stream()) {
-                int bytesRead = stream.read(copyBuffer);
-                while (bytesRead >= 0) {
-                    if (transferMetricsEnabled) {
-                        transferReadBytes += bytesRead;
-                    }
-                    write(copyBuffer, bytesRead);
-                    if (transferMetricsEnabled) {
-                        transferWrittenBytes += bytesRead;
-                    }
-                    bytesRead = stream.read(copyBuffer);
+                if (transferMetricsEnabled) {
+                    copyUntilEndWithMetrics(stream);
+                } else {
+                    copyUntilEnd(stream);
                 }
             } catch (IOException | RuntimeException e) {
                 recordTransfer(false);
@@ -261,14 +259,66 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
                         "Source returned 0 bytes while copying BLOB payload for field "
                                 + blobFieldName);
             }
-            if (transferMetricsEnabled) {
-                transferReadBytes += bytesRead;
-            }
             write(copyBuffer, bytesRead);
-            if (transferMetricsEnabled) {
-                transferWrittenBytes += bytesRead;
-            }
             remaining -= bytesRead;
+        }
+    }
+
+    // Keep accounting out of the disabled copy loops. Locals are published even when I/O fails.
+    private void copyExactlyWithMetrics(SeekableInputStream stream, long length)
+            throws IOException {
+        long readBytes = 0;
+        long writtenBytes = 0;
+        try {
+            long remaining = length;
+            while (remaining > 0) {
+                int toRead = (int) Math.min(copyBuffer.length, remaining);
+                int bytesRead = stream.read(copyBuffer, 0, toRead);
+                if (bytesRead < 0) {
+                    throw new EOFException(
+                            String.format(
+                                    "Unexpected EOF while copying BLOB payload for field %s: expected %d "
+                                            + "bytes but source ended %d bytes early.",
+                                    blobFieldName, length, remaining));
+                }
+                if (bytesRead == 0) {
+                    throw new IOException(
+                            "Source returned 0 bytes while copying BLOB payload for field "
+                                    + blobFieldName);
+                }
+                readBytes += bytesRead;
+                write(copyBuffer, bytesRead);
+                writtenBytes += bytesRead;
+                remaining -= bytesRead;
+            }
+        } finally {
+            transferReadBytes = readBytes;
+            transferWrittenBytes = writtenBytes;
+        }
+    }
+
+    private void copyUntilEnd(SeekableInputStream stream) throws IOException {
+        int bytesRead = stream.read(copyBuffer);
+        while (bytesRead >= 0) {
+            write(copyBuffer, bytesRead);
+            bytesRead = stream.read(copyBuffer);
+        }
+    }
+
+    private void copyUntilEndWithMetrics(SeekableInputStream stream) throws IOException {
+        long readBytes = 0;
+        long writtenBytes = 0;
+        try {
+            int bytesRead = stream.read(copyBuffer);
+            while (bytesRead >= 0) {
+                readBytes += bytesRead;
+                write(copyBuffer, bytesRead);
+                writtenBytes += bytesRead;
+                bytesRead = stream.read(copyBuffer);
+            }
+        } finally {
+            transferReadBytes = readBytes;
+            transferWrittenBytes = writtenBytes;
         }
     }
 
