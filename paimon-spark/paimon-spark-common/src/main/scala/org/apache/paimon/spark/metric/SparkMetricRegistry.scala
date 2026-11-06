@@ -36,9 +36,52 @@ case class SparkMetricRegistry() extends MetricRegistry {
   override def createMetricGroup(
       groupName: String,
       variables: JMap[String, String]): MetricGroup = {
-    val metricGroup = new SparkMetricGroup(groupName, variables, PaimonMetricsSource.metricRegistry)
+    val metricGroup = if (groupName == ScanMetrics.GROUP_NAME) {
+      new ScanMetricGroup(variables)
+    } else {
+      new SparkMetricGroup(groupName, variables, PaimonMetricsSource.metricRegistry)
+    }
     metricGroups.put(groupName, metricGroup)
     metricGroup
+  }
+
+  // Updates the current scan group with remaining files and the total runtime-pruned file count.
+  def updateRuntimeFileCounts(remaining: Long, skipped: Long): Unit = {
+    metricGroups.get(ScanMetrics.GROUP_NAME).foreach {
+      case group: ScanMetricGroup => group.updateRuntimeFileCounts(remaining, skipped)
+      case _ =>
+    }
+  }
+
+  // Shares runtime-pruned file counts between Spark UI and JMX.
+  private class ScanMetricGroup(variables: JMap[String, String])
+    extends SparkMetricGroup(
+      ScanMetrics.GROUP_NAME,
+      variables,
+      PaimonMetricsSource.metricRegistry) {
+
+    // Publish one immutable pair to the JMX sampling thread. Each scan group owns its state,
+    // so updating an older scan cannot overwrite the gauges registered by a newer scan.
+    @volatile private var runtimeFileCounts: Option[(Long, Long)] = None
+
+    // Replaces runtime totals; the original gauges still account for static pruning.
+    def updateRuntimeFileCounts(remaining: Long, skipped: Long): Unit = {
+      runtimeFileCounts = Some((remaining, skipped))
+    }
+
+    // Shares adjusted file counts with Spark UI and JMX, using core values before runtime pruning.
+    override def gauge[T](name: String, original: Gauge[T]): Gauge[T] = {
+      val effective: Gauge[T] = name match {
+        case ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES =>
+          () => runtimeFileCounts.map(_._1.asInstanceOf[T]).getOrElse(original.getValue)
+        case ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES =>
+          () =>
+            (original.getValue.asInstanceOf[Long] + runtimeFileCounts.map(_._2).getOrElse(0L))
+              .asInstanceOf[T]
+        case _ => original
+      }
+      super.gauge(name, effective)
+    }
   }
 
   def buildSparkScanMetrics(): Array[CustomTaskMetric] = {

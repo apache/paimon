@@ -26,9 +26,9 @@ import org.apache.paimon.spark.PostponeMergeOnRead.MergePlan
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonStatistics, PaimonSupportsRuntimeFiltering, SparkHybridSearchBuilderImpl, SparkVectorSearchBuilderImpl}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
-import org.apache.paimon.spark.util.OptionUtils
+import org.apache.paimon.spark.util.{OptionUtils, SplitUtils}
 import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.{InnerTableScan, Split}
+import org.apache.paimon.table.source.{ChainSplit, InnerTableScan, Split, Splits}
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
@@ -47,6 +47,8 @@ abstract class PaimonBaseScan(table: InnerTable)
 
   private[spark] lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
+  private var initialPlannedDataFileCount: Long = 0L
+
   @transient private lazy val postponeMergeOnRead = new PostponeMergeOnRead(this)
 
   protected def getInputSplits: Array[Split] = {
@@ -58,7 +60,12 @@ abstract class PaimonBaseScan(table: InnerTable)
 
     val plan = scan.plan()
     registerReadProtectionTagCleanup(scan.readProtectionTagName)
-    plan.splits().asScala.toArray
+    val splits = plan.splits().asScala.toArray
+    if (coreOptions.queryAuthEnabled()) {
+      // Capture the file count after static pruning and before cached runtime pruning.
+      initialPlannedDataFileCount = countDataFiles(splits)
+    }
+    splits
   }
 
   final private[spark] def registerReadProtectionTagCleanup(tagName: String): Unit = {
@@ -184,6 +191,26 @@ abstract class PaimonBaseScan(table: InnerTable)
 
   override def reportDriverMetrics(): Array[CustomTaskMetric] = {
     paimonMetricsRegistry.buildSparkScanMetrics()
+  }
+
+  // Recomputes remaining files and the total runtime reduction from the initial plan.
+  override protected def updateRuntimePruningMetrics(splits: Array[Split]): Unit = {
+    val remainingFiles = countDataFiles(splits)
+    paimonMetricsRegistry.updateRuntimeFileCounts(
+      remainingFiles,
+      initialPlannedDataFileCount - remainingFiles)
+  }
+
+  // Counts data files through wrappers, including historical files required by chain splits.
+  private def countDataFiles(splits: Array[Split]): Long = {
+    splits.iterator.map {
+      split =>
+        Splits.underlying(split) match {
+          // SplitUtils does not handle ChainSplit.
+          case chain: ChainSplit => chain.dataFiles().size().toLong
+          case underlying => SplitUtils.dataFileCount(underlying)
+        }
+    }.sum
   }
 
   final protected def ensureNoFullScan(): Unit = ensureNoFullScan(0L)
