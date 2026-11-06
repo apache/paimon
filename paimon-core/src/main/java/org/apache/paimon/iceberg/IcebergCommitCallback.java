@@ -2936,8 +2936,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     /**
      * Replays the Iceberg snapshots after the newest valid older metadata version instead of
      * rebuilding from every data file. Returns null when nothing is left to do, and what a rebuild
-     * has to inherit when the replay failed before it exposed anything and the snapshot is still
-     * the head.
+     * has to inherit when no replay was possible, or it failed before it exposed anything, and the
+     * snapshot is still the head.
      */
     @Nullable
     private RebuildRequest replayOrRebuild(
@@ -3025,12 +3025,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             listCandidates();
             ReplayBase base = nextBase();
             if (base == null) {
-                LOG.info(
-                        "No usable older Iceberg metadata for snapshot {} of table {}, "
-                                + "so it is rebuilt.",
-                        snapshotId,
-                        table.fullName());
-                return defaultRebuild;
+                return rebuildIfHead("there is no usable older Iceberg metadata");
             }
             pathFactory.startRecording();
             try {
@@ -3089,39 +3084,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 return null;
             } catch (ReplayAbort e) {
                 deleteCreatedFiles();
-                Long latest = table.snapshotManager().latestSnapshotId();
-                if (latest != null && latest == snapshotId) {
-                    try {
-                        // the failure may have come before any step checked the source
-                        verifySource(snapshot);
-                    } catch (ReplaySourceReplaced replaced) {
-                        LOG.info(
-                                "Replaying the Iceberg metadata of snapshot {} of table {} failed "
-                                        + "and the snapshot was replaced, so nothing is "
-                                        + "written: {}",
-                                snapshotId,
-                                table.fullName(),
-                                replaced.getMessage());
-                        replayPoint(ReplayPoint.ABANDONED, snapshotId);
-                        return null;
-                    }
-                    LOG.info(
-                            "Replaying the Iceberg metadata of snapshot {} of table {} failed, "
-                                    + "so it is rebuilt: {}",
-                            snapshotId,
-                            table.fullName(),
-                            e.getMessage());
-                    return rebuildRequest();
-                }
-                LOG.info(
-                        "Replaying the Iceberg metadata of snapshot {} of table {} failed and "
-                                + "the head is {}, so it is not rebuilt: {}",
-                        snapshotId,
-                        table.fullName(),
-                        latest,
-                        e.getMessage());
-                replayPoint(ReplayPoint.ABANDONED, snapshotId);
-                return null;
+                return rebuildIfHead(e.getMessage());
             } catch (IOException | RuntimeException | Error e) {
                 if (!exposing) {
                     deleteCreatedFiles();
@@ -3662,6 +3625,47 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         // ---------------------------------------------------------------------------------
         // Helpers
         // ---------------------------------------------------------------------------------
+
+        /**
+         * What a rebuild has to inherit when the replay cannot be done, or null when the snapshot
+         * is not the head any more, or was replaced. A callback of such a snapshot cannot move the
+         * pointer, and a rebuild reads every data file of the table, so it is not done for it.
+         */
+        @Nullable
+        private RebuildRequest rebuildIfHead(String reason) {
+            Long latest = table.snapshotManager().latestSnapshotId();
+            if (latest == null || latest != snapshotId) {
+                LOG.info(
+                        "The Iceberg metadata of snapshot {} of table {} cannot be replayed and "
+                                + "the head is {}, so it is not rebuilt: {}",
+                        snapshotId,
+                        table.fullName(),
+                        latest,
+                        reason);
+                replayPoint(ReplayPoint.ABANDONED, snapshotId);
+                return null;
+            }
+            try {
+                // the failure may have come before any step checked the source
+                verifySource(snapshot);
+            } catch (ReplaySourceReplaced replaced) {
+                LOG.info(
+                        "The Iceberg metadata of snapshot {} of table {} cannot be replayed and "
+                                + "the snapshot was replaced, so nothing is written: {}",
+                        snapshotId,
+                        table.fullName(),
+                        replaced.getMessage());
+                replayPoint(ReplayPoint.ABANDONED, snapshotId);
+                return null;
+            }
+            LOG.info(
+                    "The Iceberg metadata of snapshot {} of table {} cannot be replayed, so it is "
+                            + "rebuilt: {}",
+                    snapshotId,
+                    table.fullName(),
+                    reason);
+            return rebuildRequest();
+        }
 
         private RebuildRequest rebuildRequest() {
             return new RebuildRequest(
