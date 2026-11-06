@@ -22,9 +22,12 @@ import org.apache.paimon.spark.catalog.SupportV1Function
 import org.apache.paimon.spark.util.OptionUtils
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.FunctionIdentifier
+import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException
 import org.apache.spark.sql.catalyst.plans.logical.{CreateUserDefinedFunction, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.connector.catalog.CatalogManager
+import org.apache.spark.sql.connector.catalog.{CatalogManager, SupportsNamespaces}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 /**
  * Parser-stage rule that rewrites a Paimon-catalog CREATE FUNCTION ... RETURN
@@ -54,6 +57,14 @@ case class RewritePaimonSQLFunctionCommands(spark: SparkSession) extends Rule[Lo
               throw new UnsupportedOperationException(
                 s"Paimon does not support creating SQL table functions yet: $funcIdent")
             }
+            // Paimon persists no function collation, so a declared or inherited one would be
+            // silently dropped.
+            defaultCollationSource(catalog, funcIdent, c).foreach {
+              source =>
+                throw new UnsupportedOperationException(
+                  "Paimon does not support DEFAULT COLLATION on SQL functions yet: " +
+                    s"$funcIdent $source")
+            }
             CreatePaimonSQLFunctionCommand(
               catalog,
               funcIdent,
@@ -70,6 +81,28 @@ case class RewritePaimonSQLFunctionCommands(spark: SparkSession) extends Rule[Lo
             )
           case _ => c
         }
+    }
+  }
+
+  /**
+   * Describes the default collation Spark 4.2 would give the function and where it comes from: the
+   * declared one, else its database's default. `None` if the function gets none.
+   */
+  private def defaultCollationSource(
+      catalog: SupportV1Function,
+      funcIdent: FunctionIdentifier,
+      plan: LogicalPlan): Option[String] = {
+    val shim = SparkShimLoader.shim
+    shim.sqlFunctionDefaultCollation(plan).map(collation => s"declares $collation").orElse {
+      (catalog, funcIdent.database) match {
+        case (ns: SupportsNamespaces, Some(db)) if shim.sqlFunctionInheritsDatabaseCollation =>
+          // A missing database has no collation; the create command reports it.
+          val collation =
+            try Option(ns.loadNamespaceMetadata(Array(db)).get(SupportsNamespaces.PROP_COLLATION))
+            catch { case _: NoSuchNamespaceException => None }
+          collation.map(c => s"inherits $c from database $db")
+        case _ => None
+      }
     }
   }
 }

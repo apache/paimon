@@ -28,6 +28,7 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.connector.catalog.{CatalogManager, Identifier, LookupCatalog, TableCatalog}
 import org.apache.spark.sql.execution.command.{CreateTableLikeCommand => SparkCreateTableLikeCommand}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 case class RewriteCreateTableLikeCommand(spark: SparkSession)
   extends Rule[LogicalPlan]
@@ -42,6 +43,45 @@ case class RewriteCreateTableLikeCommand(spark: SparkSession)
     }
 
     plan.resolveOperatorsUp {
+      // Spark 4.2 parses `CREATE TABLE LIKE` for v2 catalogs into its own logical plan, so the V1
+      // command below never appears. The shim hands back unresolved name parts, which get resolved
+      // here exactly as the V1 path resolves its `TableIdentifier`s.
+      case p if SparkShimLoader.shim.createTableLikeParts(p).isDefined =>
+        val (
+          targetParts,
+          sourceParts,
+          provider,
+          location,
+          properties,
+          ifNotExists,
+          hasHiveStorageSyntax) = SparkShimLoader.shim.createTableLikeParts(p).get
+        (targetParts, sourceParts) match {
+          // `SparkCatalog` always creates Paimon tables, so it always takes over. A
+          // `SparkGenericCatalog` target only does when the statement asks for Paimon: otherwise
+          // this is e.g. `CREATE TABLE csv_like LIKE csv_source`, which must keep Spark's own
+          // semantics (Spark does not copy the source comment, Paimon's command does). Same
+          // condition the V1 branch below applies.
+          case (
+                CatalogAndIdentifier(targetCatalog: SparkBaseCatalog, targetIdent),
+                CatalogAndIdentifier(sourceCatalog: TableCatalog, sourceIdent))
+              if targetCatalog.isInstanceOf[SparkCatalog] ||
+                provider.exists(SparkBaseCatalog.usePaimon) =>
+            if (hasHiveStorageSyntax) {
+              throw new UnsupportedOperationException(
+                "CREATE TABLE LIKE ... STORED AS is not supported for SparkCatalog.")
+            }
+            PaimonCreateTableLikeCommand(
+              targetCatalog,
+              targetIdent,
+              sourceCatalog,
+              sourceIdent,
+              provider,
+              location,
+              properties,
+              ifNotExists)
+          case _ => p
+        }
+
       case c: SparkCreateTableLikeCommand =>
         val targetParts = toMultipartIdentifier(c.targetTable)
 

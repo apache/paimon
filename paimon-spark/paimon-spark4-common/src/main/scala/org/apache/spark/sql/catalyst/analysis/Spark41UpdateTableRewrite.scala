@@ -23,7 +23,7 @@ import org.apache.paimon.spark.catalyst.analysis.PaimonAssignmentUtils
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, EqualNullSafe, Expression, If, Literal, MetadataAttribute, Not, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, Assignment, Filter, LogicalPlan, Project, ReplaceData, Union, UpdateTable, WriteDelta}
-import org.apache.spark.sql.catalyst.util.RowDeltaUtils.{OPERATION_COLUMN, UPDATE_OPERATION, WRITE_WITH_METADATA_OPERATION}
+import org.apache.spark.sql.catalyst.util.RowDeltaUtils.{COPY_OPERATION, OPERATION_COLUMN, UPDATE_OPERATION}
 import org.apache.spark.sql.connector.catalog.SupportsRowLevelOperations
 import org.apache.spark.sql.connector.write.{RowLevelOperationTable, SupportsDelta}
 import org.apache.spark.sql.connector.write.RowLevelOperation.Command.UPDATE
@@ -136,7 +136,13 @@ object Spark41UpdateTableRewrite extends RewriteRowLevelCommand with PureAppendO
   }
 
   // Mirrors Spark 4.1.1 `RewriteUpdateTable.{buildReplaceDataPlan, buildReplaceDataWithUnionPlan,
-  // buildReplaceDataUpdateProjection}`.
+  // buildReplaceDataUpdateProjection}`. Spark 4.2 (SPARK-56510) replaced
+  // WRITE_WITH_METADATA_OPERATION with COPY_OPERATION; updated and carried-over rows are both
+  // written through `write(metadata, data)`, which is exactly what COPY_OPERATION selects, so a
+  // single flat label keeps the written rows identical. Upstream 4.2 additionally labels the rows
+  // matching the condition UPDATE_OPERATION so its `numUpdatedRows` / `numCopiedRows` UI metrics
+  // split the two; those metrics are display-only here (Paimon does not implement
+  // `BatchWrite.commit(.., WriteSummary)`), so we keep the simpler shape.
   private def buildReplaceDataPlan(
       relation: DataSourceV2Relation,
       operationTable: RowLevelOperationTable,
@@ -147,7 +153,7 @@ object Spark41UpdateTableRewrite extends RewriteRowLevelCommand with PureAppendO
     val updatedAndRemainingRowsPlan =
       buildReplaceDataUpdateProjection(readRelation, assignments, cond)
     val writeRelation = relation.copy(table = operationTable)
-    val query = addOperationColumn(WRITE_WITH_METADATA_OPERATION, updatedAndRemainingRowsPlan)
+    val query = addOperationColumn(COPY_OPERATION, updatedAndRemainingRowsPlan)
     val projections = buildReplaceDataProjections(query, relation.output, metadataAttrs)
     ReplaceData(writeRelation, cond, query, relation, projections, Some(cond))
   }
@@ -169,7 +175,7 @@ object Spark41UpdateTableRewrite extends RewriteRowLevelCommand with PureAppendO
     val updatedAndRemainingRowsPlan = Union(updatedRowsPlan, remainingRowsPlan)
 
     val writeRelation = relation.copy(table = operationTable)
-    val query = addOperationColumn(WRITE_WITH_METADATA_OPERATION, updatedAndRemainingRowsPlan)
+    val query = addOperationColumn(COPY_OPERATION, updatedAndRemainingRowsPlan)
     val projections = buildReplaceDataProjections(query, relation.output, metadataAttrs)
     ReplaceData(writeRelation, cond, query, relation, projections, Some(cond))
   }

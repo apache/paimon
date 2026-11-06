@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.spark.ShowCreateTableTestUtils.showCreateTable;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -76,13 +77,13 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         createTable("testAddColumn");
         writeTable("testAddColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
-        List<Row> beforeAdd = spark.sql("SHOW CREATE TABLE testAddColumn").collectAsList();
-        assertThat(beforeAdd.toString()).contains(defaultShowCreateString("testAddColumn"));
+        String beforeAdd = showCreateTable(spark, "testAddColumn");
+        assertThat(beforeAdd).contains(defaultShowCreateString("testAddColumn"));
 
         spark.sql("ALTER TABLE testAddColumn ADD COLUMN d STRING");
 
-        List<Row> afterAdd = spark.sql("SHOW CREATE TABLE testAddColumn").collectAsList();
-        assertThat(afterAdd.toString())
+        String afterAdd = showCreateTable(spark, "testAddColumn");
+        assertThat(afterAdd)
                 .contains(
                         showCreateString(
                                 "testAddColumn",
@@ -99,8 +100,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     public void testAddNotNullColumn() {
         createTable("testAddNotNullColumn");
 
-        List<Row> beforeAdd = spark.sql("SHOW CREATE TABLE testAddNotNullColumn").collectAsList();
-        assertThat(beforeAdd.toString()).contains(defaultShowCreateString("testAddNotNullColumn"));
+        String beforeAdd = showCreateTable(spark, "testAddNotNullColumn");
+        assertThat(beforeAdd).contains(defaultShowCreateString("testAddNotNullColumn"));
 
         assertThatThrownBy(
                         () ->
@@ -116,9 +117,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     public void testAddColumnPosition() {
         createTable("testAddColumnPositionFirst");
         spark.sql("ALTER TABLE testAddColumnPositionFirst ADD COLUMN d INT FIRST");
-        List<Row> result =
-                spark.sql("SHOW CREATE TABLE testAddColumnPositionFirst").collectAsList();
-        assertThat(result.toString())
+        String result = showCreateTable(spark, "testAddColumnPositionFirst");
+        assertThat(result)
                 .contains(
                         showCreateString(
                                 "testAddColumnPositionFirst",
@@ -129,8 +129,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
         createTable("testAddColumnPositionAfter");
         spark.sql("ALTER TABLE testAddColumnPositionAfter ADD COLUMN d INT AFTER b");
-        result = spark.sql("SHOW CREATE TABLE testAddColumnPositionAfter").collectAsList();
-        assertThat(result.toString())
+        result = showCreateTable(spark, "testAddColumnPositionAfter");
+        assertThat(result)
                 .contains(
                         showCreateString(
                                 "testAddColumnPositionAfter",
@@ -157,8 +157,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         assertThat(tables.stream().map(Row::toString))
                 .containsExactlyInAnyOrder("[default,t2,false]", "[default,t3,false]");
 
-        List<Row> afterRename = spark.sql("SHOW CREATE TABLE t3").collectAsList();
-        assertThat(afterRename.toString()).contains(defaultShowCreateString("t3"));
+        String afterRename = showCreateTable(spark, "t3");
+        assertThat(afterRename).contains(defaultShowCreateString("t3"));
 
         List<Row> data = spark.sql("SELECT * FROM t3").collectAsList();
         assertThat(data.toString()).isEqualTo("[[1,2,1], [5,6,3]]");
@@ -169,15 +169,15 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         createTable("testRenameColumn");
         writeTable("testRenameColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
-        List<Row> beforeRename = spark.sql("SHOW CREATE TABLE testRenameColumn").collectAsList();
-        assertThat(beforeRename.toString()).contains(defaultShowCreateString("testRenameColumn"));
+        String beforeRename = showCreateTable(spark, "testRenameColumn");
+        assertThat(beforeRename).contains(defaultShowCreateString("testRenameColumn"));
         List<Row> results = spark.table("testRenameColumn").select("a", "c").collectAsList();
         assertThat(results.toString()).isEqualTo("[[1,1], [5,3]]");
 
         // Rename "b" to "bb"
         spark.sql("ALTER TABLE testRenameColumn RENAME COLUMN b to bb");
-        List<Row> afterRename = spark.sql("SHOW CREATE TABLE testRenameColumn").collectAsList();
-        assertThat(afterRename.toString())
+        String afterRename = showCreateTable(spark, "testRenameColumn");
+        assertThat(afterRename)
                 .contains(
                         showCreateString(
                                 "testRenameColumn", "a INT NOT NULL", "bb BIGINT", "c STRING"));
@@ -203,9 +203,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + "a BIGINT,\n"
                         + "b STRING)\n"
                         + "PARTITIONED BY (a)\n");
-        List<Row> beforeRename =
-                spark.sql("SHOW CREATE TABLE testRenamePartitionKey").collectAsList();
-        assertThat(beforeRename.toString())
+        String beforeRename = showCreateTable(spark, "testRenamePartitionKey");
+        assertThat(beforeRename)
                 .contains(showCreateString("testRenamePartitionKey", "a BIGINT", "b STRING"));
 
         assertThatThrownBy(
@@ -221,13 +220,13 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         createTable("testDropSingleColumn");
         writeTable("testDropSingleColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
-        List<Row> beforeDrop = spark.sql("SHOW CREATE TABLE testDropSingleColumn").collectAsList();
-        assertThat(beforeDrop.toString()).contains(defaultShowCreateString("testDropSingleColumn"));
+        String beforeDrop = showCreateTable(spark, "testDropSingleColumn");
+        assertThat(beforeDrop).contains(defaultShowCreateString("testDropSingleColumn"));
 
         spark.sql("ALTER TABLE testDropSingleColumn DROP COLUMN b");
 
-        List<Row> afterDrop = spark.sql("SHOW CREATE TABLE testDropSingleColumn").collectAsList();
-        assertThat(afterDrop.toString())
+        String afterDrop = showCreateTable(spark, "testDropSingleColumn");
+        assertThat(afterDrop)
                 .contains(showCreateString("testDropSingleColumn", "a INT NOT NULL", "c STRING"));
 
         List<Row> results = spark.table("testDropSingleColumn").collectAsList();
@@ -238,14 +237,13 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     public void testDropColumns() {
         createTable("testDropColumns");
 
-        List<Row> beforeDrop = spark.sql("SHOW CREATE TABLE testDropColumns").collectAsList();
-        assertThat(beforeDrop.toString()).contains(defaultShowCreateString("testDropColumns"));
+        String beforeDrop = showCreateTable(spark, "testDropColumns");
+        assertThat(beforeDrop).contains(defaultShowCreateString("testDropColumns"));
 
         spark.sql("ALTER TABLE testDropColumns DROP COLUMNS b,c");
 
-        List<Row> afterDrop = spark.sql("SHOW CREATE TABLE testDropColumns").collectAsList();
-        assertThat(afterDrop.toString())
-                .contains(showCreateString("testDropColumns", "a INT NOT NULL"));
+        String afterDrop = showCreateTable(spark, "testDropColumns");
+        assertThat(afterDrop).contains(showCreateString("testDropColumns", "a INT NOT NULL"));
     }
 
     @Test
@@ -273,8 +271,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + "b STRING) \n"
                         + "PARTITIONED BY (a)");
 
-        List<Row> beforeDrop = spark.sql("SHOW CREATE TABLE testDropPartitionKey").collectAsList();
-        assertThat(beforeDrop.toString())
+        String beforeDrop = showCreateTable(spark, "testDropPartitionKey");
+        assertThat(beforeDrop)
                 .contains(showCreateString("testDropPartitionKey", "a BIGINT", "b STRING"));
 
         assertThatThrownBy(() -> spark.sql("ALTER TABLE testDropPartitionKey DROP COLUMN a"))
@@ -293,8 +291,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + "PARTITIONED BY (a)\n"
                         + "TBLPROPERTIES ('primary-key' = 'a, b')");
 
-        List<Row> beforeDrop = spark.sql("SHOW CREATE TABLE testDropPrimaryKey").collectAsList();
-        assertThat(beforeDrop.toString())
+        String beforeDrop = showCreateTable(spark, "testDropPrimaryKey");
+        assertThat(beforeDrop)
                 .contains(
                         showCreateString(
                                 "testDropPrimaryKey", "a BIGINT NOT NULL", "b STRING NOT NULL"));
@@ -318,9 +316,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
         spark.sql("ALTER TABLE test_rename_primary_key_table RENAME COLUMN a to a_");
 
-        List<Row> result =
-                spark.sql("SHOW CREATE TABLE test_rename_primary_key_table").collectAsList();
-        assertThat(result.toString())
+        String result = showCreateTable(spark, "test_rename_primary_key_table");
+        assertThat(result)
                 .contains(
                         showCreateString(
                                 "test_rename_primary_key_table", "a_ BIGINT NOT NULL", "b STRING"))
@@ -354,9 +351,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
         spark.sql("ALTER TABLE test_rename_bucket_key_table RENAME COLUMN b to b_");
 
-        List<Row> result =
-                spark.sql("SHOW CREATE TABLE test_rename_bucket_key_table").collectAsList();
-        assertThat(result.toString())
+        String result = showCreateTable(spark, "test_rename_bucket_key_table");
+        assertThat(result)
                 .contains(
                         showCreateString(
                                 "test_rename_bucket_key_table", "a BIGINT NOT NULL", "b_ STRING"))
@@ -376,21 +372,21 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         // move first
         createTable("tableFirst");
         spark.sql("ALTER TABLE tableFirst ALTER COLUMN b FIRST");
-        List<Row> result = spark.sql("SHOW CREATE TABLE tableFirst").collectAsList();
-        assertThat(result.toString())
+        String result = showCreateTable(spark, "tableFirst");
+        assertThat(result)
                 .contains(showCreateString("tableFirst", "b BIGINT", "a INT NOT NULL", "c STRING"));
 
         // move after
         createTable("tableAfter");
         spark.sql("ALTER TABLE tableAfter ALTER COLUMN c AFTER a");
-        result = spark.sql("SHOW CREATE TABLE tableAfter").collectAsList();
-        assertThat(result.toString())
+        result = showCreateTable(spark, "tableAfter");
+        assertThat(result)
                 .contains(showCreateString("tableAfter", "a INT NOT NULL", "c STRING", "b BIGINT"));
 
         spark.sql("CREATE TABLE tableAfter1 (a INT, b BIGINT, c STRING, d DOUBLE)");
         spark.sql("ALTER TABLE tableAfter1 ALTER COLUMN b AFTER c");
-        result = spark.sql("SHOW CREATE TABLE tableAfter1").collectAsList();
-        assertThat(result.toString())
+        result = showCreateTable(spark, "tableAfter1");
+        assertThat(result)
                 .contains(
                         showCreateString(
                                 "tableAfter1", "a INT", "c STRING", "b BIGINT", "d DOUBLE"));
@@ -434,16 +430,16 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         })
                 .hasStackTraceContaining("value appeared in non-nullable field");
 
-        List<Row> beforeAlter = spark.sql("SHOW CREATE TABLE testAlterColumnType").collectAsList();
-        assertThat(beforeAlter.toString())
+        String beforeAlter = showCreateTable(spark, "testAlterColumnType");
+        assertThat(beforeAlter)
                 .contains(defaultShowCreateStringWithNonNullColumn("testAlterColumnType"));
 
         spark.sql("ALTER TABLE testAlterColumnType ALTER COLUMN b TYPE DOUBLE");
         assertThat(spark.table("testAlterColumnType").collectAsList().toString())
                 .isEqualTo("[[1,2.0,1], [5,6.0,3]]");
 
-        List<Row> afterAlter = spark.sql("SHOW CREATE TABLE testAlterColumnType").collectAsList();
-        assertThat(afterAlter.toString())
+        String afterAlter = showCreateTable(spark, "testAlterColumnType");
+        assertThat(afterAlter)
                 .contains(
                         showCreateString(
                                 "testAlterColumnType",
@@ -1122,8 +1118,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + table
                         + " ADD COLUMN picture BINARY COMMENT '__BLOB_FIELD; profile picture'");
 
-        String createSql =
-                spark.sql("SHOW CREATE TABLE " + table).collectAsList().get(0).toString();
+        String createSql = showCreateTable(spark, table);
         assertThat(createSql).doesNotContain("__BLOB");
         assertThat(createSql).contains("desc_col");
         assertThat(createSql).contains("picture");
