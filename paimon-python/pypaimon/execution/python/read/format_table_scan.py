@@ -51,7 +51,8 @@ def _list_data_files_recursive(
     rel_path_parts = rel_path_parts or []
     try:
         infos = file_io.list_status(path)
-    except Exception:
+    except FileNotFoundError:
+        # The directory vanished after its parent listed it.
         return splits
     if not infos:
         return splits

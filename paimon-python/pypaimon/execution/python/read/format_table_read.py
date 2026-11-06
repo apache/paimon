@@ -67,7 +67,8 @@ def _read_file_to_arrow(
     except Exception as e:
         raise RuntimeError(f"Failed to read {path}") from e
 
-    if not data or len(data) == 0:
+    if not data and fmt != Format.PARQUET:
+        # Java's ORC reader reads a zero-byte file as empty, as Hive writes them.
         return pyarrow.table({})
 
     if fmt == Format.PARQUET:
@@ -76,12 +77,10 @@ def _read_file_to_arrow(
         data = (
             bytes(data) if not isinstance(data, bytes) else data
         )
-        if len(data) < 4 or data[:4] != b"PAR1":
-            return pyarrow.table({})
         try:
             tbl = pq.read_table(io.BytesIO(data))
-        except pyarrow.ArrowInvalid:
-            return pyarrow.table({})
+        except (pyarrow.ArrowException, OSError) as e:
+            raise RuntimeError(f"Failed to read {path}") from e
     elif fmt == Format.CSV:
         import pyarrow.csv as csv
         try:
@@ -89,8 +88,8 @@ def _read_file_to_arrow(
                 pyarrow.BufferReader(data),
                 read_options=csv_read_options,
             )
-        except Exception:
-            return pyarrow.table({})
+        except (pyarrow.ArrowException, OSError) as e:
+            raise RuntimeError(f"Failed to read {path}") from e
     elif fmt == Format.JSON:
         import json
         text = data.decode("utf-8") if isinstance(data, bytes) else data
@@ -108,8 +107,8 @@ def _read_file_to_arrow(
         data = bytes(data) if not isinstance(data, bytes) else data
         try:
             tbl = orc.read_table(io.BytesIO(data))
-        except Exception:
-            return pyarrow.table({})
+        except (pyarrow.ArrowException, OSError) as e:
+            raise RuntimeError(f"Failed to read {path}") from e
     elif fmt == Format.TEXT:
         text = data.decode("utf-8") if isinstance(data, bytes) else data
         lines = (
