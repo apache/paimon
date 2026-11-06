@@ -55,7 +55,8 @@ def create_python_commit(owner):
     try:
         commit = FileStoreCommit(
             snapshot_commit, owner.table, owner.commit_user,
-            commit_callbacks=owner._commit_callbacks, close_commit_callbacks=False)
+            commit_callbacks=owner._commit_callbacks, close_commit_callbacks=False,
+            dedup=owner._dedup)
         return PythonTableCommit(commit, owner.overwrite_partition)
     except Exception:
         close = getattr(snapshot_commit, 'close', None)

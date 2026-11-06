@@ -32,6 +32,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.write.file_store_commit import DedupEvidenceMissing
 from pypaimon.write.commit_message import CommitMessage
 
 
@@ -245,9 +246,13 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         self.assertEqual(sorted(actual[actual['f0'] == 1]['f1'].tolist()), ['new'])
         self.assertEqual(sorted(actual[actual['f0'] == 2]['f1'].tolist()), ['c'])
 
-    def test_fails_when_intermediate_snapshot_missing(self):
-        # Match Java SnapshotManager.snapshot: duplicate detection cannot skip
-        # an unavailable snapshot in the retry history.
+    def test_definite_failure_falls_back_when_intermediate_snapshot_missing(self):
+        self._assert_retry_with_missing_snapshot(unknown_outcome=False)
+
+    def test_unknown_outcome_fails_when_intermediate_snapshot_missing(self):
+        self._assert_retry_with_missing_snapshot(unknown_outcome=True)
+
+    def _assert_retry_with_missing_snapshot(self, unknown_outcome):
         K = 1
         missing_id = self.table.snapshot_manager().get_latest_snapshot().id + 1
 
@@ -297,20 +302,34 @@ class OverwriteCommitConflictTest(unittest.TestCase):
             if snapshot.commit_kind == "OVERWRITE" and cas['fails'] < K:
                 cas['fails'] += 1
                 self._append(pd.DataFrame({'f0': [99], 'f1': ['x']}))
+                if unknown_outcome:
+                    raise OSError('commit acknowledgement unavailable')
                 return False
             return orig_cas(base_snapshot_uuid, snapshot, statistics)
 
         fsc.snapshot_commit.commit = patched_cas
 
-        with self.assertRaisesRegex(
-                RuntimeError,
-                "snapshot {} cannot be found".format(missing_id)):
-            c.commit(messages)
-        c.close()
+        try:
+            if unknown_outcome:
+                with self.assertRaisesRegex(
+                        DedupEvidenceMissing,
+                        r"unreadable ids: \[{}\]".format(missing_id)):
+                    c.commit(messages)
+            else:
+                c.commit(messages)
+        finally:
+            c.close()
 
         self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
-        self.assertEqual([], incr_results)
-        self.assertEqual(full_scans['n'], 1)
+        self.assertEqual(incr_results, [] if unknown_outcome else [None])
+        self.assertEqual(full_scans['n'], 1 if unknown_outcome else 2)
+        read_builder = self.table.new_read_builder()
+        actual = read_builder.new_read().to_pandas(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(sorted(actual[actual['f0'] == 1]['f1'].tolist()),
+                         ['a', 'b'] if unknown_outcome else ['new'])
+        self.assertEqual(actual[actual['f0'] == 2]['f1'].tolist(), ['c'])
+        self.assertEqual(actual[actual['f0'] == 99]['f1'].tolist(), ['x'])
 
     def test_full_scan_across_empty_delta_overwrite_snapshot(self):
         self._assert_merge_equals_full_scan(
