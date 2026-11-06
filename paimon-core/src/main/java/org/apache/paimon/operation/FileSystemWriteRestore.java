@@ -21,16 +21,20 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 
@@ -105,6 +109,25 @@ public class FileSystemWriteRestore implements WriteRestore {
         List<ManifestEntry> entries =
                 scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
         Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
+        if (totalBuckets == null) {
+            PartitionEntry guardedPartition =
+                    DeleteOrderingGuardPartitions.read(
+                                    snapshot,
+                                    () ->
+                                            indexFileHandler.scan(
+                                                    snapshot,
+                                                    DeleteOrderingGuardFile.DELETE_ORDERING_GUARD))
+                            .get(partition);
+            if (guardedPartition != null) {
+                if (guardedPartition.totalBuckets()
+                        == DeleteOrderingGuardPartitions.UNKNOWN_BUCKETS) {
+                    throw new IllegalStateException(
+                            "The retained delete ordering guards have no recorded bucket layout. "
+                                    + "Run sys.rescale in batch mode to bootstrap this partition before writing or compacting it.");
+                }
+                totalBuckets = guardedPartition.totalBuckets();
+            }
+        }
 
         IndexFileMeta dynamicBucketIndex = null;
         if (scanDynamicBucketIndex) {
@@ -129,6 +152,16 @@ public class FileSystemWriteRestore implements WriteRestore {
                 restoreFiles,
                 dynamicBucketIndex,
                 deleteVectorsIndex,
-                sourceIndexPayloads);
+                sourceIndexPayloads,
+                DeleteOrderingGuardFile.mayContainGuards(snapshot)
+                        ? Objects.requireNonNull(
+                                        indexFileHandler,
+                                        "Restoring delete ordering guards requires an index file handler.")
+                                .scan(
+                                        snapshot,
+                                        DeleteOrderingGuardFile.DELETE_ORDERING_GUARD,
+                                        partition,
+                                        bucket)
+                        : Collections.emptyList());
     }
 }

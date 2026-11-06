@@ -21,8 +21,9 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.{FileStoreTable, PrimaryKeyFileStoreTable}
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions
 
@@ -32,6 +33,101 @@ import scala.collection.JavaConverters._
 
 /** Tests for the rescale procedure. See [[RescaleProcedure]]. */
 class RescaleProcedureTest extends PaimonSparkTestBase {
+
+  protected def rescaleSerializer: String = "org.apache.spark.serializer.JavaSerializer"
+
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.serializer", rescaleSerializer)
+  }
+
+  override protected def beforeAll(): Unit = {
+    super.beforeAll()
+    assert(spark.sparkContext.getConf.get("spark.serializer") == rescaleSerializer)
+  }
+
+  Seq(false, true).foreach {
+    disableCapture =>
+      test(
+        s"Paimon Procedure: rescale preserves hidden delete guards, capture disabled=$disableCapture") {
+        withTable("T") {
+          spark.sql("""
+                      |CREATE TABLE T (pt STRING, id INT, seq INT, op STRING)
+                      |TBLPROPERTIES (
+                      |  'primary-key' = 'pt,id',
+                      |  'bucket' = '2',
+                      |  'sequence.field' = 'seq',
+                      |  'rowkind.field' = 'op',
+                      |  'write-only' = 'true',
+                      |  'delete-ordering-guards.enabled' = 'true')
+                      |PARTITIONED BY (pt)
+                      |""".stripMargin)
+          spark.sql(
+            "INSERT INTO T VALUES ('p1', 1, 4, '-D'), ('p2', 2, 4, '-D'), ('p2', 3, 3, '+I')")
+          spark.sql(
+            "CALL sys.compact(table => 'T', compact_strategy => 'full', options => 'write-only=false')")
+          val guarded = loadTable("T").asInstanceOf[PrimaryKeyFileStoreTable]
+          assert(!guarded.store().newIndexFileHandler().scan("DELETE_ORDERING_GUARD").isEmpty)
+          checkAnswer(spark.sql("SELECT * FROM T"), Seq(Row("p2", 3, 3, "+I")))
+
+          val disable = if (disableCapture) ", 'delete-ordering-guards.enabled' = 'false'" else ""
+          spark.sql(s"ALTER TABLE T SET TBLPROPERTIES ('bucket' = '5'$disable)")
+          checkAnswer(
+            spark.sql("CALL sys.rescale(table => 'T', partitions => 'pt=p1')"),
+            Row(true) :: Nil)
+          val afterGuardOnly = loadTable("T")
+          val guardOnly = afterGuardOnly
+            .newSnapshotReader()
+            .withDeleteOrderingGuardBuckets()
+            .withPartitionFilter(
+              PartitionPredicate.fromMap(
+                afterGuardOnly.schema().logicalPartitionType(),
+                Collections.singletonMap("pt", "p1"),
+                afterGuardOnly.coreOptions().partitionDefaultName()))
+            .read()
+            .dataSplits()
+            .asScala
+          assert(guardOnly.nonEmpty)
+          assert(guardOnly.forall(split => split.totalBuckets() == 5 && split.dataFiles().isEmpty))
+
+          val beforeStale = loadTable("T").snapshotManager().latestSnapshotId()
+          spark.sql("INSERT INTO T VALUES ('p1', 1, 2, '+I')")
+          checkAnswer(spark.sql("SELECT * FROM T WHERE pt = 'p1'"), Seq.empty)
+          val afterStale = loadTable("T").snapshotManager().latestSnapshotId()
+          checkAnswer(
+            spark.read
+              .format("paimon")
+              .option("incremental-between", s"$beforeStale,$afterStale")
+              .option("incremental-between-scan-mode", "diff")
+              .table("T")
+              .where("pt = 'p1'")
+              .select("id", "seq"),
+            Seq.empty
+          )
+          spark.sql("INSERT INTO T VALUES ('p1', 1, 5, '+I')")
+          checkAnswer(spark.sql("SELECT * FROM T WHERE pt = 'p1'"), Seq(Row("p1", 1, 5, "+I")))
+          val afterFresh = loadTable("T").snapshotManager().latestSnapshotId()
+          checkAnswer(
+            spark.read
+              .format("paimon")
+              .option("incremental-between", s"$beforeStale,$afterFresh")
+              .option("incremental-between-scan-mode", "diff")
+              .table("T")
+              .where("pt = 'p1'")
+              .select("id", "seq"),
+            Seq(Row(1, 5))
+          )
+
+          checkAnswer(
+            spark.sql(
+              """CALL sys.rescale(table => 'T', bucket_num => 5, where => 'pt = \'p2\'')"""),
+            Row(true) :: Nil)
+          spark.sql("INSERT INTO T VALUES ('p2', 2, 2, '+I')")
+          checkAnswer(
+            spark.sql("SELECT * FROM T"),
+            Seq(Row("p1", 1, 5, "+I"), Row("p2", 3, 3, "+I")))
+        }
+      }
+  }
 
   test("Paimon Procedure: rescale basic functionality") {
     withTable("T") {
@@ -432,4 +528,9 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
   def lastSnapshotId(table: FileStoreTable): Long = {
     table.snapshotManager().latestSnapshotId()
   }
+}
+
+/** Exercises the same distributed rescale and incremental reads with Kryo task transport. */
+class RescaleProcedureKryoTest extends RescaleProcedureTest {
+  override protected def rescaleSerializer: String = "org.apache.spark.serializer.KryoSerializer"
 }

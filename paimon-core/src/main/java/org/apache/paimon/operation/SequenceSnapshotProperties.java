@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 
@@ -33,15 +34,25 @@ import java.util.OptionalLong;
 class SequenceSnapshotProperties {
 
     static final String MAX_SEQUENCE_NUMBER = "sequence.generation.max-sequence-number";
+    static final String GUARD_MAX_SEQUENCE_NUMBER =
+            DeleteOrderingGuardFile.SNAPSHOT_MAX_SEQUENCE_NUMBER;
 
     private SequenceSnapshotProperties() {}
 
     static OptionalLong maxSequenceNumber(@Nullable Snapshot snapshot) {
+        return maxSequenceNumber(snapshot, MAX_SEQUENCE_NUMBER);
+    }
+
+    static OptionalLong guardMaxSequenceNumber(@Nullable Snapshot snapshot) {
+        return maxSequenceNumber(snapshot, GUARD_MAX_SEQUENCE_NUMBER);
+    }
+
+    private static OptionalLong maxSequenceNumber(@Nullable Snapshot snapshot, String key) {
         if (snapshot == null || snapshot.properties() == null) {
             return OptionalLong.empty();
         }
 
-        String value = snapshot.properties().get(MAX_SEQUENCE_NUMBER);
+        String value = snapshot.properties().get(key);
         if (value == null) {
             return OptionalLong.empty();
         }
@@ -68,6 +79,32 @@ class SequenceSnapshotProperties {
         Map<String, String> merged =
                 properties == null ? new HashMap<>() : new HashMap<>(properties);
         merged.put(MAX_SEQUENCE_NUMBER, String.valueOf(maxSequenceNumber));
+        return merged;
+    }
+
+    /** Keep the internal tie-break watermark even after the last data file is pruned. */
+    static Map<String, String> mergeGuardMaxSequenceNumber(
+            @Nullable Map<String, String> properties,
+            @Nullable Snapshot latestSnapshot,
+            List<ManifestEntry> deltaFiles,
+            boolean publishesGuards) {
+        OptionalLong latestMax = guardMaxSequenceNumber(latestSnapshot);
+        if (!publishesGuards && !latestMax.isPresent()) {
+            return properties == null ? new HashMap<>() : properties;
+        }
+        // Source DELETE entries matter: a full compaction can produce guards and no data.
+        long currentMax =
+                deltaFiles.stream()
+                        .mapToLong(entry -> entry.file().maxSequenceNumber())
+                        .max()
+                        .orElse(-1L);
+        long max =
+                Math.max(
+                        Math.max(latestMax.orElse(-1L), currentMax),
+                        maxSequenceNumber(latestSnapshot).orElse(-1L));
+        Map<String, String> merged =
+                properties == null ? new HashMap<>() : new HashMap<>(properties);
+        merged.put(GUARD_MAX_SEQUENCE_NUMBER, String.valueOf(max));
         return merged;
     }
 }

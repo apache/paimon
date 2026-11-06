@@ -20,16 +20,22 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.operation.DeleteOrderingGuardRescale;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.PrimaryKeyFileStoreTable;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.SplitSerializer;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
@@ -46,10 +52,14 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
@@ -150,7 +160,7 @@ public class RescaleProcedure extends BaseProcedure {
                                 "When rescaling postpone bucket tables, you must provide the resulting bucket number.");
                     }
 
-                    execute(fileStoreTable, bucketNum, partitionPredicate, relation);
+                    execute(fileStoreTable, bucketNum, partitionPredicate, relation, snapshot);
 
                     InternalRow internalRow = newInternalRow(true);
                     return new InternalRow[] {internalRow};
@@ -161,7 +171,69 @@ public class RescaleProcedure extends BaseProcedure {
             FileStoreTable table,
             @Nullable Integer bucketNum,
             PartitionPredicate partitionPredicate,
-            DataSourceV2Relation relation) {
+            DataSourceV2Relation relation,
+            Snapshot snapshot) {
+        if (DeleteOrderingGuardRescale.isRequired(table, snapshot)) {
+            DeleteOrderingGuardRescale migration =
+                    new DeleteOrderingGuardRescale(
+                            (PrimaryKeyFileStoreTable) table,
+                            snapshot,
+                            bucketNum == null ? table.coreOptions().bucket() : bucketNum,
+                            partitionPredicate);
+            List<DataSplit> tasks = migration.plan();
+            if (tasks.isEmpty()) {
+                LOG.info(
+                        "No data or guards found for the specified partitions. No need to rescale.");
+                return;
+            }
+            // Kryo does not invoke DataSplit/CommitMessage's Java serialization hooks. Carry
+            // their native bytes in both directions so binary keys and partitions survive.
+            String commitUser = "guard-rescale-" + UUID.randomUUID();
+            try {
+                List<byte[]> serializedTasks = new ArrayList<>(tasks.size());
+                for (DataSplit split : tasks) {
+                    serializedTasks.add(SplitSerializer.serialize(split));
+                }
+                List<byte[]> serializedMessages =
+                        JavaSparkContext.fromSparkContext(spark().sparkContext())
+                                .parallelize(
+                                        serializedTasks,
+                                        Math.min(
+                                                tasks.size(),
+                                                spark().sparkContext().defaultParallelism()))
+                                .flatMap(
+                                        bytes -> {
+                                            List<CommitMessage> output =
+                                                    migration.rewrite(
+                                                            (DataSplit)
+                                                                    SplitSerializer.deserialize(
+                                                                            bytes));
+                                            try {
+                                                return CommitMessageSerializer.serializeAll(output)
+                                                        .iterator();
+                                            } catch (IOException
+                                                    | RuntimeException
+                                                    | Error failure) {
+                                                try {
+                                                    migration.abort(
+                                                            commitUser, Long.MAX_VALUE, output);
+                                                } catch (Throwable cleanup) {
+                                                    failure.addSuppressed(cleanup);
+                                                }
+                                                throw failure;
+                                            }
+                                        })
+                                .collect();
+                migration.commit(
+                        commitUser,
+                        Long.MAX_VALUE,
+                        CommitMessageSerializer.deserializeAll(serializedMessages));
+            } catch (IOException failure) {
+                throw new UncheckedIOException(
+                        "Cannot serialize guarded rescale tasks or results", failure);
+            }
+            return;
+        }
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (partitionPredicate != null) {
             snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);

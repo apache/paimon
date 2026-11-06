@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.index.DeleteOrderingGuardFile.DELETE_ORDERING_GUARD;
 
 /** Detailed changes from {@link CommitMessage}s. */
 public class ManifestEntryChanges {
@@ -171,6 +172,7 @@ public class ManifestEntryChanges {
         }
         for (IndexManifestEntry file : indexFileChanges) {
             if (file.indexFile().indexType().equals(DELETION_VECTORS_INDEX)
+                    || file.indexFile().indexType().equals(DELETE_ORDERING_GUARD)
                     || file.indexFile().globalIndexMeta() != null) {
                 changedPartitions.add(file.partition());
             }

@@ -22,6 +22,8 @@ import org.apache.paimon.KeyValue;
 
 import javax.annotation.Nullable;
 
+import java.util.function.Function;
+
 /**
  * A wrapper for {@link MergeFunction}, which adds new functionalities or optimizations.
  *
@@ -32,6 +34,15 @@ public interface MergeFunctionWrapper<T> {
     void reset();
 
     void add(KeyValue kv);
+
+    /** Replays persisted ordering metadata; it must never become an input changelog event. */
+    default void addDeleteOrderingGuard(KeyValue guard) {
+        throw new UnsupportedOperationException(
+                "This merge wrapper cannot resolve delete ordering guards.");
+    }
+
+    /** Resolves a native before-image against the same persisted bounds as the current key. */
+    default void withDeleteOrderingGuardBeforeImage(Function<KeyValue, KeyValue> resolver) {}
 
     @Nullable
     T getResult();

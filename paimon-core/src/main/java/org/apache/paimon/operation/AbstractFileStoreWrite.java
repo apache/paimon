@@ -28,14 +28,17 @@ import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.commit.DeleteOrderingGuardGeneration;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -289,7 +292,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 bucket,
                                 writerContainer.totalBuckets,
                                 newFilesIncrement,
-                                compactIncrement);
+                                compactIncrement,
+                                null,
+                                writerContainer.deleteOrderingGuardGeneration);
                 result.add(committable);
 
                 if (committable.isEmpty()) {
@@ -440,7 +445,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 writerContainer.dynamicBucketMaintainer,
                                 writerContainer.deletionVectorsMaintainer,
                                 writerContainer.primaryKeyIndexMaintainer,
-                                increment));
+                                increment,
+                                writerContainer.writer.deleteOrderingGuards(),
+                                writerContainer.deleteOrderingGuardGeneration));
             }
         }
 
@@ -464,7 +471,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             state.deletionVectorsMaintainer,
                             // Restore reconstructs writer state from checkpointed files, so do
                             // not ignore them.
-                            false);
+                            false,
+                            state.deleteOrderingGuards);
             notifyNewWriter(writer);
             if (state.primaryKeyIndexMaintainer != null) {
                 state.primaryKeyIndexMaintainer.withExecutor(primaryKeyIndexExecutor());
@@ -476,7 +484,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             state.indexMaintainer,
                             state.deletionVectorsMaintainer,
                             state.primaryKeyIndexMaintainer,
-                            state.baseSnapshotId);
+                            state.baseSnapshotId,
+                            state.deleteOrderingGuardGeneration);
             writerContainer.lastModifiedCommitIdentifier = state.lastModifiedCommitIdentifier;
             writers.computeIfAbsent(state.partition, k -> new HashMap<>())
                     .put(state.bucket, writerContainer);
@@ -585,17 +594,26 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         if (restoreFiles == null) {
             restoreFiles = new ArrayList<>();
         }
+        long restoredMaxSequenceNumber = getMaxSequenceNumber(restoreFiles);
+        Snapshot restoredSnapshot = restored.snapshot();
+        if (restoredSnapshot != null
+                && (latestSnapshot == null || restoredSnapshot.id() != latestSnapshot.id())) {
+            // Restore may observe a newer snapshot than the initial filesystem check. A
+            // guard-only bucket has no data-file maximum from which to recover its watermark.
+            restoredMaxSequenceNumber =
+                    startingMaxSequenceNumber(restoredMaxSequenceNumber, restoredSnapshot);
+        }
         RecordWriter<T> writer =
                 createWriter(
                         partition.copy(),
                         bucket,
                         restoreFiles,
-                        startingMaxSequenceNumber(
-                                getMaxSequenceNumber(restoreFiles), latestSnapshot),
+                        startingMaxSequenceNumber(restoredMaxSequenceNumber, latestSnapshot),
                         null,
                         compactExecutor(),
                         dvMaintainer,
-                        actualIgnorePreviousFiles);
+                        actualIgnorePreviousFiles,
+                        restored.deleteOrderingGuards());
         notifyNewWriter(writer);
 
         Snapshot previousSnapshot = restored.snapshot();
@@ -605,7 +623,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 indexMaintainer,
                 dvMaintainer,
                 primaryKeyIndexMaintainer,
-                previousSnapshot == null ? null : previousSnapshot.id());
+                previousSnapshot == null ? null : previousSnapshot.id(),
+                DeleteOrderingGuardGeneration.forWriter(
+                        actualIgnorePreviousFiles ? latestSnapshot : previousSnapshot,
+                        partition,
+                        options.deleteOrderingGuardsEnabled()));
     }
 
     private long writerNumber() {
@@ -622,6 +644,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @VisibleForTesting
     long startingMaxSequenceNumber(long restoredMaxSeqNumber, @Nullable Snapshot latestSnapshot) {
+        restoredMaxSeqNumber =
+                Math.max(
+                        restoredMaxSeqNumber,
+                        SequenceSnapshotProperties.guardMaxSequenceNumber(latestSnapshot)
+                                .orElse(-1L));
         if (options.writeSequenceNumberInitMode() != CoreOptions.SequenceNumberInitMode.SNAPSHOT) {
             return restoredMaxSeqNumber;
         }
@@ -697,11 +724,16 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     private void checkNumBuckets(String partInfo, int expected, int previous) {
         if (expected != previous) {
+            String instruction =
+                    options.deleteOrderingGuardsEnabled()
+                                    || DeleteOrderingGuardFile.mayContainGuards(
+                                            snapshotManager.latestSnapshot())
+                            ? "Please switch to batch mode, and run sys.rescale to preserve delete ordering history while rescaling current data layout."
+                            : "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.";
             throw new RuntimeException(
                     String.format(
-                            "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
-                                    + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
-                            partInfo, expected, previous));
+                            "Try to write %s with a new bucket num %d, but the previous bucket num is %d. %s",
+                            partInfo, expected, previous, instruction));
         }
     }
 
@@ -743,6 +775,30 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
             boolean ignorePreviousFiles);
 
+    protected RecordWriter<T> createWriter(
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> restoreFiles,
+            long restoredMaxSeqNumber,
+            @Nullable CommitIncrement restoreIncrement,
+            ExecutorService compactExecutor,
+            @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
+            boolean ignorePreviousFiles,
+            List<IndexFileMeta> deleteOrderingGuards) {
+        checkArgument(
+                deleteOrderingGuards.isEmpty(),
+                "This writer cannot restore delete ordering guards.");
+        return createWriter(
+                partition,
+                bucket,
+                restoreFiles,
+                restoredMaxSeqNumber,
+                restoreIncrement,
+                compactExecutor,
+                deletionVectorsMaintainer,
+                ignorePreviousFiles);
+    }
+
     // force buffer spill to avoid out of memory in batch mode
     protected void forceBufferSpill() throws Exception {}
 
@@ -758,6 +814,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         @Nullable public final BucketedDvMaintainer deletionVectorsMaintainer;
         @Nullable public final BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer;
         protected final long baseSnapshotId;
+        @Nullable protected final String deleteOrderingGuardGeneration;
         protected long lastModifiedCommitIdentifier;
 
         protected WriterContainer(
@@ -767,6 +824,24 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
                 @Nullable BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer,
                 Long baseSnapshotId) {
+            this(
+                    writer,
+                    totalBuckets,
+                    dynamicBucketMaintainer,
+                    deletionVectorsMaintainer,
+                    primaryKeyIndexMaintainer,
+                    baseSnapshotId,
+                    null);
+        }
+
+        protected WriterContainer(
+                RecordWriter<T> writer,
+                int totalBuckets,
+                @Nullable DynamicBucketIndexMaintainer dynamicBucketMaintainer,
+                @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
+                @Nullable BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer,
+                Long baseSnapshotId,
+                @Nullable String deleteOrderingGuardGeneration) {
             this.writer = writer;
             this.totalBuckets = totalBuckets;
             this.dynamicBucketMaintainer = dynamicBucketMaintainer;
@@ -775,6 +850,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             this.baseSnapshotId =
                     baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;
             this.lastModifiedCommitIdentifier = Long.MIN_VALUE;
+            this.deleteOrderingGuardGeneration = deleteOrderingGuardGeneration;
         }
     }
 

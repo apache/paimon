@@ -459,6 +459,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return snapshotReader;
     }
 
+    @Override
+    public DataTableScan withDeleteOrderingGuardBuckets() {
+        snapshotReader.withDeleteOrderingGuardBuckets();
+        return this;
+    }
+
     public CoreOptions options() {
         return options;
     }

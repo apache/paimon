@@ -28,6 +28,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
+import org.apache.paimon.index.DeleteOrderingGuardPolicy;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
@@ -52,6 +54,8 @@ import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.DataEvolutionChangesProvider;
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException;
+import org.apache.paimon.operation.commit.DeleteOrderingGuardCommit;
+import org.apache.paimon.operation.commit.DeleteOrderingGuardGeneration;
 import org.apache.paimon.operation.commit.DiscardingCompactChangesProvider;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
@@ -70,6 +74,7 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
@@ -93,6 +98,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -112,6 +119,7 @@ import java.util.stream.Collectors;
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.index.DeleteOrderingGuardFile.DELETE_ORDERING_GUARD;
 import static org.apache.paimon.manifest.ManifestEntry.nullableRecordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
@@ -122,6 +130,7 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * Default implementation of {@link FileStoreCommit}.
@@ -384,13 +393,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
                 attempts +=
                         tryCommit(
-                                dataEvolutionChangesProvider(
-                                        new CommitChanges(
-                                                changes.appendTableFiles,
-                                                changes.appendChangelog,
-                                                changes.appendIndexFiles),
-                                        commitKind,
-                                        Collections.emptySet()),
+                                DeleteOrderingGuardGeneration.fence(
+                                        dataEvolutionChangesProvider(
+                                                new CommitChanges(
+                                                        changes.appendTableFiles,
+                                                        changes.appendChangelog,
+                                                        changes.appendIndexFiles),
+                                                commitKind,
+                                                Collections.emptySet()),
+                                        commitMessages),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -512,6 +523,81 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return overwritePartition(
                 () -> PartitionPredicate.fromMultiple(partitionType, staticPartitions),
                 committable);
+    }
+
+    /** Publish a native rescale without rebasing its pinned inputs over concurrent commits. */
+    public int rescale(
+            Snapshot sourceSnapshot,
+            long schemaId,
+            @Nullable PartitionPredicate partitionFilter,
+            ManifestCommittable committable) {
+        // A restarted job may repeat a successful publication with its original input snapshot.
+        if (filterCommitted(Collections.singletonList(committable)).isEmpty()) {
+            return 0;
+        }
+        ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
+        checkArgument(
+                changes.compactTableFiles.isEmpty()
+                        && changes.compactIndexFiles.isEmpty()
+                        && changes.appendChangelog.isEmpty()
+                        && changes.compactChangelog.isEmpty(),
+                "Rescaling publishes only replacement data and guard files.");
+        for (ManifestEntry entry : changes.appendTableFiles) {
+            checkArgument(
+                    partitionFilter == null || partitionFilter.test(entry.partition()),
+                    "Rescale output is outside the selected partitions.");
+        }
+        for (IndexManifestEntry entry : changes.appendIndexFiles) {
+            checkArgument(
+                    partitionFilter == null || partitionFilter.test(entry.partition()),
+                    "Rescale guard output is outside the selected partitions.");
+        }
+        CommitChangesProvider overwrite =
+                scanner.overwriteChangesProvider(
+                        options.bucket(),
+                        changes.appendTableFiles,
+                        changes.appendIndexFiles,
+                        partitionFilter);
+        CommitChangesProvider provider =
+                new CommitChangesProvider() {
+                    @Override
+                    public CommitChanges provide(@Nullable Snapshot latestSnapshot) {
+                        checkState(
+                                sourceSnapshot.equals(latestSnapshot),
+                                "Table changed during delete ordering guard rescaling. "
+                                        + "Restart rescaling from the current snapshot.");
+                        checkState(
+                                schemaManager.latestOrThrow("Missing rescale schema").id()
+                                        == schemaId,
+                                "Table schema changed during delete ordering guard rescaling.");
+                        return overwrite.provide(latestSnapshot);
+                    }
+
+                    @Override
+                    public boolean resetsDeleteOrderingGuards() {
+                        return true;
+                    }
+
+                    @Override
+                    public boolean rescalesDeleteOrderingGuards() {
+                        return true;
+                    }
+
+                    @Nullable
+                    @Override
+                    public PartitionPredicate deleteOrderingGuardResetFilter() {
+                        return partitionFilter;
+                    }
+                };
+        return tryCommit(
+                provider,
+                committable.identifier(),
+                committable.watermark(),
+                committable.properties(),
+                CommitKind.OVERWRITE,
+                false,
+                true,
+                null);
     }
 
     private int overwritePartition(
@@ -788,6 +874,57 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return pathFactory;
     }
 
+    private long validateDeleteOrderingGuardPolicy(
+            @Nullable Snapshot latest,
+            List<ManifestEntry> dataChanges,
+            List<IndexManifestEntry> indexChanges) {
+        if (!options.deleteOrderingGuardsEnabled()
+                && !DeleteOrderingGuardFile.mayContainGuards(latest)
+                && indexChanges.stream()
+                        .noneMatch(
+                                entry ->
+                                        DELETE_ORDERING_GUARD.equals(
+                                                entry.indexFile().indexType()))) {
+            return -1;
+        }
+        TableSchema current = schemaManager.latestOrThrow("Missing delete ordering guard schema");
+        Set<Long> checked = new HashSet<>();
+        for (ManifestEntry entry : dataChanges) {
+            if (entry.kind() == FileKind.ADD && checked.add(entry.file().schemaId())) {
+                DeleteOrderingGuardPolicy.validateCompatible(
+                        schemaManager.schema(entry.file().schemaId()), current);
+            }
+        }
+        try {
+            if (DeleteOrderingGuardFile.mayContainGuards(latest)
+                    && latest.indexManifest() != null) {
+                DeleteOrderingGuardPolicy.validateGuards(
+                        fileIO,
+                        schemaManager,
+                        indexManifestFile.read(latest.indexManifest()),
+                        entry ->
+                                pathFactory
+                                        .indexFileFactory(entry.partition(), entry.bucket())
+                                        .toPath(entry.indexFile()),
+                        current);
+            }
+            DeleteOrderingGuardPolicy.validateGuards(
+                    fileIO,
+                    schemaManager,
+                    indexChanges.stream()
+                            .filter(entry -> entry.kind() == FileKind.ADD)
+                            .collect(Collectors.toList()),
+                    entry ->
+                            pathFactory
+                                    .indexFileFactory(entry.partition(), entry.bucket())
+                                    .toPath(entry.indexFile()),
+                    current);
+        } catch (IOException failure) {
+            throw new UncheckedIOException("Cannot validate delete ordering guard policy", failure);
+        }
+        return current.id();
+    }
+
     @Override
     public FileIO fileIO() {
         return fileIO;
@@ -871,13 +1008,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Set<Pair<BinaryRow, Integer>> materializedBuckets,
             List<CommitMessage> messages) {
         CommitChangesProvider provider =
-                dataEvolutionChangesProvider(
-                        new CommitChanges(
-                                changes.compactTableFiles,
-                                changes.compactChangelog,
-                                changes.compactIndexFiles),
-                        CommitKind.COMPACT,
-                        materializedBuckets);
+                DeleteOrderingGuardGeneration.fence(
+                        dataEvolutionChangesProvider(
+                                new CommitChanges(
+                                        changes.compactTableFiles,
+                                        changes.compactChangelog,
+                                        changes.compactIndexFiles),
+                                CommitKind.COMPACT,
+                                materializedBuckets),
+                        messages);
         if (!options.dataEvolutionEnabled()
                 || !options.toConfiguration()
                         .get(CoreOptions.DATA_EVOLUTION_COMPACTION_DISCARD_CONFLICTING_TASKS)
@@ -1219,6 +1358,28 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestEntry> deltaFiles = changes.tableFiles;
         List<ManifestEntry> changelogFiles = changes.changelogFiles;
         List<IndexManifestEntry> indexFiles = changes.indexFiles;
+        boolean replacesGuards =
+                indexFiles.stream()
+                        .anyMatch(
+                                entry ->
+                                        entry.kind() == FileKind.DELETE
+                                                && DELETE_ORDERING_GUARD.equals(
+                                                        entry.indexFile().indexType()));
+        boolean publishesGuards =
+                DeleteOrderingGuardCommit.validate(
+                        latestSnapshot,
+                        commitKind,
+                        deltaFiles,
+                        indexFiles,
+                        latestSnapshot != null
+                                        && latestSnapshot.indexManifest() != null
+                                        && commitKind == CommitKind.COMPACT
+                                        && replacesGuards
+                                ? indexManifestFile.read(latestSnapshot.indexManifest())
+                                : Collections.emptyList(),
+                        changesProvider.rescalesDeleteOrderingGuards());
+        long validatedGuardSchemaId =
+                validateDeleteOrderingGuardPolicy(latestSnapshot, deltaFiles, indexFiles);
         Set<Long> rebasedReassignments = changesProvider.rebasedReassignments();
 
         long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
@@ -1257,15 +1418,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<SimpleFileEntry> baseDataFiles = new ArrayList<>();
         boolean discardDuplicate =
                 options.commitDiscardDuplicateFiles() && commitKind == CommitKind.APPEND;
-        boolean checkConflicts = latestSnapshot != null && (discardDuplicate || detectConflicts);
+        boolean checkConflicts =
+                latestSnapshot != null && (discardDuplicate || detectConflicts || publishesGuards);
         // By default, if checkConflicts is required, we do not have to do the extra check bucket
         // here.
         if (!checkConflicts && shouldCheckSameFixedBucket(commitKind)) {
             checkSameFixedBucketFromSnapshot(deltaFiles, latestSnapshot);
         }
         if (checkConflicts
-                && !conflictDetection.canSkipDataFileConflictDetection(
-                        latestSnapshot, deltaFiles, indexFiles, commitKind)) {
+                && (publishesGuards
+                        || !conflictDetection.canSkipDataFileConflictDetection(
+                                latestSnapshot, deltaFiles, indexFiles, commitKind))) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
             if (changedPartitions == null) {
@@ -1440,6 +1603,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     schemaManager
                             .latestOrThrow("Cannot get latest schema for table " + tableName)
                             .id();
+            if (validatedGuardSchemaId >= 0 && validatedGuardSchemaId != latestSchemaId) {
+                validateDeleteOrderingGuardPolicy(latestSnapshot, deltaFiles, indexFiles);
+            }
 
             // write new stats or inherit from the previous snapshot
             String statsFileName = null;
@@ -1469,6 +1635,30 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             // prepare snapshot file
+            properties =
+                    SequenceSnapshotProperties.mergeGuardMaxSequenceNumber(
+                            properties, latestSnapshot, deltaFiles, publishesGuards);
+            properties =
+                    DeleteOrderingGuardGeneration.merge(
+                            properties,
+                            latestSnapshot,
+                            options.deleteOrderingGuardsEnabled(),
+                            changesProvider.resetsDeleteOrderingGuards(),
+                            changesProvider.deleteOrderingGuardResetFilter(),
+                            partitionType);
+            properties =
+                    DeleteOrderingGuardPartitions.merge(
+                            properties,
+                            latestSnapshot,
+                            deltaFiles,
+                            indexFiles,
+                            options.bucket(),
+                            changesProvider.rescalesDeleteOrderingGuards(),
+                            () ->
+                                    latestSnapshot == null || latestSnapshot.indexManifest() == null
+                                            ? Collections.emptyList()
+                                            : indexManifestFile.read(
+                                                    latestSnapshot.indexManifest()));
             newSnapshot =
                     new Snapshot(
                             newSnapshotId,
@@ -1696,6 +1886,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (head == null || !head.equals(latest)) {
             return false;
         }
+        Map<String, String> snapshotProperties =
+                SequenceSnapshotProperties.mergeGuardMaxSequenceNumber(
+                        properties, latest, emptyList(), false);
+        snapshotProperties =
+                DeleteOrderingGuardGeneration.merge(
+                        snapshotProperties,
+                        latest,
+                        options.deleteOrderingGuardsEnabled(),
+                        true,
+                        null,
+                        partitionType);
+        snapshotProperties =
+                DeleteOrderingGuardPartitions.replace(
+                        snapshotProperties,
+                        latest,
+                        indexManifest == null
+                                ? Collections.emptyList()
+                                : indexManifestFile.read(indexManifest));
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1718,7 +1926,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.watermark(),
                         latest.statistics(),
                         // if empty properties, just set to null
-                        properties == null || properties.isEmpty() ? null : properties,
+                        snapshotProperties.isEmpty() ? null : snapshotProperties,
                         nextRowId,
                         null);
 
@@ -1796,6 +2004,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         // the snapshots between the target and the previous latest, breaking the global uniqueness
         // of _ROW_ID. Keep the larger of the previous latest and the target nextRowId.
         Long nextRowId = maxNextRowId(latest.nextRowId(), targetSnapshot.nextRowId());
+        Map<String, String> rollbackProperties =
+                SequenceSnapshotProperties.mergeGuardMaxSequenceNumber(
+                        targetSnapshot.properties(), latest, deltaFiles, false);
+        rollbackProperties =
+                DeleteOrderingGuardGeneration.merge(
+                        rollbackProperties,
+                        latest,
+                        options.deleteOrderingGuardsEnabled(),
+                        true,
+                        null,
+                        partitionType);
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1817,7 +2036,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         targetSnapshot.watermark(),
                         targetSnapshot.statistics(),
-                        targetSnapshot.properties(),
+                        rollbackProperties.isEmpty() ? null : rollbackProperties,
                         nextRowId,
                         null);
 

@@ -64,6 +64,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
     private final LookupStrategy lookupStrategy;
     private final @Nullable BucketedDvMaintainer deletionVectorsMaintainer;
     private final Comparator<KeyValue> comparator;
+    @Nullable private Function<KeyValue, KeyValue> beforeImageResolver;
 
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
@@ -101,6 +102,16 @@ public class LookupChangelogMergeFunctionWrapper<T>
     }
 
     @Override
+    public void addDeleteOrderingGuard(KeyValue guard) {
+        mergeFunction.addDeleteOrderingGuard(guard);
+    }
+
+    @Override
+    public void withDeleteOrderingGuardBeforeImage(Function<KeyValue, KeyValue> resolver) {
+        beforeImageResolver = resolver;
+    }
+
+    @Override
     public ChangelogResult getResult() {
         // 1. Find the latest high level record and compute containLevel0
         KeyValue highLevel = mergeFunction.pickHighLevel();
@@ -134,15 +145,17 @@ public class LookupChangelogMergeFunctionWrapper<T>
         }
 
         // 3. Calculate result
+        KeyValue before =
+                beforeImageResolver == null ? highLevel : beforeImageResolver.apply(highLevel);
         KeyValue result = mergeFunction.getResult();
 
         // 4. Set changelog when there's level-0 records
         reusedResult.reset();
         if (containLevel0 && lookupStrategy.produceChangelog) {
-            setChangelog(highLevel, result);
+            setChangelog(before, result);
         }
 
-        return reusedResult.setResult(result);
+        return reusedResult.setResult(mergeFunction.isDeleteOrderingGuardResult() ? null : result);
     }
 
     private void setChangelog(@Nullable KeyValue before, KeyValue after) {
@@ -176,16 +189,6 @@ public class LookupChangelogMergeFunctionWrapper<T>
 
     private Comparator<KeyValue> createSequenceComparator(
             @Nullable FieldsComparator userDefinedSeqComparator) {
-        if (userDefinedSeqComparator == null) {
-            return Comparator.comparingLong(KeyValue::sequenceNumber);
-        }
-
-        return (o1, o2) -> {
-            int result = userDefinedSeqComparator.compare(o1.value(), o2.value());
-            if (result != 0) {
-                return result;
-            }
-            return Long.compare(o1.sequenceNumber(), o2.sequenceNumber());
-        };
+        return DeleteOrderingGuardReader.sequenceComparator(userDefinedSeqComparator);
     }
 }
