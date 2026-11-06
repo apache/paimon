@@ -20,21 +20,28 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -46,11 +53,16 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.CoreOptions.FILE_COMPRESSION;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION;
+import static org.apache.paimon.CoreOptions.FORMAT_TABLE_FILE_SUFFIX_ENABLED;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TARGET_FILE_ROW_NUM;
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
@@ -98,6 +110,7 @@ class FormatTableWriteTest {
         }
         assertThat(reportedSizes).hasSize(messages.size());
         List<Path> dataFiles = new ArrayList<>(reportedSizes.keySet());
+        assertThat(dataFiles).allSatisfy(path -> assertThat(path.getName()).endsWith(".csv"));
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(messages);
         }
@@ -124,6 +137,68 @@ class FormatTableWriteTest {
                                 })
                         .collect(Collectors.toList());
         assertThat(rowCounts).containsExactlyInAnyOrder(2L, 2L, 1L);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "csv, none, false, ''",
+        "csv, gzip, false, .gz",
+        "csv, gzip, true, .gz",
+        "json, gzip, false, .gz",
+        "text, gzip, false, .gz",
+        "parquet, snappy, false, ''",
+        "parquet, snappy, true, .snappy",
+        "orc, none, false, ''"
+    })
+    void testWriteAndReadWithoutFormatSuffix(
+            String format, String compression, boolean includeCompression, String expectedSuffix)
+            throws Exception {
+        Path tablePath = new Path(tempDir.toUri());
+        Map<String, String> options = new HashMap<>();
+        options.put(PATH.key(), tablePath.toString());
+        options.put(FILE_FORMAT.key(), format);
+        options.put(FILE_COMPRESSION.key(), compression);
+        options.put(FILE_SUFFIX_INCLUDE_COMPRESSION.key(), Boolean.toString(includeCompression));
+        options.put(FORMAT_TABLE_FILE_SUFFIX_ENABLED.key(), "false");
+        options.put(TARGET_FILE_ROW_NUM.key(), "2");
+        FormatTable table =
+                FormatTable.builder()
+                        .fileIO(LocalFileIO.create())
+                        .identifier(Identifier.create("test_db", "test_table"))
+                        .rowType(RowType.of(DataTypes.STRING()))
+                        .partitionKeys(Collections.emptyList())
+                        .location(tablePath.toString())
+                        .format(FormatTable.Format.valueOf(format.toUpperCase(Locale.ROOT)))
+                        .options(options)
+                        .build();
+
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        List<CommitMessage> messages;
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (int i = 0; i < 5; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("value-" + i)));
+            }
+            messages = write.prepareCommit();
+        }
+        assertThat(messages).hasSize(3);
+        for (CommitMessage message : messages) {
+            Path path = ((TwoPhaseCommitMessage) message).getCommitter().targetPath();
+            assertThat(path.getName())
+                    .matches("data-[0-9a-f-]{36}-[0-9]+" + Pattern.quote(expectedSuffix));
+        }
+        try (BatchTableCommit commit = builder.newCommit()) {
+            commit.commit(messages);
+        }
+
+        ReadBuilder read = table.newReadBuilder();
+        List<String> values = new ArrayList<>();
+        for (Split split : read.newScan().plan().splits()) {
+            try (RecordReader<InternalRow> reader = read.newRead().createReader(split)) {
+                reader.forEachRemaining(row -> values.add(row.getString(0).toString()));
+            }
+        }
+        assertThat(values)
+                .containsExactlyInAnyOrder("value-0", "value-1", "value-2", "value-3", "value-4");
     }
 
     @Test

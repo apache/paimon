@@ -2877,6 +2877,15 @@ public class CoreOptions implements Serializable {
                     .withFallbackKeys(FILE_COMPRESSION.key())
                     .withDescription("Format table file compression.");
 
+    public static final ConfigOption<Boolean> FORMAT_TABLE_FILE_SUFFIX_ENABLED =
+            key("format-table.file.suffix.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to include the file format suffix in data file names written "
+                                    + "by the Paimon implementation of a format table. Compression "
+                                    + "suffixes are unaffected.");
+
     public static final ConfigOption<String> FORMAT_TABLE_COMMIT_HIVE_SYNC_URI =
             ConfigOptions.key("format-table.commit-hive-sync-url")
                     .stringType()
