@@ -47,10 +47,10 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * Immutable bucket-local SST segments of {@link DeleteOrderingGuard}s.
  *
  * <p>A segment starts with magic, format version, and table schema id, followed by the native SST
- * blocks and footer. Keys consist of primary-key fields and an ordinal; values contain internal
- * sequence number, retract kind, input level, and projected ordering fields. Native SST blocks
- * provide checksums and a block index. Reads stream the segment for merge processing, with no
- * per-event guard lookup or ingestion-time rewrite of previous segments.
+ * blocks and footer. Keys consist of primary-key fields; values contain the internal sequence
+ * number and projected ordering fields. Native SST blocks provide checksums and a block index.
+ * Reads stream the segment for merge processing, with no per-event guard lookup or ingestion-time
+ * rewrite of previous segments.
  *
  * <p>The path factory defines the bucket scope. Callers must commit returned index references
  * atomically with the corresponding data changes. Finishing a writer only produces an uncommitted
@@ -170,14 +170,14 @@ public class DeleteOrderingGuardFile extends IndexFile {
             checkState(
                     !finished && !aborted, "Guard segment writer is already finished or aborted.");
             try {
-                byte[] key = serializer.serializeKey(guard, rowCount);
+                byte[] key = serializer.serializeKey(guard);
                 checkArgument(
                         previousKey == null
                                 || keyComparator.compare(
                                                 MemorySlice.wrap(previousKey),
                                                 MemorySlice.wrap(key))
                                         < 0,
-                        "Delete ordering guards must be sorted by primary key.");
+                        "Delete ordering guards must be sorted by primary key without duplicates.");
                 byte[] value = serializer.serializeValue(guard);
                 if (writer == null) {
                     path = pathFactory.newPath();

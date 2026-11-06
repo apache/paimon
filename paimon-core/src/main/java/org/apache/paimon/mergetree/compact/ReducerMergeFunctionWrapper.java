@@ -20,6 +20,10 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
 
+import javax.annotation.Nullable;
+
+import java.util.function.Function;
+
 /**
  * Wrapper for {@link MergeFunction}s which works like a reducer.
  *
@@ -35,6 +39,7 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
 
     private KeyValue initialKv;
     private boolean isInitialized;
+    @Nullable private Function<KeyValue, KeyValue> guardResolver;
 
     public ReducerMergeFunctionWrapper(MergeFunction<KeyValue> mergeFunction) {
         this.mergeFunction = mergeFunction;
@@ -51,26 +56,15 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
     /** Adds the given {@link KeyValue} to the {@link MergeFunction} helper. */
     @Override
     public void add(KeyValue kv) {
-        if (isInitialized) {
-            merge(kv);
-        } else if (initialKv == null) {
+        if (initialKv == null) {
             initialKv = kv;
         } else {
-            merge(initialKv);
-            isInitialized = true;
+            if (!isInitialized) {
+                merge(initialKv);
+                isInitialized = true;
+            }
             merge(kv);
         }
-    }
-
-    @Override
-    public void addDeleteOrderingGuard(KeyValue guard) {
-        if (!isInitialized) {
-            if (initialKv != null) {
-                merge(initialKv);
-            }
-            isInitialized = true;
-        }
-        mergeFunction.addDeleteOrderingGuard(guard);
     }
 
     private void merge(KeyValue kv) {
@@ -80,10 +74,12 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
     /** Get current value of the {@link MergeFunction} helper. */
     @Override
     public KeyValue getResult() {
-        if (!isInitialized) {
-            return initialKv;
-        }
-        KeyValue result = mergeFunction.getResult();
-        return mergeFunction.isDeleteOrderingGuardResult() ? null : result;
+        KeyValue result = isInitialized ? mergeFunction.getResult() : initialKv;
+        return guardResolver == null ? result : guardResolver.apply(result);
+    }
+
+    @Override
+    public void withDeleteOrderingGuardResolver(Function<KeyValue, KeyValue> resolver) {
+        guardResolver = resolver;
     }
 }

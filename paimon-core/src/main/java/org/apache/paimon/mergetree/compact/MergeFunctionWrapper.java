@@ -35,14 +35,11 @@ public interface MergeFunctionWrapper<T> {
 
     void add(KeyValue kv);
 
-    /** Replays persisted ordering metadata; it must never become an input changelog event. */
-    default void addDeleteOrderingGuard(KeyValue guard) {
+    /** Resolves the result and changelog before-image against persisted delete bounds. */
+    default void withDeleteOrderingGuardResolver(Function<KeyValue, KeyValue> resolver) {
         throw new UnsupportedOperationException(
                 "This merge wrapper cannot resolve delete ordering guards.");
     }
-
-    /** Resolves a native before-image against the same persisted bounds as the current key. */
-    default void withDeleteOrderingGuardBeforeImage(Function<KeyValue, KeyValue> resolver) {}
 
     @Nullable
     T getResult();

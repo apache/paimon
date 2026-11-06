@@ -59,7 +59,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.spy;
 
-/** Tests immutable guard SST segments, including duplicate keys, corruption, and abort cleanup. */
+/** Tests immutable guard SST segments, including key ordering, corruption, and abort cleanup. */
 class DeleteOrderingGuardFileTest {
 
     @TempDir java.nio.file.Path tempDir;
@@ -74,16 +74,11 @@ class DeleteOrderingGuardFileTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void testMultipleKeysAndRetractsAcrossBlocks(boolean externalPath) throws Exception {
+    void testMultipleKeysAcrossBlocks(boolean externalPath) throws Exception {
         DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), externalPath);
         List<DeleteOrderingGuard> input = new ArrayList<>();
         for (int i = 0; i < 1000; i++) {
-            input.add(
-                    guard(
-                            i / 10 - 50,
-                            Long.MAX_VALUE - i,
-                            i % 2 == 0 ? RowKind.DELETE : RowKind.UPDATE_BEFORE,
-                            i % 3 == 0 ? null : i));
+            input.add(guard(i - 500, Long.MAX_VALUE - i, i % 3 == 0 ? null : i));
         }
         IndexFileMeta meta = write(file, input);
         assertThat(meta.indexType()).isEqualTo(DeleteOrderingGuardFile.DELETE_ORDERING_GUARD);
@@ -102,19 +97,15 @@ class DeleteOrderingGuardFileTest {
                 assertThat(actual.ordering().getInt(0)).isEqualTo(expected.ordering().getInt(0));
             }
             assertThat(actual.sequenceNumber()).isEqualTo(expected.sequenceNumber());
-            assertThat(actual.valueKind()).isEqualTo(expected.valueKind());
-            assertThat(actual.level()).isEqualTo(expected.level());
         }
     }
 
     @Test
     void testNewSegmentLeavesPreviousSegmentUnchanged() throws Exception {
         DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), false);
-        IndexFileMeta first =
-                write(file, Collections.singletonList(guard(1, 4, RowKind.DELETE, 4)));
+        IndexFileMeta first = write(file, Collections.singletonList(guard(1, 4, 4)));
         byte[] original = Files.readAllBytes(Paths.get(file.path(first).toUri()));
-        IndexFileMeta second =
-                write(file, Collections.singletonList(guard(1, 7, RowKind.DELETE, 7)));
+        IndexFileMeta second = write(file, Collections.singletonList(guard(1, 7, 7)));
 
         assertThat(second.fileName()).isNotEqualTo(first.fileName());
         assertThat(Files.readAllBytes(Paths.get(file.path(first).toUri()))).isEqualTo(original);
@@ -184,6 +175,18 @@ class DeleteOrderingGuardFileTest {
     }
 
     @Test
+    void testDuplicateKeyAbortsSegment() throws Exception {
+        DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), false);
+        try (DeleteOrderingGuardFile.Writer writer = file.createWriter()) {
+            writer.write(guard(1, 4, 4));
+            assertThatThrownBy(() -> writer.write(guard(1, 5, 5)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("without duplicates");
+        }
+        assertThat(tempDir).isEmptyDirectory();
+    }
+
+    @Test
     void testEmptyCompactionCreatesNoFile() throws Exception {
         DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), false);
         assertThat(write(file, Collections.emptyList())).isNull();
@@ -194,7 +197,7 @@ class DeleteOrderingGuardFileTest {
     void testUnfinishedCloseAbortsSegment() throws Exception {
         DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), false);
         try (DeleteOrderingGuardFile.Writer writer = file.createWriter()) {
-            writer.write(guard(1, 4, RowKind.DELETE, 4));
+            writer.write(guard(1, 4, 4));
             assertThat(tempDir).isDirectoryContaining(path -> true);
         }
         assertThat(tempDir).isEmptyDirectory();
@@ -203,10 +206,9 @@ class DeleteOrderingGuardFileTest {
     @Test
     void testAbortAfterFinishPreservesOtherSegments() throws Exception {
         DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), false);
-        IndexFileMeta previous =
-                write(file, Collections.singletonList(guard(1, 4, RowKind.DELETE, 4)));
+        IndexFileMeta previous = write(file, Collections.singletonList(guard(1, 4, 4)));
         try (DeleteOrderingGuardFile.Writer writer = file.createWriter()) {
-            writer.write(guard(2, 7, RowKind.DELETE, 7));
+            writer.write(guard(2, 7, 7));
             IndexFileMeta aborted = writer.finish();
             assertThat(file.exists(aborted)).isTrue();
             writer.abort();
@@ -220,13 +222,7 @@ class DeleteOrderingGuardFileTest {
     @Test
     void testUnsortedInputAbortsSegment() throws Exception {
         DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), false);
-        assertThatThrownBy(
-                        () ->
-                                write(
-                                        file,
-                                        Arrays.asList(
-                                                guard(2, 4, RowKind.DELETE, 4),
-                                                guard(1, 7, RowKind.DELETE, 7))))
+        assertThatThrownBy(() -> write(file, Arrays.asList(guard(2, 4, 4), guard(1, 7, 7))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("sorted by primary key");
         assertThat(tempDir).isEmptyDirectory();
@@ -269,10 +265,15 @@ class DeleteOrderingGuardFileTest {
                 };
         DeleteOrderingGuardFile file = file(fileIO, serializer(7), false);
         try (DeleteOrderingGuardFile.Writer writer = file.createWriter()) {
-            writer.write(guard(1, 4, RowKind.DELETE, 4));
+            writer.write(guard(1, 4, 4));
             if (failDuringWrite) {
                 fail.set(true);
-                assertThatThrownBy(() -> writer.write(guard(2, 7, RowKind.DELETE, 7)))
+                assertThatThrownBy(
+                                () -> {
+                                    for (int key = 2; key < 16; key++) {
+                                        writer.write(guard(key, 7, 7));
+                                    }
+                                })
                         .isInstanceOf(IOException.class)
                         .hasMessage("injected write failure");
             } else {
@@ -288,7 +289,7 @@ class DeleteOrderingGuardFileTest {
     @Test
     void testSchemaMismatchRejected() throws Exception {
         DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), false);
-        IndexFileMeta meta = write(file, Collections.singletonList(guard(1, 4, RowKind.DELETE, 4)));
+        IndexFileMeta meta = write(file, Collections.singletonList(guard(1, 4, 4)));
         DeleteOrderingGuardFile wrongSchema = file(LocalFileIO.create(), serializer(8), false);
         assertThatThrownBy(() -> wrongSchema.read(meta))
                 .isInstanceOf(IOException.class)
@@ -299,7 +300,7 @@ class DeleteOrderingGuardFileTest {
     @ValueSource(ints = {0, 4})
     void testInvalidHeaderRejected(int offset) throws Exception {
         DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), false);
-        IndexFileMeta meta = write(file, Collections.singletonList(guard(1, 4, RowKind.DELETE, 4)));
+        IndexFileMeta meta = write(file, Collections.singletonList(guard(1, 4, 4)));
         try (RandomAccessFile output =
                 new RandomAccessFile(Paths.get(file.path(meta).toUri()).toFile(), "rw")) {
             output.seek(offset);
@@ -313,7 +314,7 @@ class DeleteOrderingGuardFileTest {
     @Test
     void testCorruptDataBlockFailsChecksum() throws Exception {
         DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), false);
-        IndexFileMeta meta = write(file, Collections.singletonList(guard(1, 4, RowKind.DELETE, 4)));
+        IndexFileMeta meta = write(file, Collections.singletonList(guard(1, 4, 4)));
         try (RandomAccessFile output =
                 new RandomAccessFile(Paths.get(file.path(meta).toUri()).toFile(), "rw")) {
             output.seek(20);
@@ -362,9 +363,8 @@ class DeleteOrderingGuardFileTest {
                 new CoreOptions(options));
     }
 
-    private static DeleteOrderingGuard guard(int key, long sequence, RowKind kind, Integer source) {
-        return new DeleteOrderingGuard(
-                GenericRow.of(key), GenericRow.of(source), sequence, kind, 3);
+    private static DeleteOrderingGuard guard(int key, long sequence, Integer source) {
+        return new DeleteOrderingGuard(GenericRow.of(key), GenericRow.of(source), sequence);
     }
 
     private static IndexFileMeta write(

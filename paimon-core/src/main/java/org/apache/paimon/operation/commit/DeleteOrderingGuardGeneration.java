@@ -128,11 +128,6 @@ public class DeleteOrderingGuardGeneration {
                 return delegate.resetsDeleteOrderingGuards();
             }
 
-            @Override
-            public boolean rescalesDeleteOrderingGuards() {
-                return delegate.rescalesDeleteOrderingGuards();
-            }
-
             @Nullable
             @Override
             public PartitionPredicate deleteOrderingGuardResetFilter() {

@@ -728,7 +728,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                     options.deleteOrderingGuardsEnabled()
                                     || DeleteOrderingGuardFile.mayContainGuards(
                                             snapshotManager.latestSnapshot())
-                            ? "Please switch to batch mode, and run sys.rescale to preserve delete ordering history while rescaling current data layout."
+                            ? "Rescaling tables with delete ordering guards is not supported."
                             : "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.";
             throw new RuntimeException(
                     String.format(

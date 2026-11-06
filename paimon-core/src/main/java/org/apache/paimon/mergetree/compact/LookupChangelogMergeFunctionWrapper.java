@@ -64,7 +64,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
     private final LookupStrategy lookupStrategy;
     private final @Nullable BucketedDvMaintainer deletionVectorsMaintainer;
     private final Comparator<KeyValue> comparator;
-    @Nullable private Function<KeyValue, KeyValue> beforeImageResolver;
+    @Nullable private Function<KeyValue, KeyValue> guardResolver;
 
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
@@ -102,13 +102,8 @@ public class LookupChangelogMergeFunctionWrapper<T>
     }
 
     @Override
-    public void addDeleteOrderingGuard(KeyValue guard) {
-        mergeFunction.addDeleteOrderingGuard(guard);
-    }
-
-    @Override
-    public void withDeleteOrderingGuardBeforeImage(Function<KeyValue, KeyValue> resolver) {
-        beforeImageResolver = resolver;
+    public void withDeleteOrderingGuardResolver(Function<KeyValue, KeyValue> resolver) {
+        guardResolver = resolver;
     }
 
     @Override
@@ -145,9 +140,11 @@ public class LookupChangelogMergeFunctionWrapper<T>
         }
 
         // 3. Calculate result
-        KeyValue before =
-                beforeImageResolver == null ? highLevel : beforeImageResolver.apply(highLevel);
+        KeyValue before = guardResolver == null ? highLevel : guardResolver.apply(highLevel);
         KeyValue result = mergeFunction.getResult();
+        if (guardResolver != null) {
+            result = guardResolver.apply(result);
+        }
 
         // 4. Set changelog when there's level-0 records
         reusedResult.reset();
@@ -155,16 +152,16 @@ public class LookupChangelogMergeFunctionWrapper<T>
             setChangelog(before, result);
         }
 
-        return reusedResult.setResult(mergeFunction.isDeleteOrderingGuardResult() ? null : result);
+        return reusedResult.setResult(result);
     }
 
-    private void setChangelog(@Nullable KeyValue before, KeyValue after) {
+    private void setChangelog(@Nullable KeyValue before, @Nullable KeyValue after) {
         if (before == null || !before.isAdd()) {
-            if (after.isAdd()) {
+            if (after != null && after.isAdd()) {
                 reusedResult.addChangelog(replaceAfter(RowKind.INSERT, after));
             }
         } else {
-            if (!after.isAdd()) {
+            if (after == null || !after.isAdd()) {
                 reusedResult.addChangelog(replaceBefore(RowKind.DELETE, before));
             } else if (valueEqualiser == null
                     || !valueEqualiser.equals(before.value(), after.value())) {
@@ -189,6 +186,16 @@ public class LookupChangelogMergeFunctionWrapper<T>
 
     private Comparator<KeyValue> createSequenceComparator(
             @Nullable FieldsComparator userDefinedSeqComparator) {
-        return DeleteOrderingGuardReader.sequenceComparator(userDefinedSeqComparator);
+        if (userDefinedSeqComparator == null) {
+            return Comparator.comparingLong(KeyValue::sequenceNumber);
+        }
+
+        return (o1, o2) -> {
+            int result = userDefinedSeqComparator.compare(o1.value(), o2.value());
+            if (result != 0) {
+                return result;
+            }
+            return Long.compare(o1.sequenceNumber(), o2.sequenceNumber());
+        };
     }
 }

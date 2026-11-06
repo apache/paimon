@@ -70,8 +70,6 @@ class DeleteOrderingGuardSerializerTest {
         assertThat(guard.ordering().getInt(0)).isEqualTo(4);
         assertThat(guard.ordering().getLong(1)).isEqualTo(7L);
         assertThat(guard.sequenceNumber()).isEqualTo(19);
-        assertThat(guard.valueKind()).isEqualTo(RowKind.DELETE);
-        assertThat(guard.level()).isEqualTo(2);
     }
 
     @Test
@@ -103,7 +101,7 @@ class DeleteOrderingGuardSerializerTest {
         assertThat(guard.ordering().getInt(0)).isEqualTo(4);
         assertThat(guard.ordering().isNullAt(1)).isTrue();
         assertThat(guard.ordering().getLong(2)).isEqualTo(7L);
-        assertThat(guard.valueKind()).isEqualTo(RowKind.UPDATE_BEFORE);
+
         verify(value, never()).getBlob(1);
         verify(value, never()).getVector(3);
         verify(value, never()).getString(5);

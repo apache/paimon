@@ -29,11 +29,12 @@ import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.OffsetRow;
 import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import javax.annotation.Nullable;
 
@@ -42,7 +43,6 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.types.DataTypeChecks.getNestedTypes;
@@ -58,9 +58,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * direction and deletion rules belong to the table schema, identified by {@link #schemaId()}.
  * Readers must use that schema, rather than the latest schema.
  *
- * <p>SST keys append a segment-local ordinal to the primary key. This preserves multiple retracts
- * for the same key without relying on equal-key SST seeks or prematurely discarding history. The
- * ordinal is not an event ordering watermark.
+ * <p>Each segment contains the strongest delete bound for each primary key.
  */
 public class DeleteOrderingGuardSerializer {
 
@@ -69,12 +67,10 @@ public class DeleteOrderingGuardSerializer {
     private final RowType orderingType;
     private final boolean ignoreDelete;
     private final ProjectedRow orderingProjection;
-    private final ProjectedRow keyProjection;
     private final InternalRowSerializer keySerializer;
     private final InternalRowSerializer orderingSerializer;
-    private final InternalRowSerializer storageKeySerializer;
     private final InternalRowSerializer storageValueSerializer;
-    private final RowType storageKeyType;
+    @Nullable private final FieldsComparator sequenceComparator;
 
     public DeleteOrderingGuardSerializer(
             long schemaId, RowType keyType, RowType valueType, CoreOptions options) {
@@ -115,19 +111,12 @@ public class DeleteOrderingGuardSerializer {
         this.orderingType = new RowType(fields);
         this.orderingProjection =
                 ProjectedRow.from(indexes.stream().mapToInt(Integer::intValue).toArray());
-        this.keyProjection =
-                ProjectedRow.from(IntStream.range(0, keyType.getFieldCount()).toArray());
         this.keySerializer = new InternalRowSerializer(keyType);
         this.orderingSerializer = new InternalRowSerializer(orderingType);
 
-        List<DataType> storageKeyTypes = new ArrayList<>(keyType.getFieldTypes());
-        storageKeyTypes.add(DataTypes.BIGINT().notNull());
-        this.storageKeyType = RowType.of(storageKeyTypes.toArray(new DataType[0]));
-        this.storageKeySerializer = new InternalRowSerializer(storageKeyType);
+        this.sequenceComparator = UserDefinedSeqComparator.create(orderingType, options);
         List<DataType> storageValueTypes = new ArrayList<>();
         storageValueTypes.add(DataTypes.BIGINT().notNull());
-        storageValueTypes.add(DataTypes.TINYINT().notNull());
-        storageValueTypes.add(DataTypes.INT().notNull());
         storageValueTypes.addAll(orderingType.getFieldTypes());
         this.storageValueSerializer =
                 new InternalRowSerializer(RowType.of(storageValueTypes.toArray(new DataType[0])));
@@ -158,21 +147,24 @@ public class DeleteOrderingGuardSerializer {
         return new DeleteOrderingGuard(
                 keySerializer.copy(record.key()),
                 orderingSerializer.copy(orderingProjection.replaceRow(record.value())),
-                record.sequenceNumber(),
-                record.valueKind(),
-                record.level());
+                record.sequenceNumber());
     }
 
-    byte[] serializeKey(DeleteOrderingGuard guard, long ordinal) {
+    public int compare(DeleteOrderingGuard left, DeleteOrderingGuard right) {
+        int result =
+                sequenceComparator == null
+                        ? 0
+                        : sequenceComparator.compare(left.ordering(), right.ordering());
+        return result == 0 ? Long.compare(left.sequenceNumber(), right.sequenceNumber()) : result;
+    }
+
+    byte[] serializeKey(DeleteOrderingGuard guard) {
         checkArgument(
                 guard.key().getFieldCount() == keyType.getFieldCount(),
                 "Guard key does not match its schema.");
         // SST retains its last key until the block is flushed; the row serializer reuses its
         // buffer.
-        return storageKeySerializer
-                .toBinaryRow(new JoinedRow(guard.key(), GenericRow.of(ordinal)))
-                .copy()
-                .toBytes();
+        return keySerializer.toBinaryRow(guard.key()).copy().toBytes();
     }
 
     byte[] serializeValue(DeleteOrderingGuard guard) {
@@ -180,35 +172,27 @@ public class DeleteOrderingGuardSerializer {
                 guard.ordering().getFieldCount() == orderingType.getFieldCount(),
                 "Guard ordering fields do not match their schema.");
         return storageValueSerializer
-                .toBinaryRow(
-                        new JoinedRow(
-                                GenericRow.of(
-                                        guard.sequenceNumber(),
-                                        guard.valueKind().toByteValue(),
-                                        guard.level()),
-                                guard.ordering()))
+                .toBinaryRow(new JoinedRow(GenericRow.of(guard.sequenceNumber()), guard.ordering()))
                 .copy()
                 .toBytes();
     }
 
     DeleteOrderingGuard deserialize(MemorySlice key, MemorySlice value) {
-        BinaryRow storageKey = new BinaryRow(storageKeyType.getFieldCount());
+        BinaryRow storageKey = new BinaryRow(keyType.getFieldCount());
         storageKey.pointTo(key.segment(), key.offset(), key.length());
-        BinaryRow storageValue = new BinaryRow(orderingType.getFieldCount() + 3);
+        BinaryRow storageValue = new BinaryRow(orderingType.getFieldCount() + 1);
         storageValue.pointTo(value.segment(), value.offset(), value.length());
         return new DeleteOrderingGuard(
-                keySerializer.copy(keyProjection.replaceRow(storageKey)),
+                keySerializer.copy(storageKey),
                 orderingSerializer.copy(
-                        new OffsetRow(orderingType.getFieldCount(), 3).replace(storageValue)),
-                storageValue.getLong(0),
-                RowKind.fromByteValue(storageValue.getByte(1)),
-                storageValue.getInt(2));
+                        new OffsetRow(orderingType.getFieldCount(), 1).replace(storageValue)),
+                storageValue.getLong(0));
     }
 
     Comparator<MemorySlice> keyComparator() {
-        Comparator<InternalRow> comparator = new KeyComparatorSupplier(storageKeyType).get();
-        BinaryRow left = new BinaryRow(storageKeyType.getFieldCount());
-        BinaryRow right = new BinaryRow(storageKeyType.getFieldCount());
+        Comparator<InternalRow> comparator = new KeyComparatorSupplier(keyType).get();
+        BinaryRow left = new BinaryRow(keyType.getFieldCount());
+        BinaryRow right = new BinaryRow(keyType.getFieldCount());
         return (a, b) -> {
             left.pointTo(a.segment(), a.offset(), a.length());
             right.pointTo(b.segment(), b.offset(), b.length());
