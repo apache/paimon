@@ -79,7 +79,7 @@ import java.util.concurrent.Future;
  */
 public class VortexRecordsReader implements FileRecordReader<InternalRow> {
 
-    private static final String ROW_INDEX_FIELD = "_PAIMON_VORTEX_ROW_INDEX";
+    private static final String ROW_INDEX_FIELD_PREFIX = "_PAIMON_VORTEX_ROW_INDEX";
 
     private final Path filePath;
     private final BufferAllocator allocator;
@@ -89,6 +89,10 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
     private final ArrowBatchReader arrowBatchReader;
     @Nullable private final int[] physicalFieldMapping;
     private final boolean readsRowIndex;
+
+    // A user column can have any name, so the row index gets a name that no projected column has.
+    private final String rowIndexField;
+
     private final Set<ArrowBatch> activeBatches = new HashSet<>();
 
     /** Fetches the next batch while the consumer processes the current one. */
@@ -118,6 +122,7 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
 
         List<String> columns = physicalReadRowType.getFieldNames();
         this.readsRowIndex = filter != null || selection != null || columns.isEmpty();
+        this.rowIndexField = rowIndexAlias(columns);
 
         this.allocator =
                 ArrowAllocation.rootAllocator()
@@ -344,7 +349,7 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
                 names[i] = columns.get(i);
                 values[i] = Expression.column(columns.get(i));
             }
-            names[columns.size()] = ROW_INDEX_FIELD;
+            names[columns.size()] = rowIndexField;
             values[columns.size()] = Expression.rowIdx();
             return Expression.pack(names, values, false);
         } finally {
@@ -354,6 +359,20 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
                 }
             }
         }
+    }
+
+    /**
+     * Returns a name for the row index that no projected column has. The Arrow batch reader finds
+     * columns by name, so a projected column with the same name would get the row index values.
+     */
+    @VisibleForTesting
+    static String rowIndexAlias(List<String> columns) {
+        Set<String> names = new HashSet<>(columns);
+        String alias = ROW_INDEX_FIELD_PREFIX;
+        for (int i = 0; names.contains(alias); i++) {
+            alias = ROW_INDEX_FIELD_PREFIX + "_" + i;
+        }
+        return alias;
     }
 
     private void track(ArrowBatch batch) {
@@ -387,7 +406,7 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
 
         LongIterator positions;
         if (readsRowIndex) {
-            positions = rowIndexPositions((UInt8Vector) root.getVector(ROW_INDEX_FIELD), rowCount);
+            positions = rowIndexPositions((UInt8Vector) root.getVector(rowIndexField), rowCount);
         } else {
             positions = LongIterator.fromRange(nextPosition, nextPosition + rowCount);
             nextPosition += rowCount;

@@ -164,6 +164,51 @@ class VortexTableTest {
         assertThat(rows).containsExactlyInAnyOrderElementsOf(expected);
     }
 
+    @Test
+    void testUserColumnWithRowIndexAliasName() throws Exception {
+        // The reader adds the row index to the projection under an alias. A user column can have
+        // the same name, and must then keep its own values.
+        FileStoreTable table =
+                createTable(
+                        "alias",
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .column("_PAIMON_VORTEX_ROW_INDEX", DataTypes.BIGINT())
+                                .option("file.format", "vortex")
+                                .option("bucket", "-1")
+                                .build());
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < 10; i++) {
+                write.write(GenericRow.of(i, i * 100L));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(builder.greaterOrEqual(0, 3));
+        List<String> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                        readBuilder
+                                .newRead()
+                                .executeFilter()
+                                .createReader(readBuilder.newScan().plan());
+                RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
+            while (iterator.hasNext()) {
+                InternalRow row = iterator.next();
+                rows.add(row.getInt(0) + ":" + row.getLong(1));
+            }
+        }
+
+        List<String> expected = new ArrayList<>();
+        for (int i = 3; i < 10; i++) {
+            expected.add(i + ":" + i * 100L);
+        }
+        assertThat(rows).containsExactlyElementsOf(expected);
+    }
+
     private FileStoreTable createTable(String name, Schema schema) throws Exception {
         Identifier identifier = Identifier.create("db", name);
         catalog.createTable(identifier, schema, false);

@@ -299,10 +299,6 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
                 return Expression.nullLiteral(Expression.DType.I32);
             case BIGINT:
                 return Expression.nullLiteral(Expression.DType.I64);
-            case FLOAT:
-                return Expression.nullLiteral(Expression.DType.F32);
-            case DOUBLE:
-                return Expression.nullLiteral(Expression.DType.F64);
             case CHAR:
             case VARCHAR:
                 return Expression.nullLiteral(Expression.DType.UTF8);

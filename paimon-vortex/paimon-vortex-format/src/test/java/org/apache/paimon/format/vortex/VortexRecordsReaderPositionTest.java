@@ -41,6 +41,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -79,6 +80,18 @@ class VortexRecordsReaderPositionTest {
             assertThat(row[1]).isEqualTo(row[0]);
             assertThat(row[0]).isGreaterThanOrEqualTo(9_990);
         }
+    }
+
+    @Test
+    void testRowIndexAliasDiffersFromProjectedColumns() {
+        assertThat(VortexRecordsReader.rowIndexAlias(Arrays.asList("id", "name")))
+                .isEqualTo("_PAIMON_VORTEX_ROW_INDEX");
+
+        assertThat(
+                        VortexRecordsReader.rowIndexAlias(
+                                Arrays.asList(
+                                        "_PAIMON_VORTEX_ROW_INDEX", "_PAIMON_VORTEX_ROW_INDEX_0")))
+                .isEqualTo("_PAIMON_VORTEX_ROW_INDEX_1");
     }
 
     @Test
