@@ -45,6 +45,9 @@ class BranchManagerTest(unittest.TestCase):
         self.assertEqual(BranchManager.normalize_branch("main"), "main")
         self.assertEqual(BranchManager.normalize_branch("feature"), "feature")
         self.assertEqual(BranchManager.normalize_branch("  feature  "), "  feature  ")
+        self.assertEqual(BranchManager.normalize_branch("\u3000"), DEFAULT_MAIN_BRANCH)
+        self.assertEqual(BranchManager.normalize_branch("\u00a0"), "\u00a0")
+        self.assertEqual(BranchManager.normalize_branch("\u180e"), "\u180e")
 
     def test_branch_path(self):
         """Test branch_path method."""
@@ -61,9 +64,11 @@ class BranchManagerTest(unittest.TestCase):
 
     def test_validate_branch_main_branch(self):
         """Test validate_branch rejects main branch."""
-        with self.assertRaises(ValueError) as context:
-            BranchManager.validate_branch("main")
-        self.assertIn("default branch", str(context.exception))
+        for branch in ("main", "MAIN", "Main", "ma\u0131n", "ma\u0130n"):
+            with self.subTest(branch=branch):
+                with self.assertRaises(ValueError) as context:
+                    BranchManager.validate_branch(branch)
+                self.assertIn("default branch", str(context.exception))
 
     def test_validate_branch_blank(self):
         """Test validate_branch rejects blank branch names."""
@@ -73,6 +78,10 @@ class BranchManagerTest(unittest.TestCase):
 
         with self.assertRaises(ValueError) as context:
             BranchManager.validate_branch("  ")
+        self.assertIn("blank", str(context.exception))
+
+        with self.assertRaises(ValueError) as context:
+            BranchManager.validate_branch("\u3000")
         self.assertIn("blank", str(context.exception))
 
     def test_validate_branch_numeric(self):
@@ -89,6 +98,7 @@ class BranchManagerTest(unittest.TestCase):
         BranchManager.validate_branch("feature-branch-123")
         BranchManager.validate_branch(" main ")
         BranchManager.validate_branch(" 123 ")
+        BranchManager.validate_branch("\u00a0")
 
     def test_fast_forward_validate_to_main(self):
         """Test fast_forward_validate rejects fast-forward to main."""

@@ -122,7 +122,8 @@ class CatalogTableGuardTest(unittest.TestCase):
         })
         assert_table_guards(self, catalog, 'db')
         add_column = SchemaChange.add_column('x', AtomicType('INT'))
-        catalog.get_table('db.t').branch_manager().create_branch('MAIN')
+        with self.assertRaisesRegex(ValueError, 'default branch'):
+            catalog.get_table('db.t').branch_manager().create_branch('MAIN')
         for target in ('db.t$branch_dev', 'db.t$branch_MAIN'):
             with self.subTest(target=target):
                 with self.assertRaises(NotImplementedError):

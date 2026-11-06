@@ -22,6 +22,7 @@ from typing import List, Optional
 from pypaimon.branch.branch_manager import BranchManager, BRANCH_PREFIX
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import JSON
+from pypaimon.management.java_string import is_null_or_whitespace_only
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.tag.tag_manager import TagManager
@@ -221,11 +222,11 @@ class FileSystemBranchManager(BranchManager):
             raise ValueError(f"Cannot rename the main branch '{from_branch}'.")
 
         # Check if from_branch is blank
-        if not from_branch or from_branch.isspace():
+        if is_null_or_whitespace_only(from_branch):
             raise ValueError("Source branch name shouldn't be blank.")
 
         # Check if to_branch is blank
-        if not to_branch or to_branch.isspace():
+        if is_null_or_whitespace_only(to_branch):
             raise ValueError("Target branch name shouldn't be blank.")
 
         # Validate the new branch name
