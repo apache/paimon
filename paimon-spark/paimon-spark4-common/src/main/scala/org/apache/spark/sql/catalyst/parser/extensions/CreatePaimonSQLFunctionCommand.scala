@@ -79,7 +79,7 @@ case class CreatePaimonSQLFunctionCommand(
       exprText,
       queryText,
       comment,
-      None, // collation, added in Spark 4.2
+      None, // collation (Spark 4.2); RewritePaimonSQLFunctionCommands rejects a non-empty one
       isDeterministic,
       containsSQL,
       isTableFunc,

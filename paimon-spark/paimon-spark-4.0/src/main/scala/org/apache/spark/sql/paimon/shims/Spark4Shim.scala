@@ -493,6 +493,11 @@ class Spark4Shim extends SparkShim {
     org.apache.paimon.spark.catalog.functions.SQLFunctionConverter
       .toSQLFunctionExpression(funcIdent, function, arguments, parser)
 
+  // `CREATE FUNCTION ... DEFAULT COLLATION` and database collation inheritance are Spark 4.2+.
+  override def sqlFunctionDefaultCollation(plan: LogicalPlan): Option[String] = None
+
+  override def sqlFunctionInheritsDatabaseCollation: Boolean = false
+
   // Spark 4.0/4.1 have no `CreateTableLike` logical plan; `CREATE TABLE LIKE` still arrives as the
   // V1 `CreateTableLikeCommand`, which `RewriteCreateTableLikeCommand` matches directly.
   override def createTableLikeParts(plan: LogicalPlan)

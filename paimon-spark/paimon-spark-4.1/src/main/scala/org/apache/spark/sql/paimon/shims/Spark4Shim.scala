@@ -528,6 +528,11 @@ class Spark4Shim extends SparkShim {
       parser: org.apache.spark.sql.catalyst.parser.ParserInterface): Expression =
     org.apache.paimon.spark.catalog.functions.SQLFunctionConverter
       .toSQLFunctionExpression(funcIdent, function, arguments, parser)
+
+  // `CREATE FUNCTION ... DEFAULT COLLATION` and database collation inheritance are Spark 4.2+.
+  override def sqlFunctionDefaultCollation(plan: LogicalPlan): Option[String] = None
+
+  override def sqlFunctionInheritsDatabaseCollation: Boolean = false
 }
 
 object Spark4Shim {

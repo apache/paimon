@@ -42,7 +42,7 @@ import org.apache.spark.sql.catalyst.catalog.CatalogStorageFormat
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, ColumnDefinition, CreateTableLike, CTERelationRef, DescribeRelation, DescribeTablePartition, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, OverwriteByExpression, OverwritePartitionsDynamic, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, ColumnDefinition, CreateTableLike, CreateUserDefinedFunction, CTERelationRef, DescribeRelation, DescribeTablePartition, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, OverwriteByExpression, OverwritePartitionsDynamic, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Copy, Insert, Keep, Update}
 import org.apache.spark.sql.catalyst.plans.physical.{ClusteredDistribution, Distribution}
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -500,6 +500,13 @@ class Spark4Shim extends SparkShim {
       parser: org.apache.spark.sql.catalyst.parser.ParserInterface): Expression =
     org.apache.paimon.spark.catalog.functions.SQLFunctionConverter
       .toSQLFunctionExpression(funcIdent, function, arguments, parser)
+
+  override def sqlFunctionDefaultCollation(plan: LogicalPlan): Option[String] = plan match {
+    case c: CreateUserDefinedFunction => c.collation
+    case _ => None
+  }
+
+  override def sqlFunctionInheritsDatabaseCollation: Boolean = true
 
   // Spark 4.2 (SPARK-39660) removed partitionSpec from DescribeRelation; DESCRIBE ... PARTITION is
   // a separate DescribeTablePartition plan there.

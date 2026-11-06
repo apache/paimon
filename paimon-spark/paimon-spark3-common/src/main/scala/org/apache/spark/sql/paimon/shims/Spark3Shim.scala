@@ -464,6 +464,10 @@ class Spark3Shim extends SparkShim {
     throw new UnsupportedOperationException(
       "SQL user-defined functions (CREATE FUNCTION ... RETURN) require Spark 4.0 or later.")
 
+  override def sqlFunctionDefaultCollation(plan: LogicalPlan): Option[String] = None
+
+  override def sqlFunctionInheritsDatabaseCollation: Boolean = false
+
   // Spark 3.x has no `CreateTableLike` logical plan; `CREATE TABLE LIKE` still arrives as the
   // V1 `CreateTableLikeCommand`, which `RewriteCreateTableLikeCommand` matches directly.
   override def createTableLikeParts(plan: LogicalPlan)

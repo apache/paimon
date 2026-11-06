@@ -397,6 +397,18 @@ trait SparkShim {
       parser: ParserInterface): Expression
 
   /**
+   * The `DEFAULT COLLATION` declared on a `CREATE FUNCTION` plan, or `None` before Spark 4.2
+   * (SPARK-55528), which has no such clause.
+   */
+  def sqlFunctionDefaultCollation(plan: LogicalPlan): Option[String]
+
+  /**
+   * Whether a SQL function created without `DEFAULT COLLATION` takes its database's default
+   * collation, as Spark 4.2 does (SPARK-55528).
+   */
+  def sqlFunctionInheritsDatabaseCollation: Boolean
+
+  /**
    * Destructures Spark 4.2's `CreateTableLike` logical plan, or returns `None` on 3.x/4.0/4.1 where
    * the node does not exist.
    *
