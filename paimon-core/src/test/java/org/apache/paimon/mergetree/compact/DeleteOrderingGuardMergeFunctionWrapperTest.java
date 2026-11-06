@@ -104,7 +104,6 @@ class DeleteOrderingGuardMergeFunctionWrapperTest {
         assertThat(guards).hasSize(1);
         assertThat(guards.get(0).ordering().getInt(0)).isEqualTo(4);
         assertThat(guards.get(0).sequenceNumber()).isEqualTo(4);
-        assertThat(guards.get(0).level()).isEqualTo(2);
     }
 
     @ParameterizedTest
@@ -138,6 +137,42 @@ class DeleteOrderingGuardMergeFunctionWrapperTest {
         assertThat(delete.value().getString(2))
                 .isEqualTo(BinaryString.fromString("delete-payload"));
         assertThat(delete.valueKind()).isEqualTo(RowKind.DELETE);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"MIN_HEAP,false", "MIN_HEAP,true", "LOSER_TREE,false", "LOSER_TREE,true"})
+    void testCapturesStrongestDeletePerKey(SortEngine engine, boolean spill) throws Exception {
+        Options options = options(engine);
+        options.set(CoreOptions.SEQUENCE_FIELD, "seqB,seqA");
+        options.set(CoreOptions.SEQUENCE_FIELD_SORT_ORDER, CoreOptions.SortOrder.DESCENDING);
+        List<DeleteOrderingGuard> guards = new ArrayList<>();
+        List<KeyValue> result =
+                merge(
+                        options,
+                        spill,
+                        guards,
+                        Arrays.asList(
+                                Arrays.asList(
+                                        row(1, 9, RowKind.DELETE, 4, 7, null),
+                                        row(2, 2, RowKind.DELETE, 4, null, null)),
+                                Arrays.asList(
+                                        row(1, 3, RowKind.DELETE, 6, 5, null),
+                                        row(2, 5, RowKind.UPDATE_BEFORE, 4, null, null)),
+                                Arrays.asList(
+                                        row(1, 4, RowKind.DELETE, 3, 5, null),
+                                        row(2, 6, RowKind.INSERT, 4, null, "fresh"))),
+                        null);
+
+        assertThat(guards).hasSize(2);
+        assertThat(guards.get(0).key().getInt(0)).isEqualTo(1);
+        assertThat(guards.get(0).ordering().getInt(0)).isEqualTo(3);
+        assertThat(guards.get(0).ordering().getInt(1)).isEqualTo(5);
+        assertThat(guards.get(1).key().getInt(0)).isEqualTo(2);
+        assertThat(guards.get(1).ordering().isNullAt(1)).isTrue();
+        assertThat(guards.get(1).sequenceNumber()).isEqualTo(5);
+        assertThat(result)
+                .singleElement()
+                .satisfies(kv -> assertThat(kv.key().getInt(0)).isEqualTo(2));
     }
 
     @ParameterizedTest
@@ -197,10 +232,11 @@ class DeleteOrderingGuardMergeFunctionWrapperTest {
                         });
         KeyValue delete = row(1, 4, RowKind.DELETE, 4, null, null);
 
-        assertThatThrownBy(() -> capture.add(delete))
+        capture.add(delete);
+        assertThatThrownBy(capture::getResult)
                 .isInstanceOf(UncheckedIOException.class)
                 .hasCause(failure);
-        verify(wrapped, never()).add(delete);
+        verify(wrapped, never()).getResult();
     }
 
     private List<KeyValue> merge(

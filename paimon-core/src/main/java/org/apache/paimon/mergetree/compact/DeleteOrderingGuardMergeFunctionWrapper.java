@@ -34,8 +34,8 @@ import java.util.function.Function;
  *
  * <p>Install on sorted compaction inputs after record TTL filtering. Capturing only a merged DELETE
  * would miss stale deletes when a newer insert makes the result live. The collector receives
- * detached, payload-free records in primary-key order, including multiple retracts for one key.
- * Ignored deletes produce no guards.
+ * detached, payload-free records in primary-key order, with one strongest retract per key. Ignored
+ * deletes produce no guards.
  *
  * <p>The caller owns the collector's lifecycle: abort its output if compaction fails, and publish
  * the finished segment references atomically with the data changes. This wrapper does not enable
@@ -46,6 +46,7 @@ public class DeleteOrderingGuardMergeFunctionWrapper<T> implements MergeFunction
     private final MergeFunctionWrapper<T> wrapped;
     private final DeleteOrderingGuardSerializer serializer;
     private final ThrowingConsumer<DeleteOrderingGuard, IOException> collector;
+    @Nullable private DeleteOrderingGuard strongest;
 
     public DeleteOrderingGuardMergeFunctionWrapper(
             MergeFunctionWrapper<T> wrapped,
@@ -59,17 +60,14 @@ public class DeleteOrderingGuardMergeFunctionWrapper<T> implements MergeFunction
     @Override
     public void reset() {
         wrapped.reset();
+        strongest = null;
     }
 
     @Override
     public void add(KeyValue record) {
         DeleteOrderingGuard guard = serializer.extract(record);
-        if (guard != null) {
-            try {
-                collector.accept(guard);
-            } catch (IOException e) {
-                throw new UncheckedIOException("Failed to capture delete ordering guard.", e);
-            }
+        if (guard != null && (strongest == null || serializer.compare(guard, strongest) > 0)) {
+            strongest = guard;
         }
         wrapped.add(record);
     }
@@ -77,16 +75,19 @@ public class DeleteOrderingGuardMergeFunctionWrapper<T> implements MergeFunction
     @Nullable
     @Override
     public T getResult() {
+        if (strongest != null) {
+            try {
+                collector.accept(strongest);
+                strongest = null;
+            } catch (IOException e) {
+                throw new UncheckedIOException("Failed to capture delete ordering guard.", e);
+            }
+        }
         return wrapped.getResult();
     }
 
     @Override
-    public void addDeleteOrderingGuard(KeyValue guard) {
-        wrapped.addDeleteOrderingGuard(guard);
-    }
-
-    @Override
-    public void withDeleteOrderingGuardBeforeImage(Function<KeyValue, KeyValue> resolver) {
-        wrapped.withDeleteOrderingGuardBeforeImage(resolver);
+    public void withDeleteOrderingGuardResolver(Function<KeyValue, KeyValue> resolver) {
+        wrapped.withDeleteOrderingGuardResolver(resolver);
     }
 }

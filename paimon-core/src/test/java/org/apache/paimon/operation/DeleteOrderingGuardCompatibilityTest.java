@@ -33,9 +33,6 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.partition.PartitionUpdateTimeExpireStrategy;
-import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -61,8 +58,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -176,139 +171,6 @@ class DeleteOrderingGuardCompatibilityTest {
         assertThat(new DataInputDeserializer(bytes.getCopyOfBuffer()).readInt()).isEqualTo(2);
         assertThat(IncrementalSplit.deserialize(new DataInputDeserializer(bytes.getCopyOfBuffer())))
                 .isEqualTo(split);
-    }
-
-    @Test
-    void testLegacyGuardOnlyLayoutRequiresExplicitBootstrap() throws Exception {
-        PrimaryKeyFileStoreTable table = createTable(Collections.emptyMap());
-        append(table, 0, row(RowKind.DELETE, 1, 4));
-        compact(table, 1);
-        table = removePartitionMetadata(table);
-        table = setOption(table, "bucket", "3");
-        PrimaryKeyFileStoreTable legacy = table;
-        assertThat(read(table, table.newScan().plan().splits(), false)).isEmpty();
-        assertThat(table.newSnapshotReader().withDeleteOrderingGuardBuckets().read().dataSplits())
-                .singleElement()
-                .satisfies(split -> assertThat(split.totalBuckets()).isZero());
-        assertThat(
-                        table.store()
-                                .newScan()
-                                .withDeleteOrderingGuardPartitions()
-                                .readPartitionEntries())
-                .singleElement()
-                .satisfies(
-                        entry -> {
-                            assertThat(entry.totalBuckets()).isZero();
-                            assertThat(entry.lastFileCreationTime()).isEqualTo(Long.MAX_VALUE);
-                        });
-        assertThatThrownBy(() -> append(legacy, 2, row(RowKind.INSERT, 1, 2)))
-                .hasStackTraceContaining("no recorded bucket layout")
-                .hasStackTraceContaining("sys.rescale");
-        assertThatThrownBy(() -> compact(legacy, 2)).hasStackTraceContaining("sys.rescale");
-
-        DeleteOrderingGuardRescale migration =
-                new DeleteOrderingGuardRescale(
-                        table, table.snapshotManager().latestSnapshot(), 3, null);
-        List<CommitMessage> messages = new ArrayList<>();
-        for (DataSplit split : migration.plan()) {
-            messages.addAll(migration.rewrite(split));
-        }
-        migration.commit("bootstrap", 0, messages);
-        PartitionEntry bootstrapped =
-                DeleteOrderingGuardPartitions.read(table.snapshotManager().latestSnapshot())
-                        .get(PARTITION);
-        assertThat(bootstrapped.totalBuckets()).isEqualTo(3);
-        assertThat(bootstrapped.lastFileCreationTime()).isEqualTo(Long.MAX_VALUE);
-        append(table, 3, row(RowKind.INSERT, 1, 2));
-        assertThat(read(table, table.newScan().plan().splits(), false)).isEmpty();
-        append(table, 4, row(RowKind.INSERT, 1, 5));
-        assertThat(read(table, table.newScan().plan().splits(), false))
-                .singleElement()
-                .satisfies(value -> assertThat(value.getInt(2)).isEqualTo(5));
-    }
-
-    @Test
-    void testUnrelatedCommitPersistsUnknownLegacyLayout() throws Exception {
-        PrimaryKeyFileStoreTable table = createTable(Collections.emptyMap());
-        append(table, 0, row(RowKind.DELETE, 1, 4));
-        compact(table, 1);
-        table = removePartitionMetadata(table);
-        append(table, 2, GenericRow.of(2, 2, 1, str("unrelated")));
-        Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        assertThat(snapshot.properties().get(DeleteOrderingGuardPartitions.SNAPSHOT_PROPERTY))
-                .contains("\"version\":\"2\"");
-        assertThat(DeleteOrderingGuardPartitions.read(snapshot).get(PARTITION).totalBuckets())
-                .isZero();
-        PrimaryKeyFileStoreTable reopened =
-                (PrimaryKeyFileStoreTable)
-                        FileStoreTableFactory.create(table.fileIO(), table.location());
-        assertThatThrownBy(() -> append(reopened, 3, row(RowKind.INSERT, 1, 2)))
-                .hasStackTraceContaining("sys.rescale");
-        assertThat(read(reopened, reopened.newScan().plan().splits(), false))
-                .singleElement()
-                .satisfies(row -> assertThat(row.getInt(0)).isEqualTo(2));
-    }
-
-    @Test
-    void testLegacyLiveDataRetainsItsRecordedBucketCount() throws Exception {
-        PrimaryKeyFileStoreTable table = createTable(Collections.emptyMap());
-        append(table, 0, row(RowKind.DELETE, 1, 4), row(RowKind.INSERT, 2, 5));
-        compact(table, 1);
-        append(table, 2, row(RowKind.INSERT, 1, 2));
-        table = removePartitionMetadata(table);
-        assertThat(read(table, table.newScan().plan().splits(), false))
-                .singleElement()
-                .satisfies(row -> assertThat(row.getInt(1)).isEqualTo(2));
-        assertThat(
-                        table.store()
-                                .newScan()
-                                .withDeleteOrderingGuardPartitions()
-                                .readPartitionEntries())
-                .singleElement()
-                .satisfies(
-                        entry -> {
-                            assertThat(entry.totalBuckets()).isEqualTo(1);
-                            assertThat(entry.lastFileCreationTime()).isEqualTo(Long.MAX_VALUE);
-                        });
-        append(table, 3, row(RowKind.INSERT, 1, 2));
-        assertThat(read(table, table.newScan().plan().splits(), false))
-                .singleElement()
-                .satisfies(row -> assertThat(row.getInt(1)).isEqualTo(2));
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void testLegacyExpirationUsesKnownPartitionValuesButDoesNotGuessActivity(boolean valuesTime)
-            throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put("partition.timestamp-pattern", "$pt");
-        options.put("partition.timestamp-formatter", "yyyyMMdd");
-        PrimaryKeyFileStoreTable table = createTable(options);
-        append(table, 0, GenericRow.ofKind(RowKind.DELETE, 20200101, 1, 4, str("deleted")));
-        compact(table, 1);
-        table = removePartitionMetadata(table);
-        try (FileStoreCommit commit = table.store().newCommit("expire", null)) {
-            List<Map<String, String>> expired =
-                    new NormalPartitionExpire(
-                                    Duration.ofDays(1),
-                                    Duration.ZERO,
-                                    valuesTime
-                                            ? new PartitionValuesTimeExpireStrategy(
-                                                    table.coreOptions(),
-                                                    table.schema().logicalPartitionType())
-                                            : new PartitionUpdateTimeExpireStrategy(
-                                                    table.coreOptions(),
-                                                    table.schema().logicalPartitionType()),
-                                    table.store().newScan(),
-                                    commit,
-                                    null,
-                                    100,
-                                    0)
-                            .expire(LocalDateTime.of(2026, 11, 2, 0, 0), 0);
-            assertThat(expired).hasSize(valuesTime ? 1 : 0);
-        }
-        assertThat(table.newSnapshotReader().withDeleteOrderingGuardBuckets().read().dataSplits())
-                .hasSize(valuesTime ? 0 : 1);
     }
 
     @Test
@@ -477,29 +339,40 @@ class DeleteOrderingGuardCompatibilityTest {
                         });
     }
 
-    @Test
-    void testUnknownPartitionMetadataVersionBlocksWritesInsteadOfGuessing() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"missing", "2", "99"})
+    void testInvalidPartitionMetadataBlocksWrites(String version) throws Exception {
         PrimaryKeyFileStoreTable table = createTable(Collections.emptyMap());
         append(table, 0, row(RowKind.DELETE, 1, 4));
         compact(table, 1);
         Snapshot snapshot = Snapshot.fromJson(table.snapshotManager().latestSnapshot().toJson());
-        snapshot.properties()
-                .put(DeleteOrderingGuardPartitions.SNAPSHOT_PROPERTY, "{\"version\":\"99\"}");
+        if (version.equals("missing")) {
+            snapshot.properties().remove(DeleteOrderingGuardPartitions.SNAPSHOT_PROPERTY);
+        } else {
+            snapshot.properties()
+                    .put(
+                            DeleteOrderingGuardPartitions.SNAPSHOT_PROPERTY,
+                            "{\"version\":\"" + version + "\"}");
+        }
         table.fileIO()
                 .overwriteFileUtf8(
                         table.snapshotManager().snapshotPath(snapshot.id()), snapshot.toJson());
         PrimaryKeyFileStoreTable reopened =
                 (PrimaryKeyFileStoreTable)
                         FileStoreTableFactory.create(table.fileIO(), table.location());
+        String error =
+                version.equals("missing")
+                        ? "Missing delete ordering guard partition state"
+                        : "Unsupported delete ordering guard partition state";
         assertThatThrownBy(() -> append(reopened, 2, row(RowKind.INSERT, 1, 2)))
-                .hasStackTraceContaining("Unsupported delete ordering guard partition state");
+                .hasStackTraceContaining(error);
         assertThatThrownBy(
                         () ->
                                 reopened.store()
                                         .newScan()
                                         .withDeleteOrderingGuardPartitions()
                                         .readPartitionEntries())
-                .hasMessageContaining("Unsupported delete ordering guard partition state");
+                .hasMessageContaining(error);
         assertThat(read(reopened, reopened.newScan().plan().splits(), false)).isEmpty();
     }
 
@@ -511,17 +384,6 @@ class DeleteOrderingGuardCompatibilityTest {
             }
             return write.prepareCommit(true, id);
         }
-    }
-
-    private PrimaryKeyFileStoreTable removePartitionMetadata(PrimaryKeyFileStoreTable table)
-            throws Exception {
-        Snapshot snapshot = Snapshot.fromJson(table.snapshotManager().latestSnapshot().toJson());
-        snapshot.properties().remove(DeleteOrderingGuardPartitions.SNAPSHOT_PROPERTY);
-        table.fileIO()
-                .overwriteFileUtf8(
-                        table.snapshotManager().snapshotPath(snapshot.id()), snapshot.toJson());
-        return (PrimaryKeyFileStoreTable)
-                FileStoreTableFactory.create(table.fileIO(), table.location());
     }
 
     private PrimaryKeyFileStoreTable createTable(Map<String, String> options) throws Exception {

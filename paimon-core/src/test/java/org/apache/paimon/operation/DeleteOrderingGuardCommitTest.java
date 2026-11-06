@@ -592,6 +592,10 @@ class DeleteOrderingGuardCommitTest {
         assertThat(readRows(table))
                 .singleElement()
                 .satisfies(r -> assertThat(r.getInt(2)).isEqualTo(1));
+        append(table, 5, row(RowKind.INSERT, 1, 1, 2));
+        assertThat(readRows(table))
+                .singleElement()
+                .satisfies(r -> assertThat(r.getInt(2)).isEqualTo(2));
     }
 
     @Test
@@ -1041,104 +1045,6 @@ class DeleteOrderingGuardCommitTest {
                 .containsExactlyElementsOf(newGuards(prepared));
         assertThat(readGuards(table)).hasSize(1);
         assertThat(table.newScan().plan().splits()).isEmpty();
-    }
-
-    @Test
-    void testRescaleRechecksPinnedSnapshotAfterPublicationConflict() throws Exception {
-        PrimaryKeyFileStoreTable table = createLifecycleTable(Collections.emptyMap());
-        append(table, 0, row(RowKind.DELETE, 1, 1, 4));
-        commit(table, 1, compactNatively(table, 1, PARTITION));
-        Snapshot source = table.snapshotManager().latestSnapshot();
-        DeleteOrderingGuardRescale rescale = new DeleteOrderingGuardRescale(table, source, 1, null);
-        List<CommitMessage> prepared = new ArrayList<>();
-        for (DataSplit split : rescale.plan()) {
-            prepared.addAll(rescale.rewrite(split));
-        }
-        List<IndexFileMeta> replacements =
-                prepared.stream()
-                        .map(message -> (CommitMessageImpl) message)
-                        .flatMap(message -> message.newFilesIncrement().newIndexFiles().stream())
-                        .collect(Collectors.toList());
-        assertThat(replacements).hasSize(1);
-        AtomicInteger publications = new AtomicInteger();
-        SnapshotCommit publisher =
-                new SnapshotCommit(Lock.empty()) {
-                    @Override
-                    protected boolean commitImpl(
-                            @Nullable String baseSnapshotUuid,
-                            Snapshot snapshot,
-                            String branch,
-                            List<PartitionStatistics> statistics)
-                            throws Exception {
-                        publications.incrementAndGet();
-                        try (FileStoreCommit reset = table.store().newCommit(USER, null)) {
-                            reset.truncateTable(2);
-                        }
-                        return false;
-                    }
-                };
-        try (FileStoreCommitImpl commit = newCommit(table, publisher, Collections.emptyList())) {
-            assertThatThrownBy(
-                            () ->
-                                    commit.rescale(
-                                            source,
-                                            table.schema().id(),
-                                            null,
-                                            committable(3, prepared)))
-                    .hasStackTraceContaining(
-                            "Table changed during delete ordering guard rescaling");
-            commit.abort(prepared);
-        }
-        assertThat(publications).hasValue(1);
-        assertThat(guards(table)).isEmpty();
-        assertThat(guardFile(table, PARTITION, 0).exists(replacements.get(0))).isFalse();
-        assertThat(readRows(table)).isEmpty();
-    }
-
-    @Test
-    void testRescaleRecoversLostPublicationResponseBeforeCheckingPinnedSnapshot() throws Exception {
-        PrimaryKeyFileStoreTable table = createLifecycleTable(Collections.emptyMap());
-        append(table, 0, row(RowKind.DELETE, 1, 1, 4), row(RowKind.INSERT, 1, 2, 3));
-        commit(table, 1, compactNatively(table, 1, PARTITION));
-        Snapshot source = table.snapshotManager().latestSnapshot();
-        DeleteOrderingGuardRescale rescale = new DeleteOrderingGuardRescale(table, source, 1, null);
-        List<CommitMessage> prepared = new ArrayList<>();
-        for (DataSplit split : rescale.plan()) {
-            prepared.addAll(rescale.rewrite(split));
-        }
-        AtomicInteger publications = new AtomicInteger();
-        SnapshotCommit delegate = new RenamingSnapshotCommit(table.snapshotManager(), Lock.empty());
-        SnapshotCommit publisher =
-                new SnapshotCommit(Lock.empty()) {
-                    @Override
-                    protected boolean commitImpl(
-                            @Nullable String baseSnapshotUuid,
-                            Snapshot snapshot,
-                            String branch,
-                            List<PartitionStatistics> statistics)
-                            throws Exception {
-                        publications.incrementAndGet();
-                        assertThat(delegate.commit(baseSnapshotUuid, snapshot, branch, statistics))
-                                .isTrue();
-                        throw new IOException("Rescale publication response lost");
-                    }
-                };
-        try (FileStoreCommitImpl commit = newCommit(table, publisher, Collections.emptyList())) {
-            assertThat(commit.rescale(source, table.schema().id(), null, committable(2, prepared)))
-                    .isEqualTo(2);
-        }
-        // Closing or retrying the task after a lost response must not delete visible outputs.
-        rescale.abort(USER, 2, prepared);
-        rescale.commit(USER, 2, prepared);
-        assertThat(publications).hasValue(1);
-        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(source.id() + 1);
-        assertThat(readGuards(table)).hasSize(1);
-        append(table, 3, row(RowKind.INSERT, 1, 1, 2));
-        assertThat(readRows(table))
-                .singleElement()
-                .satisfies(row -> assertThat(row.getInt(1)).isEqualTo(2));
-        append(table, 4, row(RowKind.INSERT, 1, 1, 5));
-        assertThat(readRows(table)).hasSize(2);
     }
 
     @Test

@@ -122,13 +122,10 @@ Retained snapshots and tags, including those in other branches, keep their origi
 and payload files readable. Snapshot expiration and orphan file cleanup reclaim replaced files
 after their last retained reference is removed. Deleting a tag removes only its metadata.
 
-Use the native Flink or Spark `sys.rescale` procedure to change bucket layouts while preserving
-guards, source sequences and internal ordering ties. It includes partitions containing only
-guards and publishes the replacements atomically. Stop concurrent writes and schema changes
-while rescaling; publication rejects a changed source snapshot or schema. Reopen affected writers
-from the new state afterward. An ordinary `INSERT OVERWRITE ... SELECT` resets ordering history
-in its replaced scope because SELECT does not expose hidden guards. See
-[Rescale Bucket](../maintenance/rescale-bucket).
+The Flink and Spark `sys.rescale` procedures reject tables while guard capture is enabled or
+previously committed guards remain active. Guard-preserving bucket rescaling is not supported.
+An ordinary `INSERT OVERWRITE ... SELECT` resets ordering history in its replaced scope because
+SELECT does not expose hidden guards. See [Rescale Bucket](../maintenance/rescale-bucket).
 
 Partition expiration removes guards and data together, including partitions with no visible
 rows. Values-time expiration uses the partition values. Update-time expiration retains the last
@@ -139,13 +136,6 @@ They return the visible before-image when a delete is requested. Streaming overw
 reads also resolve retained guards. Raw input changelogs continue to report the original input events.
 Upgrade job coordinators and
 workers together before using guarded incremental splits.
-
-Older guard snapshots may lack durable partition activity and bucket-layout metadata. Native
-reads can still resolve their bounds. Run batch `sys.rescale` before writing or compacting a
-guard-only partition with an unknown layout, even if the configured bucket count is unchanged.
-The procedure records the layout and preserves the bounds. Values-time expiration can still
-use the partition values. Update-time expiration conservatively retains an unknown activity
-time until a later data write records activity; rescaling alone does not supply that time.
 
 Scoped overwrites and truncation change the ordering-history generation. Rollback and full manifest
 replacement also fence pending writes from the previous generation. Writes to unaffected partitions

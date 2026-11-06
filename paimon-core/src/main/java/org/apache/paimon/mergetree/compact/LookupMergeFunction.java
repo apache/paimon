@@ -25,7 +25,6 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import javax.annotation.Nullable;
 
@@ -43,8 +42,6 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     private final MergeFunction<KeyValue> mergeFunction;
 
     private final KeyValueBuffer candidates;
-    private final List<KeyValue> guards = new ArrayList<>();
-    private final Comparator<KeyValue> sequenceComparator;
     private boolean containLevel0;
     private InternalRow currentKey;
 
@@ -59,11 +56,6 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
             @Nullable IOManager ioManager) {
         this.mergeFunction = mergeFunction;
         this.candidates = KeyValueBuffer.createHybridBuffer(options, keyType, valueType, ioManager);
-        this.sequenceComparator =
-                DeleteOrderingGuardReader.sequenceComparator(
-                        valueType == null || options == null
-                                ? null
-                                : UserDefinedSeqComparator.create(valueType, options));
     }
 
     @Override
@@ -72,7 +64,6 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         currentKey = null;
         containLevel0 = false;
         highLevelIndex = -1;
-        guards.clear();
     }
 
     @Override
@@ -82,12 +73,6 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
             containLevel0 = true;
         }
         candidates.put(kv);
-    }
-
-    @Override
-    public void addDeleteOrderingGuard(KeyValue guard) {
-        // Metadata must not affect high-level selection or be serialized into the payload buffer.
-        guards.add(guard);
     }
 
     public boolean containLevel0() {
@@ -136,18 +121,12 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         // same object as the one seen here
         pickHighLevel();
         int index = 0;
-        int guardIndex = 0;
-        guards.sort(sequenceComparator);
         try (CloseableIterator<KeyValue> iterator = candidates.iterator()) {
             while (iterator.hasNext()) {
                 KeyValue kv = iterator.next();
                 // records that has not been stored on the disk yet, such as the data in the write
                 // buffer being at level -1
                 if (kv.level() <= 0 || index == highLevelIndex) {
-                    while (guardIndex < guards.size()
-                            && sequenceComparator.compare(guards.get(guardIndex), kv) <= 0) {
-                        mergeFunction.addDeleteOrderingGuard(guards.get(guardIndex++));
-                    }
                     mergeFunction.add(kv);
                 }
                 index++;
@@ -155,20 +134,12 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        while (guardIndex < guards.size()) {
-            mergeFunction.addDeleteOrderingGuard(guards.get(guardIndex++));
-        }
         return mergeFunction.getResult();
     }
 
     @Override
     public boolean requireCopy() {
         return true;
-    }
-
-    @Override
-    public boolean isDeleteOrderingGuardResult() {
-        return mergeFunction.isDeleteOrderingGuardResult();
     }
 
     public static MergeFunctionFactory<KeyValue> wrap(

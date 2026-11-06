@@ -45,17 +45,6 @@ public interface MergeFunction<T> {
     /** Add the given {@link KeyValue} to the merge function. */
     void add(KeyValue kv);
 
-    /** Replays a retract containing ordering fields only, without interpreting it as payload. */
-    default void addDeleteOrderingGuard(KeyValue guard) {
-        throw new UnsupportedOperationException(
-                "This merge function cannot resolve delete ordering guards.");
-    }
-
-    /** Whether the result is a hidden metadata-only retract rather than a data record. */
-    default boolean isDeleteOrderingGuardResult() {
-        return false;
-    }
-
     /** Get current merged value. */
     T getResult();
 

@@ -21,17 +21,14 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValueFileStore;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.index.DeleteOrderingGuardFile;
-import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FilteredManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -57,7 +54,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
-import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** {@link FileStoreScan} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
@@ -70,7 +66,6 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private final ChangelogProducer changelogProducer;
     private final boolean fileIndexReadEnabled;
     private final boolean fileIndexReadIgnoreUnknownType;
-    @Nullable private IndexFileHandler guardIndexFileHandler;
 
     private Predicate keyFilter;
     private Predicate valueFilter;
@@ -121,25 +116,6 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         this.changelogProducer = changelogProducer;
         this.fileIndexReadEnabled = fileIndexReadEnabled;
         this.fileIndexReadIgnoreUnknownType = fileIndexReadIgnoreUnknownType;
-    }
-
-    public KeyValueFileStoreScan withDeleteOrderingGuardIndexHandler(IndexFileHandler handler) {
-        this.guardIndexFileHandler = handler;
-        return this;
-    }
-
-    @Override
-    protected Map<BinaryRow, PartitionEntry> readDeleteOrderingGuardPartitions(
-            @Nullable Snapshot snapshot) {
-        return DeleteOrderingGuardPartitions.read(
-                snapshot,
-                () -> {
-                    checkState(
-                            guardIndexFileHandler != null,
-                            "Legacy delete ordering guard discovery requires an index file handler.");
-                    return guardIndexFileHandler.scan(
-                            snapshot, DeleteOrderingGuardFile.DELETE_ORDERING_GUARD);
-                });
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {

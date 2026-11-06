@@ -28,22 +28,15 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.index.DeleteOrderingGuardReaderFactory;
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.index.DeleteOrderingGuardPolicy;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.mergetree.compact.DeleteOrderingGuardReader;
-import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionUpdateTimeExpireStrategy;
 import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
-import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -52,7 +45,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.PrimaryKeyFileStoreTable;
-import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
@@ -60,7 +52,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -69,7 +60,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -80,8 +70,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static org.apache.paimon.index.DeleteOrderingGuardFile.DELETE_ORDERING_GUARD;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -185,210 +173,37 @@ class DeleteOrderingGuardMaintenanceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 5})
-    void testRescaleGuardOnlyPartitionsPreservesBoundsAndInternalWatermark(int buckets)
-            throws Exception {
-        PrimaryKeyFileStoreTable table = createTable(Collections.emptyMap());
-        for (int key = 0; key < 12; key++) {
-            append(table, key, row(RowKind.DELETE, OLD, key, 4));
-        }
-        compact(table, 12);
-        List<String> bounds = bounds(table);
-        List<CommitMessage> stale = prepare(table, 13, row(RowKind.INSERT, OLD, 1, 2));
-        long sequence =
-                SequenceSnapshotProperties.guardMaxSequenceNumber(
-                                table.snapshotManager().latestSnapshot())
-                        .getAsLong();
-        table = setOption(table, "bucket", String.valueOf(buckets));
-        PrimaryKeyFileStoreTable rescaled = table;
-        assertThatThrownBy(() -> prepare(rescaled, 14, row(RowKind.INSERT, OLD, 1, 2)))
-                .hasStackTraceContaining("previous bucket num is 2")
-                .hasStackTraceContaining("sys.rescale");
-        DeleteOrderingGuardRescale migration =
-                new DeleteOrderingGuardRescale(
-                        table, table.snapshotManager().latestSnapshot(), buckets, null);
-        assertThat(migration.plan())
-                .allSatisfy(
-                        split -> {
-                            assertThat(split.dataFiles()).isEmpty();
-                            assertThat(split.totalBuckets()).isEqualTo(2);
-                        });
-        migration.commit("rescale", 0, rewrite(migration));
-        assertThat(bounds(table)).containsExactlyInAnyOrderElementsOf(bounds);
-        assertThat(read(table)).isEmpty();
-        assertThat(table.snapshotManager().latestSnapshot().commitKind())
-                .isEqualTo(Snapshot.CommitKind.OVERWRITE);
-        assertThat(
-                        SequenceSnapshotProperties.guardMaxSequenceNumber(
-                                        table.snapshotManager().latestSnapshot())
-                                .getAsLong())
-                .isGreaterThanOrEqualTo(sequence);
-        assertThat(DeleteOrderingGuardPartitions.read(table.snapshotManager().latestSnapshot()))
-                .allSatisfy(
-                        (p, metadata) -> assertThat(metadata.totalBuckets()).isEqualTo(buckets));
-        assertThatThrownBy(() -> commit(rescaled, 15, stale))
-                .hasMessageContaining("generation changed");
-        append(table, 16, row(RowKind.INSERT, OLD, 1, 2));
-        assertThat(read(table)).isEmpty();
-        // Equal source versions still use the preserved internal sequence watermark.
-        append(table, 17, row(RowKind.INSERT, OLD, 1, 4));
-        assertThat(read(table))
-                .singleElement()
-                .satisfies(r -> assertThat(r.getInt(2)).isEqualTo(4));
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"default", "mod", "hive"})
-    void testRescaleMixedDataKeepsNativeSequencesAndUnselectedPartitions(String bucketFunction)
-            throws Exception {
-        PrimaryKeyFileStoreTable table =
-                createTable(Collections.singletonMap("bucket-function.type", bucketFunction));
-        append(table, 0, row(RowKind.DELETE, OLD, 1, 7), row(RowKind.DELETE, RECENT, 3, 7));
-        compact(table, 1);
-        append(table, 2, row(RowKind.INSERT, OLD, 1, 2), row(RowKind.INSERT, OLD, 2, 3));
-        List<String> physical = physicalRecords(table, partition(OLD));
-        List<IndexManifestEntry> unaffected =
-                guards(table).stream()
-                        .filter(entry -> entry.partition().equals(partition(RECENT)))
-                        .collect(Collectors.toList());
-        table = setOption(table, "bucket", "5");
-        PartitionPredicate selected =
-                PartitionPredicate.fromMap(
-                        table.schema().logicalPartitionType(),
-                        Collections.singletonMap("pt", OLD),
-                        table.coreOptions().partitionDefaultName());
-        DeleteOrderingGuardRescale migration =
-                new DeleteOrderingGuardRescale(
-                        table, table.snapshotManager().latestSnapshot(), 5, selected);
-        migration.commit("rescale", 0, rewrite(migration));
-        assertThat(physicalRecords(table, partition(OLD)))
-                .containsExactlyInAnyOrderElementsOf(physical);
-        assertThat(guards(table)).containsAll(unaffected);
-        assertThat(
-                        DeleteOrderingGuardPartitions.read(table.snapshotManager().latestSnapshot())
-                                .get(partition(RECENT))
-                                .totalBuckets())
-                .isEqualTo(2);
-        assertThat(read(table))
-                .singleElement()
-                .satisfies(r -> assertThat(r.getInt(1)).isEqualTo(2));
-        append(table, 3, row(RowKind.INSERT, OLD, 1, 4));
-        assertThat(read(table)).hasSize(1);
-        append(table, 4, row(RowKind.INSERT, OLD, 1, 8));
-        assertThat(read(table)).hasSize(2);
-    }
-
-    @Test
-    void testRescalePreservesSnapshotOrderingOfAppendAndCompactedRecords() throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put("sequence.snapshot-ordering", "true");
-        options.put("write-only", "true");
-        PrimaryKeyFileStoreTable table =
-                createTable(
-                        options,
-                        RowType.builder()
-                                .field("pt", DataTypes.STRING())
-                                .field("k", DataTypes.INT())
-                                .field("version", DataTypes.INT())
-                                .field("payload", DataTypes.STRING())
-                                .build());
-        append(table, 0, row(RowKind.DELETE, OLD, 1, 9), row(RowKind.INSERT, OLD, 2, 100));
-        compact(
-                (PrimaryKeyFileStoreTable)
-                        table.copy(Collections.singletonMap("write-only", "false")),
-                1);
-        assertThat(guards(table)).isNotEmpty();
-        // APPEND metadata supplies the snapshot sequence; compacted records carry it physically.
-        append(table, 2, row(RowKind.INSERT, OLD, 2, 1));
-        List<String> records = physicalRecords(table, partition(OLD));
-        table = setOption(table, "bucket", "5");
-        DeleteOrderingGuardRescale migration =
-                new DeleteOrderingGuardRescale(
-                        table, table.snapshotManager().latestSnapshot(), 5, null);
-        migration.commit("rescale", 0, rewrite(migration));
-        assertThat(physicalRecords(table, partition(OLD)))
-                .containsExactlyInAnyOrderElementsOf(records);
-        assertThat(read(table))
-                .singleElement()
-                .satisfies(row -> assertThat(row.getInt(2)).isEqualTo(1));
-        append(table, 3, row(RowKind.INSERT, OLD, 1, 1));
-        assertThat(read(table))
-                .hasSize(2)
-                .allSatisfy(row -> assertThat(row.getInt(2)).isEqualTo(1));
-        assertThat(read(table)).extracting(row -> row.getInt(1)).containsExactlyInAnyOrder(1, 2);
-        compact(
-                (PrimaryKeyFileStoreTable)
-                        table.copy(Collections.singletonMap("write-only", "false")),
-                4);
-        assertThat(read(table))
-                .hasSize(2)
-                .allSatisfy(row -> assertThat(row.getInt(2)).isEqualTo(1));
-    }
-
-    @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void testConcurrentChangesRejectRescaleAndCleanUnpublishedOutputs(boolean schemaChange)
+    void testRescaleRejectedWithCaptureEnabledOrRetainedGuards(boolean disableCapture)
             throws Exception {
         PrimaryKeyFileStoreTable table = createTable(Collections.emptyMap());
-        append(table, 0, row(RowKind.DELETE, OLD, 1, 4), row(RowKind.INSERT, OLD, 2, 3));
+        append(table, 0, row(RowKind.DELETE, OLD, 1, 4));
         compact(table, 1);
-        DeleteOrderingGuardRescale migration =
-                new DeleteOrderingGuardRescale(
-                        table, table.snapshotManager().latestSnapshot(), 5, null);
-        List<String> original = files();
-        List<CommitMessage> messages = rewrite(migration);
-        List<String> outputs = files();
-        outputs.removeAll(original);
-        assertThat(outputs).isNotEmpty();
-        if (schemaChange) {
-            setOption(table, "write-buffer-size", "32 mb");
-        } else {
-            append(table, 2, row(RowKind.INSERT, OLD, 3, 8));
+        if (disableCapture) {
+            table = setOption(table, "delete-ordering-guards.enabled", "false");
         }
-        assertThatThrownBy(() -> migration.commit("rescale", 0, messages))
-                .hasMessageContaining("changed during delete ordering guard rescaling");
-        for (String output : outputs) {
-            assertThat(java.nio.file.Paths.get(output)).doesNotExist();
-        }
-        assertThat(guards(table)).isNotEmpty();
-        assertThat(read(table)).hasSize(schemaChange ? 1 : 2);
+        PrimaryKeyFileStoreTable guarded = table;
+        assertThatThrownBy(
+                        () ->
+                                DeleteOrderingGuardPolicy.validateRescale(
+                                        guarded, guarded.snapshotManager().latestSnapshot()))
+                .hasMessageContaining(
+                        "Rescaling tables with delete ordering guards is not supported");
+        assertThat(guards(table)).hasSize(1);
+        append(table, 2, row(RowKind.INSERT, OLD, 1, 2));
+        assertThat(read(table)).isEmpty();
     }
 
     @Test
-    void testGuardFinalizationFailureAbortsAlreadyWrittenRescaleData() throws Exception {
+    void testRescaleAllowedAfterExplicitHistoryResetAndCaptureDisabled() throws Exception {
         PrimaryKeyFileStoreTable table = createTable(Collections.emptyMap());
-        append(table, 0, row(RowKind.DELETE, OLD, 1, 4), row(RowKind.INSERT, OLD, 2, 3));
+        append(table, 0, row(RowKind.DELETE, OLD, 1, 4));
         compact(table, 1);
-        List<String> original = files();
-        TraceableFileIO failing =
-                new TraceableFileIO() {
-                    @Override
-                    public PositionOutputStream newOutputStream(Path path, boolean overwrite)
-                            throws IOException {
-                        PositionOutputStream stream = super.newOutputStream(path, overwrite);
-                        if (!path.getName().startsWith("index-")) {
-                            return stream;
-                        }
-                        return new PositionOutputStreamWrapper(stream) {
-                            @Override
-                            public void close() throws IOException {
-                                out.close();
-                                throw new IOException(
-                                        "Injected rescale guard finalization failure");
-                            }
-                        };
-                    }
-                };
-        PrimaryKeyFileStoreTable faultTable =
-                (PrimaryKeyFileStoreTable)
-                        FileStoreTableFactory.create(failing, table.location(), table.schema());
-        DeleteOrderingGuardRescale migration =
-                new DeleteOrderingGuardRescale(
-                        faultTable, table.snapshotManager().latestSnapshot(), 5, null);
-        assertThatThrownBy(() -> rewrite(migration))
-                .hasStackTraceContaining("Injected rescale guard finalization failure");
-        assertThat(files()).containsExactlyInAnyOrderElementsOf(original);
-        assertThat(read(table)).hasSize(1);
+        try (FileStoreCommit commit = table.store().newCommit(USER, null)) {
+            commit.truncateTable(2);
+        }
+        table = setOption(table, "delete-ordering-guards.enabled", "false");
+        DeleteOrderingGuardPolicy.validateRescale(table, table.snapshotManager().latestSnapshot());
     }
 
     @ParameterizedTest
@@ -541,19 +356,6 @@ class DeleteOrderingGuardMaintenanceTest {
         }
     }
 
-    private List<CommitMessage> rewrite(DeleteOrderingGuardRescale migration) throws Exception {
-        List<CommitMessage> messages = new ArrayList<>();
-        try {
-            for (DataSplit split : migration.plan()) {
-                messages.addAll(migration.rewrite(split));
-            }
-        } catch (Exception failure) {
-            migration.abort("rescale", 0, messages);
-            throw failure;
-        }
-        return messages;
-    }
-
     private List<Map<String, String>> expire(
             PrimaryKeyFileStoreTable table,
             PartitionExpireStrategy strategy,
@@ -591,91 +393,6 @@ class DeleteOrderingGuardMaintenanceTest {
 
     private List<IndexManifestEntry> guards(PrimaryKeyFileStoreTable table) {
         return table.store().newIndexFileHandler().scan(DELETE_ORDERING_GUARD);
-    }
-
-    private List<String> bounds(PrimaryKeyFileStoreTable table) throws Exception {
-        List<String> result = new ArrayList<>();
-        RowType keyType =
-                new RowType(
-                        PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR.keyFields(
-                                table.schema()));
-        try (CacheManager cache = new CacheManager(MemorySize.ofMebiBytes(1), 0.2)) {
-            DeleteOrderingGuardReaderFactory factory =
-                    new DeleteOrderingGuardReaderFactory(
-                            table.fileIO(),
-                            new FileSystemSchemaManager(
-                                    table.fileIO(), table.location(), table.currentBranch()),
-                            table.coreOptions(),
-                            keyType,
-                            table.rowType(),
-                            table.store().pathFactory(),
-                            cache);
-            for (IndexManifestEntry entry : guards(table)) {
-                try (DeleteOrderingGuardReader reader =
-                        factory.open(
-                                entry.partition(),
-                                entry.bucket(),
-                                Collections.singletonList(entry.indexFile()),
-                                table.rowType(),
-                                table.store().newKeyComparator())) {
-                    List<KeyValue> key;
-                    while ((key = reader.nextKey()) != null) {
-                        for (KeyValue kv : key) {
-                            result.add(
-                                    kv.key().getInt(0)
-                                            + "/"
-                                            + kv.sequenceNumber()
-                                            + "/"
-                                            + kv.valueKind()
-                                            + "/"
-                                            + kv.level()
-                                            + "/"
-                                            + kv.value().getInt(2));
-                        }
-                    }
-                }
-            }
-        }
-        return result;
-    }
-
-    private List<String> physicalRecords(PrimaryKeyFileStoreTable table, BinaryRow partition)
-            throws Exception {
-        List<String> result = new ArrayList<>();
-        for (DataSplit split : table.newSnapshotReader().read().dataSplits()) {
-            if (!split.partition().equals(partition)) {
-                continue;
-            }
-            for (DataFileMeta file : split.dataFiles()) {
-                try (RecordReaderIterator<KeyValue> rows =
-                        new RecordReaderIterator<>(
-                                table.store()
-                                        .newReaderFactoryBuilder()
-                                        .buildWithoutDeletionVector(partition, split.bucket())
-                                        .createRecordReader(file))) {
-                    while (rows.hasNext()) {
-                        KeyValue row = rows.next();
-                        result.add(
-                                row.key().getInt(0)
-                                        + "/"
-                                        + row.sequenceNumber()
-                                        + "/"
-                                        + row.valueKind()
-                                        + "/"
-                                        + row.value().getInt(2));
-                    }
-                }
-            }
-        }
-        return result;
-    }
-
-    private List<String> files() throws IOException {
-        try (Stream<java.nio.file.Path> paths = Files.walk(tempDir.resolve("table"))) {
-            return paths.filter(Files::isRegularFile)
-                    .map(Object::toString)
-                    .collect(Collectors.toList());
-        }
     }
 
     private static InternalRow row(RowKind kind, String partition, int key, int sequence) {

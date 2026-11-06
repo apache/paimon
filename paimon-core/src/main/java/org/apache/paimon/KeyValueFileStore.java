@@ -29,7 +29,6 @@ import org.apache.paimon.index.DeleteOrderingGuardReaderFactory;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
-import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
@@ -58,9 +57,6 @@ import javax.annotation.Nullable;
 import java.util.Comparator;
 import java.util.List;
 import java.util.function.Supplier;
-
-import static org.apache.paimon.format.FileFormat.fileFormat;
-import static org.apache.paimon.utils.FileStorePathFactory.createFormatPathFactories;
 
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
 public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
@@ -162,18 +158,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 pathFactory(),
                 keyValueFieldsExtractor,
                 options);
-    }
-
-    /** Native sorted-file writers for maintenance which preserves internal record sequences. */
-    public KeyValueFileWriterFactory.Builder newWriterFactoryBuilder() {
-        return KeyValueFileWriterFactory.builder(
-                fileIO,
-                schema.id(),
-                keyType,
-                valueType,
-                fileFormat(options),
-                createFormatPathFactories(options, this::pathFactory),
-                options.targetFileSize(true));
     }
 
     @Override
@@ -290,20 +274,19 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                         schema.logicalBucketKeyType());
 
         return new KeyValueFileStoreScan(
-                        newManifestsReader(),
-                        bucketSelectConverter,
-                        snapshotManager(),
-                        schemaManager,
-                        schema,
-                        keyValueFieldsExtractor,
-                        manifestFileFactory(),
-                        options.scanManifestParallelism(),
-                        options.deletionVectorsEnabled(),
-                        options.mergeEngine(),
-                        options.changelogProducer(),
-                        options.fileIndexReadEnabled() && options.deletionVectorsEnabled(),
-                        options.fileIndexReadIgnoreUnknownType())
-                .withDeleteOrderingGuardIndexHandler(newIndexFileHandler());
+                newManifestsReader(),
+                bucketSelectConverter,
+                snapshotManager(),
+                schemaManager,
+                schema,
+                keyValueFieldsExtractor,
+                manifestFileFactory(),
+                options.scanManifestParallelism(),
+                options.deletionVectorsEnabled(),
+                options.mergeEngine(),
+                options.changelogProducer(),
+                options.fileIndexReadEnabled() && options.deletionVectorsEnabled(),
+                options.fileIndexReadIgnoreUnknownType());
     }
 
     @Override

@@ -44,11 +44,6 @@ public interface CommitChangesProvider {
         return false;
     }
 
-    /** Only the native rescale publisher can replace guards across bucket layouts. */
-    default boolean rescalesDeleteOrderingGuards() {
-        return false;
-    }
-
     @Nullable
     default PartitionPredicate deleteOrderingGuardResetFilter() {
         return null;

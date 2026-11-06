@@ -198,8 +198,6 @@ class DeleteOrderingGuardReaderTest {
             MergeFunctionWrapper<ChangelogResult> resolver =
                     guards.wrap(
                             nativeWrapper,
-                            factory,
-                            null,
                             UserDefinedSeqComparator.create(VALUE_TYPE, new CoreOptions(options)));
             resolver.reset();
             resolver.add(row(1, 0, 5, 8, "before").setLevel(2));
@@ -235,11 +233,7 @@ class DeleteOrderingGuardReaderTest {
                                                 .iterator())),
                         KEYS)) {
             MergeFunctionWrapper<ChangelogResult> resolver =
-                    guards.wrap(
-                            nativeWrapper,
-                            factory,
-                            null,
-                            UserDefinedSeqComparator.create(VALUE_TYPE, core));
+                    guards.wrap(nativeWrapper, UserDefinedSeqComparator.create(VALUE_TYPE, core));
             resolver.reset();
             resolver.add(row(1, 0, 1, null, "hidden").setLevel(2));
             resolver.add(row(1, 10, source, null, "candidate"));
@@ -351,8 +345,6 @@ class DeleteOrderingGuardReaderTest {
                                     new DeleteOrderingGuardSerializer(
                                             0, KEY_TYPE, VALUE_TYPE, core),
                                     captured::add),
-                            factory,
-                            null,
                             UserDefinedSeqComparator.create(VALUE_TYPE, core));
             List<SizedReaderSupplier<KeyValue>> inputs = new ArrayList<>();
             for (List<KeyValue> run : runs) {

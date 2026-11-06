@@ -19,38 +19,24 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.types.RowKind;
-
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Ordering metadata of an explicit retract, without its value payload.
  *
  * <p>The ordering row contains only the source sequence fields. The schema that produced the guard
- * defines their comparison and deletion semantics. Internal sequence numbers, input levels, and
- * retract kinds are retained independently of those fields. Guards must not be exposed as ordinary
- * data or changelog records.
+ * defines their comparison. The internal sequence number breaks source ordering ties. Guards must
+ * not be exposed as ordinary data or changelog records.
  */
 public class DeleteOrderingGuard {
 
     private final InternalRow key;
     private final InternalRow ordering;
     private final long sequenceNumber;
-    private final RowKind valueKind;
-    private final int level;
 
-    public DeleteOrderingGuard(
-            InternalRow key,
-            InternalRow ordering,
-            long sequenceNumber,
-            RowKind valueKind,
-            int level) {
-        checkArgument(valueKind.isRetract(), "An ordering guard must describe a retract.");
+    public DeleteOrderingGuard(InternalRow key, InternalRow ordering, long sequenceNumber) {
         this.key = key;
         this.ordering = ordering;
         this.sequenceNumber = sequenceNumber;
-        this.valueKind = valueKind;
-        this.level = level;
     }
 
     public InternalRow key() {
@@ -63,13 +49,5 @@ public class DeleteOrderingGuard {
 
     public long sequenceNumber() {
         return sequenceNumber;
-    }
-
-    public RowKind valueKind() {
-        return valueKind;
-    }
-
-    public int level() {
-        return level;
     }
 }

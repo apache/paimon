@@ -21,7 +21,6 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.IOUtils;
 
@@ -37,7 +36,7 @@ import java.util.List;
 import java.util.PriorityQueue;
 
 /**
- * Streams bucket-local guard segments alongside sorted data, retaining only one key's bounds.
+ * Streams bucket-local guard segments alongside sorted data, retaining one strongest bound per key.
  *
  * <p>Guards bypass data serializers, spills and changelog inputs. Keys with only guards produce no
  * rows. Each instance belongs to one ordered read and must be closed with the data reader.
@@ -77,12 +76,14 @@ public class DeleteOrderingGuardReader implements Closeable {
         }
     }
 
-    private List<KeyValue> forKey(InternalRow key) {
-        List<KeyValue> result = new ArrayList<>();
+    @Nullable
+    private KeyValue forKey(InternalRow key, Comparator<KeyValue> comparator) {
+        KeyValue strongest = null;
         while (!heap.isEmpty() && keyComparator.compare(heap.peek().next.key(), key) <= 0) {
             Cursor cursor = heap.remove();
-            if (keyComparator.compare(cursor.next.key(), key) == 0) {
-                result.add(cursor.next);
+            if (keyComparator.compare(cursor.next.key(), key) == 0
+                    && (strongest == null || comparator.compare(cursor.next, strongest) > 0)) {
+                strongest = cursor.next;
             }
             try {
                 if (cursor.advance()) {
@@ -92,32 +93,25 @@ public class DeleteOrderingGuardReader implements Closeable {
                 throw new UncheckedIOException("Failed to read delete ordering guards.", failure);
             }
         }
-        return result;
+        return strongest;
     }
 
     /** Read one key's metadata for consolidation, including keys with no ordinary data. */
     @Nullable
-    public List<KeyValue> nextKey() throws IOException {
+    public KeyValue nextKey(Comparator<KeyValue> comparator) throws IOException {
         if (heap.isEmpty()) {
             return null;
         }
         try {
-            return forKey(heap.peek().next.key());
+            return forKey(heap.peek().next.key(), comparator);
         } catch (UncheckedIOException failure) {
             throw failure.getCause();
         }
     }
 
     public <T> MergeFunctionWrapper<T> wrap(
-            MergeFunctionWrapper<T> wrapped,
-            MergeFunctionFactory<KeyValue> factory,
-            @Nullable RowType readType,
-            @Nullable FieldsComparator sequenceComparator) {
-        MergeFunctionFactory<KeyValue> nativeFactory =
-                factory instanceof LookupMergeFunction.Factory
-                        ? ((LookupMergeFunction.Factory) factory).wrapped()
-                        : factory;
-        return new Resolver<>(wrapped, nativeFactory.create(readType), sequenceComparator);
+            MergeFunctionWrapper<T> wrapped, @Nullable FieldsComparator sequenceComparator) {
+        return new Resolver<>(wrapped, sequenceComparator);
     }
 
     /** Native ordering: source sequence, internal sequence, then retract before add. */
@@ -215,74 +209,43 @@ public class DeleteOrderingGuardReader implements Closeable {
 
     private class Resolver<T> implements MergeFunctionWrapper<T> {
         private final MergeFunctionWrapper<T> wrapped;
-        private final MergeFunction<KeyValue> beforeFunction;
         private final Comparator<KeyValue> comparator;
-        private List<KeyValue> guards;
-        private int nextGuard;
+        @Nullable private KeyValue strongest;
+        private boolean initialized;
 
         private Resolver(
-                MergeFunctionWrapper<T> wrapped,
-                MergeFunction<KeyValue> beforeFunction,
-                @Nullable FieldsComparator sourceComparator) {
+                MergeFunctionWrapper<T> wrapped, @Nullable FieldsComparator sourceComparator) {
             this.wrapped = wrapped;
-            this.beforeFunction = beforeFunction;
             this.comparator = sequenceComparator(sourceComparator);
-            wrapped.withDeleteOrderingGuardBeforeImage(this::beforeImage);
+            wrapped.withDeleteOrderingGuardResolver(this::resolve);
         }
 
         @Override
         public void reset() {
             wrapped.reset();
-            guards = null;
-            nextGuard = 0;
+            strongest = null;
+            initialized = false;
         }
 
         @Override
         public void add(KeyValue kv) {
-            if (guards == null) {
-                guards = forKey(kv.key());
-                guards.sort(comparator);
-            }
-            while (nextGuard < guards.size()
-                    && comparator.compare(guards.get(nextGuard), kv) <= 0) {
-                wrapped.addDeleteOrderingGuard(guards.get(nextGuard++));
+            if (!initialized) {
+                strongest = forKey(kv.key(), comparator);
+                initialized = true;
             }
             wrapped.add(kv);
         }
 
         @Override
         public T getResult() {
-            while (guards != null && nextGuard < guards.size()) {
-                wrapped.addDeleteOrderingGuard(guards.get(nextGuard++));
-            }
             return wrapped.getResult();
         }
 
-        private KeyValue beforeImage(KeyValue before) {
-            if (before == null || guards == null || guards.isEmpty()) {
-                return before;
-            }
-            beforeFunction.reset();
-            boolean added = false;
-            for (KeyValue guard : guards) {
-                if (!added && comparator.compare(before, guard) < 0) {
-                    beforeFunction.add(before);
-                    added = true;
-                }
-                beforeFunction.addDeleteOrderingGuard(guard);
-            }
-            if (!added) {
-                beforeFunction.add(before);
-            }
-            KeyValue result = beforeFunction.getResult();
-            // Native functions may reuse their KeyValue, but reset allocates fresh row state.
-            return new KeyValue()
-                    .replace(
-                            result.key(),
-                            result.sequenceNumber(),
-                            result.valueKind(),
-                            result.value())
-                    .setLevel(before.level());
+        @Nullable
+        private KeyValue resolve(@Nullable KeyValue row) {
+            return row == null || strongest == null || comparator.compare(row, strongest) > 0
+                    ? row
+                    : null;
         }
     }
 }
