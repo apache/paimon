@@ -46,6 +46,8 @@ public class ResourcePaths {
     protected static final String ROLLBACK = "rollback";
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
+    protected static final String MODELS = "models";
+    protected static final String PREDICTIONS = "predictions";
     protected static final String FUNCTION_DETAILS = "function-details";
     protected static final String PERMISSIONS = "permissions";
     protected static final String POLICIES = "policies";
@@ -147,6 +149,35 @@ public class ResourcePaths {
 
     public String database(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName));
+    }
+
+    public String models(String databaseName) {
+        checkModelPathSegment(databaseName, "databaseName");
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), MODELS);
+    }
+
+    public String model(String databaseName, String modelName) {
+        checkModelPathSegment(modelName, "modelName");
+        return SLASH.join(models(databaseName), encodeString(modelName));
+    }
+
+    public String predictions(String databaseName, String tableName) {
+        return SLASH.join(table(databaseName, tableName), PREDICTIONS);
+    }
+
+    public String prediction(String databaseName, String tableName, String jobId) {
+        checkArgument(jobId != null && !jobId.trim().isEmpty(), "jobId must not be blank");
+        return SLASH.join(predictions(databaseName, tableName), encodeString(jobId));
+    }
+
+    public String cancelPrediction(String databaseName, String tableName, String jobId) {
+        return SLASH.join(prediction(databaseName, tableName, jobId), "cancel");
+    }
+
+    private static void checkModelPathSegment(String value, String name) {
+        checkArgument(value != null && !value.trim().isEmpty(), "%s must not be blank", name);
+        checkArgument(
+                !".".equals(value) && !"..".equals(value), "%s must not be a dot segment", name);
     }
 
     public String tables(String databaseName) {

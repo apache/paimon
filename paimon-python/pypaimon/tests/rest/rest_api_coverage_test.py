@@ -26,6 +26,8 @@ from urllib.parse import urlsplit
 import yaml
 
 from pypaimon.api.rest_api import RESTApi
+from pypaimon.api.model import CreateModelRequest
+from pypaimon.api.prediction import SubmitPredictionRequest
 from pypaimon.common.identifier import Identifier
 from pypaimon.function.function import FunctionImpl
 from pypaimon.function.function_change import FunctionChange
@@ -53,6 +55,18 @@ _TABLE = PermissionResource(ResourceType.TABLE, "db", "t", None, None)
 
 # A value per parameter annotation, else per name; "SELECT" is valid both as a name and as an access.
 _ARGUMENTS = {
+    CreateModelRequest: CreateModelRequest(
+        "t", "bailian", "qwen3.8-flash",
+        {"video": {"data_type": "BLOB", "modality": "video"}},
+    ),
+    SubmitPredictionRequest: SubmitPredictionRequest(
+        model="db.qwen_vl",
+        inputs={"video": "content"},
+        result_columns=["id"],
+        prompt="classify",
+        output_schema={"result": "STRING"},
+        request_id="request-1",
+    ),
     str: "SELECT",
     bool: False,
     Identifier: Identifier.create("db", "t"),
