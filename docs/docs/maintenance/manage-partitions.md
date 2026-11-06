@@ -100,6 +100,15 @@ insert into t values('pk', 'par-1');
 
 ```
 
+### Flink Partition Expiration Action
+
+For the Flink `expire_partitions` action, `--expiration_time` and
+`--timestamp_formatter` are required. If `--expire_strategy` or `--timestamp_pattern`
+is omitted, the action inherits the corresponding table option, including overrides
+provided through `--table_conf`. Explicit action arguments take precedence over
+`--table_conf`, which takes precedence over persisted table options. Explicit empty
+or whitespace-only arguments are not treated as omitted.
+
 ### Retaining the Latest Partition
 
 Set `'partition.expiration-retain-latest' = 'true'` (default: `false`) to retain the latest

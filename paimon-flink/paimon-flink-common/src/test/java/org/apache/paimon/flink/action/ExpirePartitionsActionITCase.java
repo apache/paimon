@@ -43,6 +43,7 @@ import java.util.Map;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link ExpirePartitionsAction}. */
 public class ExpirePartitionsActionITCase extends ActionITCaseBase {
@@ -246,6 +247,111 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
             action.executeLocally();
             assertThat(getData(tableName)).hasSize(retainLatest ? 1 : 0);
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testInheritExpirationStrategy(boolean useTableConf) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("partition.expiration-strategy", useTableConf ? "values-time" : "update-time");
+        prepareExpirationTable(options, Collections.singletonList("dt"));
+        Map<String, String> tableConf =
+                useTableConf
+                        ? Collections.singletonMap("partition.expiration-strategy", "update-time")
+                        : Collections.emptyMap();
+        expireWithOptions(tableConf, null, null);
+        assertThat(getData(tableName)).hasSize(1);
+        expireWithOptions(tableConf, "values-time", null);
+        assertThat(getData(tableName)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testInheritTimestampPattern(boolean useTableConf) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("partition.timestamp-pattern", useTableConf ? "$k" : "$dt");
+        prepareExpirationTable(options, Arrays.asList("k", "dt"));
+        Map<String, String> tableConf =
+                useTableConf
+                        ? Collections.singletonMap("partition.timestamp-pattern", "$dt")
+                        : Collections.emptyMap();
+        expireWithOptions(tableConf, null, "$k");
+        assertThat(getData(tableName)).hasSize(1);
+        expireWithOptions(tableConf, null, null);
+        assertThat(getData(tableName)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " "})
+    public void testExplicitBlankStrategyIsRejected(String strategy) throws Exception {
+        prepareExpirationTable(Collections.emptyMap(), Collections.singletonList("dt"));
+        assertThatThrownBy(() -> expireWithOptions(Collections.emptyMap(), strategy, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Unknown partitionExpireStrategy");
+        assertThat(getData(tableName)).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " "})
+    public void testExplicitBlankPatternDoesNotInherit(String pattern) throws Exception {
+        prepareExpirationTable(
+                Collections.singletonMap("partition.timestamp-pattern", "$dt"),
+                Collections.singletonList("dt"));
+        expireWithOptions(Collections.emptyMap(), null, pattern);
+        assertThat(getData(tableName)).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " "})
+    public void testExplicitBlankFormatterDoesNotInherit(String formatter) throws Exception {
+        prepareExpirationTable(
+                Collections.singletonMap("partition.timestamp-formatter", "yyyy-MM-dd"),
+                Collections.singletonList("dt"));
+        new ExpirePartitionsAction(
+                        database,
+                        tableName,
+                        Collections.singletonMap("warehouse", warehouse),
+                        Collections.emptyMap(),
+                        "7 d",
+                        formatter,
+                        null,
+                        null)
+                .executeLocally();
+        assertThat(getData(tableName)).hasSize(1);
+    }
+
+    private void prepareExpirationTable(Map<String, String> options, List<String> partitions)
+            throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        ROW_TYPE,
+                        partitions,
+                        Arrays.asList("k", "dt", "hm"),
+                        Collections.singletonList("hm"),
+                        options);
+        StreamWriteBuilder builder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = builder.newWrite();
+        commit = builder.newCommit();
+        writeData(
+                rowData(
+                        BinaryString.fromString("9999-01-01"),
+                        BinaryString.fromString("2000-01-01"),
+                        BinaryString.fromString("00:00")));
+        assertThat(getData(tableName)).hasSize(1);
+    }
+
+    private void expireWithOptions(Map<String, String> tableConf, String strategy, String pattern)
+            throws Exception {
+        new ExpirePartitionsAction(
+                        database,
+                        tableName,
+                        Collections.singletonMap("warehouse", warehouse),
+                        tableConf,
+                        "7 d",
+                        "yyyy-MM-dd",
+                        pattern,
+                        strategy)
+                .executeLocally();
     }
 
     private FileStoreTable prepareTable() throws Exception {
