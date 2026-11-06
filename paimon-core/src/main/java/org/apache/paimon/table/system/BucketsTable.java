@@ -196,13 +196,16 @@ public class BucketsTable implements ReadonlyTable {
 
         private RowType readType;
 
+        @Nullable private Predicate predicate;
+
         public BucketsRead(FileStoreTable table) {
             this.fileStoreTable = table;
         }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // filter pushdown is handled at the Scan layer through BucketsSplit
+            // The scan only pushes plain partition and bucket leaves, so evaluate the rest here.
+            this.predicate = predicate;
             return this;
         }
 
@@ -261,6 +264,10 @@ public class BucketsTable implements ReadonlyTable {
                                     Comparator.comparing((InternalRow row) -> row.getString(0))
                                             .thenComparing(row -> row.getInt(1)))
                             .iterator();
+
+            if (predicate != null) {
+                iterator = Iterators.filter(iterator, predicate::test);
+            }
 
             if (readType != null) {
                 iterator =
