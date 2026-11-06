@@ -100,7 +100,7 @@ options name the rest:
 | `sink.operator-uid.suffix` | Writer, Global Committer, dynamic-bucket-assigner |
 | `sink.operator-uid.cover-table-sink-operators` | Also the row conversions, `local merge`, the compaction operators, `Collect Statistics` and `Strip Statistics`, `INDEX_BOOTSTRAP` and `cross-partition-bucket-assigner`, and the final `end` sink |
 | `source.operator-uid.suffix` | The source |
-| `source.operator-uid.cover-table-source-operators` | Also the split monitor and reader used by dedicated split generation and exactly-once consumers, the watermark assigner, and the DataStream row conversion |
+| `source.operator-uid.cover-table-source-operators` | Also the split monitor and reader used by dedicated split generation and exactly-once consumers, the watermark assigner, the DataStream row conversion, and the operators of the postpone merge-on-read route |
 
 Each UID is `<operator>_<table name>_<suffix>`. The table name leaves out the database, so two
 tables with the same name and suffix in one job collide, and Flink rejects the job with

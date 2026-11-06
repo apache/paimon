@@ -19,6 +19,8 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -26,6 +28,9 @@ import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -110,7 +115,16 @@ class SourceOperatorUidSuffixTest {
                 // buildAlignedContinuousFileSource, still toDataStream
                 shape("checkpoint-align")
                         .option(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_ENABLED.key(), "true")
-                        .reaches("Source: tbl"));
+                        .reaches("Source: tbl"),
+                // FlinkSourceBuilder.buildPostponeMergeSource, a snapshot to merge
+                postponeMergeOnRead("postpone-merge-on-read")
+                        .committedRow()
+                        .reaches(
+                                "Source: tbl - Postpone merge inputs",
+                                "Postpone merge input",
+                                "Postpone merge on read"),
+                // the same route before the first snapshot, an empty collection
+                postponeMergeOnRead("postpone-merge-on-read-no-snapshot").reaches("Source: tbl"));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -200,6 +214,34 @@ class SourceOperatorUidSuffixTest {
                 .isEqualTo(expected);
     }
 
+    /**
+     * The postpone merge route returns before toDataStream, so the suffix alone assigns nothing.
+     */
+    @Test
+    void testThePostponeMergeUidsArePinned() {
+        Map<String, String> expected = new TreeMap<>();
+        expected.put("Source: tbl - Postpone merge inputs", "Postpone merge inputs_tbl_test-uid");
+        expected.put("Postpone merge input", "Postpone merge input_tbl_test-uid");
+        expected.put("Postpone merge on read", "Postpone merge on read_tbl_test-uid");
+        assertThat(
+                        paimonUidsByOperatorName(
+                                buildGraph(
+                                        postponeMergeOnRead("pinned-postpone-merge-on-read")
+                                                .committedRow(),
+                                        false,
+                                        true)))
+                .as("with a snapshot")
+                .isEqualTo(expected);
+        assertThat(
+                        paimonUidsByOperatorName(
+                                buildGraph(
+                                        postponeMergeOnRead("pinned-postpone-no-snapshot"),
+                                        false,
+                                        true)))
+                .as("without a snapshot")
+                .containsOnly(entry("Source: tbl", "Postpone merge empty source_tbl_test-uid"));
+    }
+
     // ------------------------------------------------------------------------
     //  graph building
     // ------------------------------------------------------------------------
@@ -211,7 +253,9 @@ class SourceOperatorUidSuffixTest {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(conf);
         env.setParallelism(2);
         env.setRuntimeMode(
-                shape.bounded ? RuntimeExecutionMode.BATCH : RuntimeExecutionMode.STREAMING);
+                shape.bounded && !shape.streamingRuntime
+                        ? RuntimeExecutionMode.BATCH
+                        : RuntimeExecutionMode.STREAMING);
         // the checkpoint-align route insists on checkpointing with one concurrent checkpoint
         env.enableCheckpointing(1000);
         env.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
@@ -240,6 +284,13 @@ class SourceOperatorUidSuffixTest {
         return new Shape(name);
     }
 
+    private static Shape postponeMergeOnRead(String name) {
+        Shape shape = shape(name).bounded().primaryKey();
+        shape.streamingRuntime = true;
+        return shape.option(CoreOptions.BUCKET.key(), "-2")
+                .option(CoreOptions.POSTPONE_MERGE_ON_READ.key(), "true");
+    }
+
     /** A table definition plus the entry point and boundedness of the read. */
     private static final class Shape {
 
@@ -247,8 +298,11 @@ class SourceOperatorUidSuffixTest {
         private final Map<String, String> options = new LinkedHashMap<>();
         private List<String> reaches = Collections.emptyList();
         private boolean bounded;
+        private boolean streamingRuntime;
         private boolean forRow;
         private boolean watermarked;
+        private boolean primaryKey;
+        private boolean committedRow;
         private boolean coverAll = true;
         private String uidSuffix = UID_SUFFIX;
 
@@ -273,6 +327,16 @@ class SourceOperatorUidSuffixTest {
 
         private Shape watermarked() {
             this.watermarked = true;
+            return this;
+        }
+
+        private Shape primaryKey() {
+            this.primaryKey = true;
+            return this;
+        }
+
+        private Shape committedRow() {
+            this.committedRow = true;
             return this;
         }
 
@@ -311,13 +375,26 @@ class SourceOperatorUidSuffixTest {
                                 new Schema(
                                         TABLE_TYPE.getFields(),
                                         Collections.emptyList(),
-                                        Collections.emptyList(),
+                                        primaryKey
+                                                ? Collections.singletonList("k")
+                                                : Collections.emptyList(),
                                         options.toMap(),
                                         ""));
             } catch (Exception e) {
                 throw new AssertionError("shape " + name + " has an illegal table", e);
             }
-            return FileStoreTableFactory.create(LocalFileIO.create(), options);
+            FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), options);
+            if (committedRow) {
+                BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+                try (BatchTableWrite write = writeBuilder.newWrite();
+                        BatchTableCommit commit = writeBuilder.newCommit()) {
+                    write.write(GenericRow.of(1, 1L, BinaryString.fromString("a")));
+                    commit.commit(write.prepareCommit());
+                } catch (Exception e) {
+                    throw new AssertionError("shape " + name + " cannot commit its row", e);
+                }
+            }
+            return table;
         }
 
         @Override

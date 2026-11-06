@@ -294,9 +294,12 @@ public class FlinkSourceBuilder {
         Optional<PostponeMergeReadBuilder> optionalBuilder =
                 PostponeMergeReadBuilder.createSnapshotBound(fileStoreTable, partitionPredicate);
         if (!optionalBuilder.isPresent()) {
-            return env.fromCollection(Collections.<RowData>emptyList(), produceTypeInfo())
-                    .name(sourceName)
-                    .forceNonParallel();
+            return OperatorUidAssigner.forSource(table)
+                    .assign(
+                            env.fromCollection(Collections.<RowData>emptyList(), produceTypeInfo())
+                                    .name(sourceName)
+                                    .forceNonParallel(),
+                            PostponeMergeOnRead.EMPTY_SOURCE_NAME);
         }
 
         int baseParallelism = basePostponeMergeParallelism();
@@ -320,7 +323,8 @@ public class FlinkSourceBuilder {
                 produceTypeInfo(),
                 outerProject(),
                 limit,
-                conf.get(CoreOptions.BLOB_AS_DESCRIPTOR));
+                conf.get(CoreOptions.BLOB_AS_DESCRIPTOR),
+                OperatorUidAssigner.forSource(table));
     }
 
     private int basePostponeMergeParallelism() {
