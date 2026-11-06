@@ -62,7 +62,8 @@ support the table's file format, format version, and column types.
   nanoseconds the column declares. Use a precision from 3 to 6.
 - Iceberg requires microseconds, so while Iceberg metadata is enabled, `TIMESTAMP(3)` and
   `TIMESTAMP_LTZ(3)` are written to Parquet as `TIMESTAMP_MICROS` instead of `TIMESTAMP_MILLIS`.
-  This also applies to existing tables as soon as their writer is upgraded.
+  The values keep millisecond precision. This also applies to existing tables as soon as their
+  writer is upgraded.
 
 :::
 

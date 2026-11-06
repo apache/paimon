@@ -140,17 +140,22 @@ public class ParquetFilters {
 
         @Override
         public FilterPredicate visitLessThan(FieldRef fieldRef, Object literal) {
-            // the whole millisecond of a fractional literal reads below it
-            if (isMillisInMicrosColumn(fieldRef)
-                    && ((Timestamp) literal).getNanoOfMillisecond() != 0) {
-                return new Operators.LtEq(
-                        toParquetColumn(fieldRef), lastMicroOfMilli((Timestamp) literal));
+            if (isMillisInMicrosColumn(fieldRef)) {
+                Timestamp timestamp = millisLiteral(literal);
+                // the whole millisecond of a fractional literal reads below it
+                return timestamp.getNanoOfMillisecond() != 0
+                        ? new Operators.LtEq(toParquetColumn(fieldRef), lastMicroOfMilli(timestamp))
+                        : new Operators.Lt(toParquetColumn(fieldRef), firstMicroOfMilli(timestamp));
             }
             return new Operators.Lt(toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
         @Override
         public FilterPredicate visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+            if (isMillisInMicrosColumn(fieldRef)) {
+                return new Operators.GtEq(
+                        toParquetColumn(fieldRef), firstMicroOfMilli(millisLiteral(literal)));
+            }
             return new Operators.GtEq(
                     toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
@@ -168,7 +173,7 @@ public class ParquetFilters {
         public FilterPredicate visitLessOrEqual(FieldRef fieldRef, Object literal) {
             if (isMillisInMicrosColumn(fieldRef)) {
                 return new Operators.LtEq(
-                        toParquetColumn(fieldRef), lastMicroOfMilli((Timestamp) literal));
+                        toParquetColumn(fieldRef), lastMicroOfMilli(millisLiteral(literal)));
             }
             return new Operators.LtEq(
                     toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
@@ -177,9 +182,10 @@ public class ParquetFilters {
         @Override
         public FilterPredicate visitEqual(FieldRef fieldRef, Object literal) {
             if (isMillisInMicrosColumn(fieldRef)) {
+                Timestamp timestamp = millisLiteral(literal);
                 return FilterApi.and(
-                        visitGreaterOrEqual(fieldRef, literal),
-                        visitLessOrEqual(fieldRef, literal));
+                        new Operators.GtEq(toParquetColumn(fieldRef), firstMicroOfMilli(timestamp)),
+                        new Operators.LtEq(toParquetColumn(fieldRef), lastMicroOfMilli(timestamp)));
             }
             return new Operators.Eq(toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
@@ -188,7 +194,7 @@ public class ParquetFilters {
         public FilterPredicate visitGreaterThan(FieldRef fieldRef, Object literal) {
             if (isMillisInMicrosColumn(fieldRef)) {
                 return new Operators.Gt(
-                        toParquetColumn(fieldRef), lastMicroOfMilli((Timestamp) literal));
+                        toParquetColumn(fieldRef), lastMicroOfMilli(millisLiteral(literal)));
             }
             return new Operators.Gt(toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
@@ -633,6 +639,14 @@ public class ParquetFilters {
         return column;
     }
 
+    /** A null literal matches no row, and parquet-mr rejects it in an ordering comparison. */
+    private static Timestamp millisLiteral(Object literal) {
+        if (literal == null) {
+            throw new UnsupportedOperationException();
+        }
+        return (Timestamp) literal;
+    }
+
     private static long firstMicroOfMilli(Timestamp timestamp) {
         try {
             return Math.multiplyExact(timestamp.getMillisecond(), 1000L);
@@ -652,7 +666,9 @@ public class ParquetFilters {
 
     private static long toMicros(Timestamp timestamp) {
         try {
-            return timestamp.toMicros();
+            return Math.addExact(
+                    Math.multiplyExact(timestamp.getMillisecond(), 1000L),
+                    timestamp.getNanoOfMillisecond() / 1000);
         } catch (ArithmeticException e) {
             throw new UnsupportedOperationException(e);
         }

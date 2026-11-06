@@ -405,7 +405,11 @@ public class ParquetRowDataWriter {
         }
 
         private void writeTimestamp(Timestamp value) {
-            recordConsumer.addLong(value.toMicros());
+            // precision <= 3 keeps only the milliseconds, which its readers and statistics hold
+            recordConsumer.addLong(
+                    precision <= 3
+                            ? Math.multiplyExact(value.getMillisecond(), 1000L)
+                            : value.toMicros());
         }
     }
 

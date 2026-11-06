@@ -1097,6 +1097,16 @@ class ParquetFiltersTest {
                     builder.lessThan(0, Timestamp.fromEpochMillis(Long.MAX_VALUE / 1000 + 1)),
                     "",
                     false);
+            // a null literal, as in IN (x, NULL), matches no row
+            for (Predicate predicate :
+                    Arrays.asList(
+                            builder.equal(0, null),
+                            builder.lessThan(0, null),
+                            builder.lessOrEqual(0, null),
+                            builder.greaterThan(0, null),
+                            builder.greaterOrEqual(0, null))) {
+                test(schema, predicate, "", false);
+            }
         }
     }
 
