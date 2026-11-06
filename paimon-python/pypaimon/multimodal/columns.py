@@ -27,6 +27,7 @@ from pypaimon.multimodal.table import (
     _cast_merge_on_columns, _normalize_merge_on, _target_schema,
     _to_arrow_table, _validate_merge_on,
 )
+from pypaimon.schema.arrow_schema import normalize_arrow_write_nullability
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
@@ -189,7 +190,10 @@ def _normalize_output(data, schema):
         array = data[field.name]
         if not pa.types.is_null(array.type):
             source_type = _canonical_field(pa.field(field.name, array.type)).type
-            if source_type != field.type:
+            # Read schemas relax nested nullability; restore it before comparing types.
+            source = pa.Table.from_arrays([array.cast(source_type)], names=[field.name])
+            array = normalize_arrow_write_nullability(source, pa.schema([field]))[field.name]
+            if array.type != field.type:
                 raise ValueError("Incompatible type for column %s: %s != %s"
                                  % (field.name, array.type, field.type))
         if not field.nullable and array.null_count:

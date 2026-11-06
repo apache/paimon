@@ -397,6 +397,83 @@ def test_compute_columns_uses_existing_nullability(tmp_path, nullable):
         assert _rows(table, ["id", "value"]) == [{"id": 0, "value": 2}]
 
 
+@pytest.mark.parametrize("data_type, value, invalid", [
+    (pa.struct([pa.field("x", pa.int64(), nullable=False)]), {"x": 2}, {"x": None}),
+    (pa.list_(pa.field("element", pa.int64(), nullable=False)), [2], [None]),
+])
+@pytest.mark.parametrize("as_table", [False, True])
+def test_compute_columns_restores_nested_nullability(tmp_path, data_type, value, invalid, as_table):
+    connection = pmm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    schema = pa.schema([("id", pa.int64()), ("value", data_type)])
+    table = connection.create_table(
+        "nested", schema=schema,
+        data=pa.table({"id": [0, 1], "value": [value, None]}, schema=schema),
+        options={"file.format": "parquet"})
+    schema_id = table.raw_table.table_schema.id
+
+    def identity(batch):
+        field = batch.schema.field("value")
+        child = field.type[0] if pa.types.is_struct(field.type) else field.type.value_field
+        assert child.nullable
+        return pa.Table.from_batches([batch]) if as_table else batch
+
+    result = table.compute_columns(["value"], inputs=["value"], fn=identity)
+    assert result.updated_rows == 2
+    assert result.added_columns == ()
+    assert result.schema_id == schema_id
+    assert _rows(table, ["id", "value"]) == [{"id": 0, "value": value}, {"id": 1, "value": None}]
+    snapshot = _snapshot(table)
+
+    def invalid_children(batch):
+        array = pa.array([invalid] * batch.num_rows, type=batch.schema.field("value").type)
+        factory = pa.Table if as_table else pa.RecordBatch
+        return factory.from_arrays([array], names=["value"])
+
+    with pytest.raises(pmm.ColumnUpdateError) as failure:
+        table.compute_columns(["value"], inputs=["value"], fn=invalid_children)
+    assert failure.value.phase == "compute"
+    assert failure.value.schema_changed is False
+    assert failure.value.commit_outcome == "not_started"
+    assert "non-nullable field value." in str(failure.value.__cause__)
+    assert _snapshot(table) == snapshot
+    assert _rows(table, ["id", "value"]) == [{"id": 0, "value": value}, {"id": 1, "value": None}]
+
+
+def test_compute_columns_normalizes_reordered_outputs_with_null_siblings(tmp_path):
+    connection = pmm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    data_type = pa.struct([pa.field("x", pa.int64(), nullable=False)])
+    schema = pa.schema([("id", pa.int64()), ("value", data_type), ("label", pa.string())])
+    table = connection.create_table(
+        "nested", schema=schema,
+        data=pa.table({"id": [0], "value": [{"x": 2}], "label": ["old"]}, schema=schema),
+        options={"file.format": "parquet"})
+
+    def compute(batch):
+        return pa.table({"value": batch["value"], "label": pa.nulls(batch.num_rows)})
+
+    result = table.compute_columns(["label", "value"], inputs=["value"], fn=compute)
+    assert result.updated_rows == 1
+    assert _rows(table, ["id", "value", "label"]) == [{"id": 0, "value": {"x": 2}, "label": None}]
+
+
+@pytest.mark.parametrize("method", ["add_columns", "merge_columns"])
+def test_column_enrichment_restores_nested_nullability(tmp_path, method):
+    connection = pmm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    data_type = pa.struct([pa.field("x", pa.int64(), nullable=False)])
+    schema = pa.schema([("id", pa.int64()), ("value", data_type)])
+    table = connection.create_table(
+        "nested", schema=schema, data=pa.table({"id": [0], "value": [{"x": 2}]}, schema=schema),
+        options={"file.format": "parquet"})
+
+    if method == "add_columns":
+        table.add_columns(pa.schema([("derived", data_type)]), inputs=["value"],
+                          fn=lambda batch: pa.table({"derived": batch["value"]}))
+        assert _rows(table, ["id", "derived"]) == [{"id": 0, "derived": {"x": 2}}]
+    else:
+        table.merge_columns(table.scan().select(["id", "value"]).to_arrow(), on="id")
+        assert _rows(table, ["id", "value"]) == [{"id": 0, "value": {"x": 2}}]
+
+
 @pytest.mark.parametrize("kwargs, message", [
     ({"columns": []}, "unique column names"),
     ({"columns": ["label", "label"]}, "unique column names"),
