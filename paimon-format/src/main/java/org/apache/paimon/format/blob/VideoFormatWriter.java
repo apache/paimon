@@ -28,9 +28,13 @@ import org.apache.paimon.format.FileAwareFormatWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DeltaVarintCompressor;
 import org.apache.paimon.utils.LongArrayList;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -51,6 +55,8 @@ import static org.apache.paimon.utils.StreamUtils.intToLittleEndian;
  * and stores its first frame; subsequent rows increment the frame ordinal by one.
  */
 public class VideoFormatWriter implements FileAwareFormatWriter {
+
+    private static final Logger LOG = LoggerFactory.getLogger(VideoFormatWriter.class);
 
     public static final byte VERSION = 1;
     public static final int MAGIC_NUMBER = 0x4F454449; // "IDEO" in little endian
@@ -333,20 +339,38 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
                     }
                 }
                 spool.seek(start);
-                VideoKeyframeIndex.validate(
-                        new InputStream() {
-                            @Override
-                            public int read() throws IOException {
-                                return spool.read();
-                            }
+                try {
+                    VideoKeyframeIndex.validate(
+                            new SeekableInputStream() {
+                                @Override
+                                public void seek(long position) throws IOException {
+                                    spool.seek(position);
+                                }
 
-                            @Override
-                            public int read(byte[] b, int offset, int length) throws IOException {
-                                return spool.read(b, offset, length);
-                            }
-                        },
-                        expectedLength,
-                        payloadLength);
+                                @Override
+                                public long getPos() throws IOException {
+                                    return spool.getFilePointer();
+                                }
+
+                                @Override
+                                public void close() {}
+
+                                @Override
+                                public int read() throws IOException {
+                                    return spool.read();
+                                }
+
+                                @Override
+                                public int read(byte[] b, int offset, int length)
+                                        throws IOException {
+                                    return spool.read(b, offset, length);
+                                }
+                            },
+                            expectedLength,
+                            payloadLength);
+                } catch (VideoKeyframeIndex.UnsupportedIndexException e) {
+                    LOG.warn("Preserving unsupported video index: {}", e.getMessage());
+                }
                 spool.seek(start + expectedLength);
                 recordSuccess(expectedLength);
                 complete = true;

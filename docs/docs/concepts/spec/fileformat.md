@@ -442,25 +442,46 @@ Run arrays have equal lengths. Non-negative references select a video; `-1` mean
 means a data-evolution placeholder. Row `r` in a run starting at `s` maps to frame
 `run_first_frame + r - s`; gaps start new runs.
 
-Keyframe-index v1 is little endian; byte offsets are relative to the video payload.
+Each physical video has its own keyframe index; v1 and v2 may coexist in one `.video`
+file. Fields are little endian; metadata and packet offsets refer to the video payload.
+
+Released v1 (Paimon 2.1.0) stores `uint8 version=1`, `uint64 magic=0x564944454F4B4649`,
+`uint32 metadata count`, and `uint32 keyframe count`, followed by `(offset, length)`
+int64 pairs and one zlib stream of `(ordinal, PTS, packet position)` int64 triples.
+It permits at most 65,536 keyframes per physical video.
+
+Keyframe-index v2 adds a page directory and independently encoded pages:
 
 | Field | Size |
 | --- | ---: |
-| Version (`1`) | 1 byte |
+| Version (`2`) | 1 byte |
 | Magic (`0x564944454F4B4649`) | 8 bytes |
 | Metadata-range count | 4 bytes |
 | Keyframe count | 8 bytes |
+| Page codec (`0`: raw; `1`: column-delta zlib) | 1 byte |
 | Metadata `(offset, length)` pairs | 16 bytes each |
+| Page directory | 68 bytes per page |
 | Keyframe pages | Variable |
 
-Each page holds 4,096 uncompressed `(frame ordinal, PTS, packet position)` int64 triples
-and their 4-byte CRC32; the last page may be shorter. Page `p` starts at
-`21 + 16 * metadata_count + p * 98308`.
-Ordinals, PTS values and packet positions strictly increase; the first ordinal is zero.
-The index covers the first video stream; its time base remains in the video.
+Each page except the last holds exactly 4,096 `(frame ordinal, PTS, packet position)` int64 triples.
+Each directory record stores the index-relative page offset (8 bytes), encoded length (4),
+uncompressed CRC32 (4), first and last triples (48), and CRC32 of the preceding 64 bytes (4).
+Pages follow the directory contiguously and fill the remainder of the index.
 
-Readers validate each accessed page and its adjacent page boundaries; writers validate all pages.
-Metadata ranges are limited to 65,536; keyframe count and total index size have no configured limit.
+- Codec `0`: uncompressed row-major triples.
+- Codec `1`: independently zlib-compressed pages of three columns (ordinal, PTS, position).
+  Each column stores its first value and successive deltas as little-endian uint64 words,
+  using arithmetic modulo 2^64. Decode by cumulative addition modulo 2^64, then restore
+  signed int64 row-major triples for CRC32 and ordering checks.
+
+Decoded pages must contain exactly `entry_count * 24` bytes; encoded pages cannot exceed
+`4,096 * 24 + 64` bytes. Trailing or concatenated zlib streams are invalid.
+
+Ordinals, PTS and packet positions strictly increase from ordinal zero. The index covers the
+first video stream, using its time base. Metadata ranges are limited to 65,536.
+New writes use v2; copying or compaction preserves existing index bytes. Readers seek
+through either version. Unknown versions/codecs fall back to scanning and survive rewrite;
+corrupt indexes fail validation.
 
 An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
 

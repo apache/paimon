@@ -18,6 +18,7 @@
 """Helpers for descriptor-backed video frame rows."""
 
 import io
+import logging
 import os
 import weakref
 from collections import OrderedDict, deque
@@ -28,7 +29,7 @@ from fractions import Fraction
 from itertools import chain
 
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
-from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex, UnsupportedVideoIndex
 
 
 def _require_video_av():
@@ -516,10 +517,13 @@ class VideoFrameCollator:
             stream.video_metadata_key = (descriptor, keyframe_index_descriptor)
             if keyframe_index_descriptor is not None:
                 index = keyframe_index_descriptor
-                stream.video_keyframe_index = VideoKeyframeIndex.open(
-                    lambda offset, length: self.file_io.read_file_range(
-                        index.uri, index.offset + offset, length),
-                    index.length, descriptor.length)
+                try:
+                    stream.video_keyframe_index = VideoKeyframeIndex.open(
+                        lambda offset, length: self.file_io.read_file_range(
+                            index.uri, index.offset + offset, length),
+                        index.length, descriptor.length)
+                except UnsupportedVideoIndex as error:
+                    logging.getLogger(__name__).warning("Scanning video without index: %s", error)
                 stream.video_length = descriptor.length
                 stream.video_read_ranges = lambda ranges: (
                     self.file_io.read_ranges_coalesced(
