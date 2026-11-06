@@ -23,6 +23,8 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.core.execution.JobClient;
@@ -30,6 +32,8 @@ import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -63,6 +67,82 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
     @Test
     public void testRescaleCatalogTable() {
         innerTest("fs_catalog", "T1");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRescalePreservesGuardOnlyPartitions(boolean disableCapture) {
+        batchSql("USE CATALOG fs_catalog");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        batchSql(
+                "CREATE TABLE guarded_rescale (pt STRING, id INT, seq INT, op STRING, "
+                        + "PRIMARY KEY (pt, id) NOT ENFORCED) PARTITIONED BY (pt) WITH ("
+                        + "'bucket' = '2', 'sequence.field' = 'seq', 'rowkind.field' = 'op', "
+                        + "'write-only' = 'true', 'delete-ordering-guards.enabled' = 'true')");
+        batchSql(
+                "INSERT INTO guarded_rescale VALUES "
+                        + "('p1', 1, 4, '-D'), ('p2', 2, 4, '-D'), ('p2', 3, 3, '+I')");
+        batchSql(
+                "CALL sys.compact(`table` => 'default.guarded_rescale', "
+                        + "compact_strategy => 'full', options => 'write-only=false')");
+        PrimaryKeyFileStoreTable table =
+                (PrimaryKeyFileStoreTable)
+                        FileStoreTableFactory.create(
+                                LocalFileIO.create(), getTableDirectory("guarded_rescale"));
+        assertThat(table.store().newIndexFileHandler().scan("DELETE_ORDERING_GUARD")).isNotEmpty();
+        assertThat(batchSql("SELECT * FROM guarded_rescale"))
+                .containsExactly(Row.of("p2", 3, 3, "+I"));
+        batchSql(
+                "ALTER TABLE guarded_rescale SET ('bucket' = '5'"
+                        + (disableCapture ? ", 'delete-ordering-guards.enabled' = 'false'" : "")
+                        + ")");
+        batchSql(
+                "CALL sys.rescale(`table` => 'default.guarded_rescale', "
+                        + "`partition` => 'pt=p1', scan_parallelism => 2, sink_parallelism => 2)");
+        table =
+                (PrimaryKeyFileStoreTable)
+                        FileStoreTableFactory.create(
+                                LocalFileIO.create(), getTableDirectory("guarded_rescale"));
+        assertThat(table.newSnapshotReader().withDeleteOrderingGuardBuckets().read().dataSplits())
+                .filteredOn(split -> split.partition().getString(0).toString().equals("p1"))
+                .isNotEmpty()
+                .allSatisfy(
+                        split -> {
+                            assertThat(split.totalBuckets()).isEqualTo(5);
+                            assertThat(split.dataFiles()).isEmpty();
+                        });
+        long beforeStale = table.snapshotManager().latestSnapshotId();
+        batchSql("INSERT INTO guarded_rescale VALUES ('p1', 1, 2, '+I')");
+        assertThat(batchSql("SELECT * FROM guarded_rescale WHERE pt = 'p1'")).isEmpty();
+        long afterStale = table.snapshotManager().latestSnapshotId();
+        assertThat(
+                        batchSql(
+                                "SELECT id, seq FROM guarded_rescale /*+ OPTIONS("
+                                        + "'incremental-between'='"
+                                        + beforeStale
+                                        + ","
+                                        + afterStale
+                                        + "', 'incremental-between-scan-mode'='diff') */ WHERE pt = 'p1'"))
+                .isEmpty();
+        batchSql("INSERT INTO guarded_rescale VALUES ('p1', 1, 5, '+I')");
+        assertThat(batchSql("SELECT * FROM guarded_rescale WHERE pt = 'p1'"))
+                .containsExactly(Row.of("p1", 1, 5, "+I"));
+        long afterFresh = table.snapshotManager().latestSnapshotId();
+        assertThat(
+                        batchSql(
+                                "SELECT id, seq FROM guarded_rescale /*+ OPTIONS("
+                                        + "'incremental-between'='"
+                                        + beforeStale
+                                        + ","
+                                        + afterFresh
+                                        + "', 'incremental-between-scan-mode'='diff') */ WHERE pt = 'p1'"))
+                .containsExactly(Row.of(1, 5));
+        batchSql(
+                "CALL sys.rescale(`table` => 'default.guarded_rescale', "
+                        + "bucket_num => 5, `partition` => 'pt=p2')");
+        batchSql("INSERT INTO guarded_rescale VALUES ('p2', 2, 2, '+I')");
+        assertThat(batchSql("SELECT * FROM guarded_rescale"))
+                .containsExactlyInAnyOrder(Row.of("p1", 1, 5, "+I"), Row.of("p2", 3, 3, "+I"));
     }
 
     @Test

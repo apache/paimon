@@ -163,6 +163,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public InnerTableRead newRead() {
+        store().validateDeleteOrderingGuardReadScope();
         return new KeyValueTableRead(
                 () -> store().newRead(),
                 () -> store().newBatchRawFileRead(),

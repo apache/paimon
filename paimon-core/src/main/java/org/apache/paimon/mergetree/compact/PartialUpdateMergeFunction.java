@@ -142,7 +142,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private GenericRow row;
     private KeyValue reused;
     private boolean currentDeleteRow;
+    private boolean guardDeleteRow;
     private boolean notNullColumnFilled;
+    private final List<KeyValue> initialGuards = new ArrayList<>();
 
     /**
      * If the first value is retract, and no insert record is received, the row kind should be
@@ -174,10 +176,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     public void reset() {
         this.currentKey = null;
         this.currentDeleteRow = false;
+        this.guardDeleteRow = false;
         this.meetInsert = false;
         this.notNullColumnFilled = false;
         this.row = new GenericRow(getters.length);
         this.latestSequenceNumber = 0;
+        this.initialGuards.clear();
         fieldAggregators.forEach(w -> w.getValue().reset());
     }
 
@@ -189,6 +193,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
             if (!notNullColumnFilled) {
                 initRow(row, kv.value());
+                // A metadata-only prefix cannot supply required payload columns. Initialize
+                // those from the first real retract, then restore the prefix's ordering bounds.
+                for (KeyValue guard : initialGuards) {
+                    replayDeleteOrderingGuard(guard);
+                }
+                initialGuards.clear();
                 notNullColumnFilled = true;
             }
 
@@ -208,6 +218,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             if (removeRecordOnDelete) {
                 if (kv.valueKind() == RowKind.DELETE) {
                     currentDeleteRow = true;
+                    guardDeleteRow = false;
                     row = new GenericRow(getters.length);
                     initRow(row, kv.value());
                 }
@@ -229,12 +240,54 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         latestSequenceNumber = kv.sequenceNumber();
         if (fieldSeqComparators.isEmpty()) {
             currentDeleteRow = false;
+            guardDeleteRow = false;
             updateNonNullFields(kv);
         } else {
             updateWithSequenceGroup(kv);
         }
         meetInsert = true;
         notNullColumnFilled = true;
+        initialGuards.clear();
+    }
+
+    @Override
+    public void addDeleteOrderingGuard(KeyValue guard) {
+        if (ignoreDelete) {
+            return;
+        }
+        currentKey = guard.key();
+        latestSequenceNumber = guard.sequenceNumber();
+        if (!notNullColumnFilled) {
+            initialGuards.add(guard);
+        }
+        replayDeleteOrderingGuard(guard);
+    }
+
+    private void replayDeleteOrderingGuard(KeyValue guard) {
+        if (fieldSequenceEnabled) {
+            retractWithSequenceGroup(guard, true);
+        } else if (removeRecordOnDelete && guard.valueKind() == RowKind.DELETE) {
+            currentDeleteRow = true;
+            guardDeleteRow = true;
+            initGuardRow(guard.value());
+        } else if (!removeRecordOnDelete) {
+            throw new IllegalArgumentException(
+                    "Partial update delete ordering guards require a delete policy.");
+        }
+    }
+
+    private void initGuardRow(InternalRow metadata) {
+        row = new GenericRow(getters.length);
+        for (int i = 0; i < getters.length; i++) {
+            // The sparse metadata row contains no payload. In particular, do not apply
+            // payload NOT NULL checks to a guard or initialize any field from an old delete.
+            row.setField(i, getters[i].getFieldOrNull(metadata));
+        }
+    }
+
+    @Override
+    public boolean isDeleteOrderingGuardResult() {
+        return currentDeleteRow && guardDeleteRow;
     }
 
     private void updateNonNullFields(KeyValue kv) {
@@ -295,6 +348,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         for (int fieldIndex : seqComparator.compareFields()) {
                             if (sequenceGroupPartialDelete.contains(fieldIndex)) {
                                 currentDeleteRow = false;
+                                guardDeleteRow = false;
                             }
                             row.setField(
                                     fieldIndex, getters[fieldIndex].getFieldOrNull(kv.value()));
@@ -336,6 +390,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     }
 
     private void retractWithSequenceGroup(KeyValue kv) {
+        retractWithSequenceGroup(kv, false);
+    }
+
+    private void retractWithSequenceGroup(KeyValue kv, boolean guard) {
         Set<Integer> updatedSequenceFields = new HashSet<>();
         Iterator<WrapperWithFieldIndex<FieldsComparator>> comparatorIter =
                 fieldSeqComparators.iterator();
@@ -380,8 +438,13 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                 if (kv.valueKind() == RowKind.DELETE
                                         && sequenceGroupPartialDelete.contains(field)) {
                                     currentDeleteRow = true;
-                                    row = new GenericRow(getters.length);
-                                    initRow(row, kv.value());
+                                    guardDeleteRow = guard;
+                                    if (guard) {
+                                        initGuardRow(kv.value());
+                                    } else {
+                                        row = new GenericRow(getters.length);
+                                        initRow(row, kv.value());
+                                    }
                                     return;
                                 } else {
                                     row.setField(field, getters[field].getFieldOrNull(kv.value()));

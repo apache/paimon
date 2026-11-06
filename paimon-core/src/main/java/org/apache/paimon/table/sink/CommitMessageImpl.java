@@ -46,6 +46,7 @@ public class CommitMessageImpl implements CommitMessage {
     private transient int bucket;
     private transient @Nullable Integer totalBuckets;
     private transient @Nullable Long checkFromSnapshot;
+    private transient @Nullable String deleteOrderingGuardGeneration;
     private transient DataIncrement dataIncrement;
     private transient CompactIncrement compactIncrement;
 
@@ -65,12 +66,31 @@ public class CommitMessageImpl implements CommitMessage {
             DataIncrement dataIncrement,
             CompactIncrement compactIncrement,
             @Nullable Long checkFromSnapshot) {
+        this(
+                partition,
+                bucket,
+                totalBuckets,
+                dataIncrement,
+                compactIncrement,
+                checkFromSnapshot,
+                null);
+    }
+
+    public CommitMessageImpl(
+            BinaryRow partition,
+            int bucket,
+            @Nullable Integer totalBuckets,
+            DataIncrement dataIncrement,
+            CompactIncrement compactIncrement,
+            @Nullable Long checkFromSnapshot,
+            @Nullable String deleteOrderingGuardGeneration) {
         this.partition = partition;
         this.bucket = bucket;
         this.totalBuckets = totalBuckets;
         this.dataIncrement = dataIncrement;
         this.compactIncrement = compactIncrement;
         this.checkFromSnapshot = checkFromSnapshot;
+        this.deleteOrderingGuardGeneration = deleteOrderingGuardGeneration;
     }
 
     @Override
@@ -95,7 +115,29 @@ public class CommitMessageImpl implements CommitMessage {
 
     public CommitMessageImpl withCheckFromSnapshot(long snapshotId) {
         return new CommitMessageImpl(
-                partition, bucket, totalBuckets, dataIncrement, compactIncrement, snapshotId);
+                partition,
+                bucket,
+                totalBuckets,
+                dataIncrement,
+                compactIncrement,
+                snapshotId,
+                deleteOrderingGuardGeneration);
+    }
+
+    @Override
+    public @Nullable String deleteOrderingGuardGeneration() {
+        return deleteOrderingGuardGeneration;
+    }
+
+    public CommitMessageImpl withDeleteOrderingGuardGeneration(String generation) {
+        return new CommitMessageImpl(
+                partition,
+                bucket,
+                totalBuckets,
+                dataIncrement,
+                compactIncrement,
+                checkFromSnapshot,
+                generation);
     }
 
     public DataIncrement newFilesIncrement() {
@@ -126,6 +168,7 @@ public class CommitMessageImpl implements CommitMessage {
         this.bucket = message.bucket;
         this.totalBuckets = message.totalBuckets;
         this.checkFromSnapshot = message.checkFromSnapshot;
+        this.deleteOrderingGuardGeneration = message.deleteOrderingGuardGeneration;
         this.dataIncrement = message.dataIncrement;
         this.compactIncrement = message.compactIncrement;
     }
@@ -144,6 +187,7 @@ public class CommitMessageImpl implements CommitMessage {
                 && Objects.equals(partition, that.partition)
                 && Objects.equals(totalBuckets, that.totalBuckets)
                 && Objects.equals(checkFromSnapshot, that.checkFromSnapshot)
+                && Objects.equals(deleteOrderingGuardGeneration, that.deleteOrderingGuardGeneration)
                 && Objects.equals(dataIncrement, that.dataIncrement)
                 && Objects.equals(compactIncrement, that.compactIncrement);
     }
@@ -155,6 +199,7 @@ public class CommitMessageImpl implements CommitMessage {
                 bucket,
                 totalBuckets,
                 checkFromSnapshot,
+                deleteOrderingGuardGeneration,
                 dataIncrement,
                 compactIncrement);
     }
@@ -167,12 +212,14 @@ public class CommitMessageImpl implements CommitMessage {
                         + "bucket = %d, "
                         + "totalBuckets = %s, "
                         + "checkFromSnapshot = %s, "
+                        + "deleteOrderingGuardGeneration = %s, "
                         + "newFilesIncrement = %s, "
                         + "compactIncrement = %s}",
                 partition,
                 bucket,
                 totalBuckets,
                 checkFromSnapshot,
+                deleteOrderingGuardGeneration,
                 dataIncrement,
                 compactIncrement);
     }

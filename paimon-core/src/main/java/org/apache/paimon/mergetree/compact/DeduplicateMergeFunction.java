@@ -34,6 +34,7 @@ public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
     private final boolean ignoreDelete;
 
     private KeyValue latestKv;
+    private boolean guardResult;
 
     private DeduplicateMergeFunction(boolean ignoreDelete) {
         this.ignoreDelete = ignoreDelete;
@@ -42,6 +43,7 @@ public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public void reset() {
         latestKv = null;
+        guardResult = false;
     }
 
     @Override
@@ -52,11 +54,25 @@ public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
             return;
         }
         latestKv = kv;
+        guardResult = false;
     }
 
     @Override
     public KeyValue getResult() {
         return latestKv;
+    }
+
+    @Override
+    public void addDeleteOrderingGuard(KeyValue guard) {
+        add(guard);
+        if (!ignoreDelete) {
+            guardResult = true;
+        }
+    }
+
+    @Override
+    public boolean isDeleteOrderingGuardResult() {
+        return guardResult;
     }
 
     @Override

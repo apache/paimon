@@ -21,6 +21,7 @@ package org.apache.paimon.operation.commit;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.partition.PartitionPredicate;
 
 import javax.annotation.Nullable;
 
@@ -37,6 +38,20 @@ public interface CommitChangesProvider {
     /** Reassignments already validated and applied to this provider's compact results. */
     default Set<Long> rebasedReassignments() {
         return Collections.emptySet();
+    }
+
+    default boolean resetsDeleteOrderingGuards() {
+        return false;
+    }
+
+    /** Only the native rescale publisher can replace guards across bucket layouts. */
+    default boolean rescalesDeleteOrderingGuards() {
+        return false;
+    }
+
+    @Nullable
+    default PartitionPredicate deleteOrderingGuardResetFilter() {
+        return null;
     }
 
     static CommitChangesProvider provider(

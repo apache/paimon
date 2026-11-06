@@ -79,14 +79,19 @@ public class CommitMessageSerializerTest {
         assertThat(newCommittable.compactIncrement()).isEqualTo(committable.compactIncrement());
         assertThat(newCommittable.newFilesIncrement()).isEqualTo(committable.newFilesIncrement());
         assertThat(newCommittable.checkFromSnapshot()).isNull();
+        assertThat(newCommittable.deleteOrderingGuardGeneration()).isNull();
 
-        CommitMessageImpl checked = committable.withCheckFromSnapshot(42L);
+        CommitMessageImpl checked =
+                committable
+                        .withDeleteOrderingGuardGeneration("generation-A")
+                        .withCheckFromSnapshot(42L);
         CommitMessageImpl checkedRoundTrip =
                 (CommitMessageImpl)
                         serializer.deserialize(
                                 serializer.getVersion(), serializer.serialize(checked));
         assertThat(checkedRoundTrip).isEqualTo(checked);
         assertThat(checkedRoundTrip.checkFromSnapshot()).isEqualTo(42L);
+        assertThat(checkedRoundTrip.deleteOrderingGuardGeneration()).isEqualTo("generation-A");
 
         byte[] serializedWithoutSnapshot = serializer.serialize(committable);
         CommitMessageImpl oldVersion =
@@ -95,9 +100,19 @@ public class CommitMessageSerializerTest {
                                 13,
                                 Arrays.copyOf(
                                         serializedWithoutSnapshot,
-                                        serializedWithoutSnapshot.length - 1));
+                                        serializedWithoutSnapshot.length - 2));
         assertThat(oldVersion.checkFromSnapshot()).isNull();
         assertThat(oldVersion.newFilesIncrement()).isEqualTo(committable.newFilesIncrement());
+
+        CommitMessageImpl version14 =
+                (CommitMessageImpl)
+                        serializer.deserialize(
+                                14,
+                                Arrays.copyOf(
+                                        serializedWithoutSnapshot,
+                                        serializedWithoutSnapshot.length - 1));
+        assertThat(version14.deleteOrderingGuardGeneration()).isNull();
+        assertThat(version14).isEqualTo(committable);
     }
 
     @Test
@@ -109,7 +124,8 @@ public class CommitMessageSerializerTest {
                                 null,
                                 randomNewFilesIncrement(),
                                 CompactIncrement.emptyIncrement())
-                        .withCheckFromSnapshot(42L);
+                        .withCheckFromSnapshot(42L)
+                        .withDeleteOrderingGuardGeneration("generation-B");
 
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
@@ -120,6 +136,7 @@ public class CommitMessageSerializerTest {
             CommitMessageImpl restored = (CommitMessageImpl) input.readObject();
             assertThat(restored).isEqualTo(message);
             assertThat(restored.checkFromSnapshot()).isEqualTo(42L);
+            assertThat(restored.deleteOrderingGuardGeneration()).isEqualTo("generation-B");
         }
     }
 }

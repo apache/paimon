@@ -18,9 +18,11 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -52,6 +54,11 @@ public interface RecordWriter<T> {
 
     /** Get all data files maintained by this writer. */
     Collection<DataFileMeta> dataFiles();
+
+    /** Persisted and delivered ordering protection belonging to the checkpointed data. */
+    default List<IndexFileMeta> deleteOrderingGuards() {
+        return Collections.emptyList();
+    }
 
     /** Get max sequence number of records written by this writer. */
     long maxSequenceNumber();

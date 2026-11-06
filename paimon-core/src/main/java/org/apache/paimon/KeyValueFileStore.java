@@ -23,12 +23,18 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
+import org.apache.paimon.index.DeleteOrderingGuardPolicy;
+import org.apache.paimon.index.DeleteOrderingGuardReaderFactory;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
+import org.apache.paimon.io.KeyValueFileWriterFactory;
+import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.BucketSelectConverter;
+import org.apache.paimon.operation.FileSystemWriteRestore;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.operation.MergeFileSplitRead;
@@ -38,6 +44,7 @@ import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
@@ -51,6 +58,9 @@ import javax.annotation.Nullable;
 import java.util.Comparator;
 import java.util.List;
 import java.util.function.Supplier;
+
+import static org.apache.paimon.format.FileFormat.fileFormat;
+import static org.apache.paimon.utils.FileStorePathFactory.createFormatPathFactories;
 
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
 public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
@@ -106,13 +116,24 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     @Override
     public MergeFileSplitRead newRead() {
         return new MergeFileSplitRead(
-                options,
-                schema,
-                keyType,
-                valueType,
-                newKeyComparator(),
-                mfFactory,
-                newReaderFactoryBuilder());
+                        options,
+                        schema,
+                        keyType,
+                        valueType,
+                        newKeyComparator(),
+                        mfFactory,
+                        newReaderFactoryBuilder())
+                .withDeleteOrderingGuards(
+                        new DeleteOrderingGuardReaderFactory(
+                                fileIO,
+                                schemaManager,
+                                options,
+                                keyType,
+                                valueType,
+                                pathFactory(),
+                                new CacheManager(
+                                        options.lookupCacheMaxMemory(),
+                                        options.lookupCacheHighPrioPoolRatio())));
     }
 
     public RawFileSplitRead newBatchRawFileRead() {
@@ -143,6 +164,18 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options);
     }
 
+    /** Native sorted-file writers for maintenance which preserves internal record sequences. */
+    public KeyValueFileWriterFactory.Builder newWriterFactoryBuilder() {
+        return KeyValueFileWriterFactory.builder(
+                fileIO,
+                schema.id(),
+                keyType,
+                valueType,
+                fileFormat(options),
+                createFormatPathFactories(options, this::pathFactory),
+                options.targetFileSize(true));
+    }
+
     @Override
     public AbstractFileStoreWrite<KeyValue> newWrite(String commitUser) {
         return newWrite(commitUser, null);
@@ -150,6 +183,13 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public AbstractFileStoreWrite<KeyValue> newWrite(String commitUser, @Nullable Integer writeId) {
+        Snapshot snapshot = snapshotManager().latestSnapshot();
+        if (options.deleteOrderingGuardsEnabled()
+                || DeleteOrderingGuardFile.mayContainGuards(snapshot)) {
+            // Runtime overrides cannot give a persisted schema id different ordering semantics.
+            DeleteOrderingGuardPolicy.validateCompatible(schemaManager.schema(schema.id()), schema);
+            validateDeleteOrderingGuardReadScope();
+        }
         if (options.bucket() == BucketMode.POSTPONE_BUCKET) {
             return new PostponeBucketFileStoreWrite(
                     fileIO,
@@ -171,8 +211,19 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         return newFixedBucketWrite(commitUser, options);
     }
 
+    public void validateDeleteOrderingGuardReadScope() {
+        Snapshot snapshot = snapshotManager().latestSnapshot();
+        if (DeleteOrderingGuardFile.mayContainGuards(snapshot)
+                && !newIndexFileHandler()
+                        .scan(snapshot, DeleteOrderingGuardFile.DELETE_ORDERING_GUARD)
+                        .isEmpty()) {
+            SchemaValidation.validateRetainedDeleteOrderingGuards(schema);
+        }
+    }
+
     /** Creates a merge-tree writer for fixed-bucket batch writes to a postpone-bucket table. */
     public AbstractFileStoreWrite<KeyValue> newPostponeFixedBucketWrite(String commitUser) {
+        validateDeleteOrderingGuardReadScope();
         Options writeOptions = new Options(options.toMap());
         writeOptions.set(CoreOptions.WRITE_ONLY, true);
         return newFixedBucketWrite(commitUser, new CoreOptions(writeOptions));
@@ -199,28 +250,33 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     BucketedPrimaryKeyIndexMaintainer.Factory.create(
                             newIndexFileHandler(), newReaderFactoryBuilder(), schema);
         }
-        return new KeyValueFileStoreWrite(
-                fileIO,
-                schemaManager,
-                schema,
-                commitUser,
-                partitionType,
-                keyType,
-                valueType,
-                keyComparatorSupplier,
-                () -> UserDefinedSeqComparator.create(valueType, writeOptions),
-                logDedupEqualSupplier,
-                mfFactory,
-                pathFactory(),
-                this::pathFactory,
-                snapshotManager(),
-                newScan(),
-                indexFactory,
-                dvMaintainerFactory,
-                primaryKeyIndexMaintainerFactory,
-                writeOptions,
-                keyValueFieldsExtractor,
-                tableName);
+        KeyValueFileStoreWrite write =
+                new KeyValueFileStoreWrite(
+                        fileIO,
+                        schemaManager,
+                        schema,
+                        commitUser,
+                        partitionType,
+                        keyType,
+                        valueType,
+                        keyComparatorSupplier,
+                        () -> UserDefinedSeqComparator.create(valueType, writeOptions),
+                        logDedupEqualSupplier,
+                        mfFactory,
+                        pathFactory(),
+                        this::pathFactory,
+                        snapshotManager(),
+                        newScan(),
+                        indexFactory,
+                        dvMaintainerFactory,
+                        primaryKeyIndexMaintainerFactory,
+                        writeOptions,
+                        keyValueFieldsExtractor,
+                        tableName);
+        write.withWriteRestore(
+                new FileSystemWriteRestore(
+                        writeOptions, snapshotManager(), newScan(), newIndexFileHandler()));
+        return write;
     }
 
     @Override
@@ -234,19 +290,20 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                         schema.logicalBucketKeyType());
 
         return new KeyValueFileStoreScan(
-                newManifestsReader(),
-                bucketSelectConverter,
-                snapshotManager(),
-                schemaManager,
-                schema,
-                keyValueFieldsExtractor,
-                manifestFileFactory(),
-                options.scanManifestParallelism(),
-                options.deletionVectorsEnabled(),
-                options.mergeEngine(),
-                options.changelogProducer(),
-                options.fileIndexReadEnabled() && options.deletionVectorsEnabled(),
-                options.fileIndexReadIgnoreUnknownType());
+                        newManifestsReader(),
+                        bucketSelectConverter,
+                        snapshotManager(),
+                        schemaManager,
+                        schema,
+                        keyValueFieldsExtractor,
+                        manifestFileFactory(),
+                        options.scanManifestParallelism(),
+                        options.deletionVectorsEnabled(),
+                        options.mergeEngine(),
+                        options.changelogProducer(),
+                        options.fileIndexReadEnabled() && options.deletionVectorsEnabled(),
+                        options.fileIndexReadIgnoreUnknownType())
+                .withDeleteOrderingGuardIndexHandler(newIndexFileHandler());
     }
 
     @Override

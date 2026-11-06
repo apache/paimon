@@ -20,6 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -54,6 +55,15 @@ public class ContinuousCompactorStartingScanner extends AbstractStartingScanner 
         if (latestSnapshotId == null || earliestSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
             return new NoSnapshot();
+        }
+
+        if (snapshotReader.includesDeleteOrderingGuardBuckets()
+                && DeleteOrderingGuardFile.mayContainGuards(
+                        snapshotManager.snapshot(latestSnapshotId))) {
+            // The last compaction may have removed every payload file. Its active guard buckets
+            // still need maintenance after a dedicated compactor restarts.
+            return StartingScanner.fromPlan(
+                    snapshotReader.withMode(ScanMode.ALL).withSnapshot(latestSnapshotId).read());
         }
 
         for (long id = latestSnapshotId; id >= earliestSnapshotId; id--) {
