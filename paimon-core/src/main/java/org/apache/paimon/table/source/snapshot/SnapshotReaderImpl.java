@@ -40,9 +40,11 @@ import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.IncrementalSplit;
@@ -440,10 +442,29 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .withBucket(bucket)
                                 .withTotalBuckets(bucketEntry.getValue().get(0).totalBuckets())
                                 .isStreaming(isStreaming);
-                List<SplitGenerator.SplitGroup> splitGroups =
-                        isStreaming
-                                ? splitGenerator.splitForStreaming(bucketFiles)
-                                : splitGenerator.splitForBatch(bucketFiles);
+                List<SplitGenerator.SplitGroup> splitGroups;
+                if (isStreaming) {
+                    if (bucket == BucketMode.POSTPONE_BUCKET) {
+                        // files from the same writer must keep their scan order
+                        Map<String, List<DataFileMeta>> filesByWriter = new LinkedHashMap<>();
+                        for (DataFileMeta file : bucketFiles) {
+                            filesByWriter
+                                    .computeIfAbsent(
+                                            PostponeBucketFileStoreWrite.getWriterPrefix(
+                                                    file.fileName()),
+                                            ignored -> new ArrayList<>())
+                                    .add(file);
+                        }
+                        splitGroups = new ArrayList<>();
+                        for (List<DataFileMeta> files : filesByWriter.values()) {
+                            splitGroups.addAll(splitGenerator.splitForStreaming(files));
+                        }
+                    } else {
+                        splitGroups = splitGenerator.splitForStreaming(bucketFiles);
+                    }
+                } else {
+                    splitGroups = splitGenerator.splitForBatch(bucketFiles);
+                }
 
                 // Calculate bucketPath once per bucket to avoid repeated computation
                 String bucketPath = pathFactory.bucketPath(partition, bucket).toString();

@@ -261,10 +261,37 @@ TBLPROPERTIES (
 
 </details>
 
+### Index Multiple Vector Columns
+
+List the vector columns in `global-index.<type>.index-columns` and configure field overrides
+with `fields.<column>.index-options`. For example, this Flink table indexes image and text
+embeddings independently:
+
+```sql
+CREATE TABLE multimodal_items (
+    id BIGINT,
+    image_embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;512',
+    text_embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;768',
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'bucket' = '8',
+    'deletion-vectors.enabled' = 'true',
+    'global-index.ivf-flat.index-columns' = 'image_embedding,text_embedding',
+    'fields.image_embedding.index-options' = '{"nlist":256,"distance.metric":"cosine"}',
+    'fields.text_embedding.index-options' = '{"nlist":512,"distance.metric":"inner_product"}'
+);
+```
+
+Each vector search selects one column and uses that column's index, dimension, and distance
+metric. Listing multiple columns does not combine their vectors or define a fused ranking.
+Index coverage is tracked separately for each column, so an index on `image_embedding` does
+not cover a query on `text_embedding`. VECTOR columns outside the index list remain unindexed.
+
 ### Options
 
 | Option | Default | Description |
 |---|---|---|
+| `pk-index.build.parallelism` | `1` | Maximum concurrent primary-key index build tasks per writer instance. Must be positive. |
 | `global-index.<type>.index-columns` | Not set | Comma-separated columns, each owning an independent index. Types include `btree`, `bitmap`, `multivalue`, `fm`, `full-text`, and actual ANN implementations such as `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, or `diskann`. |
 | `fields.<column>.index-options` | Not set | JSON object of field overrides. Short keys are scoped to the selected implementation; for example, `{"nlist":64,"distance.metric":"cosine"}` for IVF-PQ. |
 | `<type>.dimension` | Implementation default | Vector dimension for the selected ANN implementation. A fixed-length `VECTOR` column also carries its dimension in the schema. |
@@ -300,6 +327,18 @@ For algorithm-specific options, see the corresponding
 in the [`paimon-full-text` README](https://github.com/apache/paimon/blob/master/paimon-full-text/README.md).
 
 ## Maintenance and Coverage
+
+Set `pk-index.build.parallelism` to `2`, for example, to allow two primary-key index build tasks
+to run concurrently within one writer instance. The default is `1`. Vector, Full Text, BTree,
+Bitmap, Multivalue, and FM indexes share this limit across that writer's columns and buckets.
+It is not the Flink or Spark job parallelism.
+
+Blocking commits start all configured indexes before waiting for their results. Non-blocking
+commits start builds and collect finished results without waiting; outstanding builds are
+collected by later commits. If an index fails during preparation, the coordinator rolls back
+that preparation, cancels outstanding builds, and cleans up uncommitted outputs. Previously
+committed snapshots remain valid. More concurrent builds can increase memory and I/O usage;
+each index implementation may also use its own internal threads.
 
 Paimon builds primary-key indexes from complete `COMPACT` data files above Level 0. An index group
 stores the source file names and row counts required to map index results back to physical rows.

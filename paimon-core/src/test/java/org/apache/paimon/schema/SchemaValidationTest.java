@@ -46,6 +46,7 @@ import static org.apache.paimon.CoreOptions.PRIMARY_KEY_NULLABLE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.VECTOR_FIELD;
 import static org.apache.paimon.CoreOptions.VECTOR_FILE_FORMAT;
+import static org.apache.paimon.schema.SchemaValidation.validateAggregationFunctionTypes;
 import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
 import static org.apache.paimon.schema.TableSchema.CURRENT_VERSION;
 import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
@@ -73,6 +74,115 @@ class SchemaValidationTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
                         "Option 'primary-key.nullable' can only be enabled for a table with primary keys.");
+    }
+
+    @Test
+    public void testPartialUpdateSequenceGroupOrderingFieldSkipped() {
+        // A sequence-group ordering field never gets an aggregator, so an incompatible
+        // aggregate-function configured on it must not be rejected at DDL time.
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", "partial-update");
+        options.put("fields.f2.sequence-group", "f3");
+        // 'collect' on the INT ordering field would be invalid if it were checked.
+        options.put("fields.f2.aggregate-function", "collect");
+        assertThatNoException().isThrownBy(() -> validateTableSchemaExec(options));
+    }
+
+    @Test
+    public void testPartialUpdateGlobalSequenceFieldStillValidated() {
+        // A global sequence.field column is not a sequence-group ordering field, so it still
+        // takes part in aggregation resolution and must be validated.
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", "partial-update");
+        options.put("sequence.field", "f2");
+        options.put("fields.default-aggregate-function", "collect");
+        options.put(BUCKET.key(), String.valueOf(-1));
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        Arrays.asList(
+                                new DataField(0, "f0", DataTypes.INT()),
+                                new DataField(2, "f2", DataTypes.BIGINT())),
+                        10,
+                        emptyList(),
+                        singletonList("f0"),
+                        options,
+                        "");
+
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining(
+                        "Must use sequence group for aggregation functions but not found for field f2");
+    }
+
+    @Test
+    public void testAggregateFunctionTypeMismatch() {
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", "aggregation");
+        options.put("fields.f3.aggregate-function", "collect");
+        assertThatThrownBy(() -> validateAggregationFunctionExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Data type for collect column must be 'Array' but was 'STRING'");
+
+        options.put("fields.f3.aggregate-function", "sum");
+        assertThatThrownBy(() -> validateAggregationFunctionExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Data type for sum column must be 'NumericType'");
+    }
+
+    @Test
+    public void testPartialUpdateAggregateFunctionTypeMismatch() {
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", "partial-update");
+        options.put("fields.f2.sequence-group", "f3");
+        options.put("fields.f3.aggregate-function", "collect");
+        assertThatThrownBy(() -> validateAggregationFunctionExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Data type for collect column must be 'Array' but was 'STRING'");
+
+        options.put("fields.f3.aggregate-function", "sum");
+        assertThatThrownBy(() -> validateAggregationFunctionExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Data type for sum column must be 'NumericType'");
+    }
+
+    @Test
+    public void testAggregateFunctionTypeCheckOnlyOnSchemaCommit() {
+        // A stored schema (possibly combined with current options by time travel) must stay
+        // readable, so loading a table only checks the function name, not the field type.
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", "aggregation");
+        options.put("fields.f3.aggregate-function", "collect");
+        assertThatNoException().isThrownBy(() -> validateTableSchemaExec(options));
+    }
+
+    @Test
+    public void testAggregateFunctionCompatibleTypePasses() {
+        Map<String, String> options = new HashMap<>(2);
+        options.put("merge-engine", "aggregation");
+        options.put("fields.f2.aggregate-function", "sum");
+        assertThatCode(() -> validateAggregationFunctionExec(options)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPartialUpdateAggregateFunctionCompatibleTypePasses() {
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", "partial-update");
+        options.put("fields.f2.sequence-group", "f3");
+        options.put("fields.f3.aggregate-function", "collect");
+        options.put(BUCKET.key(), String.valueOf(-1));
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()),
+                        new DataField(3, "f3", DataTypes.ARRAY(DataTypes.STRING())));
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("f1"), options, "");
+
+        assertThatNoException().isThrownBy(() -> validateTableSchema(schema));
     }
 
     @Test
@@ -140,6 +250,16 @@ class SchemaValidationTest {
     }
 
     private void validateTableSchemaExec(Map<String, String> options) {
+        validateTableSchema(schemaForAggregation(options));
+    }
+
+    private void validateAggregationFunctionExec(Map<String, String> options) {
+        TableSchema schema = schemaForAggregation(options);
+        validateTableSchema(schema);
+        validateAggregationFunctionTypes(schema);
+    }
+
+    private TableSchema schemaForAggregation(Map<String, String> options) {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
@@ -149,8 +269,7 @@ class SchemaValidationTest {
         List<String> partitionKeys = singletonList("f0");
         List<String> primaryKeys = singletonList("f1");
         options.put(BUCKET.key(), String.valueOf(-1));
-        validateTableSchema(
-                new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, ""));
+        return new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
     }
 
     private void validateBlobSchema(Map<String, String> options, List<String> partitions) {

@@ -21,7 +21,7 @@ package org.apache.paimon.table.format;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.FormatTableFilePathFactory;
 import org.apache.paimon.io.FormatTableRollingFileWriter;
 import org.apache.paimon.io.FormatTableWrittenFile;
 import org.apache.paimon.types.RowType;
@@ -33,7 +33,7 @@ import java.util.List;
 public class FormatTableRecordWriter implements AutoCloseable {
 
     private final FileIO fileIO;
-    private final DataFilePathFactory pathFactory;
+    private final FormatTableFilePathFactory pathFactory;
     private final RowType writeSchema;
     private final String fileCompression;
     private final FileFormat fileFormat;
@@ -46,7 +46,7 @@ public class FormatTableRecordWriter implements AutoCloseable {
             FileFormat fileFormat,
             long targetFileSize,
             long targetFileRowNum,
-            DataFilePathFactory pathFactory,
+            FormatTableFilePathFactory pathFactory,
             RowType writeSchema,
             String fileCompression) {
         this.fileIO = fileIO;

@@ -23,6 +23,7 @@ import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.FormatDataSplit
+import org.apache.paimon.utils.PartitionPathUtils
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.connector.catalog.TableCapability
@@ -31,6 +32,49 @@ import org.apache.spark.sql.connector.catalog.TableCatalog
 import scala.collection.JavaConverters._
 
 class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
+
+  test("PaimonFormatTable: omit file format suffix") {
+    for (compression <- Seq("none", "gzip")) {
+      val tableName = s"format_file_suffix_$compression"
+      val codecSuffix = if (compression == "gzip") ".gz" else ""
+      withTable(tableName) {
+        sql(
+          s"CREATE TABLE $tableName (id INT, v STRING, pt INT) USING csv PARTITIONED BY (pt) " +
+            "TBLPROPERTIES ('metastore.partitioned-table'='true', " +
+            s"'format-table.implementation'='paimon', 'file.compression'='$compression', " +
+            "'target-file-row-num'='1')")
+        sql(s"INSERT INTO $tableName VALUES (0, 'old', 1)")
+        val table =
+          paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+        def fileNames(partition: Int): Set[String] = {
+          table
+            .fileIO()
+            .listStatus(new Path(table.location(), s"pt=$partition"))
+            .filter(file => !PartitionPathUtils.isHiddenName(file.getPath.getName))
+            .map(_.getPath.getName)
+            .toSet
+        }
+        val oldFiles = fileNames(1)
+        assert(oldFiles.size == 1)
+        assert(oldFiles.forall(_.endsWith(".csv" + codecSuffix)))
+
+        sql(
+          s"ALTER TABLE $tableName SET TBLPROPERTIES " +
+            "('format-table.file.suffix.enabled'='false')")
+        sql(s"INSERT INTO $tableName VALUES (1, 'one', 1), (2, 'two', 2), (3, 'three', 1)")
+        val allFiles = fileNames(1) ++ fileNames(2)
+        assert(oldFiles.subsetOf(allFiles))
+        val newFiles = allFiles -- oldFiles
+        assert(newFiles.size == 3)
+        assert(
+          newFiles.forall(_.matches("data-[0-9a-f-]{36}-[0-9]+" +
+            java.util.regex.Pattern.quote(codecSuffix))))
+        val expected = Seq(Row(0, "old", 1), Row(1, "one", 1), Row(2, "two", 2), Row(3, "three", 1))
+        checkAnswer(sql(s"SELECT * FROM $tableName"), expected)
+        checkAnswer(spark.read.schema("id INT, v STRING, pt INT").csv(table.location()), expected)
+      }
+    }
+  }
 
   test("PaimonFormatTable: partition file formats survive reads statistics and overwrite") {
     val tableName = "partition_file_formats"

@@ -197,3 +197,58 @@ def test_format_batch_write_public_overrides_are_honored(tmp_path, input_method,
     assert batches[0].to_pydict() == data.to_pydict()
     assert _rows(writer.prepare_commit()[0].written_paths) == [1, 2]
     writer.close()
+
+
+@pytest.mark.parametrize('file_format, content', [
+    (Format.PARQUET, b'not a data file'), (Format.ORC, b'not a data file'), (Format.CSV, b'a,b\n1,2,3\n')])
+def test_format_read_raises_on_unreadable_file(tmp_path, file_format, content):
+    table = _table(tmp_path)
+    table._format = file_format
+    directory = Path(table.location()) / 'pt=a'
+    directory.mkdir(parents=True)
+    (directory / ('bad.' + file_format.value)).write_bytes(content)
+    reader = table.new_read_builder()
+    with pytest.raises(RuntimeError, match='Failed to read .*bad'):
+        reader.new_read().to_arrow(reader.new_scan().plan().splits())
+
+
+@pytest.mark.parametrize('file_format, readable', [(Format.PARQUET, False), (Format.ORC, True), (Format.CSV, True)])
+def test_format_reads_zero_byte_files_like_java(tmp_path, file_format, readable):
+    table = _table(tmp_path)
+    table._format = file_format
+    directory = Path(table.location()) / 'pt=a'
+    directory.mkdir(parents=True)
+    (directory / ('empty.' + file_format.value)).write_bytes(b'')
+    reader = table.new_read_builder()
+    splits = reader.new_scan().plan().splits()
+    if readable:
+        assert reader.new_read().to_arrow(splits).num_rows == 0
+    else:
+        with pytest.raises(RuntimeError, match='Failed to read .*empty'):
+            reader.new_read().to_arrow(splits)
+
+
+def test_format_scan_raises_listing_errors(tmp_path):
+    table = _table(tmp_path)
+    with patch.object(type(table.file_io), 'list_status', side_effect=OSError('connection reset')):
+        with pytest.raises(OSError, match='connection reset'):
+            table.new_read_builder().new_scan().plan()
+
+
+def test_format_scan_skips_directory_that_vanishes_after_listing(tmp_path):
+    table = _table(tmp_path)
+    for pt in ('a', 'b'):
+        directory = Path(table.location()) / f'pt={pt}'
+        directory.mkdir(parents=True)
+        pq.write_table(pa.table({'id': [1]}), str(directory / 'data.parquet'))
+    file_io_type = type(table.file_io)
+    list_status = file_io_type.list_status
+
+    def list_status_while_pt_b_vanishes(self, path):
+        if path.rstrip('/').endswith('pt=b'):
+            raise FileNotFoundError(path)
+        return list_status(self, path)
+
+    with patch.object(file_io_type, 'list_status', list_status_while_pt_b_vanishes):
+        splits = table.new_read_builder().new_scan().plan().splits()
+    assert [split.partition for split in splits] == [{'pt': 'a'}]

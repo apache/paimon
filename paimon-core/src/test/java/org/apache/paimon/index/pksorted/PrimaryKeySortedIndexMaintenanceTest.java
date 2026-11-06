@@ -58,9 +58,9 @@ import org.apache.paimon.utils.RecordWriter;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
@@ -93,9 +93,10 @@ class PrimaryKeySortedIndexMaintenanceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void testBuildRestoreAndReplaceSourceGroups(boolean sharedOptions) throws Exception {
-        TestFileStore store = createStore(sharedOptions);
+    @CsvSource({"false,1", "false,2", "true,1", "true,2"})
+    void testBuildRestoreAndReplaceSourceGroups(boolean sharedOptions, int parallelism)
+            throws Exception {
+        TestFileStore store = createStore(sharedOptions, parallelism);
         TestKeyValueGenerator generator = new TestKeyValueGenerator();
         List<KeyValue> firstBatch =
                 Arrays.asList(
@@ -145,9 +146,10 @@ class PrimaryKeySortedIndexMaintenanceTest {
         restored.close();
     }
 
-    @Test
-    void testRestoreMixedVectorAndScalarPayloads() throws Exception {
-        TestFileStore store = createMixedStore();
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void testRestoreMixedVectorAndScalarPayloads(int parallelism) throws Exception {
+        TestFileStore store = createMixedStore(parallelism);
         TestKeyValueGenerator generator = new TestKeyValueGenerator();
         KeyValue first =
                 withVector(
@@ -320,8 +322,9 @@ class PrimaryKeySortedIndexMaintenanceTest {
         return record.replaceValue(extended);
     }
 
-    private TestFileStore createStore(boolean sharedOptions) throws Exception {
+    private TestFileStore createStore(boolean sharedOptions, int parallelism) throws Exception {
         Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PK_INDEX_BUILD_PARALLELISM.key(), String.valueOf(parallelism));
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true");
@@ -359,8 +362,9 @@ class PrimaryKeySortedIndexMaintenanceTest {
                 .build();
     }
 
-    private TestFileStore createMixedStore() throws Exception {
+    private TestFileStore createMixedStore(int parallelism) throws Exception {
         Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PK_INDEX_BUILD_PARALLELISM.key(), String.valueOf(parallelism));
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true");

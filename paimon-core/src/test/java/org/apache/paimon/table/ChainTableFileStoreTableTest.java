@@ -122,6 +122,43 @@ public class ChainTableFileStoreTableTest {
         tableName = "chain_t_" + uuid.replace("-", "");
     }
 
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    public void testTimeTravelKeepsChainSnapshotHandling(boolean group, boolean deltaBeforeCopy)
+            throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable table = loadTable();
+        FileStoreTable snapshot = table.switchToBranch(SNAPSHOT_BRANCH);
+        for (int i = 0; i < 2; i++) {
+            writeWithCommit(snapshot, row(1L, 1L, "snapshot", "CN", "20250810", "20"));
+            writeWithCommit(table, row(3L, 1L, "main", "US", "20250810", "20"));
+        }
+        table = loadTable();
+        long snapshotTime =
+                Math.max(
+                        table.snapshotManager().snapshot(2).timeMillis(),
+                        snapshot.snapshotManager().snapshot(2).timeMillis());
+        while (System.currentTimeMillis() <= snapshotTime) {
+            Thread.yield();
+        }
+        FileStoreTable delta = table.switchToBranch(DELTA_BRANCH);
+        if (deltaBeforeCopy) {
+            writeWithCommit(delta, row(2L, 1L, "delta", "CN", "20250810", "21"));
+        }
+        FileStoreTable target = group ? ((ChainTableFileStoreTable) table).other() : table;
+        FileStoreTable historical =
+                target.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
+        if (!deltaBeforeCopy) {
+            writeWithCommit(delta, row(2L, 1L, "delta", "CN", "20250810", "21"));
+        }
+
+        assertThat(getResult(historical, Collections.singletonMap("region", "CN")))
+                .containsExactlyInAnyOrder(
+                        row(1L, 1L, "snapshot", "CN", "20250810", "20"),
+                        row(1L, 1L, "snapshot", "CN", "20250810", "21"),
+                        row(2L, 1L, "delta", "CN", "20250810", "21"));
+    }
+
     private static Stream<Arguments> filterPushdownParams() {
         return Stream.of("parquet", "orc")
                 .flatMap(

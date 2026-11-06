@@ -2400,6 +2400,17 @@ public class CoreOptions implements Serializable {
                                     + "falls through to the current branch, which can mask data issues. "
                                     + "Set this to true to surface fallback branch errors to the caller instead.");
 
+    public static final ConfigOption<Boolean> SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT =
+            key("scan.fallback-branch.allow-earliest-snapshot")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to allow reading the earliest available snapshot of a fallback or primary branch "
+                                    + "when no snapshot exists at or before the current branch's requested snapshot time. "
+                                    + "This applies to snapshot-ID time travel, including numeric scan.version. "
+                                    + "By default, such reads fail unless the other branch has no snapshots. "
+                                    + "Enabling this option may read data committed after the requested time.");
+
     public static final ConfigOption<String> SCAN_PRIMARY_BRANCH =
             key("scan.primary-branch")
                     .stringType()
@@ -2877,6 +2888,15 @@ public class CoreOptions implements Serializable {
                     .withFallbackKeys(FILE_COMPRESSION.key())
                     .withDescription("Format table file compression.");
 
+    public static final ConfigOption<Boolean> FORMAT_TABLE_FILE_SUFFIX_ENABLED =
+            key("format-table.file.suffix.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to include the file format suffix in data file names written "
+                                    + "by the Paimon implementation of a format table. Compression "
+                                    + "suffixes are unaffected.");
+
     public static final ConfigOption<String> FORMAT_TABLE_COMMIT_HIVE_SYNC_URI =
             ConfigOptions.key("format-table.commit-hive-sync-url")
                     .stringType()
@@ -3223,6 +3243,16 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The batch size for lateral vector search. Each batch executes vector "
                                     + "topK search and table lookup for multiple query vectors.");
+
+    public static final ConfigOption<Integer> PK_INDEX_BUILD_PARALLELISM =
+            key("pk-index.build.parallelism")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "The maximum number of concurrent primary-key index build tasks per "
+                                    + "writer instance, shared by its index columns and buckets. "
+                                    + "Must be greater than zero. Increasing this value may increase "
+                                    + "memory and I/O usage.");
 
     public static final ConfigOption<String> GLOBAL_INDEX_BTREE_INDEX_COLUMNS =
             key("global-index.btree.index-columns")
@@ -5050,6 +5080,16 @@ public class CoreOptions implements Serializable {
 
     public int vectorSearchLateralJoinBatchSize() {
         return options.get(VECTOR_SEARCH_LATERAL_JOIN_BATCH_SIZE);
+    }
+
+    public int primaryKeyIndexBuildParallelism() {
+        int parallelism = options.get(PK_INDEX_BUILD_PARALLELISM);
+        checkArgument(
+                parallelism > 0,
+                "%s must be greater than zero, but is %s.",
+                PK_INDEX_BUILD_PARALLELISM.key(),
+                parallelism);
+        return parallelism;
     }
 
     public boolean fullTextIndexEnabled() {

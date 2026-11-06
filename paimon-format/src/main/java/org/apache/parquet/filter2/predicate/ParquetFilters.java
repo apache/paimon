@@ -140,35 +140,79 @@ public class ParquetFilters {
 
         @Override
         public FilterPredicate visitLessThan(FieldRef fieldRef, Object literal) {
+            if (isMillisInMicrosColumn(fieldRef)) {
+                Timestamp timestamp = millisLiteral(literal);
+                // the whole millisecond of a fractional literal reads below it
+                return timestamp.getNanoOfMillisecond() != 0
+                        ? new Operators.LtEq(toParquetColumn(fieldRef), lastMicroOfMilli(timestamp))
+                        : new Operators.Lt(toParquetColumn(fieldRef), firstMicroOfMilli(timestamp));
+            }
             return new Operators.Lt(toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
         @Override
         public FilterPredicate visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+            if (isMillisInMicrosColumn(fieldRef)) {
+                return new Operators.GtEq(
+                        toParquetColumn(fieldRef), firstMicroOfMilli(millisLiteral(literal)));
+            }
             return new Operators.GtEq(
                     toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
         @Override
         public FilterPredicate visitNotEqual(FieldRef fieldRef, Object literal) {
+            if (isMillisInMicrosColumn(fieldRef)) {
+                throw new UnsupportedOperationException();
+            }
             return new Operators.NotEq(
                     toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
         @Override
         public FilterPredicate visitLessOrEqual(FieldRef fieldRef, Object literal) {
+            if (isMillisInMicrosColumn(fieldRef)) {
+                return new Operators.LtEq(
+                        toParquetColumn(fieldRef), lastMicroOfMilli(millisLiteral(literal)));
+            }
             return new Operators.LtEq(
                     toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
         @Override
         public FilterPredicate visitEqual(FieldRef fieldRef, Object literal) {
+            if (isMillisInMicrosColumn(fieldRef)) {
+                Timestamp timestamp = millisLiteral(literal);
+                return FilterApi.and(
+                        new Operators.GtEq(toParquetColumn(fieldRef), firstMicroOfMilli(timestamp)),
+                        new Operators.LtEq(toParquetColumn(fieldRef), lastMicroOfMilli(timestamp)));
+            }
             return new Operators.Eq(toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
         @Override
         public FilterPredicate visitGreaterThan(FieldRef fieldRef, Object literal) {
+            if (isMillisInMicrosColumn(fieldRef)) {
+                return new Operators.Gt(
+                        toParquetColumn(fieldRef), lastMicroOfMilli(millisLiteral(literal)));
+            }
             return new Operators.Gt(toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
+        }
+
+        /**
+         * Whether a timestamp field of precision <= 3 is stored as MICROS in this file. Such a
+         * field reads a stored value {@code v} as the millisecond {@code floor(v / 1000)}, so a
+         * literal millisecond covers the micros {@code [millis * 1000, millis * 1000 + 999]} and
+         * comparisons have to be widened to that range.
+         */
+        private boolean isMillisInMicrosColumn(FieldRef fieldRef) {
+            org.apache.paimon.types.DataType type = fieldRef.type();
+            if (!(type instanceof TimestampType || type instanceof LocalZonedTimestampType)
+                    || getTimestampPrecision(type) > 3) {
+                return false;
+            }
+            return timestampUnit(fieldRef, timestampColumn(fieldRef, fileSchema, caseSensitive))
+                    == LogicalTypeAnnotation.TimeUnit.MICROS;
         }
 
         @Override
@@ -247,6 +291,9 @@ public class ParquetFilters {
                 // the always-false semantics correctly.
                 throw new UnsupportedOperationException();
             }
+            if (isMillisInMicrosColumn(fieldRef)) {
+                throw new UnsupportedOperationException();
+            }
             Operators.Column<?> column = toParquetColumn(fieldRef);
             if (column instanceof Operators.LongColumn) {
                 return FilterApi.in(
@@ -277,6 +324,9 @@ public class ParquetFilters {
             if (literals.isEmpty()) {
                 // Same as visitIn: an empty NOT IN is a legitimate always-true leaf, but parquet-mr
                 // refuses an empty set. Leave it out of the pushdown rather than crash the read.
+                throw new UnsupportedOperationException();
+            }
+            if (isMillisInMicrosColumn(fieldRef)) {
                 throw new UnsupportedOperationException();
             }
             Operators.Column<?> column = toParquetColumn(fieldRef);
@@ -390,17 +440,17 @@ public class ParquetFilters {
 
             if (value instanceof Timestamp) {
                 Timestamp timestamp = (Timestamp) value;
-                timestampColumn(fieldRef, fileSchema, caseSensitive);
-                int precision = getTimestampPrecision(type);
-                if (precision <= 3) {
-                    // milliseconds
-                    return timestamp.getMillisecond();
-                } else if (precision <= 6) {
-                    // microseconds
-                    return timestamp.toMicros();
+                switch (timestampUnit(
+                        fieldRef, timestampColumn(fieldRef, fileSchema, caseSensitive))) {
+                    case MILLIS:
+                        return timestamp.getMillisecond();
+                    case MICROS:
+                        return getTimestampPrecision(type) <= 3
+                                ? firstMicroOfMilli(timestamp)
+                                : toMicros(timestamp);
+                    default:
+                        throw new UnsupportedOperationException();
                 }
-                // precision > 6 uses INT96, not supported
-                throw new UnsupportedOperationException();
             }
 
             // The literal has to speak whatever the file holds, not what the table declares.
@@ -576,16 +626,69 @@ public class ParquetFilters {
 
         TimestampLogicalTypeAnnotation timestampType = (TimestampLogicalTypeAnnotation) logicalType;
         int precision = getTimestampPrecision(fieldRef.type());
-        LogicalTypeAnnotation.TimeUnit expectedUnit =
-                precision <= 3
-                        ? LogicalTypeAnnotation.TimeUnit.MILLIS
-                        : LogicalTypeAnnotation.TimeUnit.MICROS;
         boolean expectedAdjustedToUtc = fieldRef.type() instanceof LocalZonedTimestampType;
-        if (timestampType.getUnit() != expectedUnit
-                || timestampType.isAdjustedToUTC() != expectedAdjustedToUtc) {
+        // a file unit coarser than the precision would truncate the literal
+        boolean unitHoldsPrecision =
+                timestampType.getUnit() == LogicalTypeAnnotation.TimeUnit.MICROS
+                        ? precision <= 6
+                        : timestampType.getUnit() == LogicalTypeAnnotation.TimeUnit.MILLIS
+                                && precision <= 3;
+        if (!unitHoldsPrecision || timestampType.isAdjustedToUTC() != expectedAdjustedToUtc) {
             throw new UnsupportedOperationException();
         }
         return column;
+    }
+
+    /** A null literal matches no row, and parquet-mr rejects it in an ordering comparison. */
+    private static Timestamp millisLiteral(Object literal) {
+        if (literal == null) {
+            throw new UnsupportedOperationException();
+        }
+        return (Timestamp) literal;
+    }
+
+    private static long firstMicroOfMilli(Timestamp timestamp) {
+        try {
+            return Math.multiplyExact(timestamp.getMillisecond(), 1000L);
+        } catch (ArithmeticException e) {
+            // a literal outside the range of the file's values cannot be pushed down
+            throw new UnsupportedOperationException(e);
+        }
+    }
+
+    private static long lastMicroOfMilli(Timestamp timestamp) {
+        try {
+            return Math.addExact(firstMicroOfMilli(timestamp), 999L);
+        } catch (ArithmeticException e) {
+            throw new UnsupportedOperationException(e);
+        }
+    }
+
+    private static long toMicros(Timestamp timestamp) {
+        try {
+            return Math.addExact(
+                    Math.multiplyExact(timestamp.getMillisecond(), 1000L),
+                    timestamp.getNanoOfMillisecond() / 1000);
+        } catch (ArithmeticException e) {
+            throw new UnsupportedOperationException(e);
+        }
+    }
+
+    /** The unit of the INT64 values in the file, which literals have to be converted to. */
+    private static LogicalTypeAnnotation.TimeUnit timestampUnit(
+            FieldRef fieldRef, FileColumn column) {
+        LogicalTypeAnnotation logicalType = column.type.getLogicalTypeAnnotation();
+        if (logicalType instanceof TimestampLogicalTypeAnnotation) {
+            return ((TimestampLogicalTypeAnnotation) logicalType).getUnit();
+        }
+        int precision = getTimestampPrecision(fieldRef.type());
+        if (precision <= 3) {
+            return LogicalTypeAnnotation.TimeUnit.MILLIS;
+        } else if (precision <= 6) {
+            return LogicalTypeAnnotation.TimeUnit.MICROS;
+        }
+        // precision > 6 uses INT96, not supported
+        throw new UnsupportedOperationException();
     }
 
     /**
