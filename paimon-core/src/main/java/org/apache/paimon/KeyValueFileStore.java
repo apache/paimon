@@ -111,6 +111,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public MergeFileSplitRead newRead() {
+        validateDeleteOrderingGuardReadScope();
         return new MergeFileSplitRead(
                         options,
                         schema,
@@ -133,6 +134,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     public RawFileSplitRead newBatchRawFileRead() {
+        validateDeleteOrderingGuardReadScope();
         return new RawFileSplitRead(
                 fileIO,
                 schemaManager,

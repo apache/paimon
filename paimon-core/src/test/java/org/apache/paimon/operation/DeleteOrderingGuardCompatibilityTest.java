@@ -197,7 +197,16 @@ class DeleteOrderingGuardCompatibilityTest {
         unsupportedOptions.put("bucket", "-1");
         PrimaryKeyFileStoreTable unsupported =
                 (PrimaryKeyFileStoreTable) table.copy(table.schema().copy(unsupportedOptions));
-        assertThatThrownBy(unsupported::newRead).hasMessageContaining("fixed buckets");
+        Split split =
+                table.newSnapshotReader()
+                        .withDeleteOrderingGuardBuckets()
+                        .read()
+                        .dataSplits()
+                        .get(0);
+        InnerTableRead reader = unsupported.newRead();
+        assertThatThrownBy(() -> reader.createReader(split)).hasMessageContaining("fixed buckets");
+        assertThatThrownBy(() -> unsupported.store().newBatchRawFileRead())
+                .hasMessageContaining("fixed buckets");
         append(table, 2, row(RowKind.INSERT, 1, 2));
         assertThat(read(table, table.newScan().plan().splits(), false)).isEmpty();
     }
@@ -222,7 +231,16 @@ class DeleteOrderingGuardCompatibilityTest {
         overriddenOptions.put("merge-engine", "partial-update");
         PrimaryKeyFileStoreTable overridden =
                 (PrimaryKeyFileStoreTable) retained.copy(retained.schema().copy(overriddenOptions));
-        assertThatThrownBy(overridden::newRead)
+        Split split =
+                retained.newSnapshotReader()
+                        .withDeleteOrderingGuardBuckets()
+                        .read()
+                        .dataSplits()
+                        .get(0);
+        InnerTableRead reader = overridden.newRead();
+        assertThatThrownBy(() -> reader.createReader(split))
+                .hasMessageContaining("only the deduplicate merge engine");
+        assertThatThrownBy(() -> overridden.store().newBatchRawFileRead())
                 .hasMessageContaining("only the deduplicate merge engine");
         assertThatThrownBy(() -> append(overridden, 2, row(RowKind.INSERT, 1, 2)))
                 .hasStackTraceContaining("ordering migration");
