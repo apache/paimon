@@ -249,6 +249,18 @@ under the License.
             <td>If no records flow in a partition of a stream for that amount of time, then that partition is considered "idle" and will not hold back the progress of watermarks in downstream operators.</td>
         </tr>
         <tr>
+            <td><h5>sink.striped-bucket-write.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, a fixed-bucket table stripes each bucket's writes across multiple writer subtasks so that write parallelism can exceed the bucket count without rescaling the table.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.striped-bucket-write.writers-per-bucket</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Sets how many writer subtasks write each bucket. Set to -1 to let every writer subtask write every bucket. Only takes effect when 'sink.striped-bucket-write.enabled' is true.</td>
+        </tr>
+        <tr>
             <td><h5>sink.clustering.sample-factor</h5></td>
             <td style="word-wrap: break-word;">100</td>
             <td>Integer</td>
