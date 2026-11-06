@@ -49,7 +49,6 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitSerializer;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -241,27 +240,6 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             Snapshot otherSnapshot = other.snapshotManager().earlierOrEqualTimeMills(millis);
             if (otherSnapshot == null && !coreOptions().isChainTable()) {
                 otherSnapshot = other.snapshotManager().earliestSnapshot();
-                if (otherSnapshot != null) {
-                    Preconditions.checkArgument(
-                            new Options(wrapped.options(), options)
-                                    .get(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT),
-                            "No snapshot at or before %s is available in branch '%s'. "
-                                    + "The earliest available snapshot is %s (time %s). "
-                                    + "Set '%s' to true to allow reading it.",
-                            millis,
-                            other.coreOptions().branch(),
-                            otherSnapshot.id(),
-                            otherSnapshot.timeMillis(),
-                            CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
-                    LOG.warn(
-                            "No snapshot at or before {} is available in branch '{}'; reading earliest "
-                                    + "snapshot {} (time {}) because '{}' is enabled.",
-                            millis,
-                            other.coreOptions().branch(),
-                            otherSnapshot.id(),
-                            otherSnapshot.timeMillis(),
-                            CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
-                }
             }
             if (otherSnapshot == null) {
                 // Preserve the original snapshot-1 fallback for chain tables.
@@ -273,24 +251,6 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                                         : EMPTY_BRANCH_SNAPSHOT_ID));
             } else {
                 result.put(scanSnapshotIdOptionKey, String.valueOf(otherSnapshot.id()));
-            }
-        } else if (!coreOptions().isChainTable()
-                && options.containsKey(
-                        CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key())
-                && !TimeTravelUtil.hasTimeTravelOptions(new Options(options))
-                && !new Options(wrapped.options(), options)
-                        .get(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT)) {
-            Long mainId = wrapped.coreOptions().scanSnapshotId();
-            Long otherId = other.coreOptions().scanSnapshotId();
-            if (mainId != null && otherId != null && otherId != EMPTY_BRANCH_SNAPSHOT_ID) {
-                Preconditions.checkArgument(
-                        other.snapshotManager().snapshot(otherId).timeMillis()
-                                <= wrapped.snapshotManager().snapshot(mainId).timeMillis(),
-                        "Snapshot %s of branch '%s' is later than the requested snapshot %s; '%s' is disabled.",
-                        otherId,
-                        other.coreOptions().branch(),
-                        mainId,
-                        CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
             }
         }
 
@@ -329,6 +289,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                     "Skipping branch '{}' because it was empty when resolving this read of branch '{}'.",
                     other.coreOptions().branch(),
                     wrapped.coreOptions().branch());
+        } else {
+            validateSnapshotTime();
         }
         return new FallbackReadScan(
                 first,
@@ -340,6 +302,38 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                     }
                     return scanCreator.apply(table);
                 });
+    }
+
+    private void validateSnapshotTime() {
+        Long mainId = wrapped.coreOptions().scanSnapshotId();
+        Long otherId = other.coreOptions().scanSnapshotId();
+        if (mainId == null || otherId == null) {
+            return;
+        }
+        Snapshot mainSnapshot = wrapped.snapshotManager().snapshot(mainId);
+        Snapshot otherSnapshot = other.snapshotManager().snapshot(otherId);
+        if (otherSnapshot.timeMillis() <= mainSnapshot.timeMillis()) {
+            return;
+        }
+        Preconditions.checkArgument(
+                coreOptions()
+                        .toConfiguration()
+                        .get(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT),
+                "Snapshot %s (time %s) of branch '%s' is later than the requested snapshot %s (time %s). "
+                        + "Set '%s' to true to allow reading it.",
+                otherId,
+                otherSnapshot.timeMillis(),
+                other.coreOptions().branch(),
+                mainId,
+                mainSnapshot.timeMillis(),
+                CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
+        LOG.warn(
+                "Reading snapshot {} (time {}) of branch '{}' after the requested time {} because '{}' is enabled.",
+                otherId,
+                otherSnapshot.timeMillis(),
+                other.coreOptions().branch(),
+                mainSnapshot.timeMillis(),
+                CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
     }
 
     private static class EmptyBranchScan implements DataTableScan {

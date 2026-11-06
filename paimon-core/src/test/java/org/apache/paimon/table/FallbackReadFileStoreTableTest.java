@@ -426,14 +426,14 @@ public class FallbackReadFileStoreTableTest {
         Options overrides = new Options();
         overrides.set(CoreOptions.PATH, tablePath.toString());
         overrides.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
-        assertThatThrownBy(() -> FileStoreTableFactory.create(fileIO, overrides))
+        assertThatThrownBy(() -> FileStoreTableFactory.create(fileIO, overrides).newScan().plan())
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("No snapshot at or before");
+                .hasMessageContaining("later than");
         overrides.remove(CoreOptions.SCAN_SNAPSHOT_ID.key());
         overrides.set(CoreOptions.SCAN_VERSION, "1");
-        assertThatThrownBy(() -> FileStoreTableFactory.create(fileIO, overrides))
+        assertThatThrownBy(() -> FileStoreTableFactory.create(fileIO, overrides).newScan().plan())
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("No snapshot at or before");
+                .hasMessageContaining("later than");
         overrides.set(CoreOptions.SCAN_VERSION.key(), null);
         overrides.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), null);
         assertThat(
@@ -501,9 +501,9 @@ public class FallbackReadFileStoreTableTest {
             assertThat(readAndCollect(resolved, scan -> {}))
                     .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
         } else {
-            assertThatThrownBy(() -> table.copy(options))
+            assertThatThrownBy(() -> table.copy(options).newScan().plan())
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("No snapshot at or before");
+                    .hasMessageContaining("later than");
         }
 
         options.clear();
@@ -569,6 +569,7 @@ public class FallbackReadFileStoreTableTest {
     @CsvSource({"false,false", "false,true", "true,false", "true,true"})
     public void testTimeTravelBeforeOtherSnapshots(boolean wrappedFirst, boolean expired)
             throws Exception {
+        String policyKey = CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key();
         FileStoreTable mainTable = createTable();
         writeDataIntoTable(mainTable, 0, rowData(1, 10));
         long snapshotTime = mainTable.snapshotManager().snapshot(1).timeMillis();
@@ -595,14 +596,18 @@ public class FallbackReadFileStoreTableTest {
                 new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
-        assertThatThrownBy(() -> table.copy(options))
+        assertThatThrownBy(() -> table.copy(options).newScan().plan())
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("No snapshot at or before");
-        assertThatThrownBy(() -> createFromFactory(mainTable, "bc", wrappedFirst, options))
+                .hasMessageContaining("later than");
+        assertThatThrownBy(
+                        () ->
+                                createFromFactory(mainTable, "bc", wrappedFirst, options)
+                                        .newScan()
+                                        .plan())
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("No snapshot at or before");
+                .hasMessageContaining("later than");
 
-        options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), "true");
+        options.put(policyKey, "true");
         FallbackReadFileStoreTable historical = (FallbackReadFileStoreTable) table.copy(options);
         long earliestId = expired ? 2L : 1L;
         assertThat(historical.other().coreOptions().scanSnapshotId()).isEqualTo(earliestId);
@@ -621,26 +626,29 @@ public class FallbackReadFileStoreTableTest {
         assertThat(readAndCollect(fromFactory, scan -> {}))
                 .containsExactlyInAnyOrderElementsOf(expected);
 
-        options.remove(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
+        options.remove(policyKey);
         assertThat(
                         ((FallbackReadFileStoreTable) historical.copy(options))
                                 .other()
                                 .coreOptions()
                                 .scanSnapshotId())
                 .isEqualTo(earliestId);
+        Map<String, String> schemaOptions = new HashMap<>(historical.options());
+        schemaOptions.remove(policyKey);
+        List<FileStoreTable> strictCopies = new ArrayList<>();
+        strictCopies.add(historical.copy(historical.schema().copy(schemaOptions)));
         for (String override : Arrays.asList("false", null)) {
-            options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), override);
-            assertThatThrownBy(() -> historical.copy(options))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("No snapshot at or before");
-            assertThatThrownBy(
-                            () ->
-                                    historical.copy(
-                                            Collections.singletonMap(
-                                                    CoreOptions
-                                                            .SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT
-                                                            .key(),
-                                                    override)))
+            options.put(policyKey, override);
+            strictCopies.add(historical.copy(options));
+            Map<String, String> policyOptions = new HashMap<>();
+            policyOptions.put(policyKey, override);
+            strictCopies.add(historical.copy(policyOptions));
+            strictCopies.add(historical.copyWithoutTimeTravel(policyOptions));
+            policyOptions.put(CoreOptions.SCAN_VERSION.key(), null);
+            strictCopies.add(historical.copy(policyOptions));
+        }
+        for (FileStoreTable strict : strictCopies) {
+            assertThatThrownBy(() -> strict.newScan().plan())
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("later than");
         }
