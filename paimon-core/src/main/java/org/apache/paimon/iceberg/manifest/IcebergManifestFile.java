@@ -73,7 +73,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
 
     private static final long UNASSIGNED_SEQ = -1L;
 
-    /** How many entries {@link #validate} decodes between two runs of its check. */
+    /** How many entries {@link #decode} reads between two runs of its check. */
     public static final int VALIDATE_CHECK_INTERVAL = 1024;
 
     private final RowType partitionType;
@@ -183,26 +183,34 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
     }
 
     /**
-     * Decodes the whole file one entry at a time, drops each entry at once, and compares the number
-     * of files and rows that it found with the counters of its manifest list entry. Memory use does
-     * not depend on the size of the file.
+     * Decodes the whole file one entry at a time, drops each entry at once, and returns what the
+     * file holds. Memory use does not depend on the size of the file.
      *
-     * <p>A manifest list records the counters when it is written, and a step that only adds files
-     * trusts them, so the length of a file says nothing about its contents.
+     * <p>A manifest list records the counters and the partition summaries of its manifests when it
+     * is written, and a step that only adds files trusts them, so neither the length of a file nor
+     * the entry of one list says anything about its contents. {@link ManifestFacts#disagreement}
+     * compares the facts with an entry, and a file that is listed by more than one list is compared
+     * with each of the entries.
      *
+     * @param first the entry of a list that names the file, which the entries of the file inherit
+     *     from when they leave a field unset
      * @param betweenEntries runs every {@link #VALIDATE_CHECK_INTERVAL} entries, and may throw to
      *     stop the scan. What it throws is not taken for damage.
      * @throws CorruptManifestException when the storage delivered the whole file and it does not
-     *     decode, or when the counts differ
+     *     decode
      * @throws IOException when the storage failed, or ended the read before the end of the file, so
      *     that a failing read is never reported as damage
      */
-    public void validate(IcebergManifestFileMeta meta, long fileSize, Runnable betweenEntries)
+    public ManifestFacts decode(
+            IcebergManifestFileMeta first, long fileSize, Runnable betweenEntries)
             throws IOException {
-        Path path = pathFactory.toPath(new Path(meta.manifestPath()).getName());
+        Path path = pathFactory.toPath(new Path(first.manifestPath()).getName());
         ReadWatch watch = new ReadWatch(fileIO, fileSize);
         RuntimeException[] fromCheck = new RuntimeException[1];
         long[] counts = new long[6];
+        boolean anyData = false;
+        boolean anyDeletes = false;
+        PartitionSummaryCollector partitionSummaries = new PartitionSummaryCollector();
         try (CloseableIterator<InternalRow> iterator =
                 FileUtils.createFormatReader(watch, readerFactory, path, fileSize)
                         .toCloseableIterator()) {
@@ -210,7 +218,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     (IcebergManifestEntrySerializer) serializer;
             long entries = 0;
             while (iterator.hasNext()) {
-                IcebergManifestEntry entry = entrySerializer.fromRow(iterator.next(), meta);
+                IcebergManifestEntry entry = entrySerializer.fromRow(iterator.next(), first);
                 long rows = entry.file().recordCount();
                 switch (entry.status()) {
                     case ADDED:
@@ -228,6 +236,12 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     default:
                         throw new IllegalStateException("Unknown status " + entry.status());
                 }
+                if (entry.file().content() == IcebergDataFileMeta.Content.DATA) {
+                    anyData = true;
+                } else {
+                    anyDeletes = true;
+                }
+                partitionSummaries.collect(entry.file().partition());
                 if (++entries % VALIDATE_CHECK_INTERVAL == 0) {
                     try {
                         betweenEntries.run();
@@ -245,25 +259,93 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
             throw new CorruptManifestException(path + " cannot be decoded: " + e, e);
         }
         // A reader can take a read that ended early, at the end of a block, for the end of the
-        // file, and then the counters below differ. That is the storage failing, not damage.
+        // file, and then the facts differ. That is the storage failing, not damage.
         watch.throwIfStorageFailed(path, null);
 
-        long[] expected =
-                new long[] {
-                    meta.addedFilesCount(),
-                    meta.existingFilesCount(),
-                    meta.deletedFilesCount(),
-                    meta.addedRowsCount(),
-                    meta.existingRowsCount(),
-                    meta.deletedRowsCount()
-                };
-        if (!Arrays.equals(counts, expected)) {
+        if (anyData && anyDeletes) {
             throw new CorruptManifestException(
-                    path
-                            + " holds (added, existing, deleted files and rows) "
-                            + Arrays.toString(counts)
-                            + ", and its manifest list records "
-                            + Arrays.toString(expected));
+                    path + " holds the entries of data files and of delete files");
+        }
+        return new ManifestFacts(
+                fileSize, counts, anyData, anyDeletes, partitionSummaries.result(), first);
+    }
+
+    /**
+     * What a manifest holds, in the terms of the manifest list entry that is written for it. It is
+     * what the entries of the lists that name the manifest must agree with, whichever list reads
+     * them: a reader skips a manifest by its counters and its partition summaries without looking
+     * at it.
+     */
+    public static final class ManifestFacts {
+
+        private final long length;
+        private final long[] counts;
+        private final boolean anyData;
+        private final boolean anyDeletes;
+        private final List<IcebergPartitionSummary> partitions;
+        private final IcebergManifestFileMeta first;
+
+        private ManifestFacts(
+                long length,
+                long[] counts,
+                boolean anyData,
+                boolean anyDeletes,
+                List<IcebergPartitionSummary> partitions,
+                IcebergManifestFileMeta first) {
+            this.length = length;
+            this.counts = counts;
+            this.anyData = anyData;
+            this.anyDeletes = anyDeletes;
+            this.partitions = partitions;
+            this.first = first;
+        }
+
+        /**
+         * Why the entry of a manifest list cannot be of this manifest, or null when it can. The
+         * fields that the file does not determine, such as the sequence numbers, are compared with
+         * those of the entry that the file was decoded with, because a manifest that is carried
+         * from list to list is listed the same way every time.
+         */
+        @Nullable
+        public String disagreement(IcebergManifestFileMeta entry) {
+            if (entry.manifestLength() != length) {
+                return "its list records "
+                        + entry.manifestLength()
+                        + " bytes, the file has "
+                        + length;
+            }
+            long[] listed =
+                    new long[] {
+                        entry.addedFilesCount(),
+                        entry.existingFilesCount(),
+                        entry.deletedFilesCount(),
+                        entry.addedRowsCount(),
+                        entry.existingRowsCount(),
+                        entry.deletedRowsCount()
+                    };
+            if (!Arrays.equals(counts, listed)) {
+                return "it holds (added, existing, deleted files and rows) "
+                        + Arrays.toString(counts)
+                        + ", and its list records "
+                        + Arrays.toString(listed);
+            }
+            if ((anyData && entry.content() != Content.DATA)
+                    || (anyDeletes && entry.content() != Content.DELETES)) {
+                return "its list records the content "
+                        + entry.content()
+                        + ", which the file does not hold";
+            }
+            if (!partitions.equals(entry.partitions())) {
+                return "its list records partition summaries that differ from those of its entries";
+            }
+            if (entry.partitionSpecId() != first.partitionSpecId()
+                    || entry.sequenceNumber() != first.sequenceNumber()
+                    || entry.minSequenceNumber() != first.minSequenceNumber()
+                    || entry.addedSnapshotId() != first.addedSnapshotId()) {
+                return "the lists that name it record its sequence numbers, snapshot or partition "
+                        + "spec differently";
+            }
+            return null;
         }
     }
 
@@ -279,15 +361,23 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         }
     }
 
+    /** A call on the storage. */
+    @FunctionalInterface
+    private interface StorageCall<T> {
+        T run() throws IOException;
+    }
+
     /**
-     * Passes every call on to the file system and notes whether a read failed or ended early, so
-     * that a decoder error can be told from a storage error.
+     * Passes every call on to the file system and notes whether any of them failed, or a read ended
+     * early, so that a decoder error can be told from a storage error. A failure that surfaces from
+     * closing a stream, from asking for its position or from a call on the file system is a storage
+     * failure as much as one that surfaces from a read.
      */
     private static class ReadWatch implements FileIO {
 
         private final FileIO delegate;
         private final long fileSize;
-        private volatile IOException failure;
+        private volatile Exception failure;
         private volatile boolean endedShort;
 
         private ReadWatch(FileIO delegate, long fileSize) {
@@ -295,10 +385,30 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
             this.fileSize = fileSize;
         }
 
-        /** Fails when a read failed, or ended before the end of the file, whatever was decoded. */
+        /** Runs a call on the storage, and notes what it throws before it passes it on. */
+        private <T> T watched(StorageCall<T> call) throws IOException {
+            try {
+                return call.run();
+            } catch (IOException | RuntimeException e) {
+                note(e);
+                throw e;
+            }
+        }
+
+        private void note(Exception e) {
+            if (failure == null) {
+                failure = e;
+            }
+        }
+
+        /** Fails when a call failed, or a read ended before the end of the file. */
         private void throwIfStorageFailed(Path path, @Nullable Throwable cause) throws IOException {
-            if (failure != null) {
-                throw failure;
+            Exception failed = failure;
+            if (failed instanceof IOException) {
+                throw (IOException) failed;
+            }
+            if (failed != null) {
+                throw new IOException("A read of " + path + " failed", failed);
             }
             if (endedShort) {
                 throw new IOException(
@@ -308,27 +418,20 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
 
         @Override
         public SeekableInputStream newInputStream(Path path) throws IOException {
-            SeekableInputStream in;
-            try {
-                in = delegate.newInputStream(path);
-            } catch (IOException e) {
-                failure = e;
-                throw e;
-            }
+            SeekableInputStream in = watched(() -> delegate.newInputStream(path));
             return new SeekableInputStream() {
                 @Override
                 public void seek(long desired) throws IOException {
-                    try {
-                        in.seek(desired);
-                    } catch (IOException e) {
-                        failure = e;
-                        throw e;
-                    }
+                    watched(
+                            () -> {
+                                in.seek(desired);
+                                return null;
+                            });
                 }
 
                 @Override
                 public long getPos() throws IOException {
-                    return in.getPos();
+                    return watched(in::getPos);
                 }
 
                 @Override
@@ -339,8 +442,8 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                             endedShort = true;
                         }
                         return b;
-                    } catch (IOException e) {
-                        failure = e;
+                    } catch (IOException | RuntimeException e) {
+                        note(e);
                         throw e;
                     }
                 }
@@ -353,15 +456,19 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                             endedShort = true;
                         }
                         return n;
-                    } catch (IOException e) {
-                        failure = e;
+                    } catch (IOException | RuntimeException e) {
+                        note(e);
                         throw e;
                     }
                 }
 
                 @Override
                 public void close() throws IOException {
-                    in.close();
+                    watched(
+                            () -> {
+                                in.close();
+                                return null;
+                            });
                 }
             };
         }
@@ -379,37 +486,37 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         @Override
         public PositionOutputStream newOutputStream(Path path, boolean overwrite)
                 throws IOException {
-            return delegate.newOutputStream(path, overwrite);
+            return watched(() -> delegate.newOutputStream(path, overwrite));
         }
 
         @Override
         public FileStatus getFileStatus(Path path) throws IOException {
-            return delegate.getFileStatus(path);
+            return watched(() -> delegate.getFileStatus(path));
         }
 
         @Override
         public FileStatus[] listStatus(Path path) throws IOException {
-            return delegate.listStatus(path);
+            return watched(() -> delegate.listStatus(path));
         }
 
         @Override
         public boolean exists(Path path) throws IOException {
-            return delegate.exists(path);
+            return watched(() -> delegate.exists(path));
         }
 
         @Override
         public boolean delete(Path path, boolean recursive) throws IOException {
-            return delegate.delete(path, recursive);
+            return watched(() -> delegate.delete(path, recursive));
         }
 
         @Override
         public boolean mkdirs(Path path) throws IOException {
-            return delegate.mkdirs(path);
+            return watched(() -> delegate.mkdirs(path));
         }
 
         @Override
         public boolean rename(Path src, Path dst) throws IOException {
-            return delegate.rename(src, dst);
+            return watched(() -> delegate.rename(src, dst));
         }
     }
 
@@ -444,8 +551,8 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
     private class IcebergManifestEntryWriter
             extends SingleFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> {
 
-        private final SimpleStatsCollector partitionStatsCollector;
-        private final IcebergPartitionStatsCollector[] partitionStatsCollectors;
+        private final PartitionSummaryCollector partitionSummaries =
+                new PartitionSummaryCollector();
         private final long sequenceNumber;
 
         private int addedFilesCount = 0;
@@ -471,21 +578,6 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     serializer::toRow,
                     fileCompression,
                     false);
-            this.partitionStatsCollectors =
-                    new IcebergPartitionStatsCollector[partitionType.getFieldCount()];
-            SimpleColStatsCollector.Factory[] statsFactories =
-                    new SimpleColStatsCollector.Factory[partitionType.getFieldCount()];
-            for (int i = 0; i < partitionType.getFieldCount(); i++) {
-                int position = i;
-                statsFactories[i] =
-                        () -> {
-                            IcebergPartitionStatsCollector collector =
-                                    new IcebergPartitionStatsCollector();
-                            partitionStatsCollectors[position] = collector;
-                            return collector;
-                        };
-            }
-            this.partitionStatsCollector = new SimpleStatsCollector(partitionType, statsFactories);
             this.sequenceNumber = sequenceNumber;
             this.content = content;
         }
@@ -513,25 +605,11 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                 minSequenceNumber = entry.sequenceNumber();
             }
 
-            partitionStatsCollector.collect(entry.file().partition());
+            partitionSummaries.collect(entry.file().partition());
         }
 
         @Override
         public IcebergManifestFileMeta result() throws IOException {
-            SimpleColStats[] stats = partitionStatsCollector.extract();
-            List<IcebergPartitionSummary> partitionSummaries = new ArrayList<>();
-            for (int i = 0; i < stats.length; i++) {
-                SimpleColStats fieldStats = stats[i];
-                DataType type = partitionType.getTypeAt(i);
-                Object min = fieldStats.min();
-                Object max = fieldStats.max();
-                partitionSummaries.add(
-                        new IcebergPartitionSummary(
-                                Objects.requireNonNull(fieldStats.nullCount()) > 0,
-                                partitionStatsCollectors[i].containsNan(),
-                                min == null ? null : toByteBuffer(type, min).array(),
-                                max == null ? null : toByteBuffer(type, max).array()));
-            }
             return new IcebergManifestFileMeta(
                     path.toString(),
                     outputBytes(),
@@ -546,8 +624,58 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     addedRowsCount,
                     existingRowsCount,
                     deletedRowsCount,
-                    partitionSummaries,
+                    partitionSummaries.result(),
                     null);
+        }
+    }
+
+    /**
+     * Collects the partition summaries of a manifest list entry from the entries of its manifest.
+     * The writer of a manifest and the check of one use it, so that they cannot differ.
+     */
+    private class PartitionSummaryCollector {
+
+        private final SimpleStatsCollector collector;
+        private final IcebergPartitionStatsCollector[] fieldCollectors;
+
+        PartitionSummaryCollector() {
+            this.fieldCollectors =
+                    new IcebergPartitionStatsCollector[partitionType.getFieldCount()];
+            SimpleColStatsCollector.Factory[] statsFactories =
+                    new SimpleColStatsCollector.Factory[partitionType.getFieldCount()];
+            for (int i = 0; i < partitionType.getFieldCount(); i++) {
+                int position = i;
+                statsFactories[i] =
+                        () -> {
+                            IcebergPartitionStatsCollector fieldCollector =
+                                    new IcebergPartitionStatsCollector();
+                            fieldCollectors[position] = fieldCollector;
+                            return fieldCollector;
+                        };
+            }
+            this.collector = new SimpleStatsCollector(partitionType, statsFactories);
+        }
+
+        void collect(InternalRow partition) {
+            collector.collect(partition);
+        }
+
+        List<IcebergPartitionSummary> result() {
+            SimpleColStats[] stats = collector.extract();
+            List<IcebergPartitionSummary> summaries = new ArrayList<>();
+            for (int i = 0; i < stats.length; i++) {
+                SimpleColStats fieldStats = stats[i];
+                DataType type = partitionType.getTypeAt(i);
+                Object min = fieldStats.min();
+                Object max = fieldStats.max();
+                summaries.add(
+                        new IcebergPartitionSummary(
+                                Objects.requireNonNull(fieldStats.nullCount()) > 0,
+                                fieldCollectors[i].containsNan(),
+                                min == null ? null : toByteBuffer(type, min).array(),
+                                max == null ? null : toByteBuffer(type, max).array()));
+            }
+            return summaries;
         }
     }
 

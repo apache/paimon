@@ -3273,6 +3273,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             replayPoint(ReplayPoint.LISTS_READ, base.version);
 
             Map<String, String> copied = new HashMap<>();
+            Map<String, IcebergManifestFile.ManifestFacts> facts = new HashMap<>();
             Map<Long, String> originalLists = new HashMap<>();
             List<IcebergSnapshot> retainedCopies = new ArrayList<>();
             IcebergSnapshot workingCopy = null;
@@ -3283,8 +3284,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     String target = copied.get(meta.manifestPath());
                     if (target == null) {
                         checkDuration();
-                        target = copyManifest(meta);
+                        CopiedManifest copy = copyManifest(meta, s);
+                        target = copy.target;
                         copied.put(meta.manifestPath(), target);
+                        facts.put(meta.manifestPath(), copy.facts);
+                    } else {
+                        // a manifest that several lists name is decoded once, and every list
+                        // that names it is held to what it holds
+                        checkAgreement(facts.get(meta.manifestPath()), meta, s);
                     }
                     owned.add(meta.withManifestPath(target));
                 }
@@ -3336,7 +3343,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             }
         }
 
-        private String copyManifest(IcebergManifestFileMeta meta) throws IOException {
+        /** Copies a manifest, and returns the copy with what it holds. */
+        private CopiedManifest copyManifest(IcebergManifestFileMeta meta, IcebergSnapshot listedBy)
+                throws IOException {
             Path source = new Path(meta.manifestPath());
             Path target = pathFactory.newManifestFile();
             try {
@@ -3359,14 +3368,36 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             }
             // the length says nothing about the contents, and a step that only adds files
             // trusts the counters of the list, so the copy is decoded before it is relied on
+            IcebergManifestFile.ManifestFacts decoded;
             try {
-                manifestFile.validate(
-                        meta.withManifestPath(target.toString()), length, this::checkDuration);
+                decoded =
+                        manifestFile.decode(
+                                meta.withManifestPath(target.toString()),
+                                length,
+                                this::checkDuration);
             } catch (IcebergManifestFile.CorruptManifestException e) {
                 throw new BrokenHistory(
                         "the copy of manifest " + source + " is corrupt: " + e.getMessage(), e);
             }
-            return target.toString();
+            checkAgreement(decoded, meta, listedBy);
+            return new CopiedManifest(target.toString(), decoded);
+        }
+
+        /** A list that records a manifest differently from what it holds is a broken history. */
+        private void checkAgreement(
+                IcebergManifestFile.ManifestFacts decoded,
+                IcebergManifestFileMeta entry,
+                IcebergSnapshot listedBy) {
+            String disagreement = decoded.disagreement(entry);
+            if (disagreement != null) {
+                throw new BrokenHistory(
+                        "the list of snapshot "
+                                + listedBy.snapshotId()
+                                + " records manifest "
+                                + entry.manifestPath()
+                                + " wrongly: "
+                                + disagreement);
+            }
         }
 
         // ---------------------------------------------------------------------------------
@@ -3717,6 +3748,18 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         private ReplayBase(long version, IcebergMetadata metadata) {
             this.version = version;
             this.metadata = metadata;
+        }
+    }
+
+    /** A manifest that the replay copied, and what the copy holds. */
+    private static final class CopiedManifest {
+
+        private final String target;
+        private final IcebergManifestFile.ManifestFacts facts;
+
+        private CopiedManifest(String target, IcebergManifestFile.ManifestFacts facts) {
+            this.target = target;
+            this.facts = facts;
         }
     }
 

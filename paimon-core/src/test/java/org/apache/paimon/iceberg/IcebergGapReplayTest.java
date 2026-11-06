@@ -509,6 +509,26 @@ public class IcebergGapReplayTest {
             assertRebuilt(t, n, events, before);
         }
 
+        // The base keeps older snapshots that list the same manifests as its newest one, and
+        // the newest lists one of them as holding no files. A manifest that was checked through
+        // an older list is not checked again through the newer one, unless every list that
+        // names it is held to what it holds: Iceberg skips such a manifest, and its rows go.
+        t.append(t.enabled, key++);
+        t.append(t.enabled, key++);
+        t.gap(key++, key++);
+        n = t.latest();
+        long carriedBase = n - 2;
+        listNoFiles(t.enabled, carriedBase);
+        events = new ArrayList<>();
+        t.replay(t.identifier, events, NOTHING);
+        assertThat(events)
+                .containsSubsequence(
+                        "BASE_SELECTED:" + carriedBase,
+                        "LISTS_READ:" + carriedBase,
+                        "CANDIDATE_REJECTED:" + carriedBase);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, n));
+
         // a table with a primary key is not replayed, and needs no lock for the rebuild
         ReplayTable keyed =
                 new ReplayTable(
@@ -1403,6 +1423,7 @@ public class IcebergGapReplayTest {
         COPY_UNREADABLE,
         COPY_CUT_SHORT,
         COPY_CUT_AT_BLOCK,
+        COPY_CLOSE_FAILS,
         LOCK_UNAVAILABLE,
         NO_LOCK,
         BEFORE_WRITE,
@@ -1476,6 +1497,13 @@ public class IcebergGapReplayTest {
                             name -> name.matches(".*-m\\d+\\.avro") && !before.contains(name),
                             IcebergGapReplayTest::avroHeaderEnd);
                     break;
+                case COPY_CLOSE_FAILS:
+                    // a copy that reads whole, and whose stream fails only when it is closed:
+                    // the storage failed, and the copy is not damaged
+                    fileIO.failClosesOf(
+                            name -> name.matches(".*-m\\d+\\.avro") && !before.contains(name),
+                            new IOException("injected storage failure"));
+                    break;
                 case LOCK_UNAVAILABLE:
                     t.lock.unavailable = true;
                     break;
@@ -1528,6 +1556,7 @@ public class IcebergGapReplayTest {
                 case COPY_UNREADABLE:
                 case COPY_CUT_SHORT:
                 case COPY_CUT_AT_BLOCK:
+                case COPY_CLOSE_FAILS:
                 case LOCK_UNAVAILABLE:
                 case NO_LOCK:
                 case BASE_METADATA_UNREADABLE:
@@ -1570,6 +1599,7 @@ public class IcebergGapReplayTest {
         private volatile Predicate<String> failing = name -> false;
         private volatile IOException failure;
         private volatile ToLongFunction<Path> cutAt;
+        private volatile boolean closeOnly;
         private volatile long copyDelayMillis;
         private final AtomicInteger copies = new AtomicInteger();
 
@@ -1581,6 +1611,15 @@ public class IcebergGapReplayTest {
             this.failing = names;
             this.failure = failure;
             this.cutAt = null;
+            this.closeOnly = false;
+        }
+
+        /** The files read as they are, and closing the stream of one fails. */
+        private void failClosesOf(Predicate<String> names, IOException failure) {
+            this.failing = names;
+            this.failure = failure;
+            this.cutAt = null;
+            this.closeOnly = true;
         }
 
         /** Reads of the files end at a position before their end, with no error. */
@@ -1588,6 +1627,7 @@ public class IcebergGapReplayTest {
             this.failing = names;
             this.failure = null;
             this.cutAt = position;
+            this.closeOnly = false;
         }
 
         private void stopFailing() {
@@ -1599,6 +1639,9 @@ public class IcebergGapReplayTest {
             SeekableInputStream in = super.newInputStream(path);
             if (!failing.test(path.getName())) {
                 return in;
+            }
+            if (closeOnly) {
+                return new CloseFailsStream(in, failure);
             }
             ToLongFunction<Path> position = cutAt;
             if (position == null) {
@@ -1663,6 +1706,44 @@ public class IcebergGapReplayTest {
                 @Override
                 public void close() {}
             };
+        }
+    }
+
+    /** A stream that reads the whole file, and fails when it is closed. */
+    private static class CloseFailsStream extends SeekableInputStream {
+
+        private final SeekableInputStream in;
+        private final IOException failure;
+
+        private CloseFailsStream(SeekableInputStream in, IOException failure) {
+            this.in = in;
+            this.failure = failure;
+        }
+
+        @Override
+        public void seek(long desired) throws IOException {
+            in.seek(desired);
+        }
+
+        @Override
+        public long getPos() throws IOException {
+            return in.getPos();
+        }
+
+        @Override
+        public int read() throws IOException {
+            return in.read();
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            return in.read(b, off, len);
+        }
+
+        @Override
+        public void close() throws IOException {
+            in.close();
+            throw failure;
         }
     }
 
@@ -2071,6 +2152,37 @@ public class IcebergGapReplayTest {
                                     meta.addedFilesCount() + 1,
                                     meta.existingFilesCount(),
                                     meta.deletedFilesCount(),
+                                    meta.addedRowsCount(),
+                                    meta.existingRowsCount(),
+                                    meta.deletedRowsCount(),
+                                    meta.partitions(),
+                                    meta.firstRowId()));
+                });
+    }
+
+    /**
+     * Makes the list of the current snapshot record no live file for its first manifest, which
+     * still holds rows: a reader skips such a manifest, so the rows are missing.
+     */
+    private void listNoFiles(FileStoreTable table, long version) throws Exception {
+        rewriteCurrentList(
+                table,
+                version,
+                metas -> {
+                    IcebergManifestFileMeta meta = metas.get(0);
+                    metas.set(
+                            0,
+                            new IcebergManifestFileMeta(
+                                    meta.manifestPath(),
+                                    meta.manifestLength(),
+                                    meta.partitionSpecId(),
+                                    meta.content(),
+                                    meta.sequenceNumber(),
+                                    meta.minSequenceNumber(),
+                                    meta.addedSnapshotId(),
+                                    0,
+                                    0,
+                                    0,
                                     meta.addedRowsCount(),
                                     meta.existingRowsCount(),
                                     meta.deletedRowsCount(),
