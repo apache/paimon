@@ -127,7 +127,7 @@ commit identifier to `new_update().new_update_by_row_id(commit_identifier)`.
 
 # Multimodal column enrichment
 
-Multimodal Data Evolution tables provide two local column-enrichment methods:
+Multimodal Data Evolution tables provide local column-enrichment methods:
 
 ```python
 # labels is a typed Arrow table containing sample_id and the columns to fill.
@@ -140,6 +140,10 @@ result = table.add_columns(
 
 # Without fn, only the schema is changed; existing rows read as NULL.
 result = table.add_columns(schema=nullable_columns)
+
+# Fill existing columns, or recompute them after changing the model.
+result = table.compute_columns(
+    ["embedding"], inputs=["image"], fn=compute_embeddings, batch_size=128)
 ```
 
 `table` is a `pypaimon.multimodal.MultimodalTable`. `merge_columns` uses ordinary
@@ -152,17 +156,24 @@ a VECTOR column, for example `pa.list_(pa.float32(), 768)` for an embedding.
 
 These methods require a current full-table view and a single writer during the
 operation. They do not provide distributed execution or automatic retries.
-`add_columns` reads only its inputs, materializing ordinary BLOB inputs as bytes;
-video-frame columns keep their descriptor semantics. Function calls have at most
+`compute_columns` requires existing, non-partition output columns and never
+changes the schema. It uses the table's output types and nullability. Every call
+computes all visible rows, including rows with existing values. Use `replace_video`
+for video-frame outputs. Inputs may also be outputs; reads use the source snapshot.
+`add_columns` and `compute_columns` read only their inputs, materializing ordinary
+BLOB inputs as bytes; video-frame columns keep their descriptor semantics.
+Function calls have at most
 `batch_size` rows; outputs are buffered per original file group before writing.
 `merge_columns` materializes the source as an Arrow table and delegates target
 matching and updates to the standard MERGE backend. Supported routes use native
 MERGE when `write.native.enabled=true` and a compatible `pypaimon_rust` is available.
-`add_columns` can use the native shard reader and writer; its `fn` runs in Python.
+`add_columns` and `compute_columns` can use the native shard reader and writer;
+their `fn` runs in Python.
 
 `ColumnUpdateResult` reports `updated_rows`, `added_columns`, `source_snapshot_id`,
 `snapshot_id`, and `schema_id`. `updated_rows` is the backfilled row count for
-`add_columns` (zero for schema-only additions) and `None` for `merge_columns`.
+`add_columns` (zero for schema-only additions) and `compute_columns`, and `None`
+for `merge_columns`. `compute_columns` always returns `added_columns=()`.
 Schema publication and data
 commit are separate. A schema-only call does not create a data snapshot.
 Failures during publication or data preparation raise `ColumnUpdateError` with `phase`,

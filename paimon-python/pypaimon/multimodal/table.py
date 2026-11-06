@@ -539,6 +539,24 @@ class MultimodalTable:
         from pypaimon.multimodal.columns import add_columns
         return add_columns(self, schema, inputs=inputs, fn=fn, batch_size=batch_size)
 
+    def compute_columns(self, columns, *, inputs, fn, batch_size=1024):
+        """Compute existing columns for all visible rows without changing the schema.
+
+        ``columns`` is a column name or a sequence of names. Outputs must be
+        existing, non-partition columns; use ``replace_video`` for video-frame
+        outputs. Types and nullability are taken from the table schema.
+        ``fn`` follows the same input and output contract as ``add_columns``.
+        Inputs may also be outputs; all reads use the captured source snapshot.
+
+        Execution is local and requires a current full-table view and a single
+        writer. Every call recomputes all visible rows, including non-NULL
+        outputs. Untouched columns retain their files. There are no automatic
+        retries or checkpoints. Returns :class:`pypaimon.multimodal.ColumnUpdateResult`
+        with ``added_columns=()`` and the computed row count in ``updated_rows``.
+        """
+        from pypaimon.multimodal.columns import compute_columns
+        return compute_columns(self, columns, inputs=inputs, fn=fn, batch_size=batch_size)
+
     def map_with_blobs(self, dataset, columns, fn, **kwargs):
         from pypaimon.ray import map_with_blobs
 
