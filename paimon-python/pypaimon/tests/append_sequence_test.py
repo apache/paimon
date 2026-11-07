@@ -21,8 +21,12 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
+
+# The ranges come from the Python writer; the native writer is paimon-rust's.
+pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
 
 PA_SCHEMA = pa.schema([('a', pa.int32())])
 
