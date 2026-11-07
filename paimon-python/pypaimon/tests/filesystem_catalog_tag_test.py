@@ -76,6 +76,39 @@ class FileSystemCatalogTagCRUDTest(unittest.TestCase):
 
     # -- create + get --------------------------------------------------------
 
+    def test_list_tags_skips_stray_files(self):
+        # macOS Finder writes .DS_Store into a directory it has shown.
+        self.catalog.create_tag(self.identifier, "t1")
+        table = self.catalog.get_table(self.identifier)
+        tag_dir = table.tag_manager().tag_directory()
+        with open(os.path.join(tag_dir, ".DS_Store"), "w") as f:
+            f.write("junk")
+        self.assertEqual(["t1"], table.tag_manager().list_tags())
+
+    def test_rollback_with_stray_file_in_tag_directory(self):
+        # Rollback deletes the newer snapshots and then lists the tags to
+        # delete the newer ones, so a stray file must not stop it half-way.
+        self.catalog.create_tag(self.identifier, "t1")
+        table = self.catalog.get_table(self.identifier)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {"id": [4], "value": ["d"]}, schema=self.pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+        self.catalog.create_tag(self.identifier, "t2")
+        with open(os.path.join(table.tag_manager().tag_directory(), ".DS_Store"), "w") as f:
+            f.write("junk")
+
+        table.rollback_to("t1")
+
+        table = self.catalog.get_table(self.identifier)
+        self.assertEqual(["t1"], table.tag_manager().list_tags())
+        self.assertEqual(1, table.snapshot_manager().get_latest_snapshot().id)
+        rb = table.new_read_builder()
+        rows = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual([1, 2, 3], sorted(rows.column("id").to_pylist()))
+
     def test_create_and_get_tag(self):
         self.catalog.create_tag(self.identifier, "t1")
         response = self.catalog.get_tag(self.identifier, "t1")
