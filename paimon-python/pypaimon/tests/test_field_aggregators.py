@@ -76,6 +76,13 @@ def _make(identifier, sql_type, options: CoreOptions = None):
     )
 
 
+def _fail_on_overflow(function):
+    """Java's fail-on-overflow option. The default is false (wrap)."""
+    return CoreOptions(Options({
+        "fields.field0.{}.fail-on-overflow".format(function): True,
+    }))
+
+
 class FieldPrimaryKeyAggTest(unittest.TestCase):
 
     def test_returns_input_field(self):
@@ -193,7 +200,7 @@ class FieldSumAggTest(unittest.TestCase):
         self.assertEqual(agg.retract(None, 5), -5)
 
     def test_byte_overflow(self):
-        agg = _make("sum", "TINYINT")
+        agg = _make("sum", "TINYINT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(127, 1)
@@ -202,7 +209,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.agg(-128, -1)
 
     def test_short_overflow(self):
-        agg = _make("sum", "SMALLINT")
+        agg = _make("sum", "SMALLINT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(32767, 1)
@@ -211,7 +218,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.agg(-32768, -1)
 
     def test_int_overflow(self):
-        agg = _make("sum", "INT")
+        agg = _make("sum", "INT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(2147483647, 1)
@@ -220,7 +227,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.agg(-2147483648, -1)
 
     def test_long_overflow(self):
-        agg = _make("sum", "BIGINT")
+        agg = _make("sum", "BIGINT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(9223372036854775807, 1)
@@ -229,7 +236,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.agg(-9223372036854775808, -1)
 
     def test_byte_retract_overflow(self):
-        agg = _make("sum", "TINYINT")
+        agg = _make("sum", "TINYINT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-128, 1)
@@ -241,7 +248,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.retract(None, -128)
 
     def test_short_retract_overflow(self):
-        agg = _make("sum", "SMALLINT")
+        agg = _make("sum", "SMALLINT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-32768, 1)
@@ -253,7 +260,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.retract(None, -32768)
 
     def test_int_retract_overflow(self):
-        agg = _make("sum", "INT")
+        agg = _make("sum", "INT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-2147483648, 1)
@@ -265,7 +272,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.retract(None, -2147483648)
 
     def test_long_retract_overflow(self):
-        agg = _make("sum", "BIGINT")
+        agg = _make("sum", "BIGINT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-9223372036854775808, 1)
@@ -275,6 +282,22 @@ class FieldSumAggTest(unittest.TestCase):
 
         with self.assertRaises(ArithmeticError):
             agg.retract(None, -9223372036854775808)
+
+    def test_integer_overflow_wraps_by_default(self):
+        cases = (
+            ("TINYINT", 127, 1, -128, -128, -1, 127),
+            ("SMALLINT", 32767, 1, -32768, -32768, -1, 32767),
+            ("INT", 2147483647, 1, -2147483648, -2147483648, -1, 2147483647),
+            ("BIGINT", 9223372036854775807, 1, -9223372036854775808,
+             -9223372036854775808, -1, 9223372036854775807),
+        )
+        for sql_type, high, one, wrapped_high, low, minus_one, wrapped_low in cases:
+            agg = _make("sum", sql_type)
+            self.assertEqual(agg.agg(high, one), wrapped_high)
+            self.assertEqual(agg.agg(low, minus_one), wrapped_low)
+            self.assertEqual(agg.retract(low, one), wrapped_low)
+            self.assertEqual(agg.retract(high, minus_one), wrapped_high)
+            self.assertEqual(agg.retract(None, low), low)
 
     def test_float_sum(self):
         agg = _make("sum", "FLOAT")
@@ -406,7 +429,7 @@ class FieldProductAggTest(unittest.TestCase):
         self.assertIsNone(agg.retract(None, self.to_decimal(5, 12)))
 
     def test_byte_overflow(self):
-        agg = _make("product", "TINYINT")
+        agg = _make("product", "TINYINT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(64, 2)
@@ -415,7 +438,7 @@ class FieldProductAggTest(unittest.TestCase):
             agg.agg(-64, 4)
 
     def test_short_overflow(self):
-        agg = _make("product", "SMALLINT")
+        agg = _make("product", "SMALLINT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(1000, 100)
@@ -424,7 +447,7 @@ class FieldProductAggTest(unittest.TestCase):
             agg.agg(-32768, 2)
 
     def test_int_overflow(self):
-        agg = _make("product", "INT")
+        agg = _make("product", "INT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(100000, 100000)
@@ -433,7 +456,7 @@ class FieldProductAggTest(unittest.TestCase):
             agg.agg(-2147483648, -1)
 
     def test_long_overflow(self):
-        agg = _make("product", "BIGINT")
+        agg = _make("product", "BIGINT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(9223372036854775807, 2)
@@ -442,28 +465,50 @@ class FieldProductAggTest(unittest.TestCase):
             agg.agg(-9223372036854775808, -1)
 
     def test_byte_retract_overflow(self):
-        agg = _make("product", "TINYINT")
+        agg = _make("product", "TINYINT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-128, -1)
 
     def test_short_retract_overflow(self):
-        agg = _make("product", "SMALLINT")
+        agg = _make("product", "SMALLINT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-32768, -1)
 
     def test_int_retract_overflow(self):
-        agg = _make("product", "INT")
+        agg = _make("product", "INT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-2147483648, -1)
 
     def test_long_retract_overflow(self):
-        agg = _make("product", "BIGINT")
+        agg = _make("product", "BIGINT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-9223372036854775808, -1)
+
+    def test_integer_overflow_wraps_by_default(self):
+        agg = _make("product", "TINYINT")
+        self.assertEqual(agg.agg(64, 2), -128)
+        self.assertEqual(agg.agg(-64, 4), 0)
+        self.assertEqual(agg.retract(-128, -1), -128)
+
+        agg = _make("product", "SMALLINT")
+        self.assertEqual(agg.agg(1000, 100), -31072)
+        self.assertEqual(agg.agg(-32768, 2), 0)
+        self.assertEqual(agg.retract(-32768, -1), -32768)
+
+        agg = _make("product", "INT")
+        self.assertEqual(agg.agg(100000, 100000), 1410065408)
+        self.assertEqual(agg.agg(-2147483648, -1), -2147483648)
+        self.assertEqual(agg.retract(-2147483648, -1), -2147483648)
+        self.assertEqual(agg.retract(-7, 2), -3)
+
+        agg = _make("product", "BIGINT")
+        self.assertEqual(agg.agg(9223372036854775807, 2), -2)
+        self.assertEqual(agg.agg(-9223372036854775808, -1), -9223372036854775808)
+        self.assertEqual(agg.retract(-9223372036854775808, -1), -9223372036854775808)
 
     def test_null_inputs(self):
         agg = _make("product", "INT")
@@ -483,9 +528,14 @@ class FieldProductAggTest(unittest.TestCase):
             agg.agg(3037000499, 3037000499),
             9223372030926249001,
         )
+        self.assertEqual(
+            agg.agg(3037000500, 3037000500),
+            -9223372036709301616,
+        )
 
+        failing = _make("product", "BIGINT", _fail_on_overflow("product"))
         with self.assertRaises(ArithmeticError):
-            agg.agg(3037000500, 3037000500)
+            failing.agg(3037000500, 3037000500)
 
     def test_non_numeric_type_rejected_at_construction(self):
         with self.assertRaises(ValueError) as ctx:
