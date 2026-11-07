@@ -801,6 +801,7 @@ class FieldCollectAgg(FieldAggregator):
             )
 
         self.distinct = options.field_collect_distinct(field_name)
+        self.count_limit = options.field_collect_agg_count_limit(field_name)
 
     def agg_reversed(self, accumulator: Any, input_field: Any) -> Any:
         # we don't need to actually do the reverse here for this agg
@@ -812,17 +813,24 @@ class FieldCollectAgg(FieldAggregator):
         if accumulator is None and input_field is None:
             return None
 
-        if (accumulator is None or input_field is None) and not self.distinct:
-            return input_field if accumulator is None else accumulator
+        # No truncation needed, so keep the input array as it is.
+        limit = abs(self.count_limit)
+        if input_field is None and not self.distinct and len(accumulator) <= limit:
+            return accumulator
+        if accumulator is None and not self.distinct and len(input_field) <= limit:
+            return input_field
 
-        if self.distinct:
-            result = []
+        result = []
+        if self.count_limit >= 0:
             self._collect(result, accumulator)
             self._collect(result, input_field)
-
             return result
-        else:
-            return list(accumulator) + list(input_field)
+
+        # A negative limit keeps the last elements in aggregation order.
+        self._collect(result, input_field)
+        self._collect(result, accumulator)
+        result.reverse()
+        return result
 
     def retract(self, accumulator: Any, retract_field: Any) -> Any:
         if accumulator is None:
@@ -844,8 +852,18 @@ class FieldCollectAgg(FieldAggregator):
     def _collect(self, result: List[Any], data: List[Any]):
         if data is None:
             return
-        for element in data:
-            if element not in result:
+
+        limit = abs(self.count_limit)
+        if self.count_limit < 0:
+            indices = range(len(data) - 1, -1, -1)
+        else:
+            indices = range(len(data))
+
+        for i in indices:
+            if len(result) >= limit:
+                break
+            element = data[i]
+            if not self.distinct or element not in result:
                 result.append(element)
 
 

@@ -967,11 +967,14 @@ class FieldListaggAggTest(unittest.TestCase):
 
 class FieldCollectAggTest(unittest.TestCase):
 
-    def _make(self, distinct, element_type=None):
+    def _make(self, distinct, element_type=None, count_limit=None):
         if element_type is None:
             element_type = AtomicType("INT")
 
-        options = CoreOptions(Options({"fields.field0.distinct": distinct}))
+        raw = {"fields.field0.distinct": distinct}
+        if count_limit is not None:
+            raw["fields.field0.count-limit"] = count_limit
+        options = CoreOptions(Options(raw))
 
         return create_field_aggregator(
             ArrayType(True, element_type),
@@ -1169,6 +1172,65 @@ class FieldCollectAggTest(unittest.TestCase):
             [{1: "A"}, {2: "B", 1: "A"}],
         )
         self.assertEqual(acc, [{1: "C"}])
+
+    def test_field_collect_agg_count_limit_positive(self):
+        agg = self._make(distinct=False, count_limit=2)
+
+        acc = agg.agg(None, [1, 2])
+        self.assertEqual(acc, [1, 2])
+
+        acc = agg.agg(acc, [3, 4])
+        self.assertEqual(acc, [1, 2])
+
+    def test_field_collect_agg_count_limit_negative(self):
+        agg = self._make(distinct=False, count_limit=-2)
+
+        acc = agg.agg(None, [1, 2])
+        self.assertEqual(acc, [1, 2])
+
+        acc = agg.agg(acc, [3, 4])
+        self.assertEqual(acc, [3, 4])
+
+        acc = agg.agg(acc, [5])
+        self.assertEqual(acc, [4, 5])
+
+    def test_field_collect_agg_count_limit_with_distinct(self):
+        # The example from the Java docs.
+        agg = self._make(distinct=True, count_limit=2)
+        self.assertEqual(agg.agg(None, [1, 2, 1, 3]), [1, 2])
+
+        agg = self._make(distinct=True, count_limit=-2)
+        self.assertEqual(agg.agg(None, [1, 2, 1, 3]), [1, 3])
+
+    def test_field_collect_agg_count_limit_with_distinct_across_inputs(self):
+        agg = self._make(distinct=True, count_limit=2)
+
+        acc = agg.agg(None, [1, 1, 2])
+        self.assertEqual(acc, [1, 2])
+
+        acc = agg.agg(acc, [2, 3])
+        self.assertEqual(acc, [1, 2])
+
+        agg = self._make(distinct=True, count_limit=-2)
+
+        acc = agg.agg(None, [1, 1, 2])
+        self.assertEqual(acc, [1, 2])
+
+        acc = agg.agg(acc, [2, 3])
+        self.assertEqual(acc, [2, 3])
+
+    def test_field_collect_agg_count_limit_without_distinct_keeps_duplicates(self):
+        agg = self._make(distinct=False, count_limit=3)
+
+        self.assertEqual(agg.agg(None, [1, 1, 2, 3]), [1, 1, 2])
+
+        agg = self._make(distinct=False, count_limit=-3)
+        self.assertEqual(agg.agg(None, [1, 1, 2, 3]), [1, 2, 3])
+
+    def test_field_collect_agg_count_limit_zero_returns_empty(self):
+        for limit in (0, -0):
+            agg = self._make(distinct=False, count_limit=limit)
+            self.assertEqual(agg.agg(None, [1, 2]), [])
 
 
 class FieldNestedUpdateAggTest(unittest.TestCase):
