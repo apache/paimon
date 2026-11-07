@@ -223,6 +223,88 @@ public class StripedBucketWriteChannelComputerTest {
         }
     }
 
+    @Test
+    public void testAppendAlternatingBucketsFanOut() throws Exception {
+        int numBuckets = 2;
+        int numStripes = 2;
+        int numChannels = numBuckets * numStripes;
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        TableSchema schema =
+                createSchema(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        numBuckets,
+                        Collections.singletonMap("bucket-key", "k"));
+
+        // find two bucket-key values that land on bucket 0 and bucket 1
+        FixedBucketRowKeyExtractor extractor = new FixedBucketRowKeyExtractor(schema);
+        int key0 = -1;
+        int key1 = -1;
+        for (int x = 0; x < 1000 && (key0 < 0 || key1 < 0); x++) {
+            extractor.setRecord(GenericRow.of(x, 0));
+            int bucket = extractor.bucket();
+            if (bucket == 0 && key0 < 0) {
+                key0 = x;
+            } else if (bucket == 1 && key1 < 0) {
+                key1 = x;
+            }
+        }
+        assertThat(key0).isGreaterThanOrEqualTo(0);
+        assertThat(key1).isGreaterThanOrEqualTo(0);
+
+        StripedBucketWriteChannelComputer computer =
+                new StripedBucketWriteChannelComputer(schema, numStripes);
+        computer.setup(numChannels);
+
+        // alternate the two buckets so a shared stripe counter would correlate with the bucket
+        Map<Integer, Set<Integer>> channelsByBucket = new HashMap<>();
+        for (int i = 0; i < 2000; i++) {
+            InternalRow row = GenericRow.of(i % 2 == 0 ? key0 : key1, i);
+            extractor.setRecord(row);
+            int bucket = extractor.bucket();
+            int channel = computer.channel(row);
+            assertThat(channel).isBetween(0, numChannels - 1);
+            channelsByBucket.computeIfAbsent(bucket, k -> new HashSet<>()).add(channel);
+        }
+        // each bucket must still fan out to all numStripes writers, not just one
+        assertStripesPerBucket(channelsByBucket, numBuckets, numStripes);
+    }
+
+    @Test
+    public void testEqualNaNKeysRouteToSameChannel() throws Exception {
+        int numBuckets = 2;
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.DOUBLE()},
+                        new String[] {"tenant", "k"});
+        TableSchema schema =
+                createSchema(
+                        rowType,
+                        Collections.emptyList(),
+                        Arrays.asList("tenant", "k"),
+                        numBuckets,
+                        Collections.singletonMap("bucket-key", "tenant"));
+
+        // two quiet-NaN payloads that compare equal as primary keys but differ in raw bits
+        double nanA = Double.longBitsToDouble(0x7ff8000000000001L);
+        double nanB = Double.longBitsToDouble(0x7ff8000000000003L);
+        assertThat(Double.compare(nanA, nanB)).isEqualTo(0);
+        InternalRow a = GenericRow.of(1, nanA);
+        InternalRow b = GenericRow.of(1, nanB);
+
+        for (int numStripes = 2; numStripes <= 5; numStripes++) {
+            StripedBucketWriteChannelComputer computer =
+                    new StripedBucketWriteChannelComputer(schema, numStripes);
+            computer.setup(numBuckets * numStripes);
+            // equal primary keys must never be split across writers, or they acquire independent
+            // sequence streams and a stale upsert can win
+            assertThat(computer.channel(a)).isEqualTo(computer.channel(b));
+        }
+    }
+
     private Map<Integer, Set<Integer>> groupByBucket(
             TableSchema schema, List<InternalRow> input, int writesPerBucket, int numChannels) {
         StripedBucketWriteChannelComputer computer =
@@ -268,15 +350,23 @@ public class StripedBucketWriteChannelComputerTest {
     private TableSchema createSchema(
             RowType rowType, List<String> partitionKeys, List<String> primaryKeys, int bucket)
             throws Exception {
+        return createSchema(rowType, partitionKeys, primaryKeys, bucket, Collections.emptyMap());
+    }
+
+    private TableSchema createSchema(
+            RowType rowType,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            int bucket,
+            Map<String, String> extraOptions)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", String.valueOf(bucket));
+        options.putAll(extraOptions);
         SchemaManager schemaManager =
                 new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
         return schemaManager.createTable(
-                new Schema(
-                        rowType.getFields(),
-                        partitionKeys,
-                        primaryKeys,
-                        Collections.singletonMap("bucket", String.valueOf(bucket)),
-                        ""));
+                new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, ""));
     }
 
     private List<InternalRow> randomRows(int count, long seed) {

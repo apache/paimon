@@ -189,6 +189,8 @@ public class StripedBucketWriteSinkITCase {
         options.put("write-only", "true");
         options.put("sink.parallelism", "4");
         options.put("bucket-key", "k");
+        // striping an append table breaks the append order contract, so it requires unordered
+        options.put("bucket-append-ordered", "false");
         // append-only fixed-bucket table: writer parallelism is not capped to the bucket count
         assertThat(writerParallelism(options, 4, Collections.emptyList(), NUM_BUCKETS))
                 .isEqualTo(4);
@@ -200,6 +202,22 @@ public class StripedBucketWriteSinkITCase {
         buildJob(env, table, 1);
         env.execute();
         assertThat(readResults(table)).hasSize(NUM_KEYS);
+    }
+
+    @Test
+    public void testStripedWriteRejectsOrderedAppend() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("sink.striped-bucket-write.enabled", "true");
+        options.put("write-only", "true");
+        options.put("bucket-key", "k");
+        // bucket-append-ordered defaults to true; striping successive rows across writers would
+        // break the ordered append read contract, so the sink must reject it
+        FileStoreTable table = buildTable(options, Collections.emptyList(), NUM_BUCKETS);
+        StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment(batchConfiguration(4));
+        assertThatThrownBy(() -> buildJob(env, table, 1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("bucket-append-ordered");
     }
 
     @Test

@@ -23,7 +23,14 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MurmurHashUtils;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * A {@link RowDataChannelComputer} that stripes each bucket's writes across multiple writer
@@ -48,20 +55,51 @@ public class StripedBucketWriteChannelComputer extends RowDataChannelComputer {
     private final int numBuckets;
     private final boolean hasPrimaryKey;
 
+    // Positions of FLOAT/DOUBLE fields in the trimmed primary key, whose NaN payloads must be
+    // canonicalized before hashing so that keys equal under the key comparator hash alike.
+    private final int[] floatingKeyPositions;
+    private final boolean[] floatingKeyIsDouble;
+
     private transient int numStripes;
-    private transient int nextStripe;
+    // Round-robin progress per (partition, bucket). A single shared counter would correlate with
+    // the bucket arrival pattern (e.g. alternating buckets always pick the same stripe), leaving
+    // each bucket on one writer even though more are available.
+    private transient Map<BinaryRow, int[]> stripeCounters;
 
     public StripedBucketWriteChannelComputer(TableSchema schema, int writesPerBucket) {
         super(schema);
         this.writesPerBucket = writesPerBucket;
         this.numBuckets = new CoreOptions(schema.options()).bucket();
         this.hasPrimaryKey = !schema.primaryKeys().isEmpty();
+
+        List<Integer> positions = new ArrayList<>();
+        List<Boolean> isDouble = new ArrayList<>();
+        if (hasPrimaryKey) {
+            RowType keyType = schema.logicalTrimmedPrimaryKeysType();
+            for (int i = 0; i < keyType.getFieldCount(); i++) {
+                DataTypeRoot root = keyType.getTypeAt(i).getTypeRoot();
+                if (root == DataTypeRoot.DOUBLE) {
+                    positions.add(i);
+                    isDouble.add(true);
+                } else if (root == DataTypeRoot.FLOAT) {
+                    positions.add(i);
+                    isDouble.add(false);
+                }
+            }
+        }
+        this.floatingKeyPositions = new int[positions.size()];
+        this.floatingKeyIsDouble = new boolean[positions.size()];
+        for (int i = 0; i < positions.size(); i++) {
+            this.floatingKeyPositions[i] = positions.get(i);
+            this.floatingKeyIsDouble[i] = isDouble.get(i);
+        }
     }
 
     @Override
     public void setup(int numChannels) {
         super.setup(numChannels);
         this.numStripes = resolveNumStripes();
+        this.stripeCounters = new HashMap<>();
     }
 
     private int resolveNumStripes() {
@@ -80,10 +118,17 @@ public class StripedBucketWriteChannelComputer extends RowDataChannelComputer {
         extractor.setRecord(record);
         BinaryRow partition = extractor.partition();
         int bucket = extractor.bucket();
-        int stripe =
-                hasPrimaryKey
-                        ? keyStripe(extractor.trimmedPrimaryKey())
-                        : Math.floorMod(nextStripe++, numStripes);
+        int stripe;
+        if (hasPrimaryKey) {
+            stripe = keyStripe(extractor.trimmedPrimaryKey());
+        } else {
+            int[] counters = stripeCounters.get(partition);
+            if (counters == null) {
+                counters = new int[numBuckets];
+                stripeCounters.put(partition.copy(), counters);
+            }
+            stripe = Math.floorMod(counters[bucket]++, numStripes);
+        }
         // Widen to long so that bucket * numStripes cannot overflow for large bucket counts
         long bucketSlot = (long) bucket * numStripes + stripe;
         int startChannel = ChannelComputer.startChannel(partition, numChannels);
@@ -94,7 +139,33 @@ public class StripedBucketWriteChannelComputer extends RowDataChannelComputer {
         // Avalanche the key hash so the stripe is independent of the bucket modulo, which also
         // derives from the key hash; otherwise shared factors between numStripes and numBuckets
         // skew it.
-        return Math.floorMod(MurmurHashUtils.fmix(key.hashCode()), numStripes);
+        return Math.floorMod(MurmurHashUtils.fmix(canonicalKeyHash(key)), numStripes);
+    }
+
+    private int canonicalKeyHash(BinaryRow key) {
+        if (floatingKeyPositions.length == 0) {
+            return key.hashCode();
+        }
+        // The key comparator treats all NaN payloads as equal, but BinaryRow.hashCode hashes the
+        // raw bits. Canonicalize NaNs on a copy so logically equal keys route to the same writer
+        // and cannot acquire independent sequence streams; the written record is left unchanged.
+        BinaryRow normalized = key.copy();
+        for (int i = 0; i < floatingKeyPositions.length; i++) {
+            int pos = floatingKeyPositions[i];
+            if (normalized.isNullAt(pos)) {
+                continue;
+            }
+            if (floatingKeyIsDouble[i]) {
+                if (Double.isNaN(normalized.getDouble(pos))) {
+                    normalized.setDouble(pos, Double.NaN);
+                }
+            } else {
+                if (Float.isNaN(normalized.getFloat(pos))) {
+                    normalized.setFloat(pos, Float.NaN);
+                }
+            }
+        }
+        return normalized.hashCode();
     }
 
     @Override
