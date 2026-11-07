@@ -46,6 +46,7 @@ import org.apache.flink.runtime.execution.ExecutionState;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.minicluster.MiniCluster;
 import org.apache.flink.runtime.state.filesystem.AbstractFsCheckpointStorageAccess;
+import org.apache.flink.runtime.testutils.CommonTestUtils;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.graph.StreamGraph;
@@ -186,7 +187,7 @@ class OperatorUidMigrationITCase {
         // a second file, because the restored source resumes past the first one
         Files.write(input.resolve("more.txt"), Arrays.asList("3", "4"));
         Snapshot restored = awaitSnapshotAfter(client, table, committed.id());
-        client.cancel().get();
+        cancel(client);
 
         assertThat(restored.commitUser())
                 .as("the committer kept its uid, so its commit user came back from state")
@@ -202,7 +203,7 @@ class OperatorUidMigrationITCase {
         awaitSnapshotAfter(client, table, 0);
         // one more, so the checkpoint is no older than the snapshot the restore has to continue
         String path = miniCluster(client).triggerCheckpoint(client.getJobID()).get();
-        client.cancel().get();
+        cancel(client);
         return path;
     }
 
@@ -244,6 +245,12 @@ class OperatorUidMigrationITCase {
             }
             Thread.sleep(500);
         }
+    }
+
+    /** {@code cancel()} returns on acknowledgement, while the tasks may still be writing. */
+    private static void cancel(JobClient client) throws Exception {
+        client.cancel().get();
+        CommonTestUtils.waitForJobStatus(client, Collections.singletonList(JobStatus.CANCELED));
     }
 
     private static boolean allTasksRunning(JobClient client) throws Exception {

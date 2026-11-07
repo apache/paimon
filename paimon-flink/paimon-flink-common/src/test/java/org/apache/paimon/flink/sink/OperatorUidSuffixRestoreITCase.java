@@ -41,6 +41,7 @@ import org.apache.flink.runtime.checkpoint.StandaloneCompletedCheckpointStore;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServicesFactory;
 import org.apache.flink.runtime.highavailability.nonha.embedded.EmbeddedHaServicesWithLeadershipControl;
+import org.apache.flink.runtime.testutils.CommonTestUtils;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -192,7 +193,7 @@ class OperatorUidSuffixRestoreITCase {
             }
             Thread.sleep(200);
         }
-        client.cancel().get();
+        cancel(client);
         assertThat(retainedStore.getAllCheckpoints()).isNotEmpty();
     }
 
@@ -205,7 +206,7 @@ class OperatorUidSuffixRestoreITCase {
         while (true) {
             JobStatus status = client.getJobStatus().get();
             if (status == JobStatus.RUNNING) {
-                client.cancel().get();
+                cancel(client);
                 return null;
             }
             if (status.isGloballyTerminalState()) {
@@ -218,6 +219,12 @@ class OperatorUidSuffixRestoreITCase {
             }
             Thread.sleep(200);
         }
+    }
+
+    /** {@code cancel()} returns on acknowledgement, while the tasks may still be writing. */
+    private static void cancel(JobClient client) throws Exception {
+        client.cancel().get();
+        CommonTestUtils.waitForJobStatus(client, Collections.singletonList(JobStatus.CANCELED));
     }
 
     /**
