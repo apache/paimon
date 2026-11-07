@@ -143,6 +143,29 @@ _COLLECT_SET_DEDUPE_TYPES = frozenset({
     "TIMESTAMP", "TIMESTAMP_LTZ",
 })
 
+# Timestamp field types accepted by merge_map_with_keytime. Mirrors
+# FieldMergeMapWithKeyTimeAggFactory.isSupportedTimestampType. STRING is the
+# Python spelling of VARCHAR used by the schema parser.
+_KEYTIME_STRING_TYPES = frozenset({"CHAR", "VARCHAR", "STRING"})
+_KEYTIME_TIMESTAMP_TYPES = frozenset({
+    "CHAR", "VARCHAR", "STRING",
+    "TINYINT", "SMALLINT", "INT", "INTEGER", "BIGINT",
+    "DATE", "TIME",
+    "DECIMAL",
+    "TIMESTAMP", "TIMESTAMP_LTZ",
+})
+
+
+def _utf16_code_unit_greater(left: str, right: str) -> bool:
+    """Strict greater-than in Java ``String.compareTo`` order.
+
+    Java compares unsigned UTF-16 code units. Encoding both strings as
+    UTF-16BE (supplementary characters become surrogate pairs) and comparing
+    the bytes preserves that order, including code points above U+FFFF.
+    """
+    return (left.encode("utf-16-be", "surrogatepass")
+            > right.encode("utf-16-be", "surrogatepass"))
+
 
 def _atomic_base_name(field_type: DataType):
     """Extract the bare SQL type name from an :class:`AtomicType`,
@@ -1299,8 +1322,19 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
                     )
                 )
 
+        ts_type = row_type.fields[ts_field_index].type
+        ts_base = _atomic_base_name(ts_type)
+        if ts_base not in _KEYTIME_TIMESTAMP_TYPES:
+            raise ValueError(
+                "Timestamp field '{}' for field '{}' must be CHAR/VARCHAR, "
+                "TINYINT/SMALLINT/INT/BIGINT, DATE, TIME, DECIMAL, "
+                "TIMESTAMP or TIMESTAMP_LTZ, but was '{}'.".format(
+                    ts_field_name, field_name, ts_type)
+            )
+
         self.ts_field_name = ts_field_name
         self.ts_field_index = ts_field_index
+        self._string_timestamp = ts_base in _KEYTIME_STRING_TYPES
 
     def _put_to_map(self, maps: Dict[Any, Any], input_field: Any):
         if isinstance(input_field, dict):
@@ -1339,9 +1373,21 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
                 continue
 
             existing_ts = self._get_ts_field(existing_row)
-            if (existing_ts is None or new_ts > existing_ts
-                    or (self.overwrite_on_equal_ts and new_ts == existing_ts)):
+            if existing_ts is None or self._should_replace_by_timestamp(new_ts, existing_ts):
                 result_map[key] = new_row
+
+    def _should_replace_by_timestamp(self, new_ts: Any, existing_ts: Any) -> bool:
+        # CHAR/VARCHAR keep Java String.compareTo (UTF-16 code units).
+        # Other supported types, including TIMESTAMP values that still carry a
+        # nanosecond tail, compare by their native order. Equal timestamps
+        # replace only when overwrite-on-equal-ts is enabled.
+        if self._string_timestamp:
+            if _utf16_code_unit_greater(new_ts, existing_ts):
+                return True
+            return self.overwrite_on_equal_ts and new_ts == existing_ts
+        if new_ts > existing_ts:
+            return True
+        return self.overwrite_on_equal_ts and new_ts == existing_ts
 
     def _get_ts_field(self, input_row: Any) -> Any:
         if isinstance(input_row, dict):
