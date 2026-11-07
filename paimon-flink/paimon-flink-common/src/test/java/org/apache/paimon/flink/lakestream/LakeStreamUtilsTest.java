@@ -20,7 +20,13 @@ package org.apache.paimon.flink.lakestream;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.catalog.CatalogTable;
@@ -31,6 +37,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** Tests for lake-stream schema conversion and compatibility checks. */
 public class LakeStreamUtilsTest {
@@ -165,6 +173,96 @@ public class LakeStreamUtilsTest {
     }
 
     @Test
+    public void testCompatibilityIgnoresNestedComments() {
+        DataField nested =
+                new DataField(
+                        1, "x", org.apache.paimon.types.DataTypes.INT(), "paimon nested comment");
+        Schema paimon =
+                paimonSchema(
+                        Collections.singletonList(
+                                new DataField(
+                                        0,
+                                        "r",
+                                        new RowType(true, Collections.singletonList(nested)))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        CatalogTable store =
+                storeTable(
+                        org.apache.flink.table.api.Schema.newBuilder()
+                                .column("r", DataTypes.ROW(DataTypes.FIELD("x", DataTypes.INT())))
+                                .build(),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+
+        assertThat(LakeStreamUtils.isCompatible(paimon, LakeStreamUtils.toPaimonSchema(store)))
+                .isTrue();
+    }
+
+    @Test
+    public void testCompatibilityIgnoresNestedCommentsInsideContainers() {
+        DataField nested =
+                new DataField(
+                        1, "x", org.apache.paimon.types.DataTypes.INT(), "paimon nested comment");
+        Schema paimon =
+                paimonSchema(
+                        Collections.singletonList(
+                                new DataField(
+                                        0,
+                                        "r",
+                                        new ArrayType(
+                                                true,
+                                                new RowType(
+                                                        true, Collections.singletonList(nested))))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        CatalogTable store =
+                storeTable(
+                        org.apache.flink.table.api.Schema.newBuilder()
+                                .column(
+                                        "r",
+                                        DataTypes.ARRAY(
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD("x", DataTypes.INT()))))
+                                .build(),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+
+        assertThat(LakeStreamUtils.isCompatible(paimon, LakeStreamUtils.toPaimonSchema(store)))
+                .isTrue();
+    }
+
+    @Test
+    public void testCompatibilityStillRejectsNestedTypeDrift() {
+        DataField nested =
+                new DataField(
+                        1, "x", org.apache.paimon.types.DataTypes.INT(), "paimon nested comment");
+        Schema paimon =
+                paimonSchema(
+                        Collections.singletonList(
+                                new DataField(
+                                        0,
+                                        "r",
+                                        new RowType(true, Collections.singletonList(nested)))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        CatalogTable store =
+                storeTable(
+                        org.apache.flink.table.api.Schema.newBuilder()
+                                .column(
+                                        "r",
+                                        DataTypes.ROW(DataTypes.FIELD("x", DataTypes.BIGINT())))
+                                .build(),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+
+        assertThat(LakeStreamUtils.isCompatible(paimon, LakeStreamUtils.toPaimonSchema(store)))
+                .isFalse();
+    }
+
+    @Test
     public void testCompatibilityIgnoresNonSharedAttributes() {
         Map<String, String> paimonOptions = new HashMap<>();
         paimonOptions.put(CoreOptions.BUCKET.key(), "1");
@@ -196,6 +294,53 @@ public class LakeStreamUtilsTest {
 
         assertThat(LakeStreamUtils.isCompatible(paimon, LakeStreamUtils.toPaimonSchema(store)))
                 .isTrue();
+    }
+
+    @Test
+    public void testCompatibilityReturnsFalseForOtherTypesWithTheSameTypeRoot() {
+        assertThat(
+                        LakeStreamUtils.isCompatible(
+                                schemaWithType(new RowType(true, Collections.emptyList())),
+                                schemaWithType(customType(DataTypeRoot.ROW))))
+                .isFalse();
+        assertThat(
+                        LakeStreamUtils.isCompatible(
+                                schemaWithType(
+                                        new ArrayType(
+                                                true, org.apache.paimon.types.DataTypes.INT())),
+                                schemaWithType(customType(DataTypeRoot.ARRAY))))
+                .isFalse();
+        assertThat(
+                        LakeStreamUtils.isCompatible(
+                                schemaWithType(
+                                        new MultisetType(
+                                                true, org.apache.paimon.types.DataTypes.INT())),
+                                schemaWithType(customType(DataTypeRoot.MULTISET))))
+                .isFalse();
+        assertThat(
+                        LakeStreamUtils.isCompatible(
+                                schemaWithType(
+                                        new MapType(
+                                                true,
+                                                org.apache.paimon.types.DataTypes.INT(),
+                                                org.apache.paimon.types.DataTypes.INT())),
+                                schemaWithType(customType(DataTypeRoot.MAP))))
+                .isFalse();
+    }
+
+    private static DataType customType(DataTypeRoot root) {
+        DataType type = mock(DataType.class);
+        when(type.getTypeRoot()).thenReturn(root);
+        when(type.isNullable()).thenReturn(true);
+        return type;
+    }
+
+    private static Schema schemaWithType(DataType type) {
+        return paimonSchema(
+                Collections.singletonList(new DataField(0, "r", type)),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.emptyMap());
     }
 
     private static Schema paimonSchema(

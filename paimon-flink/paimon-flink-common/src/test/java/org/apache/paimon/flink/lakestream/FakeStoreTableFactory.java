@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lakestream;
 
 import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
@@ -27,7 +28,9 @@ import org.apache.flink.table.factories.DynamicTableSourceFactory;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -44,6 +47,11 @@ import java.util.Set;
 public class FakeStoreTableFactory implements DynamicTableSourceFactory, DynamicTableSinkFactory {
 
     public static final String IDENTIFIER = FakeStoreCatalogFactory.IDENTIFIER;
+
+    private static final ConfigOption<String> SINK_OPTION =
+            ConfigOptions.key("fakestore.sink.option").stringType().noDefaultValue();
+    private static final ConfigOption<Boolean> SINK_FLAG =
+            ConfigOptions.key("fakestore.sink.flag").booleanType().defaultValue(false);
 
     private static final List<DynamicTableFactory.Context> SOURCE_CONTEXTS =
             Collections.synchronizedList(new ArrayList<DynamicTableFactory.Context>());
@@ -98,7 +106,7 @@ public class FakeStoreTableFactory implements DynamicTableSourceFactory, Dynamic
 
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
-        return Collections.emptySet();
+        return new HashSet<>(Arrays.asList(SINK_OPTION, SINK_FLAG));
     }
 
     @Override

@@ -55,7 +55,10 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -150,10 +153,36 @@ public class LakeStreamTableFactory implements DynamicTableSourceFactory, Dynami
         DynamicTableSinkFactory sinkFactory =
                 storeFactory(
                         storeCatalog, DynamicTableSinkFactory.class, "create a sink for writes");
+        CatalogBaseTable sinkTable =
+                withStatementLocalOptions(context, storeTable, table, sinkFactory);
         return new LakeStreamDynamicTableSink(
                 sinkFactory.createDynamicTableSink(
-                        delegatedContext(context, identifier, storeTable)),
+                        delegatedContext(context, identifier, sinkTable)),
                 identifier);
+    }
+
+    private static CatalogBaseTable withStatementLocalOptions(
+            DynamicTableFactory.Context context,
+            CatalogBaseTable storeTable,
+            Table paimonTable,
+            DynamicTableSinkFactory sinkFactory) {
+        Set<String> providerOptions = new HashSet<>();
+        for (ConfigOption<?> option : sinkFactory.requiredOptions()) {
+            providerOptions.add(option.key());
+        }
+        for (ConfigOption<?> option : sinkFactory.optionalOptions()) {
+            providerOptions.add(option.key());
+        }
+
+        Map<String, String> persistedOptions = paimonTable.options();
+        Map<String, String> mergedOptions = new HashMap<>(storeTable.getOptions());
+        for (Map.Entry<String, String> entry : context.getCatalogTable().getOptions().entrySet()) {
+            if (providerOptions.contains(entry.getKey())
+                    && !Objects.equals(entry.getValue(), persistedOptions.get(entry.getKey()))) {
+                mergedOptions.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return ((CatalogTable) storeTable).copy(mergedOptions);
     }
 
     /** Rejects a write while the store's schema, keys, or shared immutable options differ. */

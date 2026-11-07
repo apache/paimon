@@ -18,9 +18,12 @@
 
 package org.apache.paimon.flink.lakestream;
 
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaChange;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.Configuration;
@@ -169,6 +172,22 @@ public class LakeStreamFlussITCase {
     }
 
     @Test
+    public void testStatementLocalSinkOptionsAreAcceptedByFluss() throws Exception {
+        StreamTableEnvironment tEnv = newTableEnv();
+        createLakeStreamTable(tEnv, "orders");
+
+        tEnv.executeSql(
+                        "INSERT INTO orders /*+ OPTIONS("
+                                + "'sink.producer-id' = 'stable-producer', "
+                                + "'sink.ignore-delete' = 'true') */ "
+                                + "SELECT * FROM (VALUES (1), (2)) AS t(id)")
+                .await();
+
+        assertThat(query(tEnv, "SELECT id FROM orders$rt " + BOUNDED_SCAN))
+                .containsExactlyInAnyOrder(1, 2);
+    }
+
+    @Test
     public void testWriteIsRejectedWhileTheStoreSchemaHasNotCaughtUp() throws Exception {
         StreamTableEnvironment tEnv = newTableEnv();
         // b is a STRING so the aligned write also proves a non-numeric type passes the check
@@ -197,6 +216,30 @@ public class LakeStreamFlussITCase {
         // the refused write reached neither side
         assertThat(queryRows(tEnv, "SELECT a, b FROM drift$rt " + BOUNDED_SCAN))
                 .containsExactly(Row.of(1, "x"));
+    }
+
+    @Test
+    public void testNestedColumnCommentChangeDoesNotRejectWrites() throws Exception {
+        StreamTableEnvironment tEnv = newTableEnv();
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE fluss_store.%s.nested_comments (r ROW<x INT>)", DATABASE));
+        tEnv.executeSql(
+                "CREATE TABLE nested_comments (r ROW<x INT>) "
+                        + "WITH ('lakestream.enabled' = 'true')");
+        tEnv.executeSql("INSERT INTO nested_comments SELECT CAST(ROW(1) AS ROW<x INT>)").await();
+
+        ((FlinkCatalog) catalog)
+                .catalog()
+                .alterTable(
+                        new Identifier(DATABASE, "nested_comments"),
+                        SchemaChange.updateColumnComment(
+                                new String[] {"r", "x"}, "changed only in Paimon"),
+                        false);
+        tEnv.executeSql("INSERT INTO nested_comments SELECT CAST(ROW(2) AS ROW<x INT>)").await();
+
+        assertThat(query(tEnv, "SELECT r.x FROM nested_comments$rt " + BOUNDED_SCAN))
+                .containsExactlyInAnyOrder(1, 2);
     }
 
     @Test

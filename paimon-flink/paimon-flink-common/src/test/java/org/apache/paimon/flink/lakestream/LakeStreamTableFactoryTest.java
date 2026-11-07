@@ -487,6 +487,34 @@ public class LakeStreamTableFactoryTest {
     }
 
     @Test
+    public void testStatementLocalProviderOptionsReachTheStoreSinkFactory() throws Exception {
+        FlinkCatalog catalog = newCatalog(null);
+        createTable(catalog, T1, true);
+        CatalogBaseTable paimonTable = catalog.getTable(T1);
+        Map<String, String> hintedOptions = new HashMap<>(paimonTable.getOptions());
+        hintedOptions.put("fakestore.sink.option", "statement-value");
+        hintedOptions.put("fakestore.sink.flag", "true");
+        // Routing and Paimon-only options are not valid store sink options.
+        hintedOptions.put(CoreOptions.LAKE_STREAM_ENABLED.key(), "false");
+        hintedOptions.put(CoreOptions.BUCKET.key(), "2");
+        ResolvedCatalogTable hinted =
+                resolved(((CatalogTable) paimonTable).copy(hintedOptions), idSchema());
+        FlinkTableFactory factory = (FlinkTableFactory) catalog.getFactory().get();
+
+        factory.createDynamicTableSink(context(id("t1"), hinted));
+
+        assertThat(FakeStoreTableFactory.sinkContexts()).hasSize(1);
+        DynamicTableFactory.Context delegated = FakeStoreTableFactory.sinkContexts().get(0);
+        assertThat(delegated.getCatalogTable().getOptions())
+                .containsEntry("connector", "fakestore")
+                .containsEntry("fakestore.sink.option", "statement-value")
+                .containsEntry("fakestore.sink.flag", "true")
+                .doesNotContainKeys(
+                        CoreOptions.LAKE_STREAM_ENABLED.key(), CoreOptions.BUCKET.key());
+        catalog.close();
+    }
+
+    @Test
     public void testRowLevelModificationIsRejected() throws Exception {
         FlinkCatalog catalog = newCatalog(null);
         createTable(catalog, T1, true);

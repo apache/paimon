@@ -24,7 +24,11 @@ import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.CatalogBaseTable;
@@ -161,11 +165,46 @@ public class LakeStreamUtils {
             DataField paimonField = paimonFields.get(i);
             DataField storeField = storeFields.get(i);
             if (!paimonField.name().equals(storeField.name())
-                    || !paimonField.type().equalsIgnoreFieldId(storeField.type())) {
+                    || !equalPhysicalTypes(paimonField.type(), storeField.type())) {
                 return false;
             }
         }
         return true;
+    }
+
+    private static boolean equalPhysicalTypes(
+            org.apache.paimon.types.DataType paimonType,
+            org.apache.paimon.types.DataType storeType) {
+        if (paimonType.isNullable() != storeType.isNullable()
+                || paimonType.getTypeRoot() != storeType.getTypeRoot()) {
+            return false;
+        }
+        if (paimonType instanceof RowType) {
+            return storeType instanceof RowType
+                    && equalFields(
+                            ((RowType) paimonType).getFields(), ((RowType) storeType).getFields());
+        }
+        if (paimonType instanceof ArrayType) {
+            return storeType instanceof ArrayType
+                    && equalPhysicalTypes(
+                            ((ArrayType) paimonType).getElementType(),
+                            ((ArrayType) storeType).getElementType());
+        }
+        if (paimonType instanceof MultisetType) {
+            return storeType instanceof MultisetType
+                    && equalPhysicalTypes(
+                            ((MultisetType) paimonType).getElementType(),
+                            ((MultisetType) storeType).getElementType());
+        }
+        if (paimonType instanceof MapType) {
+            return storeType instanceof MapType
+                    && equalPhysicalTypes(
+                            ((MapType) paimonType).getKeyType(), ((MapType) storeType).getKeyType())
+                    && equalPhysicalTypes(
+                            ((MapType) paimonType).getValueType(),
+                            ((MapType) storeType).getValueType());
+        }
+        return paimonType.equals(storeType);
     }
 
     private static boolean equalSelectedOptions(
