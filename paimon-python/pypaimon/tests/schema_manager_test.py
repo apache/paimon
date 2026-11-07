@@ -20,7 +20,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from pypaimon import CatalogFactory
 from pypaimon.branch.branch_manager import BranchManager
+from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
@@ -858,6 +860,52 @@ class TestRowTrackingValidation(unittest.TestCase):
 
         self.assertEqual(manager.latest().id, 0)
         self.assertNotIn("row-tracking.enabled", manager.latest().options)
+
+
+class TestColumnAndKeyValidation(unittest.TestCase):
+    """create_table rejects the column and key lists Java's Schema rejects."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        warehouse = os.path.join(self.temp_dir, "warehouse")
+        self.catalog = CatalogFactory.create({"warehouse": warehouse})
+        self.catalog.create_database("default", True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @staticmethod
+    def _schema(names=("id", "dt"), partition_keys=None, primary_keys=None):
+        return Schema(
+            fields=[DataField(i, name, AtomicType("INT", False))
+                    for i, name in enumerate(names)],
+            partition_keys=partition_keys or [],
+            primary_keys=primary_keys or [],
+            options={"bucket": "1"} if primary_keys else {},
+        )
+
+    def test_create_table_rejects_key_that_is_not_a_column(self):
+        for kwargs, message in (
+                ({"partition_keys": ["dtt"]}, "should include all partition fields"),
+                ({"primary_keys": ["idd"]}, "should include all primary key constraint")):
+            with self.subTest(**kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    self.catalog.create_table("default.t", self._schema(**kwargs), False)
+                # Nothing is persisted, so the name can be used again.
+                with self.assertRaises(TableNotExistException):
+                    self.catalog.get_table("default.t")
+
+    def test_create_table_rejects_duplicates(self):
+        cases = [
+            ({"names": ("id", "id")}, "Table column"),
+            ({"partition_keys": ["dt", "dt"]}, "Partition key constraint"),
+            ({"primary_keys": ["id", "id"]}, "Primary key constraint"),
+        ]
+        for kwargs, message in cases:
+            with self.subTest(**kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    self.catalog.create_table("default.t", self._schema(**kwargs), False)
 
 
 if __name__ == '__main__':
