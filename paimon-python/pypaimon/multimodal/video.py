@@ -276,6 +276,25 @@ def _encode_images_to_video(
     return count
 
 
+class _PrefetchedVideo(io.BytesIO):
+    """Buffer a payload while preserving its source metadata and lifetime."""
+
+    def __init__(self, payload, source):
+        self._source = source
+        super().__init__(payload)
+        self.video_prefetch_bytes = len(payload)
+
+    def __getattr__(self, name):
+        return getattr(self._source, name)
+
+    def close(self):
+        if not self.closed:
+            try:
+                self._source.close()
+            finally:
+                super().close()
+
+
 class VideoFrameCollator:
     """Decode frame rows in a DataLoader worker while reusing video sessions.
 
@@ -530,9 +549,7 @@ class VideoFrameCollator:
                 payload = stream.read(descriptor.length)
                 if len(payload) != descriptor.length:
                     raise IOError("Incomplete video payload during prefetch.")
-                stream.close()
-                stream = io.BytesIO(payload)
-                stream.video_prefetch_bytes = len(payload)
+                stream = _PrefetchedVideo(payload, stream)
                 del payload
             # Replica decoders share metadata, while their decode state stays separate.
             stream.video_metadata_cache = self._video_metadata_cache

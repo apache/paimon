@@ -599,7 +599,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
                 result = collator([{"video": first}])
                 self.assertEqual((b"video", 0), result[0]["frame"])
             self.assertEqual([5], reads)
-            self.assertTrue(opened[0].closed)
+            self.assertFalse(opened[0].closed)
             self.assertEqual([b"id", b"o"],
                              decoders[0]._stream.video_read_ranges([(1, 2), (4, 1)]))
             self.assertEqual([5], reads)
