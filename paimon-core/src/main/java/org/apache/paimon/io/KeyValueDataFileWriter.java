@@ -32,6 +32,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
@@ -74,6 +75,7 @@ public abstract class KeyValueDataFileWriter
     private final FileSource fileSource;
     @Nullable private final DataFileIndexWriter dataFileIndexWriter;
     @Nullable private final ManagedBlobReferenceCollector blobReferenceCollector;
+    @Nullable private final DeleteRowFieldsProjector deleteRowFieldsProjector;
 
     private BinaryRow minKey = null;
     private long minSeqNumber = Long.MAX_VALUE;
@@ -94,7 +96,8 @@ public abstract class KeyValueDataFileWriter
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
             boolean isExternalPath,
-            Set<String> managedBlobFields) {
+            Set<String> managedBlobFields,
+            @Nullable DeleteRowFieldsProjector deleteRowFieldsProjector) {
         super(fileIO, context, path, converter, writeRowType, options.asyncFileWrite());
 
         this.keyType = keyType;
@@ -115,10 +118,14 @@ public abstract class KeyValueDataFileWriter
                         ? null
                         : new ManagedBlobReferenceCollector(
                                 fileIO, path, valueType, managedBlobFields);
+        this.deleteRowFieldsProjector = deleteRowFieldsProjector;
     }
 
     @Override
     public void write(KeyValue kv) throws IOException {
+        if (deleteRowFieldsProjector != null && kv.valueKind() == RowKind.DELETE) {
+            kv = deleteRowFieldsProjector.project(kv);
+        }
         super.write(kv);
 
         if (dataFileIndexWriter != null) {
