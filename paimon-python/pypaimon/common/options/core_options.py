@@ -2058,6 +2058,15 @@ class CoreOptions:
             .default_value(False)
         )
 
+    def field_collect_agg_count_limit(self, field_name: str) -> int:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.COUNT_LIMIT}'
+            )
+            .int_type()
+            .default_value(2147483647)  # Integer.MAX_VALUE
+        )
+
     def field_nested_update_agg_nested_key(self, field_name: str) -> List[str]:
         key_string = self.options.get(
             ConfigOptions.key(
