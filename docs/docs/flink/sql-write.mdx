@@ -132,7 +132,7 @@ throughput and resource utilization without rescaling the table:
 For a primary-key table, records that share a primary key still land on the same writer, so each
 writer produces sorted runs over a hash-partitioned subset of the bucket's keys rather than
 duplicating the whole key space. For an append-only table, records are distributed across the
-writers round-robin, which requires `bucket-append-ordered = false` (see below).
+writers round-robin.
 
 :::warning Requirements and costs
 
