@@ -25,6 +25,7 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.multimodal import VideoFrameCollator
 from pypaimon.multimodal.lerobot.dataset import _decode_video_rows
 from pypaimon.table.row.blob import VideoFrameDescriptor
+from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
 class _Decoder:
@@ -564,6 +565,101 @@ class VideoFrameCollatorTest(unittest.TestCase):
 
         self.assertEqual("oss://bucket/internal.video", file_io.path)
         self.assertEqual((b"resolved-video", 2), result[0]["frame"])
+
+    def test_unused_index_is_not_read_on_decode_eviction_or_close(self):
+        streams = []
+
+        class PayloadOnlyIO:
+            def new_input_stream(self, path):
+                stream = io.BytesIO(b"video")
+                streams.append(stream)
+                return stream
+
+            def read_file_range(self, *args):
+                raise AssertionError("unused index must not be read")
+
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=PayloadOnlyIO()), video_column="video",
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            max_open_videos=1, collate_fn=lambda rows: rows)
+        try:
+            for name in ("first", "second"):
+                descriptor = VideoFrameDescriptor(name, 0, 5, 2, 5, 100)
+                result = collator([{"video": descriptor.serialize()}])
+                self.assertEqual((b"video", 2), result[0]["frame"])
+            self.assertTrue(streams[0].closed)
+        finally:
+            collator.close()
+        self.assertTrue(all(stream.closed for stream in streams))
+
+    def test_index_is_opened_once_when_decoder_requests_it(self):
+        index = VideoKeyframeIndex([], [(0, 0, 0)])
+        try:
+            encoded = index.serialize()
+        finally:
+            index.close()
+        reads = []
+        opened = []
+
+        class IndexedIO:
+            def new_input_stream(self, path):
+                return io.BytesIO(b"video")
+
+            def read_file_range(self, path, offset, length):
+                reads.append((offset, length))
+                return encoded[offset - 5:offset - 5 + length]
+
+        def factory(stream):
+            self.assertEqual([], reads)
+            index = stream.video_keyframe_index
+            self.assertIsInstance(index, VideoKeyframeIndex)
+            count = len(reads)
+            self.assertGreater(count, 0)
+            self.assertIs(index, stream.video_keyframe_index)
+            self.assertEqual(count, len(reads))
+            self.assertEqual((0, 0, 0), tuple(index.keyframes[0]))
+            opened.append(stream)
+            return _Decoder(stream, [])
+
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=IndexedIO()), video_column="video",
+            decoder_factory=factory,
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            collate_fn=lambda rows: rows)
+        descriptor = VideoFrameDescriptor("video", 0, 5, 0, 5, len(encoded))
+        try:
+            for _ in range(2):
+                collator([{"video": descriptor.serialize()}])
+            self.assertEqual(1, len(opened))
+            before_close = len(reads)
+        finally:
+            collator.close()
+        self.assertEqual(before_close, len(reads))
+        self.assertTrue(opened[0].closed)
+
+    def test_failed_index_open_closes_stream_without_retrying(self):
+        source = io.BytesIO(b"video")
+        reads = []
+
+        class FailingIO:
+            def new_input_stream(self, path):
+                return source
+
+            def read_file_range(self, *args):
+                reads.append(args)
+                raise OSError("index unavailable")
+
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=FailingIO()), video_column="video",
+            decoder_factory=lambda stream: stream.video_keyframe_index,
+            decode_fn=lambda *args: None)
+        descriptor = VideoFrameDescriptor("video", 0, 5, 0, 5, 100)
+        with self.assertRaisesRegex(OSError, "index unavailable"):
+            collator([{"video": descriptor.serialize()}])
+        collator.close()
+        self.assertEqual(1, len(reads))
+        self.assertTrue(source.closed)
 
     def _descriptor(self, name, data, frame_index):
         path = os.path.join(self.temp_dir.name, name)

@@ -27,7 +27,7 @@ from contextlib import contextmanager
 from fractions import Fraction
 from itertools import chain
 
-from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+from pypaimon.table.row.blob import Blob, OffsetInputStream, VideoFrameDescriptor
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
@@ -276,6 +276,37 @@ def _encode_images_to_video(
     return count
 
 
+class _VideoInputStream(OffsetInputStream):
+    """Keep optional index I/O behind the decoder's first access."""
+
+    def __init__(self, source, length, file_io, index_descriptor):
+        super().__init__(source, 0, length)
+        self._file_io = file_io
+        self._index_descriptor = index_descriptor
+        self._keyframe_index = None
+        self.video_length = length
+
+    @property
+    def video_keyframe_index(self):
+        if self.closed:
+            raise ValueError("Video stream is closed.")
+        index = self._index_descriptor
+        if index is not None and self._keyframe_index is None:
+            self._keyframe_index = VideoKeyframeIndex.open(
+                lambda offset, length: self._file_io.read_file_range(
+                    index.uri, index.offset + offset, length),
+                index.length, self.video_length)
+        return self._keyframe_index
+
+    def close(self):
+        if not self.closed:
+            try:
+                if self._keyframe_index is not None:
+                    self._keyframe_index.close()
+            finally:
+                super().close()
+
+
 class VideoFrameCollator:
     """Decode frame rows in a DataLoader worker while reusing video sessions.
 
@@ -504,23 +535,19 @@ class VideoFrameCollator:
 
         # Reuse the table's resolved FileIO. Rebuilding a reader from raw URI
         # options can drop merged REST/DLF storage credentials in workers.
-        stream = Blob.from_file(
+        source = Blob.from_file(
             self.file_io,
             descriptor.uri,
             descriptor.offset,
             descriptor.length,
         ).new_input_stream()
+        stream = _VideoInputStream(
+            source, descriptor.length, self.file_io, keyframe_index_descriptor)
         try:
             # Replica decoders share metadata, while their decode state stays separate.
             stream.video_metadata_cache = self._video_metadata_cache
             stream.video_metadata_key = (descriptor, keyframe_index_descriptor)
             if keyframe_index_descriptor is not None:
-                index = keyframe_index_descriptor
-                stream.video_keyframe_index = VideoKeyframeIndex.open(
-                    lambda offset, length: self.file_io.read_file_range(
-                        index.uri, index.offset + offset, length),
-                    index.length, descriptor.length)
-                stream.video_length = descriptor.length
                 stream.video_read_ranges = lambda ranges: (
                     self.file_io.read_ranges_coalesced(
                         [(
@@ -533,9 +560,6 @@ class VideoFrameCollator:
                 )
             decoder = self.decoder_factory(stream)
         except Exception:
-            mapping = getattr(stream, "video_keyframe_index", None)
-            if mapping is not None:
-                mapping.close()
             stream.close()
             raise
         resource = (decoder, stream)
@@ -576,7 +600,4 @@ class VideoFrameCollator:
             if close is not None:
                 close()
         finally:
-            mapping = getattr(stream, "video_keyframe_index", None)
-            if mapping is not None:
-                mapping.close()
             stream.close()
