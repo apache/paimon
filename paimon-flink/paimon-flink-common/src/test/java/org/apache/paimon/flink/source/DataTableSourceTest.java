@@ -57,6 +57,8 @@ import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -163,6 +165,44 @@ class DataTableSourceTest {
                 runtimeProvider.produceDataStream(s -> Optional.empty(), env);
 
         assertThat(sourceStream.getParallelism()).isEqualTo(3);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "auto,false",
+        "auto,true",
+        "full,false",
+        "full,true",
+        "memory,false",
+        "memory,true"
+    })
+    void testChangelogOnReadRejectsLookup(String cacheMode, boolean async) throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(path.toString());
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath)
+                        .createTable(
+                                Schema.newBuilder()
+                                        .column("a", DataTypes.INT())
+                                        .column("b", DataTypes.BIGINT())
+                                        .primaryKey("b")
+                                        .option("bucket", "1")
+                                        .option("changelog-producer", "on-read")
+                                        .option("lookup.cache", cacheMode)
+                                        .option("lookup.async", Boolean.toString(async))
+                                        .build());
+        FileStoreTable fileStoreTable =
+                FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
+
+        assertThatThrownBy(() -> tableSource.getLookupRuntimeProvider(lookupContext()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Lookup join is not supported for tables with changelog-producer=on-read.");
+        // The restriction must not prevent ordinary streaming scans.
+        assertThat(runtimeProvider(tableSource)).isNotNull();
     }
 
     @Test

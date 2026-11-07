@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source.splitread;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
@@ -31,14 +32,19 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.LazyField;
 
+import javax.annotation.Nullable;
+
+import java.io.Closeable;
+import java.io.IOException;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
 
 /** A {@link SplitReadProvider} to incremental changelog read. */
-public class IncrementalChangelogReadProvider implements SplitReadProvider {
+public class IncrementalChangelogReadProvider implements SplitReadProvider, Closeable {
 
     private final LazyField<SplitRead<InternalRow>> splitRead;
+    @Nullable private MergeFileSplitRead mergeRead;
 
     public IncrementalChangelogReadProvider(
             Supplier<MergeFileSplitRead> supplier, SplitReadConfig splitReadConfig) {
@@ -53,28 +59,35 @@ public class IncrementalChangelogReadProvider implements SplitReadProvider {
 
     private SplitRead<InternalRow> create(Supplier<MergeFileSplitRead> supplier) {
         final MergeFileSplitRead read = supplier.get().withReadKeyType(RowType.of());
+        mergeRead = read;
         IOFunction<Split, RecordReader<InternalRow>> convertedFactory =
-                split -> {
-                    IncrementalSplit incrementalSplit = (IncrementalSplit) split;
-                    RecordReader<KeyValue> reader =
-                            ConcatRecordReader.create(
-                                    () ->
-                                            new ReverseReader(
+                CoreOptions.fromMap(read.tableSchema().options()).changelogOnRead()
+                        ? split ->
+                                unwrap(
+                                        read.createChangelogOnReadReader((IncrementalSplit) split),
+                                        read.tableSchema().options())
+                        : split -> {
+                            IncrementalSplit incrementalSplit = (IncrementalSplit) split;
+                            RecordReader<KeyValue> reader =
+                                    ConcatRecordReader.create(
+                                            () ->
+                                                    new ReverseReader(
+                                                            read.createMergeReader(
+                                                                    incrementalSplit.partition(),
+                                                                    incrementalSplit.bucket(),
+                                                                    incrementalSplit.beforeFiles(),
+                                                                    incrementalSplit
+                                                                            .beforeDeletionFiles(),
+                                                                    false)),
+                                            () ->
                                                     read.createMergeReader(
                                                             incrementalSplit.partition(),
                                                             incrementalSplit.bucket(),
-                                                            incrementalSplit.beforeFiles(),
-                                                            incrementalSplit.beforeDeletionFiles(),
-                                                            false)),
-                                    () ->
-                                            read.createMergeReader(
-                                                    incrementalSplit.partition(),
-                                                    incrementalSplit.bucket(),
-                                                    incrementalSplit.afterFiles(),
-                                                    incrementalSplit.afterDeletionFiles(),
-                                                    false));
-                    return unwrap(reader, read.tableSchema().options());
-                };
+                                                            incrementalSplit.afterFiles(),
+                                                            incrementalSplit.afterDeletionFiles(),
+                                                            false));
+                            return unwrap(reader, read.tableSchema().options());
+                        };
 
         return SplitRead.convert(read, convertedFactory);
     }
@@ -90,5 +103,12 @@ public class IncrementalChangelogReadProvider implements SplitReadProvider {
     @Override
     public LazyField<SplitRead<InternalRow>> get() {
         return splitRead;
+    }
+
+    @Override
+    public void close() throws IOException {
+        if (mergeRead != null) {
+            mergeRead.close();
+        }
     }
 }

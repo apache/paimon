@@ -40,9 +40,11 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collections;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.INPUT;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
+import static org.apache.paimon.CoreOptions.ChangelogProducer.ON_READ;
 import static org.apache.paimon.CoreOptions.PRIMARY_KEY_NULLABLE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -137,6 +139,21 @@ public class ChangelogModeTest {
         options.set(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED, true);
         // The input changelog producer forces ChangelogMode.all(), so key-only deletes is ignored.
         test(options, ChangelogMode.all(), ChangelogMode.all());
+    }
+
+    @Test
+    public void testChangelogOnRead() throws Exception {
+        Options options = new Options();
+        options.set(BUCKET, 1);
+        options.set(CHANGELOG_PRODUCER, ON_READ);
+        test(
+                options,
+                ChangelogMode.all(),
+                ChangelogMode.newBuilder()
+                        .addContainedKind(RowKind.INSERT)
+                        .addContainedKind(RowKind.UPDATE_AFTER)
+                        .addContainedKind(RowKind.DELETE)
+                        .build());
     }
 
     @Test

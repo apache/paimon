@@ -29,6 +29,15 @@ import org.slf4j.LoggerFactory;
 public class DeltaFollowUpScanner implements FollowUpScanner {
 
     private static final Logger LOG = LoggerFactory.getLogger(DeltaFollowUpScanner.class);
+    private final boolean changelogOnRead;
+
+    public DeltaFollowUpScanner() {
+        this(false);
+    }
+
+    public DeltaFollowUpScanner(boolean changelogOnRead) {
+        this.changelogOnRead = changelogOnRead;
+    }
 
     @Override
     public boolean shouldScanSnapshot(Snapshot snapshot) {
@@ -45,6 +54,9 @@ public class DeltaFollowUpScanner implements FollowUpScanner {
 
     @Override
     public SnapshotReader.Plan scan(Snapshot snapshot, SnapshotReader snapshotReader) {
+        if (changelogOnRead) {
+            return snapshotReader.withSnapshot(snapshot).readChangelogOnRead();
+        }
         return snapshotReader.withMode(ScanMode.DELTA).withSnapshot(snapshot).read();
     }
 }

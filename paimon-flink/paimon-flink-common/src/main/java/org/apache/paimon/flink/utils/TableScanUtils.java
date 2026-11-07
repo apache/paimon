@@ -23,6 +23,7 @@ import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.TableScan;
@@ -73,6 +74,8 @@ public class TableScanUtils {
         Split inner = Splits.underlying(split.split());
         if (inner instanceof DataSplit) {
             return Optional.of(((DataSplit) inner).snapshotId());
+        } else if (inner instanceof IncrementalSplit) {
+            return Optional.of(((IncrementalSplit) inner).snapshotId());
         }
         return Optional.empty();
     }
