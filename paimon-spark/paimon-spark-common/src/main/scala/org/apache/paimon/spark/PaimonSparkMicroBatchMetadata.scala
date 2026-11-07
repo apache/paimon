@@ -82,11 +82,7 @@ object PaimonSparkMicroBatchMetadata {
       batch: Dataset[_],
       batchId: Long): Optional[PaimonSparkMicroBatchOffsetRange] = {
     val source = activePaimonSource(batch)
-    if (
-      source.isEmpty ||
-      source.get._1.getClass.getMethod("currentBatchId").invoke(source.get._1) !=
-        java.lang.Long.valueOf(batchId)
-    ) {
+    if (source.isEmpty || activeBatchId(source.get._1) != batchId) {
       return Optional.empty()
     }
 
@@ -100,7 +96,7 @@ object PaimonSparkMicroBatchMetadata {
         if (!end.exists(_.emptySnapshotCompleted)) {
           return Optional.empty()
         }
-        val start = executionOffset(execution, "committedOffsets", stream)
+        val start = executionOffset(execution, startOffsetsMethod(execution), stream)
           .map(offset => PaimonSourceOffset(offset.json()))
           .orElse {
             if (batchId == 0 && end.get.snapshotId > 0) {
@@ -116,6 +112,29 @@ object PaimonSparkMicroBatchMetadata {
               Optional.of(new PaimonSparkMicroBatchOffsetRange(offset.json(), end.get.json())))
           .getOrElse(Optional.empty())
       case None => Optional.empty()
+    }
+  }
+
+  private def activeBatchId(execution: AnyRef): Long = {
+    val value =
+      try {
+        execution.getClass.getMethod("currentBatchId").invoke(execution)
+      } catch {
+        case _: NoSuchMethodException =>
+          // Spark 4 moved the batch ID into StreamExecutionContext.
+          val context = execution.getClass.getMethod("getLatestExecutionContext").invoke(execution)
+          context.getClass.getMethod("batchId").invoke(context)
+      }
+    value.asInstanceOf[java.lang.Number].longValue()
+  }
+
+  private def startOffsetsMethod(execution: AnyRef): String = {
+    try {
+      // Spark 4 keeps each batch's start offsets in its execution context.
+      execution.getClass.getMethod("getStartOffsetsOfLatestBatch")
+      "getStartOffsetsOfLatestBatch"
+    } catch {
+      case _: NoSuchMethodException => "committedOffsets"
     }
   }
 
