@@ -171,6 +171,37 @@ class AggregateMergeFunctionTest {
         assertThat(aggregateFunction.getResult().value()).isEqualTo(GenericRow.of(1, 2, 2, null));
     }
 
+    @Test
+    void testRetractNullFieldKeepsAccumulator() {
+        Options options = new Options();
+        options.set("fields.a.aggregate-function", "sum");
+        options.set("fields.b.aggregate-function", "product");
+        options.set("fields.c.aggregate-function", "last_non_null_value");
+        options.set("fields.d.aggregate-function", "sum");
+        MergeFunction<KeyValue> aggregateFunction =
+                AggregateMergeFunction.factory(
+                                options,
+                                RowType.builder()
+                                        .fields(
+                                                new DataType[] {
+                                                    DataTypes.INT(),
+                                                    DataTypes.INT(),
+                                                    DataTypes.INT(),
+                                                    DataTypes.INT(),
+                                                    DataTypes.INT()
+                                                },
+                                                new String[] {"k", "a", "b", "c", "d"})
+                                        .build(),
+                                Collections.singletonList("k"))
+                        .create();
+        aggregateFunction.reset();
+
+        aggregateFunction.add(value(1, 5, 5, 5, 5));
+        // retracting a null field must not change its accumulated value
+        aggregateFunction.add(deleteValue(1, null, null, null, 2));
+        assertThat(aggregateFunction.getResult().value()).isEqualTo(GenericRow.of(1, 5, 5, 5, 3));
+    }
+
     private KeyValue value(Integer... values) {
         return new KeyValue()
                 .replace(GenericRow.of(values[0]), RowKind.INSERT, GenericRow.of(values));
