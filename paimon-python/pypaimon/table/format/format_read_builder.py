@@ -58,7 +58,15 @@ class FormatReadBuilder:
     def with_partition_filter(
         self, partition_spec: Optional[dict]
     ) -> "FormatReadBuilder":
-        self._partition_filter = partition_spec
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.execution.python.write.partition_spec import _partition_spec_value
+
+        types = {f.name: f.type for f in self.table.fields if f.name in self.table.partition_keys}
+        default_name = CoreOptions.from_dict(self.table.options()).options.get(CoreOptions.PARTITION_DEFAULT_NAME)
+        self._partition_filter = None if partition_spec is None else {
+            key: None if value == default_name else _partition_spec_value(value, types[key])
+            for key, value in partition_spec.items()
+        }
         return self
 
     def new_scan(self) -> FormatTableScan:
