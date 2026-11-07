@@ -19,6 +19,8 @@
 package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -3087,7 +3089,8 @@ public class FieldAggregatorTest {
                         DataTypes.ROW(
                                 DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
                                 DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
-        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
+        FieldMergeMapWithKeyTimeAgg agg =
+                new FieldMergeMapWithKeyTimeAgg("test", mapType, 1, DataTypes.STRING());
 
         GenericMap map1 =
                 createTestMap(
@@ -3118,37 +3121,246 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldMergeMapWithKeyTimeAggFactoryRejectsNonStringTsField() {
-        // The merge path reads the ts field via InternalRow#getString, so a non-string ts field
-        // (declared BIGINT/TIMESTAMP/INT, which is natural for a "ts" field) is accepted at DDL
-        // today and only throws ClassCastException at the first merge/compaction, naming neither
-        // the field nor the function. Validate it is a string type at factory creation.
-        MapType mapType =
-                DataTypes.MAP(
-                        DataTypes.STRING(),
-                        DataTypes.ROW(
-                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
-                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.BIGINT())));
-        assertThatThrownBy(
-                        () ->
-                                new FieldMergeMapWithKeyTimeAggFactory()
-                                        .create(mapType, new CoreOptions(new HashMap<>()), "f"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must be a string type");
+    public void testFieldMergeMapWithKeyTimeAggFactoryRejectsUnsupportedTsField() {
+        for (DataType unsupported :
+                Arrays.asList(
+                        DataTypes.FLOAT(),
+                        DataTypes.DOUBLE(),
+                        DataTypes.BOOLEAN(),
+                        DataTypes.BINARY(4),
+                        DataTypes.ARRAY(DataTypes.INT()))) {
+            MapType mapType =
+                    DataTypes.MAP(
+                            DataTypes.STRING(),
+                            DataTypes.ROW(
+                                    DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                    DataTypes.FIELD(1, "dbsync_ts", unsupported)));
+            assertThatThrownBy(
+                            () ->
+                                    new FieldMergeMapWithKeyTimeAggFactory()
+                                            .create(mapType, new CoreOptions(new HashMap<>()), "f"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("must be CHAR/VARCHAR");
+        }
     }
 
     @Test
-    public void testFieldMergeMapWithKeyTimeAggFactoryAcceptsStringTsField() {
+    public void testFieldMergeMapWithKeyTimeAggFactoryAcceptsSupportedTsFields() {
+        for (DataType supported :
+                Arrays.asList(
+                        DataTypes.STRING(),
+                        DataTypes.CHAR(8),
+                        DataTypes.TINYINT(),
+                        DataTypes.SMALLINT(),
+                        DataTypes.INT(),
+                        DataTypes.BIGINT(),
+                        DataTypes.DATE(),
+                        DataTypes.TIME(),
+                        DataTypes.DECIMAL(10, 2),
+                        DataTypes.TIMESTAMP(3),
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(6))) {
+            MapType mapType =
+                    DataTypes.MAP(
+                            DataTypes.STRING(),
+                            DataTypes.ROW(
+                                    DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                    DataTypes.FIELD(1, "dbsync_ts", supported)));
+            assertThat(
+                            new FieldMergeMapWithKeyTimeAggFactory()
+                                    .create(mapType, new CoreOptions(new HashMap<>()), "f"))
+                    .isNotNull();
+        }
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggStringUnicodeSemantics() {
+        // Keep Java String.compareTo for CHAR/VARCHAR, including supplementary-plane characters.
         MapType mapType =
                 DataTypes.MAP(
                         DataTypes.STRING(),
                         DataTypes.ROW(
                                 DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
                                 DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
-        assertThat(
-                        new FieldMergeMapWithKeyTimeAggFactory()
-                                .create(mapType, new CoreOptions(new HashMap<>()), "f"))
-                .isNotNull();
+        FieldMergeMapWithKeyTimeAgg agg =
+                new FieldMergeMapWithKeyTimeAgg("test", mapType, 1, DataTypes.STRING());
+
+        String low = new String(Character.toChars(0x10000)); // UTF-16 D800 DC00
+        String highBmp = "\uE000";
+        assertThat(low.compareTo(highBmp)).isLessThan(0);
+
+        Object acc = agg.agg(null, createTypedMap("k", "old", BinaryString.fromString(highBmp)));
+        acc = agg.agg(acc, createTypedMap("k", "new", BinaryString.fromString(low)));
+        // low < highBmp under String.compareTo, so old value is kept.
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("old");
+
+        acc = agg.agg(acc, createTypedMap("k", "newer", BinaryString.fromString("\uFFFF")));
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("newer");
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggIntegerTypes() {
+        assertNumericTsWins(DataTypes.TINYINT(), (byte) 9, (byte) 10, (byte) 10);
+        assertNumericTsWins(DataTypes.SMALLINT(), (short) -2, (short) -1, (short) -1);
+        assertNumericTsWins(DataTypes.INT(), Integer.MIN_VALUE, -1, -1);
+        assertNumericTsWins(DataTypes.BIGINT(), 9L, 10L, Long.MIN_VALUE);
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggDateAndTime() {
+        // DATE: days since epoch as int.
+        assertNumericTsWins(DataTypes.DATE(), 18_000, 18_001, 18_001);
+        Object dateAcc = mergeTwice(DataTypes.DATE(), valueRow("a", 100), valueRow("b", 100));
+        assertThat(firstRowValue((InternalMap) dateAcc)).isEqualTo("a");
+
+        // TIME: milliseconds of day as int.
+        assertNumericTsWins(DataTypes.TIME(), 1_000, 2_000, 2_000);
+        Object timeAcc =
+                mergeTwice(DataTypes.TIME(), valueRow("a", 3_600_000), valueRow("b", 3_600_000));
+        assertThat(firstRowValue((InternalMap) timeAcc)).isEqualTo("a");
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggDecimal() {
+        DataType tsType = DataTypes.DECIMAL(10, 2);
+        Decimal older = Decimal.fromUnscaledLong(1000, 10, 2); // 10.00
+        Decimal newer = Decimal.fromUnscaledLong(1001, 10, 2); // 10.01
+        Decimal equal = Decimal.fromUnscaledLong(1001, 10, 2);
+        Decimal negative = Decimal.fromBigDecimal(new BigDecimal("-1.50"), 10, 2);
+
+        FieldMergeMapWithKeyTimeAgg agg = typedAgg(tsType);
+        Object acc = agg.agg(null, createTypedMap("k", "v1", older));
+        acc = agg.agg(acc, createTypedMap("k", "v2", newer));
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("v2");
+
+        acc = agg.agg(acc, createTypedMap("k", "v3", equal));
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("v2");
+
+        acc = agg.agg(acc, createTypedMap("k", "neg", negative));
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("v2");
+
+        // All values below keep the declared DECIMAL(10, 4) precision and scale.
+        DataType scale4Type = DataTypes.DECIMAL(10, 4);
+        Decimal scale4Older = Decimal.fromBigDecimal(new BigDecimal("1.1000"), 10, 4);
+        Decimal scale4Newer = Decimal.fromBigDecimal(new BigDecimal("1.2000"), 10, 4);
+        Decimal scale4Equal = Decimal.fromBigDecimal(new BigDecimal("1.2000"), 10, 4);
+        assertThat(scale4Older.scale()).isEqualTo(4);
+        assertThat(scale4Newer.scale()).isEqualTo(4);
+
+        FieldMergeMapWithKeyTimeAgg scale4Agg = typedAgg(scale4Type);
+        Object scale4Acc = scale4Agg.agg(null, createTypedMap("k", "a", scale4Older));
+        scale4Acc = scale4Agg.agg(scale4Acc, createTypedMap("k", "b", scale4Newer));
+        assertThat(firstRowValue((InternalMap) scale4Acc)).isEqualTo("b");
+        scale4Acc = scale4Agg.agg(scale4Acc, createTypedMap("k", "c", scale4Equal));
+        assertThat(firstRowValue((InternalMap) scale4Acc)).isEqualTo("b");
+
+        // Non-compact precision goes through the BigDecimal comparison branch.
+        DataType wideType = DataTypes.DECIMAL(20, 4);
+        Decimal wideOlder = Decimal.fromBigDecimal(new BigDecimal("12345678901234.5000"), 20, 4);
+        Decimal wideNewer = Decimal.fromBigDecimal(new BigDecimal("12345678901234.5001"), 20, 4);
+        assertThat(wideOlder.isCompact()).isFalse();
+
+        FieldMergeMapWithKeyTimeAgg wideAgg = typedAgg(wideType);
+        Object wideAcc = wideAgg.agg(null, createTypedMap("k", "a", wideOlder));
+        wideAcc = wideAgg.agg(wideAcc, createTypedMap("k", "b", wideNewer));
+        assertThat(firstRowValue((InternalMap) wideAcc)).isEqualTo("b");
+        wideAcc = wideAgg.agg(wideAcc, createTypedMap("k", "c", wideNewer));
+        assertThat(firstRowValue((InternalMap) wideAcc)).isEqualTo("b");
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggTimestampPrecisions() {
+        assertTimestampPrecision(DataTypes.TIMESTAMP(3), 3);
+        assertTimestampPrecision(DataTypes.TIMESTAMP(6), 6);
+        assertTimestampPrecision(DataTypes.TIMESTAMP(9), 9);
+        assertTimestampPrecision(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3), 3);
+        assertTimestampPrecision(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(6), 6);
+        assertTimestampPrecision(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9), 9);
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggNullTimestampAndNullValue() {
+        FieldMergeMapWithKeyTimeAgg agg = typedAgg(DataTypes.BIGINT());
+        Object acc = agg.agg(null, createTypedMap("k", "v1", 100L));
+
+        // null timestamp skips the update.
+        Map<Object, Object> nullTs = new HashMap<>();
+        nullTs.put(
+                BinaryString.fromString("k"), GenericRow.of(BinaryString.fromString("skip"), null));
+        acc = agg.agg(acc, new GenericMap(nullTs));
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("v1");
+
+        // equal timestamp keeps old value.
+        acc = agg.agg(acc, createTypedMap("k", "same", 100L));
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("v1");
+
+        // older timestamp keeps old value.
+        acc = agg.agg(acc, createTypedMap("k", "older", 99L));
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("v1");
+
+        // null map value removes the key.
+        Map<Object, Object> tombstone = new HashMap<>();
+        tombstone.put(BinaryString.fromString("k"), null);
+        acc = agg.agg(acc, new GenericMap(tombstone));
+        assertThat(((InternalMap) acc).size()).isEqualTo(0);
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggOverwritesNullExistingTimestamp() {
+        for (DataType tsType :
+                Arrays.asList(
+                        DataTypes.STRING(),
+                        DataTypes.BIGINT(),
+                        DataTypes.DECIMAL(10, 2),
+                        DataTypes.TIMESTAMP(3),
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(6))) {
+            FieldMergeMapWithKeyTimeAgg agg = typedAgg(tsType);
+            Object ts = sampleTimestamp(tsType);
+
+            // The accumulator is taken as-is, so it can carry a null timestamp.
+            Map<Object, Object> nullTs = new HashMap<>();
+            nullTs.put(
+                    BinaryString.fromString("k"),
+                    GenericRow.of(BinaryString.fromString("nullTs"), null));
+            Object acc = agg.agg(null, new GenericMap(nullTs));
+            assertThat(firstRowValue((InternalMap) acc)).isEqualTo("nullTs");
+
+            // An existing null timestamp is always replaced by the incoming row.
+            acc = agg.agg(acc, createTypedMap("k", "fresh", ts));
+            assertThat(firstRowValue((InternalMap) acc)).isEqualTo("fresh");
+
+            // Once the existing timestamp is non-null, a smaller timestamp no longer wins.
+            acc = agg.agg(acc, createTypedMap("k", "stale", olderThan(tsType)));
+            assertThat(firstRowValue((InternalMap) acc)).isEqualTo("fresh");
+        }
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggNullTimestampSkipsForAllSupportedTypes() {
+        for (DataType tsType :
+                Arrays.asList(
+                        DataTypes.CHAR(8),
+                        DataTypes.STRING(),
+                        DataTypes.TINYINT(),
+                        DataTypes.SMALLINT(),
+                        DataTypes.INT(),
+                        DataTypes.BIGINT(),
+                        DataTypes.DATE(),
+                        DataTypes.TIME(),
+                        DataTypes.DECIMAL(10, 2),
+                        DataTypes.TIMESTAMP(3),
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9))) {
+            FieldMergeMapWithKeyTimeAgg agg = typedAgg(tsType);
+            Object ts = sampleTimestamp(tsType);
+
+            Object acc = agg.agg(null, createTypedMap("k", "keep", ts));
+            Map<Object, Object> nullTs = new HashMap<>();
+            nullTs.put(
+                    BinaryString.fromString("k"),
+                    GenericRow.of(BinaryString.fromString("ignored"), null));
+            acc = agg.agg(acc, new GenericMap(nullTs));
+
+            assertThat(firstRowValue((InternalMap) acc)).isEqualTo("keep");
+        }
     }
 
     /**
@@ -3164,7 +3376,8 @@ public class FieldAggregatorTest {
                         DataTypes.ROW(
                                 DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
                                 DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
-        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
+        FieldMergeMapWithKeyTimeAgg agg =
+                new FieldMergeMapWithKeyTimeAgg("test", mapType, 1, DataTypes.STRING());
 
         Object acc = agg.agg(null, binaryKeyedMap(new byte[] {1, 2}, "A", "100"));
 
@@ -3196,7 +3409,8 @@ public class FieldAggregatorTest {
                         DataTypes.ROW(
                                 DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
                                 DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
-        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
+        FieldMergeMapWithKeyTimeAgg agg =
+                new FieldMergeMapWithKeyTimeAgg("test", mapType, 1, DataTypes.STRING());
 
         Object acc = agg.agg(null, binaryKeyedMap(new byte[] {1, 2}, "A", "100"));
 
@@ -3214,6 +3428,160 @@ public class FieldAggregatorTest {
         tombstone.put(new byte[] {1, 2}, null);
         acc = agg.agg(acc, new GenericMap(tombstone));
         assertThat(((InternalMap) acc).size()).isEqualTo(0);
+    }
+
+    private FieldMergeMapWithKeyTimeAgg typedAgg(DataType tsType) {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.STRING(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", tsType)));
+        return new FieldMergeMapWithKeyTimeAgg("test", mapType, 1, tsType);
+    }
+
+    /** A representative non-null timestamp value that respects the declared type. */
+    private Object sampleTimestamp(DataType tsType) {
+        switch (tsType.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+                return BinaryString.fromString("200");
+            case TINYINT:
+                return (byte) 100;
+            case SMALLINT:
+                return (short) 100;
+            case INTEGER:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                return 100;
+            case BIGINT:
+                return 100L;
+            case DECIMAL:
+                return Decimal.fromBigDecimal(
+                        new BigDecimal("100.00"),
+                        ((DecimalType) tsType).getPrecision(),
+                        ((DecimalType) tsType).getScale());
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return Timestamp.fromEpochMillis(1_000L, 0);
+            default:
+                throw new IllegalArgumentException("Unsupported test type: " + tsType);
+        }
+    }
+
+    /** A value that is strictly older than {@link #sampleTimestamp(DataType)}. */
+    private Object olderThan(DataType tsType) {
+        switch (tsType.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+                return BinaryString.fromString("100");
+            case TINYINT:
+                return (byte) 99;
+            case SMALLINT:
+                return (short) 99;
+            case INTEGER:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                return 99;
+            case BIGINT:
+                return 99L;
+            case DECIMAL:
+                return Decimal.fromBigDecimal(
+                        new BigDecimal("99.00"),
+                        ((DecimalType) tsType).getPrecision(),
+                        ((DecimalType) tsType).getScale());
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return Timestamp.fromEpochMillis(999L, 0);
+            default:
+                throw new IllegalArgumentException("Unsupported test type: " + tsType);
+        }
+    }
+
+    private GenericMap createTypedMap(String key, String value, Object ts) {
+        Map<Object, Object> map = new HashMap<>();
+        map.put(BinaryString.fromString(key), GenericRow.of(BinaryString.fromString(value), ts));
+        return new GenericMap(map);
+    }
+
+    private GenericRow valueRow(String value, Object ts) {
+        return GenericRow.of(BinaryString.fromString(value), ts);
+    }
+
+    private Object mergeTwice(DataType tsType, GenericRow first, GenericRow second) {
+        FieldMergeMapWithKeyTimeAgg agg = typedAgg(tsType);
+        Map<Object, Object> m1 = new HashMap<>();
+        m1.put(BinaryString.fromString("k"), first);
+        Map<Object, Object> m2 = new HashMap<>();
+        m2.put(BinaryString.fromString("k"), second);
+        Object acc = agg.agg(null, new GenericMap(m1));
+        return agg.agg(acc, new GenericMap(m2));
+    }
+
+    private void assertNumericTsWins(
+            DataType tsType, Object older, Object newer, Object equalOrOlder) {
+        FieldMergeMapWithKeyTimeAgg agg = typedAgg(tsType);
+        Object acc = agg.agg(null, createTypedMap("k", "old", older));
+        acc = agg.agg(acc, createTypedMap("k", "new", newer));
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("new");
+        acc = agg.agg(acc, createTypedMap("k", "ignored", equalOrOlder));
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("new");
+    }
+
+    private void assertTimestampPrecision(DataType tsType, int precision) {
+        FieldMergeMapWithKeyTimeAgg agg = typedAgg(tsType);
+
+        Timestamp older;
+        Timestamp newer;
+        Timestamp equal;
+        Timestamp negative;
+        if (precision <= 3) {
+            // Compact storage keeps millisecond precision only.
+            older = Timestamp.fromEpochMillis(1_000L);
+            newer = Timestamp.fromEpochMillis(2_000L);
+            equal = Timestamp.fromEpochMillis(2_000L);
+            negative = Timestamp.fromEpochMillis(-5_000L);
+        } else if (precision <= 6) {
+            older = Timestamp.fromEpochMillis(1_000L, 100_000);
+            newer = Timestamp.fromEpochMillis(1_000L, 200_000);
+            equal = Timestamp.fromEpochMillis(1_000L, 200_000);
+            negative = Timestamp.fromEpochMillis(-1L, 0);
+        } else {
+            older = Timestamp.fromEpochMillis(1_000L, 100_001);
+            newer = Timestamp.fromEpochMillis(1_000L, 100_002);
+            equal = Timestamp.fromEpochMillis(1_000L, 100_002);
+            negative = Timestamp.fromEpochMillis(-1L, 500_000);
+        }
+
+        InternalRow olderRow = binaryValueRow("old", older, precision);
+        InternalRow newerRow = binaryValueRow("new", newer, precision);
+        InternalRow equalRow = binaryValueRow("eq", equal, precision);
+        InternalRow negativeRow = binaryValueRow("neg", negative, precision);
+
+        Object acc = agg.agg(null, singletonMap(olderRow));
+        acc = agg.agg(acc, singletonMap(newerRow));
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("new");
+
+        acc = agg.agg(acc, singletonMap(equalRow));
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("new");
+
+        acc = agg.agg(acc, singletonMap(negativeRow));
+        assertThat(firstRowValue((InternalMap) acc)).isEqualTo("new");
+    }
+
+    private GenericMap singletonMap(InternalRow valueRow) {
+        Map<Object, Object> map = new HashMap<>();
+        map.put(BinaryString.fromString("k"), valueRow);
+        return new GenericMap(map);
+    }
+
+    private InternalRow binaryValueRow(String value, Timestamp ts, int precision) {
+        BinaryRow row = new BinaryRow(2);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        writer.writeString(0, BinaryString.fromString(value));
+        writer.writeTimestamp(1, ts, precision);
+        writer.complete();
+        return row.copy();
     }
 
     private GenericMap binaryKeyedMap(byte[] key, String value, String ts) {

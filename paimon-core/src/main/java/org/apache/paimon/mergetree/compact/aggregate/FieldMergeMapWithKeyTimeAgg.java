@@ -21,7 +21,11 @@ package org.apache.paimon.mergetree.compact.aggregate;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeFamily;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -34,15 +38,23 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
     private final InternalArray.ElementGetter keyGetter;
     private final InternalArray.ElementGetter valueGetter;
     private final int timestampFieldIndex;
+    private final boolean stringTimestamp;
+    private final DataTypeRoot timestampTypeRoot;
+    private final InternalRow.FieldGetter timestampGetter;
 
     /** See {@link BinaryMapKeys}: a binary key has no value equality of its own. */
     private final boolean binaryKey;
 
-    public FieldMergeMapWithKeyTimeAgg(String name, MapType dataType, int timestampFieldIndex) {
+    public FieldMergeMapWithKeyTimeAgg(
+            String name, MapType dataType, int timestampFieldIndex, DataType timestampType) {
         super(name, dataType);
         this.keyGetter = InternalArray.createElementGetter(dataType.getKeyType());
         this.valueGetter = InternalArray.createElementGetter(dataType.getValueType());
         this.timestampFieldIndex = timestampFieldIndex;
+        this.stringTimestamp =
+                timestampType.getTypeRoot().getFamilies().contains(DataTypeFamily.CHARACTER_STRING);
+        this.timestampTypeRoot = timestampType.getTypeRoot();
+        this.timestampGetter = InternalRow.createFieldGetter(timestampType, timestampFieldIndex);
         this.binaryKey = BinaryMapKeys.isBinary(dataType.getKeyType());
     }
 
@@ -102,16 +114,27 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
                 resultMap.put(key, newRow);
             } else {
                 InternalRow existingRow = (InternalRow) existingValue;
-                if (existingRow.isNullAt(timestampFieldIndex)) {
+                if (existingRow.isNullAt(timestampFieldIndex)
+                        || isNewerTimestamp(newRow, existingRow)) {
                     resultMap.put(key, newRow);
-                } else {
-                    String newTs = newRow.getString(timestampFieldIndex).toString();
-                    String existingTs = existingRow.getString(timestampFieldIndex).toString();
-                    if (newTs.compareTo(existingTs) > 0) {
-                        resultMap.put(key, newRow);
-                    }
                 }
             }
         }
+    }
+
+    /**
+     * Returns true when {@code newRow}'s timestamp is strictly greater than {@code existingRow}'s.
+     * CHAR/VARCHAR keeps the historical Java {@link String#compareTo} path; other supported types
+     * reuse {@link InternalRowUtils#compare}.
+     */
+    private boolean isNewerTimestamp(InternalRow newRow, InternalRow existingRow) {
+        if (stringTimestamp) {
+            String newTs = newRow.getString(timestampFieldIndex).toString();
+            String existingTs = existingRow.getString(timestampFieldIndex).toString();
+            return newTs.compareTo(existingTs) > 0;
+        }
+        Object newTs = timestampGetter.getFieldOrNull(newRow);
+        Object existingTs = timestampGetter.getFieldOrNull(existingRow);
+        return InternalRowUtils.compare(newTs, existingTs, timestampTypeRoot) > 0;
     }
 }
