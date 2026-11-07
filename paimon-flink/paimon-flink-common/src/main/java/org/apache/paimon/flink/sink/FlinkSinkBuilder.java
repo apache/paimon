@@ -33,6 +33,7 @@ import org.apache.paimon.flink.sink.partition.StatisticsOrRecordChannelComputer;
 import org.apache.paimon.flink.sink.partition.StatisticsOrRecordTypeInfo;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BlobDescriptorReaderFactory;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -62,6 +63,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.clusteringStrategy;
@@ -351,6 +353,61 @@ public class FlinkSinkBuilder {
 
     protected DataStreamSink<?> buildForFixedBucket(DataStream<InternalRow> input) {
         int bucketNums = table.bucketSpec().getNumBuckets();
+        Options options = Options.fromMap(table.options());
+        // sink.striped-bucket-write.enabled is the sole switch; writers-per-bucket only applies
+        // when it is
+        // on
+        if (options.get(FlinkConnectorOptions.SINK_STRIPED_BUCKET_WRITE_ENABLED)) {
+            checkArgument(
+                    !table.coreOptions().deletionVectorsEnabled(),
+                    "Striped bucket write does not support deletion-vectors.enabled: multiple writers "
+                            + "per bucket would maintain conflicting deletion-vector indexes and corrupt "
+                            + "reads. Disable deletion vectors or striped bucket write.");
+            checkArgument(
+                    table.coreOptions().writeOnly(),
+                    "Striped bucket write requires write-only=true: multiple writers per bucket cannot "
+                            + "run inline compaction without conflicts. Set write-only=true and run a "
+                            + "dedicated compaction job.");
+            checkArgument(
+                    !table.schema().primaryKeys().isEmpty()
+                            || !table.coreOptions().bucketAppendOrdered(),
+                    "Striped bucket write requires bucket-append-ordered=false for an append-only "
+                            + "table: striping spreads successive rows across independent writers, "
+                            + "breaking the append order that ordered reads rely on. Set "
+                            + "bucket-append-ordered=false or disable striped bucket write.");
+            Optional<Integer> configuredWritersPerBucket =
+                    options.getOptional(
+                            FlinkConnectorOptions.SINK_STRIPED_BUCKET_WRITE_WRITERS_PER_BUCKET);
+            checkArgument(
+                    !configuredWritersPerBucket.isPresent()
+                            || configuredWritersPerBucket.get()
+                                    == StripedBucketWriteChannelComputer.MATCH_PARALLELISM
+                            || configuredWritersPerBucket.get() >= 1,
+                    "sink.striped-bucket-write.writers-per-bucket must be a positive integer or -1.");
+            int writersPerBucket =
+                    configuredWritersPerBucket.orElse(StripedBucketWriteChannelComputer.AUTO);
+            if (writersPerBucket > 0) {
+                // An explicit writers-per-bucket derives the writer parallelism instead of capping
+                // it
+                // to bucketNums
+                long derivedParallelism = (long) writersPerBucket * bucketNums;
+                checkArgument(
+                        derivedParallelism <= Integer.MAX_VALUE,
+                        "sink.striped-bucket-write.writers-per-bucket %s * bucket count %s overflowed.",
+                        writersPerBucket,
+                        bucketNums);
+                parallelism = (int) derivedParallelism;
+            }
+            DataStream<InternalRow> partitioned =
+                    partition(
+                            input,
+                            new StripedBucketWriteChannelComputer(table.schema(), writersPerBucket),
+                            parallelism);
+            return configureBlobDescriptorReaderFactory(
+                            new FixedBucketSink(table, overwritePartition))
+                    .sinkFrom(partitioned);
+        }
+
         if (parallelism == null
                 && bucketNums < input.getParallelism()
                 && table.partitionKeys().isEmpty()) {
