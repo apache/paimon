@@ -188,23 +188,20 @@ A present `Optional` contains the complete, immutable list of written field IDs 
 
 An empty `Optional` means that metadata is unavailable, for example because a file or schema cannot be resolved, the micro-batch is empty, the `Dataset` is not the raw batch from a query with exactly one distinct Paimon streaming source, or its lineage is incomplete or ambiguous. An empty `Optional` does not mean that no columns were written; callers must fall back to processing all columns.
 
-## Source Offset Range of a Micro-Batch
+## Micro-Batch Offset Range
 
-For a Paimon streaming source, `PaimonSparkMicroBatchMetadata.offsetRange` exposes the exact start and end source offsets during `foreachBatch`. Pass the callback's unmodified `batchId` along with its raw `Dataset`:
+Use the raw `foreachBatch` dataset and its `batchId` to get Paimon source offset JSON:
 
 ```scala
 .foreachBatch { (batch: Dataset[Row], batchId: Long) =>
   val range = PaimonSparkMicroBatchMetadata.offsetRange(batch, batchId)
-  if (!range.isPresent) {
-    throw new IllegalStateException("Paimon micro-batch offset range is unavailable")
-  }
+  require(range.isPresent, "Paimon source offsets unavailable")
   val startOffset = range.get().startOffset
   val endOffset = range.get().endOffset
-  // Persist a stable identity based on both offsets before acknowledging the batch.
 }
 ```
 
-The offsets are Paimon source offset JSON strings. The end offset includes snapshot completion information when `consumer-id` is configured. An empty full snapshot can have no input partitions; its range is available when the end offset contains that completion marker. The method returns an empty `Optional` when the batch ID does not match the active query, there is more than one distinct source, or the range cannot be established safely. It performs no Spark job and does not advance the source Consumer or checkpoint.
+The result is empty if the range cannot be verified or the query has multiple distinct sources. Empty full snapshots require `consumer-id` so the end offset includes a completion marker. This read-only API does not advance the Consumer or checkpoint.
 
 ## Read Changelogs
 
