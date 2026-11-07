@@ -240,7 +240,7 @@ final class ThriftCompactReader {
                 skipBytes(8);
                 return;
             case BINARY:
-                skipBytes((int) readVarint());
+                skipBinary();
                 return;
             case LIST:
             case SET:
@@ -310,7 +310,7 @@ final class ThriftCompactReader {
                 skipBytes(8);
                 break;
             case BINARY:
-                skipBytes((int) readVarint());
+                skipBinary();
                 break;
             case LIST:
             case SET:
@@ -338,9 +338,25 @@ final class ThriftCompactReader {
     }
 
     private void skipBytes(int n) throws EOFException {
-        if (pos + n > limit) {
+        // n < 0 must be rejected explicitly (a negative skip would move the cursor backwards),
+        // and n > limit - pos (instead of pos + n > limit, which overflows for large n)
+        if (n < 0 || n > limit - pos) {
             throw new EOFException("thrift compact reader overrun at " + pos);
         }
         pos += n;
+    }
+
+    /**
+     * Skips a binary value. The unsigned varint length is validated in {@code long} space before
+     * narrowing: a length that overflows {@code int} would otherwise wrap to a negative or small
+     * value, and a crafted negative skip could move the cursor back onto the field header it just
+     * read, looping the parse forever instead of failing.
+     */
+    private void skipBinary() throws IOException {
+        long len = readVarint();
+        if (len < 0 || len > Integer.MAX_VALUE || pos + len > limit) {
+            throw new EOFException("malformed binary length " + len + " at " + pos);
+        }
+        pos += (int) len;
     }
 }

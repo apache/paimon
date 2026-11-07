@@ -259,7 +259,18 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         // statistics metadata.
         boolean enableSelectiveParser =
                 conf.get(CoreOptions.PARQUET_FOOTER_SELECTIVE_PARSER_ENABLED);
-        if (enableSelectiveParser && (predicates == null || predicates.isEmpty())) {
+        // A projected name containing the NUL separator cannot round-trip through
+        // REQUESTED_COLUMNS_KEY: splitRequestedColumns would split it into multiple names,
+        // silently rewriting the requested set, and those fragments can match real columns so
+        // the all-unmatched fallback never runs — the reader then fails on the missing chunk.
+        // Keep such reads on the official full parse (identical to the option being disabled).
+        boolean namesEncodable =
+                readType.getFieldNames().stream()
+                        .noneMatch(
+                                name -> name.contains(SelectiveFooterParser.COLUMN_NAME_SEPARATOR));
+        if (enableSelectiveParser
+                && namesEncodable
+                && (predicates == null || predicates.isEmpty())) {
             StringBuilder requestedColumns = new StringBuilder();
             for (DataField field : readType.getFields()) {
                 if (requestedColumns.length() > 0) {

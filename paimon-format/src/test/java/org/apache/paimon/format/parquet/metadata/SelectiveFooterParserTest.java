@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet.metadata;
 
 import org.apache.paimon.format.parquet.ParquetInputFile;
+import org.apache.paimon.format.parquet.ParquetInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 
 import org.apache.hadoop.conf.Configuration;
@@ -63,6 +64,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -1618,6 +1621,96 @@ public class SelectiveFooterParserTest {
                                     prot.writeListEnd();
                                 }));
         assertSelectiveMatchesOfficial(footer);
+    }
+
+    // ------------------------------------------------------------------ malformed binary length
+
+    /**
+     * A malformed binary length in an unknown field must fail fast instead of looping forever. The
+     * unsigned varint length 0xfffffff8 narrows to int -8; an unguarded skip would move the cursor
+     * back onto the very field header it just read, so the parse never advances, never overruns,
+     * and never reaches the fallback — the official parser rejects the same bytes immediately.
+     * Covered through the real parse entry and, end-to-end, through the vendored
+     * ParquetFileReader.readFooter over a real file. The preemptive timeouts turn a regression into
+     * a fast test failure instead of a hung read task.
+     */
+    @Test
+    public void testMalformedBinaryLengthInUnknownFieldFailsFast() throws Exception {
+        // unknown field 99 (BINARY): long-form field header, zigzag varint field id, then the
+        // unsigned varint 0xfffffff8 as the binary length
+        byte[] unknownField = {
+            (byte) 0x08, // (delta 0) | BINARY
+            (byte) 0xc6,
+            0x01, // zigzag varint of field id 99
+            (byte) 0xf8,
+            (byte) 0xff,
+            (byte) 0xff,
+            (byte) 0xff,
+            0x0f // unsigned varint 0xfffffff8
+        };
+        byte[] footer = insertUnknownFieldBeforeRowGroups(unknownField);
+
+        ParquetMetadataConverter converter = new ParquetMetadataConverter();
+
+        // the official parser rejects the same bytes immediately
+        Assertions.assertThrows(
+                Exception.class,
+                () ->
+                        converter.readParquetMetadata(
+                                new ByteArrayInputStream(footer),
+                                ParquetMetadataConverter.NO_FILTER));
+
+        // the selective parse must fail fast into the fallback, not loop forever
+        Assertions.assertTimeoutPreemptively(
+                Duration.ofSeconds(10),
+                () ->
+                        Assertions.assertThrows(
+                                SelectiveFooterParser.FallbackSignalException.class,
+                                () ->
+                                        SelectiveFooterParser.parse(
+                                                ByteBuffer.wrap(footer), null, converter)));
+
+        // end-to-end through the vendored reader: wrap the malformed footer in a real file; the
+        // selective parse falls back and the official parse rejects, so readFooter must throw
+        // promptly instead of hanging
+        byte[] magic = {'P', 'A', 'R', '1'};
+        byte[] fileBytes = new byte[magic.length + footer.length + 4 + magic.length];
+        System.arraycopy(magic, 0, fileBytes, 0, magic.length);
+        System.arraycopy(footer, 0, fileBytes, magic.length, footer.length);
+        int at = magic.length + footer.length;
+        fileBytes[at] = (byte) footer.length;
+        fileBytes[at + 1] = (byte) (footer.length >>> 8);
+        fileBytes[at + 2] = (byte) (footer.length >>> 16);
+        fileBytes[at + 3] = (byte) (footer.length >>> 24);
+        System.arraycopy(magic, 0, fileBytes, at + 4, magic.length);
+        java.nio.file.Path file = tempDir.resolve("malformed.parquet");
+        Files.write(file, fileBytes);
+
+        ParquetInputFile inputFile =
+                ParquetInputFile.fromPath(
+                        new LocalFileIO(),
+                        new org.apache.paimon.fs.Path(file.toUri()),
+                        fileBytes.length);
+        Assertions.assertTimeoutPreemptively(
+                Duration.ofSeconds(10),
+                () -> {
+                    try (ParquetInputStream stream = inputFile.newStream()) {
+                        Assertions.assertThrows(
+                                Exception.class,
+                                () ->
+                                        ParquetFileReader.readFooter(
+                                                inputFile,
+                                                ParquetReadOptions.builder()
+                                                        .withRange(0, fileBytes.length)
+                                                        .set(
+                                                                SelectiveFooterParser
+                                                                        .REQUESTED_COLUMNS_KEY,
+                                                                "col")
+                                                        .build(),
+                                                stream,
+                                                true));
+                    }
+                });
     }
 
     private static byte[] unknownFieldBytes(byte thriftType, UnknownFieldValueWriter valueWriter)
