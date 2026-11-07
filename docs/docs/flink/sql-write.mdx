@@ -164,7 +164,7 @@ throughput and resource utilization without rescaling the table:
 For a primary-key table, records that share a primary key still land on the same writer, so each
 writer produces sorted runs over a hash-partitioned subset of the bucket's keys rather than
 duplicating the whole key space. For an append-only table, records are distributed across the
-writers round-robin.
+writers round-robin, which requires `bucket-append-ordered = false` (see below).
 
 :::warning Requirements and costs
 
@@ -174,6 +174,10 @@ run inline compaction without conflicting commits.
 
 Striped write does not support `deletion-vectors.enabled`: each writer would maintain a conflicting
 deletion-vector index for the same bucket.
+
+Striped write of an append-only table requires `bucket-append-ordered = false`. Striping spreads
+successive rows across independent writers whose files are read whole, so it cannot preserve the
+append order within a bucket that ordered reads rely on.
 
 These misconfigurations are rejected when the sink is built.
 

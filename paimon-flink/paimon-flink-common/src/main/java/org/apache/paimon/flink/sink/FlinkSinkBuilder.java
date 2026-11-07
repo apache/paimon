@@ -368,6 +368,13 @@ public class FlinkSinkBuilder {
                     "Striped bucket write requires write-only=true: multiple writers per bucket cannot "
                             + "run inline compaction without conflicts. Set write-only=true and run a "
                             + "dedicated compaction job.");
+            checkArgument(
+                    !table.schema().primaryKeys().isEmpty()
+                            || !table.coreOptions().bucketAppendOrdered(),
+                    "Striped bucket write requires bucket-append-ordered=false for an append-only "
+                            + "table: striping spreads successive rows across independent writers, "
+                            + "breaking the append order that ordered reads rely on. Set "
+                            + "bucket-append-ordered=false or disable striped bucket write.");
             Optional<Integer> configuredWritersPerBucket =
                     options.getOptional(
                             FlinkConnectorOptions.SINK_STRIPED_BUCKET_WRITE_WRITERS_PER_BUCKET);
