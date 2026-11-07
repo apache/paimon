@@ -250,6 +250,8 @@ public final class JindoIOStats {
         String checkAlarm() {
             Cgroup alarmed = null;
             double alarmedRatio = 0;
+            int alarmedLevel = 0;
+            int alarmedIndex = -1;
             // each level keeps its own alarm, so a parent's WARN does not mute a child's
             for (int i = 0; i < cgroups.size(); i++) {
                 Cgroup cgroup = cgroups.get(i);
@@ -267,16 +269,19 @@ public final class JindoIOStats {
                     level++;
                 }
                 if (level > alarmLevels[i]) {
-                    alarmLevels[i] = level;
                     if (ratio > alarmedRatio) {
                         alarmed = cgroup;
                         alarmedRatio = ratio;
+                        alarmedLevel = level;
+                        alarmedIndex = i;
                     }
                 }
             }
             if (alarmed == null) {
                 return null;
             }
+            // Advance only the level that produced this warning; other crossings remain pending.
+            alarmLevels[alarmedIndex] = alarmedLevel;
             return String.format(
                     "Container memory working set is at %d%% of the limit. %s",
                     Math.round(alarmedRatio * 100), snapshot(alarmed));

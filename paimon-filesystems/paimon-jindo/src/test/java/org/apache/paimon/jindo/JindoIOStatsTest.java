@@ -493,11 +493,11 @@ public class JindoIOStatsTest {
         Files.createDirectories(child);
         write(root.resolve("cgroup.controllers"), "memory");
         write(pod.resolve("memory.max"), "1000");
-        write(pod.resolve("memory.current"), "960");
+        write(pod.resolve("memory.current"), "900");
         write(pod.resolve("memory.stat"), "inactive_file 0\n");
         write(pod.resolve("memory.events"), "max 7\noom_kill 0\n");
         write(child.resolve("memory.max"), "500");
-        write(child.resolve("memory.current"), "100");
+        write(child.resolve("memory.current"), "425");
         write(child.resolve("memory.stat"), "inactive_file 0\n");
         write(child.resolve("memory.events"), "max 3\noom_kill 0\n");
         java.nio.file.Path procCgroup = write(tempDir.resolve("cgroup-file"), "0::/pod/tm\n");
@@ -508,11 +508,10 @@ public class JindoIOStatsTest {
                         tempDir,
                         new AtomicBoolean());
 
-        assertThat(reporter.checkAlarm()).contains("at 96% of the limit").contains("limitHits=7");
-        // the parent eases but stays above the reset ratio while the child fills up
+        assertThat(reporter.checkAlarm()).contains("at 90% of the limit").contains("limitHits=7");
+        // The parent eases while the child crossing remains pending for the next sample.
         write(pod.resolve("memory.current"), "750");
-        write(child.resolve("memory.current"), "450");
-        assertThat(reporter.checkAlarm()).contains("at 90% of the limit").contains("limitHits=3");
+        assertThat(reporter.checkAlarm()).contains("at 85% of the limit").contains("limitHits=3");
         write(child.resolve("memory.current"), "490");
         assertThat(reporter.checkAlarm()).contains("at 98% of the limit");
         assertThat(reporter.checkAlarm()).isNull();
