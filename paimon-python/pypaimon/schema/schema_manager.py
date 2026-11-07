@@ -747,6 +747,30 @@ def _validate_primary_key_blob_fields(
         )
 
 
+def _duplicates(names: List[str]) -> List[str]:
+    return sorted({name for name in names if names.count(name) > 1})
+
+
+def _validate_columns_and_keys(schema: Schema):
+    """The checks Java's Schema runs on creation. A key that is not a column is
+    persisted otherwise, and the table can then neither be loaded nor dropped."""
+    names = [field.name for field in schema.fields]
+    if _duplicates(names):
+        raise ValueError(
+            f"Table column {names} must not contain duplicate fields. "
+            f"Found: {_duplicates(names)}")
+    for constraint, included, keys in (
+            ("Partition key", "partition fields", schema.partition_keys),
+            ("Primary key", "primary key constraint", schema.primary_keys)):
+        if _duplicates(keys):
+            raise ValueError(
+                f"{constraint} constraint {keys} must not contain duplicate "
+                f"columns. Found: {_duplicates(keys)}")
+        if not set(keys) <= set(names):
+            raise ValueError(
+                f"Table column {names} should include all {included} {keys}")
+
+
 def _validate_options(options: dict):
     core_options = CoreOptions(Options(options))
     target_file_row_num = core_options.target_file_row_num()
@@ -959,6 +983,7 @@ class SchemaManager:
                 comment=schema.comment,
             )
 
+            _validate_columns_and_keys(schema)
             table_schema = TableSchema.from_schema(schema_id=0, schema=schema)
             success = self.commit(table_schema)
             if success:
