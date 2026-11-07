@@ -286,6 +286,12 @@ class DataWriter(ABC):
     def _merge_data(self, existing_data: pa.RecordBatch, new_data: pa.RecordBatch) -> pa.RecordBatch:
         """Merge existing data with new data. Must be implemented by subclasses."""
 
+    def _numbers_append_rows(self) -> bool:
+        # Unaware-bucket files keep the zero range that commit replaces with
+        # the snapshot id on row-tracking tables.
+        return (not self.table.is_primary_key_table
+                and self.table.bucket_mode() != BucketMode.BUCKET_UNAWARE)
+
     def _append_file_sequence_range(self, row_count: int) -> Tuple[int, int]:
         if row_count <= 0:
             raise ValueError("row_count must be positive")
@@ -446,6 +452,11 @@ class DataWriter(ABC):
             minmax = pc.min_max(sequences)
             min_seq = minmax["min"].as_py()
             max_seq = minmax["max"].as_py()
+        elif self._numbers_append_rows():
+            # Like Java's AppendOnlyWriter, number the rows from the bucket's
+            # restored max sequence number + 1.
+            min_seq = self.sequence_generator.current + 1
+            max_seq = self.sequence_generator.current + data.num_rows
         else:
             min_seq = self.sequence_generator.start
             max_seq = self.sequence_generator.current
@@ -459,6 +470,8 @@ class DataWriter(ABC):
     def _finish_data_file(self, data_meta, changelog_meta=None,
                           shared_shredding_stats=None):
         """Record a fully written data file and its optional changelog."""
+        if self._numbers_append_rows():
+            self.sequence_generator.current = data_meta.max_sequence_number
         self.sequence_generator.start = self.sequence_generator.current
         if shared_shredding_stats is not None:
             self._map_shared_shredding.file_completed(shared_shredding_stats)
