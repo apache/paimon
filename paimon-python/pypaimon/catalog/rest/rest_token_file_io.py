@@ -35,6 +35,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem.cache_policy_file_io import CachePolicyFileIO
 
 
 class RESTTokenFileIO(FileIO):
@@ -151,7 +152,8 @@ class RESTTokenFileIO(FileIO):
                 cache = self._FILE_IO_CACHE
                 file_io = cache.get(cache_key)
                 if file_io is None:
-                    file_io = FileIO.get(self.path, self._merged_options(token))
+                    file_io = CachePolicyFileIO.create(
+                        self.path, self._merged_options(token))
                     self._log_file_io_created(cache)
                 # Re-inserting on every access expires idle entries only, like expireAfterAccess.
                 cache[cache_key] = file_io
@@ -216,6 +218,10 @@ class RESTTokenFileIO(FileIO):
             dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
             if dlf_oss_endpoint and dlf_oss_endpoint.strip():
                 merged_token[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
+            if self.catalog_options.contains(CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE):
+                merged_token[CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE.key()] = str(
+                    self.catalog_options.get(
+                        CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE)).lower()
         return merged_token
 
     def new_input_stream(self, path: str):

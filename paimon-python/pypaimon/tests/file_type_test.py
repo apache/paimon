@@ -126,6 +126,15 @@ class FileTypeClassifyTest(unittest.TestCase):
             FileType.parse_whitelist("data"))
         self.assertEqual(set(FileType), FileType.parse_whitelist("*"))
 
+    def test_parse_whitelist(self):
+        self.assertEqual(
+            set(FileType),
+            FileType.parse_whitelist(
+                " meta, global-index, bucket-index, data, file-index "))
+        self.assertEqual(set(), FileType.parse_whitelist(""))
+        self.assertEqual(set(), FileType.parse_whitelist("manifest,unknown"))
+        self.assertEqual(set(), FileType.parse_whitelist(None))
+
 
 class FileTypeMutableTest(unittest.TestCase):
 

@@ -37,6 +37,7 @@ from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
+from pypaimon.filesystem.cache_policy_file_io import CachePolicyFileIO
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.table.row.blob import BlobDescriptor
 
@@ -707,6 +708,55 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 "test-secret-key",
                 "Other token properties should be preserved"
             )
+
+    def test_ignore_vpc_validation_is_merged_into_token(self):
+        catalog_options = Options({
+            CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE.key(): True,
+        })
+        file_io = RESTTokenFileIO(
+            self.identifier, self.warehouse_path, catalog_options)
+
+        merged_token = file_io._merge_token_with_catalog_options({
+            CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE.key(): "false",
+        })
+
+        self.assertEqual(
+            "true",
+            merged_token[CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE.key()],
+        )
+
+    def test_token_file_io_uses_cache_policy_factory(self):
+        file_io = RESTTokenFileIO(
+            self.identifier,
+            "oss://test-bucket/database/table",
+            Options({OssOptions.OSS_IMPL.key(): "legacy"}),
+        )
+        file_io.token = RESTToken(
+            {
+                CatalogOptions.IO_CACHE_POLICY.key(): "read",
+                CatalogOptions.IO_CACHE_VPC_VALIDATED.key(): "true",
+                CatalogOptions.IO_CACHE_ENDPOINT.key(): "cache-endpoint",
+            },
+            int(time.time() * 1000) + 7_200_000,
+        )
+
+        cache = TTLCache(
+            maxsize=RESTTokenFileIO._FILE_IO_CACHE_MAXSIZE,
+            ttl=RESTTokenFileIO._FILE_IO_CACHE_TTL,
+        )
+        with patch.object(RESTTokenFileIO, "_FILE_IO_CACHE", cache):
+            expected = MagicMock()
+            with patch.object(RESTTokenFileIO, "try_to_refresh_token"), \
+                    patch.object(
+                        CachePolicyFileIO, "create", return_value=expected) as create:
+                self.assertIs(expected, file_io.file_io())
+
+            create.assert_called_once()
+            path, options = create.call_args[0]
+            self.assertEqual("oss://test-bucket/database/table", path)
+            self.assertEqual("legacy", options.get(OssOptions.OSS_IMPL))
+            self.assertEqual("read", options.get(CatalogOptions.IO_CACHE_POLICY))
+            self.assertTrue(options.get(CatalogOptions.IO_CACHE_VPC_VALIDATED))
 
     def test_catalog_options_not_modified(self):
         from pypaimon.api.rest_util import RESTUtil

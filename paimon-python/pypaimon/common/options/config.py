@@ -149,6 +149,66 @@ class CatalogOptions:
         "'openapi-v4' (ACS4-HMAC-SHA256, for DlfNext/2026-01-18), "
         "'openapi' (the earlier ROA HMAC-SHA1 scheme). "
         "If not set, will be automatically selected based on endpoint host.")
+    IO_CACHE_IGNORE_VPC_VALIDATE = (
+        ConfigOptions.key("io-cache.ignore-vpc-validate")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to use the cache endpoint even when the REST server cannot "
+            "validate VPC connectivity."
+        )
+    )
+    IO_CACHE_VPC_VALIDATED = (
+        ConfigOptions.key("io-cache.vpc-validated")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether the REST server has validated connectivity from the source "
+            "VPC to the cache endpoint."
+        )
+    )
+    IO_CACHE_ENDPOINT = (
+        ConfigOptions.key("io-cache.endpoint")
+        .string_type()
+        .no_default_value()
+        .with_description("The cache endpoint vended by the REST server.")
+    )
+    IO_CACHE_ORIGIN_ENDPOINT = (
+        ConfigOptions.key("io-cache.origin.endpoint")
+        .string_type()
+        .no_default_value()
+        .with_description("The original OSS endpoint used when cache is bypassed.")
+    )
+    IO_CACHE_WHITELIST = (
+        ConfigOptions.key("io-cache.whitelist")
+        .string_type()
+        .default_value("*")
+        .with_description(
+            "Comma-separated list of file types allowed to use the cache endpoint. "
+            "Supported values: meta, global-index, bucket-index, data, file-index. "
+            "Use * to allow all file types."
+        )
+    )
+    IO_CACHE_WHITELIST_PATH = (
+        ConfigOptions.key("io-cache.whitelist-path")
+        .string_type()
+        .default_value("*")
+        .with_description(
+            "Comma-separated list of path substrings allowed to use the cache endpoint. "
+            "Use * to allow all paths. A path must match both io-cache.whitelist and "
+            "io-cache.whitelist-path to use the cache endpoint."
+        )
+    )
+    IO_CACHE_POLICY = (
+        ConfigOptions.key("io-cache.policy")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "The table-level cache policy provided by the REST server, combined with: "
+            "meta,read,write. meta enables metadata operations, read enables file reads, "
+            "write enables file writes, and none disables the cache."
+        )
+    )
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
         "header.User-Agent").string_type().no_default_value().with_description(
