@@ -119,6 +119,32 @@ class FunctionAlreadyExistException(CatalogException):
         super().__init__(f"Function {identifier.get_full_name()} already exists")
 
 
+class ModelNotExistException(CatalogException):
+    """Model not exist exception"""
+
+    def __init__(self, identifier: Identifier):
+        self.identifier = identifier
+        super().__init__(f"Model {identifier.get_full_name()} does not exist")
+
+
+class ModelAlreadyExistException(CatalogException):
+    """Model already exist exception"""
+
+    def __init__(self, identifier: Identifier):
+        self.identifier = identifier
+        super().__init__(f"Model {identifier.get_full_name()} already exists")
+
+
+class PredictionNotExistException(CatalogException):
+    """Prediction not exist exception"""
+
+    def __init__(self, identifier: Identifier, job_id: str):
+        self.identifier = identifier
+        self.job_id = job_id
+        super().__init__(
+            f"Prediction {job_id} for table {identifier.get_full_name()} does not exist")
+
+
 class ColumnNotExistException(CatalogException):
     """Column not exist exception"""
 

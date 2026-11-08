@@ -30,6 +30,10 @@ import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.Model;
+import org.apache.paimon.catalog.Prediction;
+import org.apache.paimon.catalog.PredictionSpec;
+import org.apache.paimon.catalog.PredictionStatus;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.catalog.TableQueryAuthResult;
@@ -56,6 +60,8 @@ import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
+import org.apache.paimon.rest.requests.CreateModelRequest;
+import org.apache.paimon.rest.requests.SubmitPredictionRequest;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -110,6 +116,7 @@ import static org.apache.paimon.catalog.CatalogUtils.validateCatalogManagedForma
 import static org.apache.paimon.catalog.CatalogUtils.validateCatalogManagedPartitionOptions;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog {
@@ -1114,6 +1121,147 @@ public class RESTCatalog implements Catalog {
     public boolean supportsPartitionModification() {
         // Paimon tables use commit-based partition maintenance.
         return false;
+    }
+
+    @Override
+    public List<Model> listModels(String databaseName) throws DatabaseNotExistException {
+        try {
+            return api.listModels(databaseName).stream()
+                    .map(response -> response.toModel(databaseName))
+                    .collect(Collectors.toList());
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName, e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support models", e);
+        }
+    }
+
+    @Override
+    public Model getModel(Identifier identifier)
+            throws ModelNotExistException, DatabaseNotExistException {
+        try {
+            return api.getModel(identifier).toModel(identifier.getDatabaseName());
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_DATABASE)) {
+                throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
+            }
+            throw new ModelNotExistException(identifier, e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support models", e);
+        }
+    }
+
+    @Override
+    public Model createModel(Identifier identifier, Model model, boolean ignoreIfExists)
+            throws ModelAlreadyExistException, DatabaseNotExistException, ModelNotExistException {
+        checkArgument(
+                identifier.getFullName().equals(model.fullName()),
+                "Model identifier must match the model metadata");
+        try {
+            return api.createModel(identifier, new CreateModelRequest(model))
+                    .toModel(identifier.getDatabaseName());
+        } catch (AlreadyExistsException e) {
+            if (ignoreIfExists) {
+                return getModel(identifier);
+            }
+            throw new ModelAlreadyExistException(identifier, e);
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support models", e);
+        }
+    }
+
+    @Override
+    public void dropModel(Identifier identifier, boolean ignoreIfNotExists)
+            throws ModelNotExistException, DatabaseNotExistException {
+        try {
+            api.dropModel(identifier);
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_DATABASE)) {
+                throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
+            }
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_MODEL)) {
+                if (ignoreIfNotExists) {
+                    return;
+                }
+                throw new ModelNotExistException(identifier, e);
+            }
+            throw e;
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support models", e);
+        }
+    }
+
+    @Override
+    public Prediction submitPrediction(Identifier identifier, PredictionSpec spec)
+            throws TableNotExistException, ModelNotExistException {
+        try {
+            return api.submitPrediction(identifier, new SubmitPredictionRequest(spec))
+                    .toPrediction();
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_MODEL)) {
+                throw new ModelNotExistException(Identifier.fromString(spec.model()), e);
+            }
+            throw new TableNotExistException(identifier, e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
+        }
+    }
+
+    @Override
+    public Prediction getPrediction(Identifier identifier, String jobId)
+            throws TableNotExistException, PredictionNotExistException {
+        try {
+            return api.getPrediction(identifier, jobId).toPrediction();
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_PREDICTION)) {
+                throw new PredictionNotExistException(identifier, jobId, e);
+            }
+            throw new TableNotExistException(identifier, e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
+        }
+    }
+
+    @Override
+    public PagedList<Prediction> listPredictions(
+            Identifier identifier,
+            @Nullable String name,
+            @Nullable PredictionStatus status,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken)
+            throws TableNotExistException {
+        try {
+            PagedList<org.apache.paimon.rest.responses.GetPredictionResponse> response =
+                    api.listPredictions(identifier, name, status, maxResults, pageToken);
+            return new PagedList<>(
+                    response.getElements().stream()
+                            .map(
+                                    org.apache.paimon.rest.responses.GetPredictionResponse
+                                            ::toPrediction)
+                            .collect(Collectors.toList()),
+                    response.getNextPageToken());
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier, e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
+        }
+    }
+
+    @Override
+    public Prediction cancelPrediction(Identifier identifier, String jobId)
+            throws TableNotExistException, PredictionNotExistException {
+        try {
+            return api.cancelPrediction(identifier, jobId).toPrediction();
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_PREDICTION)) {
+                throw new PredictionNotExistException(identifier, jobId, e);
+            }
+            throw new TableNotExistException(identifier, e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
+        }
     }
 
     @Override

@@ -17,6 +17,7 @@
 
 import json
 import re
+import uuid
 from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Sequence
 
@@ -108,6 +109,92 @@ class MultimodalTable:
         raw_table = self.raw_table.copy(options)
         return MultimodalTable(
             self.catalog, raw_table.identifier.get_full_name(), raw_table)
+
+    def predict(
+            self,
+            *,
+            model,
+            inputs,
+            result_columns,
+            prompt,
+            output_schema,
+            name=None,
+            where=None,
+            request_id=None,
+            options=None):
+        """Submit an asynchronous prediction without reading rows locally."""
+        from pypaimon.catalog.prediction import PredictionSpec
+        from pypaimon.multimodal.prediction import PredictionJob
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        if not isinstance(self.raw_table, FileStoreTable):
+            raise NotImplementedError(
+                "Prediction requires a Paimon file store table")
+        table_options = self.raw_table.options.options.to_map()
+        allowed = {"scan.snapshot-id", "scan.tag-name"}
+        unsupported = [
+            key for key in table_options
+            if (key.startswith("scan.") or key.startswith("incremental-"))
+            and key not in allowed
+        ]
+        if unsupported:
+            raise ValueError(
+                "Prediction does not support scan options: {}".format(unsupported))
+        spec = PredictionSpec(
+            name=name,
+            request_id=request_id or uuid.uuid4().hex,
+            model=model,
+            inputs=inputs,
+            result_columns=result_columns,
+            prompt=prompt,
+            output_schema=output_schema,
+            where=where,
+            snapshot_id=self.raw_table.options.scan_snapshot_id(),
+            tag_name=self.raw_table.options.scan_tag_name(),
+            options=options or {},
+        )
+        prediction = self.catalog.submit_prediction(
+            self.raw_table.identifier, spec)
+        return PredictionJob(
+            self.catalog, self.raw_table.identifier, prediction)
+
+    def get_prediction(self, job_id):
+        """Return a client handle for one asynchronous prediction."""
+        from pypaimon.multimodal.prediction import PredictionJob
+
+        prediction = self.catalog.get_prediction(
+            self.raw_table.identifier, job_id)
+        return PredictionJob(
+            self.catalog, self.raw_table.identifier, prediction)
+
+    def list_predictions(
+            self,
+            *,
+            name=None,
+            status=None,
+            max_results=None,
+            page_token=None):
+        """List prediction handles for this table."""
+        from pypaimon.api.api_response import PagedList
+        from pypaimon.catalog.prediction import PredictionStatus
+        from pypaimon.multimodal.prediction import PredictionJob
+
+        if isinstance(status, str):
+            status = PredictionStatus(status)
+        page = self.catalog.list_predictions(
+            self.raw_table.identifier,
+            name=name,
+            status=status,
+            max_results=max_results,
+            page_token=page_token,
+        )
+        return PagedList(
+            [
+                PredictionJob(self.catalog, self.raw_table.identifier, value)
+                for value in page.elements
+            ],
+            page.next_page_token,
+        )
 
     def add(self, data):
         arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))

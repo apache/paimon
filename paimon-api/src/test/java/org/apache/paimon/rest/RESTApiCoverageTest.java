@@ -29,7 +29,11 @@ import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.management.RowFilter;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.requests.CreateModelRequest;
+import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.view.SemanticViewDefinition;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -47,6 +51,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -171,6 +176,80 @@ class RESTApiCoverageTest {
                 .isEmpty();
     }
 
+    @Test
+    void testModelNotFoundContract() throws Exception {
+        JsonNode spec = OpenApiSpec.catalogSpec();
+        String responseName = "DatabaseOrModelNotExistErrorResponse";
+        JsonNode path = spec.path("paths").path("/v1/{prefix}/databases/{database}/models/{model}");
+        for (String method : Arrays.asList("get", "delete")) {
+            assertThat(path.path(method).path("responses").path("404").path("$ref").asText())
+                    .isEqualTo("#/components/responses/" + responseName);
+        }
+
+        JsonNode responseSchema =
+                spec.path("components")
+                        .path("responses")
+                        .path(responseName)
+                        .path("content")
+                        .path("application/json")
+                        .path("schema");
+        assertThat(responseSchema.path("allOf").get(0).path("$ref").asText())
+                .isEqualTo("#/components/schemas/ErrorResponse");
+        JsonNode discriminator = responseSchema.path("allOf").get(1);
+        assertThat(discriminator.path("required").get(0).asText()).isEqualTo("resourceType");
+        assertThat(
+                        Arrays.asList(
+                                discriminator
+                                        .path("properties")
+                                        .path("resourceType")
+                                        .path("enum")
+                                        .get(0)
+                                        .asText(),
+                                discriminator
+                                        .path("properties")
+                                        .path("resourceType")
+                                        .path("enum")
+                                        .get(1)
+                                        .asText()))
+                .containsExactlyInAnyOrder(
+                        ErrorResponse.RESOURCE_TYPE_DATABASE, ErrorResponse.RESOURCE_TYPE_MODEL);
+
+        List<String> errorResourceTypes = new ArrayList<>();
+        spec.path("components")
+                .path("schemas")
+                .path("ErrorResponse")
+                .path("properties")
+                .path("resourceType")
+                .path("enum")
+                .forEach(value -> errorResourceTypes.add(value.asText()));
+        assertThat(errorResourceTypes).contains(ErrorResponse.RESOURCE_TYPE_MODEL);
+    }
+
+    @Test
+    void testModelPathSegmentContract() throws Exception {
+        JsonNode spec = OpenApiSpec.catalogSpec();
+        String pathSegmentRef = "#/components/schemas/ModelPathSegment";
+        for (String path :
+                Arrays.asList(
+                        "/v1/{prefix}/databases/{database}/models",
+                        "/v1/{prefix}/databases/{database}/models/{model}")) {
+            JsonNode pathItem = spec.path("paths").path(path);
+            for (String method : Arrays.asList("get", pathItem.has("post") ? "post" : "delete")) {
+                for (JsonNode parameter : pathItem.path(method).path("parameters")) {
+                    if ("database".equals(parameter.path("name").asText())
+                            || "model".equals(parameter.path("name").asText())) {
+                        assertThat(parameter.path("schema").path("$ref").asText())
+                                .isEqualTo(pathSegmentRef);
+                    }
+                }
+            }
+        }
+        JsonNode modelPathSegment =
+                spec.path("components").path("schemas").path("ModelPathSegment");
+        assertThat(modelPathSegment.path("minLength").asInt()).isEqualTo(1);
+        assertThat(modelPathSegment.path("pattern").asText()).isEqualTo("^(?!\\.{1,2}$).+");
+    }
+
     /** Requests sent by each public method, by name; "RESTApi" holds the constructor's. */
     private Map<String, List<String[]>> sendEveryRequest() throws Exception {
         Map<String, List<String[]>> sent = new TreeMap<>();
@@ -239,6 +318,14 @@ class RESTApiCoverageTest {
         arguments.put(List.class, Collections.emptyList());
         arguments.put(Map.class, Collections.emptyMap());
         arguments.put(Identifier.class, Identifier.create("db", "t"));
+        Map<String, Object> modelField = new HashMap<>();
+        modelField.put("dataType", "STRING");
+        Map<String, Map<String, Object>> modelInputs = new HashMap<>();
+        modelInputs.put("input", modelField);
+        arguments.put(
+                CreateModelRequest.class,
+                new CreateModelRequest(
+                        "t", "provider", "model", modelInputs, null, Collections.emptyMap()));
         arguments.put(
                 Function.class, new FunctionImpl(Identifier.create("db", "f"), new HashMap<>()));
         arguments.put(SemanticViewDefinition.class, new SemanticViewDefinition("x1", "x1"));
