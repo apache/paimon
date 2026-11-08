@@ -533,6 +533,11 @@ class VideoFrameCollator:
             self._decoders[cache_key] = resource
             return resource[0]
 
+        # Release the oldest decoder's payload before admitting a new one.
+        if len(self._decoders) >= self.max_open_videos:
+            _, evicted = self._decoders.popitem(last=False)
+            self._close_resource(evicted)
+
         # Reuse the table's resolved FileIO. Rebuilding a reader from raw URI
         # options can drop merged REST/DLF storage credentials in workers.
         stream = Blob.from_file(
@@ -546,9 +551,13 @@ class VideoFrameCollator:
                 getattr(cached_stream, "video_prefetch_bytes", 0)
                 for _, cached_stream in self._decoders.values())
             if 0 < descriptor.length <= self.prefetch_max_bytes - retained:
-                payload = stream.read(descriptor.length)
-                if len(payload) != descriptor.length:
-                    raise IOError("Incomplete video payload during prefetch.")
+                payload = bytearray()
+                while len(payload) < descriptor.length:
+                    chunk = stream.read(descriptor.length - len(payload))
+                    if not chunk:
+                        raise IOError("Incomplete video payload during prefetch.")
+                    payload.extend(chunk)
+                del chunk
                 stream = _PrefetchedVideo(payload, stream)
                 del payload
             # Replica decoders share metadata, while their decode state stays separate.
@@ -589,9 +598,6 @@ class VideoFrameCollator:
             raise
         resource = (decoder, stream)
         self._decoders[cache_key] = resource
-        if len(self._decoders) > self.max_open_videos:
-            _, evicted = self._decoders.popitem(last=False)
-            self._close_resource(evicted)
         return decoder
 
     def _collate(self, rows):

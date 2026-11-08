@@ -653,6 +653,59 @@ class VideoFrameCollatorTest(unittest.TestCase):
         self.assertFalse(collator._decoders)
         collator.close()
 
+    def test_prefetch_accepts_short_reads(self):
+        reads = []
+
+        class Source(io.BytesIO):
+            def read(self, size=-1):
+                reads.append(size)
+                return super().read(min(size, 2))
+
+        source = Source(b"video")
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=SimpleNamespace(new_input_stream=lambda path: source)),
+            video_column="video", decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            collate_fn=lambda rows: rows, prefetch_max_bytes=5)
+        try:
+            descriptor = VideoFrameDescriptor("video", 0, 5, 0, -1, 0)
+            result = collator([{"video": descriptor.serialize()}])
+            self.assertEqual((b"video", 0), result[0]["frame"])
+            self.assertEqual([5, 3, 1], reads)
+        finally:
+            collator.close()
+        self.assertTrue(source.closed)
+
+    def test_prefetch_reuses_evicted_decoder_budget(self):
+        opened = []
+        buffered = []
+
+        def open_source(path):
+            source = io.BytesIO(b"video")
+            opened.append(source)
+            return source
+
+        def factory(stream):
+            buffered.append(getattr(stream, "video_prefetch_bytes", 0))
+            self.assertTrue(all(source.closed for source in opened[:-1]))
+            return _Decoder(stream, [])
+
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=SimpleNamespace(new_input_stream=open_source)),
+            video_column="video", decoder_factory=factory,
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            collate_fn=lambda rows: rows, prefetch_max_bytes=5, max_open_videos=1)
+        try:
+            for name in ("first", "second", "third"):
+                descriptor = VideoFrameDescriptor(name, 0, 5, 0, -1, 0)
+                result = collator([{"video": descriptor.serialize()}])
+                self.assertEqual((b"video", 0), result[0]["frame"])
+                self.assertEqual(1, len(collator._decoders))
+            self.assertEqual([5, 5, 5], buffered)
+        finally:
+            collator.close()
+        self.assertTrue(all(source.closed for source in opened))
+
     def test_invalid_prefetch_budget(self):
         for budget in (-1, True, 1.5, "10"):
             with self.subTest(budget=budget):
