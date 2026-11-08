@@ -867,6 +867,194 @@ class ConflictDetectionTest {
     }
 
     @Test
+    void testDvConflictScanIncludesDataAndIndexBuckets() {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        ConflictDetection detection = dvConflictDetection(handler);
+        Snapshot snapshot = indexSnapshot("indexes");
+        BinaryRow partition = BinaryRow.singleColumn(1);
+        SimpleFileEntry appended = scopedFileEntry("new", ADD, EMPTY_ROW, 2);
+        SimpleFileEntry existing = scopedFileEntry("base", ADD, partition, 3);
+        IndexManifestEntry oldDv = scopedDvEntry("old", ADD, "base", partition, 3);
+        Set<Pair<BinaryRow, Integer>> buckets =
+                new HashSet<>(Arrays.asList(Pair.of(EMPTY_ROW, 2), Pair.of(partition, 3)));
+        when(handler.scanBucketEntries(snapshot, DELETION_VECTORS_INDEX, buckets))
+                .thenReturn(Collections.singletonList(oldDv));
+
+        assertThat(
+                        detection.checkConflicts(
+                                snapshot,
+                                Collections.singletonList(existing),
+                                Collections.singletonList(appended),
+                                Arrays.asList(
+                                        oldDv.toDeleteEntry(),
+                                        scopedDvEntry("new-dv", ADD, "base", partition, 3)),
+                                null,
+                                Snapshot.CommitKind.OVERWRITE))
+                .isEmpty();
+        verify(handler).scanBucketEntries(snapshot, DELETION_VECTORS_INDEX, buckets);
+        verify(handler, never()).readManifest("indexes");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testDvOnlyConflictScanPreservesVersionCheck(boolean staleDv) {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        ConflictDetection detection = dvConflictDetection(handler);
+        Snapshot snapshot = indexSnapshot("indexes");
+        IndexManifestEntry currentDv = createDvIndexEntry("current", ADD, Arrays.asList("base"));
+        Set<Pair<BinaryRow, Integer>> buckets = Collections.singleton(Pair.of(EMPTY_ROW, 0));
+        when(handler.scanBucketEntries(snapshot, DELETION_VECTORS_INDEX, buckets))
+                .thenReturn(Collections.singletonList(currentDv));
+        // Let the previous unscoped implementation check the same versions, so the bounded-read
+        // assertion also protects the optimization when the conflict result alone is unchanged.
+        when(handler.readManifest("indexes")).thenReturn(Collections.singletonList(currentDv));
+
+        Optional<RuntimeException> conflict =
+                detection.checkConflicts(
+                        snapshot,
+                        Collections.singletonList(createFileEntry("base", ADD)),
+                        Collections.emptyList(),
+                        Arrays.asList(
+                                createDvIndexEntry(
+                                        staleDv ? "stale" : "current",
+                                        DELETE,
+                                        Arrays.asList("base")),
+                                createDvIndexEntry("replacement", ADD, Arrays.asList("base"))),
+                        null,
+                        Snapshot.CommitKind.OVERWRITE);
+
+        assertThat(conflict.isPresent()).isEqualTo(staleDv);
+        if (staleDv) {
+            assertThat(conflict.get()).hasMessageContaining("File deletion conflicts detected");
+        }
+        verify(handler).scanBucketEntries(snapshot, DELETION_VECTORS_INDEX, buckets);
+        verify(handler, never()).readManifest("indexes");
+    }
+
+    @Test
+    void testDataFileOnlyConflictScanPreservesDvCheck() {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        ConflictDetection detection = dvConflictDetection(handler);
+        Snapshot snapshot = indexSnapshot("indexes");
+        Set<Pair<BinaryRow, Integer>> buckets = Collections.singleton(Pair.of(EMPTY_ROW, 0));
+        when(handler.scanBucketEntries(snapshot, DELETION_VECTORS_INDEX, buckets))
+                .thenReturn(
+                        Collections.singletonList(
+                                createDvIndexEntry("concurrent-dv", ADD, Arrays.asList("base"))));
+
+        // A compactor prepared the removal before another writer attached a DV to the file.
+        assertThat(
+                        detection.checkConflicts(
+                                snapshot,
+                                Collections.singletonList(createFileEntry("base", ADD)),
+                                Collections.singletonList(createFileEntry("base", DELETE)),
+                                Collections.emptyList(),
+                                null,
+                                Snapshot.CommitKind.COMPACT))
+                .isPresent();
+        verify(handler).scanBucketEntries(snapshot, DELETION_VECTORS_INDEX, buckets);
+        verify(handler, never()).readManifest("indexes");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testDvRemovalOnlyScanPreservesVersionCheck(boolean staleDv) {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        ConflictDetection detection = dvConflictDetection(handler);
+        Snapshot snapshot = indexSnapshot("indexes");
+        Set<Pair<BinaryRow, Integer>> buckets = Collections.singleton(Pair.of(EMPTY_ROW, 0));
+        when(handler.scanBucketEntries(snapshot, DELETION_VECTORS_INDEX, buckets))
+                .thenReturn(
+                        Collections.singletonList(
+                                createDvIndexEntry("current", ADD, Arrays.asList("base"))));
+
+        Optional<RuntimeException> conflict =
+                detection.checkConflicts(
+                        snapshot,
+                        Collections.singletonList(createFileEntry("base", ADD)),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createDvIndexEntry(
+                                        staleDv ? "stale" : "current",
+                                        DELETE,
+                                        Arrays.asList("base"))),
+                        null,
+                        Snapshot.CommitKind.OVERWRITE);
+
+        assertThat(conflict.isPresent()).isEqualTo(staleDv);
+        if (staleDv) {
+            assertThat(conflict.get()).hasMessageContaining("File deletion conflicts detected");
+        }
+        verify(handler).scanBucketEntries(snapshot, DELETION_VECTORS_INDEX, buckets);
+        verify(handler, never()).readManifest("indexes");
+    }
+
+    @Test
+    void testDvConflictScanSkipsEmptyChangesAndMissingManifest() {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        ConflictDetection detection = dvConflictDetection(handler);
+        assertThat(
+                        detection.checkConflicts(
+                                indexSnapshot("indexes"),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .isEmpty();
+        assertThat(
+                        detection.checkConflicts(
+                                indexSnapshot(null),
+                                Collections.emptyList(),
+                                Collections.singletonList(createFileEntry("new", ADD)),
+                                Collections.emptyList(),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .isEmpty();
+        verifyNoInteractions(handler);
+    }
+
+    private ConflictDetection dvConflictDetection(IndexFileHandler handler) {
+        return new AppendConflictDetection(
+                "test-table",
+                "test-user",
+                RowType.of(),
+                null,
+                BucketMode.BUCKET_UNAWARE,
+                true,
+                handler,
+                null);
+    }
+
+    private SimpleFileEntry scopedFileEntry(
+            String name, FileKind kind, BinaryRow partition, int bucket) {
+        return new SimpleFileEntry(
+                kind,
+                partition,
+                bucket,
+                -1,
+                0,
+                name,
+                Collections.emptyList(),
+                null,
+                EMPTY_ROW,
+                EMPTY_ROW,
+                null,
+                10L,
+                null);
+    }
+
+    private IndexManifestEntry scopedDvEntry(
+            String indexName, FileKind kind, String dataFile, BinaryRow partition, int bucket) {
+        return new IndexManifestEntry(
+                kind,
+                partition,
+                bucket,
+                createDvIndexEntry(indexName, kind, Collections.singletonList(dataFile))
+                        .indexFile());
+    }
+
+    @Test
     public void testConflictDeletionWithDV() {
         {
             // Scene 1: base -------------> update2 (conflict)

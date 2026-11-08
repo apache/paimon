@@ -222,10 +222,8 @@ public abstract class ConflictDetection {
                 baseEntries =
                         buildBaseEntriesWithDV(
                                 baseEntries,
-                                latestSnapshot.indexManifest() == null
-                                        ? Collections.emptyList()
-                                        : indexFileHandler.readManifest(
-                                                latestSnapshot.indexManifest()));
+                                scanChangedBucketDvIndexes(
+                                        latestSnapshot, deltaEntries, deltaIndexEntries));
                 deltaEntries =
                         buildDeltaEntriesWithDV(baseEntries, deltaEntries, deltaIndexEntries);
             } catch (Throwable e) {
@@ -504,6 +502,27 @@ public abstract class ConflictDetection {
             }
         }
         return Optional.empty();
+    }
+
+    private List<IndexManifestEntry> scanChangedBucketDvIndexes(
+            Snapshot snapshot,
+            List<SimpleFileEntry> deltaEntries,
+            List<IndexManifestEntry> deltaIndexEntries) {
+        if (snapshot.indexManifest() == null
+                || (deltaEntries.isEmpty() && deltaIndexEntries.isEmpty())) {
+            return Collections.emptyList();
+        }
+
+        Set<Pair<BinaryRow, Integer>> changedBuckets = new HashSet<>();
+        for (SimpleFileEntry entry : deltaEntries) {
+            changedBuckets.add(Pair.of(entry.partition(), entry.bucket()));
+        }
+        // DV-only updates have no data file entries. Include both added and removed indexes so
+        // their input DV versions are still checked against the latest snapshot on every retry.
+        for (IndexManifestEntry entry : deltaIndexEntries) {
+            changedBuckets.add(Pair.of(entry.partition(), entry.bucket()));
+        }
+        return indexFileHandler.scanBucketEntries(snapshot, DELETION_VECTORS_INDEX, changedBuckets);
     }
 
     static List<SimpleFileEntry> buildBaseEntriesWithDV(
