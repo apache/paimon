@@ -348,7 +348,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int attempts = 0;
 
         List<CommitMessage> commitMessages = committable.fileCommittables();
-        Map<BinaryRow, Long> compactionBaselines = prepareConflictChecks(commitMessages);
+        Map<Pair<BinaryRow, Integer>, Long> compactionBaselines =
+                prepareConflictChecks(commitMessages);
         ManifestEntryChanges changes = collectChanges(commitMessages);
         List<ManifestEntry> committedCompactFiles = changes.compactTableFiles;
         Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
@@ -528,7 +529,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int generatedSnapshot = 0;
         int attempts = 0;
 
-        Map<BinaryRow, Long> compactionBaselines =
+        Map<Pair<BinaryRow, Integer>, Long> compactionBaselines =
                 prepareConflictChecks(committable.fileCommittables());
         ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
         if (!changes.appendChangelog.isEmpty() || !changes.compactChangelog.isEmpty()) {
@@ -806,7 +807,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return changes;
     }
 
-    private Map<BinaryRow, Long> prepareConflictChecks(List<CommitMessage> commitMessages) {
+    private Map<Pair<BinaryRow, Integer>, Long> prepareConflictChecks(
+            List<CommitMessage> commitMessages) {
         if (options.dataEvolutionEnabled()) {
             configureRowIdCheckFromMessages(commitMessages);
         }
@@ -986,7 +988,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private int tryCommit(
             CommitChangesProvider changesProvider,
-            Map<BinaryRow, Long> compactionBaselines,
+            Map<Pair<BinaryRow, Integer>, Long> compactionBaselines,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -1164,7 +1166,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private CommitResult tryCommitOnce(
             @Nullable RetryCommitResult retryResult,
             CommitChangesProvider changesProvider,
-            Map<BinaryRow, Long> compactionBaselines,
+            Map<Pair<BinaryRow, Integer>, Long> compactionBaselines,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -1199,7 +1201,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private CommitResult tryCommitOnceWithoutLock(
             @Nullable RetryCommitResult retryResult,
             CommitChangesProvider changesProvider,
-            Map<BinaryRow, Long> compactionBaselines,
+            Map<Pair<BinaryRow, Integer>, Long> compactionBaselines,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,

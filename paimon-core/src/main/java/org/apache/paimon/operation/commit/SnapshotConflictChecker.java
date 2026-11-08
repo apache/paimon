@@ -27,6 +27,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -52,11 +53,11 @@ public class SnapshotConflictChecker {
     private final String commitUser;
     private final CommitScanner scanner;
     private final boolean dataEvolutionEnabled;
-    private final boolean partitionCompactionCheckEnabled;
+    private final boolean bucketCompactionCheckEnabled;
 
     @Nullable private Long lastSafeSnapshot;
     // Successfully checked intervals (from, to], independently of the writers' immutable bases.
-    private final Map<BinaryRow, Range> checkedCompactionSnapshots = new HashMap<>();
+    private final Map<Pair<BinaryRow, Integer>, Range> checkedCompactionSnapshots = new HashMap<>();
 
     public SnapshotConflictChecker(
             SnapshotManager snapshotManager,
@@ -64,21 +65,22 @@ public class SnapshotConflictChecker {
             CommitScanner scanner,
             boolean dataEvolutionEnabled,
             @Nullable Long lastSafeSnapshot,
-            boolean partitionCompactionCheckEnabled) {
+            boolean bucketCompactionCheckEnabled) {
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
         this.scanner = scanner;
         this.dataEvolutionEnabled = dataEvolutionEnabled;
         this.lastSafeSnapshot = lastSafeSnapshot;
-        this.partitionCompactionCheckEnabled = partitionCompactionCheckEnabled;
+        this.bucketCompactionCheckEnabled = bucketCompactionCheckEnabled;
     }
 
     /** Collects the writer baselines before publishing any part of the commit. */
-    public Map<BinaryRow, Long> prepareCompactionBaselines(List<CommitMessage> messages) {
-        if (!partitionCompactionCheckEnabled) {
+    public Map<Pair<BinaryRow, Integer>, Long> prepareCompactionBaselines(
+            List<CommitMessage> messages) {
+        if (!bucketCompactionCheckEnabled) {
             return Collections.emptyMap();
         }
-        Map<BinaryRow, Long> baseSnapshots = new HashMap<>();
+        Map<Pair<BinaryRow, Integer>, Long> baseSnapshots = new HashMap<>();
         for (CommitMessage message : messages) {
             if (!changesDataOrDeletionVectors(((CommitMessageImpl) message).compactIncrement())) {
                 continue;
@@ -87,8 +89,9 @@ public class SnapshotConflictChecker {
             checkArgument(
                     snapshotId != null && snapshotId >= 0,
                     "A primary-key deletion-vector compaction message is missing its "
-                            + "restored snapshot. Reload the partition and recompute compaction.");
-            baseSnapshots.merge(message.partition(), snapshotId, Math::min);
+                            + "restored snapshot. Reload the bucket and recompute compaction.");
+            baseSnapshots.merge(
+                    Pair.of(message.partition(), message.bucket()), snapshotId, Math::min);
         }
         return baseSnapshots;
     }
@@ -100,9 +103,9 @@ public class SnapshotConflictChecker {
             CommitKind newCommitKind,
             CommitChanges changes,
             Set<Long> rebasedReassignments,
-            Map<BinaryRow, Long> compactionBaselines) {
+            Map<Pair<BinaryRow, Integer>, Long> compactionBaselines) {
         if (newCommitKind == CommitKind.COMPACT && !compactionBaselines.isEmpty()) {
-            checkPartitionCompaction(newSnapshotId, compactionBaselines);
+            checkBucketCompaction(newSnapshotId, compactionBaselines);
         }
         if (lastSafeSnapshot == null) {
             return null;
@@ -176,9 +179,10 @@ public class SnapshotConflictChecker {
         }
     }
 
-    private void checkPartitionCompaction(long newSnapshotId, Map<BinaryRow, Long> baseSnapshots) {
-        Map<BinaryRow, Range> ranges = new HashMap<>();
-        for (Map.Entry<BinaryRow, Long> entry : baseSnapshots.entrySet()) {
+    private void checkBucketCompaction(
+            long newSnapshotId, Map<Pair<BinaryRow, Integer>, Long> baseSnapshots) {
+        Map<Pair<BinaryRow, Integer>, Range> ranges = new HashMap<>();
+        for (Map.Entry<Pair<BinaryRow, Integer>, Long> entry : baseSnapshots.entrySet()) {
             long base = entry.getValue();
             Range checked = checkedCompactionSnapshots.get(entry.getKey());
             // A newer writer may have skipped an earlier conflicting COMPACT. Its checked
@@ -198,19 +202,19 @@ public class SnapshotConflictChecker {
                             && snapshot.commitKind() != CommitKind.OVERWRITE)) {
                 continue;
             }
-            Set<BinaryRow> partitions = new HashSet<>();
-            for (Map.Entry<BinaryRow, Range> entry : ranges.entrySet()) {
+            Set<Pair<BinaryRow, Integer>> buckets = new HashSet<>();
+            for (Map.Entry<Pair<BinaryRow, Integer>, Range> entry : ranges.entrySet()) {
                 if (entry.getValue().to < id) {
-                    partitions.add(entry.getKey());
+                    buckets.add(entry.getKey());
                 }
             }
-            if (scanner.hasDataChanges(snapshot, partitions, false)
-                    || scanner.hasIndexChanges(snapshot, partitions, true)) {
+            if (scanner.hasDataChangesInBuckets(snapshot, buckets)
+                    || scanner.hasIndexChangesInBuckets(snapshot, buckets)) {
                 throw new RuntimeException(
                         String.format(
                                 "Concurrent compaction conflict when committing snapshot %d: "
-                                        + "%s snapshot %d by user %s modified the same partition "
-                                        + "after this writer restored its state. Reload the partition "
+                                        + "%s snapshot %d by user %s modified the same partition and bucket "
+                                        + "after this writer restored its state. Reload the bucket "
                                         + "and recompute compaction.",
                                 newSnapshotId, snapshot.commitKind(), id, snapshot.commitUser()));
             }
@@ -218,9 +222,10 @@ public class SnapshotConflictChecker {
         // Only cache a fully verified interval. Publishing may still fail afterwards, but a
         // retry must inspect all snapshots committed after this verified endpoint.
         ranges.forEach(
-                (partition, range) ->
+                (bucket, range) ->
                         checkedCompactionSnapshots.put(
-                                partition.copy(), new Range(range.from, newSnapshotId - 1)));
+                                Pair.of(bucket.getLeft().copy(), bucket.getRight()),
+                                new Range(range.from, newSnapshotId - 1)));
     }
 
     private static boolean changesDataOrDeletionVectors(CompactIncrement compact) {

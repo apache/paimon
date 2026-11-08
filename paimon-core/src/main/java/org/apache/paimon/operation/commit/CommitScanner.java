@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -42,7 +43,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /** Manifest entries scanner for commit. */
 public class CommitScanner {
@@ -93,6 +96,27 @@ public class CommitScanner {
     }
 
     boolean hasDataChanges(Snapshot snapshot, Set<BinaryRow> partitions, boolean onlyRealBuckets) {
+        return hasDataChanges(
+                snapshot,
+                partitions,
+                onlyRealBuckets,
+                entry -> partitions.contains(entry.partition()));
+    }
+
+    boolean hasDataChangesInBuckets(Snapshot snapshot, Set<Pair<BinaryRow, Integer>> buckets) {
+        Set<BinaryRow> partitions = buckets.stream().map(Pair::getLeft).collect(Collectors.toSet());
+        return hasDataChanges(
+                snapshot,
+                partitions,
+                false,
+                entry -> buckets.contains(Pair.of(entry.partition(), entry.bucket())));
+    }
+
+    private boolean hasDataChanges(
+            Snapshot snapshot,
+            Set<BinaryRow> partitions,
+            boolean onlyRealBuckets,
+            Predicate<ManifestEntry> matches) {
         if (partitions.isEmpty()) {
             return false;
         }
@@ -108,7 +132,7 @@ public class CommitScanner {
         }
         Iterator<ManifestEntry> entries = deltaScan.readFileIterator();
         while (entries.hasNext()) {
-            if (partitions.contains(entries.next().partition())) {
+            if (matches.test(entries.next())) {
                 return true;
             }
         }
@@ -120,6 +144,24 @@ public class CommitScanner {
         if (partitions.isEmpty()) {
             return false;
         }
+        return hasIndexChanges(
+                snapshot, entry -> partitions.contains(entry.partition()), requirePreviousSnapshot);
+    }
+
+    boolean hasIndexChangesInBuckets(Snapshot snapshot, Set<Pair<BinaryRow, Integer>> buckets) {
+        if (buckets.isEmpty()) {
+            return false;
+        }
+        return hasIndexChanges(
+                snapshot,
+                entry -> buckets.contains(Pair.of(entry.partition(), entry.bucket())),
+                true);
+    }
+
+    private boolean hasIndexChanges(
+            Snapshot snapshot,
+            Predicate<IndexManifestEntry> matches,
+            boolean requirePreviousSnapshot) {
         String indexManifest = snapshot.indexManifest();
         String previousIndexManifest = null;
         long previousId = snapshot.id() - 1;
@@ -132,9 +174,8 @@ public class CommitScanner {
         }
         // Compare both sides. An OVERWRITE such as rollbackToAsLatest can drop a DV entry
         // without any data-file delta.
-        Set<IndexManifestEntry> previousEntries =
-                readIndexEntries(previousIndexManifest, partitions);
-        for (IndexManifestEntry entry : readIndexEntries(indexManifest, partitions)) {
+        Set<IndexManifestEntry> previousEntries = readIndexEntries(previousIndexManifest, matches);
+        for (IndexManifestEntry entry : readIndexEntries(indexManifest, matches)) {
             if (!previousEntries.remove(entry)) {
                 return true;
             }
@@ -143,11 +184,11 @@ public class CommitScanner {
     }
 
     private Set<IndexManifestEntry> readIndexEntries(
-            @Nullable String indexManifest, Set<BinaryRow> partitions) {
+            @Nullable String indexManifest, Predicate<IndexManifestEntry> matches) {
         Set<IndexManifestEntry> entries = new HashSet<>();
         if (indexManifest != null) {
             for (IndexManifestEntry entry : indexManifestFile.read(indexManifest)) {
-                if (partitions.contains(entry.partition())) {
+                if (matches.test(entry)) {
                     entries.add(entry);
                 }
             }
