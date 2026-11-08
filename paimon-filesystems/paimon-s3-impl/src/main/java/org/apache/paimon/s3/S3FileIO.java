@@ -23,6 +23,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -31,7 +32,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.net.URI;
 import java.util.Map;
 import java.util.Objects;
@@ -61,6 +61,12 @@ public class S3FileIO extends HadoopCompliantFileIO {
      * will be shut down, so here the fs cache is used to avoid resource leakage.
      */
     private static final Map<CacheKey, S3AFileSystem> CACHE = new ConcurrentHashMap<>();
+
+    /**
+     * Per-CacheKey locks: create/replace of the same key is serialized; different keys may create
+     * concurrently. Invalidation stays lock-free and does not remove these locks.
+     */
+    private static final Map<CacheKey, Object> CACHE_LOCKS = new ConcurrentHashMap<>();
 
     private Options hadoopOptions;
 
@@ -115,34 +121,162 @@ public class S3FileIO extends HadoopCompliantFileIO {
         return hadoopConfig;
     }
 
+    /**
+     * Overrides parent to refresh {@link #fsMap} when a cached {@link RecoverableS3AFileSystem} has
+     * been invalidated. Avoids introducing a generic health hook on {@link HadoopCompliantFileIO}.
+     */
     @Override
-    protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) {
+    protected FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
+        if (fsMap == null) {
+            synchronized (this) {
+                if (fsMap == null) {
+                    fsMap = new ConcurrentHashMap<>();
+                }
+            }
+        }
+
+        final Map<Pair<String, String>, FileSystem> map = fsMap;
+        URI uri = path.toUri();
+        Pair<String, String> key = Pair.of(uri.getScheme(), uri.getAuthority());
+
+        // Create outside fsMap's ConcurrentHashMap compute lock.
+        while (true) {
+            FileSystem current = map.get(key);
+            if (isUsableFileSystem(current)) {
+                return current;
+            }
+
+            FileSystem created = createFileSystem(path);
+            if (!isUsableFileSystem(created)) {
+                continue;
+            }
+
+            if (current == null) {
+                FileSystem existing = map.putIfAbsent(key, created);
+                if (existing == null) {
+                    if (isUsableFileSystem(created)) {
+                        return created;
+                    }
+                    map.remove(key, created);
+                    continue;
+                }
+                if (isUsableFileSystem(existing)) {
+                    return existing;
+                }
+                current = existing;
+            }
+
+            if (isUsableFileSystem(current)) {
+                return current;
+            }
+            if (!map.replace(key, current, created)) {
+                continue;
+            }
+            if (isUsableFileSystem(created)) {
+                return created;
+            }
+            map.remove(key, created);
+        }
+    }
+
+    @Override
+    protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
         final String scheme = path.toUri().getScheme();
         final String authority = path.toUri().getAuthority();
-        return CACHE.computeIfAbsent(
-                new CacheKey(hadoopOptions, scheme, authority),
-                key -> {
-                    Configuration hadoopConf = new Configuration();
-                    key.options.toMap().forEach(hadoopConf::set);
-                    URI fsUri = path.toUri();
-                    if (scheme == null && authority == null) {
-                        fsUri = FileSystem.getDefaultUri(hadoopConf);
-                    } else if (scheme != null && authority == null) {
-                        URI defaultUri = FileSystem.getDefaultUri(hadoopConf);
-                        if (scheme.equals(defaultUri.getScheme())
-                                && defaultUri.getAuthority() != null) {
-                            fsUri = defaultUri;
-                        }
-                    }
+        final CacheKey cacheKey = new CacheKey(hadoopOptions, scheme, authority);
 
-                    S3AFileSystem fs = new S3AFileSystem();
-                    try {
-                        fs.initialize(fsUri, hadoopConf);
-                    } catch (IOException e) {
-                        throw new UncheckedIOException(e);
-                    }
-                    return fs;
-                });
+        S3AFileSystem cached = CACHE.get(cacheKey);
+        if (isUsableFileSystem(cached)) {
+            return cached;
+        }
+
+        Object lock = getCacheLock(cacheKey);
+        synchronized (lock) {
+            cached = CACHE.get(cacheKey);
+            if (isUsableFileSystem(cached)) {
+                return cached;
+            }
+
+            // Only this confirmed mapping may be removed if initialize fails.
+            final S3AFileSystem expectedOld = cached;
+
+            Configuration hadoopConf = new Configuration();
+            cacheKey.options.toMap().forEach(hadoopConf::set);
+            URI fsUri = path.toUri();
+            if (scheme == null && authority == null) {
+                fsUri = FileSystem.getDefaultUri(hadoopConf);
+            } else if (scheme != null && authority == null) {
+                URI defaultUri = FileSystem.getDefaultUri(hadoopConf);
+                if (scheme.equals(defaultUri.getScheme()) && defaultUri.getAuthority() != null) {
+                    fsUri = defaultUri;
+                }
+            }
+
+            RecoverableS3AFileSystem fs = newRecoverableFileSystem();
+            fs.bind(() -> CACHE.remove(cacheKey, fs));
+            try {
+                fs.initialize(fsUri, hadoopConf);
+                if (!fs.isUsable()) {
+                    throw new IOException("S3A filesystem became unusable during initialize");
+                }
+            } catch (IOException | RuntimeException | Error e) {
+                discardFailedCreate(cacheKey, expectedOld, fs);
+                throw e;
+            }
+
+            CACHE.put(cacheKey, fs);
+            if (!fs.isUsable()) {
+                CACHE.remove(cacheKey, fs);
+                try {
+                    fs.close();
+                } catch (Throwable t) {
+                    LOG.warn(
+                            "Failed to close S3AFileSystem that became unusable after cache publish",
+                            t);
+                }
+                throw new IOException(
+                        "S3A filesystem became unusable before cache publish completed");
+            }
+            return fs;
+        }
+    }
+
+    RecoverableS3AFileSystem newRecoverableFileSystem() {
+        return new RecoverableS3AFileSystem();
+    }
+
+    /**
+     * Cleans up after a failed create: remove only {@code expectedOld} if it is still cached, and
+     * close the unpublished filesystem. Never removes a newer published instance.
+     */
+    private static void discardFailedCreate(
+            CacheKey cacheKey, S3AFileSystem expectedOld, S3AFileSystem unpublished) {
+        if (expectedOld != null) {
+            CACHE.remove(cacheKey, expectedOld);
+        }
+        try {
+            unpublished.close();
+        } catch (Throwable t) {
+            LOG.warn("Failed to close unpublished S3AFileSystem after initialize failure", t);
+        }
+    }
+
+    private static Object getCacheLock(CacheKey key) {
+        return CACHE_LOCKS.computeIfAbsent(key, k -> new Object());
+    }
+
+    static boolean isUsableFileSystem(FileSystem fs) {
+        if (fs == null) {
+            return false;
+        }
+        if (fs instanceof RecoverableS3AFileSystem) {
+            return ((RecoverableS3AFileSystem) fs).isUsable();
+        }
+        return true;
+    }
+
+    static void clearCache() {
+        CACHE.clear();
     }
 
     private static class CacheKey {
