@@ -108,7 +108,7 @@ public class FileTypeTest {
     }
 
     @Test
-    public void testParseWhitelist() {
+    public void testParseWhitelistWithNullAndUnknownValues() {
         assertThat(FileType.parseWhitelist(" meta, global-index, bucket-index, data, file-index "))
                 .containsExactlyInAnyOrderElementsOf(EnumSet.allOf(FileType.class));
         assertThat(FileType.parseWhitelist("")).isEqualTo(Collections.emptySet());

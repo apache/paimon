@@ -249,7 +249,7 @@ class CachePolicyFileIOTest(unittest.TestCase):
         output = "\n".join(logs.output)
         self.assertIn("CACHE_POLICY_ROUTE operation=read route=cache", output)
         self.assertIn("endpoint=cache-endpoint", output)
-        self.assertIn("file_type=DATA", output)
+        self.assertIn("file_type=STRUCTURED_DATA", output)
         self.assertIn("path=" + DATA_PATH, output)
         self.assertIn("CACHE_POLICY_ROUTE operation=delete route=origin", output)
         self.assertIn("endpoint=origin-endpoint", output)
