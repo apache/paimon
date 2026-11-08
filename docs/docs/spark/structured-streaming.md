@@ -188,6 +188,21 @@ A present `Optional` contains the complete, immutable list of written field IDs 
 
 An empty `Optional` means that metadata is unavailable, for example because a file or schema cannot be resolved, the micro-batch is empty, the `Dataset` is not the raw batch from a query with exactly one distinct Paimon streaming source, or its lineage is incomplete or ambiguous. An empty `Optional` does not mean that no columns were written; callers must fall back to processing all columns.
 
+## Micro-Batch Offset Range
+
+Use the raw `foreachBatch` dataset and its `batchId` to get Paimon source offset JSON:
+
+```scala
+.foreachBatch { (batch: Dataset[Row], batchId: Long) =>
+  val range = PaimonSparkMicroBatchMetadata.offsetRange(batch, batchId)
+  require(range.isPresent, "Paimon source offsets unavailable")
+  val startOffset = range.get().startOffset
+  val endOffset = range.get().endOffset
+}
+```
+
+The result is empty if the range cannot be verified or the query has multiple distinct sources. Empty full snapshots require `consumer-id` so the end offset includes a completion marker. This read-only API does not advance the Consumer or checkpoint.
+
 ## Read Changelogs
 
 Expose a row-kind column to distinguish inserts, updates, and deletes. Use either the system

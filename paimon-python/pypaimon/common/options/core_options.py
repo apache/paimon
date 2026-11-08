@@ -1194,6 +1194,16 @@ class CoreOptions:
             "LeRobot DataLoader worker.")
     )
 
+    READ_VIDEO_PREFETCH_MAX_BYTES: ConfigOption[int] = (
+        ConfigOptions.key("read.video.prefetch-max-bytes")
+        .int_type()
+        .default_value(0)
+        .with_description(
+            "Encoded video bytes retained by whole-payload prefetch across cached "
+            "decoders per video feature and worker. 0 disables prefetch. "
+            "Decoder buffers, decoded frames and temporary copies are additional.")
+    )
+
     READ_VIDEO_DECODE_PARALLELISM: ConfigOption[int] = (
         ConfigOptions.key("read.video.decode-parallelism")
         .int_type()
@@ -2004,7 +2014,12 @@ class CoreOptions:
         return self._positive_video_option(CoreOptions.READ_VIDEO_DECODERS_PER_PAYLOAD)
 
     def read_video_codec_threads(self) -> int:
-        option = CoreOptions.READ_VIDEO_CODEC_THREADS
+        return self._non_negative_video_option(CoreOptions.READ_VIDEO_CODEC_THREADS)
+
+    def read_video_prefetch_max_bytes(self) -> int:
+        return self._non_negative_video_option(CoreOptions.READ_VIDEO_PREFETCH_MAX_BYTES)
+
+    def _non_negative_video_option(self, option) -> int:
         raw = self.options.to_map().get(option.key())
         try:
             value = self.options.get(option)
