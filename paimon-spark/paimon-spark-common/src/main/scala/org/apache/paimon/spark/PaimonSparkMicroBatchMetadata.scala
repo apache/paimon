@@ -19,12 +19,13 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.annotation.Experimental
-import org.apache.paimon.spark.sources.PaimonMicroBatchStream
+import org.apache.paimon.spark.sources.{PaimonMicroBatchStream, PaimonSourceOffset}
 
 import org.apache.spark.Partition
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.connector.read.InputPartition
+import org.apache.spark.sql.connector.read.streaming.Offset
 import org.apache.spark.sql.execution.datasources.v2.DataSourceRDD
 
 import java.util.{IdentityHashMap, List => JList, Map => JMap, Optional, UUID}
@@ -34,6 +35,12 @@ import scala.util.control.NonFatal
 /** Driver-side access to metadata planned for a Paimon streaming micro-batch. */
 @Experimental
 final class PaimonSparkMicroBatchMetadata private ()
+
+/** The Paimon source offsets bounding one Spark streaming micro-batch. */
+@Experimental
+final class PaimonSparkMicroBatchOffsetRange private[spark] (
+    val startOffset: String,
+    val endOffset: String)
 
 object PaimonSparkMicroBatchMetadata {
 
@@ -47,16 +54,105 @@ object PaimonSparkMicroBatchMetadata {
    */
   def writtenColumnIds(batch: Dataset[_]): Optional[JList[Integer]] = {
     try {
-      extractWrittenColumnIds(batch)
+      extractMetadata(batch).flatten
+        .map(_.writtenColumnIds)
+        .getOrElse(Optional.empty())
     } catch {
       case NonFatal(_) => Optional.empty()
       case _: LinkageError => Optional.empty()
     }
   }
 
-  private def extractWrittenColumnIds(batch: Dataset[_]): Optional[JList[Integer]] = {
-    if (!hasExactlyOnePaimonSource(batch)) {
+  /**
+   * Returns the exact source offset range of a raw foreachBatch Dataset. The batchId must be the
+   * value passed to the same callback. Empty full snapshots are supported when the source offset
+   * includes snapshot completion metadata (consumer-id is set). An empty result means the source,
+   * batch, or its offsets cannot be identified unambiguously.
+   */
+  def offsetRange(batch: Dataset[_], batchId: Long): Optional[PaimonSparkMicroBatchOffsetRange] = {
+    try {
+      extractOffsetRange(batch, batchId)
+    } catch {
+      case NonFatal(_) => Optional.empty()
+      case _: LinkageError => Optional.empty()
+    }
+  }
+
+  private def extractOffsetRange(
+      batch: Dataset[_],
+      batchId: Long): Optional[PaimonSparkMicroBatchOffsetRange] = {
+    val source = activePaimonSource(batch)
+    if (source.isEmpty || activeBatchId(source.get._1) != batchId) {
       return Optional.empty()
+    }
+
+    extractMetadata(batch) match {
+      case Some(Some(metadata)) =>
+        Optional.of(new PaimonSparkMicroBatchOffsetRange(metadata.startOffset, metadata.endOffset))
+      case Some(None) =>
+        val (execution, stream) = source.get
+        val end = executionOffset(execution, "availableOffsets", stream)
+          .map(offset => PaimonSourceOffset(offset.json()))
+        if (!end.exists(_.emptySnapshotCompleted)) {
+          return Optional.empty()
+        }
+        val start = executionOffset(execution, startOffsetsMethod(execution), stream)
+          .map(offset => PaimonSourceOffset(offset.json()))
+          .orElse {
+            if (batchId == 0 && end.get.snapshotId > 0) {
+              Some(PaimonSourceOffset(end.get.snapshotId - 1, -1, scanSnapshot = true))
+            } else {
+              None
+            }
+          }
+        start
+          .filter(offset => offset.compareTo(end.get) < 0)
+          .map(
+            offset =>
+              Optional.of(new PaimonSparkMicroBatchOffsetRange(offset.json(), end.get.json())))
+          .getOrElse(Optional.empty())
+      case None => Optional.empty()
+    }
+  }
+
+  private def activeBatchId(execution: AnyRef): Long = {
+    val value =
+      try {
+        execution.getClass.getMethod("currentBatchId").invoke(execution)
+      } catch {
+        case _: NoSuchMethodException =>
+          // Spark 4 moved the batch ID into StreamExecutionContext.
+          val context = execution.getClass.getMethod("getLatestExecutionContext").invoke(execution)
+          context.getClass.getMethod("batchId").invoke(context)
+      }
+    value.asInstanceOf[java.lang.Number].longValue()
+  }
+
+  private def startOffsetsMethod(execution: AnyRef): String = {
+    try {
+      // Spark 4 keeps each batch's start offsets in its execution context.
+      execution.getClass.getMethod("getStartOffsetsOfLatestBatch")
+      "getStartOffsetsOfLatestBatch"
+    } catch {
+      case _: NoSuchMethodException => "committedOffsets"
+    }
+  }
+
+  private def executionOffset(
+      execution: AnyRef,
+      method: String,
+      source: PaimonMicroBatchStream): Option[Offset] = {
+    execution.getClass
+      .getMethod(method)
+      .invoke(execution)
+      .asInstanceOf[scala.collection.Map[AnyRef, Offset]]
+      .get(source)
+  }
+
+  // Outer None means invalid or ambiguous lineage; Some(None) means no input partitions.
+  private def extractMetadata(batch: Dataset[_]): Option[Option[PaimonMicroBatchMetadata]] = {
+    if (!hasExactlyOnePaimonSource(batch)) {
+      return None
     }
 
     val visited = new IdentityHashMap[RDD[_], java.lang.Boolean]()
@@ -127,11 +223,7 @@ object PaimonSparkMicroBatchMetadata {
       }
     }
 
-    if (!visit(batch.queryExecution.toRdd) || (only eq null)) {
-      Optional.empty()
-    } else {
-      only.writtenColumnIds
-    }
+    if (!visit(batch.queryExecution.toRdd)) None else Some(Option(only))
   }
 
   private def dataSourceInputPartitions(partition: Partition): Seq[InputPartition] = {
@@ -172,10 +264,13 @@ object PaimonSparkMicroBatchMetadata {
           s"Unexpected input partition type ${other.getClass.getName}.")
     }
 
-  private def hasExactlyOnePaimonSource(batch: Dataset[_]): Boolean = {
+  private def hasExactlyOnePaimonSource(batch: Dataset[_]): Boolean =
+    activePaimonSource(batch).isDefined
+
+  private def activePaimonSource(batch: Dataset[_]): Option[(AnyRef, PaimonMicroBatchStream)] = {
     val queryId = batch.sparkSession.sparkContext.getLocalProperty(StreamingQueryIdKey)
     if (queryId == null) {
-      return false
+      return None
     }
 
     val sharedState =
@@ -187,7 +282,7 @@ object PaimonSparkMicroBatchMetadata {
         .asInstanceOf[JMap[UUID, AnyRef]]
     val execution = activeQueries.get(UUID.fromString(queryId))
     if (execution == null) {
-      return false
+      return None
     }
 
     // Spark replaces sources without new offsets with LocalRelation before foreachBatch. Their
@@ -196,7 +291,8 @@ object PaimonSparkMicroBatchMetadata {
     // access isolated here and fail closed if a Spark version changes it.
     val sources =
       execution.getClass.getMethod("sources").invoke(execution).asInstanceOf[Seq[AnyRef]]
-    sources.headOption.exists(
-      first => first.isInstanceOf[PaimonMicroBatchStream] && sources.forall(_ eq first))
+    sources.headOption.collect {
+      case first: PaimonMicroBatchStream if sources.forall(_ eq first) => (execution, first)
+    }
   }
 }
