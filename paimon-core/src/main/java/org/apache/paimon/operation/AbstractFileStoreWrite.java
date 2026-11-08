@@ -252,6 +252,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
 
         List<CommitMessage> result = new ArrayList<>();
+        boolean requiresCompactionBaseline = requiresCompactionBaseline();
 
         Iterator<Map.Entry<BinaryRow, Map<Integer, WriterContainer<T>>>> partIter =
                 writers.entrySet().iterator();
@@ -289,7 +290,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 bucket,
                                 writerContainer.totalBuckets,
                                 newFilesIncrement,
-                                compactIncrement);
+                                compactIncrement,
+                                requiresCompactionBaseline ? writerContainer.baseSnapshotId : null);
                 result.add(committable);
 
                 if (committable.isEmpty()) {
@@ -335,6 +337,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     //
     // For writers with no conflicts, `commitUser` might be some random value.
     protected abstract Function<WriterContainer<T>, Boolean> createWriterCleanChecker();
+
+    protected boolean requiresCompactionBaseline() {
+        return false;
+    }
 
     protected static <T>
             Function<WriterContainer<T>, Boolean> createConflictAwareWriterCleanChecker(
@@ -552,11 +558,17 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         boolean actualIgnorePreviousFiles =
                 ignorePreviousFilesForWriter(
                         partition, bucket, latestSnapshot, ignorePreviousFiles);
-        RestoreFiles restored = RestoreFiles.empty();
-        if (!actualIgnorePreviousFiles) {
+        RestoreFiles restored;
+        Snapshot baseSnapshot;
+        if (actualIgnorePreviousFiles) {
+            restored = RestoreFiles.empty();
+            // An overwrite starts from empty files and checks commits made after writer creation.
+            baseSnapshot = requiresCompactionBaseline() ? latestSnapshot : null;
+        } else {
             restored =
                     scanExistingFileMetas(
                             partition, bucket, expectedTotalBuckets, validateNumBuckets);
+            baseSnapshot = restored.snapshot();
         }
 
         DynamicBucketIndexMaintainer indexMaintainer =
@@ -598,14 +610,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         actualIgnorePreviousFiles);
         notifyNewWriter(writer);
 
-        Snapshot previousSnapshot = restored.snapshot();
         return new WriterContainer<>(
                 writer,
                 firstNonNull(restored.totalBuckets(), expectedTotalBuckets),
                 indexMaintainer,
                 dvMaintainer,
                 primaryKeyIndexMaintainer,
-                previousSnapshot == null ? null : previousSnapshot.id());
+                baseSnapshot == null ? null : baseSnapshot.id());
     }
 
     private long writerNumber() {
@@ -766,7 +777,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 @Nullable DynamicBucketIndexMaintainer dynamicBucketMaintainer,
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
                 @Nullable BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer,
-                Long baseSnapshotId) {
+                @Nullable Long baseSnapshotId) {
             this.writer = writer;
             this.totalBuckets = totalBuckets;
             this.dynamicBucketMaintainer = dynamicBucketMaintainer;

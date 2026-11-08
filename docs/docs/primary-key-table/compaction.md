@@ -70,12 +70,20 @@ publishes it. MOW batch readers can opt into merging pending data with
 For `changelog-producer = lookup`, generated changelogs are also delayed. A compactor that cannot
 keep up with sustained input will keep falling behind; relaxing waits does not add capacity.
 
+## Concurrent compaction
+
+File-level conflict checks can miss conflicts between concurrent compactions. For primary-key
+tables with fixed bucket routing, deletion vectors, and `write-only = false`, Paimon therefore
+rejects concurrent compaction commits from different commit users for the same bucket in a
+partition. This check allows different buckets to compact independently.
+
 ## Dedicated compaction job
 
 Set `write-only = true` on ingest writers and run a
 [dedicated compaction job](../maintenance/dedicated-compaction#dedicated-compaction-job) when
 compaction needs separate resources or multiple writers need a single compaction owner.
-Avoid overlapping compaction jobs for the same partition, which can cause commit conflicts.
+Avoid overlapping compaction jobs for the same bucket in a partition, which can cause commit
+conflicts.
 
 This does not lift [dynamic-bucket](./data-distribution#dynamic-bucket) restrictions on concurrent
 writers to the same partition.

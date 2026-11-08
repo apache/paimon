@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -40,8 +41,11 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /** Manifest entries scanner for commit. */
 public class CommitScanner {
@@ -89,6 +93,107 @@ public class CommitScanner {
                 .withPartitionFilter(changedPartitions)
                 .plan()
                 .files();
+    }
+
+    boolean hasDataChanges(Snapshot snapshot, Set<BinaryRow> partitions, boolean onlyRealBuckets) {
+        return hasDataChanges(
+                snapshot,
+                partitions,
+                onlyRealBuckets,
+                entry -> partitions.contains(entry.partition()));
+    }
+
+    boolean hasDataChangesInBuckets(Snapshot snapshot, Set<Pair<BinaryRow, Integer>> buckets) {
+        Set<BinaryRow> partitions = buckets.stream().map(Pair::getLeft).collect(Collectors.toSet());
+        return hasDataChanges(
+                snapshot,
+                partitions,
+                false,
+                entry -> buckets.contains(Pair.of(entry.partition(), entry.bucket())));
+    }
+
+    private boolean hasDataChanges(
+            Snapshot snapshot,
+            Set<BinaryRow> partitions,
+            boolean onlyRealBuckets,
+            Predicate<ManifestEntry> matches) {
+        if (partitions.isEmpty()) {
+            return false;
+        }
+        FileStoreScan deltaScan =
+                scanSupplier
+                        .get()
+                        .withSnapshot(snapshot)
+                        .withKind(ScanMode.DELTA)
+                        .withPartitionFilter(new ArrayList<>(partitions))
+                        .dropStats();
+        if (onlyRealBuckets) {
+            deltaScan.onlyReadRealBuckets();
+        }
+        Iterator<ManifestEntry> entries = deltaScan.readFileIterator();
+        while (entries.hasNext()) {
+            if (matches.test(entries.next())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    boolean hasIndexChanges(
+            Snapshot snapshot, Set<BinaryRow> partitions, boolean requirePreviousSnapshot) {
+        if (partitions.isEmpty()) {
+            return false;
+        }
+        return hasIndexChanges(
+                snapshot, entry -> partitions.contains(entry.partition()), requirePreviousSnapshot);
+    }
+
+    boolean hasIndexChangesInBuckets(Snapshot snapshot, Set<Pair<BinaryRow, Integer>> buckets) {
+        if (buckets.isEmpty()) {
+            return false;
+        }
+        return hasIndexChanges(
+                snapshot,
+                entry -> buckets.contains(Pair.of(entry.partition(), entry.bucket())),
+                true);
+    }
+
+    private boolean hasIndexChanges(
+            Snapshot snapshot,
+            Predicate<IndexManifestEntry> matches,
+            boolean requirePreviousSnapshot) {
+        String indexManifest = snapshot.indexManifest();
+        String previousIndexManifest = null;
+        long previousId = snapshot.id() - 1;
+        if (previousId >= Snapshot.FIRST_SNAPSHOT_ID
+                && (requirePreviousSnapshot || snapshotManager.snapshotExists(previousId))) {
+            previousIndexManifest = snapshotManager.snapshot(previousId).indexManifest();
+        }
+        if (Objects.equals(indexManifest, previousIndexManifest)) {
+            return false;
+        }
+        // Compare both sides. An OVERWRITE such as rollbackToAsLatest can drop a DV entry
+        // without any data-file delta.
+        Set<IndexManifestEntry> previousEntries = readIndexEntries(previousIndexManifest, matches);
+        for (IndexManifestEntry entry : readIndexEntries(indexManifest, matches)) {
+            if (!previousEntries.remove(entry)) {
+                return true;
+            }
+        }
+        return !previousEntries.isEmpty();
+    }
+
+    private Set<IndexManifestEntry> readIndexEntries(
+            @Nullable String indexManifest, Predicate<IndexManifestEntry> matches) {
+        Set<IndexManifestEntry> entries = new HashSet<>();
+        if (indexManifest != null) {
+            for (IndexManifestEntry entry : indexManifestFile.read(indexManifest)) {
+                if (matches.test(entry)) {
+                    entries.add(entry);
+                }
+            }
+        }
+        return entries;
     }
 
     public List<SimpleFileEntry> readAllEntriesFromChangedPartitions(

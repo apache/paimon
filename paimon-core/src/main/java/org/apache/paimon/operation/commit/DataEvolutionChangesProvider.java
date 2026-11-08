@@ -73,7 +73,7 @@ public final class DataEvolutionChangesProvider implements CommitChangesProvider
                 latest != null && latest.id() >= checkedSnapshot,
                 "Compaction planning snapshot %s is ahead of the current table.",
                 checkedSnapshot);
-        // Like StrictModeChecker, only history after the boundary is needed. The boundary
+        // Like strict mode, only history after the boundary is needed. The boundary
         // snapshot itself may already have expired.
         for (long id = checkedSnapshot + 1; id <= latest.id(); id++) {
             checkState(

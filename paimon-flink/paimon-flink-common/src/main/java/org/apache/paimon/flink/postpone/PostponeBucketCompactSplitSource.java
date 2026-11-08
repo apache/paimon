@@ -194,7 +194,10 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
                         .transform(
                                 "Remove new files",
                                 new CommittableTypeInfo(),
-                                new RemovePostponeBucketFilesOperator())
+                                new RemovePostponeBucketFilesOperator(
+                                        table.coreOptions().deletionVectorsEnabled()
+                                                ? snapshotId
+                                                : null))
                         .forceNonParallel());
     }
 
