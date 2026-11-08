@@ -270,21 +270,15 @@ Each open decoder uses memory and a file handle, so usage grows with cameras and
 `read.video.decode-parallelism` limits concurrent video decodes across all cameras in each
 Dataset worker (default: 16). Set it to 1 for serial decoding. Parallel decoding
 applies to video windows without `image_transforms` and uses more CPU and memory.
-For small videos sampled throughout their duration, opt into whole-video prefetch:
+To reduce remote requests when sampling small videos, enable whole-video prefetch:
 
 ```python
 table = table.copy({"read.video.prefetch-max-bytes": str(32 * 1024 * 1024)})
 ```
 
-This is a retained encoded-payload budget across cached decoders **per video feature
-and DataLoader worker**, not a process RSS limit. It defaults to `0` (disabled).
-Videos larger than the remaining budget continue using range reads. Prefetch may
-read more bytes but reduces remote requests; use it when sampling covers much of
-a small video. It also retains payloads for decoder reuse. Decoded frames, codec
-buffers and temporary copies require additional memory. Independent decoder
-replicas consume the budget separately. Multiply the budget by the number of
-video features and workers when sizing memory. Custom `VideoFrameCollator` users
-can set the equivalent `prefetch_max_bytes` constructor argument.
+Default: `0` (disabled). The budget covers cached video bytes per camera per worker;
+when it is full, reads remain range-based. Prefetch may increase bytes read.
+Decoded frames and temporary buffers use additional memory.
 
 `read.video.codec-threads` controls FFmpeg threads per PyAV or indexed TorchCodec decoder (default: 1),
 avoiding nested codec parallelism with multiple workers and concurrent videos.
