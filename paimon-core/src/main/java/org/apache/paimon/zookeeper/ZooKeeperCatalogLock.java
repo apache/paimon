@@ -20,6 +20,7 @@ package org.apache.paimon.zookeeper;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.utils.ExceptionUtils;
 
@@ -209,7 +210,17 @@ public class ZooKeeperCatalogLock implements Lock {
 
     /** A warehouse URI cannot appear in a znode path literally, so it is hashed. */
     static String hashWarehouse(String warehouse) {
-        String normalized = normalizeS3Path(new Path(warehouse.trim()).toString());
+        Path path = new Path(warehouse.trim());
+        String scheme = path.toUri().getScheme();
+        // Qualify local aliases using the same conversion as local file access.
+        String normalized =
+                scheme == null || "file".equalsIgnoreCase(scheme)
+                        ? new Path(
+                                        "file",
+                                        null,
+                                        LocalFileIO.INSTANCE.toFile(path).getAbsolutePath())
+                                .toString()
+                        : normalizeS3Path(path.toString());
         while (normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }

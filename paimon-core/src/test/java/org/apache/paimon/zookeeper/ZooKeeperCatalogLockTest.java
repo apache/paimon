@@ -811,6 +811,72 @@ class ZooKeeperCatalogLockTest {
     }
 
     @Test
+    void hashWarehouseNormalizesLocalAliasesButPreservesDistinctPaths() {
+        String absolute = new java.io.File("warehouse with spaces").getAbsolutePath();
+        String expected = ZooKeeperCatalogLock.hashWarehouse(absolute);
+        for (String alias :
+                new String[] {
+                    "warehouse with spaces",
+                    "file:" + absolute + "/",
+                    "file://" + absolute,
+                    absolute + "/child/..",
+                    absolute + "/./"
+                }) {
+            assertEquals(expected, ZooKeeperCatalogLock.hashWarehouse(alias), alias);
+        }
+        assertNotEquals(expected, ZooKeeperCatalogLock.hashWarehouse(absolute + "-other"));
+        assertNotEquals(expected, ZooKeeperCatalogLock.hashWarehouse(absolute.replace(" ", "%20")));
+        // Preserve the namespace used before local alias qualification for explicit file paths.
+        assertEquals(ZooKeeperCatalogLock.shortHash("file:" + absolute), expected);
+        assertNotEquals(
+                ZooKeeperCatalogLock.hashWarehouse("gs://bucket/path"),
+                ZooKeeperCatalogLock.hashWarehouse("s3://bucket/path"));
+        assertNotEquals(
+                ZooKeeperCatalogLock.hashWarehouse("s3://bucket/path"),
+                ZooKeeperCatalogLock.hashWarehouse("s3://other-bucket/path"));
+    }
+
+    @Test
+    void localWarehouseAliasesContendAcrossCatalogs(@TempDir java.nio.file.Path warehouse)
+            throws Exception {
+        Options firstOptions = options();
+        firstOptions.set(CatalogOptions.LOCK_ENABLED, true);
+        firstOptions.set(CatalogOptions.WAREHOUSE, warehouse.toString());
+        Options secondOptions = options();
+        secondOptions.set(CatalogOptions.LOCK_ENABLED, true);
+        secondOptions.set(CatalogOptions.WAREHOUSE, "file:" + warehouse + "/");
+        Identifier identifier = Identifier.create("db", "table");
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try (Catalog first = CatalogFactory.createCatalog(CatalogContext.create(firstOptions));
+                Catalog second =
+                        CatalogFactory.createCatalog(CatalogContext.create(secondOptions));
+                Lock firstLock = first.createLock(identifier, null, null, new Options());
+                Lock secondLock = second.createLock(identifier, null, null, new Options())) {
+            Future<?> contender;
+            try (AutoCloseable ignored = firstLock.acquire()) {
+                firstLock.ensureValid();
+                CountDownLatch attempted = new CountDownLatch(1);
+                contender =
+                        pool.submit(
+                                () -> {
+                                    attempted.countDown();
+                                    return secondLock.runWithLock(
+                                            () -> {
+                                                secondLock.ensureValid();
+                                                return null;
+                                            });
+                                });
+                assertTrue(attempted.await(20, TimeUnit.SECONDS));
+                assertThrows(
+                        TimeoutException.class, () -> contender.get(500, TimeUnit.MILLISECONDS));
+            }
+            contender.get(20, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
     void equivalentWarehousePathsContendOnTheSameTable() throws Exception {
         String[][] aliases = {
             {"s3://test-bucket/a//b", "s3://test-bucket/a/b"},
