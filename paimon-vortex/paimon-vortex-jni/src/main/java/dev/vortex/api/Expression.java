@@ -66,22 +66,24 @@ public final class Expression implements AutoCloseable {
         return new Expression(NativeExpression.select(columns, parent.pointer));
     }
 
+    /** The index of each row in its file, as a non-nullable u64. */
+    public static Expression rowIdx() {
+        return new Expression(NativeExpression.rowIdx());
+    }
+
+    /** A struct whose fields are the given expressions, in order, under the given names. */
+    public static Expression pack(String[] fieldNames, Expression[] exprs, boolean nullable) {
+        return new Expression(NativeExpression.pack(fieldNames, pointers(exprs), nullable));
+    }
+
     // -- Logical combinators --
 
     public static Expression and(Expression... exprs) {
-        long[] ptrs = new long[exprs.length];
-        for (int i = 0; i < exprs.length; i++) {
-            ptrs[i] = exprs[i].pointer;
-        }
-        return new Expression(NativeExpression.and(ptrs));
+        return new Expression(NativeExpression.and(pointers(exprs)));
     }
 
     public static Expression or(Expression... exprs) {
-        long[] ptrs = new long[exprs.length];
-        for (int i = 0; i < exprs.length; i++) {
-            ptrs[i] = exprs[i].pointer;
-        }
-        return new Expression(NativeExpression.or(ptrs));
+        return new Expression(NativeExpression.or(pointers(exprs)));
     }
 
     public static Expression not(Expression expr) {
@@ -102,6 +104,54 @@ public final class Expression implements AutoCloseable {
 
     public static Expression isNotNull(Expression expr) {
         return new Expression(NativeExpression.isNotNull(expr.pointer));
+    }
+
+    // -- Pattern, range and list membership --
+
+    /**
+     * SQL {@code LIKE}. {@code negated} gives {@code NOT LIKE} and {@code caseInsensitive} gives
+     * {@code ILIKE}.
+     */
+    public static Expression like(
+            Expression expr, Expression pattern, boolean negated, boolean caseInsensitive) {
+        return new Expression(
+                NativeExpression.like(expr.pointer, pattern.pointer, negated, caseInsensitive));
+    }
+
+    /**
+     * {@code lower <= value <= upper}. A strict bound excludes its end: {@code lowerStrict} gives
+     * {@code lower < value} and {@code upperStrict} gives {@code value < upper}.
+     */
+    public static Expression between(
+            Expression value,
+            Expression lower,
+            Expression upper,
+            boolean lowerStrict,
+            boolean upperStrict) {
+        return new Expression(
+                NativeExpression.between(
+                        value.pointer, lower.pointer, upper.pointer, lowerStrict, upperStrict));
+    }
+
+    /**
+     * SQL {@code value IN (list)}. The list must be a list literal. A null value, or a non-match
+     * against a list that holds a null, gives null and so never admits the row.
+     */
+    public static Expression in(Expression value, Expression list) {
+        return new Expression(NativeExpression.listContains(list.pointer, value.pointer, true));
+    }
+
+    /**
+     * SQL {@code value NOT IN (list)}. A null value, or a non-match against a list that holds a
+     * null, gives null and so never admits the row.
+     */
+    public static Expression notIn(Expression value, Expression list) {
+        long in = NativeExpression.listContains(list.pointer, value.pointer, true);
+        try {
+            return new Expression(NativeExpression.not(in));
+        } finally {
+            NativeExpression.free(in);
+        }
     }
 
     // -- Primitive literals --
@@ -138,11 +188,20 @@ public final class Expression implements AutoCloseable {
         return new Expression(NativeExpression.literalString(value));
     }
 
+    public static Expression literal(byte[] value) {
+        return new Expression(NativeExpression.literalBinary(value));
+    }
+
     // -- Decimal literals --
 
     public static Expression literalDecimal(BigInteger unscaledValue, int precision, int scale) {
         byte[] bytes = unscaledValue.toByteArray();
         return new Expression(NativeExpression.literalDecimal(bytes, precision, scale, false));
+    }
+
+    public static Expression nullLiteralDecimal(int precision, int scale) {
+        return new Expression(
+                NativeExpression.literalDecimal(new byte[] {0}, precision, scale, true));
     }
 
     // -- Date/time literals --
@@ -151,15 +210,53 @@ public final class Expression implements AutoCloseable {
         return new Expression(NativeExpression.literalDate(value, unit.tag(), false));
     }
 
+    public static Expression nullLiteralDate(TimeUnit unit) {
+        return new Expression(NativeExpression.literalDate(0L, unit.tag(), true));
+    }
+
     public static Expression literalTimestamp(long value, TimeUnit unit, String timezone) {
         return new Expression(
                 NativeExpression.literalTimestamp(value, unit.tag(), timezone, false));
+    }
+
+    public static Expression nullLiteralTimestamp(TimeUnit unit, String timezone) {
+        return new Expression(NativeExpression.literalTimestamp(0L, unit.tag(), timezone, true));
+    }
+
+    /** A time-of-day literal: {@code value} units since midnight. */
+    public static Expression literalTime(long value, TimeUnit unit) {
+        return new Expression(NativeExpression.literalTime(value, unit.tag(), false));
+    }
+
+    public static Expression nullLiteralTime(TimeUnit unit) {
+        return new Expression(NativeExpression.literalTime(0L, unit.tag(), true));
     }
 
     // -- Null literals --
 
     public static Expression nullLiteral(DType dtype) {
         return new Expression(NativeExpression.literalNull(dtype.tag()));
+    }
+
+    // -- List literals --
+
+    /**
+     * A list literal. {@code elementType} is a typed literal, normally a typed null, that gives the
+     * element dtype. Every element must itself be a literal and is cast to that dtype.
+     */
+    public static Expression literalList(
+            Expression elementType, boolean elementsNullable, Expression... elements) {
+        return new Expression(
+                NativeExpression.literalList(
+                        pointers(elements), elementType.pointer, elementsNullable, false));
+    }
+
+    private static long[] pointers(Expression[] exprs) {
+        long[] ptrs = new long[exprs.length];
+        for (int i = 0; i < exprs.length; i++) {
+            ptrs[i] = exprs[i].pointer;
+        }
+        return ptrs;
     }
 
     /** Binary operation codes. */
@@ -171,7 +268,11 @@ public final class Expression implements AutoCloseable {
         LT((byte) 4),
         LTE((byte) 5),
         AND((byte) 6),
-        OR((byte) 7);
+        OR((byte) 7),
+        ADD((byte) 8),
+        SUB((byte) 9),
+        MUL((byte) 10),
+        DIV((byte) 11);
 
         private final byte code;
 
@@ -194,7 +295,12 @@ public final class Expression implements AutoCloseable {
         F32((byte) 5),
         F64((byte) 6),
         UTF8((byte) 7),
-        BINARY((byte) 8);
+        BINARY((byte) 8),
+        U8((byte) 9),
+        U16((byte) 10),
+        U32((byte) 11),
+        U64((byte) 12),
+        F16((byte) 13);
 
         private final byte tag;
 

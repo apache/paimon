@@ -18,12 +18,13 @@
 
 package dev.vortex.api;
 
+import dev.vortex.arrow.ArrowBatchStream;
 import dev.vortex.jni.NativePartition;
 
 import org.apache.arrow.c.ArrowArrayStream;
-import org.apache.arrow.c.Data;
 import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.vector.ipc.ArrowReader;
+
+import java.io.IOException;
 
 /** A partition from a Vortex scan, consumable once as an Arrow stream. */
 public final class Partition implements AutoCloseable {
@@ -41,7 +42,11 @@ public final class Partition implements AutoCloseable {
         return new Partition(session, pointer);
     }
 
-    public ArrowReader scanArrow(BufferAllocator allocator) {
+    /**
+     * Consumes the partition as a stream of record batches. Closing the stream releases the native
+     * partition.
+     */
+    public ArrowBatchStream scanArrow(BufferAllocator allocator) throws IOException {
         if (consumed) {
             throw new IllegalStateException("partition already consumed");
         }
@@ -54,7 +59,7 @@ public final class Partition implements AutoCloseable {
             stream.close();
             throw e;
         }
-        return Data.importArrayStream(allocator, stream);
+        return ArrowBatchStream.open(allocator, stream);
     }
 
     @Override

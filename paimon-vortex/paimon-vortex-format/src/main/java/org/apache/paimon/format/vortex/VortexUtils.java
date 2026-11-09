@@ -25,28 +25,42 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTTokenFileIO;
 import org.apache.paimon.utils.Pair;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.net.URI;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Utils for Vortex storage options. */
+/**
+ * Decides how native Vortex code reaches a file.
+ *
+ * <p>Local files and OSS files go through a native storage client, which reads and writes without
+ * calls back into the JVM. All other files go through the Paimon {@link FileIO}, so they use the
+ * file system and the credentials that the table is configured with.
+ */
 public class VortexUtils {
 
-    public static Pair<Path, Map<String, String>> toVortexSpecifiedForReader(
-            FileIO fileIO, Path path) {
-        return toVortexSpecified(fileIO, path, true);
-    }
+    private VortexUtils() {}
 
-    public static Pair<Path, Map<String, String>> toVortexSpecifiedForWriter(
-            FileIO fileIO, Path path) {
-        return toVortexSpecified(fileIO, path, false);
-    }
-
-    private static Pair<Path, Map<String, String>> toVortexSpecified(
+    /**
+     * Returns the URI and the storage options for a native storage client, or null when the file
+     * must go through the {@link FileIO}.
+     */
+    @Nullable
+    static Pair<String, Map<String, String>> nativeLocation(
             FileIO fileIO, Path path, boolean isRead) {
         URI uri = path.toUri();
-        String schema = uri.getScheme();
+        String scheme = uri.getScheme();
+
+        if (scheme == null || "file".equals(scheme)) {
+            return Pair.of(uri.toString(), Collections.<String, String>emptyMap());
+        }
+
+        if (!"oss".equals(scheme)) {
+            return null;
+        }
 
         if (fileIO instanceof RESTTokenFileIO) {
             try {
@@ -56,29 +70,22 @@ public class VortexUtils {
             }
         }
 
-        Options originOptions;
-        if (fileIO instanceof HadoopOptionsProvider) {
-            originOptions =
-                    ((HadoopOptionsProvider) fileIO).hadoopOptions(path, isRead ? "read" : "write");
-        } else {
-            originOptions = new Options();
+        if (!(fileIO instanceof HadoopOptionsProvider)) {
+            return null;
         }
 
-        Path converted = path;
+        Options originOptions =
+                ((HadoopOptionsProvider) fileIO).hadoopOptions(path, isRead ? "read" : "write");
         Map<String, String> storageOptions = new HashMap<>();
-        if ("oss".equals(schema)) {
-            storageOptions.put(
-                    "endpoint",
-                    "https://" + uri.getHost() + "." + originOptions.get("fs.oss.endpoint"));
-            storageOptions.put("access_key_id", originOptions.get("fs.oss.accessKeyId"));
-            storageOptions.put("secret_access_key", originOptions.get("fs.oss.accessKeySecret"));
-            storageOptions.put("virtual_hosted_style_request", "true");
-            if (originOptions.containsKey("fs.oss.securityToken")) {
-                storageOptions.put("session_token", originOptions.get("fs.oss.securityToken"));
-            }
-            converted = new Path(uri.toString().replace("oss://", "s3://"));
+        storageOptions.put(
+                "endpoint",
+                "https://" + uri.getHost() + "." + originOptions.get("fs.oss.endpoint"));
+        storageOptions.put("access_key_id", originOptions.get("fs.oss.accessKeyId"));
+        storageOptions.put("secret_access_key", originOptions.get("fs.oss.accessKeySecret"));
+        storageOptions.put("virtual_hosted_style_request", "true");
+        if (originOptions.containsKey("fs.oss.securityToken")) {
+            storageOptions.put("session_token", originOptions.get("fs.oss.securityToken"));
         }
-
-        return Pair.of(converted, storageOptions);
+        return Pair.of(uri.toString().replace("oss://", "s3://"), storageOptions);
     }
 }

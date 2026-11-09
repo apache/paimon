@@ -263,8 +263,46 @@ Limitations:
 
 Key features:
 - **Adaptive Encoding**: Automatically selects the best encoding per column based on data distribution
-- **Native Predicate Pushdown**: Supports filter expressions pushed down to the scan layer
+- **Native Predicate Pushdown**: Comparisons, `IS [NOT] NULL`, `IN`, `NOT IN`, `BETWEEN`, and prefix, suffix and substring matches are evaluated in the scan
 - **Column Projection**: Only reads requested columns from disk
+- **File Statistics**: Min, max and null counts come from the native writer, so scans can skip files without the writer collecting statistics row by row
+- **Vectorized Reads**: Batches are returned as columnar vectors to the engine
+
+Local files and OSS files are read and written by a native storage client. All other file systems
+are reached through the Paimon `FileIO` of the table.
+
+Format Options:
+
+| Option | Default | Type | Description |
+|:---|:---|:---|:---|
+| `vortex.worker-threads` | 4 | Integer | Minimum number of native threads that decode and encode Vortex data in the background. The pool is shared by the whole JVM and only grows. With 0 threads, only the thread that reads or writes a file drives the native work for it. |
+| `vortex.compact-encodings` | false | Boolean | PyPaimon only. Write with the compact Vortex encodings, which make files smaller and reads somewhat slower. |
+| `vortex.write.edition` | core2025.10.0 | String | The Vortex edition that writers use. An edition sets the encodings and layouts that a file can contain. The default is readable by Paimon 2.0 and 2.1 in Java and in PyPaimon. See the upgrade order below before you set a newer edition. |
+
+Java writers hand at least 8192 rows to Vortex in each batch, because every batch costs a native
+call and becomes a separate chunk. `write-batch-memory` still limits the memory of each batch.
+
+Upgrade and rollback:
+
+Each Vortex edition has a minimum Vortex version that can read it. A newer Vortex version reads the
+files of all older editions, but an older version cannot read a file of an edition that it does not
+know. Paimon 2.0 and 2.1 read Vortex with Vortex 0.73 in Java and with vortex-data 0.70 in PyPaimon.
+With the default `vortex.write.edition`, Java and Python writers write files that Paimon 2.0 and
+2.1 can read, so you can upgrade writers and readers in any order.
+
+The default edition is old, so writers do not use the newest encodings and layouts. Newer editions
+can make smaller files and faster reads. When all readers of the table use this Paimon version or a
+newer one, switch to the latest edition, at this time `core2026.08.3`:
+1. Upgrade all readers of the table, in all engines and in PyPaimon, to a Vortex version that reads
+   the edition.
+2. Then set `vortex.write.edition` to the latest edition, for example:
+   `ALTER TABLE t SET ('vortex.write.edition' = 'core2026.08.3')`.
+
+The new edition applies only to files that writers write after the change. Files written before the
+change keep their edition until compaction rewrites them.
+
+After a file is written with a newer edition, you cannot roll back the readers to an older Vortex
+version that does not read it. To roll back, first rewrite or restore these files.
 
 Limitations:
 1. Vortex does not support `MAP`, `MULTISET` or `VARIANT` types.

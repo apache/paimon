@@ -332,7 +332,9 @@ class DataWriter(ABC):
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
             write_blob_file(self.file_io, file_path, data)
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
-            write_vortex_file(self.file_io, file_path, data)
+            write_vortex_file(self.file_io, file_path, data,
+                              compact=self.options.vortex_compact_encodings(),
+                              edition=self.options.vortex_write_edition())
         elif file_format == CoreOptions.FILE_FORMAT_MOSAIC:
             self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
         elif file_format == CoreOptions.FILE_FORMAT_ROW:

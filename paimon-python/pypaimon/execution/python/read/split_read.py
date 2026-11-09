@@ -46,6 +46,7 @@ from pypaimon.read.push_down_utils import (
     predicate_supports_arrow_filter,
     rewrite_predicate_indices,
     trim_predicate_by_fields,
+    vortex_pushdown_loses_rows,
 )
 from pypaimon.execution.python.read.reader.concat_batch_reader import (
     BlobFallbackBatchReader, ConcatBatchReader,
@@ -135,6 +136,8 @@ class SplitRead(ABC):
         self.push_down_predicate = self._push_down_predicate()
         self._arrow_filter_pushdown_enabled = predicate_supports_arrow_filter(
             self.push_down_predicate) and not self._has_row_tracking_predicate()
+        self._vortex_pushdown_safe = not vortex_pushdown_loses_rows(
+            self.push_down_predicate, self.table.fields)
         self.split = split
         self.row_tracking_enabled = row_tracking_enabled
         self.value_arity = len(read_type)
@@ -414,8 +417,11 @@ class SplitRead(ABC):
             predicate_fields = (
                 predicate_field_names(self.push_down_predicate)
                 if self.push_down_predicate else set())
+            # A Vortex filter is best effort: the row filter after the scan removes the
+            # extra rows, see create_reader. A filter that can drop rows is not pushed.
+            vortex_predicate = read_arrow_predicate if self._vortex_pushdown_safe else None
             format_reader = FormatVortexReader(self.table.file_io, file_path, ordered_read_fields,
-                                               read_arrow_predicate, batch_size=batch_size,
+                                               vortex_predicate, batch_size=batch_size,
                                                row_indices=row_indices,
                                                shard_range=shard_range,
                                                predicate_fields=predicate_fields)
@@ -861,6 +867,11 @@ class SplitRead(ABC):
 
         return mapping
 
+    def _has_vortex_files(self) -> bool:
+        return any(
+            format_identifier(os.path.basename(file.physical_path())) == CoreOptions.FILE_FORMAT_VORTEX
+            for file in self.split.files)
+
     def _genarate_deletion_file_readers(self):
         self.deletion_file_readers = {}
         if self.split.data_deletion_files:
@@ -1062,6 +1073,10 @@ class RawFileSplitRead(SplitRead):
                      or predicate_field_names(self.predicate).intersection(self.table.partition_keys)
                      or self.deletion_file_readers
                      or self._physical_row_ranges
+                     # Vortex drops a filter it cannot convert, and its floating
+                     # point order differs from PyArrow's, so its scans need the
+                     # row filter to give exact results.
+                     or self._has_vortex_files()
                      or any(file.schema_id != self.table.table_schema.id
                             for file in self.split.files))):
             reader = FilterRecordBatchReader(
