@@ -1232,6 +1232,41 @@ class FieldCollectAggTest(unittest.TestCase):
             agg = self._make(distinct=False, count_limit=limit)
             self.assertEqual(agg.agg(None, [1, 2]), [])
 
+    def _assert_collect_forward_equals_reversed(
+            self, distinct, count_limit, older, newer, expected
+    ):
+        agg = self._make(distinct=distinct, count_limit=count_limit)
+        forward = agg.agg(agg.agg(None, older), newer)
+        reversed_result = agg.agg_reversed(agg.agg_reversed(None, newer), older)
+        self.assertEqual(forward, expected)
+        self.assertEqual(reversed_result, expected)
+
+    def test_field_collect_agg_forward_vs_reversed_reviewer_repro(self):
+        older = [1, 2]
+        newer = [3, 4]
+        self._assert_collect_forward_equals_reversed(
+            False, 2, older, newer, [1, 2]
+        )
+        self._assert_collect_forward_equals_reversed(
+            False, -2, older, newer, [3, 4]
+        )
+
+    def test_field_collect_agg_forward_vs_reversed_java_matrix(self):
+        older = [2, 1, 2]
+        newer = [3, 3, 1]
+        cases = [
+            (False, 3, [2, 1, 2]),
+            (True, 3, [2, 1, 3]),
+            (False, -3, [3, 3, 1]),
+            (True, -3, [2, 3, 1]),
+            (False, 0, []),
+            (True, 0, []),
+        ]
+        for distinct, count_limit, expected in cases:
+            self._assert_collect_forward_equals_reversed(
+                distinct, count_limit, older, newer, expected
+            )
+
     def test_field_collect_agg_set_dedupe_for_atomic_types(self):
         for sql_type in (
                 "INT", "STRING", "BOOLEAN", "DECIMAL(10, 2)",

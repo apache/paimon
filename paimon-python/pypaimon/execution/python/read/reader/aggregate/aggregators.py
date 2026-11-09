@@ -823,10 +823,10 @@ class FieldCollectAgg(FieldAggregator):
         )
 
     def agg_reversed(self, accumulator: Any, input_field: Any) -> Any:
-        # we don't need to actually do the reverse here for this agg
-        # because accumulator has been distinct, just let accumulator be accumulator will speed up
-        # distinct process
-        return self.agg(accumulator, input_field)
+        # Reverse traversal supplies the newer partial result as
+        # ``accumulator`` and the older value as ``input_field``. Aggregate
+        # older before newer so count-limit matches forward ``agg``.
+        return self.agg(input_field, accumulator)
 
     def agg(self, accumulator: Any, input_field: Any) -> Any:
         if accumulator is None and input_field is None:
