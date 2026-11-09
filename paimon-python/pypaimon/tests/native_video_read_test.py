@@ -138,9 +138,8 @@ def test_native_update_of_normal_columns_keeps_packed_video_frames(tmp_path, nat
 
 def test_native_video_placeholder_falls_back_but_null_stops_older_frames(tmp_path):
     from dataclasses import replace
-    from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
+    from pypaimon.execution.python.write.video_format_writer import VideoFormatWriter
     from pypaimon.read.split import DataSplit
-    import struct
 
     table = _table(tmp_path, False).copy({'read.native.enabled': 'true'})
     builder = table.new_read_builder()
@@ -148,13 +147,17 @@ def test_native_video_placeholder_falls_back_but_null_stops_older_frames(tmp_pat
     read = builder.new_read()
     before = read.to_arrow([split]).to_pylist()
     original = next(file for file in split.files if file.file_name.endswith('.video'))
-    indexes = [[], [1, 1, 1, 3], [-2, -1, -2, -2], [0, 0, 0, 0]]
-    compressed = [DeltaVarintCompressor.compress(values) for values in indexes]
-    data = b''.join(compressed) + struct.pack('<IIIIIB', *(len(index) for index in compressed), 0x4F454449, 1)
     newer = tmp_path / 'newest.video'
-    newer.write_bytes(data)
+    with newer.open('wb') as output:
+        writer = VideoFormatWriter(output)
+        try:
+            for value in (Blob.PLACE_HOLDER, None, Blob.PLACE_HOLDER,
+                          Blob.PLACE_HOLDER, Blob.PLACE_HOLDER, Blob.PLACE_HOLDER):
+                writer.add_element(GenericRow([value], [DataField(0, 'left', AtomicType('BLOB'))]))
+        finally:
+            writer.close()
     added = replace(original, file_name=newer.name, file_path=str(newer), external_path=str(newer),
-                    file_size=len(data), min_sequence_number=original.max_sequence_number + 1,
+                    file_size=newer.stat().st_size, min_sequence_number=original.max_sequence_number + 1,
                     max_sequence_number=original.max_sequence_number + 1)
     combined = DataSplit(split.files + [added], split.partition, split.bucket,
                          snapshot_id=split.snapshot_id, bucket_path=split.bucket_path,
