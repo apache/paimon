@@ -38,6 +38,7 @@ from pypaimon.write.row_utils import (
     require_columns,
     row_to_named_values,
     row_values_to_arrow_table,
+    validate_inline_blob_fields,
 )
 from pypaimon.execution.python.write.writer.composite_data_writer import CompositeDataWriter
 from pypaimon.execution.python.write.writer.video_group import VideoGroupRollingPolicy
@@ -349,6 +350,10 @@ class DedicatedFormatWriter(CompositeDataWriter):
     @staticmethod
     def _project_columns(data: pa.RecordBatch, column_names: List[str]) -> pa.RecordBatch:
         return project_arrow_batch(data, column_names)
+
+    def _validate_inline_stored_fields_input(self, data: pa.RecordBatch):
+        if self.blob_inline_fields:
+            validate_inline_blob_fields(data, self.blob_descriptor_fields, self.blob_view_fields)
 
     @staticmethod
     def _process_normal_data(data: pa.RecordBatch) -> Optional[pa.Table]:

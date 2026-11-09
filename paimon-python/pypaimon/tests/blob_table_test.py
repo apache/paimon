@@ -5998,7 +5998,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             [b'upstream-1', None, b'upstream-2'],
         )
 
-    def test_primary_key_managed_blob_requires_native_writer(self):
+    def test_primary_key_managed_blob_python_writer(self):
         from pypaimon import Schema
 
         pa_schema = pa.schema([
@@ -6010,22 +6010,34 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             primary_keys=['id'],
             options={
                 'bucket': '1',
-                'write.native.enabled': 'false',  # Force Python writer to test the guard
+                'write.native.enabled': 'false',
             },
         )
         self.catalog.create_table('test_db.pk_managed_blob_table', schema, False)
         table = self.catalog.get_table('test_db.pk_managed_blob_table')
 
-        writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "Primary-key Blob writes require the native writer",
-        ):
-            writer.write_arrow(pa.Table.from_pydict({
-                'id': [1],
-                'picture': [b'raw-blob-bytes'],
-            }, schema=pa_schema))
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'picture': [b'raw-blob-bytes'],
+        }, schema=pa_schema))
+        messages = writer.prepare_commit()
+        files = [meta for message in messages for meta in message.new_files]
+        self.assertTrue(any(
+            name.endswith('.blobref')
+            for meta in files
+            for name in (meta.extra_files or [])
+        ))
+        write_builder.new_commit().commit(messages)
         writer.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        )
+        self.assertEqual(result.column('id').to_pylist(), [1])
+        self.assertEqual(result.column('picture').to_pylist(), [b'raw-blob-bytes'])
 
     def test_postpone_fixed_bucket_pk_inline_blob_write_row_new_partition(self):
         from pypaimon import Schema
@@ -6649,6 +6661,50 @@ class BlobConsumerTest(unittest.TestCase):
             self.assertIsNotNone(desc)
             data = Blob.from_descriptor(uri_reader, desc).to_data()
             self.assertEqual(data, blob_bytes)
+
+    def test_flush_only_consumer_commit_abort_deletes_new_files(self):
+        """Explicit commit abort deletes prepared data and BLOB packs."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'blob.target-file-size': '1KB',
+        })
+        self.catalog.create_table('test_db.blob_consumer_commit_abort', schema, False)
+        table = self.catalog.get_table('test_db.blob_consumer_commit_abort')
+
+        def _files(root):
+            found = set()
+            for dirpath, _, filenames in os.walk(root):
+                for name in filenames:
+                    found.add(os.path.join(dirpath, name))
+            return found
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        commit = write_builder.new_commit()
+        try:
+            # Flush-only: request a roll and do not retain the descriptor.
+            writer.with_blob_consumer(lambda field_name, descriptor: True)
+            before = _files(str(table.table_path))
+            writer.write_arrow(pa.Table.from_pydict({
+                'id': list(range(5)),
+                'blob_data': [b'X' * 2048] * 5,
+            }, schema=pa_schema))
+            messages = writer.prepare_commit()
+            written = _files(str(table.table_path)) - before
+            self.assertTrue(any(path.endswith('.blob') for path in written))
+            self.assertTrue(any(not path.endswith('.blob') for path in written))
+            commit.abort(messages)
+            remaining = _files(str(table.table_path))
+            for path in written:
+                self.assertNotIn(path, remaining)
+        finally:
+            writer.close()
+            commit.close()
 
     def test_blob_consumer_changes_apply_to_new_partition_writers(self):
         """Existing writers retain their consumer when the factory changes."""

@@ -23,7 +23,7 @@ from pyarrow import RecordBatch
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.table.row.blob import Blob, BlobViewStruct
-from pypaimon.utils.arrow_utils import as_blob_data, clear_blob_data, is_blob_data
+from pypaimon.utils.arrow_utils import as_blob_data, clear_blob_data, is_blob_data, row_kind_column_index
 
 
 class BlobDataBatchReader(RecordBatchReader):
@@ -68,7 +68,7 @@ class BlobInlineConvertReader(RecordBatchReader):
 
     def __init__(self, inner: RecordBatchReader, table,
                  prescan_reader_factory: Optional[Callable[[Set[str]], RecordBatchReader]] = None,
-                 blob_parallelism: int = 1):
+                 blob_parallelism: int = 1, field_names=None):
         """
         Args:
             inner: The main data reader (reads all columns).
@@ -78,6 +78,8 @@ class BlobInlineConvertReader(RecordBatchReader):
                 prescan to collect BlobViewStructs without reading all columns.
                 Signature: (field_names: Set[str]) -> RecordBatchReader
             blob_parallelism: number of threads for concurrent blob reads.
+            field_names: logical reader fields, so wrappers can adopt payload
+                provenance before the first batch is read.
         """
         self._inner = inner
         self._table = table
@@ -91,12 +93,21 @@ class BlobInlineConvertReader(RecordBatchReader):
         self._view_fields = CoreOptions.blob_view_fields(table.options) if resolve_enabled else set()
         self._descriptor_fields = CoreOptions.blob_descriptor_fields(table.options)
         self._blob_as_descriptor = CoreOptions.blob_as_descriptor(table.options)
+        self._field_names = field_names
         if not self._blob_as_descriptor:
             # Stage 2 materializes descriptor/view fields to payload bytes.
             # Row-level descriptor routing must not re-parse that content.
             self.descriptor_field_indices = set()
+            if field_names is not None:
+                self._mark_resolved_fields(field_names)
         self._prescan_done = False
         self._blob_view_lookup = None
+
+    def _mark_resolved_fields(self, field_names):
+        resolved_names = self._descriptor_fields | self._view_fields
+        self.resolved_blob_field_indices = set(self.resolved_blob_field_indices or ()) | {
+            index for index, name in enumerate(field_names)
+            if name in resolved_names}
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         # Align with Java: only enter blob view resolution when catalog_loader is available.
@@ -106,6 +117,10 @@ class BlobInlineConvertReader(RecordBatchReader):
         batch = self._inner.read_arrow_batch()
         if batch is None:
             return None
+        if not self._blob_as_descriptor and self._field_names is None:
+            self._mark_resolved_fields([
+                name for index, name in enumerate(batch.schema.names)
+                if index != row_kind_column_index(batch.schema)])
         # Resolve view fields using the preloaded lookup. When
         # blob-as-descriptor=true, leave BlobViewStruct bytes in place so
         # get_blob() keeps the originating table's FileIO. Arrow paths

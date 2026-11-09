@@ -881,8 +881,75 @@ class TestColumnProjectReader(unittest.TestCase):
         reader = ColumnProjectReader(_FakeBatchReader([]), ["a"])
         self.assertIsNone(reader.read_arrow_batch())
 
+    def test_projected_payload_stays_opaque_through_row_adapters(self):
+        from pypaimon.execution.python.read.reader.auth_masking_reader import (
+            BatchToRecordReaderAdapter, RecordReaderToBatchAdapter)
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        payload = BlobViewStruct('db.payload', 7, 42).serialize()
+        source = _FakeBatchReader([pa.RecordBatch.from_pydict({'id': [1], 'payload': [payload]})])
+        source.blob_field_indices = {1}
+        source.resolved_blob_field_indices = {1}
+        projected = ColumnProjectReader(source, ['payload', 'id'],
+                                        [_FakeField('id'), _FakeField('payload')])
+        rows = BatchToRecordReaderAdapter(projected)
+        batches = RecordReaderToBatchAdapter(rows, pa.schema([('payload', pa.binary()), ('id', pa.int64())]))
+        reader = BatchToRecordReaderAdapter(batches)
+        try:
+            row = reader.read_batch().next()
+            self.assertEqual(row.get_blob(0).to_data(), payload)
+            self.assertEqual(row.get_field(1), 1)
+        finally:
+            reader.close()
+
 
 class TestColumnProjectReaderRowKind(unittest.TestCase):
+
+    def test_adapter_without_row_kind_keeps_user_column(self):
+        from pypaimon.execution.python.read.reader.auth_masking_reader import (
+            BatchToRecordReaderAdapter, RecordReaderToBatchAdapter)
+        from pypaimon.utils.arrow_utils import row_kind_field
+
+        fields = pa.schema([('_row_kind', pa.string()), ('value', pa.int64())])
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array(['+I']), pa.array(['hello']), pa.array([1])],
+            schema=pa.schema([row_kind_field(fields)] + list(fields)))
+        for columns in (['_row_kind', 'value'], ['value']):
+            rows = BatchToRecordReaderAdapter(_FakeBatchReader([batch]))
+            batches = RecordReaderToBatchAdapter(rows, fields)
+            projected = ColumnProjectReader(batches, columns, list(fields))
+            result = BatchToRecordReaderAdapter(projected)
+            try:
+                row = result.read_batch().next()
+                self.assertEqual(row.arity, len(columns))
+                for index, name in enumerate(columns):
+                    self.assertEqual(row.get_field(index), 'hello' if name == '_row_kind' else 1)
+            finally:
+                result.close()
+
+    def test_round_trip_preserves_row_kind_with_colliding_user_columns(self):
+        from pypaimon.execution.python.read.reader.auth_masking_reader import (
+            BatchToRecordReaderAdapter, RecordReaderToBatchAdapter)
+        from pypaimon.table.row.row_kind import RowKind
+        from pypaimon.utils.arrow_utils import row_kind_field
+
+        fields = pa.schema([('_row_kind', pa.string()), ('__row_kind', pa.string())])
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array(['-D', '+U']), pa.array(['hello', 'world']), pa.array(['one', 'two'])],
+            schema=pa.schema([row_kind_field(fields)] + list(fields)))
+        rows = BatchToRecordReaderAdapter(_FakeBatchReader([batch]))
+        batches = RecordReaderToBatchAdapter(rows, fields, include_row_kind=True)
+        projected = ColumnProjectReader(batches, ['__row_kind', '_row_kind'], list(fields))
+        result = BatchToRecordReaderAdapter(projected)
+        try:
+            iterator = result.read_batch()
+            for kind, values in ((RowKind.DELETE, ('one', 'hello')), (RowKind.UPDATE_AFTER, ('two', 'world'))):
+                row = iterator.next()
+                self.assertEqual(row.get_row_kind(), kind)
+                self.assertEqual(tuple(row.get_field(index) for index in range(2)), values)
+            self.assertIsNone(iterator.next())
+        finally:
+            result.close()
 
     def test_preserves_row_kind_column(self):
         batch = pa.RecordBatch.from_pydict({

@@ -156,4 +156,82 @@ def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None,
     if (pa.types.is_signed_integer(target_type)
             and (pa.types.is_floating(array.type) or pa.types.is_decimal(array.type))):
         return _numeric_to_integer(array, target_type)
-    return array.cast(target_type, safe=False)
+    try:
+        return array.cast(target_type, safe=False)
+    except pa.ArrowNotImplementedError:
+        # PyArrow 6 cannot cast a map or list as a whole when only the child
+        # binary type changes. Child arrays themselves still cast.
+        rebuilt = _cast_nested_container(array, target_type)
+        if rebuilt is None:
+            raise
+        return rebuilt
+
+
+def _cast_child(array, target_type):
+    if array.type == target_type:
+        return array
+    try:
+        return array.cast(target_type, safe=False)
+    except pa.ArrowNotImplementedError:
+        return _cast_nested_container(array, target_type)
+
+
+def _cast_nested_container(array, target_type):
+    """Rebuild a list or map after casting its children."""
+    if isinstance(array, pa.ChunkedArray):
+        chunks = [_cast_nested_container(chunk, target_type) for chunk in array.chunks]
+        if any(chunk is None for chunk in chunks):
+            return None
+        return pa.chunked_array(chunks, type=target_type)
+    if pa.types.is_list(array.type) and pa.types.is_list(target_type):
+        values = _cast_child(array.values, target_type.value_type)
+        if values is None:
+            return None
+        return pa.ListArray.from_arrays(_offsets_with_nulls(array), values)
+    if pa.types.is_large_list(array.type) and pa.types.is_large_list(target_type):
+        values = _cast_child(array.values, target_type.value_type)
+        if values is None:
+            return None
+        return pa.LargeListArray.from_arrays(_offsets_with_nulls(array), values)
+    if pa.types.is_map(array.type) and pa.types.is_map(target_type):
+        keys = _cast_child(array.keys, target_type.key_type)
+        items = _cast_child(array.items, target_type.item_type)
+        if keys is None or items is None:
+            return None
+        # PyArrow 6 MapArray.from_arrays has no mask argument. A null offset
+        # entry is how that version represents a null map.
+        return pa.MapArray.from_arrays(_offsets_with_nulls(array), keys, items)
+    return None
+
+
+def _value_offsets(array):
+    """Offsets for a list or map, including a sliced array.
+
+    PyArrow 6's ``MapArray`` has no ``offsets`` attribute. The offset buffer is
+    still ``buffers()[1]``, and a slice starts at ``array.offset``. Copy that
+    range into a new array: ``from_arrays`` rejects a sliced offset buffer when
+    the map also has a null bitmap. The values still index the child arrays.
+    """
+    return _offsets_from_buffer(array)
+
+
+def _offsets_from_buffer(array):
+    offset_type = pa.int64() if pa.types.is_large_list(array.type) else pa.int32()
+    width = 8 if offset_type == pa.int64() else 4
+    start = array.offset
+    count = len(array) + 1
+    raw = array.buffers()[1]
+    sliced = None if raw is None else raw.slice(start * width, count * width)
+    return pa.Array.from_buffers(offset_type, count, [None, sliced])
+
+
+def _offsets_with_nulls(array):
+    offsets = _value_offsets(array)
+    if array.null_count == 0:
+        return offsets
+    # Keep the numeric offset under each null so neighboring rows still slice
+    # the child arrays at the right index. PyArrow 6 reads that null bit as a
+    # null list or map.
+    nulls = array.is_null().to_pylist()
+    nulls.append(False)
+    return pa.array(offsets.to_pylist(), type=offsets.type, mask=pa.array(nulls))
