@@ -92,6 +92,21 @@ print(metrics)   # {"num_updated": 50}
   snapshot and reject deleted IDs before writing that file group. Physical row
   positions are preserved during partial-column rewrites. A concurrent delete
   remains effective even if its row was live when this update was planned.
+- If concurrent compaction changes file boundaries after updates have been
+  staged, eligible updates are rebased by Ray workers before retrying the commit.
+  Recovery reads the staged files without rerunning the source transformations
+  and is not subject to the local Python
+  `data-evolution.row-id-conflict-rewrite.max-size` limit. This also applies when
+  a `process_row_id_ranges` processor calls `update_by_row_id`.
+- Distributed recovery retains the self-merge eligibility checks: the original
+  row IDs must remain covered, required snapshot history must be available, and
+  conflicting logical updates are rejected. Recovery is not supported for
+  deletion-vector tables or staged existing-row dedicated
+  BLOB/vector files. It handles normal forward snapshot progress, not table rollback.
+- Compatible schema changes, such as adding nullable columns or renaming fields,
+  are resolved by field ID using the current schema and normal read-time conversions.
+  Dropped update fields are rejected even if their names are reused. Commits with
+  unchanged file boundaries do not run rebase-only checks.
 
 ## Read By Row Id
 

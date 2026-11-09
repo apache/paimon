@@ -418,14 +418,14 @@ class RayUpdateByRowIdTest(unittest.TestCase):
     def test_close_failure_after_success_warns_and_returns_stats(self):
         close_error = RuntimeError("close failed")
 
-        with self.assertLogs("pypaimon.ray.update_by_row_id", level="WARNING") as logs:
+        with self.assertLogs("pypaimon.ray.row_id_conflict_rewriter", level="WARNING") as logs:
             recorder = self._run_with_fake_commit(close_error=close_error)
 
         self.assertEqual(recorder["result"], {"num_updated": 3})
         self.assertEqual(recorder["commit_calls"], 1)
         self.assertEqual(recorder["abort_calls"], 0)
         self.assertIn(
-            "Failed to close update_by_row_id commit",
+            "Failed to close row-id update commit",
             "\n".join(logs.output),
         )
 
@@ -518,14 +518,14 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         module = importlib.import_module("pypaimon.ray.update_by_row_id")
         original_commit = module._commit_update_messages
 
-        def delete_then_commit(target_table, messages):
+        def delete_then_commit(target_table, messages, **kwargs):
             builder = target_table.new_batch_write_builder()
             concurrent = builder.new_commit()
             try:
                 concurrent.commit(builder.new_update().delete_by_row_id([3]))
             finally:
                 concurrent.close()
-            original_commit(target_table, messages)
+            original_commit(target_table, messages, **kwargs)
 
         with mock.patch.object(module, "_commit_update_messages", delete_then_commit):
             update_by_row_id(target, pa.table({"_ROW_ID": [3], "age": [77]}),
@@ -600,7 +600,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         if recorder is None:
             recorder = {}
         recorder.update({
-            "msgs": [object()],
+            "msgs": [types.SimpleNamespace(check_from_snapshot=1)],
             "new_commit_errors": list(new_commit_errors or []),
             "commit_error": commit_error,
             "close_error": close_error,
@@ -662,6 +662,9 @@ class RayUpdateByRowIdTest(unittest.TestCase):
 
             def new_batch_write_builder(self):
                 return FakeWriteBuilder()
+
+            def copy_without_time_travel(self, options):
+                return self
 
         class FakeCatalog:
             def get_table(self, target):

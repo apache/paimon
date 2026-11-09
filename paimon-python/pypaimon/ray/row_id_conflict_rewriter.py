@@ -17,7 +17,7 @@
 #  under the License.
 ################################################################################
 
-"""Rebase Ray self-merge updates after concurrent compaction."""
+"""Rebase staged Ray row-id updates after concurrent compaction."""
 
 import logging
 import random
@@ -50,15 +50,15 @@ class _RewriteResult:
     rewritten_file_count: int
 
 
-def commit_self_merge_with_compaction_retry(
+def commit_updates_with_compaction_retry(
         table,
         update_messages: Sequence[CommitMessage],
         other_messages: Sequence[CommitMessage],
         *,
-        num_partitions: int,
+        num_partitions: Optional[int],
         ray_remote_args=None,
 ) -> None:
-    """Commit self-merge messages, rebasing stale updates when compaction wins."""
+    """Commit row-id update messages, rebasing stale files with Ray workers."""
     current_updates = list(update_messages)
     other_messages = list(other_messages)
     retry_count = 0
@@ -86,7 +86,7 @@ def commit_self_merge_with_compaction_retry(
         if result is not None:
             current_updates = result.update_messages
             logger.info(
-                "Rewrote %d stale self-merge file(s) against snapshot %d "
+                "Rewrote %d stale row-id update file(s) against snapshot %d "
                 "before committing to table %s.",
                 result.rewritten_file_count,
                 latest_snapshot.id,
@@ -112,7 +112,7 @@ def commit_self_merge_with_compaction_retry(
                     commit.close()
                 except Exception as close_error:
                     logger.warning(
-                        "Failed to close self-merge commit: %s",
+                        "Failed to close row-id update commit: %s",
                         close_error,
                         exc_info=close_error,
                     )
@@ -152,7 +152,7 @@ def commit_self_merge_with_compaction_retry(
             raise conflict
 
         logger.info(
-            "Rewrote %d stale self-merge file(s) against snapshot %d "
+            "Rewrote %d stale row-id update file(s) against snapshot %d "
             "before retrying commit to table %s.",
             result.rewritten_file_count,
             latest_snapshot.id,
@@ -167,7 +167,7 @@ def _rewrite_updates(
         update_messages: List[CommitMessage],
         latest_snapshot,
         *,
-        num_partitions: int,
+        num_partitions: Optional[int],
         ray_remote_args=None,
 ) -> Optional[_RewriteResult]:
     if table.options.deletion_vectors_enabled(False):
@@ -186,21 +186,8 @@ def _rewrite_updates(
     base_snapshot = table.snapshot_manager().get_snapshot_by_id(
         next(iter(base_snapshot_ids))
     )
-    if (
-            base_snapshot is None
-            or base_snapshot.schema_id != latest_snapshot.schema_id
-    ):
+    if base_snapshot is None:
         return None
-
-    # The failed commit already checked for logical conflicts up to the
-    # snapshot it observed. Repeat that check against the snapshot selected
-    # for this rewrite to close the race between those two reads of latest.
-    _validate_no_logical_conflict(
-        table,
-        update_messages,
-        latest_snapshot,
-        min(base_snapshot_ids),
-    )
 
     scan_table = table.copy_without_time_travel({
         CoreOptions.SCAN_SNAPSHOT_ID.key(): str(latest_snapshot.id),
@@ -246,6 +233,17 @@ def _rewrite_updates(
         return None
     if not _ranges_are_still_covered(current_files, candidates):
         return None
+
+    # An append can advance the snapshot without changing update file ranges.
+    # Ordinary commits retain their own validation; only actual rewrites need
+    # this extra check before advancing the conflict baseline.
+    table = _with_latest_schema(table)
+    _validate_no_logical_conflict(
+        table,
+        update_messages,
+        latest_snapshot,
+        min(base_snapshot_ids),
+    )
 
     candidate_ids = {id(candidate.file) for candidate in candidates}
 
@@ -311,7 +309,7 @@ def _rewrite_group(
         candidates: List[_StagedFile],
         snapshot_id: int,
         *,
-        num_partitions: int,
+        num_partitions: Optional[int],
         ray_remote_args=None,
 ):
     import ray
@@ -319,6 +317,7 @@ def _rewrite_group(
     from pypaimon.ray.data_evolution_merge_join import (
         distributed_update_apply,
     )
+    from pypaimon.ray.partitioning import _resolve_num_partitions
     from pypaimon.read.datasource.ray_datasource import RayDatasource
     from pypaimon.read.datasource.split_provider import (
         PreResolvedSplitProvider,
@@ -343,7 +342,10 @@ def _rewrite_group(
         splits,
         read_type,
     )
-    parallelism = max(1, min(num_partitions, len(splits)))
+    estimated_size_bytes = sum(candidate.file.file_size for candidate in candidates)
+    estimated_num_rows = sum(candidate.file.row_count for candidate in candidates)
+    parallelism = max(1, min(
+        _resolve_num_partitions(num_partitions, estimated_size_bytes), len(splits)))
     staged_updates = ray.data.read_datasource(
         RayDatasource(provider),
         ray_remote_args=ray_remote_args,
@@ -357,6 +359,8 @@ def _rewrite_group(
         num_partitions=num_partitions,
         ray_remote_args=ray_remote_args,
         base_snapshot_id=snapshot_id,
+        estimated_size_bytes=estimated_size_bytes,
+        estimated_num_rows=estimated_num_rows,
     )
 
 
@@ -391,17 +395,17 @@ def _is_rewrite_candidate(
         next_row_id: int,
 ) -> bool:
     file = item.file
+    if (not _is_normal_row_id_file(file)
+            or file.first_row_id >= next_row_id
+            or _range_key(item.message.partition, item.message.bucket, file) in current_exact_ranges):
+        return False
     write_cols = _partial_file_write_cols(table, file)
     return (
-        _is_normal_row_id_file(file)
-        and file.first_row_id < next_row_id
-        and bool(write_cols)
+        bool(write_cols)
         and not any(
             SpecialFields.is_system_field(name)
             for name in write_cols
         )
-        and _range_key(item.message.partition, item.message.bucket, file)
-        not in current_exact_ranges
     )
 
 
@@ -413,7 +417,34 @@ def _partial_file_write_cols(table, file: DataFileMeta):
     )
     if schema is None:
         raise RuntimeError(f"Schema {file.schema_id} not found")
-    return schema.partial_file_write_cols(file.write_cols)
+    columns = schema.partial_file_write_cols(file.write_cols)
+    if columns is None or any(SpecialFields.is_system_field(name) for name in columns):
+        return columns
+    current_fields = {field.id: field for field in table.table_schema.fields}
+    file_fields = {field.name: field for field in schema.fields}
+    fields = []
+    for name in columns:
+        if name not in file_fields:
+            raise RuntimeError("Column '{}' not found in schema {}".format(name, file.schema_id))
+        fields.append(file_fields[name])
+    if any(field.id not in current_fields for field in fields):
+        raise RuntimeError('Distributed row-id conflict rewrite cannot restore a dropped field')
+    # Resolve renamed fields by identity, including when an old name has been
+    # reused. TableRead applies the normal schema-evolution casts to the data.
+    return [current_fields[field.id].name for field in fields]
+
+
+def _with_latest_schema(table):
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    schema = table.schema_manager.latest()
+    if schema is None:
+        raise RuntimeError('Cannot load the current schema for row-id conflict rewrite')
+    if schema.id == table.table_schema.id:
+        return table
+    return FileStoreTable(
+        table.file_io, table.identifier, table.table_path,
+        schema.copy(new_options=table.options.options.to_map()), table.catalog_environment)
 
 
 def _ranges_are_still_covered(current_files, candidates) -> bool:

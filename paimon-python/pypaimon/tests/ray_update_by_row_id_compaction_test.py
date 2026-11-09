@@ -1,0 +1,447 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+"""Recover staged row-id updates through the public Ray APIs."""
+
+import importlib
+import os
+import shutil
+import tempfile
+import unittest
+import uuid
+from unittest.mock import patch
+
+import pyarrow as pa
+import pyarrow.compute as pc
+import pytest
+from packaging.version import parse
+
+ray = pytest.importorskip("ray")
+pytestmark = pytest.mark.skipif(
+    parse(ray.__version__) < parse("2.50.0") or not callable(getattr(ray.data.Dataset, "join", None)),
+    reason="Row-id update recovery requires Ray >= 2.50 with Dataset.join",
+)
+
+from pypaimon import CatalogFactory, Schema
+from pypaimon.ray import process_row_id_ranges, update_by_row_id
+from pypaimon.write.backend_dispatch import python_commit
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import SchemaChange
+
+
+class RayUpdateByRowIdCompactionTest(unittest.TestCase):
+    pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string()), ('age', pa.int32())])
+    de_options = {
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+        'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = tempfile.mkdtemp()
+        cls.catalog_options = {'warehouse': os.path.join(cls.tempdir, 'warehouse')}
+        cls.catalog = CatalogFactory.create(cls.catalog_options)
+        cls.catalog.create_database('default', True)
+        cls.initialized_here = not ray.is_initialized()
+        if cls.initialized_here:
+            ray.init(num_cpus=4, include_dashboard=False)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            if cls.initialized_here:
+                ray.shutdown()
+        finally:
+            shutil.rmtree(cls.tempdir, ignore_errors=True)
+
+    def _create_table(self, options=None):
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        table_options = dict(self.de_options)
+        table_options.update(options or {})
+        schema = Schema.from_pyarrow_schema(self.pa_schema, options=table_options)
+        self.catalog.create_table(name, schema, False)
+        return name
+
+    def _source(self, ids=(1,)):
+        return pa.Table.from_pydict({
+            'id': list(ids), 'name': ['x'] * len(ids), 'age': [10] * len(ids),
+        }, schema=self.pa_schema)
+
+    def _write(self, target, data):
+        builder = self.catalog.get_table(target).new_batch_write_builder()
+        writer = builder.new_write()
+        commit = builder.new_commit()
+        try:
+            writer.write_arrow(data)
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+
+    def _read_sorted(self, target):
+        builder = self.catalog.get_table(target).new_read_builder()
+        return builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id').to_pydict()
+
+    def _compact_all_data_files(self, table):
+        read = table.new_read_builder().with_projection(list(table.field_names) + ['_ROW_ID'])
+        plan = read.new_scan().plan_all()
+        old_files = [file for split in plan.splits() for file in split.files]
+        current = read.new_read().to_arrow(plan.splits()).sort_by('_ROW_ID').select(list(table.field_names))
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        commit = builder.new_commit()
+        try:
+            writer.write_arrow(current)
+            messages = writer.prepare_commit()
+            self.assertEqual(len(messages), 1)
+            self.assertEqual(len(messages[0].new_files), 1)
+            messages[0].new_files = [messages[0].new_files[0].assign_first_row_id(0)]
+            messages[0].deleted_files.extend(old_files)
+            original_try_commit = python_commit(commit).file_store_commit._try_commit
+            python_commit(commit).file_store_commit._try_commit = (
+                lambda commit_kind, *args, **kwargs: original_try_commit('COMPACT', *args, **kwargs)
+            )
+            commit.commit(messages)
+        finally:
+            writer.close()
+            commit.close()
+
+    def test_row_id_range_pipeline_rebases_without_reexecuting_source(self):
+        from pypaimon.ray import read_by_row_id
+        from pypaimon.execution.python.write.commit.row_id_conflict_rewriter import RowIdConflictRewriter
+
+        update_module = importlib.import_module('pypaimon.ray.update_by_row_id')
+        for num_partitions in (None, 2):
+            with self.subTest(num_partitions=num_partitions):
+                target = self._create_table({
+                    'data-evolution.row-id-conflict-rewrite.max-size': '1 B',
+                })
+                self._write(target, self._source(ids=(1, 2)))
+                self._write(target, self._source(ids=(3, 4)))
+                table = self.catalog.get_table(target)
+                marker = os.path.join(self.tempdir, uuid.uuid4().hex)
+                real_apply = update_module.distributed_update_apply
+                staged_source_calls = []
+                processed = []
+
+                def compute(batch):
+                    with open(marker, 'a') as output:
+                        output.write(str(os.getpid()) + '\n')
+                    return pa.table({
+                        '_ROW_ID': batch['_ROW_ID'],
+                        'age': pc.add(batch['age'], 1),
+                    })
+
+                def stage_then_compact(*args, **kwargs):
+                    result = real_apply(*args, **kwargs)
+                    with open(marker) as source_calls:
+                        staged_source_calls.append(source_calls.read())
+                    # Expand the current range on each batch. The range processor
+                    # keeps its original ranges, including after this compaction.
+                    self._write(target, self._source(ids=(4 + len(staged_source_calls),)))
+                    self._compact_all_data_files(table)
+                    return result
+
+                def processor(ranges):
+                    row_ids = [rid for row_range in ranges
+                               for rid in range(row_range.from_, row_range.to + 1)]
+                    source = read_by_row_id(
+                        target, pa.table({'_ROW_ID': row_ids}), self.catalog_options,
+                        projection=['age'], num_partitions=2,
+                    ).map_batches(compute, batch_format='pyarrow')
+                    result = update_by_row_id(
+                        target, source, self.catalog_options, update_cols=['age'],
+                        num_partitions=num_partitions, ray_remote_args={'num_cpus': 1},
+                    )
+                    self.assertEqual(result, {'num_updated': len(row_ids)})
+                    with open(marker) as source_calls:
+                        self.assertEqual(source_calls.read(), staged_source_calls[-1])
+                    processed.append(row_ids)
+
+                with patch.object(
+                    update_module, 'distributed_update_apply', side_effect=stage_then_compact,
+                ) as stage_updates, patch.object(
+                    RowIdConflictRewriter, '_read_staged_update',
+                    side_effect=AssertionError('Ray recovery must not read staged data on the driver'),
+                ):
+                    process_row_id_ranges(
+                        target, self.catalog_options, rows_per_commit=2, processor=processor)
+
+                self.assertEqual(processed, [[0, 1], [2, 3]])
+                self.assertEqual(stage_updates.call_count, 2)
+                output = self._read_sorted(target)
+                self.assertEqual(output['id'], [1, 2, 3, 4, 5, 6])
+                self.assertEqual(output['age'], [11, 11, 11, 11, 10, 10])
+                self.assertNotIn(str(os.getpid()), staged_source_calls[-1].splitlines())
+
+    def test_row_id_update_rebases_again_after_second_compaction(self):
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
+        from pypaimon.write.write_builder import BatchWriteBuilder
+
+        update_module = importlib.import_module('pypaimon.ray.update_by_row_id')
+        target = self._create_table({
+            'data-evolution.row-id-conflict-rewrite.max-size': '1 B',
+        })
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        real_apply = update_module.distributed_update_apply
+        real_rewrite = rewriter_module._rewrite_updates
+        real_new_commit = BatchWriteBuilder.new_commit
+        commit_users = []
+        rewrites = []
+
+        def stage_then_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            self._compact_all_data_files(table)
+            return result
+
+        def miss_precommit_race(*args, **kwargs):
+            rewrites.append(args[2].id)
+            return None if len(rewrites) == 1 else real_rewrite(*args, **kwargs)
+
+        def compact_before_first_retry(_table, retry_count):
+            if retry_count == 0:
+                self._write(target, self._source(ids=(5, 6)))
+                self._compact_all_data_files(table)
+
+        def track_commit_user(builder):
+            if builder.table.options.data_evolution_row_id_conflict_rewrite_max_size() == 0:
+                commit_users.append(builder.commit_user)
+            return real_new_commit(builder)
+
+        with patch.object(
+            update_module, 'distributed_update_apply', side_effect=stage_then_compact,
+        ) as stage_updates, patch.object(
+            rewriter_module, '_rewrite_updates', side_effect=miss_precommit_race,
+        ), patch.object(
+            rewriter_module, '_retry_wait', side_effect=compact_before_first_retry,
+        ), patch.object(BatchWriteBuilder, 'new_commit', new=track_commit_user):
+            result = update_by_row_id(
+                target, pa.table({'_ROW_ID': [1], 'age': [99]}), self.catalog_options,
+                update_cols=['age'], num_partitions=2,
+            )
+
+        self.assertEqual(result, {'num_updated': 1})
+        stage_updates.assert_called_once()
+        self.assertEqual(self._read_sorted(target)['age'], [10, 99, 10, 10, 10, 10])
+        self.assertEqual(len(rewrites), 3)
+        self.assertEqual(rewrites[0], rewrites[1])
+        self.assertGreater(rewrites[2], rewrites[1])
+        self.assertEqual(len(commit_users), 3)
+        self.assertEqual(len(set(commit_users)), 1)
+
+    def test_row_id_update_rebase_preserves_logical_conflict_checks(self):
+        update_module = importlib.import_module('pypaimon.ray.update_by_row_id')
+        for concurrent_column in ('age', 'name'):
+            with self.subTest(concurrent_column=concurrent_column):
+                target = self._create_table()
+                self._write(target, self._source(ids=(1, 2)))
+                self._write(target, self._source(ids=(3, 4)))
+                table = self.catalog.get_table(target)
+                real_apply = update_module.distributed_update_apply
+
+                def stage_then_update_and_compact(*args, **kwargs):
+                    result = real_apply(*args, **kwargs)
+                    builder = table.new_batch_write_builder()
+                    messages = builder.new_update().update_by_arrow_with_row_id(pa.table({
+                        '_ROW_ID': [1],
+                        concurrent_column: [100 if concurrent_column == 'age' else 'concurrent'],
+                    }))
+                    commit = builder.new_commit()
+                    try:
+                        commit.commit(messages)
+                    finally:
+                        commit.close()
+                    self._compact_all_data_files(table)
+                    return result
+
+                with patch.object(
+                    update_module, 'distributed_update_apply', side_effect=stage_then_update_and_compact,
+                ):
+                    source = pa.table({'_ROW_ID': [0], 'age': [99]})
+                    if concurrent_column == 'age':
+                        with self.assertRaisesRegex(Exception, "multiple 'MERGE INTO'"):
+                            update_by_row_id(
+                                target, source, self.catalog_options, update_cols=['age'], num_partitions=2)
+                    else:
+                        self.assertEqual(update_by_row_id(
+                            target, source, self.catalog_options, update_cols=['age'], num_partitions=2,
+                        ), {'num_updated': 1})
+
+                output = self._read_sorted(target)
+                if concurrent_column == 'age':
+                    self.assertEqual(output['age'], [10, 100, 10, 10])
+                else:
+                    self.assertEqual(output['age'], [99, 10, 10, 10])
+                    self.assertEqual(output['name'], ['x', 'concurrent', 'x', 'x'])
+
+    def test_row_id_backfill_added_column_rebases_after_compaction(self):
+        from pypaimon.execution.python.write.commit.row_id_conflict_rewriter import RowIdConflictRewriter
+
+        update_module = importlib.import_module('pypaimon.ray.update_by_row_id')
+        for alter_after_staging in (False, True):
+            with self.subTest(alter_after_staging=alter_after_staging):
+                target = self._create_table({
+                    'data-evolution.row-id-conflict-rewrite.max-size': '1 B',
+                })
+                self._write(target, self._source(ids=(1, 2)))
+                self._write(target, self._source(ids=(3, 4)))
+                self.catalog.alter_table(target, [SchemaChange.add_column('extra', AtomicType('INT'))])
+                table = self.catalog.get_table(target)
+                self.assertNotEqual(table.table_schema.id,
+                                    table.snapshot_manager().get_latest_snapshot().schema_id)
+                real_apply = update_module.distributed_update_apply
+
+                def stage_then_compact(*args, **kwargs):
+                    result = real_apply(*args, **kwargs)
+                    if alter_after_staging:
+                        self.catalog.alter_table(target, [
+                            SchemaChange.add_column('later', AtomicType('INT'))])
+                    self._compact_all_data_files(self.catalog.get_table(target))
+                    return result
+
+                with patch.object(
+                    update_module, 'distributed_update_apply', side_effect=stage_then_compact,
+                ) as stage_updates, patch.object(
+                    RowIdConflictRewriter, '_read_staged_update',
+                    side_effect=AssertionError('Schema evolution must use distributed recovery'),
+                ):
+                    result = update_by_row_id(
+                        target, pa.table({'_ROW_ID': [0], 'extra': [99]}), self.catalog_options,
+                        update_cols=['extra'], num_partitions=2)
+
+                self.assertEqual(result, {'num_updated': 1})
+                stage_updates.assert_called_once()
+                output = self._read_sorted(target)
+                self.assertEqual(output['extra'], [99, None, None, None])
+                self.assertEqual(output['age'], [10, 10, 10, 10])
+                if alter_after_staging:
+                    self.assertEqual(output['later'], [None] * 4)
+
+    def test_row_id_commit_after_append_and_schema_change_needs_no_rebase(self):
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
+
+        update_module = importlib.import_module('pypaimon.ray.update_by_row_id')
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        real_apply = update_module.distributed_update_apply
+
+        def stage_then_append_and_alter(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            self._write(target, self._source(ids=(3, 4)))
+            self.catalog.alter_table(target, [SchemaChange.add_column('extra', AtomicType('INT'))])
+            return result
+
+        with patch.object(
+            update_module, 'distributed_update_apply', side_effect=stage_then_append_and_alter,
+        ), patch.object(
+            rewriter_module, '_validate_no_logical_conflict',
+            side_effect=AssertionError('Ordinary commits must not run rebase-only checks'),
+        ), patch.object(
+            rewriter_module, '_rewrite_group',
+            side_effect=AssertionError('Unchanged file ranges do not need rewriting'),
+        ):
+            result = update_by_row_id(
+                target, pa.table({'_ROW_ID': [0], 'age': [99]}), self.catalog_options,
+                update_cols=['age'], num_partitions=2)
+
+        self.assertEqual(result, {'num_updated': 1})
+        output = self._read_sorted(target)
+        self.assertEqual(output['age'], [99, 10, 10, 10])
+        self.assertEqual(output['extra'], [None] * 4)
+
+    def test_row_id_rebase_tracks_renamed_fields_and_logical_conflicts(self):
+        update_module = importlib.import_module('pypaimon.ray.update_by_row_id')
+        for concurrent_column in ('age', 'renamed'):
+            with self.subTest(concurrent_column=concurrent_column):
+                target = self._create_table({
+                    'data-evolution.row-id-conflict-rewrite.max-size': '1 B',
+                })
+                self._write(target, self._source(ids=(1, 2)))
+                self._write(target, self._source(ids=(3, 4)))
+                real_apply = update_module.distributed_update_apply
+
+                def stage_then_rename_update_and_compact(*args, **kwargs):
+                    result = real_apply(*args, **kwargs)
+                    self.catalog.alter_table(target, [
+                        SchemaChange.rename_column('age', 'renamed'),
+                        SchemaChange.update_column_type('renamed', AtomicType('BIGINT')),
+                        SchemaChange.add_column('age', AtomicType('INT')),
+                    ])
+                    table = self.catalog.get_table(target)
+                    builder = table.new_batch_write_builder()
+                    messages = builder.new_update().update_by_arrow_with_row_id(pa.table({
+                        '_ROW_ID': [0, 1, 2, 3], concurrent_column: [100, 200, 300, 400],
+                    }))
+                    commit = builder.new_commit()
+                    try:
+                        commit.commit(messages)
+                    finally:
+                        commit.close()
+                    self._compact_all_data_files(table)
+                    return result
+
+                with patch.object(
+                    update_module, 'distributed_update_apply',
+                    side_effect=stage_then_rename_update_and_compact,
+                ) as stage_updates:
+                    source = pa.table({'_ROW_ID': [0], 'age': [99]})
+                    if concurrent_column == 'renamed':
+                        with self.assertRaisesRegex(Exception, "multiple 'MERGE INTO'"):
+                            update_by_row_id(
+                                target, source, self.catalog_options, update_cols=['age'], num_partitions=2)
+                    else:
+                        self.assertEqual(update_by_row_id(
+                            target, source, self.catalog_options, update_cols=['age'], num_partitions=2,
+                        ), {'num_updated': 1})
+
+                stage_updates.assert_called_once()
+                output = self._read_sorted(target)
+                if concurrent_column == 'renamed':
+                    self.assertEqual(output['renamed'], [100, 200, 300, 400])
+                    self.assertEqual(output['age'], [None] * 4)
+                else:
+                    self.assertEqual(output['renamed'], [99, 10, 10, 10])
+                    self.assertEqual(output['age'], [100, 200, 300, 400])
+
+    def test_row_id_rebase_rejects_dropped_field_even_if_name_is_reused(self):
+        update_module = importlib.import_module('pypaimon.ray.update_by_row_id')
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        real_apply = update_module.distributed_update_apply
+
+        def stage_then_drop_and_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            self.catalog.alter_table(target, [
+                SchemaChange.drop_column('age'),
+                SchemaChange.add_column('age', AtomicType('INT')),
+            ])
+            self._compact_all_data_files(self.catalog.get_table(target))
+            return result
+
+        with patch.object(
+            update_module, 'distributed_update_apply', side_effect=stage_then_drop_and_compact,
+        ), self.assertRaisesRegex(RuntimeError, 'cannot restore a dropped field'):
+            update_by_row_id(
+                target, pa.table({'_ROW_ID': [0], 'age': [99]}), self.catalog_options,
+                update_cols=['age'], num_partitions=2)
+
+        self.assertEqual(self._read_sorted(target)['age'], [None] * 4)

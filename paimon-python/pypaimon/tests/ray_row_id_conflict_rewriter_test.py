@@ -22,7 +22,7 @@ from unittest.mock import Mock, patch
 from pypaimon.ray.data_evolution_merge_into import _reraise_inner
 from pypaimon.ray.row_id_conflict_rewriter import (
     _partial_file_write_cols,
-    commit_self_merge_with_compaction_retry,
+    commit_updates_with_compaction_retry,
 )
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.table_schema import TableSchema
@@ -108,7 +108,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ) as rewrite_updates, patch(
             'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
         ):
-            commit_self_merge_with_compaction_retry(
+            commit_updates_with_compaction_retry(
                 table,
                 [],
                 [],
@@ -134,7 +134,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates',
             side_effect=rewrite_error,
         ), self.assertRaises(RuntimeError) as context:
-            commit_self_merge_with_compaction_retry(
+            commit_updates_with_compaction_retry(
                 table,
                 [update],
                 [],
@@ -210,7 +210,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ), patch(
             'pypaimon.execution.python.write.file_store_commit.FileStoreCommit.abort',
         ) as abort_messages, self.assertRaises(RuntimeError) as context:
-            commit_self_merge_with_compaction_retry(
+            commit_updates_with_compaction_retry(
                 table,
                 [generation_0],
                 [other],
@@ -249,7 +249,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ) as abort_messages, self.assertRaises(
             RowIdExistenceConflict,
         ) as context:
-            commit_self_merge_with_compaction_retry(
+            commit_updates_with_compaction_retry(
                 table,
                 [generation_0],
                 [other],
@@ -282,7 +282,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ), patch(
             'pypaimon.execution.python.write.file_store_commit.FileStoreCommit.abort',
         ) as abort_messages, self.assertRaises(RuntimeError) as context:
-            commit_self_merge_with_compaction_retry(
+            commit_updates_with_compaction_retry(
                 table,
                 [generation_0],
                 [other],
