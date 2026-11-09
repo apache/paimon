@@ -25,6 +25,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.catalog.Identifier.isBlankBranch;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manager for {@code Branch}. */
@@ -77,7 +78,7 @@ public interface BranchManager {
     }
 
     static String normalizeBranch(String branch) {
-        return StringUtils.isNullOrWhitespaceOnly(branch) ? DEFAULT_MAIN_BRANCH : branch;
+        return isBlankBranch(branch) ? DEFAULT_MAIN_BRANCH : branch;
     }
 
     static boolean isMainBranch(String branch) {
@@ -86,14 +87,11 @@ public interface BranchManager {
 
     static void validateBranch(String branchName) {
         checkArgument(
-                !BranchManager.isMainBranch(branchName),
+                !DEFAULT_MAIN_BRANCH.equalsIgnoreCase(branchName),
                 String.format(
                         "Branch name '%s' is the default branch and cannot be used.",
                         DEFAULT_MAIN_BRANCH));
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(branchName),
-                "Branch name '%s' is blank.",
-                branchName);
+        checkArgument(!isBlankBranch(branchName), "Branch name '%s' is blank.", branchName);
         checkArgument(
                 !branchName.chars().allMatch(Character::isDigit),
                 "Branch name cannot be pure numeric string but is '%s'.",
@@ -102,13 +100,9 @@ public interface BranchManager {
 
     static void mergeValidate(String sourceBranch, String targetBranch) {
         checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(sourceBranch),
-                "Source branch name '%s' is blank.",
-                sourceBranch);
+                !isBlankBranch(sourceBranch), "Source branch name '%s' is blank.", sourceBranch);
         checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(targetBranch),
-                "Target branch name '%s' is blank.",
-                targetBranch);
+                !isBlankBranch(targetBranch), "Target branch name '%s' is blank.", targetBranch);
         checkArgument(
                 !sourceBranch.equals(targetBranch),
                 "Cannot merge branch '%s' into itself.",
@@ -120,10 +114,7 @@ public interface BranchManager {
                 !branchName.equals(DEFAULT_MAIN_BRANCH),
                 "Branch name '%s' do not use in fast-forward.",
                 branchName);
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(branchName),
-                "Branch name '%s' is blank.",
-                branchName);
+        checkArgument(!isBlankBranch(branchName), "Branch name '%s' is blank.", branchName);
         checkArgument(
                 !branchName.equals(currentBranch),
                 "Fast-forward from the current branch '%s' is not allowed.",

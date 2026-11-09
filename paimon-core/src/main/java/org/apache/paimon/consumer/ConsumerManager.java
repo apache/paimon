@@ -21,7 +21,6 @@ package org.apache.paimon.consumer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.DateTimeUtils;
-import org.apache.paimon.utils.StringUtils;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -36,6 +35,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.catalog.Identifier.isBlankBranch;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listOriginalVersionedFiles;
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
@@ -59,8 +59,7 @@ public class ConsumerManager implements Serializable {
     public ConsumerManager(FileIO fileIO, Path tablePath, String branchName) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
-        this.branch =
-                StringUtils.isNullOrWhitespaceOnly(branchName) ? DEFAULT_MAIN_BRANCH : branchName;
+        this.branch = isBlankBranch(branchName) ? DEFAULT_MAIN_BRANCH : branchName;
     }
 
     public Optional<Consumer> consumer(String consumerId) {

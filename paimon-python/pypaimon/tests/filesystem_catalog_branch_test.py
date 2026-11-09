@@ -161,6 +161,49 @@ class FileSystemCatalogBranchCRUDTest(unittest.TestCase):
             self.catalog.create_branch(self.identifier, "b1")
         self.assertEqual(cm.exception.branch, "b1")
 
+    def test_create_branch_rejects_default_variants(self):
+        for branch in ("main", "MAIN", "Main", "ma\u0131n", "ma\u0130n"):
+            with self.subTest(branch=branch):
+                with self.assertRaisesRegex(ValueError, "default branch"):
+                    self.catalog.create_branch(self.identifier, branch)
+
+        self.catalog.create_branch(self.identifier, "source")
+        for branch in ("main", "MAIN", "Main", "ma\u0131n", "ma\u0130n"):
+            with self.subTest(rename_to=branch):
+                with self.assertRaisesRegex(ValueError, "default branch"):
+                    self.catalog.rename_branch(self.identifier, "source", branch)
+
+    def test_get_table_rejects_blank_encoded_branch(self):
+        for branch in ("", " "):
+            identifier = Identifier("default", "test_branch_table$branch_" + branch)
+            with self.subTest(branch=repr(branch)):
+                with self.assertRaisesRegex(ValueError, "Branch name cannot be blank"):
+                    self.catalog.get_table(identifier)
+
+        self.assertIsNotNone(self.catalog.get_table(self.identifier))
+
+    def test_no_break_space_branch_is_not_main(self):
+        # Java takes a no-break space as a branch name, not as blank.
+        branch = "\u00a0"
+        self.catalog.create_branch(self.identifier, branch)
+        self._write(
+            self.catalog.get_table(Identifier("default", "test_branch_table", branch=branch)),
+            pa.Table.from_pydict({"id": [4], "value": ["d"]}, schema=self.pa_schema))
+
+        for identifier in (Identifier("default", "test_branch_table", branch=branch),
+                           Identifier("default", "test_branch_table$branch_" + branch)):
+            table = self.catalog.get_table(identifier)
+            self.assertEqual(table.current_branch(), branch)
+            self.assertEqual(self._read(table).column("id").to_pylist(), [4])
+        self.assertEqual(
+            sorted(self._read(self.catalog.get_table(self.identifier)).column("id").to_pylist()),
+            [1, 2, 3])
+
+        self.catalog.rename_branch(self.identifier, branch, "renamed")
+        self.assertEqual(self.catalog.list_branches(self.identifier), ["renamed"])
+        self.catalog.rename_branch(self.identifier, "renamed", branch)
+        self.assertEqual(self.catalog.list_branches(self.identifier), [branch])
+
     def test_create_branch_table_not_exists(self):
         with self.assertRaises(TableNotExistException):
             self.catalog.create_branch(

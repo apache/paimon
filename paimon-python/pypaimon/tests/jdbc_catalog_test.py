@@ -144,6 +144,11 @@ class JdbcCatalogTest(unittest.TestCase):
         self.assertTrue(isinstance(table.fields[0].type, AtomicType))
         self.assertEqual(table.fields[0].type.type, "INT")
 
+        for branch in ("", " "):
+            with self.assertRaisesRegex(ValueError, "Branch name cannot be blank"):
+                reloaded.get_table("test_db.test_table$branch_" + branch)
+        self.assertIsNotNone(reloaded.get_table("test_db.test_table"))
+
         with sqlite3.connect(self.jdbc_path) as conn:
             properties = dict(
                 conn.execute(
