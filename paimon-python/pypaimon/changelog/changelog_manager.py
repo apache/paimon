@@ -55,7 +55,12 @@ class ChangelogManager:
             The latest changelog ID, or None if not found
         """
         try:
-            return self._find_latest_hint_id(self.changelog_directory())
+            latest = self._find_latest_hint_id(self.changelog_directory())
+            if (latest is not None and latest > 0
+                    and self.long_lived_changelog_exists(latest)
+                    and not self.long_lived_changelog_exists(latest + 1)):
+                return latest
+            return max(self.list_changelog_ids(), default=None)
         except Exception as e:
             raise RuntimeError("Failed to find latest changelog id") from e
 
@@ -66,7 +71,10 @@ class ChangelogManager:
             The earliest changelog ID, or None if not found
         """
         try:
-            return self._find_earliest_hint_id(self.changelog_directory())
+            earliest = self._find_earliest_hint_id(self.changelog_directory())
+            if earliest is not None and self.long_lived_changelog_exists(earliest):
+                return earliest
+            return min(self.list_changelog_ids(), default=None)
         except Exception as e:
             raise RuntimeError("Failed to find earliest changelog id") from e
 
@@ -174,7 +182,7 @@ class ChangelogManager:
         Yields:
             Changelog instances in ascending order of ID
         """
-        for snapshot_id in self._list_changelog_ids():
+        for snapshot_id in self.list_changelog_ids():
             yield self.changelog(snapshot_id)
 
     def safely_get_all_changelogs(self) -> List[Changelog]:
@@ -186,7 +194,12 @@ class ChangelogManager:
         Returns:
             List of Changelog instances (may include None for failed reads)
         """
-        paths = [self.long_lived_changelog_path(sid) for sid in self._list_changelog_ids()]
+        try:
+            changelog_ids = self.list_changelog_ids()
+        except Exception as e:
+            logger.warning(f"Failed to list changelog files: {e}")
+            return []
+        paths = [self.long_lived_changelog_path(sid) for sid in changelog_ids]
         changelogs: List[Optional[Changelog]] = [None] * len(paths)
 
         def read_changelog(index: int, path: str):
@@ -233,7 +246,7 @@ class ChangelogManager:
         """
         return BranchManager.branch_path(self.table_path, self.branch)
 
-    def _list_changelog_ids(self) -> List[int]:
+    def list_changelog_ids(self) -> List[int]:
         """List all changelog IDs in the changelog directory.
 
         Returns:
@@ -244,16 +257,14 @@ class ChangelogManager:
 
         try:
             file_infos = self.file_io.list_status(self.changelog_directory())
-            for file_info in file_infos:
-                filename = file_info.path.split('/')[-1]
-                match = pattern.match(filename)
-                if match:
-                    changelog_id = int(match.group(1))
-                    changelog_ids.append(changelog_id)
-        except Exception as e:
-            logger.warning(f"Failed to list changelog files: {e}")
+        except FileNotFoundError:
             return []
 
+        for file_info in file_infos:
+            filename = file_info.path.split('/')[-1]
+            match = pattern.match(filename)
+            if match:
+                changelog_ids.append(int(match.group(1)))
         return sorted(changelog_ids)
 
     def _find_latest_hint_id(self, directory: str) -> Optional[int]:
@@ -308,7 +319,7 @@ class ChangelogManager:
             directory: Directory to write hint file
         """
         latest_file = f"{directory}/LATEST"
-        self.file_io.write_file(latest_file, str(snapshot_id), False)
+        self.file_io.overwrite_file_utf8(latest_file, str(snapshot_id))
 
     def _commit_earliest_hint(self, snapshot_id: int, directory: str) -> None:
         """Commit the earliest hint file.
