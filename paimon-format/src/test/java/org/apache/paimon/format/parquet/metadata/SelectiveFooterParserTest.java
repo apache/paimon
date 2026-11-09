@@ -1153,9 +1153,10 @@ public class SelectiveFooterParserTest {
 
     /**
      * End-to-end integration through the vendored {@link ParquetFileReader}: the
-     * REQUESTED_COLUMNS_KEY / SKIP_STATISTICS_KEY properties set on ParquetReadOptions must reach
-     * the selective parser, and a FallbackSignalException must transparently fall back to the
-     * official parse.
+     * SELECTIVE_PARSER_ENABLED_KEY / REQUESTED_COLUMNS_KEY / SKIP_STATISTICS_KEY properties set on
+     * ParquetReadOptions must reach the selective parser, a FallbackSignalException must
+     * transparently fall back to the official parse, and either property alone (columns without the
+     * flag, or the flag without columns) must keep the read on the official path.
      */
     @Test
     public void testParquetFileReaderIntegration() throws IOException {
@@ -1169,14 +1170,20 @@ public class SelectiveFooterParserTest {
         ParquetMetadata official =
                 converter.readParquetMetadata(
                         new ByteArrayInputStream(footer), ParquetMetadataConverter.NO_FILTER);
+        Set<String> allColumns =
+                official.getBlocks().stream()
+                        .flatMap(b -> b.getColumns().stream())
+                        .map(c -> c.getPath().toDotString().split("\\.")[0])
+                        .collect(Collectors.toSet());
 
-        // A: requested columns + skip statistics propagate through ParquetReadOptions
+        // A: enable flag + requested columns + skip statistics propagate through ParquetReadOptions
         String sep = SelectiveFooterParser.COLUMN_NAME_SEPARATOR;
         try (ParquetFileReader reader =
                 new ParquetFileReader(
                         ParquetInputFile.fromPath(fileIO, path, length),
                         ParquetReadOptions.builder()
                                 .withRange(0, length)
+                                .set(SelectiveFooterParser.SELECTIVE_PARSER_ENABLED_KEY, "true")
                                 .set(SelectiveFooterParser.REQUESTED_COLUMNS_KEY, "id" + sep + "g")
                                 .set(SelectiveFooterParser.SKIP_STATISTICS_KEY, "true")
                                 .build(),
@@ -1207,19 +1214,57 @@ public class SelectiveFooterParserTest {
                     ParquetMetadata.toPrettyJSON(official), ParquetMetadata.toPrettyJSON(full));
         }
 
-        // C: requested columns absent from the file -> the selective parse falls back to the
-        // official parse inside ParquetFileReader and the result stays equivalent
+        // C: enabled + requested columns absent from the file -> the selective parse falls back
+        // to the official parse inside ParquetFileReader and the result stays equivalent
         try (ParquetFileReader reader =
                 new ParquetFileReader(
                         ParquetInputFile.fromPath(fileIO, path, length),
                         ParquetReadOptions.builder()
                                 .withRange(0, length)
+                                .set(SelectiveFooterParser.SELECTIVE_PARSER_ENABLED_KEY, "true")
                                 .set(SelectiveFooterParser.REQUESTED_COLUMNS_KEY, "missing")
                                 .build(),
                         null)) {
             ParquetMetadata fellBack = reader.getFooter();
             Assertions.assertEquals(
                     ParquetMetadata.toPrettyJSON(official), ParquetMetadata.toPrettyJSON(fellBack));
+        }
+
+        // D: requested columns without the enable flag -> requested columns alone must not
+        // activate the selective parse; the full column set comes back from the official path
+        try (ParquetFileReader reader =
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(fileIO, path, length),
+                        ParquetReadOptions.builder()
+                                .withRange(0, length)
+                                .set(SelectiveFooterParser.REQUESTED_COLUMNS_KEY, "id")
+                                .build(),
+                        null)) {
+            ParquetMetadata full = reader.getFooter();
+            Assertions.assertEquals(
+                    ParquetMetadata.toPrettyJSON(official), ParquetMetadata.toPrettyJSON(full));
+            for (BlockMetaData block : full.getBlocks()) {
+                Set<String> topLevels =
+                        block.getColumns().stream()
+                                .map(c -> c.getPath().toDotString().split("\\.")[0])
+                                .collect(Collectors.toSet());
+                Assertions.assertEquals(allColumns, topLevels);
+            }
+        }
+
+        // E: enable flag without requested columns -> the flag alone must not activate the
+        // selective parse either
+        try (ParquetFileReader reader =
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(fileIO, path, length),
+                        ParquetReadOptions.builder()
+                                .withRange(0, length)
+                                .set(SelectiveFooterParser.SELECTIVE_PARSER_ENABLED_KEY, "true")
+                                .build(),
+                        null)) {
+            ParquetMetadata full = reader.getFooter();
+            Assertions.assertEquals(
+                    ParquetMetadata.toPrettyJSON(official), ParquetMetadata.toPrettyJSON(full));
         }
     }
 
@@ -1702,6 +1747,10 @@ public class SelectiveFooterParserTest {
                                                 inputFile,
                                                 ParquetReadOptions.builder()
                                                         .withRange(0, fileBytes.length)
+                                                        .set(
+                                                                SelectiveFooterParser
+                                                                        .SELECTIVE_PARSER_ENABLED_KEY,
+                                                                "true")
                                                         .set(
                                                                 SelectiveFooterParser
                                                                         .REQUESTED_COLUMNS_KEY,

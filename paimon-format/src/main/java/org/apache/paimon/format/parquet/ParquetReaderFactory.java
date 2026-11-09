@@ -253,6 +253,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         // Enable selective footer parsing when no predicates are present and the feature is
         // enabled.
         // This improves performance by only parsing metadata for requested columns.
+        // The effective switch lives in the vendored ParquetFileReader.readFooter: it checks
+        // SELECTIVE_PARSER_ENABLED_KEY and REQUESTED_COLUMNS_KEY and only then tries the
+        // selective parse; this factory is just the property producer.
         // NOTE: When predicates are present, statistics are needed for row-group filtering,
         // so selective parser is currently disabled in that case. If selective parser is
         // extended to support predicates in the future, set parseStatistics=true to preserve
@@ -271,6 +274,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         if (enableSelectiveParser
                 && namesEncodable
                 && (predicates == null || predicates.isEmpty())) {
+            readOptionsBuilder.set(SelectiveFooterParser.SELECTIVE_PARSER_ENABLED_KEY, "true");
             StringBuilder requestedColumns = new StringBuilder();
             for (DataField field : readType.getFields()) {
                 if (requestedColumns.length() > 0) {

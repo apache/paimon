@@ -230,11 +230,20 @@ public class ParquetFileReader implements Closeable {
 
             // Regular file, or encrypted file with plaintext footer
             if (!encryptedFooterMode) {
-                // Try selective footer parsing first for better performance
-                // This is enabled when requested columns are specified in options
+                // Try selective footer parsing first for better performance. Opt-in: the enable
+                // flag AND the requested columns must both be present as read-options properties
+                // (ParquetReaderFactory sets them together when the footer option is enabled and
+                // no predicates are present). With either one absent, the official parse below
+                // runs unchanged — the risks of the selective path never reach the default path.
+                boolean selectiveParserEnabled =
+                        "true"
+                                .equals(
+                                        options.getProperty(
+                                                SelectiveFooterParser
+                                                        .SELECTIVE_PARSER_ENABLED_KEY));
                 String requestedColumns =
                         options.getProperty(SelectiveFooterParser.REQUESTED_COLUMNS_KEY);
-                if (requestedColumns != null && fileDecryptor == null) {
+                if (selectiveParserEnabled && requestedColumns != null && fileDecryptor == null) {
                     boolean includeStatistics =
                             !"true"
                                     .equals(

@@ -92,6 +92,16 @@ import java.util.Set;
  */
 public final class SelectiveFooterParser {
 
+    /**
+     * ParquetReadOptions property ("true"/"false") switching the selective parser on at the
+     * consumption site ({@code ParquetFileReader.readFooter}). Mirrors the key of {@code
+     * CoreOptions#PARQUET_FOOTER_SELECTIVE_PARSER_ENABLED}; the two must stay in sync. Selective
+     * parsing only runs when this flag and {@link #REQUESTED_COLUMNS_KEY} are both set — either one
+     * absent keeps the read on the official parse path.
+     */
+    public static final String SELECTIVE_PARSER_ENABLED_KEY =
+            "parquet.footer.selective-parser.enabled";
+
     /** ParquetReadOptions property carrying the comma-joined requested top-level column names. */
     public static final String REQUESTED_COLUMNS_KEY = "paimon.parquet.footer.requested.columns";
 
