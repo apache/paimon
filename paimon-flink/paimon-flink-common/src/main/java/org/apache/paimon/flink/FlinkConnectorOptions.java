@@ -375,6 +375,14 @@ public class FlinkConnectorOptions {
                                     + "weight sink.managed.writer-buffer-memory. The actual writer buffer "
                                     + "size depends on the slot's allocated resources and managed memory consumers.");
 
+    public static final ConfigOption<MemorySize> SINK_WRITER_OFFHEAP_MEMORY =
+            ConfigOptions.key("sink.writer-offheap-memory")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Task off-heap memory resource budget for the writer slot sharing group. "
+                                    + "Must be positive and requires sink.writer-memory.");
+
     public static final ConfigOption<Double> SINK_COMMITTER_CPU =
             ConfigOptions.key("sink.committer-cpu")
                     .doubleType()

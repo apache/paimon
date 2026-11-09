@@ -70,6 +70,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private double writerCpu;
     @Nullable private MemorySize writerMemory;
     @Nullable private MemorySize writerManagedMemory;
+    @Nullable private MemorySize writerOffHeapMemory;
     private double committerCpu;
     @Nullable private MemorySize committerMemory;
 
@@ -113,6 +114,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         this.writerCpu = options.get(FlinkConnectorOptions.SINK_WRITER_CPU);
         this.writerMemory = options.get(FlinkConnectorOptions.SINK_WRITER_MEMORY);
         this.writerManagedMemory = options.get(FlinkConnectorOptions.SINK_WRITER_MANAGED_MEMORY);
+        this.writerOffHeapMemory = options.get(FlinkConnectorOptions.SINK_WRITER_OFFHEAP_MEMORY);
         this.committerCpu = options.get(FlinkConnectorOptions.SINK_COMMITTER_CPU);
         this.committerMemory = options.get(FlinkConnectorOptions.SINK_COMMITTER_MEMORY);
         this.commitUser = createCommitUser(options);
@@ -194,6 +196,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         writerCpu,
                         writerMemory,
                         writerManagedMemory,
+                        writerOffHeapMemory,
                         committerCpu,
                         committerMemory,
                         commitUser,
