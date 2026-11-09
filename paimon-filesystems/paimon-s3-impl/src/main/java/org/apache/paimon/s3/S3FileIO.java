@@ -57,8 +57,11 @@ public class S3FileIO extends HadoopCompliantFileIO {
     };
 
     /**
-     * Cache S3AFileSystem, at present, there is no good mechanism to ensure that the file system
-     * will be shut down, so here the fs cache is used to avoid resource leakage.
+     * Shared cache of {@link S3AFileSystem} instances across {@link S3FileIO} objects. Sharing
+     * instances avoids creating duplicate filesystem instances for the same cache key. There is
+     * currently no reference-counted shutdown for published entries. Pool-shutdown recovery only
+     * evicts an unusable mapping from this cache; it does not close a previously published filesystem
+     * that may still be referenced by other {@code S3FileIO} {@code fsMap} entries or in-flight streams.
      */
     private static final Map<CacheKey, S3AFileSystem> CACHE = new ConcurrentHashMap<>();
 

@@ -38,9 +38,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * connection pool has been shut down.
  *
  * <p>Only handles {@code IllegalStateException("Connection pool shut down")} from the Apache HTTP
- * client. Netty async failures are out of scope. Previously published instances are not closed, and
- * failed requests are not retried automatically; callers must retry and obtain a recovered
- * filesystem through {@link S3FileIO}.
+ * client. Netty async failures are out of scope. Failed requests are not retried automatically;
+ * callers must retry and obtain a recovered filesystem through {@link S3FileIO}.
+ *
+ * <p>Instances are published into {@link S3FileIO}'s static CACHE and may be shared by multiple
+ * {@code S3FileIO} instances (and their per-instance {@code fsMap} entries). Recovery eviction only
+ * marks this instance unusable and removes it from CACHE when the mapping still points at {@code
+ * this}; it does not {@code close()} a previously published filesystem. Closing a shared published
+ * instance requires additional cache-level lifecycle coordination (for example reference counting)
+ * and is out of scope for this recovery path.
  */
 class RecoverableS3AFileSystem extends S3AFileSystem {
 
