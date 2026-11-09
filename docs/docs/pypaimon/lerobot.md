@@ -32,7 +32,8 @@ Import a LeRobot Dataset v3 table group, capture frames directly, or train from 
 repository. It derives the schema from `meta/info.json` and writes one row per
 frame. The import creates `<table>__episodes`, `<table>__tasks`, `<table>__info`,
 and optional `<table>__stats` and `<table>__subtasks` companion tables. Task text
-remains in the task table; frames retain `task_index`.
+remains in the task table; frames retain `task_index`. All imported tables use
+Data Evolution with row tracking.
 
 Info and stats use `key STRING, value STRING`: each top-level info property or
 stats feature becomes one row. Each value is JSON-encoded, preserving nested
