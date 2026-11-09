@@ -27,6 +27,14 @@ public interface StreamDataTableScan extends DataTableScan, StreamTableScan {
 
     StartingContext startingContext();
 
+    /**
+     * Whether this scan can read retained changelog metadata after its snapshot expires. Wrappers
+     * should delegate this capability to their underlying scan.
+     */
+    default boolean readRetainedChangelog() {
+        return false;
+    }
+
     /** Restore from checkpoint next snapshot id with scan kind. */
     void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot);
 }

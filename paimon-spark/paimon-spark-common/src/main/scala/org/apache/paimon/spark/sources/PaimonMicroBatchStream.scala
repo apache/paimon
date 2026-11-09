@@ -272,7 +272,9 @@ class PaimonMicroBatchStream(
 
   private def earliestReadableId(scanSnapshot: Boolean): Long = {
     val earliestId: JLong =
-      if (!scanSnapshot && coreOptions.changelogLifecycleDecoupled()) {
+      if (
+        !scanSnapshot && (coreOptions.changelogLifecycleDecoupled() || canReadRetainedChangelog)
+      ) {
         val earliestChangelogId = table.changelogManager().earliestLongLivedChangelogId()
         if (earliestChangelogId == null) {
           table.snapshotManager().earliestSnapshotId()

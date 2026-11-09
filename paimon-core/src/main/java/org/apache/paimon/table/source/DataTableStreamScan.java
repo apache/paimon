@@ -94,13 +94,26 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
         this.nextSnapshotProvider =
                 new NextSnapshotFetcher(
-                        snapshotManager, changelogManager, options.changelogLifecycleDecoupled());
+                        snapshotManager,
+                        changelogManager,
+                        options.changelogLifecycleDecoupled(),
+                        readRetainedChangelog());
         this.hasPk = hasPk;
 
         if (options.bucket() == BucketMode.POSTPONE_BUCKET
                 && options.changelogProducer() != CoreOptions.ChangelogProducer.NONE) {
             snapshotReader.onlyReadRealBuckets();
         }
+    }
+
+    @Override
+    public boolean readRetainedChangelog() {
+        // Retained changelog manifests are enough for changelog scans, but not for scans
+        // requiring historical table files (for example streaming overwrite reads).
+        return options.changelogLifecycleDecoupled()
+                || (scanMode == StreamScanMode.NONE
+                        && options.changelogProducer() != CoreOptions.ChangelogProducer.NONE
+                        && !supportStreamingReadOverwrite);
     }
 
     @Override

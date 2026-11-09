@@ -18,8 +18,14 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.flink.api.common.JobID;
@@ -38,12 +44,14 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -193,6 +201,107 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
                 Pair.of("target_table", "target_table2"),
                 Collections.singletonMap(
                         StateRecoveryOptions.SAVEPOINT_IGNORE_UNCLAIMED_STATE.key(), "true"));
+    }
+
+    @Test
+    @Timeout(180)
+    public void testRestoreCheckpointAfterSnapshotExpiration() throws Exception {
+        batchSql(
+                "CREATE TABLE retained_source (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ("
+                        + "'bucket'='1', 'write-only'='true', 'changelog-producer'='input', "
+                        + "'snapshot.num-retained.min'='1', 'snapshot.num-retained.max'='4', "
+                        + "'changelog.num-retained.max'='4', 'continuous.discovery-interval'='10ms')");
+        // An append sink preserves every change, so duplicates cannot be hidden by primary keys.
+        batchSql(
+                "CREATE TABLE retained_sink (kind STRING, k INT, v INT) WITH ("
+                        + "'bucket'='1', 'bucket-key'='k', 'commit.force-create-snapshot'='true')");
+        FileStoreTable source = paimonTable("retained_source");
+        writeRetainedChanges(source, 1, GenericRow.of(1, 10));
+        Configuration config = sEnv.getConfig().getConfiguration();
+        config.setString(
+                "state.checkpoints.dir", new File(path, "retained-checkpoints").toURI().toString());
+        config.setString("restart-strategy.type", "none");
+        String query =
+                "INSERT INTO retained_sink SELECT rowkind, k, v FROM `retained_source$audit_log`";
+        JobClient job = sEnv.executeSql(query).getJobClient().get();
+        try {
+            String checkpoint = triggerCheckpointAndWaitForWrites(job, "retained_sink", 1);
+            job.cancel().get(30, TimeUnit.SECONDS);
+            job = null;
+            assertThat(batchSql("SELECT * FROM retained_sink"))
+                    .containsExactly(Row.of("+I", 1, 10));
+
+            // These changes are committed while the reader is stopped and cannot be in its state.
+            writeRetainedChanges(
+                    source,
+                    2,
+                    GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 10),
+                    GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 11),
+                    GenericRow.of(2, 20));
+            writeRetainedChanges(source, 3, GenericRow.ofKind(RowKind.DELETE, 2, 20));
+            writeRetainedChanges(source, 4, GenericRow.of(3, 30));
+            batchSql(
+                    "CALL sys.expire_snapshots(`table` => 'default.retained_source', retain_max => 1)");
+            FileStoreTable reloaded = paimonTable("retained_source");
+            assertThat(reloaded.snapshotManager().earliestSnapshotId()).isEqualTo(4L);
+            assertThat(reloaded.snapshotManager().snapshotExists(2L)).isFalse();
+            assertThat(reloaded.snapshotManager().snapshotExists(3L)).isFalse();
+            assertThat(reloaded.changelogManager().longLivedChangelogExists(2L)).isTrue();
+            assertThat(reloaded.changelogManager().longLivedChangelogExists(3L)).isTrue();
+            assertThat(reloaded.options().get(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key()))
+                    .isEqualTo("4");
+            assertThat(reloaded.options().get(CoreOptions.CHANGELOG_NUM_RETAINED_MAX.key()))
+                    .isEqualTo("4");
+            assertThat(reloaded.coreOptions().changelogLifecycleDecoupled()).isFalse();
+
+            config.setString("execution.state-recovery.path", checkpoint);
+            job = sEnv.executeSql(query).getJobClient().get();
+            triggerCheckpointAndWaitForWrites(job, "retained_sink", 6);
+            assertThat(batchSql("SELECT * FROM retained_sink"))
+                    .containsExactlyInAnyOrder(
+                            Row.of("+I", 1, 10),
+                            Row.of("-U", 1, 10),
+                            Row.of("+U", 1, 11),
+                            Row.of("+I", 2, 20),
+                            Row.of("-D", 2, 20),
+                            Row.of("+I", 3, 30));
+
+            // The restored job must also keep consuming new commits after catching up.
+            writeRetainedChanges(reloaded, 5, GenericRow.of(4, 40));
+            triggerCheckpointAndWaitForWrites(job, "retained_sink", 7);
+            assertThat(batchSql("SELECT * FROM retained_sink"))
+                    .containsExactlyInAnyOrder(
+                            Row.of("+I", 1, 10),
+                            Row.of("-U", 1, 10),
+                            Row.of("+U", 1, 11),
+                            Row.of("+I", 2, 20),
+                            Row.of("-D", 2, 20),
+                            Row.of("+I", 3, 30),
+                            Row.of("+I", 4, 40));
+        } catch (Exception e) {
+            if (job != null && job.getJobStatus().get(30, TimeUnit.SECONDS) == JobStatus.FAILED) {
+                // Surface the job failure instead of only the subsequent checkpoint failure.
+                job.getJobExecutionResult().get(30, TimeUnit.SECONDS);
+            }
+            throw e;
+        } finally {
+            config.removeKey("execution.state-recovery.path");
+            if (job != null
+                    && !job.getJobStatus().get(30, TimeUnit.SECONDS).isGloballyTerminalState()) {
+                job.cancel().get(30, TimeUnit.SECONDS);
+            }
+        }
+    }
+
+    private void writeRetainedChanges(FileStoreTable table, long identifier, GenericRow... rows)
+            throws Exception {
+        try (StreamTableWrite write = table.newWrite("retained-recovery");
+                StreamTableCommit commit = table.newCommit("retained-recovery")) {
+            for (GenericRow row : rows) {
+                write.write(row);
+            }
+            commit.commit(identifier, write.prepareCommit(true, identifier));
+        }
     }
 
     private void testRecoverFromSavepoint(

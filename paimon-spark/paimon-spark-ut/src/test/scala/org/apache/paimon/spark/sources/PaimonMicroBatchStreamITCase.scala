@@ -20,13 +20,16 @@ package org.apache.paimon.spark.sources
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.consumer.Consumer
+import org.apache.paimon.data.GenericRow
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.{DataTable, FileStoreTable}
 import org.apache.paimon.table.source.OutOfRangeException
+import org.apache.paimon.table.system.AuditLogTable
 
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.connector.read.streaming.ReadLimit
 
+import java.io.File
 import java.util.{Collections, HashMap}
 
 class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
@@ -407,6 +410,145 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     }
   }
 
+  Seq("table", "audit-path", "audit-catalog").foreach {
+    source =>
+      test(s"Spark $source query discovers retained changelogs without retention overrides") {
+        withTempDir {
+          checkpointDir =>
+            val sourceTable = createChangelogTable()
+            appendChangelogRows(sourceTable, 1, 4)
+            spark.sql("CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1)")
+            assert(sourceTable.snapshotManager().earliestSnapshotId() == 4L)
+            assert(sourceTable.changelogManager().earliestLongLivedChangelogId() == 1L)
+            assert(!loadTable("T").coreOptions().changelogLifecycleDecoupled())
+
+            val query = retainedChangelogStream(
+              source,
+              sourceTable,
+              Map(CoreOptions.SCAN_SNAPSHOT_ID.key() -> "1")).writeStream
+              .format("memory")
+              .option("checkpointLocation", checkpointDir.getCanonicalPath)
+              .queryName("retained_changelog_rows")
+              .outputMode("append")
+              .start()
+            try {
+              query.processAllAvailable()
+              checkAnswer(
+                spark.table("retained_changelog_rows"),
+                expectedChangelogRows(source, 1, 4))
+            } finally {
+              query.stop()
+              spark.catalog.dropTempView("retained_changelog_rows")
+            }
+        }
+      }
+
+      test(s"Spark $source query restores retained changelogs from its checkpoint") {
+        withTempDir {
+          directory =>
+            val sourceTable = createChangelogTable()
+            appendChangelogRows(sourceTable, 1, 1)
+            val checkpoint = new File(directory, "checkpoint").getCanonicalPath
+            val output = new File(directory, "output").getCanonicalPath
+            val writer = retainedChangelogStream(
+              source,
+              sourceTable,
+              Map(CoreOptions.CONSUMER_ID.key() -> consumerId)).writeStream
+              .format("parquet")
+              .option("checkpointLocation", checkpoint)
+              .outputMode("append")
+            val first = writer.start(output)
+            try {
+              first.processAllAvailable()
+              checkAnswer(spark.read.parquet(output), expectedChangelogRows(source, 1, 1))
+            } finally {
+              first.stop()
+            }
+            appendChangelogRows(sourceTable, 2, 4)
+            spark.sql("CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1)")
+            assert(sourceTable.snapshotManager().earliestSnapshotId() == 4L)
+            assert(sourceTable.changelogManager().longLivedChangelogExists(2L))
+            assert(!loadTable("T").coreOptions().changelogLifecycleDecoupled())
+
+            val restarted = writer.start(output)
+            try {
+              restarted.processAllAvailable()
+              checkAnswer(spark.read.parquet(output), expectedChangelogRows(source, 1, 4))
+            } finally {
+              restarted.stop()
+            }
+        }
+      }
+
+  }
+
+  Seq(false, true).foreach {
+    audit =>
+      test(
+        s"retained changelogs do not replace full or overwrite startup snapshots (audit=$audit)") {
+        val table = createChangelogTable()
+        appendChangelogRows(table, 1, 4)
+        spark.sql("CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1)")
+        val readTable = loadTable("T")
+        val fullSource: DataTable = if (audit) new AuditLogTable(readTable) else readTable
+        val full = createStream(fullSource).initialOffset().asInstanceOf[PaimonSourceOffset]
+        assert(full.snapshotId == 4L)
+        assert(full.scanSnapshot)
+        val options = new HashMap[String, String]()
+        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1")
+        options.put(CoreOptions.STREAMING_READ_OVERWRITE.key(), "true")
+        val overwriteTable = readTable.copy(options)
+        val overwriteSource: DataTable =
+          if (audit) new AuditLogTable(overwriteTable) else overwriteTable
+        val overwrite =
+          createStream(overwriteSource).initialOffset().asInstanceOf[PaimonSourceOffset]
+        assert(overwrite.snapshotId == 4L)
+        assert(!overwrite.scanSnapshot)
+      }
+
+  }
+
+  private def retainedChangelogStream(
+      source: String,
+      table: FileStoreTable,
+      options: Map[String, String]): DataFrame = {
+    val reader = spark.readStream.format("paimon").options(options)
+    source match {
+      case "audit-path" => reader.option("read.changelog", "true").load(table.location().toString)
+      case "audit-catalog" => reader.table("`T$audit_log`")
+      case _ => reader.load(table.location().toString)
+    }
+  }
+
+  private def expectedChangelogRows(source: String, from: Int, last: Int): Seq[Row] = {
+    (from to last).map(i => if (source == "table") Row(i, i * 10) else Row("+I", i, i * 10))
+  }
+
+  private def createChangelogTable(): FileStoreTable = {
+    spark.sql("""CREATE TABLE T (a INT, b INT) TBLPROPERTIES (
+                |'primary-key' = 'a', 'bucket' = '1', 'write-only' = 'true',
+                |'changelog-producer' = 'input', 'snapshot.num-retained.min' = '1',
+                |'snapshot.num-retained.max' = '4', 'changelog.num-retained.max' = '4',
+                |'consumer.changelog-only' = 'true')""".stripMargin)
+    loadTable("T")
+  }
+
+  private def appendChangelogRows(table: FileStoreTable, from: Int, last: Int): Unit = {
+    val builder = table.newStreamWriteBuilder().withCommitUser("retained-changelog-test")
+    val writer = builder.newWrite()
+    val commit = builder.newCommit()
+    try {
+      (from to last).foreach {
+        i =>
+          writer.write(GenericRow.of(Int.box(i), Int.box(i * 10)))
+          commit.commit(i.toLong, writer.prepareCommit(true, i.toLong))
+      }
+    } finally {
+      writer.close()
+      commit.close()
+    }
+  }
+
   private def createTableWithOneSnapshot(): FileStoreTable = {
     createTableWithoutSnapshot()
     spark.sql("INSERT INTO T VALUES (10, 'v_10'), (11, 'v_11'), (12, 'v_12')")
@@ -428,7 +570,7 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     table.copy(Collections.singletonMap(CoreOptions.CONSUMER_ID.key(), consumerId))
   }
 
-  private def createStream(table: FileStoreTable): PaimonMicroBatchStream = {
+  private def createStream(table: DataTable): PaimonMicroBatchStream = {
     new PaimonMicroBatchStream(table, table.newReadBuilder(), "unused")
   }
 
