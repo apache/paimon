@@ -47,6 +47,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -248,6 +249,56 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             };
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to read manifest file " + fileName, e);
+        }
+    }
+
+    /**
+     * Visits binary entries using a narrow projection for uncached files and cached Avro blocks.
+     * Small manifests reuse the whole-manifest cache. The consumer must not retain entries.
+     */
+    public void scan(
+            ManifestFileMeta manifest,
+            Projection projection,
+            @Nullable PartitionPredicate partitionFilter,
+            Consumer<ManifestEntry> consumer) {
+        ManifestSidecar.Selection selected = selectBlocks(manifest, null, partitionFilter, null);
+        if (selected != null && selected.blocks().isEmpty()) {
+            return;
+        }
+        if (selected == null
+                && cache != null
+                && manifest.fileSize() <= cache.segmentsCache().maxElementSize()) {
+            try {
+                ((ManifestEntryCache) cache)
+                        .scan(
+                                pathFactory.toPath(manifest.fileName()),
+                                manifest.fileSize(),
+                                partitionFilter,
+                                consumer);
+            } catch (IOException e) {
+                throw new UncheckedIOException("Failed to scan manifest " + manifest.fileName(), e);
+            }
+            return;
+        }
+
+        ProjectedManifestEntry entry = projection.createEntry();
+        try (CloseableIterator<InternalRow> rows =
+                createManifestIterator(
+                        fileIO,
+                        pathFactory.toPath(manifest.fileName()),
+                        projection.projectedType(),
+                        partitionFilter,
+                        null,
+                        selected,
+                        cache == null ? null : cache.segmentsCache(),
+                        null)) {
+            while (rows.hasNext()) {
+                consumer.accept(entry.replace(rows.next()));
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to scan manifest " + manifest.fileName(), e);
+        } finally {
+            entry.clear();
         }
     }
 
