@@ -204,3 +204,141 @@ def test_stored_moov_bootstrap_decodes_without_refetch(mp4, backend):
                        for request in calls[1:] for o, n in request)
     finally:
         decoder.close()
+
+
+def test_first_sync_sample_must_cover_first_frame(mp4):
+    data = bytearray(mp4)
+    position = data.index(b'stss')
+    struct.pack_into('>I', data, position + 12, 2)
+    with pytest.raises(ValueError, match='keyframe order'):
+        ContainerFrameIndex(io.BytesIO(data), len(data))
+
+
+def test_transient_io_and_invalid_frame_keep_mapping(mp4):
+    from pypaimon.multimodal.lerobot.dataset import _PyAVVideoDecoder
+    mapping = ContainerFrameIndex(io.BytesIO(mp4), len(mp4))
+    decoder = _PyAVVideoDecoder(io.BytesIO(mp4), mapping)
+    try:
+        with patch.object(decoder, '_read_video_ranges', side_effect=OSError('temporary')):
+            with pytest.raises(OSError, match='temporary'):
+                decoder.get_frames_at(indices=[31])
+        assert decoder._keyframe_index is mapping
+        with patch.object(decoder, '_decode_indexed', side_effect=AssertionError('decode')):
+            with pytest.raises(IndexError):
+                decoder.get_frames_at(indices=[len(mapping.pts)])
+        assert decoder._keyframe_index is mapping
+        assert decoder.get_frames_at(indices=[31]).data.shape[0] == 1
+    finally:
+        decoder.close()
+
+
+def test_open_runtime_error_falls_back(mp4):
+    from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
+    source = io.BytesIO(mp4)
+    source.video_length = len(mp4)
+    with patch('pypaimon.multimodal.lerobot.dataset.ContainerFrameIndex',
+               side_effect=RuntimeError('initialization')):
+        decoder = _open_video_decoder(source, backend='pyav')
+    try:
+        assert decoder._keyframe_index is None
+        assert decoder.get_frames_at(indices=[0]).data.shape[0] == 1
+    finally:
+        decoder.close()
+
+
+def test_cached_mapping_prefetches_header_and_moov(mp4):
+    from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
+    mapping = ContainerFrameIndex(io.BytesIO(mp4), len(mp4))
+    calls = []
+    source = io.BytesIO(mp4)
+    source.video_length = len(mp4)
+    source.video_metadata_key = 'video'
+    source.video_metadata_cache = {('container', 'video'): mapping}
+
+    def ranges(regions):
+        calls.append(regions)
+        return [mp4[o:o + n] for o, n in regions]
+
+    source.video_read_ranges = ranges
+    with patch('pypaimon.multimodal.lerobot.dataset.ContainerFrameIndex',
+               side_effect=AssertionError('reparse')):
+        decoder = _open_video_decoder(source, backend='pyav')
+    try:
+        decoder.get_frames_at(indices=[31])
+        assert calls[0][0][0] == 0
+        offset, length = mapping.metadata_ranges[0]
+        assert any(o <= offset and o + n >= offset + length for o, n in calls[0])
+    finally:
+        decoder.close()
+
+
+def test_metadata_cache_retention_and_budget(mp4):
+    import gc
+    from pypaimon.multimodal.video import _VideoMetadataCache
+    mapping = ContainerFrameIndex(io.BytesIO(mp4), len(mp4))
+    size = mapping.nbytes
+    cache = _VideoMetadataCache(max_bytes=size, max_entries=1)
+    cache['first'] = mapping
+    reference = weakref.ref(mapping)
+    del mapping
+    gc.collect()
+    assert cache.get('first') is reference()
+    assert reference() is not None
+    cache['second'] = ContainerFrameIndex(io.BytesIO(mp4), len(mp4))
+    gc.collect()
+    assert reference() is None
+    assert cache._bytes <= size
+    cache.clear()
+    assert len(cache) == 0
+
+
+def test_writer_close_failure_is_not_retried():
+    from pypaimon.execution.python.write.video_format_writer import VideoFormatWriter
+
+    class FailingOutput(io.BytesIO):
+        writes = 0
+
+        def write(self, data):
+            self.writes += 1
+            raise OSError('footer write')
+
+    output = FailingOutput()
+    writer = VideoFormatWriter(output)
+    with pytest.raises(OSError, match='footer write'):
+        writer.close()
+    assert output.closed
+    writes = output.writes
+    writer.close()
+    assert output.writes == writes
+
+
+@pytest.mark.parametrize('wide', [False, True])
+def test_vectorized_chunk_offsets(wide):
+    from pypaimon.multimodal.mp4 import _sample_offsets
+
+    def box(kind, content):
+        return struct.pack('>I4s', len(content) + 8, kind) + content
+
+    sizes = [3, 5, 7, 11, 13, 17, 19]
+    offsets = [100, 200, 350]
+    samples = box(b'stsz', struct.pack('>III7I', 0, 0, 7, *sizes))
+    samples += box(b'co64' if wide else b'stco', struct.pack(
+        '>II3' + ('Q' if wide else 'I'), 0, 3, *offsets))
+    samples += box(b'stsc', struct.pack('>II6I', 0, 2, 1, 2, 1, 3, 3, 1))
+    np.testing.assert_array_equal(
+        _sample_offsets(samples, 7, 500), [100, 103, 200, 207, 350, 363, 380])
+    with pytest.raises(ValueError, match='exceeds video payload'):
+        _sample_offsets(samples, 7, 398)
+
+
+def test_chunk_count_is_checked_before_expansion():
+    from pypaimon.multimodal.mp4 import _sample_offsets
+
+    def box(kind, content):
+        return struct.pack('>I4s', len(content) + 8, kind) + content
+
+    samples = box(b'stsz', struct.pack('>III', 0, 1, 1))
+    samples += box(b'co64', struct.pack('>IIQ', 0, 1, 2**64 - 1))
+    samples += box(b'stsc', struct.pack('>II3I', 0, 1, 1, 2**32 - 1, 1))
+    with pytest.raises(ValueError, match='cover samples'):
+        _sample_offsets(samples, 1, 100)

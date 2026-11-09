@@ -74,6 +74,47 @@ public class VideoFileFormatTest {
     }
 
     @Test
+    public void testCloseDoesNotRetryFailedFooter() throws IOException {
+        int[] writes = {0};
+        PositionOutputStream output =
+                new PositionOutputStream() {
+                    @Override
+                    public long getPos() {
+                        return 0;
+                    }
+
+                    @Override
+                    public void flush() {}
+
+                    @Override
+                    public void close() {}
+
+                    @Override
+                    public void write(byte[] bytes) throws IOException {
+                        write(0);
+                    }
+
+                    @Override
+                    public void write(byte[] bytes, int offset, int length) throws IOException {
+                        write(0);
+                    }
+
+                    @Override
+                    public void write(int value) throws IOException {
+                        writes[0]++;
+                        throw new IOException("footer write");
+                    }
+                };
+        VideoFormatWriter writer = new VideoFormatWriter(output, rowType, false, false, null, 1024);
+        assertThatThrownBy(writer::close)
+                .isInstanceOf(IOException.class)
+                .hasMessage("footer write");
+        int attempts = writes[0];
+        writer.close();
+        assertThat(writes[0]).isEqualTo(attempts);
+    }
+
+    @Test
     public void testPackRawVideosAndMapFrameRuns() throws IOException {
         byte[] firstBytes = "first-mp4".getBytes();
         byte[] secondBytes = "second-mp4".getBytes();

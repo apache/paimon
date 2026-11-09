@@ -294,6 +294,41 @@ class _PrefetchedVideo(io.BytesIO):
                 super().close()
 
 
+class _VideoMetadataCache(weakref.WeakValueDictionary):
+    """Retain bounded container mappings across decoder eviction."""
+
+    def __init__(self, max_bytes=16 * 1024 * 1024, max_entries=64):
+        super().__init__()
+        self._retained = OrderedDict()
+        self._bytes = 0
+        self._max_bytes = max_bytes
+        self._max_entries = max_entries
+
+    def get(self, key, default=None):
+        if key in self._retained:
+            self._retained.move_to_end(key)
+        return super().get(key, default)
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        previous = self._retained.pop(key, None)
+        if previous is not None:
+            self._bytes -= previous.nbytes
+        size = getattr(value, "nbytes", None)
+        if size is None or size > self._max_bytes:
+            return
+        self._retained[key] = value
+        self._bytes += size
+        while self._bytes > self._max_bytes or len(self._retained) > self._max_entries:
+            _, removed = self._retained.popitem(last=False)
+            self._bytes -= removed.nbytes
+
+    def clear(self):
+        self._retained.clear()
+        self._bytes = 0
+        super().clear()
+
+
 class VideoFrameCollator:
     """Decode frame rows in a DataLoader worker while reusing video sessions.
 
@@ -380,7 +415,7 @@ class VideoFrameCollator:
         self.range_parallelism = range_parallelism
         self.prefetch_max_bytes = prefetch_max_bytes
         self._decoders = OrderedDict()
-        self._video_metadata_cache = weakref.WeakValueDictionary()
+        self._video_metadata_cache = _VideoMetadataCache()
         self._owner_pid = os.getpid()
 
     def __call__(self, rows):
@@ -395,7 +430,7 @@ class VideoFrameCollator:
     def close(self):
         resources = list(self._decoders.values())
         self._decoders.clear()
-        self._video_metadata_cache = weakref.WeakValueDictionary()
+        self._video_metadata_cache = _VideoMetadataCache()
         first_error = None
         for resource in resources:
             try:

@@ -109,42 +109,44 @@ class VideoFormatWriter(BlobFormatWriter):
     def close(self) -> None:
         if self._closed:
             return
-        self._flush_run()
-        physical_index = DeltaVarintCompressor.compress(self._physical_lengths)
-        moov_offset_index = DeltaVarintCompressor.compress(self._moov_offsets)
-        moov_length_index = DeltaVarintCompressor.compress(self._moov_lengths)
-        run_length_index = DeltaVarintCompressor.compress(self._run_lengths)
-        run_reference_index = DeltaVarintCompressor.compress(
-            self._run_references
-        )
-        first_frame_index = DeltaVarintCompressor.compress(
-            self._run_first_frames
-        )
-        for index in (
-            physical_index,
-            moov_offset_index,
-            moov_length_index,
-            run_length_index,
-            run_reference_index,
-            first_frame_index,
-        ):
-            self.output_stream.write(index)
-        self.output_stream.write(struct.pack(
-            '<IIIIIIIB',
-            len(physical_index),
-            len(moov_offset_index),
-            len(moov_length_index),
-            len(run_length_index),
-            len(run_reference_index),
-            len(first_frame_index),
-            self.FOOTER_MAGIC_NUMBER,
-            self.VERSION,
-        ))
-        if hasattr(self.output_stream, 'flush'):
-            self.output_stream.flush()
-        if hasattr(self.output_stream, 'close'):
-            self.output_stream.close()
-        self._closed = True
+        try:
+            self._flush_run()
+            physical_index = DeltaVarintCompressor.compress(self._physical_lengths)
+            moov_offset_index = DeltaVarintCompressor.compress(self._moov_offsets)
+            moov_length_index = DeltaVarintCompressor.compress(self._moov_lengths)
+            run_length_index = DeltaVarintCompressor.compress(self._run_lengths)
+            run_reference_index = DeltaVarintCompressor.compress(
+                self._run_references
+            )
+            first_frame_index = DeltaVarintCompressor.compress(
+                self._run_first_frames
+            )
+            for index in (
+                physical_index,
+                moov_offset_index,
+                moov_length_index,
+                run_length_index,
+                run_reference_index,
+                first_frame_index,
+            ):
+                self.output_stream.write(index)
+            self.output_stream.write(struct.pack(
+                '<IIIIIIIB',
+                len(physical_index),
+                len(moov_offset_index),
+                len(moov_length_index),
+                len(run_length_index),
+                len(run_reference_index),
+                len(first_frame_index),
+                self.FOOTER_MAGIC_NUMBER,
+                self.VERSION,
+            ))
+            if hasattr(self.output_stream, 'flush'):
+                self.output_stream.flush()
+        finally:
+            self._closed = True
+            if hasattr(self.output_stream, 'close'):
+                self.output_stream.close()
 
     def _write_video_payload(self, blob: BlobRef) -> int:
         start = self.position

@@ -221,7 +221,7 @@ def _timeline(source, length, with_index=False):
         key_pts = sample_pts[ids]
         ordinals = np.searchsorted(pts, key_pts)
         positions = offsets[ids]
-        if (np.any(ordinals[1:] <= ordinals[:-1])
+        if (ordinals[0] != 0 or np.any(ordinals[1:] <= ordinals[:-1])
                 or np.any(positions[1:] <= positions[:-1])):
             raise ValueError("Unsupported MP4 keyframe order.")
         return pts, durations, scale, stream_index, metadata_range, np.column_stack(
@@ -256,24 +256,22 @@ def _sample_offsets(samples, count, length):
             or np.any(entries[1:, 0] <= entries[:-1, 0])
             or np.any(entries[:, 1] == 0) or np.any(entries[:, 2] != 1)):
         raise ValueError("Unsupported MP4 sample-to-chunk mapping.")
-    result = np.empty(count, dtype=np.int64)
-    position = run = 0
-    for chunk, offset in enumerate(chunk_offsets):
-        while run + 1 < nr and entries[run + 1, 0] <= chunk + 1:
-            run += 1
-        size = int(entries[run, 1])
-        if size > count - position:
-            raise ValueError("MP4 chunks exceed sample count.")
-        byte_count = int(sizes[position:position + size].sum())
-        offset = int(offset)
-        if offset < 0 or offset > length - byte_count:
-            raise ValueError("MP4 sample exceeds video payload.")
-        result[position:position + size] = offset + np.cumsum(
-            sizes[position:position + size]) - sizes[position:position + size]
-        position += size
-    if position != count:
+    run_lengths = np.diff(np.append(entries[:, 0].astype(np.int64), n + 1))
+    samples_per_chunk = np.repeat(entries[:, 1].astype(np.int64), run_lengths)
+    if int(samples_per_chunk.sum()) != count:
         raise ValueError("MP4 chunks do not cover samples.")
-    return result
+    starts = np.cumsum(samples_per_chunk) - samples_per_chunk
+    byte_offsets = np.empty(count + 1, dtype=np.int64)
+    byte_offsets[0] = 0
+    np.cumsum(sizes, out=byte_offsets[1:])
+    chunk_bytes = byte_offsets[starts + samples_per_chunk] - byte_offsets[starts]
+    if np.any(chunk_offsets > length):
+        raise ValueError("MP4 sample exceeds video payload.")
+    chunk_offsets = chunk_offsets.astype(np.int64)
+    if np.any(chunk_bytes > length) or np.any(chunk_offsets > length - chunk_bytes):
+        raise ValueError("MP4 sample exceeds video payload.")
+    return byte_offsets[:-1] + np.repeat(
+        chunk_offsets - byte_offsets[starts], samples_per_chunk)
 
 
 class _TimingValues:
@@ -319,6 +317,12 @@ class ContainerFrameIndex:
         self.durations = _TimingValues(self.durations)
         self.metadata_ranges = (region,)
         self.keyframes.flags.writeable = False
+
+    @property
+    def nbytes(self):
+        return self.keyframes.nbytes + sum(
+            value.values.nbytes for value in (self.pts, self.durations)
+            if value.values is not None)
 
     def preceding(self, ordinal):
         return int(np.searchsorted(self.keyframes[:, 0], ordinal, side="right")) - 1

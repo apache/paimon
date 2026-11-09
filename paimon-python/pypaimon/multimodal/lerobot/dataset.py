@@ -53,7 +53,7 @@ from pypaimon.multimodal.lerobot.schema import (
 from pypaimon.multimodal.lerobot.source import _info_dict
 from pypaimon.multimodal.table import _target_schema, _time_travel_table
 from pypaimon.multimodal.video import VideoFrameCollator, _VideoDecodePool
-from pypaimon.multimodal.mp4 import ContainerFrameIndex
+from pypaimon.multimodal.mp4 import ContainerFrameIndex, _MAX_METADATA_BYTES
 
 
 _TORCH_DTYPE_NAMES = {
@@ -1790,13 +1790,13 @@ def _open_video_decoder(stream, backend=None, codec_threads=0):
                 source = stream
                 hint = getattr(stream, "video_moov_range", (0, 0))
                 ranges = getattr(stream, "video_read_ranges", None)
-                if 0 < hint[1] <= 16 * 1024 * 1024 and callable(ranges):
+                if 0 < hint[1] <= _MAX_METADATA_BYTES and callable(ranges):
                     source = _RangeBackedVideo(stream.video_length, ranges)
                     source.video_moov_range = hint
                     source.prefetch([(0, min(65536, stream.video_length)), hint])
                     stream.video_bootstrap = source
                 keyframe_index = ContainerFrameIndex(source, stream.video_length)
-            except (ValueError, OSError, EOFError, OverflowError, IndexError, struct.error):
+            except (ValueError, OSError, RuntimeError, EOFError, OverflowError, IndexError, struct.error):
                 bootstrap = getattr(stream, "video_bootstrap", None)
                 if bootstrap is not None:
                     bootstrap.close()
@@ -2115,7 +2115,9 @@ class _PyAVVideoDecoder:
 
     def _read_indexed(self, indices):
         requested = [operator.index(index) for index in indices]
-        if any(index < 0 for index in requested):
+        if any(index < 0 or (isinstance(self._keyframe_index, ContainerFrameIndex)
+                             and index >= len(self._keyframe_index.pts))
+               for index in requested):
             raise IndexError("Video frame index is out of range.")
         requested_set = set(requested)
         frames = {
@@ -2126,7 +2128,7 @@ class _PyAVVideoDecoder:
         if missing:
             try:
                 frames.update(self._decode_indexed(missing))
-            except (ValueError, OSError, RuntimeError):
+            except (ValueError, RuntimeError):
                 if not isinstance(self._keyframe_index, ContainerFrameIndex):
                     raise
                 import av
@@ -2161,7 +2163,9 @@ class _PyAVVideoDecoder:
                         self._video_length(), self._read_video_ranges)
                 else:
                     self._source.video_bootstrap = None
-                self._indexed_source.prefetch(self._keyframe_index.metadata_ranges)
+                self._indexed_source.prefetch(
+                    [(0, min(65536, self._video_length()))]
+                    + list(self._keyframe_index.metadata_ranges))
                 self._container = av.open(self._indexed_source)
                 self._stream = self._container.streams.video[0]
                 self._stream.thread_count = self._thread_count

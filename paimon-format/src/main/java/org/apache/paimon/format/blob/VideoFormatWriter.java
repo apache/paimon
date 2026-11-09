@@ -159,30 +159,34 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
         if (closed) {
             return;
         }
-        flushRun();
-        payloadWriter.close();
+        try {
+            flushRun();
+            payloadWriter.close();
 
-        byte[] physicalIndex = DeltaVarintCompressor.compressLongArrayList(physicalVideoLengths);
-        byte[] moovOffsetIndex = DeltaVarintCompressor.compressLongArrayList(moovOffsets);
-        byte[] moovLengthIndex = DeltaVarintCompressor.compressLongArrayList(moovLengths);
-        byte[] runLengthIndex = DeltaVarintCompressor.compressLongArrayList(runLengths);
-        byte[] runReferenceIndex = DeltaVarintCompressor.compressLongArrayList(runReferences);
-        byte[] firstFrameIndex = DeltaVarintCompressor.compressLongArrayList(runFirstFrames);
-        out.write(physicalIndex);
-        out.write(moovOffsetIndex);
-        out.write(moovLengthIndex);
-        out.write(runLengthIndex);
-        out.write(runReferenceIndex);
-        out.write(firstFrameIndex);
-        out.write(intToLittleEndian(physicalIndex.length));
-        out.write(intToLittleEndian(moovOffsetIndex.length));
-        out.write(intToLittleEndian(moovLengthIndex.length));
-        out.write(intToLittleEndian(runLengthIndex.length));
-        out.write(intToLittleEndian(runReferenceIndex.length));
-        out.write(intToLittleEndian(firstFrameIndex.length));
-        out.write(intToLittleEndian(MAGIC_NUMBER));
-        out.write(VERSION);
-        closed = true;
+            byte[] physicalIndex =
+                    DeltaVarintCompressor.compressLongArrayList(physicalVideoLengths);
+            byte[] moovOffsetIndex = DeltaVarintCompressor.compressLongArrayList(moovOffsets);
+            byte[] moovLengthIndex = DeltaVarintCompressor.compressLongArrayList(moovLengths);
+            byte[] runLengthIndex = DeltaVarintCompressor.compressLongArrayList(runLengths);
+            byte[] runReferenceIndex = DeltaVarintCompressor.compressLongArrayList(runReferences);
+            byte[] firstFrameIndex = DeltaVarintCompressor.compressLongArrayList(runFirstFrames);
+            out.write(physicalIndex);
+            out.write(moovOffsetIndex);
+            out.write(moovLengthIndex);
+            out.write(runLengthIndex);
+            out.write(runReferenceIndex);
+            out.write(firstFrameIndex);
+            out.write(intToLittleEndian(physicalIndex.length));
+            out.write(intToLittleEndian(moovOffsetIndex.length));
+            out.write(intToLittleEndian(moovLengthIndex.length));
+            out.write(intToLittleEndian(runLengthIndex.length));
+            out.write(intToLittleEndian(runReferenceIndex.length));
+            out.write(intToLittleEndian(firstFrameIndex.length));
+            out.write(intToLittleEndian(MAGIC_NUMBER));
+            out.write(VERSION);
+        } finally {
+            closed = true;
+        }
     }
 
     int physicalVideoCount() {
