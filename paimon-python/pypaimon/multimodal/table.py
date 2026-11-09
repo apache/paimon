@@ -539,6 +539,27 @@ class MultimodalTable:
         from pypaimon.multimodal.columns import add_columns
         return add_columns(self, schema, inputs=inputs, fn=fn, batch_size=batch_size)
 
+    def update_columns_by_row_id(self, data):
+        """Update existing columns from one local Arrow table containing ``_ROW_ID``.
+
+        IDs must be unique, non-NULL, non-negative integers representable as
+        int64. Every ID must identify a visible row in the captured source snapshot. Input
+        order does not affect matching. Outputs must be existing, non-partition
+        columns with the table's types and nullability; use ``replace_video``
+        for video-frame columns. Omitted rows keep their values, and untouched
+        columns retain their files. No columns or rows are added.
+
+        Validation and writing use one snapshot and the standard update backend.
+        All prepared updates are committed together. Requires a current
+        full-table Data Evolution view and a single writer for the entire call.
+        IDs from historical results are not remapped or checked for staleness.
+        Returns :class:`pypaimon.multimodal.ColumnUpdateResult` with the input
+        row count in ``updated_rows`` and ``added_columns=()``. Empty input
+        creates no data snapshot. There are no automatic retries.
+        """
+        from pypaimon.multimodal.columns import update_columns_by_row_id
+        return update_columns_by_row_id(self, data)
+
     def compute_columns(self, columns, *, inputs, fn, batch_size=1024):
         """Compute existing columns for all visible rows without changing the schema.
 

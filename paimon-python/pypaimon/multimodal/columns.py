@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.table import (
@@ -33,6 +34,8 @@ from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 from pypaimon.table.data_evolution_merge_into import WhenMatched, source_col
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.range import Range
+from pypaimon.write.row_input import normalize_row_ids
 from pypaimon.write.update_validation import _authorize_update
 
 
@@ -40,7 +43,8 @@ from pypaimon.write.update_validation import _authorize_update
 class ColumnUpdateResult:
     """Schema and data versions produced by a successful column operation.
 
-    ``updated_rows`` is available for ``add_columns`` and ``compute_columns``
+    ``updated_rows`` is available for ``add_columns``, ``compute_columns``,
+    and ``update_columns_by_row_id``
     and is ``None`` for ``merge_columns``, whose MERGE executor does not return
     logical row counts.
     """
@@ -238,6 +242,52 @@ def merge_columns(owner, data, *, on):
             source, on=dict(zip(target_keys, source_keys)),
             when_matched=[WhenMatched.update({name: source_col(name) for name in output_names})])
         return operation.finish(None, commit=commit, messages=messages)
+
+
+def update_columns_by_row_id(owner, data):
+    if not isinstance(data, pa.Table):
+        raise ValueError("data must be a pyarrow.Table.")
+    raw = owner.raw_table
+    _validate_update(raw)
+    if not raw.options.data_evolution_enabled() or not raw.options.row_tracking_enabled():
+        raise ValueError("Row ID column updates require a Data Evolution table with row tracking.")
+    row_id = SpecialFields.ROW_ID.name
+    if data.column_names.count(row_id) != 1:
+        raise ValueError("Input must contain exactly one _ROW_ID column.")
+    columns = [name for name in data.column_names if name != row_id]
+    _validate_names(columns, "Output")
+    missing = set(columns).difference(raw.field_names)
+    if missing:
+        raise ValueError("Output columns do not exist: %s" % sorted(missing))
+    if set(columns).intersection(raw.partition_keys):
+        raise ValueError("update_columns_by_row_id cannot update partition columns.")
+    if set(columns).intersection(raw.options.video_frame_fields()):
+        raise ValueError("Use replace_video() to update video-frame columns.")
+    row_ids = normalize_row_ids(data[row_id])
+    if len(pc.unique(row_ids)) != data.num_rows:
+        raise ValueError("Input data contains duplicate _ROW_ID values.")
+    if data.num_rows and pc.min(row_ids).as_py() < 0:
+        raise ValueError("_ROW_ID values must be non-negative.")
+    target_schema = _target_schema(raw)
+    schema = pa.schema([target_schema.field(name) for name in columns])
+    source = _normalize_output(data.select(columns), schema).append_column(row_id, row_ids)
+    with _ColumnUpdate(owner, raw) as operation:
+        if source.num_rows == 0:
+            return operation.finish(0)
+        operation.phase = "validate"
+        table = raw._copy_with_snapshot(operation.snapshot)
+        read = table.new_read_builder().with_projection([row_id])
+        # Read only the requested row IDs, retaining deletion-vector filtering.
+        plan = read.new_scan().with_row_ranges(Range.to_ranges(row_ids.to_pylist())).plan_all()
+        visible = read.new_read().to_arrow(plan.splits())[row_id]
+        missing = pc.is_null(pc.index_in(row_ids, value_set=visible))
+        if pc.any(missing).as_py():
+            raise ValueError("Row IDs not found or deleted: %s" % row_ids.filter(missing).to_pylist())
+        operation.phase = "write"
+        builder = table.new_batch_write_builder()
+        commit = operation.keep(builder.new_commit())
+        messages = builder.new_update().with_update_type(columns).update_by_arrow_with_row_id(source)
+        return operation.finish(source.num_rows, commit=commit, messages=messages)
 
 
 def add_columns(owner, schema, *, inputs, fn, batch_size):
