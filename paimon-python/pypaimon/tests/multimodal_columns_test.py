@@ -832,18 +832,24 @@ def test_update_columns_by_row_id_matches_duplicate_keys_without_rewriting_media
         "old", "old", "old", "old", "old", "duplicate"]
 
 
-def test_update_columns_by_row_id_preserves_deletions_and_crosses_partitions(tmp_path):
+@pytest.mark.parametrize("row_order", [
+    pytest.param([0, 1, 2, 3, 4, 5], id="a-first"),
+    pytest.param([3, 4, 5, 0, 1, 2], id="b-first"),
+])
+def test_update_columns_by_row_id_preserves_deletions_and_crosses_partitions(tmp_path, row_order):
     connection = pmm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     table = connection.create_table(
         "partitioned", schema=pa.schema([("part", pa.string()), ("id", pa.int64()), ("label", pa.string())]),
         partitioned=["part"],
-        data=[{"part": "a" if i < 3 else "b", "id": i, "label": "old"} for i in range(6)],
+        data=[{"part": "a" if i < 3 else "b", "id": i, "label": "old"} for i in row_order],
         options={"file.format": "parquet", "deletion-vectors.enabled": "true"})
     table.delete("id = 1 OR id = 4")
+    row_ids = {row["id"]: row["_ROW_ID"] for row in table.scan().select(["id"]).with_row_id().to_list()}
     snapshot = _snapshot(table)
     commit = BatchTableCommit.commit
     with patch.object(BatchTableCommit, "commit", autospec=True, side_effect=commit) as publish:
-        result = table.update_columns_by_row_id(pa.table({"_ROW_ID": [5, 0], "label": ["last", None]}))
+        result = table.update_columns_by_row_id(pa.table({
+            "_ROW_ID": [row_ids[5], row_ids[0]], "label": ["last", None]}))
     publish.assert_called_once()
     messages = publish.call_args[0][1]
     assert len(messages) == 2
