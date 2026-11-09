@@ -19,6 +19,8 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.ModelField;
+import org.apache.paimon.catalog.ProviderModelDefinition;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.management.DataPolicy;
@@ -318,14 +320,17 @@ class RESTApiCoverageTest {
         arguments.put(List.class, Collections.emptyList());
         arguments.put(Map.class, Collections.emptyMap());
         arguments.put(Identifier.class, Identifier.create("db", "t"));
-        Map<String, Object> modelField = new HashMap<>();
-        modelField.put("dataType", "STRING");
-        Map<String, Map<String, Object>> modelInputs = new HashMap<>();
-        modelInputs.put("input", modelField);
         arguments.put(
                 CreateModelRequest.class,
                 new CreateModelRequest(
-                        "t", "provider", "model", modelInputs, null, Collections.emptyMap()));
+                        "t",
+                        null,
+                        new ProviderModelDefinition(
+                                "provider",
+                                "model",
+                                Collections.singletonList(new ModelField("input", "STRING", null)),
+                                null,
+                                Collections.emptyMap())));
         arguments.put(
                 Function.class, new FunctionImpl(Identifier.create("db", "f"), new HashMap<>()));
         arguments.put(SemanticViewDefinition.class, new SemanticViewDefinition("x1", "x1"));

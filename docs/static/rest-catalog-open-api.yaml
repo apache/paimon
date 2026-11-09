@@ -4420,65 +4420,76 @@ components:
       description: A non-empty path segment other than `.` or `..`.
     ModelField:
       type: object
-      required: [dataType]
+      additionalProperties: false
+      required: [name, dataType]
       properties:
+        name:
+          type: string
+          minLength: 1
         dataType:
           type: string
           minLength: 1
         modality:
           type: string
           minLength: 1
-      additionalProperties: true
+    ProviderModelDefinition:
+      type: object
+      additionalProperties: false
+      required: [type, provider, providerModel, inputs]
+      properties:
+        type:
+          type: string
+          enum: [provider]
+        provider:
+          type: string
+          minLength: 1
+        providerModel:
+          type: string
+          minLength: 1
+        inputs:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ModelField'
+        outputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelField'
+        options:
+          type: object
+          additionalProperties:
+            type: string
+    ModelDefinition:
+      oneOf:
+        - $ref: '#/components/schemas/ProviderModelDefinition'
+      discriminator:
+        propertyName: type
+        mapping:
+          provider: '#/components/schemas/ProviderModelDefinition'
     CreateModelRequest:
       type: object
       additionalProperties: false
-      required: [name, provider, model, inputs]
+      required: [name, definition]
       properties:
         name:
           $ref: '#/components/schemas/ModelPathSegment'
-        provider:
+        comment:
           type: string
           minLength: 1
-        model:
-          type: string
-          minLength: 1
-        inputs:
-          type: object
-          minProperties: 1
-          additionalProperties:
-            $ref: '#/components/schemas/ModelField'
-        outputs:
-          type: object
-          additionalProperties:
-            $ref: '#/components/schemas/ModelField'
-        properties:
-          type: object
-          additionalProperties: true
+        definition:
+          $ref: '#/components/schemas/ModelDefinition'
     GetModelResponse:
       type: object
       additionalProperties: false
-      required: [name, provider, model, inputs]
+      required: [name, definition]
       properties:
         name:
           $ref: '#/components/schemas/ModelPathSegment'
-        provider:
+        comment:
           type: string
           minLength: 1
-        model:
-          type: string
-          minLength: 1
-        inputs:
-          type: object
-          minProperties: 1
-          additionalProperties:
-            $ref: '#/components/schemas/ModelField'
-        outputs:
-          type: object
-          additionalProperties:
-            $ref: '#/components/schemas/ModelField'
-        properties:
-          type: object
-          additionalProperties: true
+        definition:
+          $ref: '#/components/schemas/ModelDefinition'
     ListModelsResponse:
       type: object
       properties:

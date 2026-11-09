@@ -22,6 +22,8 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.Model;
+import org.apache.paimon.catalog.ModelField;
+import org.apache.paimon.catalog.ProviderModelDefinition;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 
@@ -31,7 +33,7 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -48,14 +50,7 @@ class RESTCatalogModelTest {
             Catalog catalog = catalog(server);
 
             Identifier identifier = Identifier.create("quality", "qwen_vl");
-            Model metadata =
-                    new Model(
-                            identifier,
-                            "bailian",
-                            "qwen3.8-flash",
-                            inputs(),
-                            null,
-                            Collections.emptyMap());
+            Model metadata = new Model(identifier, "Video quality model", definition());
 
             server.enqueue(json(modelJson()));
             Model created = catalog.createModel(identifier, metadata, false);
@@ -63,8 +58,10 @@ class RESTCatalogModelTest {
             RecordedRequest create = server.takeRequest(10, TimeUnit.SECONDS);
             assertThat(create.getMethod()).isEqualTo("POST");
             assertThat(create.getPath()).isEqualTo("/v1/catalog/databases/quality/models");
-            assertThat(RESTApi.fromJson(create.getBody().readUtf8(), Map.class))
-                    .doesNotContainKey("outputs");
+            Map<String, Object> body = RESTApi.fromJson(create.getBody().readUtf8(), Map.class);
+            assertThat(body).containsOnlyKeys("name", "comment", "definition");
+            Map<String, Object> definition = (Map<String, Object>) body.get("definition");
+            assertThat(definition).containsEntry("type", "provider").doesNotContainKey("outputs");
 
             server.enqueue(json("{\"models\":[]}"));
             assertThat(catalog.listModels("quality")).isEmpty();
@@ -114,14 +111,7 @@ class RESTCatalogModelTest {
 
             for (String segment : new String[] {".", ".."}) {
                 Identifier invalidModel = Identifier.create("quality", segment);
-                Model metadata =
-                        new Model(
-                                invalidModel,
-                                "bailian",
-                                "qwen3.8-flash",
-                                inputs(),
-                                null,
-                                Collections.emptyMap());
+                Model metadata = new Model(invalidModel, null, definition());
                 assertThatThrownBy(() -> catalog.createModel(invalidModel, metadata, false))
                         .isInstanceOf(IllegalArgumentException.class);
                 assertThatThrownBy(() -> catalog.getModel(invalidModel))
@@ -167,19 +157,18 @@ class RESTCatalogModelTest {
         return new RESTCatalog(CatalogContext.create(options), false);
     }
 
-    private static Map<String, Map<String, Object>> inputs() {
-        Map<String, Object> field = new HashMap<>();
-        field.put("dataType", "BLOB");
-        field.put("modality", "video");
-        Map<String, Map<String, Object>> inputs = new HashMap<>();
-        inputs.put("video", field);
-        return inputs;
+    private static ProviderModelDefinition definition() {
+        List<ModelField> inputs =
+                Collections.singletonList(new ModelField("video", "BLOB", "video"));
+        return new ProviderModelDefinition(
+                "bailian", "qwen3.8-flash", inputs, null, Collections.emptyMap());
     }
 
     private static String modelJson() {
-        return "{\"name\":\"qwen_vl\",\"provider\":\"bailian\","
-                + "\"model\":\"qwen3.8-flash\",\"inputs\":{\"video\":{"
-                + "\"dataType\":\"BLOB\",\"modality\":\"video\"}},\"properties\":{}}";
+        return "{\"name\":\"qwen_vl\",\"comment\":\"Video quality model\","
+                + "\"definition\":{\"type\":\"provider\",\"provider\":\"bailian\","
+                + "\"providerModel\":\"qwen3.8-flash\",\"inputs\":[{\"name\":\"video\","
+                + "\"dataType\":\"BLOB\",\"modality\":\"video\"}],\"options\":{}}}";
     }
 
     private static MockResponse json(String body) {

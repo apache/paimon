@@ -26,6 +26,8 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.Model;
+import org.apache.paimon.catalog.ModelField;
+import org.apache.paimon.catalog.ProviderModelDefinition;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -157,28 +159,20 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         Identifier identifier = Identifier.create(database, "qwen_vl");
         catalog.createDatabase(database, false);
 
-        Map<String, Object> video = new HashMap<>();
-        video.put("dataType", "BLOB");
-        video.put("modality", "video");
-        Map<String, Map<String, Object>> inputs = new HashMap<>();
-        inputs.put("video", video);
-        Map<String, Object> result = new HashMap<>();
-        result.put("dataType", "STRING");
-        Map<String, Map<String, Object>> outputs = new HashMap<>();
-        outputs.put("result", result);
-        Model metadata =
-                new Model(
-                        identifier,
+        ProviderModelDefinition definition =
+                new ProviderModelDefinition(
                         "bailian",
                         "qwen3.8-flash",
-                        inputs,
-                        outputs,
-                        Collections.singletonMap("enableThinking", false));
+                        Collections.singletonList(new ModelField("video", "BLOB", "video")),
+                        Collections.singletonList(new ModelField("result", "STRING", null)),
+                        Collections.singletonMap("enable_thinking", "false"));
+        Model metadata = new Model(identifier, "Video quality model", definition);
 
         Model created = catalog.createModel(identifier, metadata, false);
         assertThat(created.fullName()).isEqualTo(identifier.getFullName());
-        assertThat(catalog.getModel(identifier).properties())
-                .containsEntry("enableThinking", false);
+        ProviderModelDefinition persisted =
+                (ProviderModelDefinition) catalog.getModel(identifier).definition();
+        assertThat(persisted.options()).containsEntry("enable_thinking", "false");
         assertThat(catalog.listModels(database)).extracting(Model::name).containsExactly("qwen_vl");
 
         assertThatThrownBy(() -> catalog.createModel(identifier, metadata, false))

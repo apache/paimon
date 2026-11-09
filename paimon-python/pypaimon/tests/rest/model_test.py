@@ -28,32 +28,47 @@ from pypaimon.api.model import (
     ListModelsResponse,
 )
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.api.rest_exception import AlreadyExistsException, NoSuchResourceException
+from pypaimon.api.rest_exception import (
+    AlreadyExistsException,
+    NoSuchResourceException,
+)
 from pypaimon.catalog.catalog_exception import (
     DatabaseNotExistException,
     ModelAlreadyExistException,
     ModelNotExistException,
 )
-from pypaimon.catalog.model import Model
+from pypaimon.catalog.model import (
+    Model,
+    ModelField,
+    ProviderModelDefinition,
+)
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 
 
 def _inputs():
-    return {
-        "video": {"data_type": "BLOB", "modality": "video"},
-        "asr": {"data_type": "STRING"},
-    }
+    return [
+        ModelField("video", "BLOB", "video"),
+        ModelField("asr", "STRING"),
+    ]
+
+
+def _definition(outputs=None):
+    return ProviderModelDefinition(
+        provider="bailian",
+        provider_model="qwen3.8-flash",
+        inputs=_inputs(),
+        outputs=outputs,
+        options={"enable_thinking": "false"},
+    )
 
 
 def _response():
     return GetModelResponse(
         name="qwen_vl",
-        provider="bailian",
-        model="qwen3.8-flash",
-        inputs=_inputs(),
-        properties={"enable_thinking": False},
+        comment="Video quality model",
+        definition=_definition(),
     )
 
 
@@ -62,33 +77,38 @@ class ModelTest(unittest.TestCase):
     def test_model_metadata(self):
         model = Model(
             "quality.qwen_vl",
-            "bailian",
-            "qwen3.8-flash",
-            _inputs(),
-            properties={"enable_thinking": False},
+            _definition(),
+            comment="Video quality model",
         )
         self.assertEqual("quality.qwen_vl", model.full_name)
         self.assertEqual("qwen_vl", model.name)
-        self.assertEqual("BLOB", model.to_dict()["inputs"]["video"]["data_type"])
+        self.assertEqual(
+            "BLOB",
+            model.to_dict()["definition"]["inputs"][0]["data_type"],
+        )
 
     def test_wire_format(self):
         request = CreateModelRequest(
             "qwen_vl",
-            "bailian",
-            "qwen3.8-flash",
-            _inputs(),
-            properties={"enable_thinking": False},
+            _definition(),
+            comment="Video quality model",
         )
         body = json.loads(JSON.to_json(request))
-        self.assertEqual("BLOB", body["inputs"]["video"]["dataType"])
-        self.assertNotIn("data_type", body["inputs"]["video"])
-        self.assertNotIn("outputs", body)
+        self.assertEqual("provider", body["definition"]["type"])
+        self.assertEqual(
+            "BLOB", body["definition"]["inputs"][0]["dataType"])
+        self.assertNotIn("data_type", body["definition"]["inputs"][0])
+        self.assertNotIn("outputs", body["definition"])
 
         response_body = json.loads(JSON.to_json(_response()))
-        self.assertNotIn("outputs", response_body)
-        response = JSON.from_json(json.dumps(response_body), GetModelResponse)
-        self.assertEqual("BLOB", response.inputs["video"]["data_type"])
-        self.assertEqual("quality.qwen_vl", response.to_model("quality").full_name)
+        self.assertNotIn("outputs", response_body["definition"])
+        response = JSON.from_json(
+            json.dumps(response_body), GetModelResponse)
+        definition = response.definition
+        self.assertIsInstance(definition, ProviderModelDefinition)
+        self.assertEqual("BLOB", definition.inputs[0].data_type)
+        self.assertEqual(
+            "quality.qwen_vl", response.to_model("quality").full_name)
 
         listed = JSON.from_json(
             JSON.to_json(ListModelsResponse([_response()], "next")),
@@ -102,24 +122,56 @@ class ModelTest(unittest.TestCase):
         self.assertEqual([], json.loads(JSON.to_json(empty))["models"])
 
     def test_validation(self):
-        invalid = [
-            {"provider": ""},
-            {"model": " "},
-            {"inputs": {}},
-            {"inputs": {"video": {}}},
-            {"inputs": {"video": {"data_type": ""}}},
-            {"properties": []},
+        invalid_definitions = [
+            {
+                "type": "provider",
+                "provider": "",
+                "provider_model": "model",
+                "inputs": [{"name": "text", "data_type": "STRING"}],
+            },
+            {
+                "type": "provider",
+                "provider": "provider",
+                "provider_model": " ",
+                "inputs": [{"name": "text", "data_type": "STRING"}],
+            },
+            {
+                "type": "provider",
+                "provider": "provider",
+                "provider_model": "model",
+                "inputs": [],
+            },
+            {
+                "type": "provider",
+                "provider": "provider",
+                "provider_model": "model",
+                "inputs": [{"name": "text"}],
+            },
+            {
+                "type": "provider",
+                "provider": "provider",
+                "provider_model": "model",
+                "inputs": [
+                    {"name": "text", "data_type": "STRING"},
+                    {"name": "text", "data_type": "STRING"},
+                ],
+            },
+            {
+                "type": "provider",
+                "provider": "provider",
+                "provider_model": "model",
+                "inputs": [{"name": "text", "data_type": "STRING"}],
+                "options": {"thinking": False},
+            },
+            {"type": "resource"},
         ]
-        for changes in invalid:
-            values = {
-                "name": "qwen_vl",
-                "provider": "bailian",
-                "model": "qwen3.8-flash",
-                "inputs": _inputs(),
-            }
-            values.update(changes)
-            with self.subTest(changes=changes), self.assertRaises(ValueError):
-                CreateModelRequest(**values)
+        for definition in invalid_definitions:
+            with self.subTest(definition=definition), self.assertRaises(
+                    ValueError):
+                CreateModelRequest("qwen_vl", definition)
+
+        with self.assertRaises(ValueError):
+            CreateModelRequest("qwen_vl", _definition(), comment=" ")
 
     def test_rest_catalog_crud_and_errors(self):
         calls = []
@@ -152,7 +204,8 @@ class ModelTest(unittest.TestCase):
                     self.wfile.write(body)
 
             def do_POST(self):
-                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                body = json.loads(
+                    self.rfile.read(int(self.headers["Content-Length"])))
                 content_types.append(self.headers.get("Content-Type"))
                 calls.append(("POST", self.path, body))
                 self._send(_response())
@@ -186,35 +239,43 @@ class ModelTest(unittest.TestCase):
 
             created = catalog.create_model(
                 "a/b.qwen_vl",
-                "bailian",
-                "qwen3.8-flash",
-                _inputs(),
-                properties={"enable_thinking": False},
+                _definition(),
+                comment="Video quality model",
             )
             self.assertEqual("a/b.qwen_vl", created.full_name)
-            self.assertEqual("/v1/catalog/databases/a%2Fb/models", calls[-1][1])
-            self.assertEqual("BLOB", calls[-1][2]["inputs"]["video"]["dataType"])
+            self.assertEqual(
+                "/v1/catalog/databases/a%2Fb/models", calls[-1][1])
+            self.assertEqual(
+                "BLOB",
+                calls[-1][2]["definition"]["inputs"][0]["dataType"],
+            )
             self.assertEqual("application/json", content_types[-1])
 
-            self.assertEqual("qwen_vl", catalog.get_model("a/b.qwen_vl").name)
-            self.assertEqual("/v1/catalog/databases/a%2Fb/models/qwen_vl", calls[-1][1])
-            self.assertEqual(["qwen_vl"], [model.name for model in catalog.list_models("a/b")])
+            self.assertEqual(
+                "qwen_vl", catalog.get_model("a/b.qwen_vl").name)
+            self.assertEqual(
+                "/v1/catalog/databases/a%2Fb/models/qwen_vl",
+                calls[-1][1],
+            )
+            self.assertEqual(
+                ["qwen_vl"],
+                [model.name for model in catalog.list_models("a/b")],
+            )
             catalog.drop_model(Identifier.create("a/b", "qwen_vl"))
 
-            catalog.create_model(
-                "quality.123", "bailian", "qwen3.8-flash", _inputs()
-            )
-            self.assertEqual("/v1/catalog/databases/quality/models", calls[-1][1])
+            catalog.create_model("quality.123", _definition())
+            self.assertEqual(
+                "/v1/catalog/databases/quality/models", calls[-1][1])
             catalog.get_model("quality.123")
-            self.assertEqual("/v1/catalog/databases/quality/models/123", calls[-1][1])
+            self.assertEqual(
+                "/v1/catalog/databases/quality/models/123", calls[-1][1])
             catalog.drop_model("quality.123")
-            self.assertEqual("/v1/catalog/databases/quality/models/123", calls[-1][1])
+            self.assertEqual(
+                "/v1/catalog/databases/quality/models/123", calls[-1][1])
 
             state.update(status=409, resource_type="MODEL")
             with self.assertRaises(ModelAlreadyExistException):
-                catalog.create_model(
-                    "quality.qwen_vl", "bailian", "qwen3.8-flash", _inputs()
-                )
+                catalog.create_model("quality.qwen_vl", _definition())
 
             state.update(status=404, resource_type="MODEL")
             with self.assertRaises(ModelNotExistException):
@@ -244,9 +305,7 @@ class ModelTest(unittest.TestCase):
         api.get_model.return_value = _response()
         existing = catalog.create_model(
             identifier,
-            "bailian",
-            "qwen3.8-flash",
-            _inputs(),
+            _definition(),
             ignore_if_exists=True,
         )
         self.assertEqual("quality.qwen_vl", existing.full_name)
@@ -284,27 +343,33 @@ class ModelTest(unittest.TestCase):
             False,
         )
         api.client = Mock()
-        request = CreateModelRequest(
-            "qwen_vl", "bailian", "qwen3.8-flash", _inputs()
-        )
+        request = CreateModelRequest("qwen_vl", _definition())
 
         for segment in (".", ".."):
-            with self.subTest(segment=segment, operation="list"), self.assertRaises(ValueError):
+            with self.subTest(
+                    segment=segment,
+                    operation="list"), self.assertRaises(ValueError):
                 api.list_models(segment)
 
             invalid_model = Identifier.create("quality", segment)
-            invalid_request = CreateModelRequest(
-                segment, "bailian", "qwen3.8-flash", _inputs()
-            )
-            with self.subTest(segment=segment, operation="create"), self.assertRaises(ValueError):
+            invalid_request = CreateModelRequest(segment, _definition())
+            with self.subTest(
+                    segment=segment,
+                    operation="create"), self.assertRaises(ValueError):
                 api.create_model(invalid_model, invalid_request)
-            with self.subTest(segment=segment, operation="get"), self.assertRaises(ValueError):
+            with self.subTest(
+                    segment=segment,
+                    operation="get"), self.assertRaises(ValueError):
                 api.get_model(invalid_model)
-            with self.subTest(segment=segment, operation="drop"), self.assertRaises(ValueError):
+            with self.subTest(
+                    segment=segment,
+                    operation="drop"), self.assertRaises(ValueError):
                 api.drop_model(invalid_model)
 
             invalid_database = Identifier.create(segment, "qwen_vl")
-            with self.subTest(segment=segment, operation="database"), self.assertRaises(ValueError):
+            with self.subTest(
+                    segment=segment,
+                    operation="database"), self.assertRaises(ValueError):
                 api.create_model(invalid_database, request)
 
         api.client.get.assert_not_called()
@@ -328,7 +393,10 @@ class ModelTest(unittest.TestCase):
             ListModelsResponse([_response()], None),
         ]
 
-        self.assertEqual(["qwen_vl"], [model.name for model in api.list_models("quality")])
+        self.assertEqual(
+            ["qwen_vl"],
+            [model.name for model in api.list_models("quality")],
+        )
         self.assertEqual(2, api.client.get_with_params.call_count)
         self.assertEqual(
             {"pageToken": "second"},
@@ -338,37 +406,27 @@ class ModelTest(unittest.TestCase):
 
 def test_model_crud_round_trip_with_rest_catalog_server(native_rest_catalog):
     identifier = "default.qwen_vl"
-    outputs = {"result": {"data_type": "STRING"}}
-    properties = {"enable_thinking": False}
+    outputs = [ModelField("result", "STRING")]
 
     created = native_rest_catalog.create_model(
         identifier,
-        "bailian",
-        "qwen3.8-flash",
-        _inputs(),
-        outputs=outputs,
-        properties=properties,
+        _definition(outputs),
+        comment="Video quality model",
     )
     assert created.full_name == identifier
-    assert native_rest_catalog.get_model(identifier).outputs == outputs
-    assert [model.name for model in native_rest_catalog.list_models("default")] == [
-        "qwen_vl"
-    ]
+    persisted = native_rest_catalog.get_model(identifier).definition
+    assert isinstance(persisted, ProviderModelDefinition)
+    assert persisted.outputs == outputs
+    assert [model.name for model in native_rest_catalog.list_models(
+        "default")] == ["qwen_vl"]
 
     with pytest.raises(ModelAlreadyExistException):
-        native_rest_catalog.create_model(
-            identifier, "bailian", "qwen3.8-flash", _inputs()
-        )
-    assert (
-        native_rest_catalog.create_model(
-            identifier,
-            "bailian",
-            "qwen3.8-flash",
-            _inputs(),
-            ignore_if_exists=True,
-        ).full_name
-        == identifier
-    )
+        native_rest_catalog.create_model(identifier, _definition())
+    assert native_rest_catalog.create_model(
+        identifier,
+        _definition(),
+        ignore_if_exists=True,
+    ).full_name == identifier
 
     native_rest_catalog.drop_model(identifier)
     with pytest.raises(ModelNotExistException):

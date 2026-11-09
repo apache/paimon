@@ -136,14 +136,7 @@ final class RESTCatalogModelHandler {
                         exception.getMessage(),
                         409);
             }
-            Model model =
-                    new Model(
-                            identifier,
-                            request.getProvider(),
-                            request.getModel(),
-                            request.getInputs(),
-                            request.getOutputs(),
-                            request.getProperties());
+            Model model = new Model(identifier, request.getComment(), request.getDefinition());
             modelStore.put(identifier.getFullName(), model);
             return response(toResponse(model), 200);
         }
@@ -169,13 +162,7 @@ final class RESTCatalogModelHandler {
     }
 
     private static GetModelResponse toResponse(Model model) {
-        return new GetModelResponse(
-                model.name(),
-                model.provider(),
-                model.model(),
-                model.inputs(),
-                model.outputs(),
-                model.properties());
+        return new GetModelResponse(model.name(), model.comment(), model.definition());
     }
 
     private static MockResponse error(

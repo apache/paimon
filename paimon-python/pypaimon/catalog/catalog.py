@@ -82,11 +82,8 @@ class Catalog(ABC):
     def create_model(
             self,
             identifier: Union[str, Identifier],
-            provider: str,
-            model: str,
-            inputs: Dict[str, Dict[str, Any]],
-            outputs: Optional[Dict[str, Dict[str, Any]]] = None,
-            properties: Optional[Dict[str, Any]] = None,
+            definition: Union['ModelDefinition', Dict[str, Any]],
+            comment: Optional[str] = None,
             ignore_if_exists: bool = False,
     ) -> 'Model':
         """Create a database-scoped model and return its persisted metadata.

@@ -15,12 +15,106 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from pypaimon.common.identifier import Identifier
 
 
-ModelFields = Dict[str, Dict[str, Any]]
+@dataclass
+class ModelField:
+    """Named input or output field of a model definition."""
+
+    name: str
+    data_type: str
+    modality: Optional[str] = None
+
+    def __post_init__(self):
+        _nonblank(self.name, "name")
+        _nonblank(self.data_type, "data_type")
+        if self.modality is not None:
+            _nonblank(self.modality, "modality")
+
+    def to_dict(self) -> Dict[str, Any]:
+        value = {"name": self.name, "data_type": self.data_type}
+        if self.modality is not None:
+            value["modality"] = self.modality
+        return value
+
+    def to_wire(self) -> Dict[str, Any]:
+        value = {"name": self.name, "dataType": self.data_type}
+        if self.modality is not None:
+            value["modality"] = self.modality
+        return value
+
+
+class ModelDefinition:
+    """Base class for extensible model definitions."""
+
+    @property
+    def type(self) -> str:
+        raise NotImplementedError
+
+    def to_dict(self) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def to_wire(self) -> Dict[str, Any]:
+        raise NotImplementedError
+
+
+@dataclass
+class ProviderModelDefinition(ModelDefinition):
+    """Definition of a model served by an external provider."""
+
+    provider: str
+    provider_model: str
+    inputs: List[ModelField]
+    outputs: Optional[List[ModelField]] = None
+    options: Dict[str, str] = field(default_factory=dict)
+
+    TYPE = "provider"
+
+    def __post_init__(self):
+        _nonblank(self.provider, "provider")
+        _nonblank(self.provider_model, "provider_model")
+        self.inputs = _copy_fields(self.inputs, "inputs", True)
+        self.outputs = _copy_fields(self.outputs, "outputs", False)
+        if not isinstance(self.options, dict):
+            raise ValueError("options must be a mapping")
+        copied_options = {}
+        for name, value in self.options.items():
+            _nonblank(name, "option name")
+            if not isinstance(value, str):
+                raise ValueError("option values must be strings")
+            copied_options[name] = value
+        self.options = copied_options
+
+    @property
+    def type(self) -> str:
+        return self.TYPE
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = {
+            "type": self.type,
+            "provider": self.provider,
+            "provider_model": self.provider_model,
+            "inputs": [value.to_dict() for value in self.inputs],
+            "options": dict(self.options),
+        }
+        if self.outputs is not None:
+            result["outputs"] = [value.to_dict() for value in self.outputs]
+        return result
+
+    def to_wire(self) -> Dict[str, Any]:
+        result = {
+            "type": self.type,
+            "provider": self.provider,
+            "providerModel": self.provider_model,
+            "inputs": [value.to_wire() for value in self.inputs],
+            "options": dict(self.options),
+        }
+        if self.outputs is not None:
+            result["outputs"] = [value.to_wire() for value in self.outputs]
+        return result
 
 
 @dataclass
@@ -28,26 +122,18 @@ class Model:
     """Metadata for a model registered in a catalog database."""
 
     identifier: Union[str, Identifier]
-    provider: str
-    model: str
-    inputs: ModelFields
-    outputs: Optional[ModelFields] = None
-    properties: Dict[str, Any] = field(default_factory=dict)
+    definition: Union[ModelDefinition, Dict[str, Any]]
+    comment: Optional[str] = None
 
     def __post_init__(self):
         if isinstance(self.identifier, str):
             self.identifier = Identifier.from_string(self.identifier)
         if not isinstance(self.identifier, Identifier):
-            raise ValueError("identifier must be an Identifier or database-qualified name")
-        _nonblank(self.provider, "provider")
-        _nonblank(self.model, "model")
-        self.inputs = _validate_model_fields(self.inputs, "inputs", True)
-        self.outputs = _validate_model_fields(self.outputs, "outputs", False)
-        if not isinstance(self.properties, dict):
-            raise ValueError("properties must be a mapping")
-        for key in self.properties:
-            _nonblank(key, "property name")
-        self.properties = dict(self.properties)
+            raise ValueError(
+                "identifier must be an Identifier or database-qualified name")
+        if self.comment is not None:
+            _nonblank(self.comment, "comment")
+        self.definition = model_definition_from_dict(self.definition)
 
     @property
     def name(self) -> str:
@@ -58,67 +144,76 @@ class Model:
         return self.identifier.get_full_name()
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "identifier": self.full_name,
-            "provider": self.provider,
-            "model": self.model,
-            "inputs": _copy_model_fields(self.inputs),
-            "outputs": _copy_model_fields(self.outputs),
-            "properties": dict(self.properties),
+            "definition": self.definition.to_dict(),
         }
+        if self.comment is not None:
+            result["comment"] = self.comment
+        return result
 
 
-def _validate_model_fields(
-        fields: Optional[ModelFields], name: str, required: bool
-) -> Optional[ModelFields]:
-    if fields is None:
+def model_definition_from_dict(
+        value: Union[ModelDefinition, Dict[str, Any]],
+        wire: bool = False,
+) -> ModelDefinition:
+    if isinstance(value, ModelDefinition):
+        return value
+    if not isinstance(value, dict):
+        raise ValueError("definition must be a ModelDefinition or mapping")
+    definition_type = value.get("type")
+    if definition_type != ProviderModelDefinition.TYPE:
+        raise ValueError("unsupported model definition type: {}".format(
+            definition_type))
+    provider_model_key = "providerModel" if wire else "provider_model"
+    return ProviderModelDefinition(
+        provider=value.get("provider"),
+        provider_model=value.get(provider_model_key),
+        inputs=[
+            _field_from_dict(field_value, wire)
+            for field_value in (value.get("inputs") or [])
+        ],
+        outputs=(
+            None if value.get("outputs") is None else [
+                _field_from_dict(field_value, wire)
+                for field_value in value.get("outputs")
+            ]
+        ),
+        options=value.get("options") or {},
+    )
+
+
+def _field_from_dict(value: Any, wire: bool) -> ModelField:
+    if isinstance(value, ModelField):
+        return value
+    if not isinstance(value, dict):
+        raise ValueError(
+            "model fields must be ModelField instances or mappings")
+    data_type_key = "dataType" if wire else "data_type"
+    return ModelField(
+        name=value.get("name"),
+        data_type=value.get(data_type_key),
+        modality=value.get("modality"),
+    )
+
+
+def _copy_fields(values, name, required):
+    if values is None:
         if required:
-            raise ValueError("{} must be a non-empty mapping".format(name))
+            raise ValueError("{} must be a non-empty list".format(name))
         return None
-    if not isinstance(fields, dict) or (required and not fields):
-        raise ValueError("{} must be a non-empty mapping".format(name))
-
-    result = {}
-    for field_name, spec in fields.items():
-        _nonblank(field_name, "{} field name".format(name))
-        if not isinstance(spec, dict):
-            raise ValueError("{} field '{}' must be a mapping".format(name, field_name))
-        data_type = spec.get("data_type")
-        _nonblank(data_type, "{}.{}.data_type".format(name, field_name))
-        if "modality" in spec:
-            _nonblank(spec["modality"], "{}.{}.modality".format(name, field_name))
-        for key in spec:
-            _nonblank(key, "{} field property".format(name))
-        result[field_name] = dict(spec)
-    return result
-
-
-def _copy_model_fields(fields: Optional[ModelFields]) -> Optional[ModelFields]:
-    if fields is None:
-        return None
-    return {name: dict(spec) for name, spec in fields.items()}
-
-
-def model_fields_to_wire(fields: Optional[ModelFields]) -> Optional[ModelFields]:
-    if fields is None:
-        return None
-    result = {}
-    for name, spec in fields.items():
-        wire_spec = dict(spec)
-        wire_spec["dataType"] = wire_spec.pop("data_type")
-        result[name] = wire_spec
-    return result
-
-
-def model_fields_from_wire(fields: Optional[ModelFields]) -> Optional[ModelFields]:
-    if fields is None:
-        return None
-    result = {}
-    for name, spec in fields.items():
-        python_spec = dict(spec)
-        if "dataType" in python_spec:
-            python_spec["data_type"] = python_spec.pop("dataType")
-        result[name] = python_spec
+    if not isinstance(values, list) or (required and not values):
+        raise ValueError("{} must be a non-empty list".format(name))
+    result = []
+    names = set()
+    for value in values:
+        field_value = _field_from_dict(value, False)
+        if field_value.name in names:
+            raise ValueError(
+                "{} contains duplicate field '{}'".format(
+                    name, field_value.name))
+        names.add(field_value.name)
+        result.append(ModelField(**field_value.to_dict()))
     return result
 
 

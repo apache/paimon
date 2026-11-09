@@ -1669,26 +1669,15 @@ class RESTCatalogServer:
                 ListModelsResponse(page.elements, page.next_page_token), 200)
 
         if method == "POST":
-            wire = GetModelResponse.from_dict(json.loads(data))
-            request = CreateModelRequest(
-                name=wire.name,
-                provider=wire.provider,
-                model=wire.model,
-                inputs=wire.inputs,
-                outputs=wire.outputs,
-                properties=wire.properties,
-            )
+            request = CreateModelRequest.from_dict(json.loads(data))
             identifier = Identifier.create(database_name, request.name)
             key = identifier.get_full_name()
             if key in self.model_store:
                 raise ModelAlreadyExistException(identifier)
             response = GetModelResponse(
                 name=request.name,
-                provider=request.provider,
-                model=request.model,
-                inputs=request.inputs,
-                outputs=request.outputs,
-                properties=request.properties,
+                definition=request.definition,
+                comment=request.comment,
             )
             self.model_store[key] = response
             return self._mock_response(response, 200)

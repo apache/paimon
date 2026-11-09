@@ -18,16 +18,19 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.Model;
+import org.apache.paimon.catalog.ModelField;
+import org.apache.paimon.catalog.ProviderModelDefinition;
 import org.apache.paimon.rest.requests.CreateModelRequest;
 import org.apache.paimon.rest.responses.GetModelResponse;
 import org.apache.paimon.rest.responses.ListModelsResponse;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,29 +40,23 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class RESTApiModelTest {
 
     @Test
-    void testOptionalOutputsAreOmitted() throws Exception {
-        Map<String, Map<String, Object>> inputs = inputs();
+    void testProviderDefinitionRoundTrip() throws Exception {
         CreateModelRequest request =
-                new CreateModelRequest(
-                        "qwen_vl",
-                        "bailian",
-                        "qwen3.8-flash",
-                        inputs,
-                        null,
-                        Collections.emptyMap());
-        assertThat(RESTApi.fromJson(RESTApi.toJson(request), Map.class))
-                .containsOnlyKeys("name", "provider", "model", "inputs", "properties");
+                new CreateModelRequest("qwen_vl", "Video quality model", definition());
+        Map<String, Object> requestJson = RESTApi.fromJson(RESTApi.toJson(request), Map.class);
+        assertThat(requestJson).containsOnlyKeys("name", "comment", "definition");
+        Map<String, Object> definitionJson = (Map<String, Object>) requestJson.get("definition");
+        assertThat(definitionJson)
+                .containsEntry("type", "provider")
+                .containsEntry("provider", "bailian")
+                .containsEntry("providerModel", "qwen3.8-flash")
+                .doesNotContainKey("outputs");
 
         GetModelResponse response =
-                new GetModelResponse(
-                        "qwen_vl",
-                        "bailian",
-                        "qwen3.8-flash",
-                        inputs,
-                        null,
-                        Collections.emptyMap());
-        assertThat(RESTApi.fromJson(RESTApi.toJson(response), Map.class))
-                .containsOnlyKeys("name", "provider", "model", "inputs", "properties");
+                RESTApi.fromJson(RESTApi.toJson(request), GetModelResponse.class);
+        ProviderModelDefinition definition = (ProviderModelDefinition) response.getDefinition();
+        assertThat(definition.inputs()).extracting(ModelField::name).containsExactly("video");
+        assertThat(definition.options()).containsEntry("enable_thinking", "false");
     }
 
     @Test
@@ -72,90 +69,89 @@ class RESTApiModelTest {
     }
 
     @Test
-    void testInvalidModelFieldsAreRejected() {
-        assertThatThrownBy(() -> model(fields("text", Collections.emptyMap()), null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("inputs.text.dataType");
-        assertThatThrownBy(() -> model(fields(" ", field("STRING", null)), null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("inputs field name");
-        assertThatThrownBy(() -> model(fields("text", null), null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must be a mapping");
-        assertThatThrownBy(() -> model(fields("text", field(" ", null)), null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("inputs.text.dataType");
-        assertThatThrownBy(() -> model(fields("video", field("BLOB", " ")), null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("inputs.video.modality");
-
-        Map<String, Object> invalidFieldProperty = field("STRING", null);
-        invalidFieldProperty.put("", true);
-        assertThatThrownBy(() -> model(fields("text", invalidFieldProperty), null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("inputs field property");
-
-        Map<String, Object> invalidProperties = new HashMap<>();
-        invalidProperties.put("", true);
-        assertThatThrownBy(() -> model(fields("text", field("STRING", null)), invalidProperties))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("property name");
-
+    void testInvalidProviderDefinitionIsRejected() {
         assertThatThrownBy(
                         () ->
-                                new CreateModelRequest(
-                                        "qwen_vl",
-                                        "bailian",
-                                        "qwen3.8-flash",
-                                        fields("text", Collections.emptyMap()),
-                                        null,
-                                        Collections.emptyMap()))
+                                new ProviderModelDefinition(
+                                        "", "model", fields("text", "STRING", null), null, null))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("inputs.text.dataType");
+                .hasMessageContaining("provider");
+        assertThatThrownBy(
+                        () ->
+                                new ProviderModelDefinition(
+                                        "provider",
+                                        " ",
+                                        fields("text", "STRING", null),
+                                        null,
+                                        null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("providerModel");
+        assertThatThrownBy(
+                        () ->
+                                new ProviderModelDefinition(
+                                        "provider", "model", Collections.emptyList(), null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("inputs");
+        assertThatThrownBy(() -> new ModelField("text", "", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("dataType");
+        assertThatThrownBy(() -> new ModelField("video", "BLOB", " "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("modality");
+
+        List<ModelField> duplicateFields =
+                Arrays.asList(
+                        new ModelField("text", "STRING", null),
+                        new ModelField("text", "STRING", null));
+        assertThatThrownBy(
+                        () ->
+                                new ProviderModelDefinition(
+                                        "provider", "model", duplicateFields, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("duplicate field");
+
+        Map<String, String> invalidOptions = new HashMap<>();
+        invalidOptions.put("", "value");
+        assertThatThrownBy(
+                        () ->
+                                new ProviderModelDefinition(
+                                        "provider",
+                                        "model",
+                                        fields("text", "STRING", null),
+                                        null,
+                                        invalidOptions))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("option name");
     }
 
     @Test
-    void testModelFieldsAreDefensivelyCopied() {
-        Map<String, Object> field = field("STRING", null);
-        Model model = model(fields("text", field), null);
+    void testProviderDefinitionIsDefensivelyCopied() {
+        List<ModelField> inputs = new ArrayList<>();
+        inputs.add(new ModelField("text", "STRING", null));
+        Map<String, String> options = new HashMap<>();
+        options.put("key", "value");
 
-        field.clear();
+        ProviderModelDefinition definition =
+                new ProviderModelDefinition("provider", "model", inputs, null, options);
+        inputs.clear();
+        options.clear();
 
-        assertThat(model.inputs().get("text")).containsEntry("dataType", "STRING");
+        assertThat(definition.inputs()).extracting(ModelField::name).containsExactly("text");
+        assertThat(definition.options()).containsEntry("key", "value");
+        assertThatThrownBy(() -> definition.inputs().add(new ModelField("extra", "STRING", null)))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 
-    private static Map<String, Map<String, Object>> inputs() {
-        Map<String, Object> field = new HashMap<>();
-        field.put("dataType", "BLOB");
-        field.put("modality", "video");
-        Map<String, Map<String, Object>> inputs = new HashMap<>();
-        inputs.put("video", field);
-        return inputs;
-    }
-
-    private static Model model(
-            Map<String, Map<String, Object>> inputs, Map<String, Object> properties) {
-        return new Model(
-                Identifier.create("quality", "qwen_vl"),
+    private static ProviderModelDefinition definition() {
+        return new ProviderModelDefinition(
                 "bailian",
                 "qwen3.8-flash",
-                inputs,
+                fields("video", "BLOB", "video"),
                 null,
-                properties);
+                Collections.singletonMap("enable_thinking", "false"));
     }
 
-    private static Map<String, Map<String, Object>> fields(String name, Map<String, Object> field) {
-        Map<String, Map<String, Object>> fields = new HashMap<>();
-        fields.put(name, field);
-        return fields;
-    }
-
-    private static Map<String, Object> field(String dataType, String modality) {
-        Map<String, Object> field = new HashMap<>();
-        field.put("dataType", dataType);
-        if (modality != null) {
-            field.put("modality", modality);
-        }
-        return field;
+    private static List<ModelField> fields(String name, String dataType, String modality) {
+        return Collections.singletonList(new ModelField(name, dataType, modality));
     }
 }

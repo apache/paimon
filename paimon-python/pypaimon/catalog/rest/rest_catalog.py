@@ -43,7 +43,7 @@ from pypaimon.catalog.catalog_exception import (
     BranchNotExistException, BranchAlreadyExistException,
 )
 from pypaimon.catalog.database import Database
-from pypaimon.catalog.model import Model
+from pypaimon.catalog.model import Model, ModelDefinition
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.catalog.rest.table_metadata import TableMetadata
@@ -611,22 +611,16 @@ class RESTCatalog(Catalog):
     def create_model(
             self,
             identifier: Union[str, Identifier],
-            provider: str,
-            model: str,
-            inputs: Dict[str, Dict[str, Any]],
-            outputs: Optional[Dict[str, Dict[str, Any]]] = None,
-            properties: Optional[Dict[str, Any]] = None,
+            definition: Union[ModelDefinition, Dict[str, Any]],
+            comment: Optional[str] = None,
             ignore_if_exists: bool = False,
     ) -> Model:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         request = CreateModelRequest(
             name=identifier.get_object_name(),
-            provider=provider,
-            model=model,
-            inputs=inputs,
-            outputs=outputs,
-            properties=properties if properties is not None else {},
+            definition=definition,
+            comment=comment,
         )
         try:
             response = self.rest_api.create_model(identifier, request)

@@ -20,6 +20,7 @@ package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.Model;
+import org.apache.paimon.catalog.ModelDefinition;
 import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -30,41 +31,26 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
-import java.util.Map;
-
 /** Response containing database-scoped model metadata. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class GetModelResponse implements RESTResponse {
 
     private static final String FIELD_NAME = "name";
-    private static final String FIELD_PROVIDER = "provider";
-    private static final String FIELD_MODEL = "model";
-    private static final String FIELD_INPUTS = "inputs";
-    private static final String FIELD_OUTPUTS = "outputs";
-    private static final String FIELD_PROPERTIES = "properties";
+    private static final String FIELD_COMMENT = "comment";
+    private static final String FIELD_DEFINITION = "definition";
 
     private final String name;
-    private final String provider;
-    private final String model;
-    private final Map<String, Map<String, Object>> inputs;
-    private final @Nullable Map<String, Map<String, Object>> outputs;
-    private final Map<String, Object> properties;
+    private final @Nullable String comment;
+    private final ModelDefinition definition;
 
     @JsonCreator
     public GetModelResponse(
             @JsonProperty(FIELD_NAME) String name,
-            @JsonProperty(FIELD_PROVIDER) String provider,
-            @JsonProperty(FIELD_MODEL) String model,
-            @JsonProperty(FIELD_INPUTS) Map<String, Map<String, Object>> inputs,
-            @Nullable @JsonProperty(FIELD_OUTPUTS) Map<String, Map<String, Object>> outputs,
-            @Nullable @JsonProperty(FIELD_PROPERTIES) Map<String, Object> properties) {
+            @Nullable @JsonProperty(FIELD_COMMENT) String comment,
+            @JsonProperty(FIELD_DEFINITION) ModelDefinition definition) {
         this.name = name;
-        this.provider = provider;
-        this.model = model;
-        this.inputs = inputs;
-        this.outputs = outputs;
-        this.properties = properties == null ? Collections.emptyMap() : properties;
+        this.comment = comment;
+        this.definition = definition;
     }
 
     @JsonGetter(FIELD_NAME)
@@ -72,40 +58,19 @@ public class GetModelResponse implements RESTResponse {
         return name;
     }
 
-    @JsonGetter(FIELD_PROVIDER)
-    public String getProvider() {
-        return provider;
-    }
-
-    @JsonGetter(FIELD_MODEL)
-    public String getModel() {
-        return model;
-    }
-
-    @JsonGetter(FIELD_INPUTS)
-    public Map<String, Map<String, Object>> getInputs() {
-        return inputs;
-    }
-
     @Nullable
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonGetter(FIELD_OUTPUTS)
-    public Map<String, Map<String, Object>> getOutputs() {
-        return outputs;
+    @JsonGetter(FIELD_COMMENT)
+    public String getComment() {
+        return comment;
     }
 
-    @JsonGetter(FIELD_PROPERTIES)
-    public Map<String, Object> getProperties() {
-        return properties;
+    @JsonGetter(FIELD_DEFINITION)
+    public ModelDefinition getDefinition() {
+        return definition;
     }
 
     public Model toModel(String databaseName) {
-        return new Model(
-                Identifier.create(databaseName, name),
-                provider,
-                model,
-                inputs,
-                outputs,
-                properties);
+        return new Model(Identifier.create(databaseName, name), comment, definition);
     }
 }

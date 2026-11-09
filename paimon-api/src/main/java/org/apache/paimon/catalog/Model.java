@@ -22,8 +22,6 @@ import org.apache.paimon.annotation.Experimental;
 
 import javax.annotation.Nullable;
 
-import java.util.Map;
-
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Metadata for a model registered in a catalog database. */
@@ -31,28 +29,16 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class Model {
 
     private final Identifier identifier;
-    private final String provider;
-    private final String model;
-    private final Map<String, Map<String, Object>> inputs;
-    private final @Nullable Map<String, Map<String, Object>> outputs;
-    private final Map<String, Object> properties;
+    private final @Nullable String comment;
+    private final ModelDefinition definition;
 
-    public Model(
-            Identifier identifier,
-            String provider,
-            String model,
-            Map<String, Map<String, Object>> inputs,
-            @Nullable Map<String, Map<String, Object>> outputs,
-            @Nullable Map<String, Object> properties) {
+    public Model(Identifier identifier, @Nullable String comment, ModelDefinition definition) {
         checkArgument(identifier != null, "identifier must not be null");
-        checkArgument(provider != null && !provider.trim().isEmpty(), "provider must not be blank");
-        checkArgument(model != null && !model.trim().isEmpty(), "model must not be blank");
+        checkArgument(comment == null || !comment.trim().isEmpty(), "comment must not be blank");
+        checkArgument(definition != null, "definition must not be null");
         this.identifier = identifier;
-        this.provider = provider;
-        this.model = model;
-        this.inputs = ModelValidation.copyAndValidateFields(inputs, "inputs", true);
-        this.outputs = ModelValidation.copyAndValidateFields(outputs, "outputs", false);
-        this.properties = ModelValidation.copyAndValidateProperties(properties);
+        this.comment = comment;
+        this.definition = definition;
     }
 
     public Identifier identifier() {
@@ -67,24 +53,12 @@ public class Model {
         return identifier.getFullName();
     }
 
-    public String provider() {
-        return provider;
-    }
-
-    public String model() {
-        return model;
-    }
-
-    public Map<String, Map<String, Object>> inputs() {
-        return inputs;
-    }
-
     @Nullable
-    public Map<String, Map<String, Object>> outputs() {
-        return outputs;
+    public String comment() {
+        return comment;
     }
 
-    public Map<String, Object> properties() {
-        return properties;
+    public ModelDefinition definition() {
+        return definition;
     }
 }
