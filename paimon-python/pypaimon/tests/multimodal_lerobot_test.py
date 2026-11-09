@@ -170,7 +170,7 @@ def _configure_uint8_transform_worker(unused_worker_id):
 class LeRobotValidationTest(unittest.TestCase):
 
     def test_dataset_fps_accepts_integral_numbers(self):
-        for value in (30, 30.0, np.int64(30), np.float32(30), np.float64(30)):
+        for value in (30, 30.0, np.int64(30), np.float32(30), np.float64(30), np.longdouble(30)):
             with self.subTest(value=value):
                 self.assertEqual(30, _dataset_fps(value))
                 self.assertIsInstance(_dataset_fps(value), int)
@@ -181,6 +181,15 @@ class LeRobotValidationTest(unittest.TestCase):
                     _dataset_fps(value)
         with self.assertRaises(ValueError):
             _integer(30.0, "episode_index")
+
+    def test_dataset_fps_preserves_extended_precision(self):
+        if np.finfo(np.longdouble).eps >= np.finfo(float).eps:
+            self.skipTest("longdouble has no additional precision on this platform")
+        value = np.longdouble("30.000000000000001")
+        self.assertNotEqual(value, 30)
+        self.assertEqual(float(value), 30.0)
+        with self.assertRaises(ValueError):
+            _dataset_fps(value)
 
     def test_episode_validation_projects_batched_hf_metadata(self):
         try:

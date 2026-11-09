@@ -789,8 +789,13 @@ def _json_value(value):
 
 def _dataset_fps(value):
     if isinstance(value, numbers.Real) and not isinstance(value, numbers.Integral):
-        if float(value).is_integer():
-            value = int(value)
+        try:
+            integer = int(value)
+        except (ValueError, OverflowError):
+            pass
+        else:
+            if value == integer:
+                value = integer
     return _positive_integer(value, "fps")
 
 
