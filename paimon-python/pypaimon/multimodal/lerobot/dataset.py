@@ -37,6 +37,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.lerobot.metadata import (
+    _PANDAS_METADATA_OPTION,
     _companion_table_identifiers,
     _restore_pandas_metadata,
     _tag_snapshot_id,
@@ -1006,7 +1007,12 @@ def _episode_dataset(table):
 
 def _component_dataframe(table, index_field):
     data = _read_arrow(table).sort_by(index_field)
-    return _restore_pandas_metadata(table, data).to_pandas()
+    frame = _restore_pandas_metadata(table, data).to_pandas()
+    if table.table_schema.options.get(_PANDAS_METADATA_OPTION) is None:
+        label = index_field[:-len("_index")]
+        if label in frame.columns:
+            frame = frame.set_index(label)
+    return frame
 
 
 def _metadata_object(table, name):
