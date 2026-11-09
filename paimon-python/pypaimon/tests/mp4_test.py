@@ -174,10 +174,13 @@ def test_moov_locator_rejects_malformed_or_duplicate_boxes(data):
 
 @pytest.mark.parametrize("backend", ["pyav", "torchcodec"])
 def test_stored_moov_bootstrap_decodes_without_refetch(mp4, backend):
+    pytest.importorskip("torch")
     import av
+    indexed = True
     if backend == "torchcodec":
-        from pypaimon.tests.indexed_torchcodec_test import require_torchcodec
+        from pypaimon.tests.indexed_torchcodec_test import require_torchcodec, supports_file_like
         require_torchcodec()
+        indexed = supports_file_like()
     from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
     mapping = ContainerFrameIndex(io.BytesIO(mp4), len(mp4))
     hint = mapping.metadata_ranges[0]
@@ -194,14 +197,18 @@ def test_stored_moov_bootstrap_decodes_without_refetch(mp4, backend):
     with av.open(io.BytesIO(mp4)) as container:
         expected = list(container.decode(video=0))[31].to_ndarray(format="rgb24")
     decoder = _open_video_decoder(source, backend=backend)
-    assert decoder._keyframe_index is not None if backend == "pyav" else decoder._indexed
     try:
+        if backend == "pyav":
+            assert decoder._keyframe_index is not None
+        else:
+            assert decoder._indexed is indexed
         frame = decoder.get_frames_at(indices=[31]).data[0].permute(1, 2, 0).numpy()
         np.testing.assert_array_equal(frame, expected)
         assert calls
         assert any(o <= hint[0] and o + n >= sum(hint) for o, n in calls[0])
-        assert not any(o < sum(hint) and o + n > hint[0]
-                       for request in calls[1:] for o, n in request)
+        if indexed:
+            assert not any(o < sum(hint) and o + n > hint[0]
+                           for request in calls[1:] for o, n in request)
     finally:
         decoder.close()
 
@@ -215,6 +222,7 @@ def test_first_sync_sample_must_cover_first_frame(mp4):
 
 
 def test_transient_io_and_invalid_frame_keep_mapping(mp4):
+    pytest.importorskip("torch")
     from pypaimon.multimodal.lerobot.dataset import _PyAVVideoDecoder
     mapping = ContainerFrameIndex(io.BytesIO(mp4), len(mp4))
     decoder = _PyAVVideoDecoder(io.BytesIO(mp4), mapping)
@@ -233,6 +241,7 @@ def test_transient_io_and_invalid_frame_keep_mapping(mp4):
 
 
 def test_open_runtime_error_falls_back(mp4):
+    pytest.importorskip("torch")
     from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
     source = io.BytesIO(mp4)
     source.video_length = len(mp4)
@@ -247,6 +256,7 @@ def test_open_runtime_error_falls_back(mp4):
 
 
 def test_cached_mapping_prefetches_header_and_moov(mp4):
+    pytest.importorskip("torch")
     from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
     mapping = ContainerFrameIndex(io.BytesIO(mp4), len(mp4))
     calls = []
