@@ -410,12 +410,12 @@ A span maps consecutive table rows to consecutive frames in one video.
 +------------------------------+
 | Encoded Video Payload 1..N   | Complete video bytes, concatenated
 +------------------------------+
-| Video Length Index           | Byte length of each video
-| Moov Offset Index            | Moov offset relative to the video payload
-| Moov Length Index            | Moov byte length; 0 means no hint
-| Span Row Count Index         | Number of consecutive rows per span
-| Span Video Reference Index   | Video ordinal per span; -1 NULL, -2 placeholder
-| Span First Frame Index       | Starting presentation-order frame ordinal
+| Video Length Index           | Delta-Varint video byte lengths
+| Moov Offset Index            | Delta-Varint moov offsets relative to each video payload
+| Moov Length Index            | Delta-Varint moov byte lengths; 0 means no hint
+| Span Row Count Index         | Delta-Varint logical row counts
+| Span Video Reference Index   | Delta-Varint video ordinals; -1 NULL, -2 placeholder
+| Span First Frame Index       | Delta-Varint starting presentation-order frame ordinals
 +------------------------------+
 | Video Length Index Size      | 4 bytes, little endian
 | Moov Offset Index Size       | 4 bytes, little endian
