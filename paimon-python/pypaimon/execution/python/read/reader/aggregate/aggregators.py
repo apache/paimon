@@ -1214,6 +1214,7 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
             )
 
         self._resolve_ts_field_index(field_type.value, options, field_name)
+        self.overwrite_on_equal_ts = options.field_merge_map_overwrite_on_equal_ts(field_name)
 
     def agg(self, accumulator: Any, input_field: Any) -> Any:
         if accumulator is None or input_field is None:
@@ -1280,7 +1281,8 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
                 continue
 
             existing_ts = self._get_ts_field(existing_row)
-            if existing_ts is None or new_ts > existing_ts:
+            if (existing_ts is None or new_ts > existing_ts
+                    or (self.overwrite_on_equal_ts and new_ts == existing_ts)):
                 result_map[key] = new_row
 
     def _get_ts_field(self, input_row: Any) -> Any:

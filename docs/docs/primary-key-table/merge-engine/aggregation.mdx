@@ -203,6 +203,12 @@ count of distinct event IDs.
   Use `fields.<field-name>.ts-field=<field_name_in_row>` to specify the timestamp field name in the ROW type.
   If not specified, the last field of the ROW is used as the timestamp by default.
 
+  Equal timestamps retain the accumulated ROW by default. Set
+  `fields.<field-name>.overwrite-on-equal-ts=true` to retain the input ROW instead.
+  This replaces the entire ROW and follows merge order, not wall-clock arrival order.
+  Use the same setting for writers, readers, and compaction jobs. Changing this setting
+  cannot recover values already discarded by earlier merges.
+
   When merging into an existing map, a null incoming map value removes that key, and an entry
   with a null timestamp is skipped. The first map is accepted directly when there is no existing
   accumulator, so do not rely on the first input to remove null entries or null timestamps.

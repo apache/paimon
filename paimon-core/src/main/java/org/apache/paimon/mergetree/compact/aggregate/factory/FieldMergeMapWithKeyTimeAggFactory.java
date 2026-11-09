@@ -60,7 +60,8 @@ public class FieldMergeMapWithKeyTimeAggFactory implements FieldAggregatorFactor
                 rowType.getFieldCount());
 
         int tsFieldIndex = resolveTsFieldIndex(rowType, options, field);
-        return new FieldMergeMapWithKeyTimeAgg(NAME, mapType, tsFieldIndex);
+        return new FieldMergeMapWithKeyTimeAgg(
+                NAME, mapType, tsFieldIndex, options.fieldMergeMapOverwriteOnEqualTs(field));
     }
 
     private int resolveTsFieldIndex(RowType rowType, CoreOptions options, @Nullable String field) {

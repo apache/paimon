@@ -100,6 +100,8 @@ public class CoreOptions implements Serializable {
 
     public static final String MERGE_MAP_TS_FIELD = "ts-field";
 
+    public static final String MERGE_MAP_OVERWRITE_ON_EQUAL_TS = "overwrite-on-equal-ts";
+
     public static final String MAP_STORAGE_LAYOUT = "map.storage-layout";
 
     public static final String MAP_SHARED_SHREDDING_MAX_COLUMNS =
@@ -6060,6 +6062,17 @@ public class CoreOptions implements Serializable {
                 key(FIELDS_PREFIX + "." + fieldName + "." + MERGE_MAP_TS_FIELD)
                         .stringType()
                         .noDefaultValue());
+    }
+
+    public boolean fieldMergeMapOverwriteOnEqualTs(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + MERGE_MAP_OVERWRITE_ON_EQUAL_TS)
+                        .booleanType()
+                        .defaultValue(false)
+                        .withDescription(
+                                "For merge_map_with_keytime, overwrite the accumulated ROW with "
+                                        + "the input ROW when their timestamps are equal. "
+                                        + "This follows merge order, not wall-clock arrival order."));
     }
 
     public MapStorageLayout mapStorageLayout(String fieldName) {

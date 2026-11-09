@@ -27,6 +27,8 @@ under the License.
 
 		<suppress files="CoreOptions.java" checks="FileLength"/>
 		<suppress files="RESTCatalogTest.java" checks="FileLength"/>
+		<!-- This class uses the 5000-line limit; other files keep the default limit. -->
+		<suppress files="[/\\]PrimaryKeySimpleTableTest\.java$" id="defaultFileLength"/>
 
 		<!-- target directory is not relevant for checkstyle -->
 		<suppress

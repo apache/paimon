@@ -3118,6 +3118,53 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldMergeMapWithKeyTimeOverwriteOnEqualTs() {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.STRING(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        GenericMap oldMap = createTestMap(createEntry("k", "old", "100"));
+        GenericMap newMap = createTestMap(createEntry("k", "new", "100"));
+        for (String setting : Arrays.asList(null, "false", "true")) {
+            Map<String, String> options = new HashMap<>();
+            if (setting != null) {
+                options.put("fields.f." + CoreOptions.MERGE_MAP_OVERWRITE_ON_EQUAL_TS, setting);
+            }
+            FieldAggregator agg =
+                    new FieldMergeMapWithKeyTimeAggFactory()
+                            .create(mapType, new CoreOptions(options), "f");
+            boolean overwrite = Boolean.parseBoolean(setting);
+            assertTestMap(
+                    agg.agg(oldMap, newMap), createExpectedEntry("k", overwrite ? "new" : "old"));
+            assertTestMap(
+                    agg.aggReversed(oldMap, newMap),
+                    createExpectedEntry("k", overwrite ? "old" : "new"));
+            assertTestMap(
+                    agg.agg(oldMap, createTestMap(createEntry("k", "older", "090"))),
+                    createExpectedEntry("k", "old"));
+            assertTestMap(
+                    agg.agg(oldMap, createTestMap(createEntry("k", "newer", "110"))),
+                    createExpectedEntry("k", "newer"));
+            assertTestMap(
+                    agg.agg(oldMap, createTestMap(createEntry("k", "no-time", null))),
+                    createExpectedEntry("k", "old"));
+            assertThat(agg.agg(oldMap, null)).isSameAs(oldMap);
+            assertThat(
+                            ((InternalMap)
+                                            agg.agg(
+                                                    oldMap,
+                                                    new GenericMap(
+                                                            Collections.singletonMap(
+                                                                    BinaryString.fromString("k"),
+                                                                    null))))
+                                    .size())
+                    .isZero();
+        }
+    }
+
+    @Test
     public void testFieldMergeMapWithKeyTimeAggFactoryRejectsNonStringTsField() {
         // The merge path reads the ts field via InternalRow#getString, so a non-string ts field
         // (declared BIGINT/TIMESTAMP/INT, which is natural for a "ts" field) is accepted at DDL
