@@ -118,6 +118,10 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                 Collections.emptyList(), null, sortedMaintainers);
     }
 
+    public synchronized void notifyNewFiles(List<DataFileMeta> files) {
+        vectorMaintainers.forEach(maintainer -> maintainer.notifyNewFiles(files));
+    }
+
     public synchronized void prepareCommit(
             DataIncrement appendIncrement,
             CompactIncrement compactIncrement,
@@ -362,7 +366,8 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                                                                 definition.column())
                                                         .metric(),
                                                 definition.indexType())
-                                        .withIndexOptions(definition.options()));
+                                        .withIndexOptions(definition.options())
+                                        .withCoreOptions(coreOptions));
                         break;
                     case BTREE:
                     case BITMAP:
