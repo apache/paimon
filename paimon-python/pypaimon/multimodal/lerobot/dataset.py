@@ -1836,11 +1836,28 @@ def _open_torchcodec_decoder(stream):
             "'pypaimon[lerobot]'."
         ) from error
     try:
-        return VideoDecoder(stream, seek_mode="exact")
+        from torchcodec import _core
+    except ImportError:
+        from torchcodec.decoders import _core  # TorchCodec 0.2
+
+    source = stream
+    try:
+        decoder = VideoDecoder(source, seek_mode="exact")
     except TypeError:
         # TorchCodec 0.2 accepts bytes but not seekable file-like objects.
         stream.seek(0)
-        return VideoDecoder(stream.read(), seek_mode="exact")
+        source = stream.read()
+        decoder = VideoDecoder(source, seek_mode="exact")
+    metadata = _core.get_container_metadata(decoder._decoder)
+    first_video = next(item.stream_index for item in metadata.streams
+                       if isinstance(item, _core.VideoStreamMetadata))
+    if decoder.stream_index != first_video:
+        # Frame ordinals refer to the first video track, not the default track.
+        del decoder
+        if source is stream:
+            stream.seek(0)
+        decoder = VideoDecoder(source, stream_index=first_video, seek_mode="exact")
+    return decoder
 
 
 class _FallbackVideoDecoder:

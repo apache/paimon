@@ -276,18 +276,22 @@ def test_fragmented_and_audio_first_video(fragmented, audio_first):
         decoder.close()
 
 
-def test_multiple_video_tracks_preserve_exact_selection():
+@pytest.mark.parametrize("backend", [None, "torchcodec"])
+@pytest.mark.parametrize("packed", [False, True])
+def test_multiple_video_tracks_preserve_exact_selection(tmp_path, backend, packed):
     av = pytest.importorskip("av")
     VideoDecoder = require_torchcodec()
     output = io.BytesIO()
     with av.open(output, "w", format="mp4") as container:
         streams = [container.add_stream("libx264", rate=30) for _ in range(2)]
         for i, stream in enumerate(streams):
-            stream.width, stream.height = 32 * (i + 1), 32 * (i + 1)
+            stream.width, stream.height = 32, 32
+            stream.disposition = 0 if i == 0 else 1
             stream.pix_fmt = "yuv420p"
         for i in range(12):
-            for stream in streams:
-                pixels = np.full((stream.height, stream.width, 3), i * 16, dtype=np.uint8)
+            for track, stream in enumerate(streams):
+                pixels = np.zeros((32, 32, 3), dtype=np.uint8)
+                pixels[:, :, track * 2] = 255
                 frame = av.VideoFrame.from_ndarray(pixels, format="rgb24")
                 for packet in stream.encode(frame):
                     container.mux(packet)
@@ -296,14 +300,40 @@ def test_multiple_video_tracks_preserve_exact_selection():
                 container.mux(packet)
     payload = output.getvalue()
     source, unused = indexed_source(payload)
-    decoder = _IndexedTorchCodecDecoder(source, source.video_keyframe_index)
+    from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
+    collator = None
+    if packed:
+        import pyarrow as pa
+        import pypaimon.multimodal as pm
+        from pypaimon.multimodal.video import VideoFrameCollator
+        from pypaimon.table.row.blob import VideoFrameDescriptor
+        path = tmp_path / "two-tracks.mp4"
+        path.write_bytes(payload)
+        connection = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+        table = connection.create_table("frames", schema=pa.schema([
+            ("frame_index", pa.int64()), ("video", pa.large_binary())]),
+            options={"video-frame-field": "video"})
+        table.add_video(str(path), pa.table({"frame_index": list(range(12))}))
+        row = table.scan().to_arrow().to_pylist()[0]
+        descriptor = VideoFrameDescriptor.deserialize(row["video"])
+        assert descriptor.uri.endswith(".video")
+        collator = VideoFrameCollator(
+            table.raw_table, video_column="video",
+            decoder_factory=lambda stream: _open_video_decoder(stream, backend=backend),
+            decode_fn=lambda *args: None)
+        decoder = collator._decoder(descriptor.payload_descriptor)
+    else:
+        decoder = _open_video_decoder(source, backend=backend)
     try:
-        assert not decoder._indexed
+        assert decoder.stream_index == 0
+        assert VideoDecoder(payload, seek_mode="exact").stream_index == 1
         actual = decoder.get_frames_at(indices=[11, 0, 5])
-        expected = VideoDecoder(payload, seek_mode="exact").get_frames_at(indices=[11, 0, 5])
+        expected = VideoDecoder(payload, stream_index=0, seek_mode="exact").get_frames_at(indices=[11, 0, 5])
         np.testing.assert_array_equal(actual.data.numpy(), expected.data.numpy())
     finally:
-        decoder.close()
+        if collator is not None:
+            collator.close()
+        source.close()
 
 
 def test_signed_composition_offsets():
@@ -391,6 +421,7 @@ def test_replica_decoders_share_and_release_timeline(tmp_path, variable):
         decode_fn=lambda *args: None)
     fake = SimpleNamespace(VideoDecoder=Mock())
     with patch.dict(sys.modules, {'torchcodec.decoders': fake}), patch(
+            'pypaimon.multimodal.lerobot.dataset._open_torchcodec_decoder', return_value=Mock()), patch(
             'pypaimon.multimodal.lerobot.indexed_torchcodec._timeline', wraps=_timeline) as parse:
         try:
             decoders = [collator._decoder(frame.payload_descriptor, replica=i)

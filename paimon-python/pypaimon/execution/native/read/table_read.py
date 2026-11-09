@@ -38,8 +38,7 @@ _NATIVE_READ_FILE_FORMATS = frozenset({
     CoreOptions.FILE_FORMAT_MOSAIC,
 })
 _NATIVE_READ_FILE_SUFFIXES = tuple('.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
-# Released native readers use the previous five-array layout.
-_NATIVE_BLOB_FILE_SUFFIXES = ('.blob',)
+_NATIVE_BLOB_FILE_SUFFIXES = ('.blob', '.video')
 
 
 def _prepare_native_read(table, predicate: Optional[Predicate] = None,

@@ -27,13 +27,15 @@ from pypaimon.table.row.generic_row import GenericRow
 pytestmark = pytest.mark.native_plan
 
 
-def _table(tmp_path, multiple, external=False, catalog=None):
+def _table(tmp_path, multiple, external=False, catalog=None, variant=False):
     if catalog is None:
         catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
     catalog.create_database('db', True)
     names = ['left', 'right'] if multiple else ['left']
     fields = [DataField(0, 'id', AtomicType('INT'))]
     fields.extend(DataField(index + 1, name, AtomicType('BLOB')) for index, name in enumerate(names))
+    if variant:
+        fields.append(DataField(len(fields), 'payload', AtomicType('VARIANT')))
     options = {'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
                'video-frame-field': ','.join(names), 'write.native.enabled': 'false'}
     if external:
@@ -57,6 +59,10 @@ def _table(tmp_path, multiple, external=False, catalog=None):
                     uri = sources[ordinal + index * 2]
                     descriptor = VideoFrameDescriptor(uri, 0, 10, frame)
                     values.append(Blob.from_descriptor(table.file_io.uri_reader_factory.create(uri), descriptor))
+            if variant:
+                from pypaimon.data.generic_variant import GenericVariant
+                values.append(GenericVariant.to_arrow_array([
+                    GenericVariant.from_python({'score': 1.5})])[0].as_py())
             writer.write_row(GenericRow(values, table.fields))
         commit.commit(writer.prepare_commit())
     finally:
@@ -79,8 +85,8 @@ def _read(table, native, projection=None, filtered=False, limit=None):
     splits = builder.new_scan().plan().splits()
     if native:
         with patch(
-            'pypaimon.execution.native.read.table_read.native_read',
-            side_effect=AssertionError('old native video reader')
+            'pypaimon.execution.native.read.table_read.NativeTableRead._fallback',
+            side_effect=AssertionError('unexpected Python fallback')
         ):
             return read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()
     return read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()
@@ -89,7 +95,7 @@ def _read(table, native, projection=None, filtered=False, limit=None):
 @pytest.mark.parametrize('multiple', [False, True])
 @pytest.mark.parametrize('external', [False, True])
 @pytest.mark.parametrize('descriptor_mode', [False, True])
-def test_native_video_reads_fall_back_with_frame_descriptors(
+def test_native_video_reads_frame_descriptors(
         tmp_path, multiple, external, descriptor_mode):
     table = _table(tmp_path, multiple, external).copy({'blob-as-descriptor': str(descriptor_mode).lower()})
     expected = sorted(_read(table, False)[0].to_pylist(), key=lambda row: row['id'])
@@ -136,7 +142,7 @@ def test_native_update_of_normal_columns_keeps_packed_video_frames(tmp_path, nat
     assert [row['left'] for row in after] == [row['left'] for row in before]
 
 
-def test_native_video_placeholder_falls_back_but_null_stops_older_frames(tmp_path):
+def test_native_video_placeholder_preserves_older_frames_but_null_stops_them(tmp_path):
     from dataclasses import replace
     from pypaimon.execution.python.write.video_format_writer import VideoFormatWriter
     from pypaimon.read.split import DataSplit
@@ -165,8 +171,8 @@ def test_native_video_placeholder_falls_back_but_null_stops_older_frames(tmp_pat
     expected = [dict(row) for row in before]
     expected[1]['left'] = None
     with patch(
-        'pypaimon.execution.native.read.table_read.native_read',
-        side_effect=AssertionError('old native video reader')
+        'pypaimon.execution.native.read.table_read.NativeTableRead._fallback',
+        side_effect=AssertionError('unexpected Python fallback')
     ):
         for result in (read.to_arrow([combined]), read.to_arrow_batch_reader([combined]).read_all()):
             assert result.to_pylist() == expected
@@ -192,3 +198,16 @@ def test_native_video_deletion_vectors_filter_both_arrow_readers(tmp_path, nativ
         assert [row['id'] for row in rows] == [1, 3, 4, 5]
         assert all(VideoFrameDescriptor.deserialize(row[name]).frame_index in (3, 7, 8, 10)
                    for row in rows for name in ('left', 'right'))
+
+
+def test_variant_projection_with_full_video_split_stays_native(tmp_path):
+    table = _table(tmp_path, False, variant=True).copy({'read.native.enabled': 'true'})
+    splits = table.new_read_builder().new_scan().plan().splits()
+    assert any(file.file_name.endswith('.video') for split in splits for file in split.files)
+    builder = table.new_read_builder().with_projection({
+        'score': "try_variant_get(payload, '$.score', 'float')"})
+    read = builder.new_read()
+    with patch('pypaimon.execution.native.read.table_read.NativeTableRead._fallback',
+               side_effect=AssertionError('unexpected Python fallback')):
+        for result in (read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()):
+            assert result.to_pydict() == {'score': [1.5] * 6}
