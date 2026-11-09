@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from collections import Counter
 from typing import List, Optional
 
 from pypaimon.catalog.catalog_exception import (ColumnAlreadyExistException,
@@ -748,12 +749,13 @@ def _validate_primary_key_blob_fields(
 
 
 def _duplicates(names: List[str]) -> List[str]:
-    return sorted({name for name in names if names.count(name) > 1})
+    return sorted(name for name, count in Counter(names).items() if count > 1)
 
 
 def _validate_columns_and_keys(schema: Schema):
-    """The checks Java's Schema runs on creation. A key that is not a column is
-    persisted otherwise, and the table can then neither be loaded nor dropped."""
+    """Java's Schema checks that column names are unique and that partition
+    and primary keys do not repeat and are columns. A key that is not a column
+    is persisted otherwise, and the table can then no longer be loaded."""
     names = [field.name for field in schema.fields]
     if _duplicates(names):
         raise ValueError(
@@ -1177,6 +1179,9 @@ class SchemaManager:
             options=new_options,
             comment=new_comment
         )
+        # Java's Schema runs the same checks when an alter builds it, which
+        # rejects, for example, renaming a primary key twice in one alter.
+        _validate_columns_and_keys(new_schema)
 
         return TableSchema(
             version=old_table_schema.version,

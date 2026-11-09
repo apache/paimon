@@ -30,7 +30,7 @@ from pypaimon.common.options.options import Options
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, RowType)
 from pypaimon.schema.schema import Schema
-from pypaimon.schema.schema_change import RemoveOption, SetOption
+from pypaimon.schema.schema_change import RemoveOption, SchemaChange, SetOption
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
@@ -863,7 +863,7 @@ class TestRowTrackingValidation(unittest.TestCase):
 
 
 class TestColumnAndKeyValidation(unittest.TestCase):
-    """create_table rejects the column and key lists Java's Schema rejects."""
+    """create_table and alter_table reject the column and key lists Java's Schema rejects."""
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
@@ -896,9 +896,28 @@ class TestColumnAndKeyValidation(unittest.TestCase):
                 with self.assertRaises(TableNotExistException):
                     self.catalog.get_table("default.t")
 
+    def test_alter_table_rejects_rename_that_drops_a_primary_key(self):
+        self.catalog.create_table(
+            "default.t", self._schema(primary_keys=["id"]), False)
+        # Each rename maps the old key once, so the key becomes 'middle'.
+        with self.assertRaisesRegex(
+                RuntimeError, "should include all primary key constraint"):
+            self.catalog.alter_table("default.t", [
+                SchemaChange.rename_column("id", "middle"),
+                SchemaChange.rename_column("middle", "new_id"),
+            ], False)
+        table = self.catalog.get_table("default.t")
+        self.assertEqual(0, table.table_schema.id)
+        self.assertEqual(["id"], table.table_schema.primary_keys)
+
+        self.catalog.alter_table(
+            "default.t", [SchemaChange.rename_column("id", "new_id")], False)
+        self.assertEqual(
+            ["new_id"], self.catalog.get_table("default.t").table_schema.primary_keys)
+
     def test_create_table_rejects_duplicates(self):
         cases = [
-            ({"names": ("id", "id")}, "Table column"),
+            ({"names": ("id", "id")}, "must not contain duplicate fields"),
             ({"partition_keys": ["dt", "dt"]}, "Partition key constraint"),
             ({"primary_keys": ["id", "id"]}, "Primary key constraint"),
         ]
