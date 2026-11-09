@@ -73,7 +73,8 @@ public class KerberosLoginProvider {
                 return true;
             }
         } else {
-            throwProxyUserNotSupported();
+            LOG.debug("Login from ProxyUser");
+            return true;
         }
 
         LOG.debug("Login is NOT possible");
@@ -95,12 +96,9 @@ public class KerberosLoginProvider {
             UserGroupInformation.loginUserFromSubject(null);
             LOG.info("Loaded user's ticket cache successfully");
         } else {
-            throwProxyUserNotSupported();
+            // Proxy user: credentials are already provided by the proxy mechanism.
+            LOG.debug("Skipping Kerberos login for proxy user");
         }
-    }
-
-    private void throwProxyUserNotSupported() {
-        throw new UnsupportedOperationException("Proxy user is not supported");
     }
 
     public static boolean isProxyUser(UserGroupInformation ugi) {
