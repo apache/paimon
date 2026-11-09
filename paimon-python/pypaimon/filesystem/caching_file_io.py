@@ -540,6 +540,9 @@ class CachingFileIO(FileIO):
     def try_to_write_atomic(self, *args, **kwargs):
         return self._delegate.try_to_write_atomic(*args, **kwargs)
 
+    def create_file_if_absent(self, path: str, content: str) -> bool:
+        return self._delegate.create_file_if_absent(path, content)
+
     def create_blob_presigned_url(self, *args, **kwargs):
         return self._delegate.create_blob_presigned_url(*args, **kwargs)
 

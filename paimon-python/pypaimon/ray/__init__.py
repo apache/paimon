@@ -33,11 +33,13 @@ from pypaimon.ray.read_by_row_id import read_by_row_id
 from pypaimon.ray.process_row_id_ranges import process_row_id_ranges
 from pypaimon.ray.hdf5 import load_from_hdf5
 from pypaimon.ray.rosbag import load_from_rosbag
+from pypaimon.ray.recoverable_write import write_episodes
 
 __all__ = [
     "read_paimon",
     "map_with_blobs",
     "write_paimon",
+    "write_episodes",
     "bucket_join",
     "range_join",
     "merge_into",
