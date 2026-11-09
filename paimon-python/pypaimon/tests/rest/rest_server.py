@@ -58,6 +58,8 @@ from pypaimon.api.api_response import (ConfigResponse, CreatePartitionsResponse,
                                        ListTagsResponse,
                                        PagedList, Partition,
                                        RESTResponse, ErrorResponse)
+from pypaimon.api.model import (CreateModelRequest, GetModelResponse,
+                                ListModelsResponse)
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
@@ -71,6 +73,8 @@ from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 TableAlreadyExistException,
                                                 FunctionNotExistException,
                                                 FunctionAlreadyExistException,
+                                                ModelAlreadyExistException,
+                                                ModelNotExistException,
                                                 DefinitionAlreadyExistException,
                                                 DefinitionNotExistException,
                                                 TagNotExistException,
@@ -905,6 +909,7 @@ class RESTCatalogServer:
         self.table_latest_snapshot_store: Dict[str, str] = {}
         self.table_partitions_store: Dict[str, List] = {}
         self.function_store: Dict[str, Dict] = {}  # key: "db.func_name", value: GetFunctionResponse-like dict
+        self.model_store: Dict[str, GetModelResponse] = {}
         # Tag store: key = full table name, value = {tag_name: GetTagResponse}.
         self.tag_store: Dict[str, Dict[str, GetTagResponse]] = {}
         # Branch store: key = full table name, value = set of branch names.
@@ -1143,6 +1148,8 @@ class RESTCatalogServer:
                         return self._tables_handle(method, data, database_name, parameters)
                     elif resource_type == ResourcePaths.FUNCTIONS:
                         return self._functions_handle(method, data, database_name, parameters)
+                    elif resource_type == ResourcePaths.MODELS:
+                        return self._models_handle(method, data, database_name, parameters)
                     elif resource_type == ResourcePaths.FUNCTION_DETAILS:
                         return self._function_details_handle(database_name, parameters)
 
@@ -1158,6 +1165,8 @@ class RESTCatalogServer:
                         return self._table_partitions_handle(method, data, identifier, parameters)
                     elif resource_type == ResourcePaths.FUNCTIONS:
                         return self._function_handle(method, data, identifier)
+                    elif resource_type == ResourcePaths.MODELS:
+                        return self._model_handle(method, identifier)
 
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
@@ -1201,6 +1210,16 @@ class RESTCatalogServer:
         except FunctionAlreadyExistException as e:
             response = ErrorResponse(
                 ErrorResponse.RESOURCE_TYPE_FUNCTION, e.identifier.get_full_name(), str(e), 409
+            )
+            return self._mock_response(response, 409)
+        except ModelNotExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_MODEL, e.identifier.get_object_name(), str(e), 404
+            )
+            return self._mock_response(response, 404)
+        except ModelAlreadyExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_MODEL, e.identifier.get_object_name(), str(e), 409
             )
             return self._mock_response(response, 409)
         except TagNotExistException as e:
@@ -1634,6 +1653,49 @@ class RESTCatalogServer:
             return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
+    # ======================= Model Handlers =================================
+
+    def _models_handle(self, method: str, data: str, database_name: str,
+                       parameters: Dict[str, str]) -> Tuple[str, int]:
+        """Handle database-scoped model list and create operations."""
+        if method == "GET":
+            models = [
+                response for key, response in self.model_store.items()
+                if Identifier.from_string(key).get_database_name() == database_name
+            ]
+            page = self._build_paged_entities(
+                models, self._get_max_results(parameters), parameters.get(PAGE_TOKEN))
+            return self._mock_response(
+                ListModelsResponse(page.elements, page.next_page_token), 200)
+
+        if method == "POST":
+            request = CreateModelRequest.from_dict(json.loads(data))
+            identifier = Identifier.create(database_name, request.name)
+            key = identifier.get_full_name()
+            if key in self.model_store:
+                raise ModelAlreadyExistException(identifier)
+            response = GetModelResponse(
+                name=request.name,
+                definition=request.definition,
+                comment=request.comment,
+            )
+            self.model_store[key] = response
+            return self._mock_response(response, 200)
+
+        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _model_handle(self, method: str, identifier: Identifier) -> Tuple[str, int]:
+        """Handle individual model get and drop operations."""
+        key = identifier.get_full_name()
+        if key not in self.model_store:
+            raise ModelNotExistException(identifier)
+        if method == "GET":
+            return self._mock_response(self.model_store[key], 200)
+        if method == "DELETE":
+            del self.model_store[key]
+            return self._mock_response("", 200)
+        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
     def _function_details_handle(self, database_name: str,
                                  parameters: Dict[str, str]) -> Tuple[str, int]:
         """Handle function details listing."""
@@ -1998,6 +2060,9 @@ class RESTCatalogServer:
                 self._drop_table_access(self._table_identifier(name), self.table_metadata_store.pop(name))
                 self.table_latest_snapshot_store.pop(name, None)
                 self.table_partitions_store.pop(name, None)
+            for name in [name for name in self.model_store
+                         if Identifier.from_string(name).get_database_name() == database_name]:
+                del self.model_store[name]
             self._remove_permissions(lambda resource: resource.get_database() == database_name)
             return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
