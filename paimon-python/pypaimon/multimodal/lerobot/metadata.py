@@ -234,7 +234,11 @@ def _prepare_metadata_tables(connection, frames_table, metadata):
     tables = {}
     for name, schema in schemas.items():
         identifier = identifiers[name]
-        options = {"bucket": "-1"}
+        options = {
+            "bucket": "-1",
+            "row-tracking.enabled": "true",
+            "data-evolution.enabled": "true",
+        }
         pandas_metadata = (schema.metadata or {}).get(b"pandas")
         if pandas_metadata is not None:
             options[_PANDAS_METADATA_OPTION] = pandas_metadata.decode(

@@ -1439,6 +1439,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     for name, dtype in (
                         ("index", "int64"), ("episode_index", "int64"),
                         ("frame_index", "int64"), ("task_index", "int64"),
+                        ("subtask_index", "int64"),
                         ("timestamp", "float32"),
                     )
                 },
@@ -1450,6 +1451,10 @@ class LeRobotValidationTest(unittest.TestCase):
             pq.write_table(pa.Table.from_pandas(pd.DataFrame(
                 {"task_index": [0]}, index=pd.Index(["pick"], name="task"),
             )), source / "meta" / "tasks.parquet")
+            subtasks = pa.Table.from_pandas(pd.DataFrame(
+                {"subtask_index": [0]}, index=pd.Index(["reach"], name="instruction"),
+            ))
+            pq.write_table(subtasks, source / "meta" / "subtasks.parquet")
             pq.write_table(pa.table({
                 "episode_index": [0], "dataset_from_index": [0],
                 "dataset_to_index": [1], "tasks": [["pick"]], "length": [1],
@@ -1457,7 +1462,7 @@ class LeRobotValidationTest(unittest.TestCase):
             }), source / "meta" / "episodes" / "file.parquet")
             frames = pa.table({
                 "index": [0], "episode_index": [0], "frame_index": [0],
-                "task_index": [0], "timestamp": pa.array([0], pa.float32()),
+                "task_index": [0], "subtask_index": [0], "timestamp": pa.array([0], pa.float32()),
             })
             pq.write_table(frames, source / "data" / "file.parquet")
             connection = pmm.connect(options={"warehouse": str(root / "wh")})
@@ -1467,6 +1472,19 @@ class LeRobotValidationTest(unittest.TestCase):
                     return_value=_RemoteLeRobotFileIO(source, remote)):
                 self.assertIsNone(connection.load_from_lerobot("robot", remote))
 
+            for suffix in ("", "__info", "__stats", "__episodes", "__tasks", "__subtasks"):
+                with self.subTest(table="robot" + suffix):
+                    component = connection.get_table("robot" + suffix)
+                    schema = component.raw_table.table_schema
+                    self.assertEqual("true", schema.options["data-evolution.enabled"])
+                    self.assertEqual("true", schema.options["row-tracking.enabled"])
+                    self.assertEqual("-1", schema.options.get("bucket", "-1"))
+                    self.assertFalse(schema.primary_keys)
+                    self.assertGreater(component.scan().to_arrow().num_rows, 0)
+            subtasks_table, stored_subtasks = _catalog_arrow(connection, "robot__subtasks")
+            pd.testing.assert_frame_equal(
+                subtasks.to_pandas(),
+                _restore_pandas_metadata(subtasks_table, stored_subtasks).to_pandas())
             self.assertEqual(info, _catalog_metadata(connection, "robot__info"))
             self.assertEqual(stats, _catalog_metadata(connection, "robot__stats"))
             table = connection.get_table("robot")
@@ -1474,7 +1492,7 @@ class LeRobotValidationTest(unittest.TestCase):
             table.add(frames)
             snapshots = connection.create_lerobot_tag("robot", "training")
             self.assertEqual({
-                "frames": 3, "info": 1, "stats": 1, "episodes": 1, "tasks": 1,
+                "frames": 3, "info": 1, "stats": 1, "episodes": 1, "tasks": 1, "subtasks": 1,
             }, snapshots)
             table.add(frames)
             self.assertEqual(2, table.scan(tag_name="training").to_arrow().num_rows)
@@ -1520,7 +1538,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 connection.load_from_lerobot("no_stats", remote, tag_name="ready")
             with self.assertRaises(TableNotExistException):
                 connection.get_table("no_stats__stats")
-            self.assertEqual({"frames": 2, "info": 1, "episodes": 1, "tasks": 1},
+            self.assertEqual({"frames": 2, "info": 1, "episodes": 1, "tasks": 1, "subtasks": 1},
                              connection.create_lerobot_tag("no_stats", "training"))
 
     def test_self_contained_import_rejects_table_branches(self):
