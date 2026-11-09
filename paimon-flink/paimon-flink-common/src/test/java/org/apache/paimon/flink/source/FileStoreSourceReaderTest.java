@@ -33,6 +33,8 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.connector.source.SourceEvent;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
 import org.apache.flink.metrics.CharacterFilter;
@@ -41,6 +43,8 @@ import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.metrics.SimpleCounter;
+import org.apache.flink.metrics.groups.SourceReaderMetricGroup;
 import org.apache.flink.table.data.RowData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,10 +54,14 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.flink.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Answers.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** Unit tests for the {@link FileStoreSourceReader}. */
 public class FileStoreSourceReaderTest {
@@ -150,6 +158,78 @@ public class FileStoreSourceReaderTest {
         reader.close();
 
         assertThat(tableRead.ioManager()).isNotNull();
+    }
+
+    @Test
+    public void testCheckpointAndRestoreInsideBatch() throws Exception {
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
+        FileStoreSourceSplit split =
+                newSourceSplit(
+                        "s",
+                        row(1),
+                        0,
+                        rw.writeFiles(
+                                row(1),
+                                0,
+                                Arrays.asList(
+                                        Tuple2.of(1L, 10L),
+                                        Tuple2.of(2L, 20L),
+                                        Tuple2.of(3L, 30L),
+                                        Tuple2.of(4L, 40L))));
+        Counter inputCounter = new SimpleCounter();
+        SourceReaderMetricGroup metricGroup =
+                mock(SourceReaderMetricGroup.class, RETURNS_DEEP_STUBS);
+        when(metricGroup.getIOMetricGroup().getNumRecordsInCounter()).thenReturn(inputCounter);
+        TestingReaderContext context = new TestingReaderContext(new Configuration(), metricGroup);
+        List<FileStoreSourceSplit> checkpoint;
+        try (FileStoreSourceReader reader = createBudgetedReader(context, rw)) {
+            reader.addSplits(Collections.singletonList(split));
+            reader.start();
+            TestingReaderOutput<RowData> output = new TestingReaderOutput<>();
+            for (int i = 1; i <= 2; i++) {
+                reader.isAvailable().get(30, TimeUnit.SECONDS);
+                reader.pollNext(output);
+                assertThat(output.getEmittedRecords()).hasSize(i);
+                assertThat(output.getEmittedRecords().get(i - 1).getLong(0)).isEqualTo(i * 10L);
+                assertThat(reader.snapshotState(1L).get(0).recordsToSkip()).isEqualTo(i);
+            }
+            assertThat(inputCounter.getCount()).isEqualTo(2);
+            checkpoint = reader.snapshotState(1L);
+            // Round-trip the existing state format, rather than depending on in-memory objects.
+            FileStoreSourceSplitSerializer serializer = new FileStoreSourceSplitSerializer();
+            checkpoint =
+                    Collections.singletonList(
+                            serializer.deserialize(
+                                    serializer.getVersion(),
+                                    serializer.serialize(checkpoint.get(0))));
+        }
+        try (FileStoreSourceReader restored =
+                createBudgetedReader(new TestingReaderContext(), rw)) {
+            restored.addSplits(checkpoint);
+            restored.start();
+            TestingReaderOutput<RowData> output = new TestingReaderOutput<>();
+            for (int i = 1; i <= 2; i++) {
+                restored.isAvailable().get(30, TimeUnit.SECONDS);
+                restored.pollNext(output);
+                assertThat(output.getEmittedRecords()).hasSize(i);
+                assertThat(output.getEmittedRecords().get(i - 1).getLong(0))
+                        .isEqualTo((i + 2) * 10L);
+            }
+        }
+    }
+
+    private FileStoreSourceReader createBudgetedReader(
+            TestingReaderContext context, TestChangelogDataReadWrite rw) {
+        return new FileStoreSourceReader(
+                context,
+                rw.createReadWithKey(),
+                new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
+                IOManager.create(tempDir.toString()),
+                null,
+                null,
+                null,
+                false,
+                1);
     }
 
     protected FileStoreSourceReader createReader(TestingReaderContext context) {

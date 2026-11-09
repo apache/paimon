@@ -35,9 +35,12 @@ import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.Set;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
- * A {@link RecordsWithSplitIds} which contains only one iterator record. This can ensure that there
- * will be no checkpoint segmentation in iterator consumption.
+ * A {@link RecordsWithSplitIds} owning one physical batch. By default the batch is emitted as one
+ * iterator record. An optional emission budget exposes bounded views of the same batch, allowing
+ * checkpoints between views without recycling the underlying batch early.
  */
 public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordIterator<RowData>> {
 
@@ -49,13 +52,23 @@ public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordItera
 
     private final Set<String> finishedSplits;
 
+    @Nullable private final BoundedIterator boundedIterator;
+
+    private boolean recycled;
+
     private FlinkRecordsWithSplitIds(
             @Nullable String splitId,
             @Nullable RecordIterator<RowData> recordsForSplit,
-            Set<String> finishedSplits) {
+            Set<String> finishedSplits,
+            int maxRecordsPerPoll) {
+        checkArgument(maxRecordsPerPoll >= 0, "scan.max-records-per-poll must not be negative.");
         this.splitId = splitId;
         this.recordsForSplit = recordsForSplit;
         this.finishedSplits = finishedSplits;
+        this.boundedIterator =
+                recordsForSplit != null && maxRecordsPerPoll > 0
+                        ? new BoundedIterator(recordsForSplit, maxRecordsPerPoll)
+                        : null;
     }
 
     @Nullable
@@ -80,6 +93,13 @@ public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordItera
         }
 
         RecordIterator<RowData> recordsForSplit = this.recordsForSplitCurrent.get();
+        if (recordsForSplit != null && boundedIterator != null) {
+            if (boundedIterator.startNext()) {
+                return boundedIterator;
+            }
+            this.recordsForSplitCurrent.set(null);
+            return null;
+        }
         this.recordsForSplitCurrent.set(null);
         return recordsForSplit;
     }
@@ -90,19 +110,72 @@ public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordItera
     }
 
     @Override
-    public void recycle() {
-        if (recordsForSplit != null) {
+    public synchronized void recycle() {
+        if (!recycled && recordsForSplit != null) {
+            recycled = true;
             recordsForSplit.releaseBatch();
         }
     }
 
     public static FlinkRecordsWithSplitIds forRecords(
             String splitId, RecordIterator<RowData> recordsForSplit) {
-        return new FlinkRecordsWithSplitIds(splitId, recordsForSplit, Collections.emptySet());
+        return forRecords(splitId, recordsForSplit, 0);
+    }
+
+    public static FlinkRecordsWithSplitIds forRecords(
+            String splitId, RecordIterator<RowData> recordsForSplit, int maxRecordsPerPoll) {
+        return new FlinkRecordsWithSplitIds(
+                splitId, recordsForSplit, Collections.emptySet(), maxRecordsPerPoll);
     }
 
     public static FlinkRecordsWithSplitIds finishedSplit(String splitId) {
-        return new FlinkRecordsWithSplitIds(null, null, Collections.singleton(splitId));
+        return new FlinkRecordsWithSplitIds(null, null, Collections.singleton(splitId), 0);
+    }
+
+    private static class BoundedIterator implements RecordIterator<RowData> {
+
+        private final RecordIterator<RowData> delegate;
+        private final int budget;
+        private int remaining;
+        private boolean exhausted;
+        @Nullable private RecordAndPosition<RowData> first;
+
+        private BoundedIterator(RecordIterator<RowData> delegate, int budget) {
+            this.delegate = delegate;
+            this.budget = budget;
+        }
+
+        private boolean startNext() {
+            if (exhausted) {
+                return false;
+            }
+            first = delegate.next();
+            exhausted = first == null;
+            remaining = budget;
+            return !exhausted;
+        }
+
+        @Nullable
+        @Override
+        public RecordAndPosition<RowData> next() {
+            if (remaining == 0 || exhausted) {
+                return null;
+            }
+            remaining--;
+            if (first != null) {
+                RecordAndPosition<RowData> record = first;
+                first = null;
+                return record;
+            }
+            RecordAndPosition<RowData> record = delegate.next();
+            exhausted = record == null;
+            return record;
+        }
+
+        @Override
+        public void releaseBatch() {
+            // A view does not own the batch. Only FlinkRecordsWithSplitIds.recycle releases it.
+        }
     }
 
     public static void emitRecord(

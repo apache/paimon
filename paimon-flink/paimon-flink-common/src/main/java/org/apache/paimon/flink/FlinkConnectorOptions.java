@@ -174,6 +174,18 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "The max snapshot count to scan per checkpoint. Not limited when it's negative.");
 
+    public static final ConfigOption<Integer> SCAN_MAX_RECORDS_PER_POLL =
+            key("scan.max-records-per-poll")
+                    .intType()
+                    .defaultValue(0)
+                    .withDescription(
+                            "Maximum rows emitted by one poll of the native streaming Flink source. "
+                                    + "Zero preserves whole-batch emission; positive values allow yielding within "
+                                    + "a physical read batch without changing read.batch-size or split state. "
+                                    + "With consumer-id, requires consumer.mode=at-least-once. "
+                                    + "Not supported by bounded, dedicated-split or checkpoint-aligned sources. "
+                                    + "A blocking single record can still delay a checkpoint.");
+
     public static final ConfigOption<SplitAssignMode> SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE =
             key("scan.split-enumerator.mode")
                     .enumType(SplitAssignMode.class)

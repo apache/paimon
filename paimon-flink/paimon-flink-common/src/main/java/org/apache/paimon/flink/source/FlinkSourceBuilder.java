@@ -281,6 +281,24 @@ public class FlinkSourceBuilder {
         }
     }
 
+    private void checkEmissionBudget() {
+        int budget = conf.get(FlinkConnectorOptions.SCAN_MAX_RECORDS_PER_POLL);
+        checkArgument(budget >= 0, "scan.max-records-per-poll must not be negative.");
+        if (budget == 0) {
+            return;
+        }
+        checkArgument(
+                Boolean.FALSE.equals(sourceBounded)
+                        && !conf.get(FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION)
+                        && !conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_ENABLED)
+                        && !(conf.contains(CoreOptions.CONSUMER_ID)
+                                && conf.get(CoreOptions.CONSUMER_CONSISTENCY_MODE)
+                                        == CoreOptions.ConsumerMode.EXACTLY_ONCE),
+                "scan.max-records-per-poll requires the native streaming source. "
+                        + "With consumer-id, set consumer.mode=at-least-once. "
+                        + "Bounded, dedicated-split and checkpoint-aligned sources are not supported.");
+    }
+
     private @Nullable DataStream<RowData> buildPostponeMergeSource() {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         if (fileStoreTable.coreOptions().startupMode() == CoreOptions.StartupMode.COMPACTED_FULL) {
@@ -516,6 +534,7 @@ public class FlinkSourceBuilder {
      * RowData} type information.
      */
     public Source<RowData, ?, ?> buildSource() {
+        checkEmissionBudget();
         return new PaimonDataStreamSource<>(createSource(), table);
     }
 
@@ -525,6 +544,8 @@ public class FlinkSourceBuilder {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
         checkConsumerId();
+
+        checkEmissionBudget();
 
         if (sourceBounded && PostponeMergeOnRead.configured(table)) {
             DataStream<RowData> mergeSource = buildPostponeMergeSource();
