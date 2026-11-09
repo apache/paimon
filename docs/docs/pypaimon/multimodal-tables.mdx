@@ -297,6 +297,10 @@ print(result.updated_rows)  # 2
 
 # A schema-only addition does not backfill values or create a data snapshot.
 frames.add_columns(pa.schema([("caption", pa.string())]))
+
+# Recompute an existing column without changing its schema.
+result = frames.compute_columns(
+    ["image_size"], inputs=["image"], fn=image_sizes, batch_size=128)
 ```
 
 For embeddings, declare a fixed-size list such as
@@ -307,6 +311,17 @@ most `batch_size` rows. Functions should be deterministic and side-effect-free.
 Ordinary BLOB inputs are bytes; video-frame inputs retain their descriptor
 semantics and need decoding in the function. With no `fn`, omit `inputs`.
 New columns must be nullable; existing column names are rejected by `add_columns`.
+
+`compute_columns(columns, *, inputs, fn, batch_size=1024)` fills or replaces
+existing columns without changing the schema. `columns` is a name or a sequence
+of names; output types and nullability come from the table schema. The function
+follows the same batch contract as `add_columns`. Every call processes all
+visible rows in the captured source snapshot, including rows whose output values
+are already non-NULL. Inputs may also be outputs. Partition and system columns
+cannot be outputs; use `replace_video` for configured video-frame outputs.
+Use this method after a schema-only addition or to recompute a column left by
+failed `add_columns` computation. A new call starts a complete run, without
+resuming an earlier run or retrying function calls automatically.
 
 `merge_columns` accepts the same key forms as `merge`: a name, a list of names,
 or a mapping from target names to source names. It updates only non-key columns
@@ -322,15 +337,16 @@ use `replace_video` to replace configured video-frame columns.
 `merge_columns` delegates matching and updates to the standard MERGE executor.
 With a compatible `pypaimon_rust` runtime and `write.native.enabled=true`,
 supported tables use native MERGE without a separate Python target-key scan.
-`add_columns` can use the native shard reader and writer with the same option;
-the supplied `fn` still runs in Python. Unsupported native routes select Python
-before execution.
+`add_columns` and `compute_columns` can use the native shard reader and writer
+with the same option; the supplied `fn` still runs in Python. Unsupported native
+routes select Python before execution.
 
-Both methods retain files for untouched columns. Computing an image embedding
+All three methods retain files for untouched columns. Computing an image embedding
 still reads the image, but does not rewrite it. Normal partial updates write the
 selected columns over affected file row-ID ranges; they are not single-cell
-physical writes. `add_columns` buffers outputs per original file group so a
-small function batch does not repeatedly rewrite the same group.
+physical writes. `add_columns` and `compute_columns` buffer outputs per original
+file group so a small function batch does not repeatedly rewrite the same group.
+`batch_size` bounds function input rows, not total memory usage.
 
 These are local, single-writer operations on a current full-table view.
 As with other table methods, reopen the table after external schema changes.
@@ -342,8 +358,10 @@ The APIs do not provide automatic retries, checkpoints, or distributed jobs.
 
 Successful calls return `ColumnUpdateResult` with added column names,
 the source and final data snapshot IDs, and the schema ID. `updated_rows` is the
-backfilled row count for `add_columns` (zero for schema-only additions) and `None`
-for `merge_columns`, because MERGE does not return logical row counts. Schema-only changes
+computed row count for `add_columns` (zero for schema-only additions) and
+`compute_columns`, and `None` for `merge_columns`, because MERGE does not return
+logical row counts. `compute_columns` returns `added_columns=()` and leaves
+the schema unchanged on success or failure. Schema-only changes
 leave the data snapshot ID unchanged. Schema publication and data publication
 are separate operations. Failures during schema publication or data preparation
 and commit raise
