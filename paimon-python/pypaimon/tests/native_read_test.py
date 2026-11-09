@@ -692,7 +692,8 @@ def test_native_avro_read_uses_native_path():
     native.assert_called_once()
 
 
-@pytest.mark.parametrize('file_name', ['camera.unsupported', 'data.vector.unsupported', 'data.vector.vortex'])
+@pytest.mark.parametrize('file_name', [
+    'camera.unsupported', 'camera.video', 'data.vector.unsupported', 'data.vector.vortex'])
 def test_native_read_falls_back_for_unsupported_dedicated_file(file_name):
     read = _table_read()
     schema = pa.schema([('id', pa.int32())])
@@ -705,7 +706,7 @@ def test_native_read_falls_back_for_unsupported_dedicated_file(file_name):
     native.assert_not_called()
 
 
-@pytest.mark.parametrize('file_name', ['picture.blob', 'camera.video', 'data.vector.parquet'])
+@pytest.mark.parametrize('file_name', ['picture.blob', 'data.vector.parquet'])
 def test_native_read_supports_dedicated_files_and_forwards_parallelism(file_name):
     read = _table_read()
     schema = pa.schema([('id', pa.int32())])

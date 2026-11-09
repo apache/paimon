@@ -353,8 +353,7 @@ class MultimodalTableTest(unittest.TestCase):
         from fractions import Fraction
         from pathlib import Path
         from pypaimon.multimodal.lerobot.dataset import _PyAVVideoDecoder
-        from pypaimon.table.row.blob import Blob
-        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+        from pypaimon.multimodal.mp4 import ContainerFrameIndex
 
         cases = [(0, 24), (3, Fraction(30000, 1001)), (3, 59.94), (3, Fraction(60000, 1001))]
         for number, (b_frames, fps) in enumerate(cases):
@@ -376,14 +375,9 @@ class MultimodalTableTest(unittest.TestCase):
                 self.assertTrue(all(r["episode_id"] == 42 for r in rows))
                 descriptor = pmm.VideoFrameDescriptor.deserialize(rows[0]["video"])
                 self.assertTrue(descriptor.uri.endswith(".video"))
-                index_descriptor = descriptor.keyframe_index_descriptor
-                self.assertIsNotNone(index_descriptor)
-                index = VideoKeyframeIndex.deserialize(Blob.from_file(
-                    table.raw_table.file_io, index_descriptor.uri,
-                    index_descriptor.offset, index_descriptor.length).to_data(), descriptor.length)
-                self.assertGreater(len(index.keyframes), 1)
                 _, bodies = table.scan().read_blobs("video")
                 payload = bodies["video"][0]
+                index = ContainerFrameIndex(io.BytesIO(payload), len(payload))
                 self.assertTrue(all(b == payload for b in bodies["video"]))
                 with av.open(io.BytesIO(payload)) as container:
                     stream = container.streams.video[0]
@@ -986,7 +980,7 @@ class MultimodalTableTest(unittest.TestCase):
         np = pytest.importorskip("numpy")
         from fractions import Fraction
         from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
-        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+        from pypaimon.multimodal.mp4 import ContainerFrameIndex
 
         table = self.conn.create_table(
             "local_video_indexes",
@@ -1030,21 +1024,13 @@ class MultimodalTableTest(unittest.TestCase):
         ]
         self.assertEqual([0, 1], [value.frame_index for value in descriptors])
         for descriptor in descriptors:
-            stored_index = descriptor.keyframe_index_descriptor
-            self.assertIsNotNone(stored_index)
-            VideoKeyframeIndex.deserialize(
-                Blob.from_file(
-                    table.raw_table.file_io,
-                    stored_index.uri,
-                    stored_index.offset,
-                    stored_index.length,
-                ).to_data(),
-                descriptor.length,
-            )
+            payload = Blob.from_file(table.raw_table.file_io, descriptor.uri,
+                                     descriptor.offset, descriptor.length).to_data()
+            self.assertEqual(open(video_path, "rb").read(), payload)
+            self.assertGreater(len(ContainerFrameIndex(io.BytesIO(payload), len(payload)).keyframes), 1)
 
-    def test_video_write_apis_preserve_existing_keyframe_index(self):
+    def test_video_write_apis_preserve_payload(self):
         from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
-        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
         table = self.conn.create_table(
             "indexed_video_write_apis",
@@ -1058,19 +1044,14 @@ class MultimodalTableTest(unittest.TestCase):
             }),
         )
         video = b"indexed-video"
-        index = VideoKeyframeIndex(
-            [(0, 1)], [(0, 0, 1)]
-        ).serialize()
         source_path = os.path.join(self.temp_dir, "indexed-source.mp4")
         with open(source_path, "wb") as output:
-            output.write(video + index)
+            output.write(video)
         source = VideoFrameDescriptor(
             "file://" + source_path,
             0,
             len(video),
             0,
-            len(video),
-            len(index),
         )
 
         table.add_video(source, [{"frame_id": 1}], first_frame=1)
@@ -1091,17 +1072,8 @@ class MultimodalTableTest(unittest.TestCase):
         ]
         self.assertEqual([1, 2, 3], [value.frame_index for value in descriptors])
         for descriptor in descriptors:
-            stored_index = descriptor.keyframe_index_descriptor
-            self.assertIsNotNone(stored_index)
-            self.assertEqual(
-                index,
-                Blob.from_file(
-                    table.raw_table.file_io,
-                    stored_index.uri,
-                    stored_index.offset,
-                    stored_index.length,
-                ).to_data(),
-            )
+            self.assertEqual(video, Blob.from_file(
+                table.raw_table.file_io, descriptor.uri, descriptor.offset, descriptor.length).to_data())
 
     def test_normal_update_preserves_video_descriptors(self):
         from pypaimon.table.row.blob import Blob
@@ -1245,7 +1217,7 @@ class MultimodalTableTest(unittest.TestCase):
 
         payload = Blob.from_local(video_path).to_descriptor()
         valid = VideoFrameDescriptor(
-            payload.uri, payload.offset, payload.length, 0, -1, 0
+            payload.uri, payload.offset, payload.length, 0
         ).serialize()
         with self.assertRaisesRegex(ValueError, "VideoFrameDescriptor"):
             table.add_batches([

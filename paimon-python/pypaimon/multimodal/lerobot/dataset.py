@@ -24,6 +24,7 @@ import math
 import operator
 import pickle
 import sys
+import struct
 import zlib
 from abc import ABC, abstractmethod
 from collections import OrderedDict
@@ -52,7 +53,7 @@ from pypaimon.multimodal.lerobot.schema import (
 from pypaimon.multimodal.lerobot.source import _info_dict
 from pypaimon.multimodal.table import _target_schema, _time_travel_table
 from pypaimon.multimodal.video import VideoFrameCollator, _VideoDecodePool
-from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+from pypaimon.multimodal.mp4 import ContainerFrameIndex
 
 
 _TORCH_DTYPE_NAMES = {
@@ -1559,17 +1560,11 @@ def _decode_video_windows_with_pool(
             window = [descriptors[p] for p in plan["windows"][key]]
             if not window or any(d is None for d in window):
                 return key, None
-            payload = window[0].payload_descriptor
+            payload = window[0].video_descriptor
             # Cross-file windows use the regular frame assembly path.
-            if any(d.payload_descriptor != payload for d in window):
+            if any(d.video_descriptor != payload for d in window):
                 return key, None
-            keyframe_index = window[0].keyframe_index_descriptor
-            if any(d.keyframe_index_descriptor != keyframe_index
-                   for d in window):
-                raise ValueError(
-                    "One video payload references different keyframe indexes."
-                )
-            requests.setdefault((payload, keyframe_index), []).append((
+            requests.setdefault((payload,), []).append((
                 offset, [d.frame_index for d in window]))
 
         if len(requests) == 1 and executor is not None:
@@ -1785,9 +1780,32 @@ def _video_decoder_fallback_errors():
 
 def _open_video_decoder(stream, backend=None, codec_threads=0):
     pyav_options = {"thread_count": codec_threads} if codec_threads else {}
-    keyframe_index = getattr(stream, "video_keyframe_index", None)
-    if not isinstance(keyframe_index, VideoKeyframeIndex):
-        keyframe_index = None
+    keyframe_index = getattr(stream, "__dict__", {}).get("video_keyframe_index")
+    if keyframe_index is None and isinstance(getattr(stream, "video_length", None), int):
+        cache = getattr(stream, "video_metadata_cache", None)
+        key = ("container", getattr(stream, "video_metadata_key", None))
+        keyframe_index = cache.get(key) if cache is not None else None
+        if keyframe_index is None:
+            try:
+                source = stream
+                hint = getattr(stream, "video_moov_range", (0, 0))
+                ranges = getattr(stream, "video_read_ranges", None)
+                if 0 < hint[1] <= 16 * 1024 * 1024 and callable(ranges):
+                    source = _RangeBackedVideo(stream.video_length, ranges)
+                    source.video_moov_range = hint
+                    source.prefetch([(0, min(65536, stream.video_length)), hint])
+                    stream.video_bootstrap = source
+                keyframe_index = ContainerFrameIndex(source, stream.video_length)
+            except (ValueError, OSError, EOFError, OverflowError, IndexError, struct.error):
+                bootstrap = getattr(stream, "video_bootstrap", None)
+                if bootstrap is not None:
+                    bootstrap.close()
+                    stream.video_bootstrap = None
+            finally:
+                stream.seek(0)
+            if keyframe_index is not None and cache is not None:
+                cache[key] = keyframe_index
+        stream.video_keyframe_index = keyframe_index
     if backend is None and keyframe_index is not None:
         try:
             decoder = _PyAVVideoDecoder(stream, keyframe_index, **pyav_options)
@@ -2017,9 +2035,6 @@ class _PyAVVideoDecoder:
         self._source = stream
         self._keyframe_index = keyframe_index
         self._thread_count = thread_count
-        self._anchor_ordinals = (
-            keyframe_index.ordinals
-            if keyframe_index is not None else [])
         self._container = None
         self._indexed_source = None
         self._stream = None
@@ -2109,7 +2124,24 @@ class _PyAVVideoDecoder:
         }
         missing = sorted(requested_set - set(frames))
         if missing:
-            frames.update(self._decode_indexed(missing))
+            try:
+                frames.update(self._decode_indexed(missing))
+            except (ValueError, OSError, RuntimeError):
+                if not isinstance(self._keyframe_index, ContainerFrameIndex):
+                    raise
+                import av
+                self.close()
+                self._keyframe_index = None
+                self._cache.clear()
+                self._timestamps = []
+                self._keyframes = []
+                self._next_index = 0
+                self._source.seek(0)
+                self._container = av.open(self._source)
+                self._stream = self._container.streams.video[0]
+                self._stream.thread_count = self._thread_count
+                self._frames = iter(self._container.decode(self._stream))
+                return [self[index] for index in requested]
         try:
             return [frames[index] for index in requested]
         except KeyError as error:
@@ -2123,8 +2155,12 @@ class _PyAVVideoDecoder:
         decoded = {}
         try:
             if self._container is None:
-                self._indexed_source = _RangeBackedVideo(
-                    self._video_length(), self._read_video_ranges)
+                self._indexed_source = getattr(self._source, "video_bootstrap", None)
+                if self._indexed_source is None:
+                    self._indexed_source = _RangeBackedVideo(
+                        self._video_length(), self._read_video_ranges)
+                else:
+                    self._source.video_bootstrap = None
                 self._indexed_source.prefetch(self._keyframe_index.metadata_ranges)
                 self._container = av.open(self._indexed_source)
                 self._stream = self._container.streams.video[0]
@@ -2153,8 +2189,7 @@ class _PyAVVideoDecoder:
         groups = {}
         ranges = []
         for index in indices:
-            preceding = bisect.bisect_right(
-                self._anchor_ordinals, index) - 1
+            preceding = mapping.preceding(index)
             if preceding < 0:
                 raise IndexError(
                     "Video frame index %d is out of range." % index)
@@ -2181,8 +2216,11 @@ class _PyAVVideoDecoder:
             decoded):
         anchor_ordinal, anchor_pts, unused_position = (
             self._keyframe_index.keyframes[anchor])
+        if isinstance(self._keyframe_index, ContainerFrameIndex):
+            if self._keyframe_index.scale * stream.time_base != 1:
+                raise ValueError("MP4 time base differs from the decoder.")
         container.seek(
-            anchor_pts, backward=True, any_frame=False, stream=stream)
+            int(anchor_pts), backward=True, any_frame=False, stream=stream)
         ordinal = anchor_ordinal
         found_anchor = False
         remaining = set(targets)
@@ -2192,6 +2230,11 @@ class _PyAVVideoDecoder:
                 if frame.pts != anchor_pts or not frame.key_frame:
                     continue
                 found_anchor = True
+            if isinstance(self._keyframe_index, ContainerFrameIndex):
+                timeline = self._keyframe_index.pts
+                if (ordinal >= len(timeline) or frame.pts is None
+                        or frame.pts != timeline[int(ordinal)]):
+                    raise ValueError("Decoded PTS differs from the MP4 sample table.")
             if ordinal in remaining:
                 found[ordinal] = self._tensor(frame)
                 remaining.remove(ordinal)

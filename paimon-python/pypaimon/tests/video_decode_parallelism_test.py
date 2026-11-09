@@ -224,7 +224,7 @@ class VideoDecodeParallelismTest(unittest.TestCase):
         pixels = torch.arange(4 * 4 * 5 * 3).reshape(4, 4, 5, 3).to(torch.uint8)
         frames = pixels.permute(0, 3, 1, 2)
         rows = {i: {"camera": VideoFrameDescriptor(
-            "video-%s" % (i // 4), 0, 1, i % 4, -1, 0).serialize()}
+            "video-%s" % (i // 4), 0, 1, i % 4).serialize()}
             for i in range(12)}
         plans = [{"windows": {"camera": w}} for w in (
             [0, 0, 2], [4, 5, 6], [8, 9, 10], [0, 1, 3])]
@@ -281,7 +281,7 @@ class VideoDecodeParallelismTest(unittest.TestCase):
         names = ["camera-%s" % i for i in range(3)]
         for collator, name in zip(collators, names):
             collator.video_column = name
-        rows = {0: {name: VideoFrameDescriptor(name, 0, 1, 0, -1, 0).serialize()
+        rows = {0: {name: VideoFrameDescriptor(name, 0, 1, 0).serialize()
                     for name in names}}
         plans = [{"windows": {name: [0] for name in names}}]
         features = {name: {"dtype": "video", "shape": [4, 5, 3]} for name in names}
@@ -400,7 +400,7 @@ class VideoDecodeParallelismTest(unittest.TestCase):
         from pypaimon.table.row.blob import VideoFrameDescriptor
 
         pixels = torch.arange(10 * 4 * 5 * 3).reshape(10, 4, 5, 3).to(torch.uint8)
-        rows = {i: {"camera": VideoFrameDescriptor("video", 0, 1, i, -1, 0).serialize()}
+        rows = {i: {"camera": VideoFrameDescriptor("video", 0, 1, i).serialize()}
                 for i in range(10)}
         windows = ([0, 0, 2], [2, 3, 4], [9, 7, 8], [0, 0, 2])
         plans = [{"windows": {"camera": indices}} for indices in windows]
@@ -452,7 +452,6 @@ class VideoDecodeParallelismTest(unittest.TestCase):
         except ImportError as error:
             self.skipTest(str(error))
         from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
-        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
         target = io.BytesIO()
         with av.open(target, mode="w", format="mp4") as container:
@@ -467,13 +466,11 @@ class VideoDecodeParallelismTest(unittest.TestCase):
             for packet in stream.encode():
                 container.mux(packet)
         payload = target.getvalue()
-        index = VideoKeyframeIndex.inspect(io.BytesIO(payload), len(payload))
         outputs = []
         for indexed in (False, True):
             for threads in (0, 1, 2):
                 source = io.BytesIO(payload)
                 if indexed:
-                    source.video_keyframe_index = index
                     source.video_length = len(payload)
                 decoder = _open_video_decoder(source, backend="pyav", codec_threads=threads)
                 try:
@@ -526,7 +523,7 @@ class VideoDecodeParallelismTest(unittest.TestCase):
             videos["video-%s" % video] = target.getvalue()
         rows = {i: {"camera": VideoFrameDescriptor(
             "video-%s" % (i // 8), 0, len(videos["video-%s" % (i // 8)]),
-            i % 8, -1, 0).serialize()} for i in range(24)}
+            i % 8).serialize()} for i in range(24)}
         plans = [{"windows": {"camera": indices}} for indices in (
             [0, 0, 3], [8, 9, 11], [16, 18, 19], [1, 2, 4])]
         outputs = []
@@ -580,7 +577,7 @@ class VideoDecodeParallelismTest(unittest.TestCase):
 
         windows = [[7, 2, 7], [0, 1, 2], [5, 6, 7], [2, 3, 4]]
         rows = {i: {"camera": VideoFrameDescriptor(
-            "one-video", 0, 1, i, -1, 0).serialize()} for i in range(8)}
+            "one-video", 0, 1, i).serialize()} for i in range(8)}
         plans = [{"windows": {"camera": window}} for window in windows]
         features = {"camera": {"dtype": "video", "shape": [4, 5, 3]}}
         for parallelism, capacity, replicas, expected in (
@@ -646,7 +643,7 @@ class VideoDecodeParallelismTest(unittest.TestCase):
 
         def decode(windows):
             rows = {i: {"camera": VideoFrameDescriptor(
-                "one-video", 0, 1, i, -1, 0).serialize()}
+                "one-video", 0, 1, i).serialize()}
                 for i in {index for window in windows for index in window}}
             plans = [{"windows": {"camera": window}} for window in windows]
             collator = self.collator(4)
@@ -694,10 +691,10 @@ class VideoDecodeParallelismTest(unittest.TestCase):
         collator = self.collator(2)
         descriptor = BlobDescriptor("one-video", 0, 1)
         with patch("pypaimon.multimodal.video.Blob.from_file", self.streams):
-            first = collator._decoder(descriptor, None, 0)
-            second = collator._decoder(descriptor, None, 1)
+            first = collator._decoder(descriptor, 0)
+            second = collator._decoder(descriptor, 1)
             self.assertIs(collator._decoder(descriptor), first)
-            third = collator._decoder(descriptor, None, 2)
+            third = collator._decoder(descriptor, 2)
             self.assertTrue(second.closed)
             self.assertFalse(first.closed)
             child = pickle.loads(pickle.dumps(collator))

@@ -160,22 +160,20 @@ class _EpisodeVideoSources(dict):
 
     def descriptors(self, uri, start, end, timestamps):
         from pypaimon.table.row.blob import VideoFrameDescriptor
-        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
         key = (uri, start, end)
         clip = self.clips.get(key)
         if clip is None:
             with self.delegate.create(uri).new_input_stream(uri) as source:
                 payload, mapping = remux_video_interval(source, start, end)
-            index = VideoKeyframeIndex.inspect(io.BytesIO(payload), len(payload)).serialize()
             name = "paimon-remux:episode-%d" % self.sequence
             self.sequence += 1
-            self.payloads[name] = payload + index
-            clip = (name, len(payload), len(index),
+            self.payloads[name] = payload
+            clip = (name, len(payload),
                     [float(t) for t, unused in mapping],
                     [ordinal for unused, ordinal in mapping])
             self.clips[key] = clip
-        name, length, index_length, times, ordinals = clip
+        name, length, times, ordinals = clip
         result = []
         for timestamp in timestamps:
             # Source timestamps have already been validated by the importer.
@@ -186,5 +184,5 @@ class _EpisodeVideoSources(dict):
                 raise ValueError("Remux cannot map source timestamp %r in [%r, %r); clip range %r."
                                  % (timestamp, start, end, (times[:1], times[-1:])))
             result.append(VideoFrameDescriptor(
-                name, 0, length, ordinals[candidates[0]], length, index_length).serialize())
+                name, 0, length, ordinals[candidates[0]]).serialize())
         return result
