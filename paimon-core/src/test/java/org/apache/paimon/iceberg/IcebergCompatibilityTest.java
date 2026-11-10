@@ -46,6 +46,10 @@ import org.apache.paimon.iceberg.metadata.IcebergRef;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.FileStoreCommitImpl;
+import org.apache.paimon.operation.RemoveUnexistingManifests;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
@@ -61,6 +65,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -68,6 +73,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -583,6 +589,312 @@ public class IcebergCompatibilityTest {
 
         write.close();
         commit.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRemoveUnexistingManifestsUpdatesIcebergMetadata(boolean removeAll)
+            throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.singletonList("pt"), Collections.emptyList(), -1);
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(IcebergCommitCallback.catalogTableMetadataPath(table));
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 10));
+            commit.commit(1, write.prepareCommit(false, 1));
+            write.write(GenericRow.of(2, 20));
+            commit.commit(2, write.prepareCommit(false, 2));
+            assertThat(getIcebergResult())
+                    .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+            Snapshot beforeRepair = table.snapshotManager().latestSnapshot();
+            IcebergMetadata baseMetadata =
+                    IcebergMetadata.fromPath(
+                            table.fileIO(), pathFactory.toMetadataPath(beforeRepair.id()));
+            List<ManifestFileMeta> manifests =
+                    table.store()
+                            .newScan()
+                            .manifestsReader()
+                            .read(beforeRepair, ScanMode.ALL)
+                            .allManifests;
+            assertThat(manifests).hasSize(2);
+            for (ManifestFileMeta manifest : manifests) {
+                if (removeAll
+                        || table.store().newScan().readManifest(manifest).stream()
+                                .anyMatch(entry -> entry.partition().getInt(0) == 1)) {
+                    assertThat(
+                                    table.fileIO()
+                                            .delete(
+                                                    table.store()
+                                                            .pathFactory()
+                                                            .toManifestFilePath(
+                                                                    manifest.fileName()),
+                                                    false))
+                            .isTrue();
+                }
+            }
+
+            assertThat(new RemoveUnexistingManifests(table).execute()).isTrue();
+            Snapshot repaired = table.snapshotManager().latestSnapshot();
+            assertThat(repaired.id()).isEqualTo(beforeRepair.id() + 1);
+            assertThat(repaired.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+            assertThat(table.fileIO().exists(pathFactory.toMetadataPath(repaired.id()))).isTrue();
+            IcebergMetadata repairedMetadata =
+                    IcebergMetadata.fromPath(
+                            table.fileIO(), pathFactory.toMetadataPath(repaired.id()));
+            assertThat(repairedMetadata.currentSnapshotId()).isEqualTo(repaired.id());
+            assertThat(repairedMetadata.tableUuid()).isEqualTo(baseMetadata.tableUuid());
+            assertThat(repairedMetadata.currentSnapshot().summary().operation())
+                    .isEqualTo("overwrite");
+            assertSummaryTotalsMatchManifests(table);
+            assertThat(
+                            table.fileIO()
+                                    .readFileUtf8(
+                                            new Path(
+                                                    pathFactory.metadataDirectory(),
+                                                    "version-hint.text"))
+                                    .trim())
+                    .isEqualTo(String.valueOf(repaired.id()));
+            if (removeAll) {
+                assertThat(getIcebergResult()).isEmpty();
+            } else {
+                assertThat(getIcebergResult()).containsExactly("Record(2, 20)");
+            }
+            assertThat(
+                            getIcebergResult(
+                                    icebergTable ->
+                                            IcebergGenerics.read(icebergTable)
+                                                    .useSnapshot(beforeRepair.id())
+                                                    .build(),
+                                    Record::toString))
+                    .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+            write.write(GenericRow.of(3, 30));
+            commit.commit(3, write.prepareCommit(false, 3));
+            if (removeAll) {
+                assertThat(getIcebergResult()).containsExactly("Record(3, 30)");
+            } else {
+                assertThat(getIcebergResult())
+                        .containsExactlyInAnyOrder("Record(2, 20)", "Record(3, 30)");
+            }
+        }
+    }
+
+    @Test
+    public void testPrimaryKeyRepairUpdatesIcebergWithoutCompaction() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.singletonList("pt"), Arrays.asList("pt", "k"), 1);
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write =
+                        table.newWrite(commitUser)
+                                .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            for (int pt = 1; pt <= 2; pt++) {
+                write.write(GenericRow.of(pt, 1, 10));
+                commit.commit(2 * pt - 1, write.prepareCommit(false, 2 * pt - 1));
+
+                BinaryRow partition = new BinaryRow(1);
+                BinaryRowWriter partitionWriter = new BinaryRowWriter(partition);
+                partitionWriter.writeInt(0, pt);
+                partitionWriter.complete();
+
+                write.write(GenericRow.of(pt, 1, 20));
+                write.compact(partition, 0, true);
+                commit.commit(2 * pt, write.prepareCommit(true, 2 * pt));
+            }
+        }
+
+        Snapshot beforeRepair = table.snapshotManager().latestSnapshot();
+        assertThat(beforeRepair.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(table.store().newScan().withSnapshot(beforeRepair.id()).plan().files())
+                .hasSize(2)
+                .allSatisfy(
+                        entry ->
+                                assertThat(entry.file().level())
+                                        .isEqualTo(table.coreOptions().numLevels() - 1));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 1, 20)", "Record(2, 1, 20)");
+
+        List<ManifestFileMeta> manifests =
+                table.store()
+                        .newScan()
+                        .manifestsReader()
+                        .read(beforeRepair, ScanMode.ALL)
+                        .allManifests;
+        int removedManifests = 0;
+        for (ManifestFileMeta manifest : manifests) {
+            if (table.store().newScan().readManifest(manifest).stream()
+                    .anyMatch(entry -> entry.partition().getInt(0) == 1)) {
+                assertThat(
+                                table.fileIO()
+                                        .delete(
+                                                table.store()
+                                                        .pathFactory()
+                                                        .toManifestFilePath(manifest.fileName()),
+                                                false))
+                        .isTrue();
+                removedManifests++;
+            }
+        }
+        assertThat(removedManifests).isPositive();
+        // Iceberg still references the compacted data files until repair publishes new metadata.
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 1, 20)", "Record(2, 1, 20)");
+
+        // The writers are closed. Repair must update Iceberg without another write or compaction.
+        assertThat(new RemoveUnexistingManifests(table).execute()).isTrue();
+        Snapshot repaired = table.snapshotManager().latestSnapshot();
+        assertThat(repaired.id()).isEqualTo(beforeRepair.id() + 1);
+        assertThat(repaired.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        assertThat(table.store().manifestListFactory().create().readDeltaManifests(repaired))
+                .isEmpty();
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(IcebergCommitCallback.catalogTableMetadataPath(table));
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(repaired.id()));
+        assertThat(metadata.currentSnapshotId()).isEqualTo(repaired.id());
+        assertThat(metadata.currentSnapshot().summary().operation()).isEqualTo("overwrite");
+        assertThat(metadata.currentSnapshot().summary().getSummary())
+                .containsEntry("total-data-files", "1")
+                .containsEntry("total-records", "1")
+                .containsEntry("deleted-data-files", "1")
+                .containsEntry("deleted-records", "1");
+        assertSummaryTotalsMatchManifests(table);
+        assertThat(getIcebergResult()).containsExactly("Record(2, 1, 20)");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRetryManifestReplacementMetadata(boolean missingBase) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(IcebergCommitCallback.catalogTableMetadataPath(table));
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 10));
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+
+        // Publish a replacement while the mirror is disabled, then recover through retry.
+        FileStoreTable disabled =
+                table.copy(
+                        Collections.singletonMap(
+                                IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "disabled"));
+        Snapshot before = table.snapshotManager().latestSnapshot();
+        Pair<String, Long> emptyManifestList =
+                table.store().manifestListFactory().create().write(Collections.emptyList());
+        String repairUser = UUID.randomUUID().toString();
+        try (FileStoreCommitImpl commit =
+                (FileStoreCommitImpl) disabled.store().newCommit(repairUser, disabled)) {
+            assertThat(commit.replaceManifestList(before, 0L, emptyManifestList, emptyManifestList))
+                    .isTrue();
+        }
+        if (missingBase) {
+            assertThat(table.fileIO().delete(pathFactory.toMetadataPath(before.id()), false))
+                    .isTrue();
+        }
+
+        try (IcebergCommitCallback callback = new IcebergCommitCallback(table, repairUser)) {
+            callback.retry(new ManifestCommittable(Long.MAX_VALUE));
+            callback.retry(new ManifestCommittable(Long.MAX_VALUE));
+        }
+        long repairedId = before.id() + 1;
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(repairedId));
+        assertThat(metadata.currentSnapshotId()).isEqualTo(repairedId);
+        assertSummaryTotalsMatchManifests(table);
+        assertThat(getIcebergResult()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testManifestReplacementRefreshesDeletionVectors(boolean clearIndex)
+            throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "true");
+        options.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        options);
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write =
+                        table.newWrite(commitUser)
+                                .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 10));
+            write.write(GenericRow.of(2, 20));
+            commit.commit(1, write.prepareCommit(false, 1));
+            write.write(GenericRow.ofKind(RowKind.DELETE, 2, 20));
+            write.compact(BinaryRow.EMPTY_ROW, 0, false);
+            commit.commit(2, write.prepareCommit(true, 2));
+        }
+        Snapshot before = table.snapshotManager().latestSnapshot();
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(IcebergCommitCallback.catalogTableMetadataPath(table));
+        IcebergMetadata baseMetadata =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(before.id()));
+        assertThat(baseMetadata.currentSnapshot().summary().getSummary())
+                .containsEntry("total-delete-files", "1");
+
+        ManifestList manifestList = table.store().manifestListFactory().create();
+        Pair<String, Long> baseManifestList =
+                manifestList.write(manifestList.readDataManifests(before));
+        Pair<String, Long> emptyManifestList = manifestList.write(Collections.emptyList());
+        try (FileStoreCommitImpl commit =
+                (FileStoreCommitImpl) table.store().newCommit(commitUser, table)) {
+            assertThat(
+                            commit.replaceManifestList(
+                                    before,
+                                    before.totalRecordCount(),
+                                    baseManifestList,
+                                    emptyManifestList,
+                                    clearIndex ? null : before.indexManifest(),
+                                    before.nextRowId()))
+                    .isTrue();
+        }
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(), pathFactory.toMetadataPath(before.id() + 1));
+        assertThat(metadata.tableUuid()).isEqualTo(baseMetadata.tableUuid());
+        assertThat(metadata.currentSnapshot().summary().getSummary())
+                .containsEntry("total-delete-files", clearIndex ? "0" : "1")
+                .containsEntry("total-position-deletes", clearIndex ? "0" : "1")
+                .containsEntry("changed-partition-count", clearIndex ? "1" : "0");
+        assertThat(metadata.nextRowId()).isEqualTo(baseMetadata.nextRowId());
+        long deletedRows =
+                IcebergManifestList.create(table, pathFactory)
+                        .read(new Path(metadata.currentSnapshot().manifestList()).getName())
+                        .stream()
+                        .filter(meta -> meta.content() == IcebergManifestFileMeta.Content.DELETES)
+                        .mapToLong(IcebergManifestFileMeta::liveRowsCount)
+                        .sum();
+        assertThat(deletedRows).isEqualTo(clearIndex ? 0L : 1L);
     }
 
     @Test

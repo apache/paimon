@@ -1675,17 +1675,25 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
             @Nullable Map<String, String> properties) {
-        return replaceManifestListOnce(
-                latest,
-                totalRecordCount,
-                baseManifestList,
-                deltaManifestList,
-                indexManifest,
-                nextRowId,
-                properties);
+        Snapshot snapshot =
+                replaceManifestListOnce(
+                        latest,
+                        totalRecordCount,
+                        baseManifestList,
+                        deltaManifestList,
+                        indexManifest,
+                        nextRowId,
+                        properties);
+        if (snapshot == null) {
+            return false;
+        }
+        // Like regular commits, run post-commit callbacks after releasing the commit lock.
+        commitCallbacks.forEach(callback -> callback.onManifestReplacement(snapshot));
+        return true;
     }
 
-    private boolean replaceManifestListOnce(
+    @Nullable
+    private Snapshot replaceManifestListOnce(
             Snapshot latest,
             long totalRecordCount,
             Pair<String, Long> baseManifestList,
@@ -1705,7 +1713,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 properties));
     }
 
-    private boolean replaceManifestListOnceWithoutLock(
+    @Nullable
+    private Snapshot replaceManifestListOnceWithoutLock(
             Snapshot latest,
             long totalRecordCount,
             Pair<String, Long> baseManifestList,
@@ -1715,7 +1724,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Map<String, String> properties) {
         Snapshot head = snapshotManager.latestSnapshot();
         if (head == null || !head.equals(latest)) {
-            return false;
+            return null;
         }
         Snapshot newSnapshot =
                 new Snapshot(
@@ -1743,7 +1752,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         nextRowId,
                         null);
 
-        return commitSnapshotImpl(latest, newSnapshot, emptyList());
+        return commitSnapshotImpl(latest, newSnapshot, emptyList()) ? newSnapshot : null;
     }
 
     @Override
