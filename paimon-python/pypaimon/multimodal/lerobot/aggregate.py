@@ -250,8 +250,9 @@ def _same_fields(left, right):
                     for name in right.names))
 
 
-def _plan_merge(plans, fps_mode="dataset", extra_dataset_fields=None):
+def _plan_merge(plans, extra_dataset_fields=None):
     first = plans[0]
+    mixed_fps = len({plan["metadata"]["fps"] for plan in plans}) > 1
     reserved_frame_fields = {
         _DATASET_INDEX_COLUMN, _SOURCE_FRAME_INDEX_COLUMN,
     }
@@ -264,7 +265,7 @@ def _plan_merge(plans, fps_mode="dataset", extra_dataset_fields=None):
     metadata["episodes_schema"] = pa.schema([
         field for field in metadata["episodes_schema"]
         if not field.name.startswith("stats/")
-        and not (fps_mode == "source" and field.name == _EPISODE_FPS_COLUMN)
+        and not (mixed_fps and field.name == _EPISODE_FPS_COLUMN)
     ], metadata=metadata["episodes_schema"].metadata)
     required_episode_fields = set(_EPISODE_CONTROL_COLUMNS) | {
         "videos/%s/%s" % (name, suffix)
@@ -286,8 +287,6 @@ def _plan_merge(plans, fps_mode="dataset", extra_dataset_fields=None):
     for ordinal, plan in enumerate(plans):
         other = plan["info"]
         compared_keys = ("codebase_version", "robot_type")
-        if fps_mode == "dataset":
-            compared_keys += ("fps",)
         for key in compared_keys:
             if info.get(key) != other.get(key):
                 raise ValueError("LeRobot source %d has incompatible info.%s." % (ordinal, key))
@@ -305,7 +304,8 @@ def _plan_merge(plans, fps_mode="dataset", extra_dataset_fields=None):
                for name in required_episode_fields):
             raise ValueError("LeRobot source %d has incompatible Episode schema." % ordinal)
         # Validate every Episode before creating any target table.
-        plan["metadata"]["fps_mode"] = fps_mode
+        if mixed_fps:
+            plan["metadata"]["fps_mode"] = "source"
         try:
             for name in plan["videos"]:
                 _video_fps(other, other["features"][name], name)
@@ -359,15 +359,13 @@ def _plan_merge(plans, fps_mode="dataset", extra_dataset_fields=None):
         }
         for ordinal, plan in enumerate(plans)
     ], schema=pa.schema(list(_DATASETS_SCHEMA) + _text_fields_schema(extra_dataset_fields or {})))
-    metadata["fps_mode"] = fps_mode
+    metadata["fps_mode"] = "source" if mixed_fps else "dataset"
     info.update(total_frames=frame_offset, total_episodes=episode_offset,
                 total_tasks=metadata["tasks_table"].num_rows,
                 splits={"train": "0:%d" % episode_offset})
-    mixed_fps = len({plan["metadata"]["fps"] for plan in plans}) > 1
     info.pop("fps_mode", None)
-    if fps_mode == "source":
-        info["fps_mode"] = "source"
     if mixed_fps:
+        info["fps_mode"] = "source"
         info["fps"] = None
         for feature in info["features"].values():
             if feature.get("dtype") != "video":
@@ -479,7 +477,7 @@ def _merged_episodes(plans, schema):
 
 def _import_sources(connection, table_name, sources, batch_size, options,
                     source_options, tag_name, parallelism=1,
-                    fps_mode="auto", dataset_name=None, extra_dataset_fields=None):
+                    dataset_name=None, extra_dataset_fields=None):
     from functools import partial
     from pypaimon.multimodal.lerobot.api import _create_target_table, _validated_counts
 
@@ -514,9 +512,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                           "schema": schema, "videos": videos,
                           "extra_dataset_fields": _read_text_fields(resolved, extra_dataset_fields),
                           "metadata": _load_dataset_metadata(dataset, info, resolved)})
-        if fps_mode == "auto":
-            fps_mode = "source" if len({plan["metadata"]["fps"] for plan in plans}) > 1 else "dataset"
-        metadata, stats = _plan_merge(plans, fps_mode, extra_dataset_fields)
+        metadata, stats = _plan_merge(plans, extra_dataset_fields)
         target_schema = plans[0]["schema"]
         for field in (
                 pa.field(_DATASET_INDEX_COLUMN, pa.int64(), nullable=False),

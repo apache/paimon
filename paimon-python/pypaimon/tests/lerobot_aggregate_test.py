@@ -112,9 +112,10 @@ def source(root, tasks=("pick", "place"), subtasks=("reach", "grasp"), video=Fal
 
 
 @pytest.fixture
-def setup(tmp_path):
+def setup(tmp_path, request):
     a = source(tmp_path / "a")
-    b = source(tmp_path / "b", tasks=("place", "stack"), subtasks=("grasp", "release"), value=20)
+    b = source(tmp_path / "b", tasks=("place", "stack"), subtasks=("grasp", "release"), value=20,
+               fps=getattr(request, "param", 10))
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     return conn, [a, b]
 
@@ -502,7 +503,7 @@ def test_merge_preserves_integer_statistics(setup):
     assert _merge_stats([summary, summary])["count"] == [2 * (2**53 + 1)]
 
 
-@pytest.mark.parametrize("field", ["fps", "robot_type", "features", "stats"])
+@pytest.mark.parametrize("field", ["robot_type", "features", "stats"])
 def test_incompatible_sources_fail_before_creation(setup, field):
     conn, sources = setup
     root = Path(sources[1][7:])
@@ -514,10 +515,10 @@ def test_incompatible_sources_fail_before_creation(setup, field):
         if field == "features":
             info[field]["action"]["names"] = ["different", "axes"]
         else:
-            info[field] = 20 if field == "fps" else "different"
+            info[field] = "different"
         path.write_text(json.dumps(info))
     with pytest.raises(ValueError):
-        conn.load_from_lerobot("merged", sources, fps_mode="dataset")
+        conn.load_from_lerobot("merged", sources)
     with pytest.raises(TableNotExistException):
         conn.get_table("merged_frames")
 
@@ -538,12 +539,12 @@ def test_missing_stats_and_existing_target(setup):
 def test_single_source_metadata_opt_in(setup, import_parallelism):
     pytest.importorskip("torch")
     conn, sources = setup
-    conn.load_from_lerobot("single", sources[0], fps_mode="source",
+    conn.load_from_lerobot("single", sources[0], dataset_name="single",
                            parallelism=import_parallelism)
     reader = pm.PaimonLeRobotDataset(conn.get_table("single_frames"))
     info = reader.reader.meta.info
     assert info["fps"] == 10
-    assert info["fps_mode"] == "source"
+    assert "fps_mode" not in info
     assert [json.loads(value)["fps"] for value in
             rows(conn, "single_datasets")["info"].to_pylist()] == [10]
     assert rows(conn, "single_episodes")["dataset_index"].to_pylist() == [0, 0]
@@ -568,9 +569,8 @@ def test_source_info_remains_distinct_from_merged_info(setup):
             for value in datasets["info"].to_pylist()] == [0, 1]
 
 
-@pytest.mark.parametrize("fps_mode", ["dataset", "source"])
 @pytest.mark.parametrize("dataset_index", [None, 0, 1])
-def test_source_selection_derives_unequal_ranges_from_info(setup, fps_mode, dataset_index):
+def test_source_selection_derives_unequal_ranges_from_info(setup, dataset_index):
     pytest.importorskip("datasets")
     pytest.importorskip("torch")
     conn, sources = setup
@@ -585,7 +585,7 @@ def test_source_selection_derives_unequal_ranges_from_info(setup, fps_mode, data
     path.write_text(json.dumps(info))
     for uri in sources:
         (Path(uri[7:]) / "meta/stats.json").unlink()
-    conn.load_from_lerobot("merged", sources, fps_mode=fps_mode)
+    conn.load_from_lerobot("merged", sources)
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), dataset_index=dataset_index)
     try:
         indices = list(range(7)) if dataset_index is None else (
@@ -610,7 +610,7 @@ def test_source_info_counts_must_match_episode_layout(setup, field, counts):
     pytest.importorskip("datasets")
     pytest.importorskip("torch")
     conn, sources = setup
-    conn.load_from_lerobot("merged", sources, fps_mode="source")
+    conn.load_from_lerobot("merged", sources)
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"))
     try:
         for dataset, count in zip(reader.meta.datasets, counts):
@@ -693,7 +693,7 @@ def test_video_sources_with_identical_paths(tmp_path, import_parallelism):
     sources = [source(tmp_path / "a", video=True, value=0),
                source(tmp_path / "b", video=True, value=100)]
     conn.load_from_lerobot("merged", sources, batch_size=2, tag_name="train",
-                           parallelism=import_parallelism, fps_mode="source")
+                           parallelism=import_parallelism)
     table = conn.get_table("merged_frames").raw_table
     imported = rows(conn, "merged_frames").sort_by("index")
     episodes = episode_rows(conn, "merged_episodes")
@@ -731,11 +731,6 @@ def test_mixed_fps_group_keeps_episode_rates(tmp_path, import_parallelism):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     sources = [source(tmp_path / "a", video=True, fps=25, frames=16),
                source(tmp_path / "b", video=True, fps=30, value=100, frames=16)]
-    with pytest.raises(ValueError, match="incompatible info.fps"):
-        conn.load_from_lerobot("default_rejected", sources, parallelism=import_parallelism,
-                               fps_mode="dataset")
-    with pytest.raises(TableNotExistException):
-        conn.get_table("default_rejected_frames")
     conn.load_from_lerobot("merged", sources, batch_size=2, tag_name="train",
                            parallelism=import_parallelism)
     info = metadata(conn, "info")
@@ -796,7 +791,7 @@ def test_vocabulary_columns_without_pandas_index_are_preserved(setup):
             path = root / ("meta/%s.parquet" % component)
             table = pq.read_table(path).replace_schema_metadata(None)
             pq.write_table(table, path)
-    conn.load_from_lerobot("merged", sources, fps_mode="source")
+    conn.load_from_lerobot("merged", sources)
     dataset = rows(conn, "merged_datasets").sort_by("index").to_pylist()[0]
     for component in ("tasks", "subtasks"):
         expected = pq.read_table(Path(sources[0][7:]) / ("meta/%s.parquet" % component))
@@ -921,23 +916,15 @@ def test_ray_worker_failure_does_not_commit(setup, ray_cluster):
     assert all(Path(uri[7:]).is_dir() for uri in sources)
 
 
-@pytest.mark.parametrize("mode", [None, "mixed", "", 1, ["episode"]])
-def test_invalid_fps_mode_before_io(tmp_path, mode):
-    conn = pm.connect(options={"warehouse": str(tmp_path)})
-    with pytest.raises(ValueError, match="fps_mode"):
-        conn.load_from_lerobot("invalid", ["unused"], fps_mode=mode)
-    assert conn.catalog.list_databases() == []
-
-
-@pytest.mark.parametrize("multiple", [False, True])
+@pytest.mark.parametrize("setup", [20], indirect=True)
 @pytest.mark.parametrize("rate", [None, 0, -1, True, 10.5, 20])
-def test_source_fps_conflicts_before_creation(setup, tmp_path, multiple, rate):
+def test_source_fps_conflicts_before_creation(setup, tmp_path, rate):
     conn, sources = setup
     path = tmp_path / "a/meta/episodes/chunk-000/file-000.parquet"
     data = pq.read_table(path).append_column("fps", pa.array([rate, rate]))
     pq.write_table(data, path)
     with pytest.raises(ValueError, match="fps"):
-        conn.load_from_lerobot("invalid", sources if multiple else sources[0], fps_mode="source")
+        conn.load_from_lerobot("invalid", sources)
     with pytest.raises(TableNotExistException):
         conn.get_table("invalid_frames")
 
@@ -948,8 +935,8 @@ def test_existing_source_episode_fps(setup, tmp_path, import_parallelism, multip
     conn, sources = setup
     path = tmp_path / "a/meta/episodes/chunk-000/file-000.parquet"
     pq.write_table(pq.read_table(path).append_column("fps", pa.array([10, 10])), path)
-    conn.load_from_lerobot("merged", sources if multiple else sources[0],
-                           fps_mode="source", parallelism=import_parallelism)
+    conn.load_from_lerobot("merged", sources if multiple else [sources[0]],
+                           parallelism=import_parallelism)
     episodes = episode_rows(conn, "merged_episodes")
     assert "fps" not in episodes.column_names
     assert episodes["dataset_index"].to_pylist() == (
@@ -997,7 +984,8 @@ def test_merge_nullable_subtask_import(setup, tmp_path, import_parallelism, all_
         assert second["subtask_index"][0].item() == 0
 
 
-@pytest.mark.parametrize("rate", [None, 0, -1, True, 10.5, 20])
+@pytest.mark.parametrize("rate", [None, 0, -1, True, 10.5])
+@pytest.mark.parametrize("setup", [20], indirect=True)
 def test_reader_rejects_invalid_source_fps(setup, rate):
 
     pytest.importorskip("datasets")
@@ -1008,7 +996,7 @@ def test_reader_rejects_invalid_source_fps(setup, rate):
             raise AssertionError("Invalid FPS must fail before reading frames")
 
     conn, sources = setup
-    conn.load_from_lerobot("merged", sources, fps_mode="source")
+    conn.load_from_lerobot("merged", sources)
     meta = pm.PaimonLeRobotDataset(conn.get_table("merged_frames")).meta
     info = json.loads(meta.datasets[0]["info"])
     info["fps"] = rate
@@ -1024,7 +1012,7 @@ def test_reader_accepts_legacy_source_info(setup, legacy_fps):
     pytest.importorskip("datasets")
     pytest.importorskip("torch")
     conn, sources = setup
-    conn.load_from_lerobot("merged", sources, fps_mode="source")
+    conn.load_from_lerobot("merged", sources)
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"))
     try:
         for dataset in reader.meta.datasets:
@@ -1056,8 +1044,7 @@ def test_reader_requires_fps_without_episode_column(setup):
         pm.PaimonLeRobotDataset(conn.get_table("merged_frames"))
 
 
-@pytest.mark.parametrize("multiple", [False, True])
-def test_episode_fps_rejects_conflicting_video_feature(tmp_path, multiple):
+def test_episode_fps_rejects_conflicting_video_feature(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     uri = source(tmp_path / "source", video=True, fps=25)
     path = tmp_path / "source/meta/info.json"
@@ -1065,7 +1052,7 @@ def test_episode_fps_rejects_conflicting_video_feature(tmp_path, multiple):
     info["features"]["camera"]["info"]["video.fps"] = 30
     path.write_text(json.dumps(info))
     with pytest.raises(ValueError, match="FPS"):
-        conn.load_from_lerobot("invalid", [uri] if multiple else uri, fps_mode="source")
+        conn.load_from_lerobot("invalid", [uri])
     with pytest.raises(TableNotExistException):
         conn.get_table("invalid_frames")
 
@@ -1213,6 +1200,7 @@ def test_legacy_single_source_extensions(setup, mode):
         reader.close()
 
 
+@pytest.mark.parametrize("setup", [20], indirect=True)
 def test_source_mode_rejects_broken_episode_link(setup):
     pytest.importorskip("datasets")
     pytest.importorskip("torch")
@@ -1223,7 +1211,7 @@ def test_source_mode_rejects_broken_episode_link(setup):
             raise AssertionError("Invalid metadata must fail before reading")
 
     conn, sources = setup
-    conn.load_from_lerobot("merged", sources, fps_mode="source")
+    conn.load_from_lerobot("merged", sources)
     meta = pm.PaimonLeRobotDataset(conn.get_table("merged_frames")).meta
     episodes = meta.episodes.to_dict()
     episodes["dataset_index"][0] = 1
@@ -1509,8 +1497,7 @@ def test_merge_optional_video_metadata(tmp_path, key, value, reverse):
 
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
-@pytest.mark.parametrize("fps_mode", ["dataset", "source"])
-def test_merge_reserves_fps_mode(setup, import_parallelism, fps_mode):
+def test_merge_reserves_fps_mode(setup, import_parallelism):
     pytest.importorskip("datasets")
     pytest.importorskip("torch")
     conn, sources = setup
@@ -1519,13 +1506,10 @@ def test_merge_reserves_fps_mode(setup, import_parallelism, fps_mode):
         info = json.loads(path.read_text())
         info["fps_mode"] = "episode"
         path.write_text(json.dumps(info))
-    conn.load_from_lerobot("merged", sources, fps_mode=fps_mode,
+    conn.load_from_lerobot("merged", sources,
                            parallelism=import_parallelism, tag_name="train")
     info = metadata(conn, "info")
-    if fps_mode == "dataset":
-        assert "fps_mode" not in info
-    else:
-        assert info["fps_mode"] == "source"
+    assert "fps_mode" not in info
     for row in rows(conn, "merged_datasets").to_pylist():
         assert json.loads(row["info"])["fps_mode"] == "episode"
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), tag_name="train")

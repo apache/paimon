@@ -142,7 +142,6 @@ class MultimodalConnection:
             source_options=None,
             tag_name=None,
             parallelism=1,
-            fps_mode="auto",
             dataset_name=None,
             extra_dataset_fields=None) -> None:
         """Import LeRobot v3 sources using table_name as the group prefix.
@@ -160,7 +159,6 @@ class MultimodalConnection:
             source_options=source_options,
             tag_name=tag_name,
             parallelism=parallelism,
-            fps_mode=fps_mode,
             dataset_name=dataset_name,
             extra_dataset_fields=extra_dataset_fields,
         )

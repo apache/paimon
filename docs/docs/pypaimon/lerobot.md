@@ -104,9 +104,8 @@ source is rejected before creating tables to avoid losing original frame IDs.
 Sources must share robot type and training features. Each source retains its own
 FPS from `info`; different source frame rates are handled automatically. Use
 `PaimonLeRobotDataset` to train from mixed-FPS groups. Pass `dataset_index=N` to
-that reader to select one source. Advanced callers can still require equal FPS
-with `fps_mode="dataset"`, or explicitly select `fps_mode="source"`; the default
-is `fps_mode="auto"`.
+that reader to select one source. Frame-rate handling is automatic and does not
+require an import option.
 
 ### Extra dataset text fields
 

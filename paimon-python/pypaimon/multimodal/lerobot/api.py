@@ -77,7 +77,6 @@ def load_from_lerobot(
         source_options: Optional[Mapping[str, object]] = None,
         tag_name: Optional[str] = None,
         parallelism: int = 1,
-        fps_mode: str = "auto",
         dataset_name=None,
         extra_dataset_fields: Optional[Mapping[str, str]] = None,
 ) -> None:
@@ -103,8 +102,6 @@ def load_from_lerobot(
     if isinstance(parallelism, bool) or not isinstance(parallelism, int) \
             or parallelism <= 0:
         raise ValueError("parallelism must be a positive integer.")
-    if fps_mode not in ("auto", "dataset", "source"):
-        raise ValueError("fps_mode must be 'auto', 'dataset' or 'source'.")
     if dataset_name is not None:
         if isinstance(dataset_name, str):
             dataset_name = [dataset_name]
@@ -117,8 +114,7 @@ def load_from_lerobot(
     if extra_dataset_fields is not None:
         from pypaimon.multimodal.lerobot.aggregate import _DATASETS_SCHEMA
         extra_dataset_fields = _validated_text_fields(extra_dataset_fields, _DATASETS_SCHEMA.names)
-    if isinstance(source, (list, tuple)) or fps_mode == "source" \
-            or dataset_name is not None or extra_dataset_fields:
+    if isinstance(source, (list, tuple)) or dataset_name is not None or extra_dataset_fields:
         if not isinstance(source, (list, tuple)):
             source = [source]
         if not source:
@@ -129,7 +125,7 @@ def load_from_lerobot(
         return _import_sources(
             connection, table_name, source, batch_size, options,
             _validated_source_options(source_options), tag_name, parallelism,
-            fps_mode, dataset_name, extra_dataset_fields)
+            dataset_name, extra_dataset_fields)
     if parallelism > 1:
         from pypaimon.multimodal.lerobot.ray_loader import _require_ray, _ray_source_uri
         _require_ray()
