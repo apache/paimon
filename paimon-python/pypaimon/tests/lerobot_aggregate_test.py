@@ -500,6 +500,7 @@ def test_merge_keeps_source_specific_episode_statistics_in_json(setup):
         [1700000000123456789, None], type=pa.timestamp("ns", tz="UTC"))),
     ("stats/measurement/mean", pa.array(
         [Decimal("123456789.123"), None], type=pa.decimal128(12, 3))),
+    ("camera_intrinsics/head_left", pa.array([b"invalid", None])),
 ])
 def test_merge_rejects_non_json_episode_fields_before_create(setup, name, values):
     conn, sources = setup
@@ -1110,7 +1111,8 @@ def test_existing_source_episode_fps(setup, tmp_path, import_parallelism, multip
     conn.load_from_lerobot("merged", sources if multiple else [sources[0]],
                            parallelism=import_parallelism)
     episodes = episode_rows(conn, "merged_episodes")
-    assert "fps" not in episodes.column_names
+    assert episodes["fps"].to_pylist() == (
+        [10, 10, None, None] if multiple else [10, 10])
     assert episodes["dataset_index"].to_pylist() == (
         [0, 0, 1, 1] if multiple else [0, 0])
     assert [json.loads(value)["fps"] for value in
@@ -1311,10 +1313,7 @@ def test_default_fps_preserves_importer_contract(tmp_path, multiple, video_rate)
     pq.write_table(pq.read_table(path).append_column("fps", pa.array([10.0, 10.0])), path)
     conn.load_from_lerobot("merged", [uri] if multiple else uri)
     episodes = rows(conn, "merged_episodes")
-    if multiple:
-        assert "fps" not in episodes.column_names
-    else:
-        assert episodes["fps"].to_pylist() == [10.0, 10.0]
+    assert episodes["fps"].to_pylist() == [10.0, 10.0]
     assert "fps_mode" not in metadata(conn, "info")
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), video_backend="pyav")
     try:
@@ -1426,7 +1425,7 @@ def test_merge_archives_standard_vocabulary_columns(setup, import_parallelism):
 
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
-def test_merge_omits_unmapped_arrow_native_episode_fields(setup, import_parallelism):
+def test_merge_preserves_arrow_native_episode_extensions(setup, import_parallelism):
     conn, sources = setup
     for index, uri in enumerate(sources):
         path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
@@ -1440,8 +1439,11 @@ def test_merge_omits_unmapped_arrow_native_episode_fields(setup, import_parallel
         pq.write_table(table, path)
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
     episodes = episode_rows(conn, "merged_episodes")
-    assert not {"native_bytes", "captured_at", "measurement"}.intersection(
-        episodes.column_names)
+    names = ["native_bytes", "captured_at", "measurement"]
+    for index, uri in enumerate(sources):
+        expected = pq.read_table(Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet")
+        assert episodes.slice(index * 2, 2).select(names).to_pylist() == (
+            expected.select(names).to_pylist())
     assert rows(conn, "merged_frames").num_rows == 10
 
 
@@ -1492,7 +1494,7 @@ def test_training_projects_out_source_archives(setup, dataset_index):
 
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
-def test_merge_omits_unmapped_episode_timestamp(setup, import_parallelism):
+def test_merge_preserves_episode_timestamp(setup, import_parallelism):
     conn, sources = setup
     for uri in sources:
         path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
@@ -1501,7 +1503,8 @@ def test_merge_omits_unmapped_episode_timestamp(setup, import_parallelism):
         pq.write_table(data, path)
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
     data = episode_rows(conn, "merged_episodes")
-    assert "capture_time" not in data.column_names
+    expected = pq.read_table(Path(sources[0][7:]) / "meta/episodes/chunk-000/file-000.parquet")
+    assert data["capture_time"].to_pylist() == expected["capture_time"].to_pylist() * 2
     assert conn.catalog.get_tag(conn._identifier("merged_frames"), "train") is not None
 
 
@@ -1604,13 +1607,16 @@ def test_merge_source_specific_episode_extensions(setup, import_parallelism, rev
     pytest.importorskip("datasets")
     pytest.importorskip("torch")
     conn, sources = setup
+    original = sources[:]
     for index, uri in enumerate(sources):
         path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
         data = pq.read_table(path)
         if index == 1:
             data = data.append_column("vendor_note", pa.array(["note", None]))
+            data = data.append_column("camera_intrinsics/head_left", pa.array(
+                [[1.] * 8, [2.] * 8], type=pa.list_(pa.float32(), 8)))
         data = data.append_column("vendor_value", pa.array(
-            [1, 2] if index == 0 else [b"a", b"b"]))
+            [1, 2] if index == 0 else [3, 4]))
         field = pa.field("shared_note", pa.string(), nullable=index == 1)
         data = data.append_column(field, pa.array(["shared", "note"] if index == 0 else [None, "note"]))
         pq.write_table(data, path)
@@ -1618,14 +1624,54 @@ def test_merge_source_specific_episode_extensions(setup, import_parallelism, rev
         sources.reverse()
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
     data = episode_rows(conn, "merged_episodes")
-    assert "vendor_note" not in data.column_names
-    assert "vendor_value" not in data.column_names
-    assert "shared_note" not in data.column_names
+    assert data.schema.field("vendor_note").nullable
+    assert data.schema.field("camera_intrinsics").type == pa.string()
+    assert data.schema.field("camera_intrinsics").nullable
+    for ordinal, uri in enumerate(sources):
+        source_index = original.index(uri)
+        values = data.slice(ordinal * 2, 2)
+        assert values["vendor_note"].to_pylist() == (
+            [None, None] if source_index == 0 else ["note", None])
+        assert values["vendor_value"].to_pylist() == (
+            [1, 2] if source_index == 0 else [3, 4])
+        assert values["shared_note"].to_pylist() == (
+            ["shared", "note"] if source_index == 0 else [None, "note"])
+        assert [None if value is None else json.loads(value)
+                for value in values["camera_intrinsics"].to_pylist()] == (
+                    [None, None] if source_index == 0 else [
+                        {"head_left": [1.] * 8}, {"head_left": [2.] * 8}])
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), tag_name="train")
     try:
         assert [int(sample["episode_index"]) for sample in reader.get_items([0, 2, 5, 7])] == [0, 1, 2, 3]
     finally:
         reader.close()
+
+
+def test_merge_rejects_conflicting_episode_extension_types(setup):
+    conn, sources = setup
+    for index, uri in enumerate(sources):
+        path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
+        data = pq.read_table(path).append_column(
+            "vendor_value", pa.array([1, 2] if index == 0 else [b"a", b"b"]))
+        pq.write_table(data, path)
+    with pytest.raises(ValueError, match="incompatible type.*vendor_value"):
+        conn.load_from_lerobot("merged", sources)
+    with pytest.raises(TableNotExistException):
+        conn.get_table("merged_frames")
+
+
+def test_merge_rejects_episode_json_group_column_collision(setup):
+    conn, sources = setup
+    for index, uri in enumerate(sources):
+        path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
+        data = pq.read_table(path).append_column(
+            "camera_intrinsics" if index == 0 else "camera_intrinsics/head_left",
+            pa.array(["already a column"] * 2 if index == 0 else [[1.] * 8] * 2))
+        pq.write_table(data, path)
+    with pytest.raises(ValueError, match="reserved columns:.*camera_intrinsics"):
+        conn.load_from_lerobot("merged", sources)
+    with pytest.raises(TableNotExistException):
+        conn.get_table("merged_frames")
 
 
 def test_merge_rejects_incompatible_episode_controls(setup):
@@ -2020,6 +2066,17 @@ def test_schema_evolution_disabled_keeps_first_source_schema(setup, add_new):
     else:
         conn.load_from_lerobot("merged", sources, schema_evolution=False)
         assert rows(conn, "merged_frames")["temperature"].null_count == 5
+
+
+def test_schema_evolution_disabled_rejects_new_episode_json_group(setup):
+    conn, sources = setup
+    path = Path(sources[1][7:]) / "meta/episodes/chunk-000/file-000.parquet"
+    pq.write_table(pq.read_table(path).append_column(
+        "camera_intrinsics/head_left", pa.array([[1.] * 8] * 2)), path)
+    with pytest.raises(ValueError, match="schema_evolution disabled"):
+        conn.load_from_lerobot("merged", sources, schema_evolution=False)
+    with pytest.raises(TableNotExistException):
+        conn.get_table("merged_frames")
 
 
 @pytest.mark.parametrize("kind", ["frame", "shape"])

@@ -90,12 +90,14 @@ identifies a frame. The training reader derives continuous positions at read
 time. Source task/subtask ID-to-text mappings use `_datasets.tasks` and
 `_datasets.subtasks`; stats remain JSON.
 
-Merged `_episodes` keeps source-local Episode keys and frame ranges. Its
-`meta/`, `data/`, `videos/`, and `stats/` fields are grouped into JSON columns.
+Merged `_episodes` keeps source-local Episode keys and frame ranges. Fields with
+`/` are grouped by prefix into JSON columns, including `meta/`,
+`data/`, `videos/`, and `stats/`.
 Grouped fields must use JSON-native Arrow types: null, boolean, integer,
 floating point, string, list, or struct, including nested combinations.
-Binary, temporal, decimal, map, and extension types are rejected before any
-target table is created. Other Episode extension fields are not imported.
+Binary, temporal, decimal, map, and extension types in these JSON groups are
+rejected before any target table is created. Episode fields without `/` retain
+their original names and Arrow types as columns in `_episodes`.
 Control-field statistics reflect merged IDs; their original quantiles are
 omitted. Training reads skip `stats`. Repeated task/subtask text within one
 source is rejected before creating tables to avoid losing original frame IDs.
@@ -109,14 +111,15 @@ require an import option.
 ### Schema evolution
 
 `schema_evolution=True` is the default. The importer plans the union of source
-columns before creating `_frames` and any declared extra `_datasets` columns.
+columns before creating `_frames`, `_episodes`, and any declared extra
+`_datasets` columns. Episode fields with `/` are grouped by prefix into JSON:
+`camera_intrinsics/head_left` becomes the `head_left` key in
+`_episodes.camera_intrinsics`. Other Episode fields retain their Arrow types.
 For appends, it compares the incoming columns with the existing table group and
 adds new nullable columns. Existing rows read as null in those columns; incoming
 rows receive nulls for omitted optional columns. Existing optional columns are
 made nullable when necessary. All three component schemas are checked before
 catalog changes, and existing field IDs are preserved.
-Merged `_episodes` keeps its fixed typed controls and JSON group columns;
-source-specific keys remain inside those JSON values.
 Missing columns receive typed nulls. Optional columns become nullable; source
 indices, timestamps, task indices, and required Episode controls remain required.
 Common columns must have identical types, and common frame features must retain
