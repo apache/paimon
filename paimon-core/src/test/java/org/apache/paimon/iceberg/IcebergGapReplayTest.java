@@ -1176,9 +1176,9 @@ public class IcebergGapReplayTest {
         assertCleanupLeavesReplacedTimeline(t, deletingVersions(0), t.latest() - 3, 164, 1);
         t.cleanupBatchSize = 0;
 
-        // The versions above the head are retired under the lock, and only by the head: a commit
-        // that came after they were listed makes its own version a valid one, and the callback
-        // of the snapshot that is not the head any more retires nothing
+        // The versions above the head are retired under the lock, which checks the head again for
+        // every one of them: a commit that came after they were listed makes its own version a
+        // valid one, and the callback of the snapshot that is not the head any more keeps it
         t.append(t.enabled, 78);
         t.append(t.enabled, 79);
         t.append(t.enabled, 80);
@@ -1195,7 +1195,7 @@ public class IcebergGapReplayTest {
                 IcebergCommitCallback.ReplayPoint.BEFORE_CLEANUP,
                 -1,
                 () -> t.append(t.enabled, 81));
-        assertThat(events).doesNotContain("CLEANUP_LOCKED:" + retained);
+        assertThat(versionFiles(t.enabled)).contains("v" + (retained + 1) + ".metadata.json");
         assertThat(t.latest()).isEqualTo(retained + 1);
         assertThat(readVersionHint(t.enabled)).isEqualTo(retained + 1);
         assertThat(getIcebergResult())

@@ -71,11 +71,16 @@ it one by one from their delta manifests.
   the copies, they add to the size of the metadata. The original lists of the snapshots that stay
   are left in place, because readers of older metadata may still use them. Each of those snapshots
   records its originals, and they are deleted when retention drops it or when a rebuild cleans up
-  the older versions.
+  the older versions. A snapshot of the base that Paimon already expired is not kept.
+- Replay checks the live rows of every snapshot it keeps against Paimon. What the base records about
+  each data file, and its other totals, are taken as they are, as a commit on top of its base does.
+- Paimon tries the older versions newest first. It skips the versions that a rollback left on
+  another timeline, and stops after five versions that cannot be used for any other reason.
 - When replay cannot be used, Paimon rebuilds. That happens when no valid base is within
   `metadata.iceberg.replay.max-snapshots`, when one of the `metadata.iceberg.replay.*` limits is
   exceeded, when a file of the base is missing, or when the replayed row count differs from
-  Paimon's. A snapshot that is no longer the latest one is not rebuilt after a failed replay.
+  Paimon's. A snapshot that is no longer the latest one is not rebuilt after a failed replay. The
+  rebuild keeps the table uuid of the newest older version.
 - The limits bound the amount of work. They do not bound the heap that a step uses or how long
   one step takes.
 - Replay needs a lock that the catalog provides, and fails with an error when the table has none,

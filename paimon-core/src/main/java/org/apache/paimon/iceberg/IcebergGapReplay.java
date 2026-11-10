@@ -19,6 +19,7 @@
 package org.apache.paimon.iceberg;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback.BuildResult;
 import org.apache.paimon.iceberg.IcebergCommitCallback.FileChangesCollector;
@@ -41,6 +42,7 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -51,6 +53,8 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -84,7 +88,8 @@ final class IcebergGapReplay {
 
     private static final Logger LOG = LoggerFactory.getLogger(IcebergGapReplay.class);
 
-    private static final int MAX_CANDIDATES = 5;
+    /** The versions that are tried and fail, not counting those of another timeline. */
+    private static final int MAX_FAILED_CANDIDATES = 5;
 
     private final IcebergCommitCallback callback;
     private final FileStoreTable table;
@@ -105,6 +110,7 @@ final class IcebergGapReplay {
 
     private final List<Long> candidates = new ArrayList<>();
     private int nextCandidate = 0;
+    private int failedCandidates = 0;
     private long chargedBytes = 0;
 
     // what a rebuild after a failed replay has to inherit
@@ -137,7 +143,16 @@ final class IcebergGapReplay {
         this.maxDeltaEntries = options.get(IcebergOptions.REPLAY_MAX_DELTA_ENTRIES);
         this.maxBaseManifestBytes =
                 options.get(IcebergOptions.REPLAY_MAX_BASE_MANIFEST_BYTES).getBytes();
-        this.maxDurationNanos = options.get(IcebergOptions.REPLAY_MAX_DURATION).toNanos();
+        this.maxDurationNanos = nanosOf(options.get(IcebergOptions.REPLAY_MAX_DURATION));
+    }
+
+    private static long nanosOf(Duration duration) {
+        try {
+            return duration.toNanos();
+        } catch (ArithmeticException e) {
+            // longer than any replay can run
+            return Long.MAX_VALUE;
+        }
     }
 
     /**
@@ -199,8 +214,8 @@ final class IcebergGapReplay {
             return null;
         } catch (ReplaySourceReplaced e) {
             LOG.info(
-                    "Snapshot {} of table {} was replaced while its Iceberg metadata was "
-                            + "replayed, so nothing is written: {}",
+                    "The replayed Iceberg metadata of snapshot {} of table {} is not written, "
+                            + "because {}",
                     snapshotId,
                     table.fullName(),
                     e.getMessage());
@@ -233,33 +248,28 @@ final class IcebergGapReplay {
                 versions.add(version);
             }
         }
-        for (long version : versions) {
-            if (candidates.size() == MAX_CANDIDATES) {
-                break;
-            }
-            candidates.add(version);
-        }
+        candidates.addAll(versions);
     }
 
+    /**
+     * The newest older version that is a valid base. The versions that a rollback left on another
+     * timeline are skipped without counting against the versions that are tried, and nothing
+     * further behind than the first version beyond {@link IcebergOptions#REPLAY_MAX_SNAPSHOTS} is
+     * read.
+     */
     @Nullable
     private ReplayBase nextBase() throws IOException {
-        while (nextCandidate < candidates.size()) {
+        while (nextCandidate < candidates.size() && failedCandidates < MAX_FAILED_CANDIDATES) {
             long version = candidates.get(nextCandidate++);
-            String problem = null;
-            ReplayBase base = null;
-            try {
-                base = checkBase(version);
-            } catch (ReplayAbort e) {
-                problem = e.getMessage();
+            boolean tooFar = snapshotId - version > maxSnapshots;
+            if (tooFar) {
+                // still read, for what a rebuild inherits; every older version is further behind
+                nextCandidate = candidates.size();
             }
-            if (base != null) {
-                // a valid version names the table for a rebuild, near enough to replay or not
-                baseUuid = base.metadata.tableUuid();
-                maxLastColumnId = Math.max(maxLastColumnId, base.metadata.lastColumnId());
-                if (base.metadata.nextRowId() != null) {
-                    maxNextRowId = Math.max(maxNextRowId, base.metadata.nextRowId());
-                }
-                if (snapshotId - version <= maxSnapshots) {
+            String problem;
+            try {
+                ReplayBase base = checkBase(version);
+                if (!tooFar) {
                     callback.replayPoint(ReplayPoint.BASE_SELECTED, version);
                     return base;
                 }
@@ -268,8 +278,11 @@ final class IcebergGapReplay {
                                 + (snapshotId - version)
                                 + " snapshots behind, more than "
                                 + IcebergOptions.REPLAY_MAX_SNAPSHOTS.key();
-                // every older version is further behind
-                nextCandidate = candidates.size();
+            } catch (OtherTimeline e) {
+                problem = e.getMessage();
+            } catch (ReplayAbort e) {
+                problem = e.getMessage();
+                failedCandidates++;
             }
             LOG.info(
                     "Iceberg metadata v{} of table {} is not a base for snapshot {}: {}",
@@ -283,13 +296,16 @@ final class IcebergGapReplay {
     }
 
     private ReplayBase checkBase(long version) throws IOException {
-        Snapshot paimonSnapshot = readSnapshot(version);
-        if (paimonSnapshot == null) {
-            throw new ReplayAbort("there is no Paimon snapshot " + version);
-        }
         IcebergMetadata metadata = callback.readUsableMetadata(pathFactory.toMetadataPath(version));
         if (metadata == null) {
             throw new ReplayAbort("it is missing or malformed");
+        }
+        inherit(metadata);
+        Snapshot paimonSnapshot = readSnapshot(version);
+        if (paimonSnapshot == null) {
+            // Paimon expired it, and every older snapshot with it
+            nextCandidate = candidates.size();
+            throw new ReplayAbort("there is no Paimon snapshot " + version);
         }
         if (metadata.formatVersion() != callback.formatVersion) {
             throw new ReplayAbort("its format version is " + metadata.formatVersion());
@@ -308,16 +324,35 @@ final class IcebergGapReplay {
                         ? null
                         : current.summary().get(SNAPSHOT_SUMMARY_PAIMON_COMMIT_IDENTITY);
         if (identity == null || !identity.equals(commitIdentity(paimonSnapshot))) {
-            throw new ReplayAbort("it was not built from Paimon snapshot " + version);
+            throw new OtherTimeline("it was not built from Paimon snapshot " + version);
         }
         checkFields(metadata);
         return new ReplayBase(version, metadata);
     }
 
     /**
-     * What the replay carries over from the base as it is, and what its snapshots point at, is what
-     * a rebuild would write for the table, or the base is not used. A field that is missing would
-     * fail every replay for good, and the same base is picked every time.
+     * A version of this table names it for a rebuild, valid or not, and the ids it handed out stay
+     * taken. The newest version that is read gives the table uuid.
+     */
+    private void inherit(IcebergMetadata metadata) {
+        if (!Objects.equals(metadata.location(), table.location().toString())) {
+            return;
+        }
+        if (baseUuid == null) {
+            baseUuid = metadata.tableUuid();
+        }
+        maxLastColumnId = Math.max(maxLastColumnId, metadata.lastColumnId());
+        if (metadata.nextRowId() != null) {
+            maxNextRowId = Math.max(maxNextRowId, metadata.nextRowId());
+        }
+    }
+
+    /**
+     * The fields that the replay carries over from the base as they are must be those a rebuild
+     * would write for the table, or the base is not used. A field that is missing would fail every
+     * replay for good, and the same base is picked every time. What the base records about each
+     * data file, and the totals of its snapshots other than the live rows, are not compared with
+     * Paimon: like a commit on top of its base, the replay takes them as the base has them.
      */
     private void checkFields(IcebergMetadata metadata) {
         if (metadata.tableUuid() == null
@@ -377,6 +412,7 @@ final class IcebergGapReplay {
                 }
             } catch (RuntimeException e) {
                 if (isMissingFile(e)) {
+                    confirmDeltaMissing(step, e);
                     throw new ReplayAbort(
                             "the delta of Paimon snapshot " + id + " cannot be read", e);
                 }
@@ -395,10 +431,16 @@ final class IcebergGapReplay {
         return steps;
     }
 
-    /** Index of the first snapshot of the base that retention keeps for snapshot N. */
+    /**
+     * Index of the first snapshot of the base that retention keeps for snapshot N. A snapshot that
+     * Paimon expired is never kept: the writer that left the gap may retain fewer snapshots than
+     * this one, and its expiration deleted the files that only such a snapshot reads.
+     */
     private int firstRetained(IcebergMetadata base, List<Snapshot> steps) {
         List<IcebergSnapshot> baseSnapshots = base.snapshots();
         int total = baseSnapshots.size() + steps.size();
+        // like the build helper, nothing is dropped when every older snapshot expires
+        int first = 0;
         for (int i = 0; i + 1 < total; i++) {
             boolean expire;
             if (i < baseSnapshots.size()) {
@@ -408,11 +450,17 @@ final class IcebergGapReplay {
                 expire = callback.shouldExpire(step.id(), step.timeMillis(), snapshotId);
             }
             if (!expire) {
-                return Math.min(i, baseSnapshots.size());
+                first = Math.min(i, baseSnapshots.size());
+                break;
             }
         }
-        // like the build helper, nothing is dropped when every older snapshot expires
-        return 0;
+        Long earliest = table.snapshotManager().earliestSnapshotId();
+        while (earliest != null
+                && first < baseSnapshots.size()
+                && baseSnapshots.get(first).snapshotId() < earliest) {
+            first++;
+        }
+        return first;
     }
 
     /**
@@ -516,9 +564,9 @@ final class IcebergGapReplay {
     private List<IcebergManifestFileMeta> readBaseList(IcebergSnapshot icebergSnapshot)
             throws IOException {
         String name = new Path(icebergSnapshot.manifestList()).getName();
+        Path path = pathFactory.toManifestListPath(name);
         try {
-            return manifestList.decode(
-                    name, table.fileIO().getFileSize(pathFactory.toManifestListPath(name)));
+            return manifestList.decode(name, table.fileIO().getFileSize(path));
         } catch (IcebergManifestFile.CorruptManifestException e) {
             throw new BrokenHistory(
                     "the manifest list of snapshot "
@@ -528,6 +576,7 @@ final class IcebergGapReplay {
                     e);
         } catch (IOException e) {
             if (isMissingFile(e)) {
+                callback.confirmMissing(path, e);
                 throw new BrokenHistory(
                         "the manifest list of snapshot "
                                 + icebergSnapshot.snapshotId()
@@ -596,6 +645,7 @@ final class IcebergGapReplay {
             table.fileIO().copyFile(source, target, false);
         } catch (IOException e) {
             if (isMissingFile(e)) {
+                callback.confirmMissing(source, e);
                 throw new BrokenHistory("manifest " + source + " cannot be copied", e);
             }
             throw e;
@@ -662,7 +712,7 @@ final class IcebergGapReplay {
             // deletion vectors make a table ineligible, so a step has no index files
             BuildResult result =
                     callback.buildMetadataWithBase(
-                            chargingCollector(guardingDelta(stepCollector, id), current),
+                            chargingCollector(guardingDelta(stepCollector, step), current),
                             Collections.emptyList(),
                             step,
                             current,
@@ -698,18 +748,48 @@ final class IcebergGapReplay {
      * Reports a delta that is missing as a failed replay. The preflight reads only the delta lists,
      * so a missing list or manifest can still show up here. Other failures propagate.
      */
-    private FileChangesCollector guardingDelta(FileChangesCollector inner, long id) {
+    private FileChangesCollector guardingDelta(FileChangesCollector inner, Snapshot step) {
         return (removedFiles, addedFiles) -> {
             try {
                 return inner.collect(removedFiles, addedFiles);
             } catch (IOException | RuntimeException e) {
                 if (isMissingFile(e)) {
+                    confirmDeltaMissing(step, e);
                     throw new ReplayAbort(
-                            "the delta of Paimon snapshot " + id + " cannot be read", e);
+                            "the delta of Paimon snapshot " + step.id() + " cannot be read", e);
                 }
                 throw e;
             }
         };
+    }
+
+    /**
+     * Fails with a storage failure when the delta of the Paimon snapshot, its list and every
+     * manifest the list names, is there after all, see {@link
+     * IcebergCommitCallback#confirmMissing}.
+     */
+    private void confirmDeltaMissing(Snapshot step, Exception notFound) {
+        FileStorePathFactory paths = table.store().pathFactory();
+        try {
+            if (!table.fileIO().exists(paths.toManifestListPath(step.deltaManifestList()))) {
+                return;
+            }
+            for (ManifestFileMeta meta :
+                    table.store().manifestListFactory().create().readDeltaManifests(step)) {
+                if (!table.fileIO().exists(paths.toManifestFilePath(meta.fileName()))) {
+                    return;
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        IOException failure =
+                new IOException(
+                        "Failed to read the delta of Paimon snapshot "
+                                + step.id()
+                                + ", which exists");
+        failure.addSuppressed(notFound);
+        throw new UncheckedIOException(failure);
     }
 
     /** The snapshot on disk is still the one this step replays. */
@@ -789,12 +869,20 @@ final class IcebergGapReplay {
             List<Path> files = callback.applicableMetadataFiles(snapshotId);
             if (publication.ours) {
                 files.addAll(droppedOriginalFiles(result, acquired));
+                files.addAll(filesOfSkippedVersions(acquired.base));
             }
             callback.deleteUnderLock(snapshot, publication.generation, files);
         }
     }
 
     private Publication publish(Lock lock, IcebergMetadata result) throws IOException {
+        Long latest = table.snapshotManager().latestSnapshotId();
+        if (latest != null && latest != snapshotId && hasPublishedVersionAfter(latest)) {
+            throw new ReplaySourceReplaced(
+                    "the metadata of a later snapshot is published, and nothing extends v"
+                            + snapshotId
+                            + " any more");
+        }
         // from the write on the file may exist, unless the write is known to have left
         // nothing: a failed write of unknown outcome may still have landed
         exposing = true;
@@ -810,6 +898,100 @@ final class IcebergGapReplay {
         exposing = generationOf(durable).equals(generationOf(result));
         callback.replayPoint(ReplayPoint.EXPOSED, snapshotId);
         return callback.pointTo(lock, snapshotId, result, durable, null, null);
+    }
+
+    /** Whether a version after N, up to the head, is built from the Paimon snapshot of its id. */
+    private boolean hasPublishedVersionAfter(long latest) throws IOException {
+        List<Long> versions = metadataVersionsBetween(snapshotId, latest + 1);
+        versions.sort(Comparator.reverseOrder());
+        for (long version : versions) {
+            Snapshot paimon = readSnapshot(version);
+            if (paimon != null && callback.metadataMatchesSnapshot(version, paimon)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The versions of the metadata files, exclusive of both bounds. */
+    private List<Long> metadataVersionsBetween(long after, long before) throws IOException {
+        List<Long> versions = new ArrayList<>();
+        for (FileStatus status : table.fileIO().listStatus(pathFactory.metadataDirectory())) {
+            long version = metadataVersionOf(status.getPath());
+            if (version > after && version < before) {
+                versions.add(version);
+            }
+        }
+        return versions;
+    }
+
+    /**
+     * The files of the versions between the base and N that were published while the replay ran, by
+     * callbacks of older snapshots. Nothing extends them once N is published, and what only they
+     * reference stays needed by nothing: the replay reads only its base, and the output reaches
+     * only files that the replay created. Nothing is deleted here.
+     */
+    private List<Path> filesOfSkippedVersions(ReplayBase base) throws IOException {
+        List<IcebergMetadata> skipped = new ArrayList<>();
+        for (long version : metadataVersionsBetween(base.version, snapshotId)) {
+            if (candidates.contains(version)) {
+                continue;
+            }
+            Snapshot paimon = readSnapshot(version);
+            IcebergMetadata metadata =
+                    callback.readUsableMetadata(pathFactory.toMetadataPath(version));
+            if (paimon != null
+                    && metadata != null
+                    && metadata.snapshots() != null
+                    && callback.metadataMatchesSnapshot(version, paimon)) {
+                skipped.add(metadata);
+            }
+        }
+        List<Path> files = new ArrayList<>();
+        if (skipped.isEmpty()) {
+            return files;
+        }
+        // what the base reaches stays for the readers of the base
+        Set<String> seen = new HashSet<>();
+        for (IcebergSnapshot s : base.metadata.snapshots()) {
+            for (String list : listsOf(s)) {
+                seen.add(list);
+                for (String manifest : callback.manifestPathsIn(list)) {
+                    seen.add(new Path(manifest).getName());
+                }
+            }
+        }
+        for (IcebergMetadata metadata : skipped) {
+            for (IcebergSnapshot s : metadata.snapshots()) {
+                for (String list : listsOf(s)) {
+                    if (!seen.add(list)) {
+                        continue;
+                    }
+                    for (String manifest : callback.manifestPathsIn(list)) {
+                        String name = new Path(manifest).getName();
+                        if (seen.add(name)) {
+                            files.add(pathFactory.toManifestFilePath(name));
+                        }
+                    }
+                    files.add(pathFactory.toManifestListPath(list));
+                }
+            }
+        }
+        return files;
+    }
+
+    /** The names of the lists of a snapshot that still exist: its own, and its replay originals. */
+    private List<String> listsOf(IcebergSnapshot s) throws IOException {
+        List<String> lists = new ArrayList<>();
+        lists.add(new Path(s.manifestList()).getName());
+        lists.addAll(replayedOriginals(s));
+        List<String> existing = new ArrayList<>();
+        for (String list : lists) {
+            if (table.fileIO().exists(pathFactory.toManifestListPath(list))) {
+                existing.add(list);
+            }
+        }
+        return existing;
     }
 
     /** Deletes the files the replay created that the final metadata does not reach. */
@@ -856,51 +1038,50 @@ final class IcebergGapReplay {
      * dropped: their lists, the lists that earlier replays left for them, and the manifests that no
      * kept original list still lists. The copies are never touched. Nothing is deleted here.
      */
-    private List<Path> droppedOriginalFiles(IcebergMetadata result, Acquired acquired) {
+    private List<Path> droppedOriginalFiles(IcebergMetadata result, Acquired acquired)
+            throws IOException {
+        // a failure here fails the commit, and its retry cleans up from what is durable
         List<Path> files = new ArrayList<>();
-        try {
-            Set<Long> keptIds = new HashSet<>();
-            for (IcebergSnapshot s : result.snapshots()) {
-                keptIds.add(s.snapshotId());
-            }
-            List<IcebergSnapshot> dropped = new ArrayList<>();
-            for (IcebergSnapshot s : acquired.base.metadata.snapshots()) {
-                if (!keptIds.contains(s.snapshotId())) {
-                    dropped.add(s);
-                }
-            }
-            if (dropped.isEmpty()) {
-                return files;
-            }
-            IcebergSnapshot firstKept = result.snapshots().get(0);
-            // A kept snapshot that is a copy still has its original list, with the manifests
-            // it lists. A kept snapshot that a step built lists only files of the replay, so
-            // no original stays in use when every base snapshot is dropped.
-            Set<String> inUse = new HashSet<>();
-            String keptOriginal = acquired.originalLists.get(firstKept.snapshotId());
-            if (keptOriginal != null) {
-                inUse.addAll(callback.manifestPathsIn(keptOriginal));
-            }
-            // what the kept snapshot still keeps of the older replays
-            callback.addManifestPathsOfOriginals(firstKept, inUse);
-            for (int i = 0; i < dropped.size(); i++) {
-                Set<String> next =
-                        i + 1 < dropped.size()
-                                ? callback.manifestPathsReachableFrom(dropped.get(i + 1))
-                                : inUse;
-                callback.collectExpiredList(
-                        files, new Path(dropped.get(i).manifestList()).getName(), next);
-                callback.collectExpiredOriginals(files, dropped.get(i), next);
-            }
-            return files;
-        } catch (RuntimeException e) {
-            LOG.warn(
-                    "Failed to clean the metadata files that retention dropped for table {}. "
-                            + "They stay on storage.",
-                    table.fullName(),
-                    e);
-            return Collections.emptyList();
+        Set<Long> keptIds = new HashSet<>();
+        for (IcebergSnapshot s : result.snapshots()) {
+            keptIds.add(s.snapshotId());
         }
+        List<IcebergSnapshot> dropped = new ArrayList<>();
+        for (IcebergSnapshot s : acquired.base.metadata.snapshots()) {
+            if (!keptIds.contains(s.snapshotId())) {
+                dropped.add(s);
+            }
+        }
+        if (dropped.isEmpty()) {
+            return files;
+        }
+        IcebergSnapshot firstKept = result.snapshots().get(0);
+        // A kept snapshot that is a copy still has its original list, with the manifests
+        // it lists. A kept snapshot that a step built lists only files of the replay, so
+        // no original stays in use when every base snapshot is dropped.
+        Set<String> inUse = new HashSet<>();
+        String keptOriginal = acquired.originalLists.get(firstKept.snapshotId());
+        if (keptOriginal != null) {
+            inUse.addAll(callback.manifestPathsIn(keptOriginal));
+        }
+        // what the kept snapshot still keeps of the older replays
+        callback.addManifestPathsOfOriginals(firstKept, inUse);
+        // A list that an earlier cleanup deleted names nothing that can be deleted. A manifest
+        // that a dropped snapshot shares with a later one is listed by every snapshot between
+        // them, so the next list that exists tells what stays in use.
+        Set<String> next = inUse;
+        for (int i = dropped.size() - 1; i >= 0; i--) {
+            IcebergSnapshot s = dropped.get(i);
+            String list = new Path(s.manifestList()).getName();
+            boolean listExists = table.fileIO().exists(pathFactory.toManifestListPath(list));
+            Set<String> inUseAfter = next;
+            if (listExists) {
+                next = callback.manifestPathsReachableFrom(s);
+                callback.collectExpiredList(files, list, inUseAfter);
+            }
+            callback.collectExpiredOriginals(files, s, inUseAfter);
+        }
+        return files;
     }
 
     // ---------------------------------------------------------------------------------
@@ -913,7 +1094,7 @@ final class IcebergGapReplay {
      * pointer, and a rebuild reads every data file of the table, so it is not done for it.
      */
     @Nullable
-    private RebuildRequest rebuildIfHead(String reason) {
+    private RebuildRequest rebuildIfHead(String reason) throws IOException {
         Long latest = table.snapshotManager().latestSnapshotId();
         if (latest == null || latest != snapshotId) {
             LOG.info(
@@ -936,6 +1117,18 @@ final class IcebergGapReplay {
                     snapshotId,
                     table.fullName(),
                     replaced.getMessage());
+            callback.replayPoint(ReplayPoint.ABANDONED, snapshotId);
+            return null;
+        }
+        if (callback.metadataMatchesSnapshot(snapshotId, snapshot)) {
+            // another callback of the snapshot published it, and its cleanup can make the
+            // history this one read look broken
+            LOG.info(
+                    "The Iceberg metadata of snapshot {} of table {} cannot be replayed and "
+                            + "another callback published it, so it is not rebuilt: {}",
+                    snapshotId,
+                    table.fullName(),
+                    reason);
             callback.replayPoint(ReplayPoint.ABANDONED, snapshotId);
             return null;
         }
@@ -963,10 +1156,15 @@ final class IcebergGapReplay {
 
     @Nullable
     private Snapshot readSnapshot(long id) {
+        Path path = table.snapshotManager().snapshotPath(id);
         try {
-            return SnapshotManager.tryFromPath(
-                    table.fileIO(), table.snapshotManager().snapshotPath(id));
+            return SnapshotManager.tryFromPath(table.fileIO(), path);
         } catch (FileNotFoundException e) {
+            try {
+                callback.confirmMissing(path, e);
+            } catch (IOException failure) {
+                throw new UncheckedIOException(failure);
+            }
             return null;
         }
     }
@@ -999,6 +1197,14 @@ final class IcebergGapReplay {
         }
     }
 
+    /** A version that a rollback left behind, built from a snapshot that Paimon replaced. */
+    private static final class OtherTimeline extends ReplayAbort {
+
+        private OtherTimeline(String message) {
+            super(message);
+        }
+    }
+
     /** A snapshot of the retained history is missing or damaged, so the base cannot be used. */
     private static final class BrokenHistory extends ReplayAbort {
 
@@ -1011,7 +1217,10 @@ final class IcebergGapReplay {
         }
     }
 
-    /** The Paimon snapshot was replaced by a rollback or a recreation while it was replayed. */
+    /**
+     * The Paimon snapshot was replaced by a rollback or a recreation while it was replayed, or a
+     * later snapshot has its metadata published, so the replayed metadata would serve nothing.
+     */
     private static final class ReplaySourceReplaced extends RuntimeException {
 
         private ReplaySourceReplaced(String message) {
