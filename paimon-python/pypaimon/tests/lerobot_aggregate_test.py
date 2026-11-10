@@ -237,6 +237,25 @@ def test_append_episode_task_stats_use_group_vocabulary(setup):
         dataset.close()
 
 
+@pytest.mark.parametrize("setup", [20], indirect=True)
+def test_append_mixed_fps_group_remains_readable(setup):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn, sources = setup
+    conn.load_from_lerobot("robot", [sources[0]])
+    conn.append_to_lerobot("robot", sources[1])
+
+    dataset = pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))
+    try:
+        assert dataset.fps is None
+        assert dataset.episode_fps == (10, 10, 20, 20)
+        assert "fps_mode" not in dataset.reader.meta.info
+        assert [float(item["timestamp"]) for item in dataset.reader.get_items([5, 6])] == (
+            pytest.approx([0, 0.05]))
+    finally:
+        dataset.close()
+
+
 @pytest.mark.parametrize("manual_recovery", [False, True])
 def test_append_recovers_after_episode_commit_failure(setup, manual_recovery):
     conn, sources = setup
@@ -876,7 +895,7 @@ def test_mixed_fps_group_keeps_episode_rates(tmp_path, import_parallelism):
                            parallelism=import_parallelism)
     info = metadata(conn, "info")
     assert info["fps"] is None
-    assert info["fps_mode"] == "source"
+    assert "fps_mode" not in info
     datasets = rows(conn, "merged_datasets").sort_by("index")
     assert "fps" not in datasets.column_names
     assert [json.loads(value)["fps"] for value in

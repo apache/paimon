@@ -185,7 +185,6 @@ def load_from_lerobot(
                 "subtasks": _vocabulary_rows(metadata["subtasks_table"], "subtask"),
                 "stats": _stats_json(metadata["stats_table"]),
             }], schema=_DATASETS_SCHEMA)
-            metadata["fps_mode"] = "dataset"
             _import_dataset(
                 connection,
                 table_name,
@@ -317,14 +316,11 @@ def _create_target_table(
     managed_options = _managed_table_options(connection._identifier(table_name))
     reserved_options = set(_COMPANION_OPTION_KEYS.values()).intersection(
         create_options)
-    if "pypaimon.lerobot.fps-mode" in create_options:
-        reserved_options.add("pypaimon.lerobot.fps-mode")
     if reserved_options:
         raise ValueError(
             "%s are managed by load_from_lerobot."
             % sorted(reserved_options))
     create_options.update(managed_options)
-    create_options["pypaimon.lerobot.fps-mode"] = metadata.get("fps_mode", "dataset")
     frames_name = _companion_identifier(connection._identifier(table_name), "_frames")
     try:
         table = connection.create_table(

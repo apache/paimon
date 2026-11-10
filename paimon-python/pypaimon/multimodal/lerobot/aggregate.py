@@ -351,12 +351,11 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
             if info.get(key) != other.get(key):
                 raise ValueError("LeRobot source %d has incompatible info.%s." % (ordinal, key))
         # Validate every Episode before creating any target table.
-        if mixed_fps:
-            plan["metadata"]["fps_mode"] = "source"
         try:
             for name in plan["videos"]:
                 _video_fps(other, other["features"][name], name)
-            for table in _validated_episode_tables(plan["metadata"], plan["videos"]):
+            for table in _validated_episode_tables(
+                    plan["metadata"], plan["videos"], check_episode_fps=mixed_fps):
                 _validate_episode_json(table, ordinal)
         except ValueError as error:
             raise ValueError("LeRobot source %d: %s" % (ordinal, error)) from error
@@ -403,13 +402,11 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
         }
         for ordinal, plan in enumerate(plans)
     ], schema=pa.schema(list(_DATASETS_SCHEMA) + _text_fields_schema(extra_dataset_fields or {})))
-    metadata["fps_mode"] = "source" if mixed_fps else "dataset"
     info.update(total_frames=frame_offset, total_episodes=episode_offset,
                 total_tasks=metadata["tasks_table"].num_rows,
                 splits={"train": "0:%d" % episode_offset})
     info.pop("fps_mode", None)
     if mixed_fps:
-        info["fps_mode"] = "source"
         info["fps"] = None
         for feature in info["features"].values():
             if feature.get("dtype") != "video":

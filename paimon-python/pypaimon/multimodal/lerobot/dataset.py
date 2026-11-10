@@ -1106,9 +1106,7 @@ def _load_dataset(table, tag_name):
 
     info = (json.loads(source_rows[0]["info"])
             if not source_local_layout else _merged_source_info(
-                source_rows, tasks, subtasks,
-                raw_table.table_schema.options.get(
-                    "pypaimon.lerobot.fps-mode", "dataset")))
+                source_rows, tasks, subtasks))
     for feature in info.get("features", {}).values():
         feature["shape"] = tuple(feature["shape"])
     if source_local_layout:
@@ -1161,7 +1159,7 @@ def _source_vocabulary(sources, singular):
     return frame, maps
 
 
-def _merged_source_info(sources, tasks, subtasks, fps_mode):
+def _merged_source_info(sources, tasks, subtasks):
     if not sources:
         raise ValueError("LeRobot Dataset metadata is required for info.")
     infos = []
@@ -1190,9 +1188,8 @@ def _merged_source_info(sources, tasks, subtasks, fps_mode):
                   total_tasks=len(tasks))
     merged["splits"] = {"train": "0:%d" % merged["total_episodes"]}
     merged.pop("fps_mode", None)
-    if fps_mode == "source":
-        merged["fps_mode"] = "source"
-    if len({info["fps"] for info in infos}) > 1:
+    mixed_fps = len({info["fps"] for info in infos}) > 1
+    if mixed_fps:
         merged["fps"] = None
         for feature in merged["features"].values():
             if feature.get("dtype") != "video":
@@ -1405,8 +1402,7 @@ def _episode_ranges(metadata, total_frames, total_episodes):
 
 
 def _episode_fps(metadata, fps, total_episodes):
-    mode = _info_dict(_metadata_member(metadata, "info")).get("fps_mode")
-    if _metadata_member(metadata, "datasets") is not None and mode == "source":
+    if _metadata_member(metadata, "datasets") is not None:
         return _source_dataset_fps(metadata, fps, total_episodes)
     if fps is None:
         raise ValueError("LeRobot metadata is missing fps; enable source FPS explicitly.")
@@ -1444,6 +1440,8 @@ def _source_dataset_fps(metadata, fps, total_episodes):
     rates = []
     ranges = _source_dataset_ranges(datasets)
     for ordinal, (source_info, begin, end, frame_begin, frame_end) in enumerate(ranges):
+        if source_info.get("fps") is None:
+            raise ValueError("LeRobot source dataset %d is missing fps." % ordinal)
         rate = _dataset_fps(source_info.get("fps"))
         dataset = datasets[ordinal]
         if "fps" in dataset and _positive_integer(dataset["fps"], "source dataset %d fps" % ordinal) != rate:

@@ -568,7 +568,7 @@ def _source_episodes(dataset, source):
     return {"paths": paths, "schema": schema}
 
 
-def _validated_episode_tables(metadata, video_fields=()):
+def _validated_episode_tables(metadata, video_fields=(), check_episode_fps=False):
     episodes = _EpisodeIndex(video_fields)
     expected_begin = 0
     video_columns = [
@@ -587,8 +587,7 @@ def _validated_episode_tables(metadata, video_fields=()):
             raise ValueError(
                 "LeRobot Episode metadata is missing columns: %s."
                 % ", ".join(missing))
-        if metadata.get("fps_mode") in ("episode", "source") \
-                and _EPISODE_FPS_COLUMN in table.column_names:
+        if check_episode_fps and _EPISODE_FPS_COLUMN in table.column_names:
             for ordinal, value in enumerate(table[_EPISODE_FPS_COLUMN].to_pylist()):
                 rate = _positive_integer(value, "episode fps")
                 if rate != metadata["fps"]:
