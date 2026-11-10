@@ -1234,6 +1234,11 @@ class LeRobotValidationTest(unittest.TestCase):
         }
 
         class Reader(pmm.PaimonDatasetReader):
+            # This test checks batching and backend cache reuse with one decoder.
+            # Replica splitting is covered in video_decode_parallelism_test.py.
+            _table = SimpleNamespace(options=CoreOptions(Options({
+                "read.video.decoders-per-payload": "1",
+            })))
 
             def read_indices(self, indices, columns):
                 return pa.Table.from_pylist([{
