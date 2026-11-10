@@ -652,6 +652,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             options = FakeOptions()
             table_schema = types.SimpleNamespace(id=0, fields=[
                 types.SimpleNamespace(
+                    id=0,
                     name="age",
                     type=types.SimpleNamespace(type="INT"),
                 )

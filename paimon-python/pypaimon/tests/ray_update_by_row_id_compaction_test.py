@@ -24,7 +24,9 @@ import shutil
 import tempfile
 import unittest
 import uuid
+from pathlib import Path
 from unittest.mock import patch
+from zipfile import ZipFile
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -40,7 +42,7 @@ pytestmark = pytest.mark.skipif(
 from pypaimon import CatalogFactory, Schema
 from pypaimon.ray import process_row_id_ranges, update_by_row_id
 from pypaimon.write.backend_dispatch import python_commit
-from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.data_types import AtomicType, PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
 
 
@@ -330,6 +332,121 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
         rewrite.assert_not_called()
         self.assertEqual(planned, [{('a', 1), (None, 2)}])
         self.assertEqual(self._read_sorted(target)['age'], [99, 88, 30, 40])
+
+    def test_recovery_checks_java_nested_partial_write_history(self):
+        from pypaimon.ray.row_id_conflict_rewriter import _rewrite_group
+        from pypaimon.ray.update_by_row_id import _commit_update_messages
+
+        fixture = Path(__file__).parent / 'resources' / 'row-id' / 'java-nested-history.zip'
+        for overlap in (False, True):
+            with self.subTest(overlap=overlap):
+                warehouse = Path(self.tempdir) / uuid.uuid4().hex
+                with ZipFile(str(fixture)) as archive:
+                    archive.extractall(str(warehouse))
+                directory = warehouse / 'default.db' / 'nested'
+                pending = {}
+                for name in ('schema/schema-1', 'snapshot/snapshot-3', 'snapshot/snapshot-4', 'snapshot/LATEST'):
+                    path = directory / name
+                    pending[path] = path.read_bytes()
+                    path.unlink()
+                (directory / 'snapshot/LATEST').write_text('2')
+                catalog = CatalogFactory.create({'warehouse': str(warehouse)})
+                table = catalog.get_table('default.nested')
+                self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 2)
+                self.assertEqual(table.table_schema.id, 0)
+                values = {'_ROW_ID': pa.array([0], pa.int64())}
+                values.update({'nest': [{'a': 99, 'b': 'updated'}]} if overlap else {'age': [99]})
+                messages = table.new_batch_write_builder().new_update().update_by_arrow_with_row_id(pa.table(values))
+
+                # Publish Java's schema change, nest.a update, and compaction
+                # only after Python has staged its files on snapshot 2.
+                for path, contents in pending.items():
+                    path.write_bytes(contents)
+                current = catalog.get_table('default.nested')
+                history = current.copy({'scan.snapshot-id': '3'}).new_read_builder().new_scan().plan_all()
+                self.assertTrue(any(
+                    file.write_cols == ['nest.a'] for split in history.splits() for file in split.files))
+                with patch('pypaimon.ray.row_id_conflict_rewriter._rewrite_group', wraps=_rewrite_group) as rewrite:
+                    if overlap:
+                        with self.assertRaisesRegex(RuntimeError, "multiple 'MERGE INTO'"):
+                            _commit_update_messages(table, messages, num_partitions=2)
+                    else:
+                        _commit_update_messages(table, messages, num_partitions=2)
+                self.assertEqual(rewrite.call_count, 0 if overlap else 1)
+                self.assertEqual(current.snapshot_manager().get_latest_snapshot().id, 4 if overlap else 5)
+                read = current.new_read_builder()
+                rows = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id').to_pydict()
+                self.assertEqual(rows['age'], [10 if overlap else 99, 20, 30, 40])
+                self.assertEqual([value['a'] for value in rows['nest']], [1000, 2000, 300, 400])
+                self.assertEqual([value['b'] for value in rows['nest']], ['row-1', 'row-2', 'row-3', 'row-4'])
+
+    def test_inner_snapshot_retry_revalidates_update_fields(self):
+        from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
+        from pypaimon.ray.update_by_row_id import _commit_update_messages
+        from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
+
+        changes_by_case = {
+            'recreate': [SchemaChange.drop_column('age'), SchemaChange.add_column('age', AtomicType('INT'))],
+            'rename': [SchemaChange.rename_column('age', 'renamed'),
+                       SchemaChange.add_column('age', AtomicType('INT'))],
+            'widen': [SchemaChange.update_column_type('age', AtomicType('BIGINT'))],
+            'unrelated': [SchemaChange.drop_column('name'), SchemaChange.add_column('name', AtomicType('STRING'))],
+        }
+        for case, changes in changes_by_case.items():
+            with self.subTest(case=case):
+                target = self._create_table()
+                self._write(target, self._source(ids=(1, 2)))
+                table = self.catalog.get_table(target)
+                messages = table.new_batch_write_builder().new_update().update_by_arrow_with_row_id(
+                    pa.table({'_ROW_ID': [0], 'age': [99]}))
+                attempts, publications, cas_results = [], [], []
+                original_once = FileStoreCommit._try_commit_once
+                original_publish = RenamingSnapshotCommit.commit
+
+                def attempt(store, *args, **kwargs):
+                    if not attempts or store is attempts[0]:
+                        attempts.append(store)
+                    return original_once(store, *args, **kwargs)
+
+                def publish(commit, base_uuid, snapshot, statistics):
+                    if snapshot.commit_user != attempts[0].commit_user:
+                        return original_publish(commit, base_uuid, snapshot, statistics)
+                    publications.append(snapshot.schema_id)
+                    if len(publications) == 1:
+                        # DDL runs after the coordinator check and snapshot construction.
+                        # A real competing append wins the same snapshot ID, forcing
+                        # FileStoreCommit's inner CAS retry rather than a Ray retry.
+                        self.catalog.alter_table(target, changes)
+                        current = self.catalog.get_table(target)
+                        values = {'id': [3], 'name': ['x'], 'age': [10]}
+                        if case == 'rename':
+                            values['renamed'] = [10]
+                        self._write(target, pa.Table.from_pydict(
+                            values, schema=PyarrowFieldParser.from_paimon_schema(current.fields)))
+                    success = original_publish(commit, base_uuid, snapshot, statistics)
+                    cas_results.append(success)
+                    return success
+
+                with patch.object(FileStoreCommit, '_try_commit_once', new=attempt), patch.object(
+                    RenamingSnapshotCommit, 'commit', new=publish,
+                ):
+                    if case == 'recreate':
+                        with self.assertRaisesRegex(RuntimeError, 'cannot restore a dropped field'):
+                            _commit_update_messages(table, messages)
+                    else:
+                        _commit_update_messages(table, messages)
+                self.assertEqual(len(attempts), 2)
+                self.assertEqual(cas_results, [False] if case == 'recreate' else [False, True])
+                self.assertEqual(publications, [0] if case == 'recreate' else [0, 1])
+                latest = table.snapshot_manager().get_latest_snapshot()
+                self.assertEqual(latest.id, 2 if case == 'recreate' else 3)
+                self.assertEqual(latest.schema_id, 1)
+                rows = self._read_sorted(target)
+                column = 'renamed' if case == 'rename' else 'age'
+                self.assertEqual(rows[column], [None, None, 10] if case == 'recreate' else [99, 10, 10])
+                for message in messages:
+                    for file in message.new_files:
+                        self.assertTrue(table.file_io.exists(file.file_path))
 
     def test_retry_rechecks_fields_after_ddl_without_snapshot_progress(self):
         from pypaimon.ray import row_id_conflict_rewriter as rewriter

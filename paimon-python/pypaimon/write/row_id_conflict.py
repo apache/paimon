@@ -15,7 +15,62 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Structured row-ID conflicts shared by both execution backends."""
+"""Field identity validation and structured row-ID conflicts shared by both backends."""
+
+from pypaimon.schema.data_types import RowType, collect_field_ids
+from pypaimon.table.special_fields import SpecialFields
+
+
+def resolve_write_fields(schema, write_cols):
+    """Resolve file write paths in their historical schema, matching Java ROW paths."""
+    if write_cols is None:
+        fields = schema.data_file_fields(None) if hasattr(schema, 'data_file_fields') else schema.fields
+        return [field for field in fields if not SpecialFields.is_system_field(field.name)]
+    top_fields = {field.name: field for field in schema.fields}
+    result = []
+    for name in write_cols:
+        if SpecialFields.is_system_field(name):
+            continue
+        # Exact names containing dots take precedence at every ROW level.
+        fields, path = top_fields, name
+        while True:
+            field = fields.get(path)
+            if field is not None:
+                break
+            head, separator, path = path.partition('.')
+            parent = fields.get(head)
+            if not separator or parent is None or not isinstance(parent.type, RowType):
+                break
+            fields = {child.name: child for child in parent.type.fields}
+        if field is None:
+            raise RuntimeError("Column '{}' not found in schema {}".format(name, schema.id))
+        result.append(field)
+    return result
+
+
+def validate_row_id_update_fields(current_schema, schema_manager, files):
+    """Reject staged updates whose written field IDs are absent from this schema."""
+    current_ids = set()
+    for field in current_schema.fields:
+        current_ids.add(field.id)
+        collect_field_ids(field.type, current_ids)
+    checked = set()
+    for file in files:
+        if file.first_row_id is None:
+            continue
+        key = (file.schema_id, None if file.write_cols is None else tuple(file.write_cols))
+        if key in checked:
+            continue
+        schema = current_schema if file.schema_id == current_schema.id else schema_manager.get_schema(file.schema_id)
+        if schema is None:
+            raise RuntimeError('Schema {} not found'.format(file.schema_id))
+        written_ids = set()
+        for field in resolve_write_fields(schema, file.write_cols):
+            written_ids.add(field.id)
+            collect_field_ids(field.type, written_ids)
+        if not written_ids.issubset(current_ids):
+            raise RuntimeError('Row-id update cannot restore a dropped field')
+        checked.add(key)
 
 
 class RowIdExistenceConflict(RuntimeError):

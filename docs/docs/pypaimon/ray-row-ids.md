@@ -110,6 +110,10 @@ print(metrics)   # {"num_updated": 50}
   columns, are rejected even if their names are reused, file boundaries are unchanged,
   or DDL has not published a data snapshot. Recovery prechecks plan only the partitions
   present in the staged updates.
+  Python commits repeat field-identity validation against the schema recorded in each
+  snapshot attempt, including retries after a failed snapshot publication. Logical conflict
+  checks also resolve nested write paths from Java partial updates using each file's
+  historical schema.
 
 ## Read By Row Id
 
