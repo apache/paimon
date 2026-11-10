@@ -103,6 +103,45 @@ public class FieldIdOneBasedTest {
     }
 
     @Test
+    public void testShiftPreservesGeneratedColumns() throws Exception {
+        SchemaManager manager = newSchemaManager("t");
+        TableSchema schema =
+                manager.createTable(
+                        Schema.newBuilder()
+                                .column("name", DataTypes.STRING())
+                                .generatedColumn("label", DataTypes.STRING(), "UPPER(name)")
+                                .option(CoreOptions.FIELD_ID_ONE_BASED.key(), "true")
+                                .build());
+        assertThat(topLevelIds(schema)).containsExactly(1, 2);
+        assertThat(schema.fields().get(1).generationExpression()).isEqualTo("UPPER(name)");
+        assertThat(manager.latest().get().fields().get(1).generationExpression())
+                .isEqualTo("UPPER(name)");
+    }
+
+    @Test
+    public void testEmptyOneBasedTableNeverAllocatesIdZero() throws Exception {
+        SchemaManager manager = newSchemaManager("t");
+        TableSchema created =
+                manager.createTable(
+                        Schema.newBuilder()
+                                .option(CoreOptions.FIELD_ID_ONE_BASED.key(), "true")
+                                .build());
+        assertThat(created.highestFieldId()).isEqualTo(0);
+        TableSchema evolved =
+                manager.commitChanges(SchemaChange.addColumn("value", DataTypes.INT()));
+        assertThat(topLevelIds(evolved)).containsExactly(1);
+
+        // the default remains zero-based
+        SchemaManager zeroBased = newSchemaManager("t2");
+        zeroBased.createTable(Schema.newBuilder().build());
+        assertThat(
+                        topLevelIds(
+                                zeroBased.commitChanges(
+                                        SchemaChange.addColumn("value", DataTypes.INT()))))
+                .containsExactly(0);
+    }
+
+    @Test
     public void testCreateFromPersistedOneBasedSchemaPreservesIds() throws Exception {
         // the copy_files procedure rebuilds a Schema from a persisted TableSchema, options
         // included; already-shifted ids must survive creation unchanged, since the copied

@@ -147,7 +147,7 @@ public class FileSystemSchemaManager implements SchemaManager {
 
             schema = applyDirectives(schema);
             schema = applyFieldIdOneBased(schema);
-            TableSchema newSchema = TableSchema.create(0, schema);
+            TableSchema newSchema = reserveFieldIdZero(TableSchema.create(0, schema));
 
             // validate table from creating table
             FileStoreTableFactory.create(fileIO, tableRoot, newSchema).store();
@@ -175,6 +175,25 @@ public class FileSystemSchemaManager implements SchemaManager {
             return schema;
         }
         return schema.copy((RowType) ShiftFieldId.shift(schema.rowType(), 1));
+    }
+
+    /**
+     * Keep id 0 unallocatable for a one-based table created without fields, so the first added
+     * column gets id 1 rather than 0.
+     */
+    private static TableSchema reserveFieldIdZero(TableSchema schema) {
+        if (schema.highestFieldId() >= 0
+                || !CoreOptions.fromMap(schema.options()).fieldIdOneBased()) {
+            return schema;
+        }
+        return new TableSchema(
+                schema.id(),
+                schema.fields(),
+                0,
+                schema.partitionKeys(),
+                schema.primaryKeys(),
+                schema.options(),
+                schema.comment());
     }
 
     private void checkSchemaForExternalTable(Schema existsSchema, Schema newSchema) {

@@ -118,14 +118,7 @@ public class ShiftFieldId extends DataTypeDefaultVisitor<DataType> {
     public DataType visit(RowType rowType) {
         List<DataField> fields =
                 rowType.getFields().stream()
-                        .map(
-                                f ->
-                                        new DataField(
-                                                f.id() + offset,
-                                                f.name(),
-                                                f.type().accept(this),
-                                                f.description(),
-                                                f.defaultValue()))
+                        .map(f -> f.newId(f.id() + offset).newType(f.type().accept(this)))
                         .collect(Collectors.toList());
         return new RowType(rowType.isNullable(), fields);
     }
