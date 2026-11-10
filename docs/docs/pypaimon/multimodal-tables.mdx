@@ -255,7 +255,18 @@ docs.update(
     where="id = 2",
     values={"category": "docs"},
 )
+
+# Target a row using a row ID obtained from this table.
+docs.update(where="_ROW_ID = 42", values={"category": "docs"})
 ```
+
+On row-tracking tables, `update` accepts `_ROW_ID` conditions, including `IN`
+and combinations with business-column predicates using `AND` or `OR`.
+Only matching visible rows are updated; missing or deleted row IDs do not
+match, and no rows are inserted. `_ROW_ID` cannot be assigned a new value.
+The method returns the table and uses the existing predicate-update backend.
+For external per-row values with strict matching of every supplied ID, use
+`update_columns_by_row_id` instead.
 
 On a frame table, updating ordinary columns leaves the configured
 `video-frame-field` untouched. Replacing that field requires the specialized

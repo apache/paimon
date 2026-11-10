@@ -24,6 +24,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.multimodal.query import (
     BatchVectorQuery,
     HybridQuery,
@@ -415,6 +416,13 @@ class MultimodalTable:
         return self
 
     def update(self, where, values):
+        """Update visible rows matching a SQL-like predicate and return this table.
+
+        Row-tracking tables also accept ``_ROW_ID`` predicates. Missing or
+        deleted rows do not match. ``_ROW_ID`` is read-only. Use
+        ``update_columns_by_row_id`` for external per-row values with strict
+        ID matching.
+        """
         video_columns = self.raw_table.options.video_frame_fields()
         if isinstance(values, Mapping):
             assigned_video_columns = video_columns.intersection(values)
@@ -424,8 +432,10 @@ class MultimodalTable:
                     "replace_video() with a complete encoded video."
                     % sorted(assigned_video_columns)[0]
                 )
-        query = self.scan().where(where)
-        predicate = query._predicate
+        if isinstance(where, str) and self.raw_table.options.row_tracking_enabled():
+            predicate = parse_where_clause(where, SpecialFields.row_type_with_row_id(self.raw_table.fields))
+        else:
+            predicate = self.scan().where(where)._predicate
         write_builder = self.raw_table.new_batch_write_builder()
         table_update = write_builder.new_update()
         table_commit = write_builder.new_commit()
