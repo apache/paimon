@@ -17,7 +17,7 @@
 
 import json
 from dataclasses import replace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
@@ -162,6 +162,48 @@ def test_commit_retry_checks_its_exact_snapshot(tmp_path):
         assert table.snapshot_manager().get_latest_snapshot().properties == ordinary.properties
     finally:
         commit.close()
+
+
+@pytest.mark.parametrize('options,properties', [
+    ({'delete-ordering-guards.enabled': 'true'}, None),
+    ({}, {'delete-ordering-guards.max-sequence-number': '1'}),
+    ({}, {'delete-ordering-guards.generations': '{"version":"1","*":"reset"}'}),
+])
+@pytest.mark.parametrize('target', ['snapshot', 'tag', 'timestamp'])
+@pytest.mark.parametrize('catalog_rollback', [False, True])
+def test_guarded_histories_reject_destructive_rollback(
+        tmp_path, options, properties, target, catalog_rollback):
+    table = _table(tmp_path)
+    _append(table, 1)
+    manager = table.snapshot_manager()
+    retained = manager.get_latest_snapshot()
+    table.create_tag('before-reset', retained.id)
+    _append(table, 2)
+    table.create_tag('after-reset')
+    if properties is not None:
+        _guard_snapshot(table, properties)
+    table = table.copy(options)
+    latest = manager.get_latest_snapshot()
+    tag_manager = table.tag_manager()
+    snapshot_ids = manager.list_snapshot_ids()
+    tags = sorted(tag_manager.list_tags())
+    metadata_paths = [manager.get_snapshot_path(snapshot_id) for snapshot_id in snapshot_ids]
+    metadata_paths.extend(tag_manager.tag_path(tag) for tag in tags)
+    metadata = {path: table.file_io.read_file_utf8(path) for path in metadata_paths}
+
+    delegate = Mock() if catalog_rollback else None
+    with patch.object(table.catalog_environment, 'catalog_table_rollback', return_value=delegate) as select:
+        with pytest.raises(NotImplementedError, match='does not support delete ordering guards'):
+            if target == 'timestamp':
+                table.rollback_to_timestamp(retained.time_millis)
+            else:
+                table.rollback_to(retained.id if target == 'snapshot' else 'before-reset')
+        select.assert_not_called()
+
+    assert manager.get_latest_snapshot().id == latest.id
+    assert manager.list_snapshot_ids() == snapshot_ids
+    assert sorted(tag_manager.list_tags()) == tags
+    assert {path: table.file_io.read_file_utf8(path) for path in metadata_paths} == metadata
 
 
 @pytest.mark.python_plan
