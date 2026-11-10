@@ -1483,6 +1483,29 @@ def test_merge_preserves_arrow_native_episode_extensions(setup, import_paralleli
     assert rows(conn, "merged_frames").num_rows == 10
 
 
+def test_training_metadata_ignores_episode_map_extension(setup):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn, sources = setup
+    path = Path(sources[0][7:]) / "meta/episodes/chunk-000/file-000.parquet"
+    values = pa.array([[("vendor", 1)], [("vendor", 2)]],
+                      type=pa.map_(pa.string(), pa.int64()))
+    pq.write_table(pq.read_table(path).append_column("vendor_map", values), path)
+
+    conn.load_from_lerobot("merged", sources, tag_name="train")
+    episodes = episode_rows(conn, "merged_episodes")
+    assert episodes.schema.field("vendor_map").type == values.type
+    assert episodes["vendor_map"].to_pylist() == values.to_pylist() + [None, None]
+
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), tag_name="train")
+    try:
+        assert reader.num_episodes == 4
+        assert "vendor_map" not in reader.meta.episodes.column_names
+        assert int(reader[0]["episode_index"]) == 0
+    finally:
+        reader.close()
+
+
 @pytest.mark.parametrize("dataset_index", [None, 1])
 def test_training_projects_out_source_archives(setup, dataset_index):
     from pypaimon.multimodal.lerobot import dataset as dataset_module

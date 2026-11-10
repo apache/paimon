@@ -99,6 +99,7 @@ Binary, temporal, decimal, map, and extension types in these JSON groups are
 rejected before any target table is created. Episode fields without `/` retain
 their original names and Paimon-supported Arrow types as columns in `_episodes`;
 unsupported types are rejected before table creation.
+Training metadata reads only Episode controls; query `_episodes` for extensions.
 Control-field statistics reflect merged IDs; their original quantiles are
 omitted. Training reads skip `stats`. Repeated task/subtask text within one
 source is rejected before creating tables to avoid losing original frame IDs.
