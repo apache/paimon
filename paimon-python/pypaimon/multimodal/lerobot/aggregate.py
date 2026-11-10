@@ -146,19 +146,18 @@ def _vocabulary(plans, kind):
     index_name = singular + "_index"
     schema = tables[0].schema
     label = _pandas_index_column(schema, singular)
-    if set(schema.names) != {index_name, label}:
-        raise ValueError("Multi-source %s metadata requires only index and text." % kind)
+    schema = tables[0].select([index_name, label]).schema
     rows, by_text = [], {}
     for ordinal, (plan, table) in enumerate(zip(plans, tables)):
         source_label = _pandas_index_column(table.schema, singular)
-        if (set(table.column_names) != {index_name, source_label}
-                or not table.schema.field(index_name).equals(
-                    schema.field(index_name), check_metadata=False)
+        if (not table.schema.field(index_name).equals(
+                schema.field(index_name), check_metadata=False)
                 or not (pa.types.is_string(table.schema.field(source_label).type)
                         or pa.types.is_large_string(table.schema.field(source_label).type))):
             raise ValueError("LeRobot source %d has incompatible %s schema." % (ordinal, kind))
         mapping = {}
-        for row in sorted(table.to_pylist(), key=lambda row: row[index_name]):
+        for row in sorted(table.select([index_name, source_label]).to_pylist(),
+                          key=lambda row: row[index_name]):
             text = row[source_label]
             if text not in by_text:
                 by_text[text] = len(rows)
@@ -250,7 +249,7 @@ def _plan_merge(plans, fps_mode="dataset"):
     reserved_episode_fields = {
         _DATASET_INDEX_COLUMN,
         "source_frame_from_index", "source_frame_to_index",
-        "source_episode_json",
+        "source_episode_ipc",
     }
     if reserved_episode_fields.intersection(metadata["episodes_schema"].names):
         raise ValueError("Source Episode metadata uses reserved source index columns.")
@@ -258,7 +257,7 @@ def _plan_merge(plans, fps_mode="dataset"):
             pa.field(_DATASET_INDEX_COLUMN, pa.int64(), nullable=False),
             pa.field("source_frame_from_index", pa.int64(), nullable=False),
             pa.field("source_frame_to_index", pa.int64(), nullable=False),
-            pa.field("source_episode_json", pa.string(), nullable=False)):
+            pa.field("source_episode_ipc", pa.binary(), nullable=False)):
         metadata["episodes_schema"] = metadata["episodes_schema"].append(field)
     metadata["datasets_table"] = pa.Table.from_pylist([
         {
@@ -369,15 +368,13 @@ def _merged_episodes(plans, schema):
     for dataset_index, plan in enumerate(plans):
         for table in _source_episode_tables(plan["metadata"]):
             records = []
-            for original in table.to_pylist():
+            for offset, original in enumerate(table.to_pylist()):
                 row = {name: original[name] for name in schema.names
                        if name in original}
                 row[_DATASET_INDEX_COLUMN] = dataset_index
                 row["source_frame_from_index"] = original["dataset_from_index"]
                 row["source_frame_to_index"] = original["dataset_to_index"]
-                row["source_episode_json"] = json.dumps(
-                    _json_value(original), ensure_ascii=False,
-                    separators=(",", ":"))
+                row["source_episode_ipc"] = _arrow_ipc(table.slice(offset, 1))
                 episode = row["episode_index"]
                 for key in ("dataset_from_index", "dataset_to_index"):
                     row[key] += plan["frame_offset"]

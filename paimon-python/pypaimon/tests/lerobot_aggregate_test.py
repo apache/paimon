@@ -217,13 +217,13 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     for value in datasets["episodes_schema_ipc"].to_pylist():
         names = pa.ipc.read_schema(pa.BufferReader(value)).names
         assert "episode_index" in names
-        assert "source_episode_json" not in names
-    assert [json.loads(value)["episode_index"] for value in
-            episodes["source_episode_json"].to_pylist()] == [0, 1, 0, 1]
-    assert [json.loads(value)["dataset_from_index"] for value in
-            episodes["source_episode_json"].to_pylist()] == [0, 2, 0, 2]
-    assert [json.loads(value)["dataset_to_index"] for value in
-            episodes["source_episode_json"].to_pylist()] == [2, 5, 2, 5]
+        assert "source_episode_ipc" not in names
+    assert [pa.ipc.open_stream(value).read_all()["episode_index"][0].as_py() for value in
+            episodes["source_episode_ipc"].to_pylist()] == [0, 1, 0, 1]
+    assert [pa.ipc.open_stream(value).read_all()["dataset_from_index"][0].as_py() for value in
+            episodes["source_episode_ipc"].to_pylist()] == [0, 2, 0, 2]
+    assert [pa.ipc.open_stream(value).read_all()["dataset_to_index"][0].as_py() for value in
+            episodes["source_episode_ipc"].to_pylist()] == [2, 5, 2, 5]
     assert conn.catalog.get_tag(
         conn._identifier("merged__datasets"), "train").snapshot.id == 1
     assert episodes["dataset_from_index"].to_pylist() == [0, 2, 5, 7]
@@ -674,7 +674,16 @@ def test_official_merge_reference_and_local_sources(tmp_path):
     expected = pa.concat_tables([pq.read_table(p) for p in sorted((reference / "data").rglob("*.parquet"))])
     actual = rows(conn, "merged").sort_by("index")
     for name in expected.column_names:
-        np.testing.assert_allclose(actual[name].to_pylist(), expected[name].to_pylist())
+        if name != "episode_index":
+            np.testing.assert_allclose(actual[name].to_pylist(), expected[name].to_pylist())
+    assert actual["episode_index"].to_pylist() == [0] * 3 + [1] * 3 + [0] * 3 + [1] * 3
+    assert actual["dataset_index"].to_pylist() == [0] * 6 + [1] * 6
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged"), tag_name="train")
+    try:
+        assert [int(sample["episode_index"]) for sample in reader.get_items(range(12))] == (
+            expected["episode_index"].to_pylist())
+    finally:
+        reader.close()
     info = metadata(conn, "info")
     reference_info = json.loads((reference / "meta/info.json").read_text())
     for name in ("total_frames", "total_episodes", "total_tasks", "splits"):
@@ -1004,3 +1013,63 @@ def test_source_mode_rejects_broken_episode_link(setup):
     meta.episodes = Dataset.from_dict(episodes)
     with pytest.raises(ValueError, match="dataset_index"):
         Reader(meta)
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_merge_preserves_vocabulary_extension_columns(setup, import_parallelism):
+    conn, sources = setup
+    originals = {}
+    for index, uri in enumerate(sources):
+        for kind in ("tasks", "subtasks"):
+            path = Path(uri[7:]) / ("meta/%s.parquet" % kind)
+            table = pq.read_table(path).append_column(
+                "native_bytes", pa.array([b"\xff" + bytes([index]), None], type=pa.binary()))
+            if index == 1:
+                table = table.append_column("source_note", pa.array(["extra", "column"]))
+            pq.write_table(table, path)
+            originals[index, kind] = pq.read_table(path)
+    conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
+    datasets = rows(conn, "merged__datasets").sort_by("dataset_index").to_pylist()
+    for index, dataset in enumerate(datasets):
+        for kind in ("tasks", "subtasks"):
+            restored = pa.ipc.open_stream(dataset[kind + "_ipc"]).read_all()
+            assert restored.equals(originals[index, kind], check_metadata=True)
+    for kind in ("tasks", "subtasks"):
+        assert set(rows(conn, "merged__" + kind).column_names) == {kind[:-1], kind[:-1] + "_index"}
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged"), tag_name="train")
+    try:
+        samples = reader.get_items([0, 5])
+        assert [sample["task"] for sample in samples] == ["pick", "place"]
+        assert [sample["subtask"] for sample in samples] == ["reach", "grasp"]
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_merge_preserves_arrow_native_episode_rows(setup, import_parallelism):
+    from decimal import Decimal
+
+    conn, sources = setup
+    originals = []
+    for index, uri in enumerate(sources):
+        path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
+        table = pq.read_table(path)
+        table = table.append_column("native_bytes", pa.array([b"\xff" + bytes([index]), None]))
+        table = table.append_column("captured_at", pa.array(
+            [1700000000123456789 + index, None], type=pa.timestamp("ns", tz="UTC")))
+        table = table.append_column("measurement", pa.array(
+            [Decimal("123456789.123"), None], type=pa.decimal128(12, 3)))
+        table = table.replace_schema_metadata({b"producer": b"native-source"})
+        pq.write_table(table, path)
+        originals.append(pq.read_table(path))
+    conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
+    datasets = rows(conn, "merged__datasets").sort_by("dataset_index").to_pylist()
+    episodes = episode_rows(conn, "merged__episodes").to_pylist()
+    for row in episodes:
+        expected = originals[row["dataset_index"]].slice(row["episode_index"], 1)
+        restored = pa.ipc.open_stream(row["source_episode_ipc"]).read_all()
+        schema = pa.ipc.read_schema(pa.BufferReader(
+            datasets[row["dataset_index"]]["episodes_schema_ipc"]))
+        assert restored.schema.equals(schema, check_metadata=True)
+        assert restored.equals(expected, check_metadata=True)
+    assert rows(conn, "merged").num_rows == 10
