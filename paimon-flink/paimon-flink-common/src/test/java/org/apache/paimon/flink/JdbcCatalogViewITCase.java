@@ -97,6 +97,15 @@ public class JdbcCatalogViewITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testRealTimeSuffixInViewName() {
+        sql("CREATE VIEW `ordinary$rt` AS SELECT id FROM test_table");
+        assertThat(sql("SELECT id FROM `ordinary$rt`")).hasSize(3);
+
+        sql("DROP VIEW `ordinary$rt`");
+        assertThat(sql("SHOW VIEWS")).isEmpty();
+    }
+
+    @Test
     public void testShowViews() {
         // Create multiple views
         sql(

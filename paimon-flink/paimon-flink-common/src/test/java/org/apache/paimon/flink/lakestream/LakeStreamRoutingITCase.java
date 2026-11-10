@@ -227,6 +227,21 @@ public class LakeStreamRoutingITCase {
     }
 
     @Test
+    public void testLakeStreamBranchWriteIsRejectedBeforeOpeningTheStore() throws Exception {
+        StreamTableEnvironment batch = newBatchEnvWithLakeStreamTable("t1");
+        batch.executeSql("CALL sys.create_branch('default.t1', 'work')");
+
+        assertThatThrownBy(() -> batch.executeSql("INSERT INTO `t1$branch_work` VALUES (1)"))
+                .hasStackTraceContaining("only serves the main branch");
+        assertThat(FakeStoreCatalogFactory.createdCatalogs()).isEmpty();
+
+        batch.executeSql("ALTER TABLE `t1$branch_work` SET ('lakestream.enabled' = 'false')");
+        batch.executeSql("INSERT INTO `t1$branch_work` VALUES (1)").await();
+        assertThat(queryIds(batch, "SELECT id FROM `t1$branch_work`")).containsExactly(1);
+        assertThat(queryIds(batch, "SELECT id FROM t1")).isEmpty();
+    }
+
+    @Test
     public void testConnectorMappingToALakeStreamTableIsRejected() throws Exception {
         StreamTableEnvironment batch = newBatchEnvWithLakeStreamTable("t1");
         String path = tablePath("t1");

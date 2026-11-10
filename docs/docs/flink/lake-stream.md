@@ -23,14 +23,14 @@ under the License.
 
 # Lake-Stream Mode
 
-The Flink connector routes the reads and writes of a lake-stream table through the streaming store
-you name on the catalog. [Lake-Stream Mode](../concepts/lake-stream) explains what the mode does to
-a table.
+Lake-stream mode keeps table history in Paimon and serves recent data through an external
+Lakestream Store. This lets Flink read fresh data between Paimon snapshot commits. The store's
+tiering service moves its records into Paimon in the background. Fluss is the first supported store.
 
 ## Enable Lake-Stream Mode
 
-A lake-stream table needs three things: a table of the same database and name in the store, the
-`lakestream.enabled` option on the Paimon table, and a Paimon catalog that names the store.
+A lake-stream table has `lakestream.enabled` set to `true` in Paimon, a corresponding store table
+with the same database and table name, and a Paimon catalog configured to use that store.
 
 Create the Paimon catalog with `lakestream.store` and the store's connection options.
 
@@ -48,45 +48,51 @@ identifier, and Paimon removes the prefix before it passes the options on, so
 `fluss.bootstrap.servers` reaches Fluss as `bootstrap.servers`. See
 [CatalogOptions](../maintenance/configurations#catalogoptions) for the catalog reference.
 
-Paimon does not create the store-side table and does not move a table's existing data into it.
-Create the store table yourself, in a catalog of the store;
-[Use Fluss as the Store](#use-fluss-as-the-store) shows how for Fluss.
+Set up the store table through the provider's catalog. For Fluss, follow
+[Use Fluss as the Store](#use-fluss-as-the-store) to link both layers to the same table.
 
 Stop the pipelines that write to the table before you change either side, and restart them without
 state once both sides exist, so that Flink plans them against the store sink. A write that lands
 while the store side is missing, or a writer that resumes from state saved against the Paimon sink,
 can leave the store and Paimon holding different data for the same keys.
 
-A catalog created without `lakestream.store` cannot serve a lake-stream table. `my_table$rt` fails
-as an unknown table, and a write to `my_table` is rejected instead of quietly going to Paimon, which
-would leave the store and Paimon holding different data for the same keys. Tables that are not
-lake-stream tables are unaffected. Add `lakestream.store` and the store's connection options to the
-catalog, or [disable the mode](../concepts/lake-stream#disable-lake-stream-mode) on the table first.
+A catalog without `lakestream.store` can still read committed Paimon snapshots by the original
+table name. Real-time reads and writes to an enabled table require the store configuration.
+To resume direct writes to Paimon, [disable the mode](#disable-lake-stream-mode) first.
 
-Lake-stream mode needs a Paimon catalog. A temporary table declared with `'connector' = 'paimon'`
-and a `path` reaches the data without a catalog, so it has no store: a `$rt` read through it, and a
-write to a lake-stream table through it, are both rejected rather than served from Paimon. Read and
-write a lake-stream table through the catalog.
+Use the Paimon catalog for lake-stream reads and writes. A table declared with `'connector' = 'paimon'`
+and a `path` can read snapshots, but Flink rejects `$rt` reads and writes through a path mapping to an
+enabled table.
 
 ## Write to a Lake-Stream Table
 
-Your write statements do not change. Flink reads `lakestream.enabled` from the table when it plans
-the statement and routes the write accordingly.
+Flink uses the persisted `lakestream.enabled` setting to route batch and streaming inserts to the
+store.
 
 ```sql
 INSERT INTO my_table SELECT * FROM source_table;
 ```
 
-A Flink CDC pipeline does not plan its writes through the SQL sink, so it writes straight to Paimon
-and bypasses the store. Confirm that the data it writes has already expired from the store: while
-the store still holds records for the same primary keys, the two can disagree about them, and later
-updates from the store may then use stale state. See
-[Write to a Lake-Stream Table](../concepts/lake-stream#write-to-a-lake-stream-table).
+Flink rejects `INSERT OVERWRITE`, `UPDATE`, and `DELETE` on lake-stream tables. Row-level changes
+would select rows from committed Paimon snapshots while writing changes to the store, which may
+already hold newer values.
 
-## Read the Real-Time Name
+Lake-stream writes use the main branch. A new Paimon branch can inherit `lakestream.enabled`.
+To write directly to that branch, disable the option on the branch first.
 
-`my_table$rt` is the same table read through the store, not a second table. Write the name in
-backticks:
+A Flink CDC pipeline writes directly to Paimon through its own sink. Before using it to update a
+lake-stream table, confirm that records for the affected keys have expired from the store. Later
+store updates can otherwise use stale values.
+
+## Read a Lake-Stream Table
+
+The original name reads committed Paimon snapshots. The read-only `$rt` alias delegates to the
+store, which can combine those snapshots with records it has yet to tier. Use the original name for
+time travel.
+
+### Read the Real-Time Name
+
+Quote the alias with backticks in SQL.
 
 ```sql
 -- Reads only data that Paimon has committed.
@@ -99,17 +105,37 @@ SELECT * FROM `my_table$rt`;
 Paimon connects to the store on the first lake-stream read or write. An unknown store identifier or
 a connection option the store requires fails at that point with a configuration error.
 
+## Change a Lake-Stream Table
+
+Disable lake-stream mode before renaming or replacing the table. The store uses the original table
+name to find its corresponding table. Dropping the Paimon table leaves the store table in place.
+
+Keep physical columns, keys, and shared immutable options aligned between Paimon and the store.
+Flink rejects a write when they differ or when the statement was planned against an older layout.
+Apply supported schema changes through the store's catalog. With Fluss, a schema change made only
+in Paimon can cause the tiering job to fail and restart until the two schemas match again.
+
+## Disable Lake-Stream Mode
+
+Stop the write pipelines and let the store finish tiering any records that subsequent Paimon reads
+need. Then disable the option and restart the pipelines without state so Flink plans a Paimon sink.
+
+```sql
+ALTER TABLE my_table SET ('lakestream.enabled' = 'false');
+```
+
+Subsequent reads and writes use Paimon snapshots and sinks. The `$rt` alias is available only while
+the table has lake-stream mode enabled.
+
 ## Use Fluss as the Store
 
-Fluss is a streaming storage system for the lakehouse, and can serve as a Paimon Lakestream Store.
-Lake-stream mode requires Fluss 1.0 or later.
+Use Fluss 1.0 or later. Configure the Fluss cluster and tiering service to use the same Paimon catalog
+and warehouse as `paimon_catalog`. See the Fluss guide to
+[configuring Paimon as lakehouse storage](https://fluss.apache.org/docs/streaming-lakehouse/datalake-formats/paimon/).
 
-Set up a Fluss cluster with Paimon as its lakehouse storage first; the Fluss documentation covers
-[deploying the streaming lakehouse](https://fluss.apache.org/docs/install-deploy/deploying-streaming-lakehouse/)
-and [Paimon as a datalake format](https://fluss.apache.org/docs/streaming-lakehouse/datalake-formats/paimon/).
-
-Then create the store-side table and the Paimon table that points at it. The two have to agree on
-the database name and the table name, because that name is how Paimon finds the table in the store.
+For a new table, create it in Fluss with `table.datalake.enabled` set to `true`. Fluss creates the
+corresponding Paimon table and enables lake-stream mode on it. If the Paimon table already exists,
+use a Fluss version that supports in-place enablement and follow its promotion procedure.
 
 ```sql
 CREATE CATALOG `fluss_store` WITH (
@@ -117,34 +143,33 @@ CREATE CATALOG `fluss_store` WITH (
     'bootstrap.servers' = 'fluss-server:9123'
 );
 
-CREATE TABLE fluss_store.my_db.my_table (id INT);
+CREATE DATABASE IF NOT EXISTS fluss_store.my_db;
 
-CREATE TABLE paimon_catalog.my_db.my_table (id INT) WITH (
-    'lakestream.enabled' = 'true'
+CREATE TABLE fluss_store.my_db.my_table (id INT) WITH (
+    'table.datalake.enabled' = 'true'
 );
 ```
 
-Writes and reads are then the ordinary ones, in the Paimon catalog:
+Write and query through the Paimon catalog.
 
 ```sql
+USE CATALOG paimon_catalog;
+USE my_db;
+
 INSERT INTO my_table SELECT * FROM source_table;
 
 SELECT * FROM `my_table$rt`;
 ```
 
-:::note
-A Fluss log table is unbounded, so Flink rejects a batch query on `my_table$rt` as a query on an
-unbounded table. Bound the read with scan hints. The example below reads the log from the beginning
-up to the offset it had when the query started.
-:::
+Run the query in batch mode to get a bounded union read. Fluss uses its `full` startup mode for
+the lake-enabled table.
 
 ```sql
-SELECT * FROM `my_table$rt`
-/*+ OPTIONS('scan.startup.mode' = 'earliest', 'scan.bounded.mode' = 'latest-offset') */;
+SET 'execution.runtime-mode' = 'batch';
+SELECT * FROM `my_table$rt`;
 ```
 
-Records reach Paimon only through the Fluss tiering service, which is a separate component from the
-Fluss cluster that serves `my_table$rt`. Until the tiering service runs, the records stay in Fluss:
-`my_table$rt` returns them and `my_table` returns nothing. The Fluss documentation covers the
-[tiering service](https://fluss.apache.org/docs/streaming-lakehouse/tiering-service/) and
-[union reads](https://fluss.apache.org/docs/streaming-lakehouse/union-read/).
+The [Fluss tiering service](https://fluss.apache.org/docs/streaming-lakehouse/tiering-service/) runs
+separately from the cluster. New records become visible through the original Paimon table name once
+tiering commits them. For real-time reads, see
+[Fluss union reads](https://fluss.apache.org/docs/streaming-lakehouse/union-read/).

@@ -396,7 +396,8 @@ public class FlinkCatalog extends AbstractCatalog {
     private CatalogBaseTable getTable(ObjectPath tablePath, @Nullable Long timestamp)
             throws TableNotExistException {
         if (LakeStreamUtils.isRealTimeTable(tablePath)) {
-            return getLakeStreamRealTimeTable(tablePath, timestamp);
+            Optional<CatalogBaseTable> view = getView(tablePath, timestamp);
+            return view.isPresent() ? view.get() : getLakeStreamRealTimeTable(tablePath, timestamp);
         }
         Table table;
         try {
@@ -1132,8 +1133,13 @@ public class FlinkCatalog extends AbstractCatalog {
                             LakeStreamUtils.REAL_TIME_TABLE_SUFFIX,
                             basePath.getFullName()));
         }
-        CatalogBaseTable baseTable = getTable(basePath, null);
-        if (!Options.fromMap(baseTable.getOptions()).get(CoreOptions.LAKE_STREAM_ENABLED)) {
+        Table baseTable;
+        try {
+            baseTable = catalog.getTable(toIdentifier(basePath));
+        } catch (Catalog.TableNotExistException e) {
+            throw new TableNotExistException(getName(), tablePath);
+        }
+        if (!Options.fromMap(baseTable.options()).get(CoreOptions.LAKE_STREAM_ENABLED)) {
             throw new TableNotExistException(getName(), tablePath);
         }
         return requireLakeStreamStoreTable(basePath);

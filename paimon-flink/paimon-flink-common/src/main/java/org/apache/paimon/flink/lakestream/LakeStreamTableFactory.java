@@ -94,10 +94,8 @@ public class LakeStreamTableFactory implements DynamicTableSourceFactory, Dynami
     public static boolean isLakeStreamRead(
             @Nullable FlinkCatalog catalog, DynamicTableFactory.Context context) {
         if (catalog == null) {
-            // with no catalog there is no lake-stream table to confirm the name against, so the
-            // name alone counts; the read is then refused for lack of a store rather than served
-            // from Paimon
-            return LakeStreamUtils.isRealTimeTable(context.getObjectIdentifier().toObjectPath());
+            return LakeStreamUtils.isRealTimeTable(identifierOf(context))
+                    && lakeStreamEnabledAtPath(context);
         }
         return realTimeReadBaseTable(catalog.catalog(), context) != null;
     }
@@ -108,13 +106,26 @@ public class LakeStreamTableFactory implements DynamicTableSourceFactory, Dynami
      */
     public static boolean isLakeStreamWrite(
             @Nullable FlinkCatalog catalog, DynamicTableFactory.Context context) {
+        if (catalog == null) {
+            return lakeStreamEnabledAtPath(context);
+        }
         Identifier identifier = identifierOf(context);
         if (LakeStreamUtils.isRealTimeTable(identifier)) {
             return true;
         }
-        return catalog != null
-                ? persistedLakeStreamTable(catalog.catalog(), identifier) != null
-                : lakeStreamEnabledAtPath(context);
+        if (persistedLakeStreamTable(catalog.catalog(), identifier) == null) {
+            return false;
+        }
+        if (identifier.getBranchName() != null) {
+            throw new ValidationException(
+                    String.format(
+                            "Cannot write to lake-stream branch '%s'. The Lakestream Store only "
+                                    + "serves the main branch. To write directly to this Paimon "
+                                    + "branch, disable '%s' on the branch first.",
+                            context.getObjectIdentifier().asSummaryString(),
+                            CoreOptions.LAKE_STREAM_ENABLED.key()));
+        }
+        return true;
     }
 
     @Override
@@ -149,7 +160,7 @@ public class LakeStreamTableFactory implements DynamicTableSourceFactory, Dynami
         // require provider-specific table options (PIP-39 L289)
         CatalogBaseTable storeTable =
                 catalog.requireLakeStreamStoreTable(identifier.toObjectPath());
-        checkSchemaAlignment(table, storeTable, identifier);
+        checkSchemaAlignment(context, table, storeTable);
         DynamicTableSinkFactory sinkFactory =
                 storeFactory(
                         storeCatalog, DynamicTableSinkFactory.class, "create a sink for writes");
@@ -187,17 +198,28 @@ public class LakeStreamTableFactory implements DynamicTableSourceFactory, Dynami
 
     /** Rejects a write while the store's schema, keys, or shared immutable options differ. */
     private static void checkSchemaAlignment(
-            Table paimonTable, CatalogBaseTable storeTable, ObjectIdentifier identifier) {
+            DynamicTableFactory.Context context, Table paimonTable, CatalogBaseTable storeTable) {
         Schema paimonSchema = LakeStreamUtils.toPaimonSchema(paimonTable);
-        Schema storeSchema = LakeStreamUtils.toPaimonSchema(storeTable);
+        Schema storeSchema =
+                LakeStreamUtils.toPaimonSchema(
+                        storeTable, context.getClassLoader(), context.getConfiguration());
+        String identifier = context.getObjectIdentifier().asSummaryString();
         if (!LakeStreamUtils.isCompatible(paimonSchema, storeSchema)) {
             throw new ValidationException(
                     String.format(
                             "Cannot write to lake-stream table '%s': the Lakestream Store's "
-                                    + "schema and table options [%s] have not caught up with "
-                                    + "Paimon's [%s]. Wait for the store to reconcile its schema, "
-                                    + "or align the two through the store's catalog, before writing.",
-                            identifier.asSummaryString(), storeSchema, paimonSchema));
+                                    + "physical schema, keys, or shared immutable options have not "
+                                    + "caught up with Paimon's. Store physical schema: %s. "
+                                    + "Paimon physical schema: %s. Align the two tables before writing.",
+                            identifier, storeSchema.rowType(), paimonSchema.rowType()));
+        }
+        if (!LakeStreamUtils.matchesPlannedLayout(context.getCatalogTable(), storeSchema)) {
+            throw new ValidationException(
+                    String.format(
+                            "Cannot write to lake-stream table '%s': the statement was planned "
+                                    + "with a different physical schema or keys. Replan the "
+                                    + "statement before writing.",
+                            identifier));
         }
     }
 
