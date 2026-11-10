@@ -118,6 +118,16 @@ class _ManualDatasetReader(pmm.PaimonDatasetReader):
         raise NotImplementedError
 
 
+class _NullableLabelReader(pmm.PaimonDatasetReader):
+
+    def read_indices(self, indices, columns):
+        return pa.Table.from_pylist([
+            {"index": i, "episode_index": 0, "frame_index": i,
+             "timestamp": i / 10.0, "task_index": 0,
+             "subtask_index": None if i % 16 == 15 else 0}
+            for i in indices], schema=self.schema).select(columns)
+
+
 class _PickleDatasetReader(_ManualDatasetReader):
 
     def __init__(self, value):
@@ -1045,6 +1055,142 @@ class LeRobotValidationTest(unittest.TestCase):
                               return_value=rows):
                     with self.assertRaisesRegex(ValueError, option):
                         pmm.PaimonLeRobotDataset(Mock())
+
+    def test_nullable_windows_share_one_storage_across_workers(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        metadata = {
+            "info": {
+                "codebase_version": "v3.0", "fps": 10,
+                "total_frames": 128, "total_episodes": 1, "total_tasks": 1,
+                "features": {
+                    key: {"dtype": dtype, "shape": [1]}
+                    for key, dtype in (("index", "int64"), ("episode_index", "int64"),
+                                       ("frame_index", "int64"), ("timestamp", "float32"),
+                                       ("task_index", "int64"), ("subtask_index", "int64"))
+                },
+            },
+            "tasks": ["pick"], "subtasks": ["reach"],
+            "episodes": [{"episode_index": 0, "dataset_from_index": 0,
+                          "dataset_to_index": 128, "length": 128, "tasks": ["pick"]}],
+        }
+        reader = _NullableLabelReader(
+            metadata, delta_timestamps={"subtask_index": [i / 10.0 for i in range(-1, 31)]})
+        dataset = pmm.PaimonLeRobotDataset(reader)
+        try:
+            samples = dataset.get_items([0, 0])
+            samples[0]["subtask_index"][0].fill_(-100)
+            self.assertEqual(0, samples[0]["subtask_index"][1].item())
+            self.assertEqual(0, samples[1]["subtask_index"][0].item())
+            loader = dataset.to_dataloader(
+                batch_size=64, num_workers=1, multiprocessing_context="spawn")
+            for batch in loader:
+                labels = batch["subtask_index"]
+                mask = batch["subtask_index_is_valid"]
+                self.assertTrue(labels.is_shared())
+                self.assertTrue(mask.is_shared())
+                self.assertEqual((64, 32), tuple(labels.shape))
+                self.assertEqual(labels.shape, mask.shape)
+                self.assertEqual(torch.int64, labels.dtype)
+                self.assertEqual(torch.bool, mask.dtype)
+                for offset, index in enumerate(batch["index"].tolist()):
+                    for column, delta in enumerate(range(-1, 31)):
+                        position = min(127, max(0, index + delta))
+                        expected = position % 16 != 15
+                        self.assertEqual(expected, mask[offset, column].item())
+                        self.assertEqual(0 if expected else -1, labels[offset, column].item())
+                before = labels.clone()
+                labels[0, 0] = -100
+                self.assertTrue(torch.equal(before.flatten()[1:], labels.flatten()[1:]))
+        finally:
+            dataset.close()
+
+    def test_nullable_batch_contract_is_stable(self):
+        import pytest
+        torch = pytest.importorskip("torch")
+        from pypaimon.multimodal.lerobot.dataset import _collate_lerobot_batch
+
+        for labels, expected, validity in (
+                ([torch.tensor(0), None], [0, -1], [True, False]),
+                ([torch.tensor(0), torch.tensor(1)], [0, 1], [True, True]),
+                ([None, None], [-1, -1], [False, False]),
+                ([[None, torch.tensor(1)], torch.tensor([2, 3])],
+                 [[-1, 1], [2, 3]], [[False, True], [True, True]])):
+            batch = _collate_lerobot_batch([{"subtask_index": label} for label in labels], {})
+            self.assertEqual(expected, batch["subtask_index"].tolist())
+            self.assertEqual(validity, batch["subtask_index_is_valid"].tolist())
+            self.assertEqual(torch.int64, batch["subtask_index"].dtype)
+            self.assertEqual(torch.bool, batch["subtask_index_is_valid"].dtype)
+
+    def test_nullable_label_storage_preserves_mixed_shapes(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.lerobot.dataset import _pack_nullable_labels
+
+        scalar = torch.tensor(3)
+        rows = [{"subtask_index": [scalar, scalar, None]},
+                {"subtask_index": torch.tensor([4, 5, 6])},
+                {"subtask_index": scalar}, {"subtask_index": None}]
+        _pack_nullable_labels(rows)
+        first = rows[0]["subtask_index"]
+        self.assertIsNone(first[2])
+        self.assertIsNone(rows[3]["subtask_index"])
+        tensors = first[:2] + [rows[1]["subtask_index"], rows[2]["subtask_index"]]
+        self.assertEqual(1, len({value.untyped_storage().data_ptr() for value in tensors}))
+        first[0].fill_(-100)
+        self.assertEqual(3, first[1].item())
+        self.assertEqual(3, rows[2]["subtask_index"].item())
+        self.assertEqual([4, 5, 6], rows[1]["subtask_index"].tolist())
+        self.assertEqual(3, scalar.item())
+        valid = [{"subtask_index": scalar}]
+        _pack_nullable_labels(valid)
+        self.assertIs(scalar, valid[0]["subtask_index"])
+        empty = [{"subtask_index": [None, None]}]
+        _pack_nullable_labels(empty)
+        self.assertEqual([None, None], empty[0]["subtask_index"])
+
+    def test_custom_reader_empty_subtask_vocabulary(self):
+        try:
+            import torch  # noqa: F401
+        except ImportError as error:
+            self.skipTest(str(error))
+        metadata = {
+            "info": {
+                "codebase_version": "v3.0", "fps": 10,
+                "total_frames": 1, "total_episodes": 1, "total_tasks": 1,
+                "features": {
+                    key: {"dtype": dtype, "shape": [1]}
+                    for key, dtype in (("index", "int64"), ("episode_index", "int64"),
+                                       ("frame_index", "int64"), ("timestamp", "float32"),
+                                       ("task_index", "int64"), ("subtask_index", "int64"))
+                },
+            },
+            "tasks": ["pick"], "subtasks": [],
+            "episodes": [{"episode_index": 0, "dataset_from_index": 0,
+                          "dataset_to_index": 1, "length": 1, "tasks": ["pick"]}],
+        }
+
+        class Reader(pmm.PaimonDatasetReader):
+            label = None
+
+            def read_indices(self, indices, columns):
+                return pa.Table.from_pylist([
+                    {"index": 0, "episode_index": 0, "frame_index": 0,
+                     "timestamp": 0.0, "task_index": 0, "subtask_index": self.label}
+                    for unused in indices], schema=self.schema).select(columns)
+
+        reader = Reader(metadata)
+        self.assertIsNone(reader[0]["subtask"])
+        batch = next(iter(pmm.PaimonLeRobotDataset(reader).to_dataloader(
+            batch_size=1, num_workers=0)))
+        self.assertEqual([None], batch["subtask"])
+        reader.label = 0
+        with self.assertRaises(ValueError):
+            reader[0]
 
     def test_video_batches_include_delta_frames_and_preserve_backends(self):
         try:
@@ -2348,6 +2494,13 @@ class LeRobotValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "subtask_index 2 outside"):
             _validate_frame_controls(
                 batch, 30, 0, 0, 0, [0], range(2))
+
+        nullable = batch.set_column(
+            batch.schema.get_field_index("subtask_index"),
+            "subtask_index", pa.array([None], type=pa.int64()))
+        self.assertEqual(
+            {0}, _validate_frame_controls(
+                nullable, 30, 0, 0, 0, [0], range(2)))
 
     def test_metadata_writer_closes_after_commit_creation_failure(self):
         table = Mock()
@@ -4305,6 +4458,39 @@ class LeRobotImportTest(unittest.TestCase):
                 self.assertEqual("reach", row["subtask"])
                 self.assertEqual(info["total_frames"], len(dataset))
 
+    def test_import_empty_subtask_vocabulary(self):
+        import pandas as pd
+
+        source = self.temp_dir / "empty_subtasks"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta/info.json"
+        info = json.loads(info_path.read_text())
+        info["features"]["subtask_index"] = {
+            "dtype": "int64", "shape": [1], "names": None}
+        info_path.write_text(json.dumps(info))
+        for path in (source / "data").rglob("*.parquet"):
+            data = pq.read_table(path)
+            pq.write_table(data.append_column(
+                "subtask_index", pa.nulls(data.num_rows, type=pa.int64())), path)
+        vocabulary = pa.Table.from_pandas(pd.DataFrame(
+            {"subtask_index": [0]},
+            index=pd.Index(["reach"], name="instruction"))).slice(0, 0)
+        pq.write_table(vocabulary, source / "meta/subtasks.parquet")
+        self.connection.load_from_lerobot("empty_subtasks", source, tag_name="train")
+        table, stored = _catalog_arrow(self.connection, "empty_subtasks__subtasks")
+        self.assertEqual(0, stored.num_rows)
+        self.assertTrue(_target_schema(table).equals(vocabulary.schema, check_metadata=False))
+        self.assertEqual(1, self.connection.catalog.get_tag(
+            self.connection._identifier("empty_subtasks__subtasks"), "train").snapshot.id)
+        dataset = pmm.PaimonLeRobotDataset(
+            self.connection.get_table("empty_subtasks"), tag_name="train")
+        self.assertIsNone(dataset[0]["subtask"])
+        self.assertIsNone(dataset[0]["subtask_index"])
+        batch = next(iter(dataset.to_dataloader(batch_size=5, num_workers=0)))
+        self.assertEqual([None] * 5, batch["subtask"])
+        self.assertEqual([-1] * 5, batch["subtask_index"].tolist())
+        self.assertFalse(batch["subtask_index_is_valid"].any())
+
     def test_import_publishes_optional_subtasks(self):
         import pandas as pd
 
@@ -4327,6 +4513,8 @@ class LeRobotImportTest(unittest.TestCase):
                 for index in range(data.num_rows)
             ]
             next_subtask += data.num_rows
+            if next_subtask == 5:
+                values[-1] = None
             pq.write_table(data.append_column(
                 "subtask_index",
                 pa.array(values, type=pa.int64()),
@@ -4344,7 +4532,7 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertNotIn("subtask", [
             field.name for field in frames.raw_table.fields
         ])
-        self.assertEqual([0, 1, 0, 1, 0], frames.scan().select([
+        self.assertEqual([0, 1, 0, 1, None], frames.scan().select([
             "index", "subtask_index"
         ]).to_arrow().sort_by("index").column("subtask_index").to_pylist())
         subtasks_table = self.connection.catalog.get_table(
@@ -4367,6 +4555,43 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual(["reach", "grasp"], list(
             dataset.meta.subtasks.index))
         self.assertEqual("reach", dataset[0]["subtask"])
+        self.assertIsNone(dataset[4]["subtask_index"])
+        self.assertIsNone(dataset[4]["subtask"])
+        self.assertEqual(["grasp", None], [
+            row["subtask"] for row in dataset.__getitems__([3, 4])
+        ])
+        batch = next(iter(dataset.to_dataloader(
+            batch_size=5, shuffle=False, num_workers=0)))
+        self.assertEqual([0, 1, 2, 3, 4], batch["index"].tolist())
+        self.assertEqual([0, 1, 0, 1, -1], batch["subtask_index"].tolist())
+        self.assertEqual([True, True, True, True, False],
+                         batch["subtask_index_is_valid"].tolist())
+        self.assertEqual(["reach", "grasp", "reach", "grasp", None],
+                         batch["subtask"])
+        windowed = pmm.PaimonLeRobotDataset(
+            frames, tag_name="training",
+            delta_timestamps={"subtask_index": [-0.1, 0.0]})
+        self.assertEqual([1, None], [
+            None if value is None else int(value)
+            for value in windowed[4]["subtask_index"]
+        ])
+        padded = pmm.PaimonLeRobotDataset(
+            frames, tag_name="training",
+            delta_timestamps={"subtask_index": [-0.1, 0.0, 0.2]})
+        samples = padded.__getitems__([2, 2])
+        self.assertEqual([True, False, False],
+                         samples[0]["subtask_index_is_pad"].tolist())
+        for sample in samples:
+            self.assertEqual([0, 0, None], [
+                None if value is None else int(value)
+                for value in sample["subtask_index"]
+            ])
+        samples[0]["subtask_index"][0].fill_(-100)
+        self.assertEqual(0, int(samples[0]["subtask_index"][1]))
+        self.assertEqual([0, 0, None], [
+            None if value is None else int(value)
+            for value in samples[1]["subtask_index"]
+        ])
         self.assertEqual(
             1,
             self.connection.catalog.get_tag(

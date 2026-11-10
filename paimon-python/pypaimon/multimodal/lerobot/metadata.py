@@ -285,7 +285,8 @@ def _commit_metadata(
     for name in ("tasks", "subtasks", "stats", "info"):
         if name not in tables:
             continue
-        snapshot_id = _append_arrow(tables[name], metadata[name + "_table"])
+        snapshot_id = _append_arrow(tables[name], metadata[name + "_table"],
+                                    allow_empty=name == "subtasks")
         _require_initial_snapshot(name, snapshot_id)
         component_snapshots.append((tables[name].identifier, snapshot_id))
     frames_table = connection.catalog.get_table(frames_identifier)
@@ -360,8 +361,8 @@ def _require_initial_snapshot(component, snapshot_id):
             "expected snapshot 1, found %d." % (component, snapshot_id))
 
 
-def _append_arrow(table, data):
-    return _append_arrow_tables(table, [data])
+def _append_arrow(table, data, allow_empty=False):
+    return _append_arrow_tables(table, [data], allow_empty=allow_empty)
 
 
 def _overwrite_arrow(table, data):
@@ -390,7 +391,9 @@ def _overwrite_arrow(table, data):
             table_commit.close()
 
 
-def _append_arrow_tables(table, tables):
+def _append_arrow_tables(table, tables, allow_empty=False):
+    if allow_empty:
+        table = table.copy({"snapshot.ignore-empty-commit": "false"})
     builder = table.new_batch_write_builder()
     table_write = None
     table_commit = None
@@ -412,7 +415,7 @@ def _append_arrow_tables(table, tables):
             table_write.write_arrow(data)
             row_count += data.num_rows
             del data
-        if row_count == 0:
+        if row_count == 0 and not allow_empty:
             table_write.abort()
             return None
         messages = table_write.prepare_commit()
