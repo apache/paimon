@@ -70,6 +70,17 @@ public class LookupFileTest {
     }
 
     @Test
+    public void testLocalFilePrefixWithInvalidPathCharacters() throws IOException {
+        String fileName =
+                localFilePrefix(
+                        RowType.of(DataTypes.STRING()),
+                        singleColumn("a\u0000/b"),
+                        0,
+                        "data.parquet");
+        assertThat(new File(tempDir.toFile(), fileName).createNewFile()).isTrue();
+    }
+
+    @Test
     public void testCloseCleansLocalStateWhenReaderCloseFails() throws Exception {
         File localFile = tempDir.resolve("lookup-file").toFile();
         assertThat(localFile.createNewFile()).isTrue();
