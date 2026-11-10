@@ -441,6 +441,166 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
         rows = rb.new_read().to_arrow(splits).to_pylist()
         self.assertEqual(rows, [{'p': 1, 'id': 1, 'v': 30}])
 
+    # -- merge_map_with_keytime compatibility / public-read precision ----
+
+    def _write_map_table(self, table, pa_schema, rows):
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        c = wb.new_commit()
+        try:
+            w.write_arrow(pa.Table.from_pylist(rows, schema=pa_schema))
+            c.commit(w.prepare_commit())
+        finally:
+            w.close()
+            c.close()
+
+    def _read_map_table(self, table):
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        if not splits:
+            return []
+        return rb.new_read().to_arrow(splits).to_pylist()
+
+    def test_merge_map_with_keytime_double_reopen_keeps_newer(self):
+        # Historical PyPaimon accepted DOUBLE event_time for
+        # merge_map_with_keytime. Recreate that schema, persist two
+        # commits, reopen the table through the current catalog, and
+        # verify the public reader still prefers 10.25 over 9.5.
+        # Boundary: this uses the current writer with the historical
+        # schema rather than an old-version binary; the reopen path is
+        # what the typed-timestamp validation previously broke.
+        value_type = pa.struct([
+            pa.field('value', pa.string()),
+            pa.field('event_time', pa.float64()),
+        ])
+        pa_schema = pa.schema([
+            pa.field('id', pa.string(), nullable=False),
+            pa.field('updates', pa.map_(pa.string(), value_type)),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={
+                'bucket': '1',
+                'merge-engine': 'aggregation',
+                'fields.updates.aggregate-function': 'merge_map_with_keytime',
+                'fields.updates.ts-field': 'event_time',
+            },
+        )
+        self.catalog.create_table('default.agg_keytime_double_reopen', schema, False)
+        table = self.catalog.get_table('default.agg_keytime_double_reopen')
+        self._write_map_table(table, pa_schema, [{
+            'id': '1',
+            'updates': [('k', {'value': 'old', 'event_time': 9.5})],
+        }])
+        self._write_map_table(table, pa_schema, [{
+            'id': '1',
+            'updates': [('k', {'value': 'new', 'event_time': 10.25})],
+        }])
+
+        reopened = self.catalog.get_table('default.agg_keytime_double_reopen')
+        rows = self._read_map_table(reopened)
+        self.assertEqual(len(rows), 1)
+        updates = dict(rows[0]['updates'])
+        self.assertEqual(updates['k']['value'], 'new')
+        self.assertEqual(updates['k']['event_time'], 10.25)
+
+    def test_merge_map_with_keytime_public_read_preserves_ns(self):
+        # Nested MAP/ROW TIMESTAMP(9) and TIMESTAMP_LTZ(9) values that
+        # differ only by 1ns must stay distinguishable on the public read
+        # path so merge_map_with_keytime keeps the newer entry.
+        cases = (
+            ('agg_keytime_ts9_ns', pa.timestamp('ns')),
+            ('agg_keytime_tsltz9_ns', pa.timestamp('ns', tz='UTC')),
+        )
+        for table_name, ts_type in cases:
+            with self.subTest(table=table_name):
+                value_type = pa.struct([
+                    pa.field('value', pa.string()),
+                    pa.field('event_time', ts_type),
+                ])
+                pa_schema = pa.schema([
+                    pa.field('id', pa.string(), nullable=False),
+                    pa.field('updates', pa.map_(pa.string(), value_type)),
+                ])
+                schema = Schema.from_pyarrow_schema(
+                    pa_schema,
+                    primary_keys=['id'],
+                    options={
+                        'bucket': '1',
+                        'merge-engine': 'aggregation',
+                        'fields.updates.aggregate-function':
+                            'merge_map_with_keytime',
+                        'fields.updates.ts-field': 'event_time',
+                    },
+                )
+                self.catalog.create_table(
+                    'default.{}'.format(table_name), schema, False)
+                table = self.catalog.get_table(
+                    'default.{}'.format(table_name))
+                older = pa.scalar(1_000_000_001, type=ts_type).as_py()
+                newer = pa.scalar(1_000_000_002, type=ts_type).as_py()
+                self.assertNotEqual(older, newer)
+
+                self._write_map_table(table, pa_schema, [{
+                    'id': '1',
+                    'updates': [('k', {
+                        'value': 'old', 'event_time': older})],
+                }])
+                self._write_map_table(table, pa_schema, [{
+                    'id': '1',
+                    'updates': [('k', {
+                        'value': 'new', 'event_time': newer})],
+                }])
+
+                rows = self._read_map_table(table)
+                self.assertEqual(len(rows), 1)
+                updates = dict(rows[0]['updates'])
+                self.assertEqual(updates['k']['value'], 'new')
+                self.assertEqual(updates['k']['event_time'], newer)
+
+    def test_merge_map_with_keytime_public_read_microsecond_timestamp(self):
+        # Microsecond TIMESTAMP values must keep working after the Arrow
+        # row-materialization path that preserves nanoseconds.
+        value_type = pa.struct([
+            pa.field('value', pa.string()),
+            pa.field('event_time', pa.timestamp('us')),
+        ])
+        pa_schema = pa.schema([
+            pa.field('id', pa.string(), nullable=False),
+            pa.field('updates', pa.map_(pa.string(), value_type)),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={
+                'bucket': '1',
+                'merge-engine': 'aggregation',
+                'fields.updates.aggregate-function': 'merge_map_with_keytime',
+                'fields.updates.ts-field': 'event_time',
+            },
+        )
+        self.catalog.create_table('default.agg_keytime_ts_us', schema, False)
+        table = self.catalog.get_table('default.agg_keytime_ts_us')
+        older = pa.scalar(1_000_001, type=pa.timestamp('us')).as_py()
+        newer = pa.scalar(1_000_002, type=pa.timestamp('us')).as_py()
+        self.assertNotEqual(older, newer)
+
+        self._write_map_table(table, pa_schema, [{
+            'id': '1',
+            'updates': [('k', {'value': 'old', 'event_time': older})],
+        }])
+        self._write_map_table(table, pa_schema, [{
+            'id': '1',
+            'updates': [('k', {'value': 'new', 'event_time': newer})],
+        }])
+
+        rows = self._read_map_table(table)
+        self.assertEqual(len(rows), 1)
+        updates = dict(rows[0]['updates'])
+        self.assertEqual(updates['k']['value'], 'new')
+        self.assertEqual(updates['k']['event_time'], newer)
+
 
 if __name__ == '__main__':
     unittest.main()

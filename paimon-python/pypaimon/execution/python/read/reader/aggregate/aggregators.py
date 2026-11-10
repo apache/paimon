@@ -144,12 +144,15 @@ _COLLECT_SET_DEDUPE_TYPES = frozenset({
 })
 
 # Timestamp field types accepted by merge_map_with_keytime. Mirrors
-# FieldMergeMapWithKeyTimeAggFactory.isSupportedTimestampType. STRING is the
-# Python spelling of VARCHAR used by the schema parser.
+# FieldMergeMapWithKeyTimeAggFactory.isSupportedTimestampType, plus FLOAT/
+# DOUBLE which historical PyPaimon accepted via native ordering and must
+# remain readable. STRING is the Python spelling of VARCHAR used by the
+# schema parser. Java continues to reject FLOAT/DOUBLE.
 _KEYTIME_STRING_TYPES = frozenset({"CHAR", "VARCHAR", "STRING"})
 _KEYTIME_TIMESTAMP_TYPES = frozenset({
     "CHAR", "VARCHAR", "STRING",
     "TINYINT", "SMALLINT", "INT", "INTEGER", "BIGINT",
+    "FLOAT", "DOUBLE",
     "DATE", "TIME",
     "DECIMAL",
     "TIMESTAMP", "TIMESTAMP_LTZ",
@@ -1327,8 +1330,8 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
         if ts_base not in _KEYTIME_TIMESTAMP_TYPES:
             raise ValueError(
                 "Timestamp field '{}' for field '{}' must be CHAR/VARCHAR, "
-                "TINYINT/SMALLINT/INT/BIGINT, DATE, TIME, DECIMAL, "
-                "TIMESTAMP or TIMESTAMP_LTZ, but was '{}'.".format(
+                "TINYINT/SMALLINT/INT/BIGINT, FLOAT/DOUBLE, DATE, TIME, "
+                "DECIMAL, TIMESTAMP or TIMESTAMP_LTZ, but was '{}'.".format(
                     ts_field_name, field_name, ts_type)
             )
 
@@ -1378,8 +1381,9 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
 
     def _should_replace_by_timestamp(self, new_ts: Any, existing_ts: Any) -> bool:
         # CHAR/VARCHAR keep Java String.compareTo (UTF-16 code units).
-        # Other supported types, including TIMESTAMP values that still carry a
-        # nanosecond tail, compare by their native order. Equal timestamps
+        # Other supported types compare by their native order, including
+        # TIMESTAMP(9) / TIMESTAMP_LTZ(9) values that still carry a
+        # nanosecond tail after Arrow row materialization. Equal timestamps
         # replace only when overwrite-on-equal-ts is enabled.
         if self._string_timestamp:
             if _utf16_code_unit_greater(new_ts, existing_ts):
