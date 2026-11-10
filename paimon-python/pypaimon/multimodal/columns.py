@@ -26,7 +26,7 @@ import pyarrow.compute as pc
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.table import (
     _cast_merge_on_columns, _normalize_merge_on, _target_schema,
-    _to_arrow_table, _validate_merge_on,
+    _to_arrow_table, _validate_merge_on, _validate_row_id_update_schema,
 )
 from pypaimon.schema.arrow_schema import normalize_arrow_write_nullability
 from pypaimon.schema.data_types import PyarrowFieldParser
@@ -251,6 +251,7 @@ def update_columns_by_row_id(owner, data, *, columns):
     _validate_update(raw)
     if not raw.options.data_evolution_enabled() or not raw.options.row_tracking_enabled():
         raise ValueError("Row ID column updates require a Data Evolution table with row tracking.")
+    _validate_row_id_update_schema(owner)
     row_id = SpecialFields.ROW_ID.name
     if data.column_names.count(row_id) != 1:
         raise ValueError("Input must contain exactly one _ROW_ID column.")

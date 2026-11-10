@@ -857,6 +857,128 @@ def test_update_columns_by_row_id_requires_explicit_columns(frames):
     assert _snapshot(frames) == snapshot
 
 
+@pytest.mark.parametrize("row_count", [0, 1])
+@pytest.mark.parametrize("method", ["batch", "predicate"])
+def test_row_id_updates_reject_stale_schema_before_staging(frames, row_count, method):
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.schema.schema_change import SchemaChange
+
+    connection = pmm.MultimodalConnection(frames.catalog)
+    table = connection.get_table(frames.identifier)
+    raw = table.raw_table
+    snapshot, files = _snapshot(table), set(_files(table))
+    table.catalog.alter_table(table.identifier, [
+        SchemaChange.drop_column("label"), SchemaChange.add_column("label", AtomicType("STRING"))])
+    current = connection.get_table(table.identifier)
+    assert current.raw_table.field_dict["label"].id != raw.field_dict["label"].id
+    assert _snapshot(current) == snapshot
+    assert current.raw_table.snapshot_manager().get_latest_snapshot().schema_id == raw.table_schema.id
+    data = pa.table({"_ROW_ID": pa.array([0][:row_count], type=pa.int64()),
+                     "label": pa.array(["new"][:row_count], type=pa.string())})
+    with patch("pypaimon.table.file_store_table.FileStoreTable.new_batch_write_builder",
+               side_effect=AssertionError("must not stage files")):
+        with pytest.raises(ValueError, match="schema has changed.*Reopen"):
+            if method == "batch":
+                table.update_columns_by_row_id(data, columns=["label"])
+            else:
+                table.update("_ROW_ID = %s" % (0 if row_count else 999999), {"label": "new"})
+    assert table.raw_table is raw
+    assert _snapshot(current) == snapshot
+    assert set(_files(current)) == files
+    assert current.scan().select(["label"]).to_list() == [{"label": None}] * 5
+
+    if method == "batch":
+        result = current.update_columns_by_row_id(
+            pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+        assert result.updated_rows == 1
+        assert result.schema_id == current.raw_table.table_schema.id
+    else:
+        assert current.update("_ROW_ID = 0", {"label": "new"}) is current
+    assert _rows(connection.get_table(table.identifier), ["id", "label"]) == [
+        {"id": i, "label": "new" if i == 0 else None} for i in range(5)]
+
+
+@pytest.mark.parametrize("method", ["batch", "predicate"])
+def test_row_id_updates_do_not_write_if_schema_lookup_fails(frames, method):
+    snapshot, files = _snapshot(frames), set(_files(frames))
+    with patch.object(frames.catalog, "get_table", side_effect=OSError("schema lookup failed")):
+        with patch("pypaimon.table.file_store_table.FileStoreTable.new_batch_write_builder",
+                   side_effect=AssertionError("must not stage files")):
+            with pytest.raises(OSError, match="schema lookup failed"):
+                if method == "batch":
+                    frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+                else:
+                    frames.update("id = 1 OR (_ROW_ID = 0 AND label = 'old')", {"label": "new"})
+    assert _snapshot(frames) == snapshot
+    assert set(_files(frames)) == files
+
+
+def test_update_columns_by_row_id_checks_current_branch_schema_and_keeps_dynamic_options(frames):
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.schema.schema_change import SchemaChange
+
+    connection = pmm.MultimodalConnection(frames.catalog)
+    frames.catalog.create_tag(frames.identifier, "base", _snapshot(frames))
+    frames.catalog.create_branch(frames.identifier, "dev", tag_name="base")
+    frames.catalog.alter_table(frames.identifier, [SchemaChange.add_column("score", AtomicType("INT"))])
+    table = connection.get_table(frames.identifier + "$branch_dev").copy({"write.native.enabled": "false"})
+    raw = table.raw_table
+    assert raw.table_schema.id != connection.get_table(frames.identifier).raw_table.table_schema.id
+    result = table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["branch"]}), columns=["label"])
+    assert result.updated_rows == 1
+    assert result.schema_id == raw.table_schema.id
+    assert table.raw_table is raw
+    assert not raw.options.native_write_enabled()
+    assert _rows(connection.get_table(table.identifier), ["id", "label"]) == [
+        {"id": i, "label": "branch" if i == 0 else "old"} for i in range(5)]
+    assert connection.get_table(frames.identifier).scan().select(["label"]).to_list() == [{"label": "old"}] * 5
+
+
+@pytest.mark.parametrize("method", ["batch", "predicate"])
+def test_row_id_updates_reject_branch_copy_with_same_schema_id_and_different_field_ids(frames, method):
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.schema.schema_change import Move, SchemaChange
+
+    connection = pmm.MultimodalConnection(frames.catalog)
+    frames.catalog.create_tag(frames.identifier, "base", _snapshot(frames))
+    frames.catalog.create_branch(frames.identifier, "dev", tag_name="base")
+    frames.catalog.alter_table(frames.identifier, [SchemaChange.set_option("read.batch-size", "3")])
+    identifier = frames.identifier + "$branch_dev"
+    frames.catalog.alter_table(identifier, [
+        SchemaChange.drop_column("label"),
+        SchemaChange.add_column("label", AtomicType("STRING"), move=Move.before("label", "image"))])
+    copied = connection.get_table(frames.identifier).copy({"branch": "dev"})
+    current = connection.get_table(identifier)
+    assert copied.raw_table.table_schema.id == current.raw_table.table_schema.id
+    assert copied.raw_table.field_names == current.raw_table.field_names
+    assert [field.type for field in copied.raw_table.fields] == [field.type for field in current.raw_table.fields]
+    assert copied.raw_table.field_dict["label"].id != current.raw_table.field_dict["label"].id
+    snapshot, files = _snapshot(current), set(_files(current))
+    with patch("pypaimon.table.file_store_table.FileStoreTable.new_batch_write_builder",
+               side_effect=AssertionError("must not stage files")):
+        with pytest.raises(ValueError, match="schema has changed.*Reopen"):
+            if method == "batch":
+                copied.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+            else:
+                copied.update("_ROW_ID = 0", {"label": "new"})
+    assert _snapshot(current) == snapshot
+    assert set(_files(current)) == files
+    assert current.scan().select(["label"]).to_list() == [{"label": None}] * 5
+    if method == "batch":
+        current.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+    else:
+        current.update("_ROW_ID = 0", {"label": "new"})
+    assert _rows(connection.get_table(identifier), ["id", "label"]) == [
+        {"id": i, "label": "new" if i == 0 else None} for i in range(5)]
+
+
+def test_business_predicate_with_row_id_string_literal_does_not_check_schema(frames):
+    snapshot = _snapshot(frames)
+    with patch.object(frames.catalog, "get_table", side_effect=AssertionError("must not check schema")):
+        assert frames.update("label = '_ROW_ID'", {"label": "new"}) is frames
+    assert _snapshot(frames) == snapshot
+
+
 @pytest.mark.parametrize("row_order", [
     pytest.param([0, 1, 2, 3, 4, 5], id="a-first"),
     pytest.param([3, 4, 5, 0, 1, 2], id="b-first"),

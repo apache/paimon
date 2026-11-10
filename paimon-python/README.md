@@ -184,8 +184,10 @@ must be existing, non-partition columns with the table's types and nullability;
 use `replace_video` for video-frame outputs. Omitted rows keep their values and
 untouched columns retain their files. The method uses the standard Python/native
 row-ID update backend and commits all updates together. Empty input creates no
-snapshot. It does not insert rows, add columns, remap historical IDs, or check
-whether external results are stale.
+snapshot. A schema mismatch with the current target branch is rejected before
+writing; reopen the table after schema changes or copying to a branch with a
+different schema. It does not insert rows, add columns, remap
+historical IDs, or check whether external results are stale.
 
 Rollback followed by a new append can reuse both row IDs and numeric snapshot
 IDs. Discard pending annotations from the rolled-back history before writeback;

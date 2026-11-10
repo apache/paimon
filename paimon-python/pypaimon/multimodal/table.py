@@ -41,6 +41,7 @@ from pypaimon.table.data_evolution_merge_into import (
     source_col as _source_col,
 )
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.write.update_validation import predicate_fields
 
 
 _ALL_SOURCE_COLUMNS = object()
@@ -421,7 +422,9 @@ class MultimodalTable:
         Row-tracking tables also accept ``_ROW_ID`` predicates. Missing or
         deleted rows do not match. ``_ROW_ID`` is read-only. Use
         ``update_columns_by_row_id`` for external per-row values with strict
-        ID matching.
+        ID matching. Row-ID predicates require a current table schema; reopen
+        the table after external schema changes or a branch copy with a
+        different schema.
         """
         video_columns = self.raw_table.options.video_frame_fields()
         if isinstance(values, Mapping):
@@ -436,6 +439,8 @@ class MultimodalTable:
             predicate = parse_where_clause(where, SpecialFields.row_type_with_row_id(self.raw_table.fields))
         else:
             predicate = self.scan().where(where)._predicate
+        if predicate is not None and SpecialFields.ROW_ID.name in predicate_fields(predicate):
+            _validate_row_id_update_schema(self)
         write_builder = self.raw_table.new_batch_write_builder()
         table_update = write_builder.new_update()
         table_commit = write_builder.new_commit()
@@ -564,6 +569,9 @@ class MultimodalTable:
         Validation and writing use one snapshot and the standard update backend.
         All prepared updates are committed together. Requires a current
         full-table Data Evolution view and a single writer for the entire call.
+        A schema mismatch with the current target branch is rejected before
+        writing; reopen the table after external schema changes or a branch
+        copy with a different schema.
         IDs from historical results are not remapped or checked for staleness.
         Rollback followed by an append can reuse row IDs and numeric snapshot
         IDs. Discard pending annotations from the rolled-back history before
@@ -1023,6 +1031,13 @@ def _time_travel_table(table, snapshot_id=None, tag_name=None):
             CoreOptions.SCAN_TAG_NAME.key(): tag_name,
         })
     return table
+
+
+def _validate_row_id_update_schema(owner):
+    raw = owner.raw_table
+    current = owner.catalog.get_table(raw.identifier)
+    if current.table_schema.id != raw.table_schema.id or current.fields != raw.fields:
+        raise ValueError("Table schema has changed. Reopen the table before updating columns by row ID.")
 
 
 def _target_schema(table):

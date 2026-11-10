@@ -267,6 +267,9 @@ match, and no rows are inserted. `_ROW_ID` cannot be assigned a new value.
 The method returns the table and uses the existing predicate-update backend.
 For external per-row values with strict matching of every supplied ID, use
 `update_columns_by_row_id` instead.
+Updates with `_ROW_ID` predicates require the handle's schema to match the
+current target branch. Reopen the table after schema changes or a branch copy
+with a different schema; mismatches are rejected before writing.
 
 `_ROW_ID` conditions are currently supported only by `update`, not by
 `delete` or `scan().where(...)`. Calling `with_row_id()` on a scan adds the
@@ -371,6 +374,9 @@ nullability. Other system columns and video-frame outputs are rejected; use
 explicit NULL values clear nullable outputs. No rows or columns are added.
 Empty input creates no data snapshot. The method does not remap historical row
 IDs or determine whether external annotations are stale.
+A table schema that differs from the current target branch is rejected before
+writing; reopen the table after external schema changes or a branch copy with
+a different schema.
 
 Rollback followed by a new append can reuse both row IDs and numeric snapshot
 IDs. Discard pending annotations from the rolled-back history before writing
