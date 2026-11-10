@@ -109,7 +109,7 @@ def _abort_messages(table, messages):
 
 def _prepare_dataset(
         table, dataset, info, source, source_schema, batch_size, metadata,
-        video_fields=(), episode_indices=None):
+        video_fields=(), episode_indices=None, transform=None):
     from pypaimon.common.options import CoreOptions
     remux_videos = table.options.options.get(CoreOptions.WRITE_LEROBOT_REMUX_EPISODES)
     if video_fields and remux_videos:
@@ -182,6 +182,8 @@ def _prepare_dataset(
                 metadata["subtask_indices"],
             )
             observed_tasks.update(seen_tasks)
+            if transform is not None:
+                batch = transform(batch, episode_index).select(target_schema.names)
             batch = _strict_lerobot_table(
                 batch,
                 target_schema,
@@ -332,6 +334,8 @@ def _validate_frame_controls(
                    sorted(allowed_tasks)))
         seen_tasks.add(task_index)
         if subtask_indices is not None:
+            if values["subtask_index"][offset] is None:
+                continue
             subtask_index = _control_integer(
                 values["subtask_index"][offset], "subtask_index", index)
             if subtask_index not in subtask_indices:

@@ -36,8 +36,10 @@ from pypaimon.multimodal.table import _target_schema
 
 
 _PANDAS_METADATA_OPTION = "pypaimon.lerobot.pandas-metadata"
+_EPISODE_FPS_COLUMN = "fps"
 _TABLE_SUFFIXES = {
     "info": "__info",
+    "datasets": "__datasets",
     "stats": "__stats",
     "episodes": "__episodes",
     "tasks": "__tasks",
@@ -198,6 +200,9 @@ def _managed_table_options(frames_identifier, metadata=None):
             "LeRobot import does not support table branches.")
     result = {}
     for name, suffix in _TABLE_SUFFIXES.items():
+        if name == "datasets" and (metadata is None or
+                                   metadata.get("datasets_table") is None):
+            continue
         if metadata is not None and name in ("stats", "subtasks") \
                 and metadata[name + "_table"] is None:
             continue
@@ -212,7 +217,7 @@ def _companion_table_identifiers(frames_table):
     for name, key in _COMPANION_OPTION_KEYS.items():
         value = options.get(key)
         if not value:
-            if name in ("stats", "subtasks"):
+            if name in ("datasets", "stats", "subtasks"):
                 continue
             raise ValueError(
                 "LeRobot table %s is missing managed option %s."
@@ -230,6 +235,8 @@ def _prepare_metadata_tables(connection, frames_table, metadata):
     for name in ("stats", "subtasks"):
         if metadata[name + "_table"] is not None:
             schemas[name] = metadata[name + "_table"].schema
+    if metadata.get("datasets_table") is not None:
+        schemas["datasets"] = metadata["datasets_table"].schema
     identifiers = _companion_table_identifiers(frames_table)
     tables = {}
     for name, schema in schemas.items():
@@ -282,10 +289,11 @@ def _commit_metadata(
     component_snapshots = [
         (tables["episodes"].identifier, episodes_snapshot_id),
     ]
-    for name in ("tasks", "subtasks", "stats", "info"):
+    for name in ("tasks", "subtasks", "stats", "info", "datasets"):
         if name not in tables:
             continue
-        snapshot_id = _append_arrow(tables[name], metadata[name + "_table"])
+        snapshot_id = _append_arrow(tables[name], metadata[name + "_table"],
+                                    allow_empty=name == "subtasks")
         _require_initial_snapshot(name, snapshot_id)
         component_snapshots.append((tables[name].identifier, snapshot_id))
     frames_table = connection.catalog.get_table(frames_identifier)
@@ -360,8 +368,8 @@ def _require_initial_snapshot(component, snapshot_id):
             "expected snapshot 1, found %d." % (component, snapshot_id))
 
 
-def _append_arrow(table, data):
-    return _append_arrow_tables(table, [data])
+def _append_arrow(table, data, allow_empty=False):
+    return _append_arrow_tables(table, [data], allow_empty=allow_empty)
 
 
 def _overwrite_arrow(table, data):
@@ -390,7 +398,9 @@ def _overwrite_arrow(table, data):
             table_commit.close()
 
 
-def _append_arrow_tables(table, tables):
+def _append_arrow_tables(table, tables, allow_empty=False):
+    if allow_empty:
+        table = table.copy({"snapshot.ignore-empty-commit": "false"})
     builder = table.new_batch_write_builder()
     table_write = None
     table_commit = None
@@ -412,7 +422,7 @@ def _append_arrow_tables(table, tables):
             table_write.write_arrow(data)
             row_count += data.num_rows
             del data
-        if row_count == 0:
+        if row_count == 0 and not allow_empty:
             table_write.abort()
             return None
         messages = table_write.prepare_commit()
@@ -498,10 +508,10 @@ def _source_tasks(dataset, source, total_tasks):
             _remote_path,
         )
         path = _remote_path(source.path, "meta/tasks.parquet")
-        return _read_remote_parquet(source.file_io, path)
+        return _source_vocabulary_index(_read_remote_parquet(source.file_io, path), "task")
     path = _metadata_root(dataset, source) / "meta" / "tasks.parquet"
     try:
-        return pq.read_table(path)
+        return _source_vocabulary_index(pq.read_table(path), "task")
     except (OSError, ValueError, pa.ArrowException) as error:
         raise ValueError(
             "Cannot read LeRobot task metadata %s: %s" % (path, error)
@@ -519,16 +529,31 @@ def _source_subtasks(dataset, source):
             source.file_io.get_file_status(path)
         except FileNotFoundError:
             return None
-        return _read_remote_parquet(source.file_io, path)
+        return _source_vocabulary_index(_read_remote_parquet(source.file_io, path), "subtask")
     path = _metadata_root(dataset, source) / "meta" / "subtasks.parquet"
     if not path.is_file():
         return None
     try:
-        return pq.read_table(path)
+        return _source_vocabulary_index(pq.read_table(path), "subtask")
     except (OSError, ValueError, pa.ArrowException) as error:
         raise ValueError(
             "Cannot read LeRobot subtask metadata %s: %s" % (path, error)
         ) from error
+
+
+def _source_vocabulary_index(table, component):
+    """Accept a named text column when source Parquet omits Pandas metadata."""
+    if b"pandas" in (table.schema.metadata or {}):
+        return table
+    index_column = component + "_index"
+    if set(table.column_names) != {index_column, component} \
+            or not (pa.types.is_string(table.schema.field(component).type)
+                    or pa.types.is_large_string(table.schema.field(component).type)):
+        return table
+    import pandas as pd
+    frame = table.to_pandas().set_index(component)
+    frame.index = pd.Index(frame.index, name=component)
+    return pa.Table.from_pandas(frame, preserve_index=True)
 
 
 def _source_episodes(dataset, source):
@@ -586,6 +611,14 @@ def _validated_episode_tables(metadata, video_fields=()):
             raise ValueError(
                 "LeRobot Episode metadata is missing columns: %s."
                 % ", ".join(missing))
+        if metadata.get("fps_mode") in ("episode", "source") \
+                and _EPISODE_FPS_COLUMN in table.column_names:
+            for ordinal, value in enumerate(table[_EPISODE_FPS_COLUMN].to_pylist()):
+                rate = _positive_integer(value, "episode fps")
+                if rate != metadata["fps"]:
+                    raise ValueError(
+                        "LeRobot episode %d fps does not match info.fps."
+                        % (len(episodes) + ordinal))
         controls = table.select(required_columns)
         columns = {
             name: controls.column(name)

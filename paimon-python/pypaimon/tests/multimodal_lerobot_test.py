@@ -118,6 +118,16 @@ class _ManualDatasetReader(pmm.PaimonDatasetReader):
         raise NotImplementedError
 
 
+class _NullableLabelReader(pmm.PaimonDatasetReader):
+
+    def read_indices(self, indices, columns):
+        return pa.Table.from_pylist([
+            {"index": i, "episode_index": 0, "frame_index": i,
+             "timestamp": i / 10.0, "task_index": 0,
+             "subtask_index": None if i % 16 == 15 else 0}
+            for i in indices], schema=self.schema).select(columns)
+
+
 class _PickleDatasetReader(_ManualDatasetReader):
 
     def __init__(self, value):
@@ -1045,6 +1055,103 @@ class LeRobotValidationTest(unittest.TestCase):
                               return_value=rows):
                     with self.assertRaisesRegex(ValueError, option):
                         pmm.PaimonLeRobotDataset(Mock())
+
+    def test_nullable_windows_share_one_storage_across_workers(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        metadata = {
+            "info": {
+                "codebase_version": "v3.0", "fps": 10,
+                "total_frames": 128, "total_episodes": 1, "total_tasks": 1,
+                "features": {
+                    key: {"dtype": dtype, "shape": [1]}
+                    for key, dtype in (("index", "int64"), ("episode_index", "int64"),
+                                       ("frame_index", "int64"), ("timestamp", "float32"),
+                                       ("task_index", "int64"), ("subtask_index", "int64"))
+                },
+            },
+            "tasks": ["pick"], "subtasks": ["reach"],
+            "episodes": [{"episode_index": 0, "dataset_from_index": 0,
+                          "dataset_to_index": 128, "length": 128, "tasks": ["pick"]}],
+        }
+        reader = _NullableLabelReader(
+            metadata, delta_timestamps={"subtask_index": [i / 10.0 for i in range(-1, 31)]})
+        dataset = pmm.PaimonLeRobotDataset(reader)
+        try:
+            samples = dataset.get_items([0, 0])
+            samples[0]["subtask_index"][0].fill_(-100)
+            self.assertEqual(0, samples[0]["subtask_index"][1].item())
+            self.assertEqual(0, samples[1]["subtask_index"][0].item())
+            loader = dataset.to_dataloader(
+                batch_size=64, num_workers=1, multiprocessing_context="spawn")
+            for batch in loader:
+                labels = batch["subtask_index"]
+                mask = batch["subtask_index_is_valid"]
+                self.assertTrue(labels.is_shared())
+                self.assertTrue(mask.is_shared())
+                self.assertEqual((64, 32), tuple(labels.shape))
+                self.assertEqual(labels.shape, mask.shape)
+                self.assertEqual(torch.int64, labels.dtype)
+                self.assertEqual(torch.bool, mask.dtype)
+                for offset, index in enumerate(batch["index"].tolist()):
+                    for column, delta in enumerate(range(-1, 31)):
+                        position = min(127, max(0, index + delta))
+                        expected = position % 16 != 15
+                        self.assertEqual(expected, mask[offset, column].item())
+                        self.assertEqual(0 if expected else -1, labels[offset, column].item())
+                before = labels.clone()
+                labels[0, 0] = -100
+                self.assertTrue(torch.equal(before.flatten()[1:], labels.flatten()[1:]))
+        finally:
+            dataset.close()
+
+    def test_nullable_batch_contract_is_stable(self):
+        import pytest
+        torch = pytest.importorskip("torch")
+        from pypaimon.multimodal.lerobot.dataset import _collate_lerobot_batch
+
+        for labels, expected, validity in (
+                ([torch.tensor(0), None], [0, -1], [True, False]),
+                ([torch.tensor(0), torch.tensor(1)], [0, 1], [True, True]),
+                ([None, None], [-1, -1], [False, False]),
+                ([[None, torch.tensor(1)], torch.tensor([2, 3])],
+                 [[-1, 1], [2, 3]], [[False, True], [True, True]])):
+            batch = _collate_lerobot_batch([{"subtask_index": label} for label in labels], {})
+            self.assertEqual(expected, batch["subtask_index"].tolist())
+            self.assertEqual(validity, batch["subtask_index_is_valid"].tolist())
+            self.assertEqual(torch.int64, batch["subtask_index"].dtype)
+            self.assertEqual(torch.bool, batch["subtask_index_is_valid"].dtype)
+
+    def test_nullable_label_storage_preserves_mixed_shapes(self):
+        try:
+            import torch  # noqa: F401
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.lerobot.dataset import _pack_nullable_labels
+
+        scalar = torch.tensor(3)
+        rows = [{"subtask_index": [scalar, scalar, None]},
+                {"subtask_index": torch.tensor([4, 5, 6])},
+                {"subtask_index": scalar}, {"subtask_index": None}]
+        _pack_nullable_labels(rows)
+        first = rows[0]["subtask_index"]
+        self.assertIsNone(first[2])
+        self.assertIsNone(rows[3]["subtask_index"])
+        tensors = first[:2] + [rows[1]["subtask_index"], rows[2]["subtask_index"]]
+        self.assertEqual(1, len({value.untyped_storage().data_ptr() for value in tensors}))
+        first[0].fill_(-100)
+        self.assertEqual(3, first[1].item())
+        self.assertEqual(3, rows[2]["subtask_index"].item())
+        self.assertEqual([4, 5, 6], rows[1]["subtask_index"].tolist())
+        self.assertEqual(3, scalar.item())
+        valid = [{"subtask_index": scalar}]
+        _pack_nullable_labels(valid)
+        self.assertIs(scalar, valid[0]["subtask_index"])
+        empty = [{"subtask_index": [None, None]}]
+        _pack_nullable_labels(empty)
+        self.assertEqual([None, None], empty[0]["subtask_index"])
 
     def test_video_batches_include_delta_frames_and_preserve_backends(self):
         try:

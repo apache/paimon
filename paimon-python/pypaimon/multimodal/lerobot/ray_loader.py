@@ -91,7 +91,7 @@ def _task_groups(info, episodes, video_fields, parallelism):
 
 
 def _prepare_group(table, source_path, source_options, info, schema,
-                   batch_size, metadata, video_fields, episode_indices):
+                   batch_size, metadata, video_fields, episode_indices, transform=None):
     messages = None
     try:
         with _resolved_source(source_path, source_options) as (source, current_info):
@@ -101,7 +101,7 @@ def _prepare_group(table, source_path, source_options, info, schema,
             try:
                 messages = _prepare_dataset(
                     table, dataset, info, source, schema, batch_size,
-                    metadata, video_fields, episode_indices)
+                    metadata, video_fields, episode_indices, transform=transform)
             finally:
                 dataset.close()
         return messages
@@ -170,3 +170,80 @@ def _write_dataset_ray(table, dataset, info, source, source_schema, batch_size,
         return _commit_messages(table_commit, messages)
     finally:
         table_commit.close()
+
+
+def _prepare_merged_source(table, source_path, source_options, info, schema,
+                           batch_size, metadata, video_fields, mapping):
+    from functools import partial
+    from pypaimon.multimodal.lerobot.aggregate import _transform_frames
+
+    mapping = dict(mapping, control_stats={})
+    messages = _prepare_group(
+        table, source_path, source_options, info, schema, batch_size,
+        metadata, video_fields, None, partial(_transform_frames, mapping))
+    return messages, mapping["control_stats"]
+
+
+def _prepare_sources_ray(table, plans, source_options, batch_size, parallelism):
+    ray = _require_ray()
+    table_ref = ray.put(table)
+    prepare = ray.remote(num_cpus=1, max_retries=0)(_prepare_merged_source)
+
+    def arguments():
+        for ordinal, plan in enumerate(plans):
+            info_ref = ray.put(plan["info"])
+            metadata_ref = ray.put({
+                "episodes": plan["metadata"]["episodes"],
+                "subtask_indices": plan["metadata"]["subtask_indices"],
+            })
+            mapping_ref = ray.put({key: plan[key] for key in (
+                "dataset_index", "frame_offset", "episode_offset",
+                "task_index", "subtask_index") if key in plan})
+            yield ordinal, (table_ref, plan["source"].path, source_options,
+                            info_ref, plan["schema"], batch_size, metadata_ref,
+                            plan["videos"], mapping_ref)
+
+    tasks = iter(arguments())
+    pending, messages = {}, []
+    try:
+        exhausted = False
+        while pending or not exhausted:
+            # Limit concurrency across all sources, not separately per dataset.
+            while len(pending) < parallelism and not exhausted:
+                item = next(tasks, None)
+                if item is None:
+                    exhausted = True
+                else:
+                    ordinal, args = item
+                    pending[prepare.remote(*args)] = ordinal
+            if not pending:
+                break
+            ready, _ = ray.wait(list(pending), num_returns=1)
+            task = ready[0]
+            prepared, stats = ray.get(task)
+            messages.extend(prepared)
+            ordinal = pending.pop(task)
+            plans[ordinal]["control_stats"].update(stats)
+        return messages
+    except BaseException:
+        for task in pending:
+            try:
+                ray.cancel(task)
+            except Exception:
+                logging.exception("Failed to cancel LeRobot import task.")
+        if pending:
+            try:
+                ready, _ = ray.wait(list(pending), num_returns=len(pending), timeout=_CANCEL_DRAIN_SECONDS)
+                for task in ready:
+                    try:
+                        prepared, _ = ray.get(task, timeout=0)
+                        messages.extend(prepared)
+                    except Exception:
+                        pass
+            except Exception:
+                logging.exception("Failed to drain cancelled LeRobot tasks.")
+        try:
+            _abort_messages(table, messages)
+        except Exception:
+            logging.exception("Failed to abort prepared LeRobot files.")
+        raise

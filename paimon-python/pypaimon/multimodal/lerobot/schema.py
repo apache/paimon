@@ -157,7 +157,7 @@ def _feature_field(name, feature, legacy_vectors=False):
     return pa.field(
         name,
         arrow_type,
-        nullable=False,
+        nullable=name == "subtask_index",
         metadata={b"description": description.encode("utf-8")},
     )
 

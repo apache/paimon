@@ -61,6 +61,28 @@ The call returns `None` on success. Omitting `tag_name` imports the tables
 without creating tags. The one-time importer requires a new target table and
 a non-empty source dataset; subsequent table edits use the normal Paimon APIs.
 
+Pass an ordered list to merge sources into one table group:
+
+```python
+conn.load_from_lerobot(
+    "robot_all",
+    ["oss://bucket/dataset_a", "oss://bucket/dataset_b"],
+    dataset_names=["dataset_a", "dataset_b"],
+    fps_mode="source",  # Allow different source FPS.
+)
+```
+
+Each source has one row in `__datasets`, including its original metadata and FPS.
+`dataset_names` supplies optional labels; omitted names are null, and duplicate
+labels do not merge sources. Use `dataset_index` to link frames and Episodes;
+`(dataset_index, episode_index)` identifies an original Episode. Frames keep a
+merged `index` and their original `source_index`.
+
+Sources must share robot type and training features. By default they must also
+share FPS; `fps_mode="source"` permits mixed FPS and requires
+`PaimonLeRobotDataset` for training. Pass `dataset_index=N` to that reader to
+select one source.
+
 For FileIO URIs, pass credentials through `source_options`:
 
 ```python
@@ -229,6 +251,9 @@ a partial batch. Pause writes and use `create_lerobot_tag` before training to
 pin one named snapshot on every component.
 
 ## Train with Paimon LeRobot data
+
+For nullable `subtask_index`, `to_dataloader()` uses `-1` with a false
+`subtask_index_is_valid` mask; individual samples retain `None`.
 
 For map-style training, pass an image- or video-backed table group created by
 `load_from_lerobot` to `PaimonLeRobotDataset`. A frame-only table created by
