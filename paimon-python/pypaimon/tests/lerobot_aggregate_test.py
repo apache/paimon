@@ -29,6 +29,9 @@ from pypaimon.catalog.catalog_exception import TableNotExistException
 import pypaimon.multimodal as pm
 from pypaimon.multimodal.lerobot.aggregate import _batch_stats, _transform_frames
 from pypaimon.multimodal.lerobot.metadata import _restore_pandas_metadata
+from pypaimon.multimodal.lerobot.source_json import (
+    _row_from_patch_json, _schema_from_json,
+)
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 
 
@@ -208,22 +211,29 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     assert datasets["frame_to_index"].to_pylist() == [5, 10]
     assert [json.loads(value)["total_frames"] for value in
             datasets["info_json"].to_pylist()] == [5, 5]
-    assert [pa.ipc.open_stream(value).read_all().num_rows for value in
-            datasets["tasks_ipc"].to_pylist()] == [2, 2]
-    assert [pa.ipc.open_stream(value).read_all().num_rows for value in
-            datasets["subtasks_ipc"].to_pylist()] == [2, 2]
-    assert [pa.ipc.open_stream(value).read_all().num_rows for value in
-            datasets["stats_ipc"].to_pylist()] == [6, 6]
-    for value in datasets["episodes_schema_ipc"].to_pylist():
-        names = pa.ipc.read_schema(pa.BufferReader(value)).names
+    assert [len(value) for value in datasets["source_tasks"].to_pylist()] == [2, 2]
+    assert [len(value) for value in datasets["source_subtasks"].to_pylist()] == [2, 2]
+    assert [len(json.loads(value)) for value in
+            datasets["stats_json"].to_pylist()] == [6, 6]
+    for value in datasets["episodes_schema_json"].to_pylist():
+        names = _schema_from_json(value).names
         assert "episode_index" in names
-        assert "source_episode_ipc" not in names
-    assert [pa.ipc.open_stream(value).read_all()["episode_index"][0].as_py() for value in
-            episodes["source_episode_ipc"].to_pylist()] == [0, 1, 0, 1]
-    assert [pa.ipc.open_stream(value).read_all()["dataset_from_index"][0].as_py() for value in
-            episodes["source_episode_ipc"].to_pylist()] == [0, 2, 0, 2]
-    assert [pa.ipc.open_stream(value).read_all()["dataset_to_index"][0].as_py() for value in
-            episodes["source_episode_ipc"].to_pylist()] == [2, 5, 2, 5]
+        assert "source_episode_patch_json" not in names
+    schemas = [_schema_from_json(value) for value in
+               datasets["episodes_schema_json"].to_pylist()]
+    restored = [
+        _row_from_patch_json(row["source_episode_patch_json"], row,
+                             schemas[row["dataset_index"]])
+        for row in episodes.to_pylist()
+    ]
+    assert [row["episode_index"] for row in restored] == [0, 1, 0, 1]
+    assert [row["dataset_from_index"] for row in restored] == [0, 2, 0, 2]
+    assert [row["dataset_to_index"] for row in restored] == [2, 5, 2, 5]
+    patches = [json.loads(value) for value in
+               episodes["source_episode_patch_json"].to_pylist()]
+    assert all("episode_index" not in patch and "length" not in patch
+               for patch in patches)
+    assert "dataset_from_index" in patches[2]
     assert conn.catalog.get_tag(
         conn._identifier("merged__datasets"), "train").snapshot.id == 1
     assert episodes["dataset_from_index"].to_pylist() == [0, 2, 5, 7]
@@ -640,8 +650,8 @@ def test_vocabulary_columns_without_pandas_index_are_preserved(setup):
     dataset = rows(conn, "merged__datasets").sort_by("dataset_index").to_pylist()[0]
     for component in ("tasks", "subtasks"):
         expected = pq.read_table(Path(sources[0][7:]) / ("meta/%s.parquet" % component))
-        actual = pa.ipc.open_stream(dataset[component + "_ipc"]).read_all()
-        assert actual.equals(expected)
+        actual = dataset["source_" + component]
+        assert actual == expected.select([component[:-1] + "_index", component[:-1]]).to_pylist()
 
 
 def test_official_merge_reference_and_local_sources(tmp_path):
@@ -1008,13 +1018,13 @@ def test_legacy_single_source_extensions(setup, mode):
     info["fps_mode"] = mode
     path.write_text(json.dumps(info))
     path = root / "meta/episodes/chunk-000/file-000.parquet"
-    data = pq.read_table(path).append_column("source_episode_ipc", pa.array([b"a", b"b"]))
+    data = pq.read_table(path).append_column("source_episode_patch_json", pa.array(["a", "b"]))
     pq.write_table(data, path)
     conn.load_from_lerobot("single", sources[0], tag_name="train")
     reader = pm.PaimonLeRobotDataset(conn.get_table("single"), tag_name="train")
     try:
         assert reader.episode_fps == (10, 10)
-        assert reader.meta.episodes["source_episode_ipc"] == [b"a", b"b"]
+        assert reader.meta.episodes["source_episode_patch_json"] == ["a", "b"]
         assert int(reader[2]["episode_index"]) == 1
     finally:
         reader.close()
@@ -1040,7 +1050,7 @@ def test_source_mode_rejects_broken_episode_link(setup):
 
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
-def test_merge_preserves_vocabulary_extension_columns(setup, import_parallelism):
+def test_merge_archives_standard_vocabulary_columns(setup, import_parallelism):
     pytest.importorskip("datasets")
     pytest.importorskip("torch")
     conn, sources = setup
@@ -1053,13 +1063,14 @@ def test_merge_preserves_vocabulary_extension_columns(setup, import_parallelism)
             if index == 1:
                 table = table.append_column("source_note", pa.array(["extra", "column"]))
             pq.write_table(table, path)
-            originals[index, kind] = pq.read_table(path)
+            originals[index, kind] = pq.read_table(path).select([kind[:-1] + "_index", kind[:-1]])
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
     datasets = rows(conn, "merged__datasets").sort_by("dataset_index").to_pylist()
     for index, dataset in enumerate(datasets):
         for kind in ("tasks", "subtasks"):
-            restored = pa.ipc.open_stream(dataset[kind + "_ipc"]).read_all()
-            assert restored.equals(originals[index, kind], check_metadata=True)
+            restored = dataset["source_" + kind]
+            assert restored == originals[index, kind].to_pylist()
+            assert all(set(item) == {kind[:-1] + "_index", kind[:-1]} for item in restored)
     for kind in ("tasks", "subtasks"):
         assert set(rows(conn, "merged__" + kind).column_names) == {kind[:-1], kind[:-1] + "_index"}
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged"), tag_name="train")
@@ -1093,16 +1104,18 @@ def test_merge_preserves_arrow_native_episode_rows(setup, import_parallelism):
     episodes = episode_rows(conn, "merged__episodes").to_pylist()
     for row in episodes:
         expected = originals[row["dataset_index"]].slice(row["episode_index"], 1)
-        restored = pa.ipc.open_stream(row["source_episode_ipc"]).read_all()
-        schema = pa.ipc.read_schema(pa.BufferReader(
-            datasets[row["dataset_index"]]["episodes_schema_ipc"]))
+        schema = _schema_from_json(
+            datasets[row["dataset_index"]]["episodes_schema_json"])
+        restored = pa.Table.from_pylist(
+            [_row_from_patch_json(row["source_episode_patch_json"], row, schema)],
+            schema=schema)
         assert restored.schema.equals(schema, check_metadata=True)
         assert restored.equals(expected, check_metadata=True)
     assert rows(conn, "merged").num_rows == 10
 
 
 @pytest.mark.parametrize("dataset_index", [None, 1])
-def test_training_projects_out_source_ipc(setup, dataset_index):
+def test_training_projects_out_source_json(setup, dataset_index):
     from pypaimon.multimodal.lerobot import dataset as dataset_module
 
     pytest.importorskip("torch")
@@ -1116,7 +1129,8 @@ def test_training_projects_out_source_ipc(setup, dataset_index):
         name = table.identifier.object
         if name.endswith(("__datasets", "__episodes")):
             assert projection is not None
-            assert not any(column.endswith("_ipc") for column in projection)
+            assert "source_episode_patch_json" not in projection
+            assert "source_tasks" not in projection
             reads[name.rsplit("__", 1)[1]] = projection
         result = read_arrow(table, projection)
         if name.endswith(("__datasets", "__episodes")):
@@ -1128,14 +1142,14 @@ def test_training_projects_out_source_ipc(setup, dataset_index):
             conn.get_table("merged"), tag_name="train", dataset_index=dataset_index)
         try:
             assert dataset[0]["task"] == ("pick" if dataset_index is None else "place")
-            assert not any(name.endswith("_ipc") for name in dataset.meta.episodes.column_names)
-            assert all(not any(name.endswith("_ipc") for name in row)
+            assert "source_episode_patch_json" not in dataset.meta.episodes.column_names
+            assert all("source_tasks" not in row
                        for row in dataset.meta.datasets)
         finally:
             dataset.close()
     assert set(reads) == {"datasets", "episodes"}
-    assert "tasks_ipc" in rows(conn, "merged__datasets").column_names
-    assert "source_episode_ipc" in episode_rows(conn, "merged__episodes").column_names
+    assert "source_tasks" in rows(conn, "merged__datasets").column_names
+    assert "source_episode_patch_json" in episode_rows(conn, "merged__episodes").column_names
 
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
@@ -1154,8 +1168,11 @@ def test_merge_canonicalizes_episode_timezone(setup, import_parallelism):
     assert data["capture_time"].cast(pa.int64()).to_pylist() == [1700000000123, None] * 2
     for row in data.to_pylist():
         original = originals[row["dataset_index"]].slice(row["episode_index"], 1)
-        assert pa.ipc.open_stream(row["source_episode_ipc"]).read_all().equals(
-            original, check_metadata=True)
+        schema = original.schema
+        restored = pa.Table.from_pylist(
+            [_row_from_patch_json(row["source_episode_patch_json"], row, schema)],
+            schema=schema)
+        assert restored.equals(original, check_metadata=True)
     assert conn.catalog.get_tag(conn._identifier("merged"), "train") is not None
 
 
@@ -1174,7 +1191,7 @@ def test_merge_rejects_ambiguous_source_labels(setup, kind, import_parallelism):
 
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
-def test_merge_archives_original_arrow_vocabulary(setup, import_parallelism):
+def test_merge_archives_vocabulary_without_arrow_schema(setup, import_parallelism):
     pytest.importorskip("datasets")
     pytest.importorskip("torch")
     conn, sources = setup
@@ -1192,8 +1209,8 @@ def test_merge_archives_original_arrow_vocabulary(setup, import_parallelism):
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism)
     for row in rows(conn, "merged__datasets").to_pylist():
         for kind in ("task", "subtask"):
-            restored = pa.ipc.open_stream(row[kind + "s_ipc"]).read_all()
-            assert restored.equals(originals[row["dataset_index"], kind], check_metadata=True)
+            restored = row["source_" + kind + "s"]
+            assert restored == originals[row["dataset_index"], kind].to_pylist()
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged"))
     try:
         assert reader[0]["task"] == "pick"
@@ -1279,7 +1296,10 @@ def test_merge_source_specific_episode_extensions(setup, import_parallelism, rev
     assert "shared_note" in data.column_names
     for row in data.to_pylist():
         expected = originals[sources[row["dataset_index"]]].slice(row["episode_index"], 1)
-        restored = pa.ipc.open_stream(row["source_episode_ipc"]).read_all()
+        restored = pa.Table.from_pylist(
+            [_row_from_patch_json(row["source_episode_patch_json"], row,
+                                  expected.schema)],
+            schema=expected.schema)
         assert restored.equals(expected, check_metadata=True)
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged"), tag_name="train")
     try:

@@ -43,6 +43,7 @@ from pypaimon.multimodal.lerobot.source import (
     _open_resolved_dataset, _pandas_index_column, _resolved_source,
     _validate_info_paths,
 )
+from pypaimon.multimodal.lerobot.source_json import _row_patch_json, _schema_json
 from pypaimon.multimodal.source_utils import _validate_source_kerberos
 from pypaimon.multimodal.table import _target_schema
 
@@ -62,6 +63,14 @@ _REBUILT_INFO = {
 }
 _DATASET_INDEX_COLUMN = "dataset_index"
 _SOURCE_FRAME_INDEX_COLUMN = "source_index"
+_SOURCE_TASKS_TYPE = pa.list_(pa.struct([
+    pa.field("task_index", pa.int64(), nullable=False),
+    pa.field("task", pa.string(), nullable=False),
+]))
+_SOURCE_SUBTASKS_TYPE = pa.list_(pa.struct([
+    pa.field("subtask_index", pa.int64(), nullable=False),
+    pa.field("subtask", pa.string(), nullable=False),
+]))
 _DATASETS_SCHEMA = pa.schema([
     pa.field(_DATASET_INDEX_COLUMN, pa.int64(), nullable=False),
     pa.field("dataset_name", pa.string()),
@@ -71,24 +80,29 @@ _DATASETS_SCHEMA = pa.schema([
     pa.field("frame_from_index", pa.int64(), nullable=False),
     pa.field("frame_to_index", pa.int64(), nullable=False),
     pa.field("info_json", pa.string(), nullable=False),
-    pa.field("tasks_ipc", pa.binary(), nullable=False),
-    pa.field("subtasks_ipc", pa.binary()),
-    pa.field("stats_ipc", pa.binary()),
-    pa.field("episodes_schema_ipc", pa.binary(), nullable=False),
+    pa.field("source_tasks", _SOURCE_TASKS_TYPE, nullable=False),
+    pa.field("source_subtasks", _SOURCE_SUBTASKS_TYPE),
+    pa.field("stats_json", pa.string()),
+    pa.field("episodes_schema_json", pa.string(), nullable=False),
 ])
-
-
-def _arrow_ipc(table):
-    if table is None:
-        return None
-    sink = pa.BufferOutputStream()
-    with pa.ipc.new_stream(sink, table.schema) as writer:
-        writer.write_table(table)
-    return sink.getvalue().to_pybytes()
 
 
 def _json_table(table):
     return {row["key"]: json.loads(row["value"]) for row in table.to_pylist()}
+
+
+def _vocabulary_rows(table, label):
+    if table is None:
+        return None
+    index = label + "_index"
+    source_label = _pandas_index_column(table.schema, label)
+    return [{index: row[index], label: row[source_label]}
+            for row in table.select([index, source_label]).to_pylist()]
+
+
+def _stats_json(table):
+    return None if table is None else json.dumps(
+        _json_table(table), ensure_ascii=False, separators=(",", ":"))
 
 
 def _merge_stats(items):
@@ -215,7 +229,7 @@ def _plan_merge(plans, fps_mode="dataset"):
         for name in first["videos"]
         for suffix in ("chunk_index", "file_index", "from_timestamp", "to_timestamp")
     }
-    # Optional source-specific fields remain lossless in source_episode_ipc.
+    # Source-specific fields remain in source_episode_patch_json.
     metadata["episodes_schema"] = pa.schema([
         field if field.name in required_episode_fields else field.with_nullable(
             field.nullable or any(plan["metadata"]["episodes_schema"].field(field.name).nullable
@@ -271,7 +285,7 @@ def _plan_merge(plans, fps_mode="dataset"):
     reserved_episode_fields = {
         _DATASET_INDEX_COLUMN,
         "source_frame_from_index", "source_frame_to_index",
-        "source_episode_ipc",
+        "source_episode_patch_json",
     }
     if reserved_episode_fields.intersection(metadata["episodes_schema"].names):
         raise ValueError("Source Episode metadata uses reserved source index columns.")
@@ -279,7 +293,7 @@ def _plan_merge(plans, fps_mode="dataset"):
             pa.field(_DATASET_INDEX_COLUMN, pa.int64(), nullable=False),
             pa.field("source_frame_from_index", pa.int64(), nullable=False),
             pa.field("source_frame_to_index", pa.int64(), nullable=False),
-            pa.field("source_episode_ipc", pa.binary(), nullable=False)):
+            pa.field("source_episode_patch_json", pa.string(), nullable=False)):
         metadata["episodes_schema"] = metadata["episodes_schema"].append(field)
     metadata["datasets_table"] = pa.Table.from_pylist([
         {
@@ -293,10 +307,10 @@ def _plan_merge(plans, fps_mode="dataset"):
             "frame_to_index": plan["frame_offset"] + plan["info"]["total_frames"],
             "info_json": json.dumps(_json_value(plan["info"]),
                                     ensure_ascii=False, separators=(",", ":")),
-            "tasks_ipc": _arrow_ipc(plan["metadata"]["source_tasks_table"]),
-            "subtasks_ipc": _arrow_ipc(plan["metadata"]["source_subtasks_table"]),
-            "stats_ipc": _arrow_ipc(plan["metadata"]["stats_table"]),
-            "episodes_schema_ipc": plan["metadata"]["episodes_schema"].serialize().to_pybytes(),
+            "source_tasks": _vocabulary_rows(plan["metadata"]["source_tasks_table"], "task"),
+            "source_subtasks": _vocabulary_rows(plan["metadata"]["source_subtasks_table"], "subtask"),
+            "stats_json": _stats_json(plan["metadata"]["stats_table"]),
+            "episodes_schema_json": _schema_json(plan["metadata"]["episodes_schema"]),
         }
         for ordinal, plan in enumerate(plans)
     ], schema=_DATASETS_SCHEMA)
@@ -392,13 +406,14 @@ def _merged_episodes(plans, schema):
     for dataset_index, plan in enumerate(plans):
         for table in _source_episode_tables(plan["metadata"]):
             records = []
-            for offset, original in enumerate(table.to_pylist()):
+            originals = table.to_pylist()
+            for original in originals:
                 row = {name: original[name] for name in schema.names
                        if name in original}
                 row[_DATASET_INDEX_COLUMN] = dataset_index
                 row["source_frame_from_index"] = original["dataset_from_index"]
                 row["source_frame_to_index"] = original["dataset_to_index"]
-                row["source_episode_ipc"] = _arrow_ipc(table.slice(offset, 1))
+                row["source_episode_patch_json"] = "{}"
                 episode = row["episode_index"]
                 for key in ("dataset_from_index", "dataset_to_index"):
                     row[key] += plan["frame_offset"]
@@ -412,7 +427,13 @@ def _merged_episodes(plans, schema):
                         if key in row:
                             row[key] = _stat_value(schema.field(key).type, value[0])
                 records.append(row)
-            yield pa.Table.from_pylist(records, schema=schema)
+            merged = pa.Table.from_pylist(records, schema=schema)
+            patches = pa.array([
+                _row_patch_json(original, stored, table.schema)
+                for original, stored in zip(originals, merged.to_pylist())
+            ], type=pa.string())
+            patch_index = schema.get_field_index("source_episode_patch_json")
+            yield merged.set_column(patch_index, schema.field(patch_index), patches)
 
 
 def _import_sources(connection, table_name, sources, batch_size, options,

@@ -80,11 +80,14 @@ Each source has one row in `__datasets`, including its original metadata and FPS
 `dataset_names` supplies optional labels; omitted names are null, and duplicate
 labels do not merge sources. Use `dataset_index` to link frames and Episodes;
 `(dataset_index, episode_index)` identifies an original Episode. Frames keep a
-merged `index` and their original `source_index`. Source task/subtask metadata
-and original Episode rows (`__episodes.source_episode_ipc`) use Arrow IPC to
-preserve extra columns and native types. Episode extension columns are shared
-only when present with matching types in every source. Repeated task/subtask text within one
-source is rejected before creating tables to avoid losing original frame IDs.
+merged `index` and their original `source_index`. Source task/subtask ID-to-text
+mappings use typed arrays of rows; stats remain JSON. Original Episode values
+that differ from the merged row are stored in
+`__episodes.source_episode_patch_json`, with their source schemas in
+`__datasets.episodes_schema_json`. Episode extension columns are shared only
+when present with matching types in every source. Repeated task/subtask text
+within one source is rejected before creating tables to avoid losing original
+frame IDs.
 
 Sources must share robot type and training features. By default they must also
 share FPS; `fps_mode="source"` permits mixed FPS and requires
