@@ -36,7 +36,7 @@ import java.util.Map;
 public class WrappedManifestCommittableSerializer
         implements VersionedSerializer<WrappedManifestCommittable> {
 
-    protected static final int CURRENT_VERSION = 1;
+    protected static final int CURRENT_VERSION = 2;
 
     private final ManifestCommittableSerializer manifestCommittableSerializer;
 
@@ -56,6 +56,7 @@ public class WrappedManifestCommittableSerializer
 
         view.writeLong(wrapped.checkpointId());
         view.writeLong(wrapped.watermark());
+        view.writeInt(manifestCommittableSerializer.getVersion());
 
         // Serialize ManifestCommittable map inside WrappedManifestCommittable
         Map<Identifier, ManifestCommittable> map = wrapped.manifestCommittables();
@@ -74,9 +75,9 @@ public class WrappedManifestCommittableSerializer
     @Override
     public WrappedManifestCommittable deserialize(int version, byte[] serialized)
             throws IOException {
-        if (version != CURRENT_VERSION) {
+        if (version < 1 || version > CURRENT_VERSION) {
             throw new UnsupportedOperationException(
-                    "Expecting WrappedManifestCommittable version to be "
+                    "Expecting WrappedManifestCommittable version between 1 and "
                             + CURRENT_VERSION
                             + ", but found "
                             + version
@@ -88,6 +89,8 @@ public class WrappedManifestCommittableSerializer
 
         long checkpointId = view.readLong();
         long watermark = view.readLong();
+        // Version 1 omitted the nested version; the previously supported manifest format was 5.
+        int manifestVersion = version >= 2 ? view.readInt() : 5;
 
         // Deserialize ManifestCommittable map inside WrappedManifestCommittable
         int mapSize = view.readInt();
@@ -103,8 +106,7 @@ public class WrappedManifestCommittableSerializer
             byte[] serializedValue = new byte[valueLength];
             view.read(serializedValue);
             ManifestCommittable value =
-                    manifestCommittableSerializer.deserialize(
-                            manifestCommittableSerializer.getVersion(), serializedValue);
+                    manifestCommittableSerializer.deserialize(manifestVersion, serializedValue);
             wrappedManifestCommittable.putManifestCommittable(key, value);
         }
 

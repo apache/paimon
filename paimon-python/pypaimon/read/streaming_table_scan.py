@@ -76,6 +76,8 @@ class _StreamingScan:
     def plan(self):
         """Plan one available frame without changing execution backends."""
         self._require_open()
+        from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guards
+        validate_delete_ordering_guards(self.table)
         generation = self._generation
         plan = self._execution.plan()
         self._require_open()

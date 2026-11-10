@@ -38,6 +38,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -51,6 +52,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.SnapshotLoader;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -58,6 +60,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -67,6 +70,9 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /** Integration coverage for guarded read endpoints and metadata upgrades. */
 class DeleteOrderingGuardCompatibilityTest {
@@ -80,6 +86,54 @@ class DeleteOrderingGuardCompatibilityTest {
     @AfterEach
     void closeIoManagers() throws Exception {
         IOUtils.closeAll(ioManagers);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testPinnedReadersDoNotLoadCurrentSnapshot(boolean guarded) throws Exception {
+        PrimaryKeyFileStoreTable table =
+                createTable(
+                        Collections.singletonMap(
+                                "delete-ordering-guards.enabled", String.valueOf(guarded)));
+        if (guarded) {
+            append(table, 0, row(RowKind.DELETE, 1, 4));
+            compact(table, 1);
+            table = setOption(table, "delete-ordering-guards.enabled", "false");
+            append(table, 2, row(RowKind.INSERT, 1, 2));
+        } else {
+            append(table, 0, row(RowKind.INSERT, 1, 2));
+        }
+        List<Split> splits = table.newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+        SnapshotLoader loader = mock(SnapshotLoader.class);
+        when(loader.load()).thenThrow(new IOException("Current snapshot service is unavailable"));
+        CatalogEnvironment environment =
+                new CatalogEnvironment(null, null, null, null, null, null, false, false) {
+                    @Override
+                    public SnapshotLoader snapshotLoader() {
+                        return loader;
+                    }
+                };
+        PrimaryKeyFileStoreTable offline =
+                (PrimaryKeyFileStoreTable)
+                        FileStoreTableFactory.create(
+                                table.fileIO(), table.location(), table.schema(), environment);
+        List<InternalRow> rows = read(offline, splits, false);
+        if (guarded) {
+            assertThat(rows).isEmpty();
+            assertThatThrownBy(
+                            () -> offline.store().newBatchRawFileRead().createReader(splits.get(0)))
+                    .hasMessageContaining("Raw reads cannot resolve delete ordering guards");
+        } else {
+            assertThat(rows).hasSize(1);
+            try (org.apache.paimon.reader.RecordReader<InternalRow> reader =
+                    offline.store().newBatchRawFileRead().createReader(splits.get(0))) {
+                List<InternalRow> raw = new ArrayList<>();
+                reader.forEachRemaining(raw::add);
+                assertThat(raw).hasSize(1);
+            }
+        }
+        verifyNoInteractions(loader);
     }
 
     @ParameterizedTest
@@ -205,8 +259,8 @@ class DeleteOrderingGuardCompatibilityTest {
                         .get(0);
         InnerTableRead reader = unsupported.newRead();
         assertThatThrownBy(() -> reader.createReader(split)).hasMessageContaining("fixed buckets");
-        assertThatThrownBy(() -> unsupported.store().newBatchRawFileRead())
-                .hasMessageContaining("fixed buckets");
+        assertThatThrownBy(() -> unsupported.store().newBatchRawFileRead().createReader(split))
+                .hasMessageContaining("Raw reads cannot resolve delete ordering guards");
         append(table, 2, row(RowKind.INSERT, 1, 2));
         assertThat(read(table, table.newScan().plan().splits(), false)).isEmpty();
     }
@@ -240,8 +294,8 @@ class DeleteOrderingGuardCompatibilityTest {
         InnerTableRead reader = overridden.newRead();
         assertThatThrownBy(() -> reader.createReader(split))
                 .hasMessageContaining("only the deduplicate merge engine");
-        assertThatThrownBy(() -> overridden.store().newBatchRawFileRead())
-                .hasMessageContaining("only the deduplicate merge engine");
+        assertThatThrownBy(() -> overridden.store().newBatchRawFileRead().createReader(split))
+                .hasMessageContaining("Raw reads cannot resolve delete ordering guards");
         assertThatThrownBy(() -> append(overridden, 2, row(RowKind.INSERT, 1, 2)))
                 .hasStackTraceContaining("ordering migration");
         append(retained, 2, row(RowKind.INSERT, 1, 2));

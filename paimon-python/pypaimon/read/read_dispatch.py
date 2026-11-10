@@ -79,6 +79,8 @@ def validate_read_backend(read):
 
 def _native_read_execution(read):
     """Select Native before importing its reader; disabled reads stay Python."""
+    from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guards
+    validate_delete_ordering_guards(read.table)
     if not read.table.options.native_read_enabled():
         return native_read_fallback(read, 'read.native.enabled is false')
     from pypaimon.execution.native.read.table_read import NativeTableRead
@@ -226,6 +228,8 @@ def _native_scan_execution(scan):
 
 
 def plan_scan(self, *, _file_scanner_base=False) -> Plan:
+    from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guards
+    validate_delete_ordering_guards(self.table)
     # A catalog-issued grant travels with Core's plan. Other authorization
     # callbacks run before discovering a planning backend.
     native_auth = self.table.options.query_auth_enabled
@@ -290,6 +294,8 @@ def file_scan_has_bucket_pruning(scan):
 def plan_files(scanner, *, _file_scanner_base=False):
     """Plan raw file metadata only with unrestricted whole-table permission."""
     scan = scanner._scan
+    from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guards
+    validate_delete_ordering_guards(scan.table)
     if not _python_scan_selected(scan) and native_plan_requested(scan):
         from pypaimon.execution.native.table import _native_query_auth_supported
         # Raw file metadata precedes query result transformations. Do not let
@@ -322,6 +328,8 @@ def plan_files(scanner, *, _file_scanner_base=False):
 
 def plan_all(self) -> Plan:
     """Plan complete splits only with unrestricted whole-table permission."""
+    from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guards
+    validate_delete_ordering_guards(self.table)
     native = None
     if not _python_scan_selected(self) and native_plan_requested(self):
         from pypaimon.execution.native.table import _native_query_auth_supported
@@ -341,6 +349,8 @@ def plan_all(self) -> Plan:
 
 def scan_with_stats(self, *, _file_scanner_base=False) -> Tuple[Plan, Optional[ScanStats]]:
     """Record pruning counters through the selected planner."""
+    from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guards
+    validate_delete_ordering_guards(self.table)
     native_auth = self.table.options.query_auth_enabled
     native = _native_scan_execution(self) if native_auth else None
     if native is not None:

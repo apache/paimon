@@ -472,6 +472,8 @@ class FileStoreCommit:
                          commit_result_may_be_uncertain: bool = False,
                          snapshot_properties: Optional[Dict[str, str]] = None
                          ) -> CommitResult:
+        from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guards
+        validate_delete_ordering_guards(self.table, latest_snapshot)
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(
                 retry_result,

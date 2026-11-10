@@ -183,6 +183,10 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
         if (s instanceof DataSplit) {
             DataSplit split = (DataSplit) s;
+            if (!split.deleteOrderingGuards().isEmpty()) {
+                throw new UnsupportedOperationException(
+                        "Raw reads cannot resolve delete ordering guards.");
+            }
             return createReader(
                     split.partition(),
                     split.bucket(),
@@ -190,6 +194,11 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                     split.deletionFiles().orElse(null));
         } else {
             IncrementalSplit split = (IncrementalSplit) s;
+            if (!split.beforeDeleteOrderingGuards().isEmpty()
+                    || !split.afterDeleteOrderingGuards().isEmpty()) {
+                throw new UnsupportedOperationException(
+                        "Raw reads cannot resolve delete ordering guards.");
+            }
             if (!split.beforeFiles().isEmpty()) {
                 LOG.info("Ignore split before files: {}", split.beforeFiles());
             }

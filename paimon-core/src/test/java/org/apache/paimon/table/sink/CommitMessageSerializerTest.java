@@ -35,6 +35,7 @@ import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.rando
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomNewFilesIncrement;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link CommitMessageSerializer}. */
 public class CommitMessageSerializerTest {
@@ -80,9 +81,11 @@ public class CommitMessageSerializerTest {
         assertThat(newCommittable.newFilesIncrement()).isEqualTo(committable.newFilesIncrement());
         assertThat(newCommittable.checkFromSnapshot()).isNull();
         assertThat(newCommittable.deleteOrderingGuardGeneration()).isNull();
+        assertThat(newCommittable.deleteOrderingGuardSources()).isNull();
 
         CommitMessageImpl checked =
                 committable
+                        .withDeleteOrderingGuardSources(Arrays.asList("guard-1", "guard-2"))
                         .withDeleteOrderingGuardGeneration("generation-A")
                         .withCheckFromSnapshot(42L);
         CommitMessageImpl checkedRoundTrip =
@@ -92,6 +95,8 @@ public class CommitMessageSerializerTest {
         assertThat(checkedRoundTrip).isEqualTo(checked);
         assertThat(checkedRoundTrip.checkFromSnapshot()).isEqualTo(42L);
         assertThat(checkedRoundTrip.deleteOrderingGuardGeneration()).isEqualTo("generation-A");
+        assertThat(checkedRoundTrip.deleteOrderingGuardSources())
+                .containsExactly("guard-1", "guard-2");
 
         byte[] serializedWithoutSnapshot = serializer.serialize(committable);
         CommitMessageImpl oldVersion =
@@ -100,7 +105,7 @@ public class CommitMessageSerializerTest {
                                 13,
                                 Arrays.copyOf(
                                         serializedWithoutSnapshot,
-                                        serializedWithoutSnapshot.length - 2));
+                                        serializedWithoutSnapshot.length - 3));
         assertThat(oldVersion.checkFromSnapshot()).isNull();
         assertThat(oldVersion.newFilesIncrement()).isEqualTo(committable.newFilesIncrement());
 
@@ -110,9 +115,23 @@ public class CommitMessageSerializerTest {
                                 14,
                                 Arrays.copyOf(
                                         serializedWithoutSnapshot,
-                                        serializedWithoutSnapshot.length - 1));
+                                        serializedWithoutSnapshot.length - 2));
         assertThat(version14.deleteOrderingGuardGeneration()).isNull();
         assertThat(version14).isEqualTo(committable);
+
+        CommitMessageImpl version15 =
+                (CommitMessageImpl)
+                        serializer.deserialize(
+                                15,
+                                Arrays.copyOf(
+                                        serializedWithoutSnapshot,
+                                        serializedWithoutSnapshot.length - 1));
+        assertThat(version15).isEqualTo(committable);
+        assertThat(version15.deleteOrderingGuardSources()).isNull();
+
+        assertThatThrownBy(() -> serializer.deserialize(serializer.getVersion() + 1, new byte[0]))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Upgrade the Paimon reader");
     }
 
     @Test
@@ -125,6 +144,7 @@ public class CommitMessageSerializerTest {
                                 randomNewFilesIncrement(),
                                 CompactIncrement.emptyIncrement())
                         .withCheckFromSnapshot(42L)
+                        .withDeleteOrderingGuardSources(Arrays.asList("guard-3", "guard-4"))
                         .withDeleteOrderingGuardGeneration("generation-B");
 
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
@@ -137,6 +157,7 @@ public class CommitMessageSerializerTest {
             assertThat(restored).isEqualTo(message);
             assertThat(restored.checkFromSnapshot()).isEqualTo(42L);
             assertThat(restored.deleteOrderingGuardGeneration()).isEqualTo("generation-B");
+            assertThat(restored.deleteOrderingGuardSources()).containsExactly("guard-3", "guard-4");
         }
     }
 }

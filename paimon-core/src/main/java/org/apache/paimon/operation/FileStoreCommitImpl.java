@@ -394,7 +394,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
                 attempts +=
                         tryCommit(
-                                DeleteOrderingGuardGeneration.fence(
+                                DeleteOrderingGuardCommit.fence(
                                         dataEvolutionChangesProvider(
                                                 new CommitChanges(
                                                         changes.appendTableFiles,
@@ -402,7 +402,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                         changes.appendIndexFiles),
                                                 commitKind,
                                                 Collections.emptySet()),
-                                        commitMessages),
+                                        commitMessages,
+                                        this::guardIndexFiles),
                                 emptyMap(),
                                 committable.identifier(),
                                 committable.watermark(),
@@ -942,12 +943,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return result;
     }
 
+    private List<IndexManifestEntry> guardIndexFiles(Snapshot snapshot) {
+        return snapshot.indexManifest() == null
+                ? Collections.emptyList()
+                : indexManifestFile.read(snapshot.indexManifest());
+    }
+
     private CommitChangesProvider compactChangesProvider(
             ManifestEntryChanges changes,
             Set<Pair<BinaryRow, Integer>> materializedBuckets,
             List<CommitMessage> messages) {
         CommitChangesProvider provider =
-                DeleteOrderingGuardGeneration.fence(
+                DeleteOrderingGuardCommit.fence(
                         dataEvolutionChangesProvider(
                                 new CommitChanges(
                                         changes.compactTableFiles,
@@ -955,7 +962,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                         changes.compactIndexFiles),
                                 CommitKind.COMPACT,
                                 materializedBuckets),
-                        messages);
+                        messages,
+                        this::guardIndexFiles);
         if (!options.dataEvolutionEnabled()
                 || !options.toConfiguration()
                         .get(CoreOptions.DATA_EVOLUTION_COMPACTION_DISCARD_CONFLICTING_TASKS)
