@@ -53,9 +53,53 @@ public interface HiveCloneExtractor {
             @Nullable PartitionPredicate predicate)
             throws Exception;
 
+    /**
+     * Same as {@link #extractFiles(Map, IMetaStoreClient, Table, FileIO, Identifier, RowType,
+     * String, PartitionPredicate)}, optionally listing the files of each partition recursively.
+     * Extractors that cannot list recursively reject the request.
+     */
+    default List<HivePartitionFiles> extractFiles(
+            Map<String, String> catalogOptions,
+            IMetaStoreClient client,
+            Table table,
+            FileIO fileIO,
+            Identifier identifier,
+            RowType partitionRowType,
+            String defaultPartitionName,
+            @Nullable PartitionPredicate predicate,
+            boolean recursive)
+            throws Exception {
+        if (recursive) {
+            throw new UnsupportedOperationException(
+                    getClass().getSimpleName() + " does not support recursive file listing.");
+        }
+        return extractFiles(
+                catalogOptions,
+                client,
+                table,
+                fileIO,
+                identifier,
+                partitionRowType,
+                defaultPartitionName,
+                predicate);
+    }
+
     List<String> extractPartitionKeys(Table table);
 
     Map<String, String> extractOptions(Table table);
+
+    /**
+     * Same as {@link #extractOptions(Table)}, optionally for copying the data files as they are
+     * instead of reading and rewriting their rows. Extractors that cannot copy files reject the
+     * request.
+     */
+    default Map<String, String> extractOptions(Table table, boolean copyFiles) {
+        if (copyFiles) {
+            throw new UnsupportedOperationException(
+                    getClass().getSimpleName() + " does not support copying data files.");
+        }
+        return extractOptions(table);
+    }
 
     boolean supportCloneSplits(String format);
 

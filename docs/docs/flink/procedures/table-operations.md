@@ -254,6 +254,8 @@ Clone a table or a database. Arguments:
 
 - `parallelism, where, included_tables, excluded_tables, prefer_file_format, meta_only, clone_if_exists and target_table_conf`: optional clone controls.
 
+- `copy_files and recursive_listing`: optional, only for `hive` sources. `copy_files` copies ORC, Parquet or Avro data files as they are instead of rewriting rows, and `recursive_listing` also copies files in sub directories of partitions, skipping hidden directories. `copy_files` can not be combined with `prefer_file_format`.
+
 **Syntax**
 
 ```sql
@@ -272,7 +274,9 @@ CALL [catalog.]sys.clone(
     clone_from => 'hive-or-paimon'][,
     meta_only => true][,
     clone_if_exists => true][,
-    target_table_conf => 'key=value']
+    target_table_conf => 'key=value'][,
+    copy_files => true][,
+    recursive_listing => true]
 );
 ```
 

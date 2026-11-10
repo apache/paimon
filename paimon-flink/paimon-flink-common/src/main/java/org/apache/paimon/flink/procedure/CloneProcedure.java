@@ -85,6 +85,14 @@ public class CloneProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "target_table_conf",
                         type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "copy_files",
+                        type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "recursive_listing",
+                        type = @DataTypeHint("BOOLEAN"),
                         isOptional = true)
             })
     public String[] call(
@@ -103,7 +111,9 @@ public class CloneProcedure extends ProcedureBase {
             String cloneFrom,
             Boolean metaOnly,
             Boolean cloneIfExists,
-            String targetTableConfigStr)
+            String targetTableConfigStr,
+            Boolean copyFiles,
+            Boolean recursiveListing)
             throws Exception {
         Map<String, String> sourceCatalogConfig =
                 new HashMap<>(optionalConfigMap(sourceCatalogConfigStr));
@@ -138,7 +148,9 @@ public class CloneProcedure extends ProcedureBase {
                         preferFileFormat,
                         cloneFrom,
                         metaOnly != null && metaOnly,
-                        cloneIfExists == null || cloneIfExists);
+                        cloneIfExists == null || cloneIfExists,
+                        copyFiles != null && copyFiles,
+                        recursiveListing != null && recursiveListing);
         return execute(procedureContext, action, "Clone Job");
     }
 
