@@ -185,6 +185,10 @@ conn.load_from_lerobot("robot_merged", ["/data/source_a"])
 conn.append_to_lerobot("robot_merged", "/data/source_b", tag_name="after-append")
 ```
 
+If a process stops between component commits, call
+`conn.recover_lerobot_append("robot_merged")` before retrying. This rolls
+unfinished Frame and Episode commits back to the Dataset metadata boundary.
+
 For FileIO URIs, pass credentials through `source_options`:
 
 ```python

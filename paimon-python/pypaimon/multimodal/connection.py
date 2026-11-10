@@ -188,6 +188,11 @@ class MultimodalConnection:
             append=True,
         )
 
+    def recover_lerobot_append(self, table_name: str):
+        """Recover a three-table group after an interrupted append."""
+        from pypaimon.multimodal.lerobot.aggregate import _recover_incomplete_append
+        return _recover_incomplete_append(self, table_name)
+
     def create_lerobot_tag(self, table_name: str, tag_name: str):
         """Pin a LeRobot group by prefix or frame table name.
 

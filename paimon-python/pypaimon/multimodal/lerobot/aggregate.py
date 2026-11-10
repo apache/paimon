@@ -18,7 +18,7 @@
 
 import copy
 import json
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 
 import numpy as np
 import pyarrow as pa
@@ -90,6 +90,59 @@ def _json_table(table):
 def _same_fields(left, right):
     return len(left) == len(right) and all(
         a.equals(b, check_metadata=False) for a, b in zip(left, right))
+
+
+def _recover_incomplete_append(connection, table_name):
+    """Restore component snapshots to the Dataset table's committed counts."""
+    from pypaimon.multimodal.lerobot.dataset import (
+        _read_arrow, _source_dataset_ranges,
+    )
+
+    frames_name = _companion_identifier(
+        connection._identifier(table_name), "_frames")
+    frames = connection.get_table(frames_name).raw_table
+    identifiers = _companion_table_identifiers(frames)
+    datasets = connection.catalog.get_table(identifiers["datasets"])
+    episodes = connection.catalog.get_table(identifiers["episodes"])
+    source_rows = _read_arrow(datasets, ["index", "info"]).sort_by("index").to_pylist()
+    if not source_rows:
+        raise ValueError("LeRobot append recovery requires Dataset metadata.")
+    ranges = _source_dataset_ranges(source_rows)
+    expected = {"frames": ranges[-1][4], "episodes": ranges[-1][2]}
+    restored = []
+    for name, table in (("frames", frames), ("episodes", episodes)):
+        manager = table.snapshot_manager()
+        latest = manager.get_latest_snapshot()
+        if latest is not None and latest.next_row_id == expected[name]:
+            continue
+        if latest is None or latest.next_row_id < expected[name]:
+            raise RuntimeError(
+                "LeRobot %s has fewer rows than Dataset metadata; rollback "
+                "cannot restore the group." % name)
+        previous = next((snapshot for snapshot in reversed(manager.list_snapshots())
+                         if snapshot.next_row_id == expected[name]), None)
+        if previous is None:
+            raise RuntimeError(
+                "LeRobot %s has no retained snapshot with %d rows."
+                % (name, expected[name]))
+        table.rollback_to(previous.id)
+        restored.append(name)
+    return restored
+
+
+@contextmanager
+def _recover_failed_append(connection, table_name):
+    try:
+        yield
+    except BaseException as error:
+        try:
+            _recover_incomplete_append(connection, table_name)
+        except Exception as recovery_error:
+            raise RuntimeError(
+                "LeRobot append failed and automatic recovery failed: %s. "
+                "Call recover_lerobot_append after resolving the cause."
+                % recovery_error) from error
+        raise
 
 
 def _json_native_arrow_type(data_type):
@@ -198,7 +251,7 @@ def _batch_stats(values):
             "count": [len(values)]}
 
 
-def _vocabulary(plans, kind):
+def _vocabulary(plans, kind, existing_sources=None):
     key = kind + "_table"
     tables = [plan["metadata"][key] for plan in plans]
     if all(table is None for table in tables):
@@ -210,6 +263,12 @@ def _vocabulary(plans, kind):
     label = _pandas_index_column(schema, singular)
     schema = first_table.select([index_name, label]).schema
     rows, by_text = [], {}
+    for source in existing_sources or ():
+        for entry in sorted(source.get(kind) or (), key=lambda row: row[index_name]):
+            text = entry[singular]
+            if text not in by_text:
+                by_text[text] = len(rows)
+                rows.append({index_name: len(rows), label: text})
     for ordinal, (plan, table) in enumerate(zip(plans, tables)):
         if table is None:
             plan[index_name] = {}
@@ -253,7 +312,8 @@ def _feature_contract(features):
     return result
 
 
-def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True):
+def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
+                existing_sources=None):
     first = plans[0]
     mixed_fps = len({plan["metadata"]["fps"] for plan in plans}) > 1
     reserved_frame_fields = {_DATASET_INDEX_COLUMN}
@@ -309,8 +369,8 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True):
         if key not in _REBUILT_INFO and key not in ("codebase_version", "robot_type", "fps") \
                 and any(plan["info"].get(key) != info[key] for plan in plans):
             del info[key]
-    metadata["tasks_table"] = _vocabulary(plans, "tasks")
-    metadata["subtasks_table"] = _vocabulary(plans, "subtasks")
+    metadata["tasks_table"] = _vocabulary(plans, "tasks", existing_sources)
+    metadata["subtasks_table"] = _vocabulary(plans, "subtasks", existing_sources)
     metadata["episodes_schema"] = pa.schema([
         metadata["episodes_schema"].field(name)
         for name in _EPISODE_CONTROL_COLUMNS
@@ -516,7 +576,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             if _DATASET_INDEX_COLUMN not in _target_schema(tables["episodes"]).names:
                 raise ValueError("LeRobot append requires a source-local table group.")
             source_rows = _read_arrow(tables["datasets"], [
-                "index", "info", "stats",
+                "index", "info", "tasks", "subtasks", "stats",
             ]).sort_by("index").to_pylist()
             if not source_rows:
                 raise ValueError("LeRobot append requires an initialized table group.")
@@ -530,10 +590,12 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                 snapshot = component.snapshot_manager().get_latest_snapshot()
                 if snapshot is None or snapshot.next_row_id != expected_counts[name]:
                     raise ValueError(
-                        "LeRobot group has incomplete %s data; resolve it "
-                        "before appending." % name)
+                        "LeRobot group has incomplete %s data; call "
+                        "recover_lerobot_append before appending." % name)
             existing = (table, tables, source_rows, ranges)
-        metadata, stats = _plan_merge(plans, extra_dataset_fields, schema_evolution)
+        metadata, stats = _plan_merge(
+            plans, extra_dataset_fields, schema_evolution,
+            source_rows if existing is not None else None)
         target_schema = metadata["frame_schema"]
         target_schema = target_schema.append(
             pa.field(_DATASET_INDEX_COLUMN, pa.int64(), nullable=False))
@@ -581,6 +643,8 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                 row["index"] += dataset_offset
             metadata["datasets_table"] = pa.Table.from_pylist(
                 datasets, schema=metadata["datasets_table"].schema)
+        if existing is not None:
+            stack.enter_context(_recover_failed_append(connection, table_name))
         episode_schema = _target_schema(tables["episodes"])
         commit = table.raw_table.new_batch_write_builder().new_commit()
         stack.callback(commit.close)

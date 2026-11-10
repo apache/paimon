@@ -16,6 +16,7 @@
 
 import json
 import sys
+from contextlib import nullcontext
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
@@ -28,6 +29,7 @@ import pytest
 
 from pypaimon.catalog.catalog_exception import TableNotExistException
 import pypaimon.multimodal as pm
+from pypaimon.multimodal.lerobot import aggregate
 from pypaimon.multimodal.lerobot.aggregate import _batch_stats, _transform_frames
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 
@@ -209,6 +211,62 @@ def test_append_rejects_incompatible_source_without_writing(setup):
     assert rows(conn, "robot_frames").num_rows == 5
     assert rows(conn, "robot_episodes").num_rows == 2
     assert rows(conn, "robot_datasets").num_rows == 1
+
+
+def test_append_episode_task_stats_use_group_vocabulary(setup):
+    conn, sources = setup
+    conn.load_from_lerobot("robot", [sources[0]])
+    conn.append_to_lerobot("robot", sources[1])
+
+    episodes = episode_rows(conn, "robot_episodes").to_pylist()
+    task_means = [json.loads(row["stats"])["task_index"]["mean"][0]
+                  for row in episodes]
+    subtask_means = [json.loads(row["stats"])["subtask_index"]["mean"][0]
+                     for row in episodes]
+    assert task_means == [0, 1, 1, 2]
+    assert subtask_means == pytest.approx([0.5, 1 / 3, 1.5, 4 / 3])
+    assert sum(mean * count for mean, count in zip(task_means, (2, 3, 2, 3))) / 10 == 1.1
+
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    dataset = pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))
+    try:
+        frames = dataset.reader.get_items(range(10))
+        assert [int(row["task_index"]) for row in frames] == [0] * 2 + [1] * 5 + [2] * 3
+    finally:
+        dataset.close()
+
+
+@pytest.mark.parametrize("manual_recovery", [False, True])
+def test_append_recovers_after_episode_commit_failure(setup, manual_recovery):
+    conn, sources = setup
+    conn.load_from_lerobot("robot", [sources[0]])
+    original_commit = aggregate._commit_messages
+    calls = 0
+
+    def fail_on_episode(commit, messages):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected Episode commit failure")
+        return original_commit(commit, messages)
+
+    recovery_patch = (patch.object(aggregate, "_recover_incomplete_append", return_value=[])
+                      if manual_recovery else nullcontext())
+    with patch.object(aggregate, "_commit_messages", side_effect=fail_on_episode), recovery_patch:
+        with pytest.raises(RuntimeError, match="injected Episode commit failure"):
+            conn.append_to_lerobot("robot", sources[1])
+
+    if manual_recovery:
+        assert rows(conn, "robot_frames").num_rows == 10
+        with pytest.raises(ValueError, match="incomplete frames"):
+            conn.append_to_lerobot("robot", sources[1])
+        assert conn.recover_lerobot_append("robot") == ["frames"]
+    assert rows(conn, "robot_frames").num_rows == 5
+    assert rows(conn, "robot_episodes").num_rows == 2
+    assert rows(conn, "robot_datasets").num_rows == 1
+    conn.append_to_lerobot("robot", sources[1])
+    assert rows(conn, "robot_frames").num_rows == 10
 
 
 def test_append_twice_keeps_source_keys_and_training_order(setup, tmp_path):
@@ -915,12 +973,14 @@ def test_official_merge_reference_and_local_sources(tmp_path):
     expected = pa.concat_tables([pq.read_table(p) for p in sorted((reference / "data").rglob("*.parquet"))])
     actual = frame_rows(conn, "merged_frames")
     for name in expected.column_names:
-        if name not in ("episode_index", "task_index", "subtask_index"):
+        if name not in ("index", "episode_index", "task_index", "subtask_index"):
             np.testing.assert_allclose(actual[name].to_pylist(), expected[name].to_pylist())
     assert actual["episode_index"].to_pylist() == [0] * 3 + [1] * 3 + [0] * 3 + [1] * 3
     assert actual["dataset_index"].to_pylist() == [0] * 6 + [1] * 6
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), tag_name="train")
     try:
+        assert [int(sample["index"]) for sample in reader.get_items(range(12))] == (
+            expected["index"].to_pylist())
         assert [int(sample["episode_index"]) for sample in reader.get_items(range(12))] == (
             expected["episode_index"].to_pylist())
     finally:
