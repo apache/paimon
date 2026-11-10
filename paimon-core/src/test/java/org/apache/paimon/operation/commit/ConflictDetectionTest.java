@@ -267,6 +267,24 @@ class ConflictDetectionTest {
         // Data Evolution takes precedence even if a key comparator is supplied.
         assertThat(createConflictDetection(null, true, true))
                 .isInstanceOf(DataEvolutionConflictDetection.class);
+        // Data Evolution on a primary key table without row tracking keeps the LSM detection.
+        assertThat(
+                        ConflictDetection.create(
+                                "test-table",
+                                "test-user",
+                                RowType.of(),
+                                null,
+                                (left, right) -> 0,
+                                BucketMode.HASH_FIXED,
+                                false,
+                                true,
+                                false,
+                                false,
+                                false,
+                                null,
+                                null,
+                                null))
+                .isInstanceOf(PrimaryKeyConflictDetection.class);
     }
 
     @Test

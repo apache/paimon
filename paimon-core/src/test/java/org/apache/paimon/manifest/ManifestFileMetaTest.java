@@ -1996,6 +1996,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
@@ -2048,6 +2049,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
             Options testOptions = new Options();
             testOptions.set("manifest-sort.enabled", "true");
             testOptions.set("data-evolution.enabled", "true");
+            testOptions.set("row-tracking.enabled", "true");
             testOptions.set("manifest.full-compaction-threshold-size", "1B");
             merged =
                     ManifestFileMerger.merge(
@@ -2077,6 +2079,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
         testOptions.set("scan.manifest.parallelism", "1");
         testOptions.set("local-sort.max-num-file-handles", "2");
@@ -2110,6 +2113,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("manifest.merge-optimize.enabled", "false");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
         CoreOptions coreOptions = CoreOptions.fromMap(testOptions.toMap());
 
@@ -2144,6 +2148,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
         testOptions.set("scan.manifest.parallelism", "2");
 
@@ -2176,6 +2181,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
         testOptions.set("scan.manifest.parallelism", "2");
 
@@ -2231,6 +2237,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
 
         List<ManifestFileMeta> merged =
@@ -2265,6 +2272,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
 
         List<ManifestFileMeta> merged =
@@ -2296,6 +2304,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
 
         List<ManifestFileMeta> merged =
@@ -2330,6 +2339,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
 
         List<ManifestFileMeta> merged =
@@ -2401,6 +2411,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
 
         List<ManifestFileMeta> merged =
@@ -2447,6 +2458,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
 
         List<ManifestFileMeta> merged =
@@ -2498,6 +2510,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options defaultOptions = new Options();
         defaultOptions.set("manifest-sort.enabled", "true");
         defaultOptions.set("data-evolution.enabled", "true");
+        defaultOptions.set("row-tracking.enabled", "true");
         defaultOptions.set("manifest.full-compaction-threshold-size", "1B");
         List<ManifestFileMeta> sortedByFullPartition =
                 ManifestFileMerger.merge(
@@ -2516,6 +2529,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         configuredFieldOptions.set("manifest-sort.enabled", "true");
         configuredFieldOptions.set("manifest-sort.partition-field", "f1");
         configuredFieldOptions.set("data-evolution.enabled", "true");
+        configuredFieldOptions.set("row-tracking.enabled", "true");
         configuredFieldOptions.set("manifest.full-compaction-threshold-size", "1B");
         List<ManifestFileMeta> sortedByDt =
                 ManifestFileMerger.merge(
@@ -2542,6 +2556,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
@@ -2578,6 +2593,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", Long.MAX_VALUE + "B");
 
         List<ManifestFileMeta> merged =
@@ -2689,6 +2705,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         options.set("manifest-sort.enabled", "true");
         options.set("manifest.merge-optimize.enabled", Boolean.toString(runMergeOptimizeEnabled));
         options.set("data-evolution.enabled", "true");
+        options.set("row-tracking.enabled", "true");
         options.set("manifest.full-compaction-threshold-size", Long.MAX_VALUE + "B");
         return ManifestFileMerger.merge(
                 input, manifestFile, getPartitionType(), CoreOptions.fromMap(options.toMap()));

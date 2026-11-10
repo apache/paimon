@@ -153,7 +153,10 @@ final class SchemaManagerUtils {
                 if (!unchanged && CoreOptions.TYPE.key().equals(setOption.key())) {
                     throw new UnsupportedOperationException("Change 'type' is not supported yet.");
                 }
-                if (hasSnapshots.get() && !unchanged) {
+                if (hasSnapshots.get()
+                        && !unchanged
+                        && !enablesPrimaryKeyDataEvolution(
+                                oldTableSchema, setOption.key(), oldValue, newValue)) {
                     checkAlterTableOption(oldOptions, setOption.key(), oldValue, newValue);
                 }
                 if (!unchanged) {
@@ -1056,6 +1059,18 @@ final class SchemaManagerUtils {
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * A primary key table keeps reading files written without alignment ids as full rows, so data
+     * evolution can be turned on for it after data was written. It cannot be turned off again.
+     */
+    private static boolean enablesPrimaryKeyDataEvolution(
+            TableSchema schema, String key, @Nullable String oldValue, String newValue) {
+        return CoreOptions.DATA_EVOLUTION_ENABLED.key().equals(key)
+                && !schema.primaryKeys().isEmpty()
+                && !Boolean.parseBoolean(oldValue)
+                && Boolean.parseBoolean(newValue);
     }
 
     static void checkAlterTableOption(

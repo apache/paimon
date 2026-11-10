@@ -112,7 +112,9 @@ public class ManifestFileMerger {
                 && (partitionType.getFieldCount() > 0
                         || options.bucket() > 0
                         || options.bucket() == BucketMode.POSTPONE_BUCKET
-                        || (options.dataEvolutionEnabled() && allContainsRowId(input)));
+                        || (options.dataEvolutionEnabled()
+                                && options.rowTrackingEnabled()
+                                && allContainsRowId(input)));
     }
 
     public static Optional<List<ManifestFileMeta>> tryFullCompaction(

@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.SortValue;
@@ -190,6 +191,18 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
             return Optional.of(result);
         }
 
+        // A split holding primary key column files is not raw convertible and has no
+        // mergedRowCount, so the loop below never adds it to limitedSplits: once the other splits
+        // fill the limit it returns without it. The backfilled bucket would then be unreachable
+        // for every small limit, not just occasionally. Keep the whole plan.
+        if (hasPrimaryKeyColumnFile(splits)) {
+            LOG.info(
+                    "Skip split limit pushdown because a split contains column files. Splits: {}, Pushdown limit: {}",
+                    splits.size(),
+                    pushDownLimit);
+            return Optional.of(result);
+        }
+
         LOG.info("Applying limit pushdown. Original splits count: {}", splits.size());
         List<Split> limitedSplits = new ArrayList<>();
         for (Split split : splits) {
@@ -215,6 +228,32 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
             }
         }
         return Optional.of(result);
+    }
+
+    /**
+     * A column file of a primary key table shares its split with a keyed base file. Append column
+     * files have no key, and their merged row count is still valid for limit pushdown.
+     */
+    private static boolean hasPrimaryKeyColumnFile(List<Split> splits) {
+        for (Split split : splits) {
+            if (!(split instanceof DataSplit)) {
+                continue;
+            }
+            boolean columnFile = false;
+            boolean keyed = false;
+            for (DataFileMeta file : ((DataSplit) split).dataFiles()) {
+                if (file.isPartialColumnFile()) {
+                    columnFile = true;
+                }
+                if (file.minKey().getFieldCount() > 0) {
+                    keyed = true;
+                }
+            }
+            if (columnFile && keyed) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Optional<StartingScanner.Result> applyPushDownTopN() {

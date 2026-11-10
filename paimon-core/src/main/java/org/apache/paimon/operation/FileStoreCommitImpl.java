@@ -71,6 +71,7 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
@@ -118,10 +119,12 @@ import static org.apache.paimon.manifest.ManifestEntry.nullableRecordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
+import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignPrimaryKeyAlignment;
 import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRowTracking;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.primaryKeyDataEvolution;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -172,6 +175,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final SnapshotConflictChecker snapshotConflictChecker;
     private final ConflictDetection conflictDetection;
     private final CommitCleaner commitCleaner;
+    // Primary-key tables align column files by firstRowId only, they have no _ROW_ID.
+    private final boolean primaryKeyDataEvolution;
+    private final boolean rowIdDataEvolution;
 
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
@@ -197,6 +203,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Supplier<FileStoreScan> scanSupplier,
             StatsFileHandler statsFileHandler,
             BucketMode bucketMode,
+            boolean primaryKeyTable,
             List<CommitPreCallback> commitPreCallbacks,
             List<CommitCallback> commitCallbacks,
             ConflictDetection.Factory conflictDetectFactory,
@@ -230,12 +237,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
         this.conflictDetection = conflictDetectFactory.create(scanner);
+        this.primaryKeyDataEvolution =
+                primaryKeyDataEvolution(
+                        primaryKeyTable,
+                        options.dataEvolutionEnabled(),
+                        options.rowTrackingEnabled());
+        this.rowIdDataEvolution = options.dataEvolutionEnabled() && !primaryKeyDataEvolution;
         this.snapshotConflictChecker =
                 new SnapshotConflictChecker(
                         snapshotManager,
                         commitUser,
                         scanner,
-                        options.dataEvolutionEnabled(),
+                        rowIdDataEvolution,
                         options.commitLastSafeSnapshot()
                                 .filter(ignored -> options.commitStrictModeEnabled())
                                 .orElse(null),
@@ -804,12 +817,52 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         ManifestEntryChanges changes = new ManifestEntryChanges(options.bucket());
         commitMessages.forEach(changes::collect);
         LOG.info("Finished collecting changes, including: {}", changes);
+        if (primaryKeyDataEvolution) {
+            checkPrimaryKeyColumnFiles(changes);
+        }
         return changes;
+    }
+
+    private void checkPrimaryKeyColumnFiles(ManifestEntryChanges changes) {
+        for (ManifestEntry entry : changes.appendTableFiles) {
+            checkArgument(
+                    !entry.file().isPartialColumnFile(),
+                    "Column file %s of a primary key table must be committed as a compaction.",
+                    entry.fileName());
+        }
+        TableSchema schema = null;
+        for (ManifestEntry entry : changes.compactTableFiles) {
+            List<String> writeCols = entry.file().writeCols();
+            if (entry.kind() != FileKind.ADD || !entry.file().isPartialColumnFile()) {
+                continue;
+            }
+            if (schema == null) {
+                schema = schemaManager.latestOrThrow("Cannot get latest schema of " + tableName);
+            }
+            checkArgument(!writeCols.isEmpty(), "Column file %s has no columns.", entry.fileName());
+            checkArgument(
+                    entry.file().firstRowId() != null,
+                    "Column file %s must carry the alignment range of its base file.",
+                    entry.fileName());
+            for (String column : writeCols) {
+                checkArgument(
+                        !schema.primaryKeys().contains(column)
+                                && !schema.partitionKeys().contains(column),
+                        "Column file %s cannot write primary key or partition column %s.",
+                        entry.fileName(),
+                        column);
+                checkArgument(
+                        schema.fieldNames().contains(column),
+                        "Column file %s writes unknown column %s.",
+                        entry.fileName(),
+                        column);
+            }
+        }
     }
 
     private Map<Pair<BinaryRow, Integer>, Long> prepareConflictChecks(
             List<CommitMessage> commitMessages) {
-        if (options.dataEvolutionEnabled()) {
+        if (rowIdDataEvolution) {
             configureRowIdCheckFromMessages(commitMessages);
         }
         return snapshotConflictChecker.prepareCompactionBaselines(commitMessages);
@@ -860,7 +913,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private Set<Pair<BinaryRow, Integer>> materializedBuckets(List<CommitMessage> commitMessages) {
-        if (!options.dataEvolutionEnabled() || !options.deletionVectorsEnabled()) {
+        if (!rowIdDataEvolution || !options.deletionVectorsEnabled()) {
             return Collections.emptySet();
         }
 
@@ -893,7 +946,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 changes.compactIndexFiles),
                         CommitKind.COMPACT,
                         materializedBuckets);
-        if (!options.dataEvolutionEnabled()
+        if (!rowIdDataEvolution
                 || !options.toConfiguration()
                         .get(CoreOptions.DATA_EVOLUTION_COMPACTION_DISCARD_CONFLICTING_TASKS)
                 || !materializedBuckets.isEmpty()
@@ -938,7 +991,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Set<Pair<BinaryRow, Integer>> materializedBuckets) {
         if (materializedBuckets.isEmpty()) {
             Long lastSafeSnapshot = options.commitLastSafeSnapshot().orElse(null);
-            if (options.dataEvolutionEnabled()
+            if (rowIdDataEvolution
                     && (commitKind == CommitKind.COMPACT
                             || (commitKind == CommitKind.APPEND
                                     && changes.tableFiles.isEmpty()
@@ -1437,6 +1490,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         assignRowTracking(newSnapshotId, firstRowIdStart, deltaFiles);
                 nextRowIdStart = assigned.nextRowIdStart;
                 deltaFiles = assigned.assignedEntries;
+            } else if (primaryKeyDataEvolution) {
+                RowTrackingAssigned assigned =
+                        assignPrimaryKeyAlignment(firstRowIdStart, deltaFiles);
+                nextRowIdStart = assigned.nextRowIdStart;
+                deltaFiles = assigned.assignedEntries;
             }
 
             if (options.snapshotSequenceOrdering()) {
@@ -1444,11 +1502,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             // the added records subtract the deleted records from
-            long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
+            long deltaRecordCount =
+                    recordCountAdd(deltaFiles, !primaryKeyDataEvolution)
+                            - recordCountDelete(deltaFiles, !primaryKeyDataEvolution);
             long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
 
             // write new delta files into manifest files
-            deltaPartitionEntries = new ArrayList<>(PartitionEntry.merge(deltaFiles));
+            deltaPartitionEntries =
+                    new ArrayList<>(PartitionEntry.merge(deltaFiles, !primaryKeyDataEvolution));
             deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
 
             // write changelog into manifest files
@@ -1834,7 +1895,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         CommitKind.OVERWRITE,
                         System.currentTimeMillis(),
                         targetSnapshot.totalRecordCount(),
-                        recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles),
+                        recordCountAdd(deltaFiles, !primaryKeyDataEvolution)
+                                - recordCountDelete(deltaFiles, !primaryKeyDataEvolution),
                         null,
                         targetSnapshot.watermark(),
                         targetSnapshot.statistics(),
@@ -1858,7 +1920,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         boolean success =
                 commitSnapshotImpl(
-                        latest, newSnapshot, new ArrayList<>(PartitionEntry.merge(deltaFiles)));
+                        latest,
+                        newSnapshot,
+                        new ArrayList<>(
+                                PartitionEntry.merge(deltaFiles, !primaryKeyDataEvolution)));
         if (success) {
             // Notify the post-commit callbacks so external views stay in sync with the rolled-back
             // state (e.g. Iceberg compatibility metadata and chain-table overwrite handling).

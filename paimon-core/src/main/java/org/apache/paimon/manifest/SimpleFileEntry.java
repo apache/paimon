@@ -45,6 +45,7 @@ public class SimpleFileEntry implements FileEntry {
     @Nullable private final String externalPath;
     private final long rowCount;
     @Nullable private final Long firstRowId;
+    @Nullable private final List<String> writeCols;
 
     public SimpleFileEntry(
             FileKind kind,
@@ -60,6 +61,38 @@ public class SimpleFileEntry implements FileEntry {
             @Nullable String externalPath,
             long rowCount,
             @Nullable Long firstRowId) {
+        this(
+                kind,
+                partition,
+                bucket,
+                totalBuckets,
+                level,
+                fileName,
+                extraFiles,
+                embeddedIndex,
+                minKey,
+                maxKey,
+                externalPath,
+                rowCount,
+                firstRowId,
+                null);
+    }
+
+    public SimpleFileEntry(
+            FileKind kind,
+            BinaryRow partition,
+            int bucket,
+            int totalBuckets,
+            int level,
+            String fileName,
+            List<String> extraFiles,
+            @Nullable byte[] embeddedIndex,
+            BinaryRow minKey,
+            BinaryRow maxKey,
+            @Nullable String externalPath,
+            long rowCount,
+            @Nullable Long firstRowId,
+            @Nullable List<String> writeCols) {
         this.kind = kind;
         this.partition = partition;
         this.bucket = bucket;
@@ -73,6 +106,7 @@ public class SimpleFileEntry implements FileEntry {
         this.externalPath = externalPath;
         this.rowCount = rowCount;
         this.firstRowId = firstRowId;
+        this.writeCols = writeCols;
     }
 
     public static SimpleFileEntry from(ManifestEntry entry) {
@@ -89,7 +123,8 @@ public class SimpleFileEntry implements FileEntry {
                 entry.maxKey(),
                 entry.externalPath(),
                 entry.file().rowCount(),
-                entry.firstRowId());
+                entry.firstRowId(),
+                entry.file().writeCols());
     }
 
     public SimpleFileEntry toDelete() {
@@ -106,7 +141,8 @@ public class SimpleFileEntry implements FileEntry {
                 maxKey,
                 externalPath,
                 rowCount,
-                firstRowId);
+                firstRowId,
+                writeCols);
     }
 
     public static List<SimpleFileEntry> from(List<ManifestEntry> entries) {
@@ -183,6 +219,12 @@ public class SimpleFileEntry implements FileEntry {
     @Override
     public @Nullable Long firstRowId() {
         return firstRowId;
+    }
+
+    /** The physical columns of a partial-column file, or null for a full-row file. */
+    @Nullable
+    public List<String> writeCols() {
+        return writeCols;
     }
 
     public long nonNullFirstRowId() {

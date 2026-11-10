@@ -36,6 +36,7 @@ import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResul
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DataEvolutionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
@@ -61,6 +62,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.utils.DataEvolutionUtils.primaryKeyDataEvolution;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -123,7 +125,46 @@ public abstract class ConflictDetection {
             IndexFileHandler indexFileHandler,
             SnapshotManager snapshotManager,
             CommitScanner commitScanner) {
-        if (dataEvolutionEnabled) {
+        return create(
+                tableName,
+                commitUser,
+                partitionType,
+                pathFactory,
+                keyComparator,
+                bucketMode,
+                deletionVectorsEnabled,
+                dataEvolutionEnabled,
+                true,
+                dataEvolutionNestedFieldEnabled,
+                pkClusteringOverride,
+                indexFileHandler,
+                snapshotManager,
+                commitScanner);
+    }
+
+    /**
+     * Data evolution on a primary key table works without row tracking, so a key comparator only
+     * selects primary key detection when row tracking is disabled, see {@link
+     * DataEvolutionUtils#primaryKeyDataEvolution}.
+     */
+    public static ConflictDetection create(
+            String tableName,
+            String commitUser,
+            RowType partitionType,
+            FileStorePathFactory pathFactory,
+            @Nullable Comparator<InternalRow> keyComparator,
+            BucketMode bucketMode,
+            boolean deletionVectorsEnabled,
+            boolean dataEvolutionEnabled,
+            boolean rowTrackingEnabled,
+            boolean dataEvolutionNestedFieldEnabled,
+            boolean pkClusteringOverride,
+            IndexFileHandler indexFileHandler,
+            SnapshotManager snapshotManager,
+            CommitScanner commitScanner) {
+        if (dataEvolutionEnabled
+                && !primaryKeyDataEvolution(
+                        keyComparator != null, dataEvolutionEnabled, rowTrackingEnabled)) {
             return new DataEvolutionConflictDetection(
                     tableName,
                     commitUser,
@@ -146,6 +187,7 @@ public abstract class ConflictDetection {
                     bucketMode,
                     deletionVectorsEnabled,
                     pkClusteringOverride,
+                    dataEvolutionEnabled,
                     indexFileHandler,
                     commitScanner);
         }

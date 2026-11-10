@@ -1467,6 +1467,7 @@ public class ManifestFileTest {
     void testSidecarCacheUsesExplicitPathsAndIsSeparateFromManifestCache() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, true);
         options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
         RecordingFileIO io = new RecordingFileIO();
         SegmentsCache<Path> cache =
@@ -1535,6 +1536,7 @@ public class ManifestFileTest {
     void testDedicatedSidecarCacheAndManifestCacheFallback() {
         Options options = new Options();
         options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, true);
         options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
         for (boolean cacheManifest : new boolean[] {false, true}) {
             for (boolean cacheSidecar : new boolean[] {false, true}) {
@@ -1613,6 +1615,7 @@ public class ManifestFileTest {
     void testReadsOnlySelectedBlocksAndPreservesPhysicalOrdinals() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, true);
         options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
         RecordingFileIO fileIO = new RecordingFileIO();
         SegmentsCache<Path> cache =
@@ -1719,6 +1722,7 @@ public class ManifestFileTest {
     void testScannerPreservesDeletesAndColumnGroups() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, true);
         options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
         RecordingFileIO fileIO = new RecordingFileIO();
         ManifestFile.Factory factory =
@@ -1907,6 +1911,7 @@ public class ManifestFileTest {
     void testUnfilteredReadWithoutCacheSkipsSidecar() {
         Options options = new Options();
         options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, true);
         options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
         RecordingFileIO fileIO = new RecordingFileIO();
         ManifestFile manifests =
@@ -2029,6 +2034,7 @@ public class ManifestFileTest {
     void testExplicitIndexReferenceAndNullDoesNotProbe() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, true);
         options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
         RecordingFileIO io = new RecordingFileIO();
         ManifestFile manifests =

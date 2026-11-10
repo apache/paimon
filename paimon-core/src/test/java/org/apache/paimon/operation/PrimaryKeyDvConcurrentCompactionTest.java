@@ -854,6 +854,7 @@ class PrimaryKeyDvConcurrentCompactionTest {
                         store::newScan,
                         store.newStatsFileHandler(),
                         store.bucketMode(),
+                        true,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         scanner ->

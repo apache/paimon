@@ -47,6 +47,9 @@ import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter.FirstRowMergeFunctionWrapperFactory;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter.LookupMergeFunctionWrapperFactory;
+import org.apache.paimon.mergetree.dataevolution.AlignedCompactRewriter;
+import org.apache.paimon.mergetree.dataevolution.AlignedKeyValueFileReaderFactory;
+import org.apache.paimon.mergetree.dataevolution.ColumnFileGroups;
 import org.apache.paimon.mergetree.lookup.LookupSerializerFactory;
 import org.apache.paimon.mergetree.lookup.PersistEmptyProcessor;
 import org.apache.paimon.mergetree.lookup.PersistPositionProcessor;
@@ -167,9 +170,19 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
             return new NoopCompactManager();
         }
 
+        // column files are not part of the LSM tree, they follow their base files
+        ColumnFileGroups columnFileGroups = null;
+        if (options.dataEvolutionEnabled() && ColumnFileGroups.hasColumnFiles(restoreFiles)) {
+            columnFileGroups = ColumnFileGroups.group(restoreFiles, true);
+            restoreFiles = columnFileGroups.baseFiles();
+        }
+
         CompactStrategy compactStrategy = createCompactStrategy(options, restoreFiles);
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
+        if (columnFileGroups != null) {
+            levels.addDropFileCallback(columnFileGroups::dropBaseFile);
+        }
         @Nullable FieldsComparator userDefinedSeqComparator = udsComparatorSupplier.get();
         MergeTreeCompactRewriter defaultRewriter =
                 createRewriter(
@@ -179,9 +192,14 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                         userDefinedSeqComparator,
                         levels,
                         dvMaintainer,
-                        ignorePreviousFiles);
+                        ignorePreviousFiles,
+                        columnFileGroups);
+        CompactRewriter alignedRewriter =
+                columnFileGroups == null
+                        ? defaultRewriter
+                        : new AlignedCompactRewriter(defaultRewriter, columnFileGroups);
         CompactRewriter rewriter =
-                wrapRewriter(compactRewriterFactory, partition, bucket, defaultRewriter);
+                wrapRewriter(compactRewriterFactory, partition, bucket, alignedRewriter);
         CompactionMetrics.Reporter metricsReporter =
                 compactionMetrics == null
                         ? null
@@ -298,11 +316,20 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
             @Nullable FieldsComparator userDefinedSeqComparator,
             Levels levels,
             @Nullable BucketedDvMaintainer dvMaintainer,
-            boolean ignorePreviousFiles) {
+            boolean ignorePreviousFiles,
+            @Nullable ColumnFileGroups columnFileGroups) {
         DeletionVector.Factory dvFactory = DeletionVector.factory(dvMaintainer);
         KeyValueFileReaderFactory keyReaderFactory =
                 readerFactoryBuilder.build(partition, bucket, dvFactory);
         FileReaderFactory<KeyValue> readerFactory = keyReaderFactory;
+        if (columnFileGroups != null) {
+            readerFactory =
+                    new AlignedKeyValueFileReaderFactory(
+                            keyReaderFactory,
+                            keyReaderFactory,
+                            readerFactoryBuilder.buildColumnFileReaderFactory(partition, bucket),
+                            columnFileGroups);
+        }
         if (recordLevelExpire != null) {
             readerFactory = recordLevelExpire.wrap(readerFactory);
         }
