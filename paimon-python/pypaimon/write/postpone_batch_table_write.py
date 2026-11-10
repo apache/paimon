@@ -43,6 +43,10 @@ class PostponeFixedBucketWriteBuilder(BatchWriteBuilder):
         self._bucket_plan = bucket_plan
         return self
 
+    def _carry_state_to(self, new_builder) -> None:
+        super()._carry_state_to(new_builder)
+        new_builder._bucket_plan = self._bucket_plan
+
     def new_write(self):
         return create_write(
             self.table, self.commit_user, self.static_partition,

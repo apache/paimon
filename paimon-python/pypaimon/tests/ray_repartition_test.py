@@ -281,6 +281,98 @@ class RayShuffleTest(unittest.TestCase):
             set(result.columns),
         )
 
+    def test_postpone_explicit_options_control_bucket_planning(self):
+        from pypaimon.ray import write_paimon
+        from pypaimon.write.postpone_bucket import PostponeBucketPlanner
+
+        arrow_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('value', pa.int64()),
+        ])
+        identifier = self._make_table(
+            'test_postpone_explicit_options', arrow_schema, primary_keys=['id'],
+            options={
+                'bucket': '-2',
+                'postpone.default-bucket-num': '1',
+                'write.native.enabled': 'false',
+                'commit.native.enabled': 'false',
+            },
+        )
+        rows = pa.Table.from_pydict({
+            'id': list(range(12)), 'value': list(range(12)),
+        }, schema=arrow_schema)
+
+        result = write_paimon(
+            ray.data.from_arrow(rows), identifier, self.catalog_options,
+            options={'postpone.default-bucket-num': '3'},
+        )
+
+        table = CatalogFactory.create(self.catalog_options).get_table(identifier)
+        self.assertEqual(PostponeBucketPlanner(table).current_plan().as_dict(), {(): 3})
+        self.assertEqual(table.options.postpone_default_bucket_num(), 1)
+        self.assertEqual(result.row_count, 12)
+        self.assertEqual(sorted(self._read_table(identifier)['id'].tolist()), list(range(12)))
+
+    def test_postpone_branch_option_controls_bucket_planning(self):
+        from pypaimon.ray import write_paimon
+        from pypaimon.write.postpone_bucket import PostponeBucketPlanner
+
+        arrow_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('value', pa.int64()),
+        ])
+        identifier = self._make_table(
+            'test_postpone_branch_options', arrow_schema, primary_keys=['id'],
+            options={
+                'bucket': '-2',
+                'postpone.default-bucket-num': '1',
+                'write.native.enabled': 'false',
+                'commit.native.enabled': 'false',
+            },
+        )
+        catalog = CatalogFactory.create(self.catalog_options)
+        table = catalog.get_table(identifier)
+
+        def batch(start):
+            return pa.Table.from_pydict({
+                'id': list(range(start, start + 12)),
+                'value': list(range(start, start + 12)),
+            }, schema=arrow_schema)
+
+        def seed(target, start):
+            builder = target.new_postpone_fixed_bucket_write_builder()
+            writer = builder.new_write()
+            committer = builder.new_commit()
+            try:
+                writer.write_arrow(batch(start))
+                committer.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                committer.close()
+
+        seed(table, 0)
+        catalog.create_branch(identifier, 'dev')
+        branch_identifier = identifier + '$branch_dev'
+        branch = catalog.get_table(branch_identifier)
+        seed(branch.copy({'postpone.default-bucket-num': '3'}), 100)
+        main_snapshot = table.snapshot_manager().get_latest_snapshot().id
+        branch_snapshot = branch.snapshot_manager().get_latest_snapshot().id
+        self.assertEqual(PostponeBucketPlanner(table).current_plan().as_dict(), {(): 1})
+        self.assertEqual(PostponeBucketPlanner(branch).current_plan().as_dict(), {(): 3})
+
+        result = write_paimon(
+            ray.data.from_arrow(batch(200)), identifier, self.catalog_options,
+            options={'branch': 'dev'},
+        )
+
+        self.assertEqual(result.row_count, 12)
+        self.assertEqual(result.snapshot_id, branch_snapshot + 1)
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, main_snapshot)
+        self.assertEqual(PostponeBucketPlanner(branch).current_plan().as_dict(), {(): 3})
+        self.assertEqual(sorted(self._read_table(identifier)['id'].tolist()), list(range(12)))
+        self.assertEqual(sorted(self._read_table(branch_identifier)['id'].tolist()),
+                         list(range(100, 112)) + list(range(200, 212)))
+
     def test_primary_key_postpone_bucket_off_keeps_postpone_path(self):
         from pypaimon.ray import write_paimon
 
