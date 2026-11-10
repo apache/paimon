@@ -36,8 +36,8 @@ from pypaimon.multimodal.lerobot.metadata import (
     _source_episode_tables, _validated_episode_tables,
 )
 from pypaimon.multimodal.lerobot.schema import (
-    _V3_REQUIRED_FEATURE_DTYPES, _merge_schemas,
-    _require_v3, _schema_from_info, _validate_v3_required_features,
+    _V3_REQUIRED_FEATURE_DTYPES, _merge_schemas, _plan_schema_evolution,
+    _require_v3, _schema_from_info, _validate_lerobot_schema, _validate_v3_required_features,
     _video_feature_names,
 )
 from pypaimon.multimodal.lerobot.source import (
@@ -85,11 +85,6 @@ _DATASETS_SCHEMA = pa.schema([
 
 def _json_table(table):
     return {row["key"]: json.loads(row["value"]) for row in table.to_pylist()}
-
-
-def _same_fields(left, right):
-    return len(left) == len(right) and all(
-        a.equals(b, check_metadata=False) for a, b in zip(left, right))
 
 
 def _recover_incomplete_append(connection, table_name):
@@ -591,7 +586,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                         "recover_lerobot_append before appending." % name)
             existing = (table, tables, source_rows, ranges)
         metadata, stats = _plan_merge(
-            plans, extra_dataset_fields, schema_evolution,
+            plans, extra_dataset_fields, schema_evolution if existing is None else True,
             source_rows if existing is not None else None)
         target_schema = metadata["frame_schema"]
         target_schema = target_schema.append(
@@ -604,32 +599,45 @@ def _import_sources(connection, table_name, sources, batch_size, options,
         else:
             table, tables, source_rows, ranges = existing
             first_info = ranges[0][0]
+            old_features = {}
+            for source in source_rows:
+                old_features.update(_feature_contract(json.loads(source["info"])["features"]))
             for ordinal, plan in enumerate(plans):
                 for key in ("codebase_version", "robot_type"):
                     if first_info.get(key) != plan["info"].get(key):
                         raise ValueError(
                             "LeRobot source %d has incompatible info.%s."
                             % (ordinal, key))
-                old_features = _feature_contract(first_info["features"])
                 new_features = _feature_contract(plan["info"]["features"])
-                if old_features != new_features:
-                    raise ValueError(
-                        "LeRobot source %d has incompatible training features."
-                        % ordinal)
-            if not _same_fields(target_schema, _target_schema(table.raw_table)):
-                raise ValueError("LeRobot append has incompatible frame schema.")
-            if not _same_fields(metadata["episodes_schema"],
-                                _target_schema(tables["episodes"])):
-                raise ValueError("LeRobot append has incompatible Episode schema.")
-            if not _same_fields(metadata["datasets_table"].schema,
-                                _target_schema(tables["datasets"])):
-                raise ValueError("LeRobot append has incompatible Dataset schema.")
+                for name in old_features.keys() & new_features.keys():
+                    if old_features[name] != new_features[name]:
+                        raise ValueError("LeRobot source %d has incompatible features.%s."
+                                         % (ordinal, name))
             old_stats = source_rows[0]["stats"]
             new_stats = metadata["datasets_table"]["stats"][0].as_py()
-            if (old_stats is None) != (new_stats is None) or (
-                    old_stats is not None and
-                    set(json.loads(old_stats)) != set(json.loads(new_stats))):
+            if (old_stats is None) != (new_stats is None):
                 raise ValueError("LeRobot append has incompatible statistics.")
+            _validate_lerobot_schema(target_schema, _target_schema(table.raw_table), "append")
+            # Validate every component before making any catalog changes.
+            requests = [
+                (table.raw_table, target_schema, (*_V3_REQUIRED_FEATURE_DTYPES, _DATASET_INDEX_COLUMN)),
+                (tables["episodes"], metadata["episodes_schema"],
+                 (*_EPISODE_CONTROL_COLUMNS, _DATASET_INDEX_COLUMN)),
+                (tables["datasets"], metadata["datasets_table"].schema,
+                 tuple(field.name for field in _DATASETS_SCHEMA if not field.nullable)),
+            ]
+            video_fields = _video_feature_names(_json_table(metadata["info_table"]))
+            changes = [_plan_schema_evolution(
+                _target_schema(component), schema, schema_evolution, required,
+                video_fields if ordinal == 0 else ())
+                for ordinal, (component, schema, required) in enumerate(requests)]
+            for (component, _, _), component_changes in zip(requests, changes):
+                if component_changes:
+                    connection.catalog.alter_table(component.identifier, component_changes)
+            # Writers and Ray workers must use the reloaded schema, including new field IDs.
+            table = connection.get_table(table.identifier)
+            tables = {name: connection.catalog.get_table(component.identifier)
+                      for name, component in tables.items()}
             frame_offset = ranges[-1][4]
             dataset_offset = len(source_rows)
             for plan in plans:
@@ -639,7 +647,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             for row in datasets:
                 row["index"] += dataset_offset
             metadata["datasets_table"] = pa.Table.from_pylist(
-                datasets, schema=metadata["datasets_table"].schema)
+                datasets, schema=_target_schema(tables["datasets"]))
         if existing is not None:
             stack.enter_context(_recover_failed_append(connection, table_name))
         episode_schema = _target_schema(tables["episodes"])
