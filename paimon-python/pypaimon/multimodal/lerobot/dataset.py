@@ -1096,11 +1096,12 @@ def _load_dataset(table, tag_name):
     source_local_layout = "dataset_id" in _target_schema(episodes_table).names
     datasets_table = _component_table(
         catalog, catalog.get_table(identifiers["datasets"]), tag_name)
-    source_rows = _read_arrow(datasets_table, [
-        "id", "name", "info", "tasks", "subtasks", "stats",
-    ]).sort_by("id").to_pylist()
+    source_columns = ["id", "name", "info", "tasks", "subtasks", "stats"]
+    if "read_control_stats" in _target_schema(datasets_table).names:
+        source_columns.append("read_control_stats")
+    source_rows = _read_arrow(datasets_table, source_columns).sort_by("id").to_pylist()
     datasets = ([{key: value for key, value in row.items()
-                  if key not in ("tasks", "subtasks", "stats")}
+                  if key not in ("tasks", "subtasks", "stats", "read_control_stats")}
                  for row in source_rows] if source_local_layout else None)
     episodes = _episode_dataset(episodes_table, datasets)
     tasks, task_maps = _source_vocabulary(source_rows, "task")
@@ -1235,10 +1236,20 @@ def _merged_source_stats(sources, episodes_table):
         for name in names if name not in _CONTROLS}
     columns = _target_schema(episodes_table).names
     if "stats" in columns:
-        stats_rows = _read_arrow(episodes_table, ["stats"])["stats"].to_pylist()
-        decoded_rows = [GenericVariant.from_arrow_struct(raw).to_python()
-                        if isinstance(raw, dict) else json.loads(raw)
-                        for raw in stats_rows if raw]
+        decoded_rows = []
+        legacy_ids = {source["id"] for source in sources
+                      if not source.get("read_control_stats")}
+        if legacy_ids:
+            legacy_rows = _read_arrow(episodes_table, ["dataset_id", "stats"]).to_pylist()
+            decoded_rows.extend(
+                GenericVariant.from_arrow_struct(row["stats"]).to_python()
+                if isinstance(row["stats"], dict) else json.loads(row["stats"])
+                for row in legacy_rows
+                if row["dataset_id"] in legacy_ids and row["stats"])
+        for source in sources:
+            raw = source.get("read_control_stats")
+            if raw:
+                decoded_rows.append(json.loads(raw))
         for name in _CONTROLS:
             parts = [row[name] for row in decoded_rows if name in row
                      and row[name].get("count") is not None]

@@ -339,7 +339,7 @@ def test_append_preserves_episode_group_kind(setup):
     ]
 
 
-def test_append_episode_task_stats_use_group_vocabulary(setup):
+def test_append_preserves_source_episode_stats(setup):
     conn, sources = setup
     conn.load_from_lerobot("robot", [sources[0]])
     conn.append_to_lerobot("robot", sources[1])
@@ -349,9 +349,9 @@ def test_append_episode_task_stats_use_group_vocabulary(setup):
                   for row in episodes]
     subtask_means = [variant_value(row["stats"])["subtask_index"]["mean"][0]
                      for row in episodes]
-    assert task_means == [0, 1, 1, 2]
-    assert subtask_means == pytest.approx([0.5, 1 / 3, 1.5, 4 / 3])
-    assert sum(mean * count for mean, count in zip(task_means, (2, 3, 2, 3))) / 10 == 1.1
+    assert task_means == [0, 1, 0, 1]
+    assert subtask_means == pytest.approx([0.5, 1 / 3, 0.5, 1 / 3])
+    assert all("q50" in variant_value(row["stats"])["task_index"] for row in episodes)
 
     pytest.importorskip("datasets")
     pytest.importorskip("torch")
@@ -359,6 +359,7 @@ def test_append_episode_task_stats_use_group_vocabulary(setup):
     try:
         frames = dataset.reader.get_items(range(10))
         assert [int(row["task_index"]) for row in frames] == [0] * 2 + [1] * 5 + [2] * 3
+        assert dataset.reader.meta.stats["task_index"]["mean"] == pytest.approx([1.1])
     finally:
         dataset.close()
 
@@ -527,7 +528,8 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     assert "source_frame_from_index" not in episodes.column_names
     assert "source_frame_to_index" not in episodes.column_names
     datasets = rows(conn, "merged_datasets").sort_by("id")
-    assert datasets.column_names == ["id", "name", "info", "tasks", "subtasks", "stats"]
+    assert datasets.column_names == [
+        "id", "name", "info", "tasks", "subtasks", "stats", "read_control_stats"]
     assert datasets["name"].to_pylist() == [None, None]
     assert "fps" not in datasets.column_names
     assert [json.loads(value)["fps"] for value in datasets["info"].to_pylist()] == [10, 10]
@@ -545,8 +547,9 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     assert not any(c.startswith("stats/") for c in episodes.column_names)
     episode_stats = [variant_value(value) for value in episodes["stats"].to_pylist()]
     assert [item["index"]["mean"] for item in episode_stats] == [
-        [0.5], [3.0], [5.5], [8.0]]
-    assert all("q50" not in item["index"] for item in episode_stats)
+        [0.5], [3.0], [0.5], [3.0]]
+    assert all(item["index"]["q50"] == [0.0] for item in episode_stats)
+    assert metadata(conn, "stats")["task_index"]["mean"] == pytest.approx([1.1])
     pytest.importorskip("datasets")
     torch = pytest.importorskip("torch")
     dataset = pm.PaimonLeRobotDataset(
@@ -600,9 +603,19 @@ def test_merge_keeps_source_specific_episode_statistics_in_variant(setup):
                    for name in episodes.column_names)
     for row in episodes.to_pylist():
         stats = variant_value(row["stats"])
+        source_path = Path(sources[row["dataset_index"]][7:])
+        source_episodes = pq.read_table(
+            source_path / "meta/episodes/chunk-000/file-000.parquet").to_pylist()
+        original = source_episodes[row["episode_index"]]
+        expected = {}
+        for name, value in original.items():
+            if name.startswith("stats/"):
+                feature, statistic = name[6:].rsplit("/", 1)
+                expected.setdefault(feature, {})[statistic] = value
+        assert stats == expected
         assert stats["source_%d" % row["dataset_index"]]["mean"] == [
             row["dataset_index"] + 0.5]
-        assert "q50" not in stats["index"]
+        assert stats["index"]["q50"] == [0.0]
         assert variant_value(row["meta"]) == {"episodes/chunk_index": row["dataset_index"]}
         assert variant_value(row["data"]) == {
             "chunk_index": 0, "file_index": 0,
@@ -1280,9 +1293,8 @@ def test_merge_nullable_subtask_import(setup, tmp_path, import_parallelism, all_
     assert not batch["subtask_index_is_valid"][1].item()
     if all_null:
         assert "subtask_index" not in metadata(conn, "stats")
-        assert all(all(metric is None for metric in variant_value(value)
-                       ["subtask_index"].values()) for value in
-                   rows(conn, "merged_episodes")["stats"].to_pylist())
+        assert all(variant_value(value)["subtask_index"]["mean"] is not None
+                   for value in rows(conn, "merged_episodes")["stats"].to_pylist())
     if not all_null:
         windowed = pm.PaimonLeRobotDataset(
             conn.get_table("merged_frames"), delta_timestamps={"subtask_index": [-0.1, 0, 0.1]})
@@ -1347,7 +1359,7 @@ def test_episode_fps_rejects_conflicting_video_feature(tmp_path):
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
 @pytest.mark.parametrize("empty_episode", [False, True])
-def test_reconstructed_subtask_stats_use_output_schema(setup, import_parallelism, empty_episode):
+def test_source_subtask_stats_are_preserved(setup, import_parallelism, empty_episode):
     conn, sources = setup
     for uri in sources:
         root = Path(uri[7:])
@@ -1372,7 +1384,7 @@ def test_reconstructed_subtask_stats_use_output_schema(setup, import_parallelism
     episodes = episode_rows(conn, "merged_episodes")
     stats = [variant_value(value) for value in episodes["stats"].to_pylist()]
     assert [value.get("subtask_index", {}).get("mean") for value in stats[::2]] == (
-        [None, None] if empty_episode else [[0.0], [1.0]])
+        [[0.5], [0.5]] if empty_episode else [None, None])
     assert not any(name.startswith("stats/") for name in episodes.column_names)
     assert rows(conn, "merged_frames").num_rows == 10
 
