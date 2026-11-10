@@ -34,6 +34,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Tests for {@link RowIdPredicateVisitor}. */
 public class RowIdPredicateVisitorTest {
@@ -81,6 +82,65 @@ public class RowIdPredicateVisitorTest {
         // Test unrecognized predicate (should return empty)
         Predicate unrecognized = builder.greaterThan(0, 10);
         assertThat(unrecognized.visit(visitor)).isEmpty();
+    }
+
+    @Test
+    public void testInWithNullLiterals() {
+        Predicate smallIn = builder.in(rowIdIndex, Arrays.asList(1L, null, 2L));
+        assertThat(assertDoesNotThrow(() -> smallIn.visit(visitor)))
+                .contains(Collections.singletonList(new Range(1, 2)));
+
+        // More than 20 literals keeps an IN leaf instead of an OR of equalities.
+        List<Object> literals = new ArrayList<>();
+        literals.add(null);
+        for (long id = 20; id >= 1; id--) {
+            literals.add(id);
+        }
+        Predicate largeIn = builder.in(rowIdIndex, literals);
+        assertThat(assertDoesNotThrow(() -> largeIn.visit(visitor)))
+                .contains(Collections.singletonList(new Range(1, 20)));
+        assertThat(literals.get(0)).isNull();
+        assertThat(literals.get(1)).isEqualTo(20L);
+    }
+
+    @Test
+    public void testNullLiteralsMatchNoRowIds() {
+        List<Predicate> predicates =
+                Arrays.asList(
+                        builder.equal(rowIdIndex, null),
+                        builder.in(rowIdIndex, Collections.singletonList(null)),
+                        builder.in(rowIdIndex, new ArrayList<>(Collections.nCopies(21, null))),
+                        builder.between(rowIdIndex, null, 5L),
+                        builder.between(rowIdIndex, 1L, null),
+                        builder.between(rowIdIndex, null, null));
+        for (Predicate predicate : predicates) {
+            assertThat(assertDoesNotThrow(() -> predicate.visit(visitor)))
+                    .contains(Collections.emptyList());
+            assertThat(
+                            assertDoesNotThrow(
+                                    () ->
+                                            PredicateBuilder.or(
+                                                            predicate,
+                                                            builder.equal(rowIdIndex, 7L))
+                                                    .visit(visitor)))
+                    .contains(Collections.singletonList(new Range(7, 7)));
+            assertThat(
+                            assertDoesNotThrow(
+                                    () ->
+                                            PredicateBuilder.and(
+                                                            predicate,
+                                                            builder.between(rowIdIndex, 1L, 10L))
+                                                    .visit(visitor)))
+                    .contains(Collections.emptyList());
+        }
+    }
+
+    @Test
+    public void testNullLiteralsOnOtherFieldsDoNotConstrainRowIds() {
+        Predicate predicate =
+                PredicateBuilder.and(builder.equal(0, null), builder.equal(rowIdIndex, 7L));
+        assertThat(predicate.visit(visitor)).contains(Collections.singletonList(new Range(7, 7)));
+        assertThat(builder.equal(0, null).visit(visitor)).isEmpty();
     }
 
     @Test
