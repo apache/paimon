@@ -795,6 +795,142 @@ public class BlobFormatWriterTest {
     }
 
     @Test
+    public void testTransferLatencyExcludesPreviousSourceClose(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        byte[] payload = {1, 2, 3};
+        java.nio.file.Path sourceFile = tempDir.resolve("source.bin");
+        Files.write(sourceFile, payload);
+        BlobRef fileRef =
+                new BlobRef(
+                        UriReader.fromFile(new LocalFileIO()),
+                        new BlobDescriptor(sourceFile.toUri().toString(), 0, payload.length));
+        long[] closeNanos = {0};
+        int[] closeCount = {0};
+        UriReader customReader =
+                uri ->
+                        SeekableInputStream.wrap(
+                                new ByteArrayInputStream(payload) {
+                                    @Override
+                                    public void close() throws IOException {
+                                        closeCount[0]++;
+                                        closeNanos[0] = pauseForTiming(350);
+                                    }
+                                });
+        TestingBlobFetchMetricReporter reporter = new TestingBlobFetchMetricReporter();
+        java.nio.file.Path outputFile = tempDir.resolve("close-latency.out");
+        BlobFormatWriter writer =
+                newWriter(outputFile, RowType.of(DataTypes.BLOB()), false, false, reporter);
+        long writeNanos;
+        try {
+            writer.addElement(GenericRow.of(fileRef));
+            writer.addElement(
+                    GenericRow.of(
+                            new BlobRef(
+                                    customReader,
+                                    new BlobDescriptor("custom://source", 0, payload.length))));
+            assertThat(closeCount[0]).isZero();
+            long writeStart = System.nanoTime();
+            writer.addElement(GenericRow.of(fileRef));
+            writeNanos = System.nanoTime() - writeStart;
+        } finally {
+            writer.close();
+        }
+
+        assertThat(reporter.transferSources)
+                .containsExactly(
+                        BlobTransferSource.FILE,
+                        BlobTransferSource.CUSTOM,
+                        BlobTransferSource.FILE);
+        assertThat(closeCount[0]).isEqualTo(1);
+        // Compare measured intervals, not a fixed upper bound for file I/O on a busy machine.
+        // The write includes the previous CUSTOM close; the last FILE transfer must exclude it.
+        assertThat(writeNanos - reporter.transferDurationsNanos.get(2))
+                .isGreaterThanOrEqualTo(closeNanos[0] / 2);
+        assertThat(reporter.transfersCompleted).isEqualTo(3);
+        assertThat(reporter.transfersFailed).isZero();
+        assertThat(readBackBlobs(outputFile, 3)).containsExactly(payload, payload, payload);
+    }
+
+    @Test
+    public void testTransferLatencyIncludesCurrentOpenSeekAndRead(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        byte[] payload = {1, 2, 3};
+        long[] openNanos = {0};
+        long[] seekNanos = {0};
+        List<Long> readNanos = new ArrayList<>();
+        int[] openCount = {0};
+        UriReader reader =
+                uri -> {
+                    openCount[0]++;
+                    openNanos[0] = pauseForTiming(75);
+                    SeekableInputStream delegate = new CountingSeekableInputStream(payload);
+                    return new SeekableInputStream() {
+                        @Override
+                        public void seek(long desired) throws IOException {
+                            seekNanos[0] += pauseForTiming(150);
+                            delegate.seek(desired);
+                        }
+
+                        @Override
+                        public long getPos() throws IOException {
+                            return delegate.getPos();
+                        }
+
+                        @Override
+                        public int read() throws IOException {
+                            return delegate.read();
+                        }
+
+                        @Override
+                        public int read(byte[] bytes, int offset, int length) throws IOException {
+                            readNanos.add(pauseForTiming(75));
+                            return delegate.read(bytes, offset, length);
+                        }
+
+                        @Override
+                        public void close() throws IOException {
+                            delegate.close();
+                        }
+                    };
+                };
+        BlobRef ref = new BlobRef(reader, new BlobDescriptor("custom://source", 0, payload.length));
+        TestingBlobFetchMetricReporter reporter = new TestingBlobFetchMetricReporter();
+        java.nio.file.Path outputFile = tempDir.resolve("current-latency.out");
+        BlobFormatWriter writer =
+                newWriter(outputFile, RowType.of(DataTypes.BLOB()), false, false, reporter);
+        try {
+            writer.addElement(GenericRow.of(ref));
+            // Reusing the same source at offset zero seeks backwards during prepareFor.
+            writer.addElement(GenericRow.of(ref));
+        } finally {
+            writer.close();
+        }
+
+        assertThat(openCount[0]).isEqualTo(1);
+        assertThat(readNanos).hasSize(2);
+        assertThat(seekNanos[0]).isPositive();
+        assertThat(reporter.transferDurationsNanos).hasSize(2);
+        assertThat(reporter.transferDurationsNanos.get(0))
+                .isGreaterThanOrEqualTo(openNanos[0] + readNanos.get(0));
+        // Excluding the whole prepareFor interval would incorrectly remove this current seek.
+        assertThat(reporter.transferDurationsNanos.get(1))
+                .isGreaterThanOrEqualTo(seekNanos[0] + readNanos.get(1));
+        assertThat(reporter.transfersCompleted).isEqualTo(2);
+        assertThat(readBackBlobs(outputFile, 2)).containsExactly(payload, payload);
+    }
+
+    private static long pauseForTiming(long millis) throws IOException {
+        long start = System.nanoTime();
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while measuring transfer latency", e);
+        }
+        return System.nanoTime() - start;
+    }
+
+    @Test
     public void testTransferReporterFailureDoesNotFailASuccessfulWrite(
             @TempDir java.nio.file.Path tempDir) throws Exception {
         TestingBlobFetchMetricReporter reporter = throwingTransferReporter();
@@ -1404,6 +1540,7 @@ public class BlobFormatWriterTest {
         private int fetchFailureNullWritten;
         private int failure;
         private final List<BlobTransferSource> transferSources = new ArrayList<>();
+        private final List<Long> transferDurationsNanos = new ArrayList<>();
         private long transferReadBytes;
         private long transferWrittenBytes;
         private long transferDurationNanos;
@@ -1423,6 +1560,7 @@ public class BlobFormatWriterTest {
                 long durationNanos,
                 boolean completed) {
             transferSources.add(source);
+            transferDurationsNanos.add(durationNanos);
             transferReadBytes += readBytes;
             transferWrittenBytes += writtenBytes;
             transferDurationNanos += durationNanos;

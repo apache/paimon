@@ -159,7 +159,13 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             if (length >= 0) {
                 // Position/release the previous source first; its cleanup error is not this blob's
                 // fetch failure and must not be turned into a NULL write.
-                reuseSource.prepareFor(ref);
+                if (transferMetricsEnabled) {
+                    // Only the previous source's close is excluded. Seeking the current reference
+                    // remains part of its transfer latency.
+                    transferStartNanos += reuseSource.prepareForWithCleanupTiming(ref);
+                } else {
+                    reuseSource.prepareFor(ref);
+                }
                 SeekableInputStream source = openStream(ref, () -> reuseSource.openBounded(ref));
                 if (source == null) {
                     return null;
