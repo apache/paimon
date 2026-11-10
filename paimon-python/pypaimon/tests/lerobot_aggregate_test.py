@@ -1291,3 +1291,81 @@ def test_merge_rejects_incompatible_episode_controls(setup):
         conn.load_from_lerobot("merged", sources)
     with pytest.raises(TableNotExistException):
         conn.get_table("merged")
+
+
+@pytest.mark.parametrize("key", ["info", "video_info"])
+@pytest.mark.parametrize("value", [None, "producer", []])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_merge_optional_video_metadata(tmp_path, key, value, reverse):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    sources = [source(tmp_path / name, video=True, value=i * 30)
+               for i, name in enumerate(("a", "b"))]
+    for i, name in enumerate(("a", "b")):
+        path = tmp_path / name / "meta/info.json"
+        info = json.loads(path.read_text())
+        info["features"]["camera"].pop(key, None)
+        if i == 0:
+            info["features"]["camera"][key] = value
+        path.write_text(json.dumps(info))
+    if reverse:
+        sources.reverse()
+    conn.load_from_lerobot("merged", sources, tag_name="train")
+    assert metadata(conn, "info")["features"]["camera"][key] == {}
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged"), tag_name="train", video_backend="pyav")
+    try:
+        assert tuple(reader[5]["camera"].shape) == (3, 16, 16)
+        assert reader.episode_fps == (10, 10, 10, 10)
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+@pytest.mark.parametrize("fps_mode", ["dataset", "source"])
+def test_merge_reserves_fps_mode(setup, import_parallelism, fps_mode):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn, sources = setup
+    for uri in sources:
+        path = Path(uri[7:]) / "meta/info.json"
+        info = json.loads(path.read_text())
+        info["fps_mode"] = "episode"
+        path.write_text(json.dumps(info))
+    conn.load_from_lerobot("merged", sources, fps_mode=fps_mode,
+                           parallelism=import_parallelism, tag_name="train")
+    info = metadata(conn, "info")
+    if fps_mode == "dataset":
+        assert "fps_mode" not in info
+    else:
+        assert info["fps_mode"] == "source"
+    for row in rows(conn, "merged__datasets").to_pylist():
+        assert json.loads(row["info_json"])["fps_mode"] == "episode"
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged"), tag_name="train")
+    try:
+        assert int(reader[5]["episode_index"]) == 2
+        assert reader.episode_fps == (10, 10, 10, 10)
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_merge_int32_source_episode_ids(setup, import_parallelism):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn, sources = setup
+    for uri in sources:
+        path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
+        data = pq.read_table(path)
+        data = data.set_column(data.schema.get_field_index("episode_index"), "episode_index",
+                               data["episode_index"].cast(pa.int32()))
+        pq.write_table(data, path)
+    conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
+    data = episode_rows(conn, "merged__episodes")
+    assert data.schema.field("episode_index").type == pa.int32()
+    assert data["episode_index"].to_pylist() == [0, 1, 0, 1]
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged"), tag_name="train")
+    try:
+        assert [int(s["episode_index"]) for s in reader.get_items([0, 2, 5, 7])] == [0, 1, 2, 3]
+    finally:
+        reader.close()

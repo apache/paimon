@@ -1116,7 +1116,7 @@ def _episode_dataset(table, datasets=None):
             raise ValueError("LeRobot source Episode keys are not contiguous.")
         data = data.set_column(
             data.schema.get_field_index("episode_index"),
-            data.schema.field("episode_index"),
+            pa.field("episode_index", pa.int64()),
             pa.array(range(data.num_rows), type=pa.int64()))
     else:
         data = data.sort_by("episode_index")

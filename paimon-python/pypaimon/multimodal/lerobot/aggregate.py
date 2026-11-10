@@ -180,7 +180,9 @@ def _feature_contract(features):
         if feature.get("dtype") == "video":
             feature.pop("fps", None)
             for key in ("info", "video_info"):
-                feature[key] = {k: v for k, v in feature.get(key, {}).items()
+                details = feature.get(key)
+                details = details if isinstance(details, dict) else {}
+                feature[key] = {k: v for k, v in details.items()
                                 if k not in _ENCODER_KEYS
                                 and k != "video.fps"}
     return result
@@ -302,6 +304,7 @@ def _plan_merge(plans, fps_mode="dataset"):
                 total_tasks=metadata["tasks_table"].num_rows,
                 splits={"train": "0:%d" % episode_offset})
     mixed_fps = len({plan["metadata"]["fps"] for plan in plans}) > 1
+    info.pop("fps_mode", None)
     if fps_mode == "source":
         info["fps_mode"] = "source"
     if mixed_fps:
@@ -321,7 +324,8 @@ def _plan_merge(plans, fps_mode="dataset"):
     # Encoder descriptions are not training features. Retain only shared values.
     for name in first["videos"]:
         for key in ("info", "video_info"):
-            details = [p["info"]["features"][name].get(key, {}) for p in plans]
+            details = [p["info"]["features"][name].get(key) for p in plans]
+            details = [d if isinstance(d, dict) else {} for d in details]
             info["features"][name][key] = {
                 k: v for k, v in details[0].items()
                 if all(d.get(k) == v for d in details[1:])}
