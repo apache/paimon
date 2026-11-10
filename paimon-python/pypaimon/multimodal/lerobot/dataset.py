@@ -1099,7 +1099,7 @@ def _episode_dataset(table, datasets=None):
 
     projection = [
         name for name in _target_schema(table).names
-        if not name.startswith("stats/")
+        if not name.startswith("stats/") and name != "stats"
         and (datasets is None or name not in (
             "source_episode_patch_json", "source_episode_json", "source_episode_ipc"))
     ]
