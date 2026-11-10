@@ -52,6 +52,7 @@ from pypaimon.multimodal.lerobot.loader import _DECLARED_NUMERIC_RANGES, _video_
 from pypaimon.multimodal.lerobot.reader import _PaimonTableFrameReader
 from pypaimon.multimodal.lerobot.schema import (
     _feature_shape,
+    _merge_schemas,
     _require_v3,
     _schema_from_info,
     _validate_lerobot_schema,
@@ -554,14 +555,16 @@ class PaimonDatasetReader(ABC):
                     item[key] = visual_windows[key][offset]
                 else:
                     values = [converted[position][key] for position in positions]
-                    if key == "subtask_index" and _contains_none(values):
-                        item[key] = values
+                    if _contains_none(values):
+                        item[key] = (None if key != "subtask_index"
+                                     and all(value is None for value in values) else values)
                     else:
                         item[key] = torch.stack(values)
             item.update(plan["padding"])
             if self.image_transforms is not None:
                 for key in self._visual_keys:
-                    item[key] = self.image_transforms(item[key])
+                    if item[key] is not None:
+                        item[key] = self.image_transforms(item[key])
             result.append(item)
         if return_batch:
             return _collate_lerobot_batch(result, video_windows)
@@ -1114,7 +1117,9 @@ def _source_vocabulary(sources, singular):
     values = [source.get(field) for source in sources]
     if all(value is None for value in values) and singular == "subtask":
         return None, None
-    if any(value is None for value in values):
+    if singular == "subtask":
+        values = [value if value is not None else [] for value in values]
+    elif any(value is None for value in values):
         raise ValueError("LeRobot sources disagree on %s metadata." % field)
     by_text, rows, maps = {}, [], []
     for ordinal, entries in enumerate(values):
@@ -1152,6 +1157,13 @@ def _merged_source_info(sources, tasks, subtasks, fps_mode):
             raise ValueError("LeRobot source %d has invalid info." % ordinal)
         infos.append(info)
     merged = copy.deepcopy(infos[0])
+    merged["features"] = {}
+    for info in infos:
+        for name, feature in info["features"].items():
+            merged["features"].setdefault(name, copy.deepcopy(feature))
+    for field in _merge_schemas([_schema_from_info(info) for info in infos]):
+        if field.nullable:
+            merged["features"][field.name]["nullable"] = True
     for key in list(merged):
         if key not in _REBUILT_INFO and key not in ("codebase_version", "robot_type", "fps") \
                 and any(info.get(key) != merged[key] for info in infos):
@@ -1181,7 +1193,8 @@ def _merged_source_info(sources, tasks, subtasks, fps_mode):
         if feature.get("dtype") != "video":
             continue
         for key in ("info", "video_info"):
-            details = [info["features"][name].get(key) for info in infos]
+            details = [info["features"][name].get(key) for info in infos
+                       if name in info["features"]]
             details = [value if isinstance(value, dict) else {} for value in details]
             feature[key] = {k: v for k, v in details[0].items()
                             if all(value.get(k) == v for value in details[1:])}
@@ -1195,10 +1208,9 @@ def _merged_source_stats(sources, episodes_table):
     if any(value is None for value in values):
         raise ValueError("LeRobot sources disagree on stats metadata.")
     decoded = [json.loads(value) for value in values]
-    if any(set(value) != set(decoded[0]) for value in decoded[1:]):
-        raise ValueError("LeRobot source statistics features differ.")
-    merged = {name: _merge_stats([value[name] for value in decoded])
-              for name in decoded[0] if name not in _CONTROLS}
+    names = dict.fromkeys(name for value in decoded for name in value)
+    merged = {name: _merge_stats([value[name] for value in decoded if name in value])
+              for name in names if name not in _CONTROLS}
     columns = _target_schema(episodes_table).names
     if "stats" in columns:
         stats_rows = _read_arrow(episodes_table, ["stats"])["stats"].to_pylist()
@@ -1632,8 +1644,12 @@ def _numeric_tensor_rows(column, name, feature):
     import numpy as np
     import torch
 
-    values = column.combine_chunks()
+    values = column.combine_chunks() if isinstance(column, pa.ChunkedArray) else column
     if values.null_count:
+        if feature.get("nullable"):
+            valid = pc.is_valid(values)
+            converted = iter(_numeric_tensor_rows(pc.filter(values, valid), name, feature))
+            return [next(converted) if present else None for present in valid.to_pylist()]
         raise ValueError(
             "LeRobot numeric feature %s contains null values." % name)
     shape = _feature_shape(feature, name)
@@ -1776,7 +1792,7 @@ def _resolve_image_blobs(
     for rows in row_groups:
         for row in rows.values():
             for key in image_keys:
-                if key in row:
+                if key in row and row[key] is not None:
                     targets[key].append(row)
                     values[key].append(row[key])
     used = [key for key in image_keys if values[key]]
@@ -1793,7 +1809,7 @@ def _decode_image_rows(row_groups, image_keys, features, return_uint8):
     for rows in row_groups:
         for row in rows.values():
             for key in image_keys:
-                if key in row:
+                if key in row and row[key] is not None:
                     row[key] = _image_tensor(
                         row[key], features[key], return_uint8=return_uint8)
 
@@ -1804,7 +1820,7 @@ def _image_blob_sources(row_groups, image_keys):
         for rows in row_groups
         for row in rows.values()
         for key in image_keys
-        if key in row
+        if key in row and row[key] is not None
     ]
 
 
@@ -2052,6 +2068,9 @@ def _collate_lerobot_batch(rows, video_windows):
                 nullable["subtask_index"], dtype=torch.bool)
     if "subtask" in rows[0] and any(_contains_none(row["subtask"]) for row in rows):
         nullable["subtask"] = [row["subtask"] for row in rows]
+    for key in rows[0]:
+        if key not in nullable and any(_contains_none(row[key]) for row in rows):
+            nullable[key] = [row[key] for row in rows]
     if not video_windows and not nullable:
         return default_collate(rows)
     remaining = [{
@@ -2083,9 +2102,9 @@ def _stack_visual_windows(plans, rows, visual_keys):
     def stack(key):
         with torch.inference_mode(inference_enabled), \
                 torch.set_grad_enabled(grad_enabled):
-            return [torch.stack([
-                rows[position][key] for position in plan["windows"][key]
-            ]) for plan in plans]
+            windows = [[rows[position][key] for position in plan["windows"][key]] for plan in plans]
+            return [None if all(value is None for value in window) else window
+                    if _contains_none(window) else torch.stack(window) for window in windows]
 
     with ThreadPoolExecutor(
             max_workers=min(len(keys), _MAX_VISUAL_WORKERS)) as executor:
@@ -2100,6 +2119,8 @@ def _torch_row(row, features, return_uint8=False):
         if key not in result:
             continue
         value = result[key]
+        if value is None:
+            continue
         if feature.get("dtype") == "image" and not torch.is_tensor(value):
             result[key] = _image_tensor(
                 value, feature, return_uint8=return_uint8)
@@ -2784,7 +2805,7 @@ def _decode_video_rows(
         input_rows = []
         for rows in row_groups:
             for index, row in rows.items():
-                if collator.video_column in row:
+                if collator.video_column in row and row[collator.video_column] is not None:
                     targets.append((rows, index))
                     input_rows.append(row)
         if not input_rows:

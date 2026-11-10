@@ -157,7 +157,7 @@ def _feature_field(name, feature, legacy_vectors=False):
     return pa.field(
         name,
         arrow_type,
-        nullable=name == "subtask_index",
+        nullable=name == "subtask_index" or bool(feature.get("nullable", False)),
         metadata={b"description": description.encode("utf-8")},
     )
 
@@ -188,3 +188,27 @@ def _tensor_type(scalar_type, shape, legacy_vectors=False):
     for unused_size in (shape[:-1] if legacy_vectors else shape):
         result = pa.list_(result)
     return result
+
+
+def _merge_schemas(schemas, schema_evolution=True, required=()):
+    """Merge top-level columns without promoting types or changing nested schemas."""
+    fields = {}
+    first_names = set(schemas[0].names)
+    for ordinal, schema in enumerate(schemas):
+        missing = set(required) - set(schema.names)
+        if missing:
+            raise ValueError("LeRobot source %d is missing required fields: %s."
+                             % (ordinal, sorted(missing)))
+        for field in schema:
+            if not schema_evolution and field.name not in first_names:
+                raise ValueError("LeRobot source %d adds field %s with schema_evolution disabled."
+                                 % (ordinal, field.name))
+            if field.name in fields and not fields[field.name].type.equals(field.type):
+                raise ValueError("LeRobot source %d has incompatible type for field %s: %s versus %s."
+                                 % (ordinal, field.name, field.type, fields[field.name].type))
+            fields.setdefault(field.name, field)
+    return pa.schema([
+        field.with_nullable(any(name not in schema.names or schema.field(name).nullable
+                                for schema in schemas))
+        for name, field in fields.items()
+    ], metadata=schemas[0].metadata)

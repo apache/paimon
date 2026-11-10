@@ -51,8 +51,9 @@ Python 3.10–3.11 uses LeRobot 0.4.x; Python 3.12+ uses LeRobot 0.6.x.
 
 ```python
 conn.load_from_lerobot(
-    "robot_data",
-    "/data/lerobot_dataset",
+    table_name="robot_data",
+    source="/data/lerobot_dataset",
+    dataset_name="dataset_a",  # Optional source label.
     tag_name="initial-import",  # Optional: tag all imported component snapshots.
 )
 ```
@@ -66,10 +67,9 @@ just an example prefix; choose any unused name:
 
 ```python
 conn.load_from_lerobot(
-    "robot_merged",
-    ["oss://bucket/dataset_a", "oss://bucket/dataset_b"],
-    dataset_names=["dataset_a", "dataset_b"],
-    fps_mode="source",  # Allow different source FPS.
+    table_name="robot_merged",
+    source=["oss://bucket/dataset_a", "oss://bucket/dataset_b"],
+    dataset_name=["dataset_a", "dataset_b"],
 )
 ```
 
@@ -82,8 +82,9 @@ Each source has one row in `_datasets`. Its `info` JSON contains the original
 `meta/info.json`, including FPS; there is no separate FPS column.
 The table contains `index`, `name`, `info`, `tasks`, `subtasks`,
 and `stats`. Source ranges are derived from the counts in each source's `info`.
-`dataset_names` supplies optional labels; omitted names are null, and duplicate
-labels do not merge sources. Frame and Episode `dataset_index` values reference
+`dataset_name` accepts a string for one source or a list/tuple with one label per
+source in input order. Omitted names are null, and duplicate labels do not merge
+sources. Frame and Episode `dataset_index` values reference
 `_datasets.index`. The pair `(dataset_index, episode_index)` identifies an
 original Episode. Frames keep a
 merged `index` and their original `source_index`. Source task/subtask ID-to-text
@@ -100,17 +101,89 @@ Control-field statistics reflect merged IDs; their original quantiles are
 omitted. Training reads skip `stats`. Repeated task/subtask text within one
 source is rejected before creating tables to avoid losing original frame IDs.
 
-Sources must share robot type and training features. By default they must also
-share FPS; `fps_mode="source"` permits mixed FPS and requires
-`PaimonLeRobotDataset` for training. Pass `dataset_index=N` to that reader to
-select one source.
+Sources must share robot type and compatible definitions for common features. Each source retains its own
+FPS from `info`; different source frame rates are handled automatically. Use
+`PaimonLeRobotDataset` to train from mixed-FPS groups. Pass `dataset_index=N` to
+that reader to select one source. Frame-rate handling is automatic and does not
+require an import option.
+
+### Schema evolution
+
+`schema_evolution=True` is the default. The importer plans the union of source
+columns before creating `_frames` and any declared extra `_datasets` columns.
+Merged `_episodes` keeps its fixed typed controls and JSON group columns;
+source-specific keys remain inside those JSON values.
+Missing columns receive typed nulls. Optional columns become nullable; source
+indices, timestamps, task indices, and required Episode controls remain required.
+Common columns must have identical types, and common frame features must retain
+their dtype, shape, and names. Type promotion and nested schema changes are
+rejected before creating tables.
+
+```python
+conn.load_from_lerobot(
+    table_name="robot_all",
+    source=["/data/dataset_a", "/data/dataset_b"],
+    schema_evolution=True,  # Optional; this is the default.
+)
+```
+
+For example, sources with `action, temperature` and `action, pressure` produce
+`action, temperature, pressure`. Rows from the first source have null pressure;
+rows from the second have null temperature. The training reader reconstructs
+`meta.info.features` as the union of the original info stored in `_datasets`;
+feature statistics combine only sources with that feature.
+
+With `schema_evolution=False`, the first source defines the columns. Later
+sources may omit optional columns, which still receive nulls, but adding a column
+is rejected. This applies to the sources of one import into a new table group.
+
+Readers return `None` for missing features. The built-in training batch reader
+keeps columns containing missing features as lists with `None` entries; fully
+populated features retain their tensor behavior. Select compatible sources or
+handle these missing entries when supplying inputs to a model.
+
+### Extra dataset text fields
+
+`extra_dataset_fields` maps new `_datasets` column names to file paths or glob
+patterns relative to each source root. The same mapping applies independently to
+every source. UTF-8 `.json`, `.txt`, `.md`, `.yaml`, `.yml`, `.jsonl`, `.ndjson`,
+`.csv`, and `.tsv` files are supported, including uppercase suffixes. Contents
+remain verbatim text, including whitespace and line endings; they are not parsed
+as JSON, YAML, or tables.
+
+```python
+conn.load_from_lerobot(
+    table_name="robot_all",
+    source=["/data/dataset_a", "/data/dataset_b"],
+    dataset_name=["dataset_a", "dataset_b"],
+    extra_dataset_fields={
+        "config": "config/*.json",
+        "notes": "notes.md",
+    },
+)
+```
+
+A literal file path creates a `STRING` column. A glob creates a
+`MAP<STRING, STRING>` column, even when it matches only one file. Map values are
+file contents. Keys are relative to the directory prefix before the first glob
+component, with the final suffix removed. For example, `config/model_a.json`
+matched by `config/*.json` has key `model_a`, accessed in SQL as
+`config['model_a']`. Recursive patterns such as `config/**/*.json` retain nested
+directories in keys: `config/nested/model_a.json` has key `nested/model_a`.
+
+Missing extra files and empty globs produce null values, with their declared
+`STRING` or `MAP<STRING, STRING>` column types retained. Unsupported
+suffixes, invalid UTF-8, paths outside the source root, duplicate keys after
+removing suffixes, and names that overwrite standard `_datasets` columns are
+rejected before creating target tables. Training readers project only required
+source metadata and skip extra text columns.
 
 For FileIO URIs, pass credentials through `source_options`:
 
 ```python
 conn.load_from_lerobot(
-    "robot_data",
-    "oss://source-bucket/lerobot_dataset",
+    table_name="robot_data",
+    source="oss://source-bucket/lerobot_dataset",
     source_options={
         "fs.oss.endpoint": "oss-cn-hangzhou.aliyuncs.com",
         "fs.oss.accessKeyId": "SOURCE_ACCESS_KEY_ID",
@@ -125,7 +198,7 @@ For distributed import, install `pypaimon[ray,lerobot]` on each worker:
 import ray
 
 ray.init(address="auto")
-conn.load_from_lerobot("robot_data", "oss://source-bucket/lerobot_dataset",
+conn.load_from_lerobot(table_name="robot_data", source="oss://source-bucket/lerobot_dataset",
                        parallelism=8)
 ```
 

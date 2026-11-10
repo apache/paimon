@@ -58,6 +58,7 @@ from pypaimon.multimodal.source_utils import (
     _validated_source_options,
     _validate_source_kerberos,
 )
+from pypaimon.multimodal.lerobot.text_fields import _validated_text_fields
 
 
 _VIDEO_LAYOUT_ERROR = (
@@ -76,16 +77,20 @@ def load_from_lerobot(
         source_options: Optional[Mapping[str, object]] = None,
         tag_name: Optional[str] = None,
         parallelism: int = 1,
-        fps_mode: str = "dataset",
-        dataset_names=None,
+        dataset_name=None,
+        extra_dataset_fields: Optional[Mapping[str, str]] = None,
+        schema_evolution: bool = True,
 ) -> None:
     """Import one or more LeRobot v3 sources into a new Paimon table group.
 
     ``table_name`` is the group prefix; frames are stored in ``<table_name>_frames``.
-    Sources must share training features. ``fps_mode='source'`` allows mixed
-    FPS. ``_datasets`` retains source metadata; optional ``dataset_names``
-    are caller-provided labels, never inferred from paths. ``tag_name`` pins
-    component snapshots.
+    Schema evolution adds new columns by default; missing values become null.
+    Common fields must keep their types and feature definitions. Differing
+    source FPS is handled automatically. ``dataset_name`` is a label or an ordered
+    list of labels. ``extra_dataset_fields`` maps columns to relative UTF-8
+    text file paths or globs in each source. Globs produce maps keyed by paths
+    relative to their static directory prefix, without the final suffix.
+    ``_datasets`` retains source metadata. ``tag_name`` pins component snapshots.
     FileIO credentials come from ``source_options``; ``parallelism > 1`` uses Ray.
     """
     if sys.version_info < (3, 10):
@@ -99,17 +104,21 @@ def load_from_lerobot(
     if isinstance(parallelism, bool) or not isinstance(parallelism, int) \
             or parallelism <= 0:
         raise ValueError("parallelism must be a positive integer.")
-    if fps_mode not in ("dataset", "source"):
-        raise ValueError("fps_mode must be 'dataset' or 'source'.")
-    if dataset_names is not None:
-        if not isinstance(dataset_names, (list, tuple)) or len(dataset_names) != (
+    if not isinstance(schema_evolution, bool):
+        raise ValueError("schema_evolution must be a boolean.")
+    if dataset_name is not None:
+        if isinstance(dataset_name, str):
+            dataset_name = [dataset_name]
+        if not isinstance(dataset_name, (list, tuple)) or len(dataset_name) != (
                 len(source) if isinstance(source, (list, tuple)) else 1) \
                 or any(not isinstance(name, str) or not name.strip()
-                       for name in dataset_names):
-            raise ValueError("dataset_names must contain one non-empty name per source.")
-        dataset_names = [name.strip() for name in dataset_names]
-    if isinstance(source, (list, tuple)) or fps_mode == "source" \
-            or dataset_names is not None:
+                       for name in dataset_name):
+            raise ValueError("dataset_name must contain one non-empty name per source.")
+        dataset_name = [name.strip() for name in dataset_name]
+    if extra_dataset_fields is not None:
+        from pypaimon.multimodal.lerobot.aggregate import _DATASETS_SCHEMA
+        extra_dataset_fields = _validated_text_fields(extra_dataset_fields, _DATASETS_SCHEMA.names)
+    if isinstance(source, (list, tuple)) or dataset_name is not None or extra_dataset_fields:
         if not isinstance(source, (list, tuple)):
             source = [source]
         if not source:
@@ -120,7 +129,7 @@ def load_from_lerobot(
         return _import_sources(
             connection, table_name, source, batch_size, options,
             _validated_source_options(source_options), tag_name, parallelism,
-            fps_mode, dataset_names)
+            dataset_name, extra_dataset_fields, schema_evolution)
     if parallelism > 1:
         from pypaimon.multimodal.lerobot.ray_loader import _require_ray, _ray_source_uri
         _require_ray()
