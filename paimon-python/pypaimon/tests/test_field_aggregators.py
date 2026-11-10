@@ -2651,14 +2651,20 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
         )
 
     def test_overwrite_on_equal_ts(self):
-        # Cover both the string (UTF-16) path and a typed (BIGINT) path.
+        # Cover the string (UTF-16) path, a typed BIGINT path, and the
+        # historical PyPaimon FLOAT/DOUBLE native-order path.
         bigint_fields = [
             DataField(0, "actual_value", AtomicType("STRING")),
             DataField(1, "dbsync_ts", AtomicType("BIGINT")),
         ]
+        double_fields = [
+            DataField(0, "actual_value", AtomicType("STRING")),
+            DataField(1, "dbsync_ts", AtomicType("DOUBLE")),
+        ]
         cases = (
             (None, self.DEFAULT_FIELDS, "100", "090", "110"),
             (RowType(True, bigint_fields), bigint_fields, 100, 90, 110),
+            (RowType(True, double_fields), double_fields, 10.25, 9.5, 11.0),
         )
         for row_type, fields, equal_ts, older_ts, newer_ts in cases:
             for setting in (None, "false", "true"):
@@ -2770,6 +2776,7 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
         supported = (
             "CHAR(8)", "VARCHAR(16)", "STRING",
             "TINYINT", "SMALLINT", "INT", "INTEGER", "BIGINT",
+            "FLOAT", "DOUBLE",
             "DATE", "TIME", "DECIMAL(10, 2)",
             "TIMESTAMP(3)", "TIMESTAMP(9)", "TIMESTAMP_LTZ(6)",
         )
@@ -2781,7 +2788,9 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
             agg = self._make(row_type=RowType(True, fields))
             self.assertIsInstance(agg, FieldMergeMapWithKeyTimeAgg)
 
-        for sql_type in ("FLOAT", "DOUBLE", "BOOLEAN", "BINARY(4)"):
+        # Keep rejecting types that historical PyPaimon never used for
+        # keytime ordering. FLOAT/DOUBLE stay accepted for compatibility.
+        for sql_type in ("BOOLEAN", "BINARY(4)"):
             fields = [
                 DataField(0, "actual_value", AtomicType("STRING")),
                 DataField(1, "dbsync_ts", AtomicType(sql_type)),
@@ -2839,10 +2848,13 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
 
     def test_ordered_timestamp_types_replace_only_when_newer(self):
         # 9 then 10 is numeric order. Lexicographic string order would keep 9.
+        # FLOAT/DOUBLE match the historical PyPaimon native-order path.
         cases = (
             ("TINYINT", 9, 10),
             ("SMALLINT", 9, 10),
             ("INT", 9, 10),
+            ("FLOAT", 9.5, 10.25),
+            ("DOUBLE", 9.5, 10.25),
             ("DATE", datetime.date(2024, 1, 1), datetime.date(2024, 1, 2)),
             ("TIME", datetime.time(1, 2, 3), datetime.time(1, 2, 4)),
             ("DECIMAL(10, 2)", BigDecimal("9.00"), BigDecimal("10.00")),
@@ -2885,6 +2897,7 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
         self.assertEqual(acc["k"]["actual_value"], "replaced")
 
     def test_timestamp9_nano_tail_comparison(self):
+        """BinaryRow comparator keeps nanosecond tails for TIMESTAMP(9)."""
         import pandas as pd
 
         fields = [
@@ -2901,7 +2914,7 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
 
         # 100_000 ns is an exact microsecond, so the reader returns datetime.
         # 100_001 ns keeps a 1ns tail as pandas.Timestamp. The later value
-        # must still win.
+        # must still win on this BinaryRow path.
         on_microsecond = pd.Timestamp(1_000_000_000 + 100_000, unit="ns")
         acc = agg.agg(None, {"k": binary_row("old", on_microsecond)})
         acc = agg.agg(acc, {"k": binary_row("plus_one_ns", older)})
