@@ -103,6 +103,21 @@ _INT_TYPES = frozenset({"INT", "INTEGER"})
 # SQL type names treated as floating-point.
 _FLOAT_TYPES = frozenset({"FLOAT", "DOUBLE"})
 
+# Atomic element types whose runtime values are hashable and whose equality
+# matches a list scan, so distinct collect can use a set. ARRAY and MAP
+# elements are list/dict and are not hashable. ROW stays on the list path:
+# GenericRow equality ignores field descriptors while its hash includes them.
+_COLLECT_SET_DEDUPE_TYPES = frozenset({
+    "CHAR", "VARCHAR", "STRING",
+    "BOOLEAN",
+    "BINARY", "VARBINARY", "BYTES",
+    "TINYINT", "SMALLINT", "INT", "INTEGER", "BIGINT",
+    "FLOAT", "DOUBLE",
+    "DECIMAL", "NUMERIC", "DEC",
+    "DATE", "TIME",
+    "TIMESTAMP", "TIMESTAMP_LTZ",
+})
+
 
 def _atomic_base_name(field_type: DataType):
     """Extract the bare SQL type name from an :class:`AtomicType`,
@@ -801,28 +816,43 @@ class FieldCollectAgg(FieldAggregator):
             )
 
         self.distinct = options.field_collect_distinct(field_name)
+        self.count_limit = options.field_collect_agg_count_limit(field_name)
+        element_base = _atomic_base_name(field_type.element)
+        self._set_dedupe = (
+            self.distinct and element_base in _COLLECT_SET_DEDUPE_TYPES
+        )
 
     def agg_reversed(self, accumulator: Any, input_field: Any) -> Any:
-        # we don't need to actually do the reverse here for this agg
-        # because accumulator has been distinct, just let accumulator be accumulator will speed up
-        # distinct process
-        return self.agg(accumulator, input_field)
+        # Reverse traversal supplies the newer partial result as
+        # ``accumulator`` and the older value as ``input_field``. Aggregate
+        # older before newer so count-limit matches forward ``agg``.
+        return self.agg(input_field, accumulator)
 
     def agg(self, accumulator: Any, input_field: Any) -> Any:
         if accumulator is None and input_field is None:
             return None
 
-        if (accumulator is None or input_field is None) and not self.distinct:
-            return input_field if accumulator is None else accumulator
+        # No truncation needed, so keep the input array as it is.
+        limit = abs(self.count_limit)
+        if input_field is None and not self.distinct and len(accumulator) <= limit:
+            return accumulator
+        if accumulator is None and not self.distinct and len(input_field) <= limit:
+            return input_field
 
-        if self.distinct:
-            result = []
-            self._collect(result, accumulator)
-            self._collect(result, input_field)
-
+        result = []
+        # One set covers both sides, so a value already kept from the
+        # accumulator is not collected again from the input.
+        seen = set() if self._set_dedupe else None
+        if self.count_limit >= 0:
+            self._collect(result, accumulator, seen)
+            self._collect(result, input_field, seen)
             return result
-        else:
-            return list(accumulator) + list(input_field)
+
+        # A negative limit keeps the last elements in aggregation order.
+        self._collect(result, input_field, seen)
+        self._collect(result, accumulator, seen)
+        result.reverse()
+        return result
 
     def retract(self, accumulator: Any, retract_field: Any) -> Any:
         if accumulator is None:
@@ -841,12 +871,29 @@ class FieldCollectAgg(FieldAggregator):
 
         return result
 
-    def _collect(self, result: List[Any], data: List[Any]):
+    def _collect(self, result: List[Any], data: List[Any], seen: Optional[set]):
         if data is None:
             return
-        for element in data:
-            if element not in result:
-                result.append(element)
+
+        limit = abs(self.count_limit)
+        if self.count_limit < 0:
+            indices = range(len(data) - 1, -1, -1)
+        else:
+            indices = range(len(data))
+
+        for i in indices:
+            if len(result) >= limit:
+                break
+            element = data[i]
+            if self.distinct:
+                if seen is not None:
+                    if element in seen:
+                        continue
+                elif element in result:
+                    continue
+            result.append(element)
+            if seen is not None:
+                seen.add(element)
 
 
 class FieldNestedUpdateAgg(FieldAggregator):

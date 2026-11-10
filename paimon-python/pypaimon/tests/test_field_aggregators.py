@@ -967,11 +967,14 @@ class FieldListaggAggTest(unittest.TestCase):
 
 class FieldCollectAggTest(unittest.TestCase):
 
-    def _make(self, distinct, element_type=None):
+    def _make(self, distinct, element_type=None, count_limit=None):
         if element_type is None:
             element_type = AtomicType("INT")
 
-        options = CoreOptions(Options({"fields.field0.distinct": distinct}))
+        raw = {"fields.field0.distinct": distinct}
+        if count_limit is not None:
+            raw["fields.field0.count-limit"] = count_limit
+        options = CoreOptions(Options(raw))
 
         return create_field_aggregator(
             ArrayType(True, element_type),
@@ -1169,6 +1172,186 @@ class FieldCollectAggTest(unittest.TestCase):
             [{1: "A"}, {2: "B", 1: "A"}],
         )
         self.assertEqual(acc, [{1: "C"}])
+
+    def test_field_collect_agg_count_limit_positive(self):
+        agg = self._make(distinct=False, count_limit=2)
+
+        acc = agg.agg(None, [1, 2])
+        self.assertEqual(acc, [1, 2])
+
+        acc = agg.agg(acc, [3, 4])
+        self.assertEqual(acc, [1, 2])
+
+    def test_field_collect_agg_count_limit_negative(self):
+        agg = self._make(distinct=False, count_limit=-2)
+
+        acc = agg.agg(None, [1, 2])
+        self.assertEqual(acc, [1, 2])
+
+        acc = agg.agg(acc, [3, 4])
+        self.assertEqual(acc, [3, 4])
+
+        acc = agg.agg(acc, [5])
+        self.assertEqual(acc, [4, 5])
+
+    def test_field_collect_agg_count_limit_with_distinct(self):
+        # The example from the Java docs.
+        agg = self._make(distinct=True, count_limit=2)
+        self.assertEqual(agg.agg(None, [1, 2, 1, 3]), [1, 2])
+
+        agg = self._make(distinct=True, count_limit=-2)
+        self.assertEqual(agg.agg(None, [1, 2, 1, 3]), [1, 3])
+
+    def test_field_collect_agg_count_limit_with_distinct_across_inputs(self):
+        agg = self._make(distinct=True, count_limit=2)
+
+        acc = agg.agg(None, [1, 1, 2])
+        self.assertEqual(acc, [1, 2])
+
+        acc = agg.agg(acc, [2, 3])
+        self.assertEqual(acc, [1, 2])
+
+        agg = self._make(distinct=True, count_limit=-2)
+
+        acc = agg.agg(None, [1, 1, 2])
+        self.assertEqual(acc, [1, 2])
+
+        acc = agg.agg(acc, [2, 3])
+        self.assertEqual(acc, [2, 3])
+
+    def test_field_collect_agg_count_limit_without_distinct_keeps_duplicates(self):
+        agg = self._make(distinct=False, count_limit=3)
+
+        self.assertEqual(agg.agg(None, [1, 1, 2, 3]), [1, 1, 2])
+
+        agg = self._make(distinct=False, count_limit=-3)
+        self.assertEqual(agg.agg(None, [1, 1, 2, 3]), [1, 2, 3])
+
+    def test_field_collect_agg_count_limit_zero_returns_empty(self):
+        for limit in (0, -0):
+            agg = self._make(distinct=False, count_limit=limit)
+            self.assertEqual(agg.agg(None, [1, 2]), [])
+
+    def _assert_collect_forward_equals_reversed(
+            self, distinct, count_limit, older, newer, expected
+    ):
+        agg = self._make(distinct=distinct, count_limit=count_limit)
+        forward = agg.agg(agg.agg(None, older), newer)
+        reversed_result = agg.agg_reversed(agg.agg_reversed(None, newer), older)
+        self.assertEqual(forward, expected)
+        self.assertEqual(reversed_result, expected)
+
+    def test_field_collect_agg_forward_vs_reversed_reviewer_repro(self):
+        older = [1, 2]
+        newer = [3, 4]
+        self._assert_collect_forward_equals_reversed(
+            False, 2, older, newer, [1, 2]
+        )
+        self._assert_collect_forward_equals_reversed(
+            False, -2, older, newer, [3, 4]
+        )
+
+    def test_field_collect_agg_forward_vs_reversed_java_matrix(self):
+        older = [2, 1, 2]
+        newer = [3, 3, 1]
+        cases = [
+            (False, 3, [2, 1, 2]),
+            (True, 3, [2, 1, 3]),
+            (False, -3, [3, 3, 1]),
+            (True, -3, [2, 3, 1]),
+            (False, 0, []),
+            (True, 0, []),
+        ]
+        for distinct, count_limit, expected in cases:
+            self._assert_collect_forward_equals_reversed(
+                distinct, count_limit, older, newer, expected
+            )
+
+    def test_field_collect_agg_set_dedupe_for_atomic_types(self):
+        for sql_type in (
+                "INT", "STRING", "BOOLEAN", "DECIMAL(10, 2)",
+                "DATE", "VARBINARY(8)", "TIMESTAMP(6)",
+        ):
+            agg = self._make(distinct=True, element_type=AtomicType(sql_type))
+            self.assertTrue(agg._set_dedupe, sql_type)
+
+        agg = self._make(distinct=False)
+        self.assertFalse(agg._set_dedupe)
+
+        agg = self._make(distinct=True, element_type=AtomicType("BLOB"))
+        self.assertFalse(agg._set_dedupe)
+
+    def test_field_collect_agg_set_dedupe_across_inputs(self):
+        agg = self._make(distinct=True)
+        self.assertTrue(agg._set_dedupe)
+
+        acc = agg.agg(None, [1, 2, 2])
+        acc = agg.agg(acc, [2, 3, 3])
+        self.assertEqual(acc, [1, 2, 3])
+
+    def test_field_collect_agg_set_dedupe_with_count_limit(self):
+        agg = self._make(distinct=True, count_limit=2)
+        self.assertTrue(agg._set_dedupe)
+        self.assertEqual(agg.agg(None, [1, 1, 2, 3]), [1, 2])
+
+        agg = self._make(distinct=True, count_limit=-2)
+        self.assertEqual(agg.agg(None, [1, 2, 1, 3]), [1, 3])
+
+        agg = self._make(distinct=True, count_limit=0)
+        self.assertEqual(agg.agg(None, [1, 2]), [])
+
+    def test_field_collect_agg_list_dedupe_for_array_and_map(self):
+        agg = self._make(
+            distinct=True,
+            element_type=ArrayType(True, AtomicType("INT")),
+        )
+        self.assertFalse(agg._set_dedupe)
+        self.assertEqual(agg.agg(None, [[1], [1], [2]]), [[1], [2]])
+
+        acc = agg.agg([[1], [2]], [[2], [3]])
+        self.assertEqual(acc, [[1], [2], [3]])
+
+        agg = self._make(
+            distinct=True,
+            element_type=MapType(True, AtomicType("INT"), AtomicType("STRING")),
+        )
+        self.assertFalse(agg._set_dedupe)
+        self.assertEqual(
+            agg.agg(None, [{1: "A"}, {1: "A"}, {2: "B"}]),
+            [{1: "A"}, {2: "B"}],
+        )
+
+    def test_field_collect_agg_row_same_value_different_field_name(self):
+        fields_a = [DataField(0, "id", AtomicType("INT"))]
+        fields_b = [DataField(0, "other", AtomicType("INT"))]
+        agg = self._make(
+            distinct=True,
+            element_type=RowType(True, fields_a),
+        )
+        self.assertFalse(agg._set_dedupe)
+
+        left = self.row(1, fields=fields_a)
+        right = self.row(1, fields=fields_b)
+        self.assertEqual(agg.agg(None, [left, right]), [left])
+
+    def test_field_collect_agg_float_nan_signed_zero_and_binary(self):
+        agg = self._make(distinct=True, element_type=AtomicType("DOUBLE"))
+        self.assertTrue(agg._set_dedupe)
+
+        nan = float("nan")
+        result = agg.agg(None, [nan, float("nan"), 1.0])
+        self.assertEqual(len(result), 3)
+        self.assertTrue(math.isnan(result[0]))
+        self.assertTrue(math.isnan(result[1]))
+        self.assertEqual(result[2], 1.0)
+
+        self.assertEqual(agg.agg(None, [0.0, -0.0, 1.0]), [0.0, 1.0])
+
+        agg = self._make(distinct=True, element_type=AtomicType("VARBINARY(8)"))
+        self.assertEqual(
+            agg.agg(None, [b"\x01\x02", bytes([1, 2]), b"\x03"]),
+            [b"\x01\x02", b"\x03"],
+        )
 
 
 class FieldNestedUpdateAggTest(unittest.TestCase):
