@@ -35,6 +35,7 @@ import org.apache.spark.sql.types.StructType
 import java.util.{Map => JMap, Objects}
 
 import scala.collection.JavaConverters._
+import scala.collection.immutable.ListMap
 
 trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with Logging {
 
@@ -72,6 +73,13 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
             s"which ${table.name()} is not.")
     }
   }
+
+  /**
+   * The spec Paimon stores for the partition `row` identifies, as `Partition.spec()` holds it, in
+   * `partitionNames` order.
+   */
+  def paimonPartitionSpec(row: InternalRow, partitionNames: Seq[String]): Map[String, String] =
+    ListMap(toPaimonPartition(row, partitionNames).asScala.toSeq: _*)
 
   protected def toPaimonPartition(
       row: InternalRow,

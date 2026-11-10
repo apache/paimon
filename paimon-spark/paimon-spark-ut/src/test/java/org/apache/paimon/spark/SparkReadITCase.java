@@ -56,6 +56,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
+import static org.apache.paimon.spark.ShowCreateTableTestUtils.showCreateTable;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -243,7 +244,7 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql(
                 "CREATE TABLE partitionedTableAs PARTITIONED BY (a) AS SELECT * FROM partitionedTable");
         Path tablePath = new Path(warehousePath, "default.db/partitionedTableAs");
-        assertThat(spark.sql("SHOW CREATE TABLE partitionedTableAs").collectAsList().toString())
+        assertThat(showCreateTable(spark, "partitionedTableAs"))
                 .isEqualTo(
                         String.format(
                                 "[[%s"
@@ -273,7 +274,7 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql(
                 "CREATE TABLE testTableAs TBLPROPERTIES ('file.format' = 'parquet') AS SELECT * FROM testTable");
         tablePath = new Path(warehousePath, "default.db/testTableAs");
-        assertThat(spark.sql("SHOW CREATE TABLE testTableAs").collectAsList().toString())
+        assertThat(showCreateTable(spark, "testTableAs"))
                 .isEqualTo(
                         String.format(
                                 "[[%s"
@@ -304,7 +305,7 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql("INSERT INTO t_pk VALUES(1,'aaa','bbb')");
         spark.sql("CREATE TABLE t_pk_as TBLPROPERTIES ('primary-key' = 'a') AS SELECT * FROM t_pk");
         tablePath = new Path(warehousePath, "default.db/t_pk_as");
-        assertThat(spark.sql("SHOW CREATE TABLE t_pk_as").collectAsList().toString())
+        assertThat(showCreateTable(spark, "t_pk_as"))
                 .isEqualTo(
                         String.format(
                                 "[[%s"
@@ -333,7 +334,7 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql(
                 "CREATE TABLE t_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM t_all");
         tablePath = new Path(warehousePath, "default.db/t_all_as");
-        assertThat(spark.sql("SHOW CREATE TABLE t_all_as").collectAsList().toString())
+        assertThat(showCreateTable(spark, "t_all_as"))
                 .isEqualTo(
                         String.format(
                                 "[[%s"
@@ -437,7 +438,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                         + ")");
 
         Path tablePath = new Path(warehousePath, "default.db/tbl");
-        assertThat(spark.sql("SHOW CREATE TABLE tbl").collectAsList().toString())
+        assertThat(showCreateTable(spark, "tbl"))
                 .isEqualTo(
                         String.format(
                                 "[[%s"
@@ -778,7 +779,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     public void testCreateNestedField() {
         spark.sql(
                 "CREATE TABLE nested_table ( a INT, b STRUCT<b1: STRUCT<b11: INT, b12 INT>, b2 BIGINT>)");
-        assertThat(spark.sql("SHOW CREATE TABLE nested_table").collectAsList().toString())
+        assertThat(showCreateTable(spark, "nested_table"))
                 .contains(
                         showCreateString(
                                 "nested_table",

@@ -30,6 +30,7 @@ import org.apache.spark.sql.catalyst.parser.ParserInterface;
 import org.apache.spark.sql.connector.catalog.CatalogManager;
 import org.apache.spark.sql.connector.catalog.CatalogPlugin;
 import org.apache.spark.sql.connector.catalog.Identifier;
+import org.apache.spark.sql.paimon.shims.SparkVersionCompat;
 
 import java.util.List;
 import java.util.function.BiFunction;
@@ -115,8 +116,8 @@ public class SparkUtils {
         CatalogManager catalogManager = spark.sessionState().catalogManager();
 
         String[] currentNamespace;
-        if (defaultCatalog.equals(catalogManager.currentCatalog())) {
-            currentNamespace = catalogManager.currentNamespace();
+        if (defaultCatalog.equals(SparkVersionCompat.currentCatalog(catalogManager))) {
+            currentNamespace = SparkVersionCompat.currentNamespace(catalogManager);
         } else {
             currentNamespace = defaultCatalog.defaultNamespace();
         }
@@ -126,7 +127,7 @@ public class SparkUtils {
                         nameParts,
                         catalogName -> {
                             try {
-                                return catalogManager.catalog(catalogName);
+                                return SparkVersionCompat.catalog(catalogManager, catalogName);
                             } catch (Exception e) {
                                 return null;
                             }

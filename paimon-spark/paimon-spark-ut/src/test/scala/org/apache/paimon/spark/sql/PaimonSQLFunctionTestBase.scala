@@ -229,4 +229,53 @@ abstract class PaimonSQLFunctionTestBase extends PaimonSparkTestWithRestCatalogB
     }
     assert(e.getMessage.contains("does not support creating SQL table functions"))
   }
+
+  test("Paimon SQL Function: DEFAULT COLLATION is not supported yet") {
+    assume(gteqSpark4_2)
+    withUserDefinedFunction("lcase_eq" -> false) {
+      val e = intercept[Exception] {
+        sql("""
+              |CREATE FUNCTION lcase_eq()
+              |RETURNS BOOLEAN
+              |DEFAULT COLLATION UTF8_LCASE
+              |RETURN 'a' = 'A'
+              |""".stripMargin)
+      }
+      assert(e.getMessage.contains("does not support DEFAULT COLLATION"))
+      assert(e.getMessage.contains("declares UTF8_LCASE"))
+      val names = sql("SHOW USER FUNCTIONS").collect().map(_.getString(0).toLowerCase)
+      assert(!names.exists(_.contains("lcase_eq")), names.mkString(", "))
+    }
+  }
+
+  test("Paimon SQL Function: database default collation is not supported yet") {
+    assume(gteqSpark4_2)
+    withDatabase("lcase_db") {
+      // Spark only accepts this clause behind an internal flag.
+      withSparkSQLConf("spark.sql.collation.schemaLevel.enabled" -> "true") {
+        sql("CREATE DATABASE lcase_db DEFAULT COLLATION UTF8_LCASE")
+      }
+      val e = intercept[Exception] {
+        sql("CREATE FUNCTION lcase_db.lcase_eq() RETURNS BOOLEAN RETURN 'a' = 'A'")
+      }
+      assert(e.getMessage.contains("does not support DEFAULT COLLATION"))
+      assert(e.getMessage.contains("inherits UTF8_LCASE from database lcase_db"))
+      val names = sql("SHOW USER FUNCTIONS IN lcase_db").collect().map(_.getString(0).toLowerCase)
+      assert(!names.exists(_.contains("lcase_eq")), names.mkString(", "))
+    }
+  }
+
+  test("Paimon SQL Function: database default collation is not inherited before Spark 4.2") {
+    assume(!gteqSpark4_2)
+    withDatabase("lcase_db") {
+      // Through the Paimon API, so that the same setup works on Spark 4.0 and 4.1.
+      paimonCatalog.createDatabase(
+        "lcase_db",
+        false,
+        java.util.Collections.singletonMap("collation", "UTF8_LCASE"))
+      assert(paimonCatalog.getDatabase("lcase_db").options().get("collation") == "UTF8_LCASE")
+      sql("CREATE FUNCTION lcase_db.lcase_eq() RETURNS BOOLEAN RETURN 'a' = 'A'")
+      checkAnswer(sql("SELECT lcase_db.lcase_eq()"), Row(false))
+    }
+  }
 }
