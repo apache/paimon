@@ -243,6 +243,9 @@ class SplitRead(ABC):
         else:
             return predicate_for_physical_fields(self.predicate, self.table.fields)
 
+    def _assigns_row_id(self) -> bool:
+        return any(f.name == SpecialFields.ROW_ID.name for f in self.read_fields)
+
     def _has_row_tracking_predicate(self) -> bool:
         return (self.table.options.row_tracking_enabled()
                 and self.predicate is not None
@@ -272,7 +275,11 @@ class SplitRead(ABC):
         ) = self._get_fields_and_predicate(file.schema_id, read_fields)
         if (file.file_name in self.deletion_file_readers
                 or (for_merge_read and self.row_ranges is not None)
-                or physical_row_ranges is not None):
+                or physical_row_ranges is not None
+                # A shard range and _ROW_ID values are counted on the rows the
+                # format reader returns, so it must not filter them either.
+                or shard_range is not None
+                or self._assigns_row_id()):
             # DVs and indexed PK ranges refer to physical file positions.
             # Filtering or skipping row groups here would renumber those rows.
             # Apply the residual predicate after position selection and merging.
@@ -1062,6 +1069,10 @@ class RawFileSplitRead(SplitRead):
                      or predicate_field_names(self.predicate).intersection(self.table.partition_keys)
                      or self.deletion_file_readers
                      or self._physical_row_ranges
+                     # file_reader_supplier does not push the predicate into
+                     # shard reads or reads that assign _ROW_ID.
+                     or isinstance(self.split, SlicedSplit)
+                     or self._assigns_row_id()
                      or any(file.schema_id != self.table.table_schema.id
                             for file in self.split.files))):
             reader = FilterRecordBatchReader(
