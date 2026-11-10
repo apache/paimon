@@ -732,6 +732,8 @@ class _SourceEpisodeFrameReader:
     def __init__(self, reader, datasets, vocabulary_maps=None):
         self._reader = reader
         ranges = _source_dataset_ranges(datasets)
+        self._frame_starts = [source[3] for source in ranges]
+        self._frame_ends = [source[4] for source in ranges]
         self._episode_offsets = pa.array(
             [source[1] for source in ranges],
             type=pa.int64())
@@ -756,14 +758,29 @@ class _SourceEpisodeFrameReader:
 
     def read_indices(self, indices, columns):
         mapped = [name for name in self._vocabulary if name in columns]
-        if "episode_index" not in columns and not mapped:
-            return self._reader.read_indices(indices, columns)
         projection = list(columns)
         if "dataset_index" not in projection:
             projection.append("dataset_index")
-        data = self._reader.read_indices(indices, projection)
+        if "index" not in projection:
+            projection.append("index")
+        keys = []
+        for index in indices:
+            dataset_index = bisect.bisect_right(self._frame_ends, index)
+            if dataset_index >= len(self._frame_ends) or index < 0:
+                raise IndexError("LeRobot frame index %d is out of range." % index)
+            keys.append((dataset_index, index - self._frame_starts[dataset_index]))
+        data = self._reader.read_keys(keys, projection)
         if data.num_rows == 0:
             return data.select(columns)
+        expected = set(keys)
+        actual = list(zip(data["dataset_index"].to_pylist(),
+                          data["index"].to_pylist()))
+        if len(actual) != len(expected) or set(actual) != expected:
+            raise ValueError("LeRobot frame keys are missing or duplicated.")
+        data = data.set_column(
+            data.schema.get_field_index("index"), data.schema.field("index"),
+            pa.array([self._frame_starts[dataset_index] + local
+                      for dataset_index, local in actual], type=pa.int64()))
         source_ids = data["dataset_index"]
         if "episode_index" in columns:
             try:
@@ -1280,16 +1297,23 @@ def _episode_dataset(table, datasets=None):
             ("dataset_index", "ascending"),
             ("episode_index", "ascending"),
         ])
+        ranges = _source_dataset_ranges(datasets)
         expected = [
             (index, local)
             for index, (unused, begin, end, frame_begin, frame_end)
-            in enumerate(_source_dataset_ranges(datasets))
+            in enumerate(ranges)
             for local in range(end - begin)
         ]
         actual = list(zip(data["dataset_index"].to_pylist(),
                           data["episode_index"].to_pylist()))
         if actual != expected:
             raise ValueError("LeRobot source Episode keys are not contiguous.")
+        offsets = pa.array([item[3] for item in ranges], type=pa.int64())
+        source_offsets = pc.take(offsets, data["dataset_index"])
+        for name in ("dataset_from_index", "dataset_to_index"):
+            data = data.set_column(
+                data.schema.get_field_index(name), data.schema.field(name),
+                pc.add_checked(data[name], source_offsets))
         data = data.set_column(
             data.schema.get_field_index("episode_index"),
             pa.field("episode_index", pa.int64()),

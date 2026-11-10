@@ -59,8 +59,7 @@ conn.load_from_lerobot(
 ```
 
 The call returns `None` on success. Omitting `tag_name` imports the tables
-without creating tags. The one-time importer requires a new target table and
-a non-empty source dataset; subsequent table edits use the normal Paimon APIs.
+without creating tags. The importer requires a new target and a non-empty source.
 
 Pass an ordered list to merge sources into one table group. `robot_merged` is
 just an example prefix; choose any unused name:
@@ -86,13 +85,13 @@ and `stats`. Source ranges are derived from the counts in each source's `info`.
 source in input order. Omitted names are null, and duplicate labels do not merge
 sources. Frame and Episode `dataset_index` values reference
 `_datasets.index`. The pair `(dataset_index, episode_index)` identifies an
-original Episode. Frames keep a
-merged `index` and their original `source_index`. Source task/subtask ID-to-text
-mappings use the typed arrays of rows `_datasets.tasks` and `_datasets.subtasks`;
-stats remain JSON.
+original Episode. Frames keep the source-local `index`; `(dataset_index, index)`
+identifies a frame. The training reader derives continuous positions at read
+time. Source task/subtask ID-to-text mappings use `_datasets.tasks` and
+`_datasets.subtasks`; stats remain JSON.
 
-Merged `_episodes` keeps typed Episode keys and frame ranges, with
-`meta/`, `data/`, `videos/`, and `stats/` fields grouped into JSON columns.
+Merged `_episodes` keeps source-local Episode keys and frame ranges. Its
+`meta/`, `data/`, `videos/`, and `stats/` fields are grouped into JSON columns.
 Grouped fields must use JSON-native Arrow types: null, boolean, integer,
 floating point, string, list, or struct, including nested combinations.
 Binary, temporal, decimal, map, and extension types are rejected before any
@@ -177,6 +176,14 @@ suffixes, invalid UTF-8, paths outside the source root, duplicate keys after
 removing suffixes, and names that overwrite standard `_datasets` columns are
 rejected before creating target tables. Training readers project only required
 source metadata and skip extra text columns.
+
+Append another Dataset to a source-local group with `append_to_lerobot`.
+To make a one-source group appendable, import it as a one-element list:
+
+```python
+conn.load_from_lerobot("robot_merged", ["/data/source_a"])
+conn.append_to_lerobot("robot_merged", "/data/source_b", tag_name="after-append")
+```
 
 For FileIO URIs, pass credentials through `source_options`:
 

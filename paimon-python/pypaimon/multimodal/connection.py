@@ -165,6 +165,29 @@ class MultimodalConnection:
             schema_evolution=schema_evolution,
         )
 
+    def append_to_lerobot(
+            self,
+            table_name: str,
+            source,
+            *,
+            batch_size: int = 1024,
+            source_options=None,
+            tag_name=None,
+            parallelism=1,
+            dataset_name=None,
+            extra_dataset_fields=None,
+            schema_evolution=True) -> None:
+        """Append LeRobot v3 datasets to a source-local three-table group."""
+        from pypaimon.multimodal.lerobot import load_from_lerobot
+        load_from_lerobot(
+            self, table_name, source, batch_size=batch_size,
+            source_options=source_options, tag_name=tag_name,
+            parallelism=parallelism, dataset_name=dataset_name,
+            extra_dataset_fields=extra_dataset_fields,
+            schema_evolution=schema_evolution,
+            append=True,
+        )
+
     def create_lerobot_tag(self, table_name: str, tag_name: str):
         """Pin a LeRobot group by prefix or frame table name.
 

@@ -41,17 +41,43 @@ class _PaimonTableFrameReader:
             self._table, snapshot, splits, projection=columns)
 
     def read_indices(self, indices, columns):
+        return self._read_predicate(
+            _index_predicate(self._table, indices), columns, indices=indices)
+
+    def read_keys(self, keys, columns):
+        """Read source-local frame keys without scanning whole datasets."""
+        from pypaimon.common.predicate_builder import PredicateBuilder
+
+        by_dataset = {}
+        for dataset_index, index in keys:
+            by_dataset.setdefault(dataset_index, []).append(index)
+        builder = self._table.new_read_builder().new_predicate_builder()
+        predicate = PredicateBuilder.or_predicates([
+            PredicateBuilder.and_predicates([
+                builder.equal("dataset_index", dataset_index),
+                builder.is_in("index", indices),
+            ])
+            for dataset_index, indices in by_dataset.items()
+        ])
+        projection = list(columns)
+        for name in ("dataset_index", "index"):
+            if name not in projection:
+                projection.append(name)
+        return self._read_predicate(predicate, projection)
+
+    def _read_predicate(self, predicate, columns, indices=None):
         builder = self._table.new_read_builder().with_projection(columns)
         from pypaimon.read.read_dispatch import plan_indexed_read
-        builder.with_filter(_index_predicate(self._table, indices))
+        builder.with_filter(predicate)
         plan = plan_indexed_read(builder.new_scan())
         if plan is not None:
             return builder.new_read().to_arrow(plan.splits())
         builder = self._table.new_read_builder().with_projection(columns)
-        splits, needs_filter = self._locator.locate(indices)
+        splits, needs_filter = (
+            self._locator.locate(indices) if indices is not None
+            else self._locator.locate_predicate(predicate))
         if needs_filter:
-            builder = builder.with_filter(
-                _index_predicate(self._table, indices))
+            builder = builder.with_filter(predicate)
         return builder.new_read().to_arrow(splits)
 
     def close(self):
@@ -83,9 +109,11 @@ class _FrameLocator:
         self._split_range_index = SplitRangeIndex(self._split_ranges)
 
     def locate(self, indices):
+        return self.locate_predicate(_index_predicate(self._table, indices))
+
+    def locate_predicate(self, predicate):
         """Return narrowed splits and whether rows still need filtering."""
         self._ensure_process()
-        predicate = _index_predicate(self._table, indices)
         try:
             scanner = self._index_scanner(predicate)
         except Exception as error:

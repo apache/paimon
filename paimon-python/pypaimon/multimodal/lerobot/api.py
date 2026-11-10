@@ -80,6 +80,7 @@ def load_from_lerobot(
         dataset_name=None,
         extra_dataset_fields: Optional[Mapping[str, str]] = None,
         schema_evolution: bool = True,
+        append: bool = False,
 ) -> None:
     """Import one or more LeRobot v3 sources into a new Paimon table group.
 
@@ -118,7 +119,8 @@ def load_from_lerobot(
     if extra_dataset_fields is not None:
         from pypaimon.multimodal.lerobot.aggregate import _DATASETS_SCHEMA
         extra_dataset_fields = _validated_text_fields(extra_dataset_fields, _DATASETS_SCHEMA.names)
-    if isinstance(source, (list, tuple)) or dataset_name is not None or extra_dataset_fields:
+    if append or isinstance(source, (list, tuple)) or dataset_name is not None \
+            or extra_dataset_fields:
         if not isinstance(source, (list, tuple)):
             source = [source]
         if not source:
@@ -129,7 +131,7 @@ def load_from_lerobot(
         return _import_sources(
             connection, table_name, source, batch_size, options,
             _validated_source_options(source_options), tag_name, parallelism,
-            dataset_name, extra_dataset_fields, schema_evolution)
+            dataset_name, extra_dataset_fields, schema_evolution, append)
     if parallelism > 1:
         from pypaimon.multimodal.lerobot.ray_loader import _require_ray, _ray_source_uri
         _require_ray()
