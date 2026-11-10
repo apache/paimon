@@ -1091,11 +1091,12 @@ def _load_dataset(table, tag_name):
     source_local_layout = "dataset_index" in _target_schema(episodes_table).names
     datasets_table = _component_table(
         catalog, catalog.get_table(identifiers["datasets"]), tag_name)
-    source_rows = _read_arrow(datasets_table, [
-        "index", "name", "info", "tasks", "subtasks", "stats",
-    ]).sort_by("index").to_pylist()
+    source_columns = ["index", "name", "info", "tasks", "subtasks", "stats"]
+    if "read_control_stats" in _target_schema(datasets_table).names:
+        source_columns.append("read_control_stats")
+    source_rows = _read_arrow(datasets_table, source_columns).sort_by("index").to_pylist()
     datasets = ([{key: value for key, value in row.items()
-                  if key not in ("tasks", "subtasks", "stats")}
+                  if key not in ("tasks", "subtasks", "stats", "read_control_stats")}
                  for row in source_rows] if source_local_layout else None)
     episodes = _episode_dataset(episodes_table, datasets)
     tasks, task_maps = _source_vocabulary(source_rows, "task")
@@ -1228,8 +1229,17 @@ def _merged_source_stats(sources, episodes_table):
               for name in names if name not in _CONTROLS}
     columns = _target_schema(episodes_table).names
     if "stats" in columns:
-        stats_rows = _read_arrow(episodes_table, ["stats"])["stats"].to_pylist()
-        decoded_rows = [json.loads(raw) for raw in stats_rows if raw]
+        legacy_rows = None
+        if any(not source.get("read_control_stats") for source in sources):
+            legacy_rows = _read_arrow(episodes_table, ["dataset_index", "stats"]).to_pylist()
+        decoded_rows = []
+        for source in sources:
+            raw = source.get("read_control_stats")
+            if raw:
+                decoded_rows.append(json.loads(raw))
+            else:
+                decoded_rows.extend(json.loads(row["stats"]) for row in legacy_rows
+                                    if row["dataset_index"] == source["index"] and row["stats"])
         for name in _CONTROLS:
             parts = [row[name] for row in decoded_rows if name in row
                      and row[name].get("count") is not None]
