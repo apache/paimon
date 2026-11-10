@@ -62,8 +62,8 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                     table,
                     writeProvider,
                     commitUser,
-                    // checkpointing on by default for the JM-side committer; bounded sources will
-                    // be handled by end-input support in a follow-up PR
+                    // The JM-side committer requires streaming checkpoints, including the final
+                    // checkpoint that captures bounded-source EndInput.
                     true,
                     createCommitterFactory(),
                     new Options(table.options())

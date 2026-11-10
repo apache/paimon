@@ -103,7 +103,6 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     private transient CheckpointCommittablesSerializer stateSerializer;
     private transient TypeSerializer<CheckpointCommittables> eventSerializer;
     private boolean endOfInput;
-    private boolean terminalCaptured;
     private final transient MailboxExecutor taskMailbox;
     private final int subtask;
     private final int attemptNumber;
@@ -173,7 +172,6 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
                     // Replay the original contribution once, but retain the sealed-input fact
                     // independently of the ordinary pending-file buffer.
                     endOfInput = true;
-                    terminalCaptured = true;
                     requiredReleaseCheckpoint =
                             requiredReleaseCheckpoint < 0
                                     ? entry.checkpointId()
@@ -222,7 +220,9 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
         // Early writers receive permission at terminal reporting; only the last candidate
         // waits for ordinary commit and global finalization before the task can finish.
-        if (terminalCaptured && checkpointId >= requiredReleaseCheckpoint && !waitingForRelease) {
+        if (hasTerminalCheckpoint()
+                && checkpointId >= requiredReleaseCheckpoint
+                && !waitingForRelease) {
             waitingForRelease = true;
             try {
                 while (releasedCheckpoint < requiredReleaseCheckpoint) {
@@ -256,7 +256,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
         Preconditions.checkArgument(
                 checkpointId != Long.MAX_VALUE, "A real checkpoint is required");
-        if (terminalCaptured) {
+        if (hasTerminalCheckpoint()) {
             // Keep the terminal fact in every later snapshot, including after file retirement.
             pendingCommittables.put(
                     checkpointId,
@@ -296,8 +296,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
                         false,
                         endOfInput);
         pendingCommittables.put(checkpointId, entry);
-        terminalCaptured = endOfInput;
-        if (terminalCaptured) {
+        if (endOfInput) {
             requiredReleaseCheckpoint = checkpointId;
         }
         // Downstream operators have already ended when the terminal checkpoint is captured.
@@ -312,12 +311,17 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
         Preconditions.checkArgument(
                 event instanceof TerminalWriterReleaseEvent, "Unexpected coordinator event");
         TerminalWriterReleaseEvent release = (TerminalWriterReleaseEvent) event;
-        if (terminalCaptured
+        if (hasTerminalCheckpoint()
                 && release.getSubtask() == subtask
                 && release.getAttemptNumber() == attemptNumber
                 && release.getCheckpointId() >= requiredReleaseCheckpoint) {
             releasedCheckpoint = Math.max(releasedCheckpoint, release.getCheckpointId());
         }
+    }
+
+    private boolean hasTerminalCheckpoint() {
+        // The release boundary survives clearing pending data after checkpoint completion.
+        return requiredReleaseCheckpoint >= 0;
     }
 
     /**

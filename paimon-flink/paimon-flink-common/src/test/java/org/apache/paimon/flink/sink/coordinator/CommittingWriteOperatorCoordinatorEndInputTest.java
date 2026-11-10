@@ -442,6 +442,12 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
                 .isEqualTo(Long.MAX_VALUE);
         coordinator.executionAttemptReady(1, 1, releaseGateway(1, 1, last));
         coordinator.waitProcessAllActions();
+        assertThat(last).hasSize(1);
+        coordinator.handleEventFromOperator(
+                1,
+                1,
+                restoreEventEntries(2, terminalEvent(table, 2, true, 20).deserialize(SERIALIZER)));
+        coordinator.waitProcessAllActions();
         assertThat(last).hasSize(2);
         coordinator.close();
     }
@@ -558,7 +564,7 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
     }
 
     @Test
-    public void testInFlightFinalCommitUsesOnlyReplacementReleaseTarget() throws Exception {
+    public void testInFlightFinalCommitWaitsForReplacementTerminalReport() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -598,6 +604,13 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
             release.countDown();
             coordinator.waitProcessAllActions();
             assertThat(old).isEmpty();
+            assertThat(replacement).isEmpty();
+            coordinator.handleEventFromOperator(
+                    0,
+                    1,
+                    restoreEventEntries(
+                            1, terminalEvent(table, 1, true, 10).deserialize(SERIALIZER)));
+            coordinator.waitProcessAllActions();
             assertThat(replacement).isNotEmpty();
             assertThat(replacement)
                     .allSatisfy(
@@ -620,6 +633,12 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
         coordinator.start();
         coordinator.executionAttemptReady(0, 2, releaseGateway(0, 2, events));
         coordinator.waitProcessAllActions();
+        assertThat(events).isEmpty();
+        coordinator.handleEventFromOperator(
+                0,
+                2,
+                restoreEventEntries(5, terminalEvent(table, 1, true, 10).deserialize(SERIALIZER)));
+        coordinator.waitProcessAllActions();
         assertThat(events).isNotEmpty();
         assertThat(events)
                 .allSatisfy(
@@ -635,6 +654,17 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
         coordinator.start();
         coordinator.executionAttemptReady(0, 3, releaseGateway(0, 3, events));
         coordinator.executionAttemptReady(1, 3, releaseGateway(1, 3, events));
+        coordinator.waitProcessAllActions();
+        assertThat(events).isEmpty();
+        coordinator.handleEventFromOperator(
+                0,
+                3,
+                restoreEventEntries(5, terminalEvent(table, 1, true, 10).deserialize(SERIALIZER)));
+        coordinator.handleEventFromOperator(
+                1,
+                3,
+                restoreEventEntries(5, terminalEvent(table, 2, true, 20).deserialize(SERIALIZER)));
+        coordinator.notifyCheckpointComplete(6);
         coordinator.waitProcessAllActions();
         assertThat(events)
                 .extracting(TerminalWriterReleaseEvent::getSubtask)
@@ -722,8 +752,8 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
         assertThat(tokens.get(0).watermark()).isEqualTo(999);
         assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(999);
         assertResults(table, "1, 1", "2, 2");
-        coordinator.executionAttemptReady(0, 1, releaseGateway(0, 1, events));
-        coordinator.executionAttemptReady(1, 1, releaseGateway(1, 1, events));
+        coordinator.executionAttemptReady(0, 0, releaseGateway(0, 0, events));
+        coordinator.executionAttemptReady(1, 0, releaseGateway(1, 0, events));
         coordinator.notifyCheckpointComplete(3);
         coordinator.waitProcessAllActions();
         assertThat(events).extracting(TerminalWriterReleaseEvent::getSubtask).contains(0, 1);
@@ -822,6 +852,13 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
         List<TerminalWriterReleaseEvent> events = new CopyOnWriteArrayList<>();
         restored.executionAttemptReady(0, 1, releaseGateway(0, 1, events));
         restored.waitProcessAllActions();
+        assertThat(events).isEmpty();
+        restored.handleEventFromOperator(
+                0,
+                1,
+                restoreEventEntries(2, terminalEvent(table, 1, true, 200).deserialize(SERIALIZER)));
+        restored.notifyCheckpointComplete(3);
+        restored.waitProcessAllActions();
         assertThat(events).isNotEmpty();
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshot);
         assertThat(table.snapshotManager().latestSnapshot().commitIdentifier())
@@ -861,6 +898,8 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
         restored.waitProcessAllActions();
         assertThat(restored.getCurrentState())
                 .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        restored.notifyCheckpointComplete(3);
+        restored.waitProcessAllActions();
         assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(300);
         restored.close();
     }
@@ -875,6 +914,84 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
         return SimpleVersionedSerialization.writeVersionAndSerialize(
                 new CoordinatorStateSerializer(),
                 new CoordinatorState(commitUser, store.getSerializedStates(), coverage));
+    }
+
+    @Test
+    public void testLateActiveRestorePreventsPrematureFinalization() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 2);
+        List<TerminalWriterReleaseEvent> events = new CopyOnWriteArrayList<>();
+        try {
+            coordinator.resetToCheckpoint(5, terminalState(1, -1));
+            coordinator.start();
+            coordinator.executionAttemptReady(0, 1, releaseGateway(0, 1, events));
+            coordinator.handleEventFromOperator(
+                    1,
+                    1,
+                    restoreEventEntries(
+                            5, terminalEvent(table, 5, false, 100).deserialize(SERIALIZER)));
+            coordinator.waitProcessAllActions();
+            assertThat(table.snapshotManager().latestSnapshot().commitIdentifier()).isEqualTo(5);
+            assertThat(events).isEmpty();
+
+            // The old finished W0 starts with empty state in a fresh savepoint submission.
+            coordinator.handleEventFromOperator(0, 1, restoreEventEntries(5));
+            coordinator.handleEventFromOperator(
+                    0, 1, eventOf(6, Collections.singletonList(committable(table, 6, 2)), 200));
+            coordinator.notifyCheckpointComplete(6);
+            coordinator.waitProcessAllActions();
+            assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(-1);
+            assertThat(table.snapshotManager().latestSnapshot().commitIdentifier()).isEqualTo(6);
+            assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(200);
+            assertThat(events).isEmpty();
+            assertResults(table, "1, 1", "2, 2");
+
+            coordinator.handleEventFromOperator(0, 1, terminalEvent(table, 7, true, 200));
+            coordinator.notifyCheckpointComplete(7);
+            coordinator.waitProcessAllActions();
+            assertThat(events).hasSize(1);
+            assertThat(events.get(0).getCheckpointId()).isEqualTo(7);
+            assertThat(table.snapshotManager().latestSnapshot().commitIdentifier())
+                    .isEqualTo(Long.MAX_VALUE);
+        } finally {
+            coordinator.close();
+        }
+    }
+
+    @Test
+    public void testMissingCoordinatorStateRemainsDormantUntilWriterReports() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 1);
+        byte[] dormant;
+        try {
+            coordinator.resetToCheckpoint(5, null);
+            coordinator.start();
+            CompletableFuture<byte[]> checkpoint = new CompletableFuture<>();
+            coordinator.checkpointCoordinator(6, checkpoint);
+            dormant = checkpoint.get(10, TimeUnit.SECONDS);
+            assertThat(dormant).isEmpty();
+            coordinator.notifyCheckpointComplete(6);
+            coordinator.waitProcessAllActions();
+            assertThat(table.snapshotManager().latestSnapshot()).isNull();
+        } finally {
+            coordinator.close();
+        }
+        // Null state also occurs for a newly added operator. Its writers must activate normally.
+        coordinator = createCoordinator(table, 1);
+        try {
+            coordinator.resetToCheckpoint(6, dormant);
+            coordinator.start();
+            coordinator.handleEventFromOperator(0, 1, restoreEventEntries(6));
+            coordinator.handleEventFromOperator(
+                    0, 1, eventOf(7, Collections.singletonList(committable(table, 7, 2)), 200));
+            coordinator.notifyCheckpointComplete(7);
+            coordinator.waitProcessAllActions();
+            assertThat(coordinator.getCurrentState())
+                    .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+            assertResults(table, "2, 2");
+        } finally {
+            coordinator.close();
+        }
     }
 
     private void testRecovery(boolean fail) throws Exception {

@@ -36,6 +36,7 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.core.io.InputStatus;
+import org.apache.flink.runtime.checkpoint.Checkpoints;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
@@ -44,10 +45,12 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.DataInputStream;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -148,6 +151,57 @@ public class AppendTableSavepointTagITCase extends AbstractTestBase {
         assertThat(snapshotWithTags.getValue())
                 .containsExactly(SavepointTagUtils.tagNameOf(tagged.commitIdentifier()));
         assertThat(table.snapshotManager().snapshotExists(tagged.id())).isTrue();
+    }
+
+    /** Draining EndInput must finish the real savepoint commit and tag before MAX release. */
+    @Test
+    @Timeout(value = 180, unit = TimeUnit.SECONDS)
+    public void testDrainingCoordinatorSavepointCreatesTag() throws Exception {
+        String tableName = "T_COORD_DRAIN_STOP";
+        FileStoreTable table = createTable(tableName, true);
+
+        JobClient client = runSink(table);
+        try {
+            // Wait until a data-carrying snapshot exists so the savepoint lands on a checkpoint
+            // that
+            // carries data, avoiding the empty-savepoint boundary.
+            waitUntilSnapshotWithData(table);
+
+            String savepointPath =
+                    client.stopWithSavepoint(
+                                    true,
+                                    getTempDirPath("stop_savepoint_" + tableName),
+                                    SavepointFormatType.DEFAULT)
+                            .get(120, TimeUnit.SECONDS);
+            client.getJobExecutionResult().get(30, TimeUnit.SECONDS);
+
+            org.apache.flink.core.fs.Path metadata =
+                    new org.apache.flink.core.fs.Path(savepointPath, "_metadata");
+            long checkpointId;
+            try (DataInputStream input =
+                    new DataInputStream(metadata.getFileSystem().open(metadata))) {
+                checkpointId =
+                        Checkpoints.loadCheckpointMetadata(
+                                        input, getClass().getClassLoader(), savepointPath)
+                                .getCheckpointId();
+            }
+
+            Map<Snapshot, List<String>> savepointTags = savepointTags(table);
+            assertThat(savepointTags).hasSize(1);
+            Map.Entry<Snapshot, List<String>> snapshotWithTags =
+                    savepointTags.entrySet().iterator().next();
+            Snapshot tagged = snapshotWithTags.getKey();
+            assertThat(tagged.commitIdentifier()).isEqualTo(checkpointId);
+            assertThat(table.snapshotManager().latestSnapshot().commitIdentifier())
+                    .isEqualTo(Long.MAX_VALUE);
+            assertThat(snapshotWithTags.getValue())
+                    .containsExactly(SavepointTagUtils.tagNameOf(tagged.commitIdentifier()));
+            assertThat(table.snapshotManager().snapshotExists(tagged.id())).isTrue();
+        } finally {
+            if (!client.getJobStatus().get().isTerminalState()) {
+                client.cancel().get(30, TimeUnit.SECONDS);
+            }
+        }
     }
 
     private FileStoreTable createTable(String tableName, boolean coordinatorCommit)

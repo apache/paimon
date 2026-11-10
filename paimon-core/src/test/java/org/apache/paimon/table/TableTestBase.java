@@ -81,7 +81,7 @@ public abstract class TableTestBase {
     @BeforeEach
     public void beforeEach() throws Catalog.DatabaseAlreadyExistException {
         database = "default";
-        warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempPath.toString());
+        warehouse = new Path(TraceableFileIO.SCHEME, null, tempPath.toUri().getPath());
         catalog = CatalogFactory.createCatalog(CatalogContext.create(warehouse));
         catalog.createDatabase(database, true);
         this.ioManager = new IOManagerImpl(tempPath.toString());

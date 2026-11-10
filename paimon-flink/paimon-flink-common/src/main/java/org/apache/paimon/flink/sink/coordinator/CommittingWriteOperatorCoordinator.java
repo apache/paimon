@@ -87,13 +87,10 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private final int parallelism;
     @Nullable private final SavepointTagger.Factory savepointTaggerFactory;
 
-    private final WriterCommittables[] subtaskCommittables;
-    // Successful commit coverage, copied into each later coordinator checkpoint.
-    private final long[] terminalCoveredBy;
-    // Permission to finish before commit, rebuilt from candidate reports after global recovery.
-    // The last terminal candidate never receives this permission: it guards finalization.
-    private final long[] earlyReleaseCheckpoint;
+    // Mutable writer state is confined to commitExecutor.
+    private final WriterState[] writers;
     // Scheduler callbacks invalidate targets immediately, even while a commit is in flight.
+    // Keep gateways outside the executor-confined writer state.
     private final Map<Integer, SubtaskGateway> releaseTargets = new ConcurrentHashMap<>();
     // Required writers still missing their restore contribution; executor-confined.
     private final BitSet requiredRestoreWriters;
@@ -141,11 +138,8 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         this.commitUser = initialCommitUser;
         this.savepointTaggerFactory = savepointTaggerFactory;
         this.parallelism = context.currentParallelism();
-        this.subtaskCommittables = new WriterCommittables[parallelism];
-        this.terminalCoveredBy = new long[parallelism];
-        Arrays.fill(terminalCoveredBy, -1L);
-        this.earlyReleaseCheckpoint = new long[parallelism];
-        Arrays.fill(earlyReleaseCheckpoint, -1L);
+        this.writers = new WriterState[parallelism];
+        Arrays.setAll(writers, ignored -> new WriterState());
         this.requiredRestoreWriters = new BitSet(parallelism);
         requiredRestoreWriters.set(0, parallelism);
         this.committablesSerializer =
@@ -209,6 +203,13 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     public void checkpointCoordinator(long checkpointId, CompletableFuture<byte[]> result) {
         runCheckpointInEventLoop(
                 () -> {
+                    if (state == State.DORMANT) {
+                        // Flink drops coordinator bytes for a fully finished operator. Its restored
+                        // tasks do not initialize the writer or report events. An empty marker
+                        // preserves this dormant state without publishing a table snapshot.
+                        result.complete(new byte[0]);
+                        return;
+                    }
                     if (state != State.RUNNING) {
                         // if checkpoint is executed before finishing restoring, just fail it
                         result.completeExceptionally(
@@ -224,7 +225,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                                     new CoordinatorState(
                                             commitUser,
                                             stateStore.getSerializedStates(),
-                                            terminalCoveredBy));
+                                            terminalCoverage()));
                     result.complete(checkpointData);
                 },
                 result,
@@ -236,6 +237,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     public void handleEventFromOperator(int subtask, int attemptNumber, OperatorEvent event) {
         runInEventLoop(
                 () -> {
+                    writers[subtask].reportingAttempt = attemptNumber;
                     if (event instanceof CommittableEvent) {
                         handleCommittableEvent(subtask, (CommittableEvent) event);
                     } else if (event instanceof RestoredCommittableEvent) {
@@ -254,6 +256,9 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     public void notifyCheckpointComplete(long checkpointId) {
         runInEventLoop(
                 () -> {
+                    if (state == State.DORMANT) {
+                        return;
+                    }
                     if (state != State.RUNNING) {
                         throw new IllegalStateException(
                                 "Completing checkpoint should be notified in RUNNING state, while current state is "
@@ -261,10 +266,16 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     }
                     if (globalFinalizationCompleted) {
                         for (int i = 0; i < parallelism; i++) {
-                            if (earlyReleaseCheckpoint[i] < 0) {
+                            if (writers[i].earlyReleaseCheckpoint < 0) {
                                 sendWriterRelease(i, checkpointId);
                             }
                         }
+                        return;
+                    }
+                    if (allTerminal()) {
+                        // Recovery postponed MAX until a real checkpoint establishes which writers
+                        // have been restarted. Do not manufacture an ordinary snapshot after MAX.
+                        retireAndPromote(checkpointId);
                         return;
                     }
                     // writers always report a committable per (subtask, checkpoint) during
@@ -275,13 +286,13 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     Map<Long, Long> watermarks =
                             alignWatermarkPerCheckpoint(
                                     checkpointId,
-                                    subtaskCommittables,
+                                    writerCommittables(),
                                     watermarkAligner,
-                                    terminalCoveredBy);
+                                    terminalCoverage());
                     commitUpToCheckpoint(
                             checkpointId,
                             collectManifestCommittablesForCheckpoint(
-                                    checkpointId, subtaskCommittables, watermarks, committer),
+                                    checkpointId, writerCommittables(), watermarks, committer),
                             watermarks,
                             committer::commit);
                     recordProcessedWatermark(watermarks.get(checkpointId));
@@ -340,26 +351,8 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         releaseTargets.remove(subtask);
         runInEventLoop(
                 () -> {
-                    checkState(
-                            terminalCoveredBy[subtask] < 0
-                                    || checkpointId >= terminalCoveredBy[subtask],
-                            "Region reset before terminal coverage requires global recovery");
-                    earlyReleaseCheckpoint[subtask] = -1;
-                    WriterCommittables writerCommittables = subtaskCommittables[subtask];
-                    if (writerCommittables != null) {
-                        // sanity check subtask state
-                        Map<Long, CheckpointCommittables> committables =
-                                writerCommittables.getCommittablesBeforeCheckpoint(
-                                        checkpointId, false);
-                        if (!committables.isEmpty()) {
-                            throw new IllegalStateException(
-                                    String.format(
-                                            "Writer [%d] contains invalid committables before checkpoint %d",
-                                            subtask, checkpointId));
-                        }
-                        writerCommittables.reset();
-                    }
-                    if (state == State.RESTORING && terminalCoveredBy[subtask] < 0) {
+                    writers[subtask].resetAttempt(subtask, checkpointId);
+                    if (state == State.RESTORING && writers[subtask].terminalCoveredBy < 0) {
                         requiredRestoreWriters.set(subtask);
                     }
                 },
@@ -398,7 +391,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private void handleCommittableEvent(int subtask, CommittableEvent event) throws Exception {
         if (state == State.RUNNING) {
             WriterCommittables incoming = WriterCommittables.from(event, committablesSerializer);
-            if (terminalCoveredBy[subtask] >= 0) {
+            if (writers[subtask].terminalCoveredBy >= 0) {
                 checkState(
                         incoming.getCommittablesPerCheckpoint().values().stream()
                                 .allMatch(
@@ -420,21 +413,34 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
 
     private void handleRestoredCommittableEvent(int subtask, RestoredCommittableEvent event)
             throws Exception {
-        if (terminalCoveredBy[subtask] >= 0) {
+        if (state == State.DORMANT) {
+            transitionState(State.RESTORING);
+        }
+        if (writers[subtask].terminalCoveredBy >= 0) {
             // Already committed payloads may be replayed by a writer that still starts on restore.
-            // Validate their boundary, then ignore them without changing durable coverage.
+            // Validate and discard their covered payloads before deciding whether this attempt
+            // resumes the sealed input or starts active with empty operator state.
             WriterCommittables restored =
                     WriterCommittables.fromRestore(event, committablesSerializer);
             checkState(
-                    event.getRestoredCheckpointId() >= terminalCoveredBy[subtask],
+                    event.getRestoredCheckpointId() >= writers[subtask].terminalCoveredBy,
                     "Restore before terminal coverage requires global recovery");
             for (CheckpointCommittables entry : restored.getCommittablesPerCheckpoint().values()) {
                 checkState(
                         entry.committables().isEmpty()
-                                || entry.checkpointId() <= terminalCoveredBy[subtask],
+                                || entry.checkpointId() <= writers[subtask].terminalCoveredBy,
                         "Terminal writer restored output beyond committed coverage");
             }
-            sendWriterRelease(subtask, event.getRestoredCheckpointId());
+            if (restored.hasTerminalCandidate(event.getRestoredCheckpointId())) {
+                sendWriterRelease(subtask, event.getRestoredCheckpointId());
+            } else {
+                // A fresh job restores a partially finished subtask with empty operator state.
+                // Its old files are covered, but the new reader may produce new records.
+                checkState(
+                        !globalFinalizationCompleted,
+                        "Active writer after global finalization requires global recovery");
+                writers[subtask].reactivate(restored, event.getRestoredCheckpointId());
+            }
             return;
         }
         if (state == State.RESTORING) {
@@ -454,7 +460,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
             // marker needs global reconciliation rather than silently dropping its final files.
             WriterCommittables restored =
                     WriterCommittables.fromRestore(event, committablesSerializer);
-            if (terminalCoveredBy[subtask] < 0
+            if (writers[subtask].terminalCoveredBy < 0
                     && restored.hasTerminalCandidate(event.getRestoredCheckpointId())) {
                 throw new IllegalStateException(
                         "Uncovered terminal restore requires global recovery");
@@ -486,19 +492,15 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                 }
             }
         }
-        if (subtaskCommittables[subtask] != null) {
-            subtaskCommittables[subtask].mergeWith(incoming);
-        } else {
-            subtaskCommittables[subtask] = incoming;
-        }
+        writers[subtask].addCommittables(incoming);
     }
 
     private boolean alignCommittables(long checkpointId) {
         for (int i = 0; i < parallelism; i++) {
-            if (terminalCoveredBy[i] >= 0 && terminalCoveredBy[i] < checkpointId) {
+            if (writers[i].terminalCoveredBy >= 0 && writers[i].terminalCoveredBy < checkpointId) {
                 continue;
             }
-            WriterCommittables committables = subtaskCommittables[i];
+            WriterCommittables committables = writers[i].committables;
             if (committables == null || committables.getMaxCheckpointId() < checkpointId) {
                 return false;
             }
@@ -521,11 +523,11 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         }
         Map<Long, Long> watermarks =
                 alignWatermarkPerCheckpoint(
-                        checkpointId, subtaskCommittables, watermarkAligner, terminalCoveredBy);
+                        checkpointId, writerCommittables(), watermarkAligner, terminalCoverage());
         commitUpToCheckpoint(
                 checkpointId,
                 collectManifestCommittablesForCheckpoint(
-                        checkpointId, subtaskCommittables, watermarks, committer),
+                        checkpointId, writerCommittables(), watermarks, committer),
                 watermarks,
                 entries -> committer.filterAndCommit(entries, true, true));
         recordProcessedWatermark(watermarks.get(checkpointId));
@@ -541,7 +543,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     }
 
     private boolean allTerminal() {
-        return Arrays.stream(terminalCoveredBy).allMatch(coverage -> coverage >= 0);
+        return Arrays.stream(writers).allMatch(WriterState::isCovered);
     }
 
     private void retireAndPromote(long checkpointId) throws Exception {
@@ -550,16 +552,16 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         }
         BitSet promoted = new BitSet(parallelism);
         for (int i = 0; i < parallelism; i++) {
-            WriterCommittables entries = subtaskCommittables[i];
-            if (entries != null) {
-                if (terminalCoveredBy[i] < 0 && entries.hasTerminalCandidate(checkpointId)) {
-                    terminalCoveredBy[i] = checkpointId;
-                    promoted.set(i);
-                }
-                entries.clearCommittablesBeforeCheckpoint(checkpointId, true);
+            if (writers[i].completeCommit(checkpointId)) {
+                promoted.set(i);
             }
         }
         if (allTerminal()) {
+            if (state == State.RESTORING) {
+                // Covered writers may still register fresh, nonterminal attempts. A completed
+                // checkpoint fences those reports before deciding that all inputs have ended.
+                return;
+            }
             if (!globalFinalizationCompleted) {
                 long watermark =
                         endInputWatermark != null
@@ -572,40 +574,40 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
             }
             // Release the remaining writers only after global finalization succeeds.
             for (int i = 0; i < parallelism; i++) {
-                if (earlyReleaseCheckpoint[i] < 0) {
+                if (writers[i].earlyReleaseCheckpoint < 0) {
                     sendWriterRelease(i, checkpointId);
                 }
             }
             return;
         }
         for (int i = promoted.nextSetBit(0); i >= 0; i = promoted.nextSetBit(i + 1)) {
-            if (earlyReleaseCheckpoint[i] < 0) {
+            if (writers[i].earlyReleaseCheckpoint < 0) {
                 sendWriterRelease(i, checkpointId);
             }
         }
     }
 
     private void releaseEarlyWriter(int subtask, long checkpointId) {
-        if (!subtaskCommittables[subtask].hasTerminalCandidate(checkpointId)) {
+        if (!writers[subtask].committables.hasTerminalCandidate(checkpointId)) {
             return;
         }
-        if (earlyReleaseCheckpoint[subtask] >= 0) {
+        if (writers[subtask].earlyReleaseCheckpoint >= 0) {
             // An aborted checkpoint can move this writer's wait boundary forward. Keep its
             // early permission, while the last candidate still guards global finalization.
-            if (checkpointId > earlyReleaseCheckpoint[subtask]) {
-                earlyReleaseCheckpoint[subtask] = checkpointId;
+            if (checkpointId > writers[subtask].earlyReleaseCheckpoint) {
+                writers[subtask].earlyReleaseCheckpoint = checkpointId;
                 sendWriterRelease(subtask, checkpointId);
             }
             return;
         }
         for (int i = 0; i < parallelism; i++) {
-            if (terminalCoveredBy[i] < 0
-                    && (subtaskCommittables[i] == null
-                            || !subtaskCommittables[i].hasTerminalCandidate(checkpointId))) {
+            if (writers[i].terminalCoveredBy < 0
+                    && (writers[i].committables == null
+                            || !writers[i].committables.hasTerminalCandidate(checkpointId))) {
                 // With one concurrent checkpoint, K's writer state covers an unfinished
                 // commit and the commit executor fences the next coordinator checkpoint.
                 // Another writer remains responsible for the final completion barrier.
-                earlyReleaseCheckpoint[subtask] = checkpointId;
+                writers[subtask].earlyReleaseCheckpoint = checkpointId;
                 sendWriterRelease(subtask, checkpointId);
                 return;
             }
@@ -616,15 +618,17 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         if (fatalFailure != null) {
             return;
         }
-        long releaseCheckpoint = earlyReleaseCheckpoint[subtask];
+        long releaseCheckpoint = writers[subtask].earlyReleaseCheckpoint;
         if (releaseCheckpoint < 0) {
-            if (terminalCoveredBy[subtask] < 0 || (allTerminal() && !globalFinalizationCompleted)) {
+            if (writers[subtask].terminalCoveredBy < 0
+                    || (allTerminal() && !globalFinalizationCompleted)) {
                 return;
             }
-            releaseCheckpoint = terminalCoveredBy[subtask];
+            releaseCheckpoint = writers[subtask].terminalCoveredBy;
         }
         SubtaskGateway gateway = releaseTargets.get(subtask);
-        if (gateway != null) {
+        if (gateway != null
+                && writers[subtask].reportingAttempt == gateway.getExecution().getAttemptNumber()) {
             // A later restored marker can require a later checkpoint than its original tail.
             long coverage = Math.max(releaseCheckpoint, replayCheckpoint);
             gateway.sendEvent(
@@ -636,12 +640,12 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     @VisibleForTesting
     Map<Long, CheckpointCommittables> pendingCommittables(int subtask) {
         return Collections.unmodifiableMap(
-                subtaskCommittables[subtask].getCommittablesPerCheckpoint());
+                writers[subtask].committables.getCommittablesPerCheckpoint());
     }
 
     @VisibleForTesting
     long terminalCoveredBy(int subtask) {
-        return terminalCoveredBy[subtask];
+        return writers[subtask].terminalCoveredBy;
     }
 
     @VisibleForTesting
@@ -766,9 +770,84 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         commitAction.accept(committables);
     }
 
+    private WriterCommittables[] writerCommittables() {
+        return Arrays.stream(writers)
+                .map(writer -> writer.committables)
+                .toArray(WriterCommittables[]::new);
+    }
+
+    private long[] terminalCoverage() {
+        return Arrays.stream(writers).mapToLong(writer -> writer.terminalCoveredBy).toArray();
+    }
+
+    /**
+     * One writer's commit and execution lifecycle, accessed only by commitExecutor.
+     *
+     * <p>Only terminal coverage is persisted in coordinator state. Pending data is replayed from
+     * writer state; attempt identity and early permission are rebuilt after recovery.
+     */
+    private static class WriterState {
+        @Nullable private WriterCommittables committables;
+        private long terminalCoveredBy = -1;
+        // This permission does not imply that the table commit has succeeded.
+        private long earlyReleaseCheckpoint = -1;
+        private int reportingAttempt = -1;
+
+        private boolean isCovered() {
+            return terminalCoveredBy >= 0;
+        }
+
+        private void addCommittables(WriterCommittables incoming) {
+            if (committables == null) {
+                committables = incoming;
+            } else {
+                committables.mergeWith(incoming);
+            }
+        }
+
+        private void reactivate(WriterCommittables restored, long checkpointId) {
+            // The caller validated historical coverage before reopening this lifecycle.
+            restored.clearCommittablesBeforeCheckpoint(checkpointId, true);
+            terminalCoveredBy = -1;
+            earlyReleaseCheckpoint = -1;
+            committables = restored;
+        }
+
+        private void resetAttempt(int subtask, long checkpointId) {
+            checkState(
+                    !isCovered() || checkpointId >= terminalCoveredBy,
+                    "Region reset before terminal coverage requires global recovery");
+            earlyReleaseCheckpoint = -1;
+            reportingAttempt = -1;
+            if (committables != null) {
+                checkState(
+                        committables.getCommittablesBeforeCheckpoint(checkpointId, false).isEmpty(),
+                        "Writer [%d] contains invalid committables before checkpoint %d",
+                        subtask,
+                        checkpointId);
+                committables.reset();
+            }
+        }
+
+        private boolean completeCommit(long checkpointId) {
+            if (committables == null) {
+                return false;
+            }
+            boolean promoted = !isCovered() && committables.hasTerminalCandidate(checkpointId);
+            if (promoted) {
+                terminalCoveredBy = checkpointId;
+            }
+            committables.clearCommittablesBeforeCheckpoint(checkpointId, true);
+            return promoted;
+        }
+    }
+
     private void restoreState(long checkpointId, byte[] checkpointData) throws Exception {
-        if (checkpointData == null) {
+        if (checkpointData == null || checkpointData.length == 0) {
             stateStore = new MemoryBackendStateStore();
+            if (checkpointId != OperatorCoordinator.NO_CHECKPOINT) {
+                transitionState(State.DORMANT);
+            }
         } else {
             CoordinatorState coordinatorState =
                     SimpleVersionedSerialization.readVersionAndDeSerialize(
@@ -785,7 +864,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     checkState(
                             restoredTerminal[i] <= checkpointId,
                             "Terminal coverage exceeds restored checkpoint");
-                    terminalCoveredBy[i] = restoredTerminal[i];
+                    writers[i].terminalCoveredBy = restoredTerminal[i];
                     if (restoredTerminal[i] >= 0) {
                         requiredRestoreWriters.clear(i);
                     }
@@ -911,6 +990,12 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
          * writer has replayed its pending committables, and recovery commit succeeds.
          */
         RESTORING,
+
+        /**
+         * Restored without coordinator payload. Checkpoints may proceed without table commits; an
+         * active writer's restore report resumes RESTORING. Fully finished writers never report.
+         */
+        DORMANT,
 
         /** Accepting checkpoints and commits. */
         RUNNING,
