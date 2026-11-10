@@ -144,7 +144,10 @@ class MultimodalConnection:
             parallelism=1,
             fps_mode="dataset",
             dataset_names=None) -> None:
-        """Import one or an ordered list of LeRobot v3 sources into a new table group."""
+        """Import LeRobot v3 sources using table_name as the group prefix.
+
+        Creates <table_name>_frames and metadata tables with the same prefix.
+        """
         from pypaimon.multimodal.lerobot import load_from_lerobot
         load_from_lerobot(
             self,

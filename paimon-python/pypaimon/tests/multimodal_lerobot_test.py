@@ -1659,7 +1659,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     return_value=_RemoteLeRobotFileIO(source, remote)):
                 self.assertIsNone(connection.load_from_lerobot("robot", remote))
 
-            for suffix in ("", "__info", "__stats", "__episodes", "__tasks", "__subtasks"):
+            for suffix in ("_frames", "_info", "_stats", "_episodes", "_tasks", "_subtasks"):
                 with self.subTest(table="robot" + suffix):
                     component = connection.get_table("robot" + suffix)
                     schema = component.raw_table.table_schema
@@ -1668,16 +1668,16 @@ class LeRobotValidationTest(unittest.TestCase):
                     self.assertEqual("-1", schema.options.get("bucket", "-1"))
                     self.assertFalse(schema.primary_keys)
                     self.assertGreater(component.scan().to_arrow().num_rows, 0)
-            subtasks_table, stored_subtasks = _catalog_arrow(connection, "robot__subtasks")
+            subtasks_table, stored_subtasks = _catalog_arrow(connection, "robot_subtasks")
             pd.testing.assert_frame_equal(
                 subtasks.to_pandas(),
                 _restore_pandas_metadata(subtasks_table, stored_subtasks).to_pandas())
-            self.assertEqual(info, _catalog_metadata(connection, "robot__info"))
-            self.assertEqual(stats, _catalog_metadata(connection, "robot__stats"))
-            table = connection.get_table("robot")
+            self.assertEqual(info, _catalog_metadata(connection, "robot_info"))
+            self.assertEqual(stats, _catalog_metadata(connection, "robot_stats"))
+            table = connection.get_table("robot_frames")
             self.assertEqual([], table.raw_table.tag_manager().list_tags())
             table.add(frames)
-            snapshots = connection.create_lerobot_tag("robot", "training")
+            snapshots = connection.create_lerobot_tag("robot_frames", "training")
             self.assertEqual({
                 "frames": 3, "info": 1, "stats": 1, "episodes": 1, "tasks": 1, "subtasks": 1,
             }, snapshots)
@@ -1685,13 +1685,13 @@ class LeRobotValidationTest(unittest.TestCase):
             self.assertEqual(2, table.scan(tag_name="training").to_arrow().num_rows)
             self.assertEqual(3, table.scan().to_arrow().num_rows)
             for component, snapshot_id in snapshots.items():
-                name = "robot" if component == "frames" else "robot__" + component
+                name = "robot_frames" if component == "frames" else "robot_" + component
                 self.assertEqual(snapshot_id, connection.catalog.get_tag(
                     connection._identifier(name), "training").snapshot.id)
 
             with patch.object(connection.catalog, "create_tag") as create_tag:
                 with self.assertRaisesRegex(ValueError, "already points"):
-                    connection.create_lerobot_tag("robot", "training")
+                    connection.create_lerobot_tag("robot_frames", "training")
             create_tag.assert_not_called()
 
             create_tag = connection.catalog.create_tag
@@ -1706,16 +1706,16 @@ class LeRobotValidationTest(unittest.TestCase):
             with patch.object(connection.catalog, "create_tag",
                               side_effect=fail_second_component):
                 with self.assertRaisesRegex(RuntimeError, "tag failed"):
-                    connection.create_lerobot_tag("robot", "retry")
+                    connection.create_lerobot_tag("robot_frames", "retry")
             self.assertFalse(table.raw_table.tag_manager().tag_exists("retry"))
             self.assertEqual(4, connection.create_lerobot_tag(
-                "robot", "retry")["frames"])
+                "robot_frames", "retry")["frames"])
             self.assertEqual(3, table.scan(tag_name="retry").to_arrow().num_rows)
 
-            connection.catalog.drop_table(connection._identifier("robot__tasks"))
+            connection.catalog.drop_table(connection._identifier("robot_tasks"))
             with patch.object(connection.catalog, "create_tag") as create_tag:
                 with self.assertRaises(TableNotExistException):
-                    connection.create_lerobot_tag("robot", "incomplete")
+                    connection.create_lerobot_tag("robot_frames", "incomplete")
             create_tag.assert_not_called()
 
             (source / "meta" / "stats.json").unlink()
@@ -1724,9 +1724,9 @@ class LeRobotValidationTest(unittest.TestCase):
                     return_value=_RemoteLeRobotFileIO(source, remote)):
                 connection.load_from_lerobot("no_stats", remote, tag_name="ready")
             with self.assertRaises(TableNotExistException):
-                connection.get_table("no_stats__stats")
+                connection.get_table("no_stats_stats")
             self.assertEqual({"frames": 2, "info": 1, "episodes": 1, "tasks": 1, "subtasks": 1},
-                             connection.create_lerobot_tag("no_stats", "training"))
+                             connection.create_lerobot_tag("no_stats_frames", "training"))
 
     def test_self_contained_import_rejects_table_branches(self):
         with self.assertRaisesRegex(ValueError, "does not support"):
@@ -1734,11 +1734,11 @@ class LeRobotValidationTest(unittest.TestCase):
 
     def test_companion_identifier_preserves_quoted_components(self):
         name = _companion_identifier(
-            "`db.name`.`robot.data`", "__tasks")
+            "`db.name`.`robot.data`", "_tasks")
         identifier = Identifier.from_string(name)
 
         self.assertEqual("db.name", identifier.get_database_name())
-        self.assertEqual("robot.data__tasks", identifier.get_table_name())
+        self.assertEqual("robot.data_tasks", identifier.get_table_name())
 
     def test_image_tensor_preserves_declared_channels(self):
         try:
@@ -2765,7 +2765,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     connection.load_from_lerobot("empty_frames", source)
             import_lerobot.assert_not_called()
             with self.assertRaises(TableNotExistException):
-                connection.get_table("empty_frames")
+                connection.get_table("empty_frames_frames")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -2910,7 +2910,7 @@ class LeRobotValidationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "non-empty"):
                 connection.load_from_lerobot("frames", source)
             with self.assertRaises(TableNotExistException):
-                connection.get_table("frames")
+                connection.get_table("frames_frames")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -3067,7 +3067,7 @@ class LeRobotValidationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "fps must be positive"):
                 connection.load_from_lerobot("frames", source)
             with self.assertRaises(TableNotExistException):
-                connection.get_table("frames")
+                connection.get_table("frames_frames")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -3299,7 +3299,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     "frames", temp_dir, batch_size=1)
 
             self.assertIsNone(result)
-            table = connection.get_table("frames")
+            table = connection.get_table("frames_frames")
             self.assertEqual(
                 {"camera_a", "camera_b"},
                 table.raw_table.options.video_frame_fields(),
@@ -3378,7 +3378,7 @@ class LeRobotValidationTest(unittest.TestCase):
             )
             self.assertEqual(1, source_file_io.close_count)
             _, remote_bodies = connection.get_table(
-                "remote_frames").scan().select([
+                "remote_frames_frames").scan().select([
                     "index", "camera_a", "camera_b"
                 ]).read_blobs()
             self.assertEqual(bodies, remote_bodies)
@@ -3411,7 +3411,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     options={"target-file-row-num": "1"},
                 )
             raw_table = connection.get_table(
-                "shared_video_frames").raw_table
+                "shared_video_frames_frames").raw_table
             files = {
                 file.file_name: file
                 for split in raw_table.new_read_builder().new_scan().plan().splits()
@@ -3658,7 +3658,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     "frames", temp_dir, batch_size=1,
                     options={"write.lerobot.remux-episodes": str(remux).lower()})
 
-            table = connection.get_table("frames")
+            table = connection.get_table("frames_frames")
             rows = table.scan().select([
                 "index", "camera", "camera_b"
             ]).to_arrow().sort_by("index").to_pylist()
@@ -4167,10 +4167,10 @@ class LeRobotImportTest(unittest.TestCase):
         for name, location in (("local_fps", source), ("uri_fps", source.as_uri())):
             with self.subTest(source=name):
                 self.connection.load_from_lerobot(name, location)
-                self.assertEqual(info, _catalog_metadata(self.connection, name + "__info"))
-                data = self.connection.get_table(name).scan().to_arrow()
+                self.assertEqual(info, _catalog_metadata(self.connection, name + "_info"))
+                data = self.connection.get_table(name + "_frames").scan().to_arrow()
                 self.assertEqual(info["total_frames"], data.num_rows)
-                dataset = pmm.PaimonLeRobotDataset(self.connection.get_table(name))
+                dataset = pmm.PaimonLeRobotDataset(self.connection.get_table(name + "_frames"))
                 self.assertEqual(info["fps"], dataset.meta.fps)
                 self.assertEqual(0, dataset[0]["frame_index"].item())
 
@@ -4185,7 +4185,7 @@ class LeRobotImportTest(unittest.TestCase):
         self.connection.load_from_lerobot("extended_info", source)
 
         self.assertEqual(
-            info, _catalog_metadata(self.connection, "extended_info__info"))
+            info, _catalog_metadata(self.connection, "extended_info_info"))
 
     def test_hub_import_preserves_extended_info(self):
         from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
@@ -4206,15 +4206,15 @@ class LeRobotImportTest(unittest.TestCase):
             self.connection.load_from_lerobot("hub_info", repo_id)
 
         self.assertEqual(
-            info, _catalog_metadata(self.connection, "hub_info__info"))
+            info, _catalog_metadata(self.connection, "hub_info_info"))
 
     def test_table_dataset_pickle_preserves_episode_metadata_and_reads(self):
         import torch
 
         self.connection.load_from_lerobot("worker_pickle", self.image_source)
         snapshots = self.connection.create_lerobot_tag(
-            "worker_pickle", "training")
-        table = self.connection.get_table("worker_pickle").copy({
+            "worker_pickle_frames", "training")
+        table = self.connection.get_table("worker_pickle_frames").copy({
             "read.video.max-open-decoders": "2"})
         dataset = pmm.PaimonLeRobotDataset(
             table, tag_name="training", return_uint8=True)
@@ -4246,7 +4246,7 @@ class LeRobotImportTest(unittest.TestCase):
                    side_effect=lambda info: _schema_from_info(info, legacy_vectors=True)):
             self.connection.load_from_lerobot(
                 "legacy_vectors", self.image_source, batch_size=2)
-        table = self.connection.get_table("legacy_vectors")
+        table = self.connection.get_table("legacy_vectors_frames")
         self.assertEqual("VECTOR<FLOAT, 3> NOT NULL", str(next(
             field.type for field in table.raw_table.fields
             if field.name == "observation.state")))
@@ -4267,7 +4267,7 @@ class LeRobotImportTest(unittest.TestCase):
 
         self.assertIsNone(result)
 
-        table = self.connection.get_table("robot_data")
+        table = self.connection.get_table("robot_data_frames")
         schema = table.raw_table.fields
         types = {field.name: str(field.type) for field in schema}
         self.assertEqual("ARRAY<FLOAT> NOT NULL", types["observation.state"])
@@ -4305,13 +4305,13 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual(1.0, rows[4]["reward"])
         self.assertEqual(
             json.loads((self.image_source / "meta" / "info.json").read_text()),
-            _catalog_metadata(self.connection, "robot_data__info"),
+            _catalog_metadata(self.connection, "robot_data_info"),
         )
         self.assertEqual(
             json.loads((self.image_source / "meta" / "stats.json").read_text()),
-            _catalog_metadata(self.connection, "robot_data__stats"),
+            _catalog_metadata(self.connection, "robot_data_stats"),
         )
-        for name in ("robot_data__info", "robot_data__stats"):
+        for name in ("robot_data_info", "robot_data_stats"):
             fields = self.connection.catalog.get_table(
                 self.connection._identifier(name)).fields
             self.assertEqual({"key": "STRING", "value": "STRING"}, {
@@ -4319,17 +4319,17 @@ class LeRobotImportTest(unittest.TestCase):
             })
         self.assertEqual([], table.raw_table.tag_manager().list_tags())
 
-        episodes = _catalog_rows(self.connection, "robot_data__episodes")
+        episodes = _catalog_rows(self.connection, "robot_data_episodes")
         episode_fields = {
             field.name for field in self.connection.catalog.get_table(
                 self.connection._identifier(
-                    "robot_data__episodes")).fields
+                    "robot_data_episodes")).fields
         }
         source_episode_schema = pq.read_schema(next(
             (self.image_source / "meta" / "episodes").rglob("*.parquet")))
         self.assertTrue(_target_schema(
             self.connection.catalog.get_table(self.connection._identifier(
-                "robot_data__episodes"))
+                "robot_data_episodes"))
         ).equals(source_episode_schema, check_metadata=False))
         self.assertEqual([(0, 0, 2), (1, 2, 5)], [
             (row["episode_index"], row["dataset_from_index"],
@@ -4341,14 +4341,14 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertTrue(any(
             name.startswith("stats/") for name in episode_fields))
 
-        tasks = _catalog_rows(self.connection, "robot_data__tasks")
+        tasks = _catalog_rows(self.connection, "robot_data_tasks")
         task_fields = {
             field.name for field in self.connection.catalog.get_table(
-                self.connection._identifier("robot_data__tasks")).fields
+                self.connection._identifier("robot_data_tasks")).fields
         }
         self.assertTrue(_target_schema(
             self.connection.catalog.get_table(self.connection._identifier(
-                "robot_data__tasks"))
+                "robot_data_tasks"))
         ).equals(
             pq.read_schema(self.image_source / "meta" / "tasks.parquet"),
             check_metadata=False,
@@ -4358,7 +4358,7 @@ class LeRobotImportTest(unittest.TestCase):
             (row["task_index"], row[task_name]) for row in tasks
         ])
         tasks_table, tasks_arrow = _catalog_arrow(
-            self.connection, "robot_data__tasks")
+            self.connection, "robot_data_tasks")
         pd.testing.assert_frame_equal(
             pq.read_table(
                 self.image_source / "meta" / "tasks.parquet").to_pandas(),
@@ -4419,7 +4419,7 @@ class LeRobotImportTest(unittest.TestCase):
 
         self.connection.load_from_lerobot("sharded_episodes", source)
         table = self.connection.catalog.get_table(
-            self.connection._identifier("sharded_episodes__episodes"))
+            self.connection._identifier("sharded_episodes_episodes"))
         files = {
             file.file_name
             for split in table.new_read_builder().new_scan().plan().splits()
@@ -4450,7 +4450,7 @@ class LeRobotImportTest(unittest.TestCase):
             with self.subTest(source=name):
                 self.connection.load_from_lerobot(name, location, tag_name="train")
                 dataset = pmm.PaimonLeRobotDataset(
-                    self.connection.get_table(name), tag_name="train")
+                    self.connection.get_table(name + "_frames"), tag_name="train")
                 self.assertEqual(expected_tasks, dataset.meta.tasks.index.tolist())
                 self.assertEqual(["reach"], dataset.meta.subtasks.index.tolist())
                 row = dataset[0]
@@ -4477,13 +4477,13 @@ class LeRobotImportTest(unittest.TestCase):
             index=pd.Index(["reach"], name="instruction"))).slice(0, 0)
         pq.write_table(vocabulary, source / "meta/subtasks.parquet")
         self.connection.load_from_lerobot("empty_subtasks", source, tag_name="train")
-        table, stored = _catalog_arrow(self.connection, "empty_subtasks__subtasks")
+        table, stored = _catalog_arrow(self.connection, "empty_subtasks_subtasks")
         self.assertEqual(0, stored.num_rows)
         self.assertTrue(_target_schema(table).equals(vocabulary.schema, check_metadata=False))
         self.assertEqual(1, self.connection.catalog.get_tag(
-            self.connection._identifier("empty_subtasks__subtasks"), "train").snapshot.id)
+            self.connection._identifier("empty_subtasks_subtasks"), "train").snapshot.id)
         dataset = pmm.PaimonLeRobotDataset(
-            self.connection.get_table("empty_subtasks"), tag_name="train")
+            self.connection.get_table("empty_subtasks_frames"), tag_name="train")
         self.assertIsNone(dataset[0]["subtask"])
         self.assertIsNone(dataset[0]["subtask_index"])
         batch = next(iter(dataset.to_dataloader(batch_size=5, num_workers=0)))
@@ -4528,7 +4528,7 @@ class LeRobotImportTest(unittest.TestCase):
         result = self.connection.load_from_lerobot(
             "with_subtasks", source, tag_name="training")
 
-        frames = self.connection.get_table("with_subtasks")
+        frames = self.connection.get_table("with_subtasks_frames")
         self.assertNotIn("subtask", [
             field.name for field in frames.raw_table.fields
         ])
@@ -4536,15 +4536,15 @@ class LeRobotImportTest(unittest.TestCase):
             "index", "subtask_index"
         ]).to_arrow().sort_by("index").column("subtask_index").to_pylist())
         subtasks_table = self.connection.catalog.get_table(
-            self.connection._identifier("with_subtasks__subtasks"))
+            self.connection._identifier("with_subtasks_subtasks"))
         self.assertTrue(_target_schema(subtasks_table).equals(
             subtasks.schema, check_metadata=False))
         self.assertEqual(
             subtasks.to_pylist(),
-            _catalog_rows(self.connection, "with_subtasks__subtasks"),
+            _catalog_rows(self.connection, "with_subtasks_subtasks"),
         )
         _, subtasks_arrow = _catalog_arrow(
-            self.connection, "with_subtasks__subtasks")
+            self.connection, "with_subtasks_subtasks")
         pd.testing.assert_frame_equal(
             subtasks.to_pandas(),
             _restore_pandas_metadata(
@@ -4595,7 +4595,7 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual(
             1,
             self.connection.catalog.get_tag(
-                self.connection._identifier("with_subtasks__subtasks"),
+                self.connection._identifier("with_subtasks_subtasks"),
                 "training",
             ).snapshot.id,
         )
@@ -4609,11 +4609,11 @@ class LeRobotImportTest(unittest.TestCase):
 
         table_names = self.connection.catalog.list_tables("db.name")
         self.assertEqual([
-            "robot",
-            "robot__episodes",
-            "robot__info",
-            "robot__stats",
-            "robot__tasks",
+            "robot_episodes",
+            "robot_frames",
+            "robot_info",
+            "robot_stats",
+            "robot_tasks",
         ], sorted(table_names))
 
     def test_import_reuses_validated_episode_metadata(self):
@@ -4641,7 +4641,7 @@ class LeRobotImportTest(unittest.TestCase):
             self.connection.load_from_lerobot("stable_episodes", source)
 
         published = _catalog_rows(
-            self.connection, "stable_episodes__episodes")
+            self.connection, "stable_episodes_episodes")
         self.assertEqual(["pick"], published[0]["tasks"])
 
     def test_frame_controls_must_match_published_episode_metadata(self):
@@ -4672,9 +4672,9 @@ class LeRobotImportTest(unittest.TestCase):
                 with self.assertRaisesRegex(
                         ValueError, "has %s" % column):
                     self.connection.load_from_lerobot(table_name, source)
-                self.connection.get_table(table_name)
+                self.connection.get_table(table_name + "_frames")
                 self.assertEqual([], _catalog_rows(
-                    self.connection, table_name + "__info"))
+                    self.connection, table_name + "_info"))
 
     def test_task_text_remains_in_published_task_mapping(self):
         source = self.temp_dir / "reordered_tasks"
@@ -4684,7 +4684,7 @@ class LeRobotImportTest(unittest.TestCase):
         pq.write_table(tasks.take(pa.array([1, 0])), path)
 
         self.connection.load_from_lerobot("reordered_tasks", source)
-        table = self.connection.get_table("reordered_tasks")
+        table = self.connection.get_table("reordered_tasks_frames")
         self.assertNotIn("task", [
             field.name for field in table.raw_table.fields
         ])
@@ -4692,7 +4692,7 @@ class LeRobotImportTest(unittest.TestCase):
             "index", "task_index"
         ]).to_arrow().sort_by("index").to_pylist()
         task_rows = _catalog_rows(
-            self.connection, "reordered_tasks__tasks")
+            self.connection, "reordered_tasks_tasks")
         task_name = (
             "task" if "task" in task_rows[0] else "__index_level_0__")
         published = {
@@ -4721,9 +4721,9 @@ class LeRobotImportTest(unittest.TestCase):
                 ValueError, "declares task indices"):
             self.connection.load_from_lerobot(
                 "extra_episode_task", source)
-        self.connection.get_table("extra_episode_task")
+        self.connection.get_table("extra_episode_task_frames")
         self.assertEqual([], _catalog_rows(
-            self.connection, "extra_episode_task__info"))
+            self.connection, "extra_episode_task_info"))
 
     def test_nonempty_dataset_cannot_publish_without_tasks(self):
         source = self.temp_dir / "missing_tasks"
@@ -4748,9 +4748,9 @@ class LeRobotImportTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "task_index"):
             self.connection.load_from_lerobot("missing_tasks", source)
-        self.connection.get_table("missing_tasks")
+        self.connection.get_table("missing_tasks_frames")
         self.assertEqual([], _catalog_rows(
-            self.connection, "missing_tasks__info"))
+            self.connection, "missing_tasks_info"))
 
     def test_paimon_dataset_reads_lazy_batches_with_lerobot_metadata(self):
         import torch
@@ -4760,7 +4760,7 @@ class LeRobotImportTest(unittest.TestCase):
             "training_data", self.image_source, batch_size=2,
             tag_name="training")
         self.assertIsNone(result)
-        table = self.connection.get_table("training_data")
+        table = self.connection.get_table("training_data_frames")
         dataset = pmm.PaimonLeRobotDataset(
             table,
             tag_name="training",
@@ -4787,7 +4787,7 @@ class LeRobotImportTest(unittest.TestCase):
             for name in episodes.column_names))
         self.assertFalse(hasattr(dataset, "index_mapping"))
         frame_indexes = _catalog_rows(
-            self.connection, "training_data$table_indexes")
+            self.connection, "training_data_frames$table_indexes")
         self.assertEqual(
             {"btree", "index"},
             {frame_indexes[0]["index_type"],
@@ -4922,7 +4922,7 @@ class LeRobotImportTest(unittest.TestCase):
         # Exercise the Python locator's failures explicitly; Native lookup
         # does not open this scanner or invoke its internal hooks.
         dataset = pmm.PaimonLeRobotDataset(
-            self.connection.get_table("missing_frame_index").copy({
+            self.connection.get_table("missing_frame_index_frames").copy({
                 "read.native.enabled": "false",
                 "scan.native-plan.enabled": "false",
             }))
@@ -4953,7 +4953,7 @@ class LeRobotImportTest(unittest.TestCase):
     def test_paimon_dataset_rejects_query_authorization(self):
         self.connection.load_from_lerobot(
             "authorized_frames", self.image_source)
-        table = self.connection.get_table("authorized_frames")
+        table = self.connection.get_table("authorized_frames_frames")
         auth_results = [
             TableQueryAuthResult([json.dumps({
                 "kind": "LEAF",
@@ -4997,7 +4997,7 @@ class LeRobotImportTest(unittest.TestCase):
             )
 
         self.assertIsNone(result)
-        table = self.connection.get_table("oss_images")
+        table = self.connection.get_table("oss_images_frames")
         rows = table.scan().select([
             "episode_index", "frame_index", "index", "task_index"
         ]).to_arrow().sort_by("index").to_pylist()
@@ -5034,7 +5034,7 @@ class LeRobotImportTest(unittest.TestCase):
                 "custom_task_index", source)
 
         rows = _catalog_rows(
-            self.connection, "custom_task_index__tasks")
+            self.connection, "custom_task_index_tasks")
         self.assertEqual(
             [(0, "pick"), (1, "place")],
             [(row["task_index"], row["instruction"]) for row in rows],
@@ -5071,7 +5071,7 @@ class LeRobotImportTest(unittest.TestCase):
                 "tag_fallback", self.image_source, tag_name="training")
 
         tag = "training"
-        table = self.connection.get_table("tag_fallback")
+        table = self.connection.get_table("tag_fallback_frames")
         self.assertIsNone(result)
         self.assertEqual(
             table.raw_table.snapshot_manager().get_latest_snapshot().id,
@@ -5099,7 +5099,7 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertTrue(lost[0])
         self.assertIsNone(result)
         self.assertEqual(2, self.connection.catalog.get_tag(
-            self.connection._identifier("tag_response_loss"),
+            self.connection._identifier("tag_response_loss_frames"),
             "training").snapshot.id)
 
     def test_tag_failure_leaves_imported_data(self):
@@ -5111,22 +5111,22 @@ class LeRobotImportTest(unittest.TestCase):
                     "failed_publish", self.image_source, tag_name="training")
 
         self.assertEqual(5, self.connection.get_table(
-            "failed_publish").scan().to_arrow().num_rows)
+            "failed_publish_frames").scan().to_arrow().num_rows)
         self.assertEqual("v3.0", _catalog_metadata(
-            self.connection, "failed_publish__info")["codebase_version"])
+            self.connection, "failed_publish_info")["codebase_version"])
 
     def test_existing_companion_is_rejected(self):
         self.connection.load_from_lerobot(
             "other_group", self.image_source)
-        stale = self.connection._identifier("stale__tasks")
+        stale = self.connection._identifier("stale_tasks")
         self.connection.catalog.rename_table(
-            self.connection._identifier("other_group__tasks"), stale)
+            self.connection._identifier("other_group_tasks"), stale)
 
         with self.assertRaisesRegex(ValueError, "already exists"):
             self.connection.load_from_lerobot(
                 "stale", self.image_source)
 
-        self.connection.get_table("stale")
+        self.connection.get_table("stale_frames")
         self.connection.catalog.get_table(stale)
 
     def test_invalid_target_options_do_not_leave_table(self):
@@ -5138,7 +5138,7 @@ class LeRobotImportTest(unittest.TestCase):
             )
         with self.assertRaises(TableNotExistException):
             self.connection.catalog.get_table(
-                self.connection._identifier("invalid_options"))
+                self.connection._identifier("invalid_options_frames"))
 
         result = self.connection.load_from_lerobot(
             "invalid_options", self.image_source)
@@ -5160,7 +5160,7 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.load_from_lerobot(
                     "failed_open", self.image_source)
 
-        self.connection.get_table("failed_open")
+        self.connection.get_table("failed_open_frames")
 
     def test_dataset_close_failure_does_not_override_success(self):
         from pypaimon.multimodal.lerobot import api
@@ -5181,7 +5181,7 @@ class LeRobotImportTest(unittest.TestCase):
 
         self.assertIsNone(result)
         self.assertEqual("v3.0", _catalog_metadata(
-            self.connection, "close_failure__info")["codebase_version"])
+            self.connection, "close_failure_info")["codebase_version"])
 
     def test_source_close_failure_does_not_override_success(self):
         source = "oss://source-bucket/robot-images"
@@ -5198,12 +5198,12 @@ class LeRobotImportTest(unittest.TestCase):
 
         self.assertIsNone(result)
         self.assertEqual("v3.0", _catalog_metadata(
-            self.connection, "source_close_failure__info")["codebase_version"])
+            self.connection, "source_close_failure_info")["codebase_version"])
 
     def test_existing_target_is_rejected(self):
         info = json.loads((self.image_source / "meta" / "info.json").read_text())
         schema = _schema_from_info(info)
-        table = self.connection.create_table("existing", schema=schema)
+        table = self.connection.create_table("existing_frames", schema=schema)
 
         with self.assertRaisesRegex(ValueError, "already exists"):
             self.connection.load_from_lerobot(
@@ -5247,7 +5247,7 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual(
             5,
             self.connection.get_table(
-                "concurrent").scan().to_arrow().num_rows,
+                "concurrent_frames").scan().to_arrow().num_rows,
         )
 
     def test_concurrent_append_rejects_initial_import(self):
@@ -5288,9 +5288,9 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.load_from_lerobot(
                     "concurrent_append", self.image_source)
 
-        self.connection.get_table("concurrent_append")
+        self.connection.get_table("concurrent_append_frames")
         self.assertEqual([], _catalog_rows(
-            self.connection, "concurrent_append__info"))
+            self.connection, "concurrent_append_info"))
 
 
 if __name__ == "__main__":

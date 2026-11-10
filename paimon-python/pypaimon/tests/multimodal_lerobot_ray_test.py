@@ -271,7 +271,7 @@ class LeRobotRayImportTest(unittest.TestCase):
         self._import_serial()
         self.conn.load_from_lerobot("parallel", source or self.source, parallelism=2,
                                     batch_size=1, tag_name="imported")
-        for suffix in ("", "__episodes", "__tasks", "__info"):
+        for suffix in ("_frames", "_episodes", "_tasks", "_info"):
             def read(name, tag=None):
                 table = self.conn.catalog.get_table("default." + name)
                 if tag:
@@ -281,10 +281,10 @@ class LeRobotRayImportTest(unittest.TestCase):
 
             left = read("serial" + suffix)
             right = read("parallel" + suffix, "imported")
-            if not suffix:
+            if suffix == "_frames":
                 from pypaimon.table.row.blob import Blob
                 left, right = left.sort_by("index"), right.sort_by("index")
-                file_io = self.conn.get_table("parallel").raw_table.file_io
+                file_io = self.conn.get_table("parallel_frames").raw_table.file_io
                 for original, imported in zip(left["camera"], right["camera"]):
                     self.assertEqual(
                         Blob.from_descriptor_bytes(original.as_py(), file_io=file_io).to_data(),
@@ -295,7 +295,7 @@ class LeRobotRayImportTest(unittest.TestCase):
                 right = right.sort_by(right.column_names[0])
             self.assertTrue(left.equals(right), suffix)
         # One data snapshot plus the initial BTree snapshot, regardless of task count.
-        table = self.conn.get_table("parallel").raw_table
+        table = self.conn.get_table("parallel_frames").raw_table
         self.assertEqual(2, table.snapshot_manager().get_latest_snapshot().id)
 
     @unittest.skipUnless(
@@ -309,8 +309,8 @@ class LeRobotRayImportTest(unittest.TestCase):
         self.conn.load_from_lerobot("videos", self.source, parallelism=2, batch_size=1)
         self._import_serial()
         from pypaimon.multimodal.lerobot import PaimonLeRobotDataset
-        first = PaimonLeRobotDataset(self.conn.get_table("videos"), video_backend="pyav", return_uint8=True)
-        second = PaimonLeRobotDataset(self.conn.get_table("serial"), video_backend="pyav", return_uint8=True)
+        first = PaimonLeRobotDataset(self.conn.get_table("videos_frames"), video_backend="pyav", return_uint8=True)
+        second = PaimonLeRobotDataset(self.conn.get_table("serial_frames"), video_backend="pyav", return_uint8=True)
         try:
             for i in (7, 0, 3, 4, 1, 6, 2, 5):
                 self.assertTrue(np.array_equal(first[i]["camera"], second[i]["camera"]))
@@ -338,7 +338,7 @@ class LeRobotRayImportTest(unittest.TestCase):
             def get(self, ref, **kwargs):
                 result = ray.get(ref, **kwargs)
                 if isinstance(result, list) and result and hasattr(result[0], "new_files"):
-                    table = connection.get_table("broken").raw_table
+                    table = connection.get_table("broken_frames").raw_table
                     files_before_failure.extend(_bucket_files(table))
                     received.touch()
                 return result
@@ -364,7 +364,7 @@ class LeRobotRayImportTest(unittest.TestCase):
         self.assertTrue(files_before_failure)
         abort.assert_called_once()
         self.assertTrue(abort.call_args[0][1])
-        table = self.conn.get_table("broken").raw_table
+        table = self.conn.get_table("broken_frames").raw_table
         self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
         self.assertFalse(table.tag_manager().tag_exists("imported"))
         self.assertEqual([], _bucket_files(table))
@@ -404,7 +404,7 @@ class LeRobotRayImportTest(unittest.TestCase):
                 self.assertTrue(any(name.endswith(".parquet") for name in before), before)
                 self.assertFalse(any(".vector." in name for name in before), before)
                 self.assertTrue(any(name.endswith(".blob") for name in before), before)
-                table = self.conn.get_table(table_name).raw_table
+                table = self.conn.get_table(table_name + "_frames").raw_table
                 self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
                 self.assertEqual([], _bucket_files(table))
 
@@ -429,7 +429,7 @@ class LeRobotRayImportTest(unittest.TestCase):
             with self.assertRaisesRegex(KeyboardInterrupt, "interrupted result delivery"):
                 self.conn.load_from_lerobot("interrupted", self.source, parallelism=2)
         self.assertTrue(delivered)
-        table = self.conn.get_table("interrupted").raw_table
+        table = self.conn.get_table("interrupted_frames").raw_table
         self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
         self.assertEqual([], _bucket_files(table))
 
@@ -457,7 +457,7 @@ class LeRobotRayImportTest(unittest.TestCase):
             with self.assertRaisesRegex(BaseException, "interrupted source close"):
                 self.conn.load_from_lerobot("source_close", self.source, parallelism=2)
         self.assertTrue(json.loads(trace.read_text()))
-        table = self.conn.get_table("source_close").raw_table
+        table = self.conn.get_table("source_close_frames").raw_table
         self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
         self.assertEqual([], _bucket_files(table))
 
@@ -476,7 +476,7 @@ class LeRobotRayImportTest(unittest.TestCase):
                             options={"commit.max-retries": "typo"})
                     prepare.assert_not_called()
                     group.assert_not_called()
-                table = self.conn.get_table(name).raw_table
+                table = self.conn.get_table(name + "_frames").raw_table
                 self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
                 self.assertEqual([], _bucket_files(table))
 

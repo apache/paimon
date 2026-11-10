@@ -38,12 +38,12 @@ from pypaimon.multimodal.table import _target_schema
 _PANDAS_METADATA_OPTION = "pypaimon.lerobot.pandas-metadata"
 _EPISODE_FPS_COLUMN = "fps"
 _TABLE_SUFFIXES = {
-    "info": "__info",
-    "datasets": "__datasets",
-    "stats": "__stats",
-    "episodes": "__episodes",
-    "tasks": "__tasks",
-    "subtasks": "__subtasks",
+    "info": "_info",
+    "datasets": "_datasets",
+    "stats": "_stats",
+    "episodes": "_episodes",
+    "tasks": "_tasks",
+    "subtasks": "_subtasks",
 }
 _COMPANION_OPTION_KEYS = {
     name: "pypaimon.lerobot.%s-table" % name
@@ -206,6 +206,9 @@ def _managed_table_options(frames_identifier, metadata=None):
             "LeRobot import does not support table branches.")
     result = {}
     for name, suffix in _TABLE_SUFFIXES.items():
+        if metadata is not None and metadata.get("source_local_metadata") \
+                and name not in ("datasets", "episodes"):
+            continue
         if name == "datasets" and (metadata is None or
                                    metadata.get("datasets_table") is None):
             continue
@@ -220,10 +223,12 @@ def _managed_table_options(frames_identifier, metadata=None):
 def _companion_table_identifiers(frames_table):
     options = frames_table.table_schema.options
     identifiers = {}
+    has_datasets = bool(options.get(_COMPANION_OPTION_KEYS["datasets"]))
     for name, key in _COMPANION_OPTION_KEYS.items():
         value = options.get(key)
         if not value:
-            if name in ("datasets", "stats", "subtasks"):
+            if name in ("datasets", "stats", "subtasks") \
+                    or (has_datasets and name in ("info", "tasks")):
                 continue
             raise ValueError(
                 "LeRobot table %s is missing managed option %s."
@@ -233,14 +238,13 @@ def _companion_table_identifiers(frames_table):
 
 
 def _prepare_metadata_tables(connection, frames_table, metadata):
-    schemas = {
-        "info": metadata["info_table"].schema,
-        "episodes": metadata["episodes_schema"],
-        "tasks": metadata["tasks_table"].schema,
-    }
-    for name in ("stats", "subtasks"):
-        if metadata[name + "_table"] is not None:
-            schemas[name] = metadata[name + "_table"].schema
+    schemas = {"episodes": metadata["episodes_schema"]}
+    if not metadata.get("source_local_metadata"):
+        schemas.update(info=metadata["info_table"].schema,
+                       tasks=metadata["tasks_table"].schema)
+        for name in ("stats", "subtasks"):
+            if metadata[name + "_table"] is not None:
+                schemas[name] = metadata[name + "_table"].schema
     if metadata.get("datasets_table") is not None:
         schemas["datasets"] = metadata["datasets_table"].schema
     identifiers = _companion_table_identifiers(frames_table)

@@ -24,6 +24,7 @@ from typing import Mapping, Optional
 from pypaimon.catalog.catalog_exception import TableAlreadyExistException
 from pypaimon.multimodal.lerobot.metadata import (
     _COMPANION_OPTION_KEYS,
+    _companion_identifier,
     _append_arrow_tables,
     _load_dataset_metadata,
     _managed_table_options,
@@ -76,8 +77,9 @@ def load_from_lerobot(
 ) -> None:
     """Import one or more LeRobot v3 sources into a new Paimon table group.
 
+    ``table_name`` is the group prefix; frames are stored in ``<table_name>_frames``.
     Sources must share training features. ``fps_mode='source'`` allows mixed
-    FPS. ``__datasets`` retains source metadata; optional ``dataset_names``
+    FPS. ``_datasets`` retains source metadata; optional ``dataset_names``
     are caller-provided labels, never inferred from paths. ``tag_name`` pins
     component snapshots.
     FileIO credentials come from ``source_options``; ``parallelism > 1`` uses Ray.
@@ -289,20 +291,25 @@ def _create_target_table(
         connection._identifier(table_name), metadata)
     reserved_options = set(_COMPANION_OPTION_KEYS.values()).intersection(
         create_options)
+    if "pypaimon.lerobot.fps-mode" in create_options:
+        reserved_options.add("pypaimon.lerobot.fps-mode")
     if reserved_options:
         raise ValueError(
             "%s are managed by load_from_lerobot."
             % sorted(reserved_options))
     create_options.update(managed_options)
+    if metadata.get("source_local_metadata"):
+        create_options["pypaimon.lerobot.fps-mode"] = metadata["fps_mode"]
+    frames_name = _companion_identifier(connection._identifier(table_name), "_frames")
     try:
         table = connection.create_table(
-            table_name,
+            frames_name,
             schema=source_schema,
             options=create_options,
         )
     except TableAlreadyExistException as error:
         raise ValueError(
             "LeRobot target %s already exists; use a new target table."
-            % connection._identifier(table_name)
+            % frames_name
         ) from error
     return table

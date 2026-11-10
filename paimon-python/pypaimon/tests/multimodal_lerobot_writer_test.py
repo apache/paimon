@@ -92,15 +92,15 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         frames = self.connection.get_table("table_group")
         self.assertNotIn("task", [field.name for field in frames.raw_table.fields])
         options = frames.raw_table.table_schema.options
-        self.assertEqual("default.table_group__episodes", options[
+        self.assertEqual("default.table_group_episodes", options[
             "pypaimon.lerobot.episodes-table"])
-        self.assertEqual("default.table_group__tasks", options[
+        self.assertEqual("default.table_group_tasks", options[
             "pypaimon.lerobot.tasks-table"])
-        self.assertEqual("default.table_group__info", options[
+        self.assertEqual("default.table_group_info", options[
             "pypaimon.lerobot.info-table"])
 
         episode = _catalog_rows(
-            self.connection, "table_group__episodes")[0]
+            self.connection, "table_group_episodes")[0]
         self.assertEqual({
             "episode_index": 0,
             "dataset_from_index": 0,
@@ -113,10 +113,10 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual([{
             "task_index": 0,
             "task": "pick",
-        }], _catalog_rows(self.connection, "table_group__tasks"))
+        }], _catalog_rows(self.connection, "table_group_tasks"))
         info = {
             row["key"]: json.loads(row["value"])
-            for row in _catalog_rows(self.connection, "table_group__info")
+            for row in _catalog_rows(self.connection, "table_group_info")
         }
         self.assertEqual(10, info["fps"])
         self.assertEqual(1, info["total_frames"])
@@ -174,18 +174,18 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual([
             {"subtask_index": 0, "subtask": "approach"},
             {"subtask_index": 1, "subtask": "grasp"},
-        ], _catalog_rows(self.connection, "with_subtasks__subtasks"))
+        ], _catalog_rows(self.connection, "with_subtasks_subtasks"))
         for component, expected in (
                 ("tasks", ["pick"]),
                 ("subtasks", ["approach", "grasp"])):
             table = self.connection.catalog.get_table(
                 self.connection._identifier(
-                    "with_subtasks__%s" % component))
+                    "with_subtasks_%s" % component))
             data = _restore_pandas_metadata(
                 table, _read_arrow(table)).to_pandas()
             self.assertEqual(expected, data.index.tolist())
         self.assertEqual(
-            "default.with_subtasks__subtasks",
+            "default.with_subtasks_subtasks",
             frames.raw_table.table_schema.options[
                 "pypaimon.lerobot.subtasks-table"],
         )
@@ -384,7 +384,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         PaimonLeRobotWriter(
             self.connection, "inconsistent", fps=10, features=features)
         tasks = self.connection.catalog.get_table(
-            self.connection._identifier("inconsistent__tasks"))
+            self.connection._identifier("inconsistent_tasks"))
         _append_arrow(tasks, pa.Table.from_pylist([{
             "task_index": 0,
             "task": "pick",
@@ -540,7 +540,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual([
             {"task_index": 0, "task": "pick"},
             {"task_index": 1, "task": "place"},
-        ], _catalog_rows(self.connection, "robot_data__tasks"))
+        ], _catalog_rows(self.connection, "robot_data_tasks"))
 
     def test_multiple_flushes_append_rows_and_replace_info(self):
         writer = PaimonLeRobotWriter(
@@ -565,10 +565,10 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         writer.finalize()
 
         self.assertEqual(2, len(_catalog_rows(
-            self.connection, "multiple_flushes__episodes")))
+            self.connection, "multiple_flushes_episodes")))
         self.assertEqual(2, len(_catalog_rows(
-            self.connection, "multiple_flushes__tasks")))
-        info_rows = _catalog_rows(self.connection, "multiple_flushes__info")
+            self.connection, "multiple_flushes_tasks")))
+        info_rows = _catalog_rows(self.connection, "multiple_flushes_info")
         self.assertEqual(len({row["key"] for row in info_rows}),
                          len(info_rows))
         info = {
@@ -609,9 +609,9 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
 
         options = self.connection.get_table(
             "stats").raw_table.table_schema.options
-        self.assertEqual("default.stats__stats", options[
+        self.assertEqual("default.stats_stats", options[
             "pypaimon.lerobot.stats-table"])
-        episodes = _catalog_rows(self.connection, "stats__episodes")
+        episodes = _catalog_rows(self.connection, "stats_episodes")
         native_episodes = [
             compute_episode_stats(
                 {"action": np.asarray(values, dtype=np.float32)},
@@ -636,7 +636,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
 
         stats = {
             row["key"]: json.loads(row["value"])
-            for row in _catalog_rows(self.connection, "stats__stats")
+            for row in _catalog_rows(self.connection, "stats_stats")
         }
         expected_stats = aggregate_stats(native_episodes)["action"]
         for stat, expected in expected_stats.items():
@@ -700,7 +700,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         writer.finalize()
 
         episodes = self.connection.catalog.get_table(
-            self.connection._identifier("projected_metadata__episodes"))
+            self.connection._identifier("projected_metadata_episodes"))
         projected = _read_arrow(
             episodes, ["episode_index", "stats/index/count"])
         self.assertEqual(
@@ -738,14 +738,14 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         image = Image.open(io.BytesIO(blobs["observation.image"][0]))
         self.assertEqual((5, 4), image.size)
         self.assertEqual((73, 73, 73), image.getpixel((0, 0)))
-        episode = _catalog_rows(self.connection, "images__episodes")[0]
+        episode = _catalog_rows(self.connection, "images_episodes")[0]
         np.testing.assert_allclose(
             np.full((3, 1, 1), 73 / 255.0),
             episode["stats/observation.image/mean"],
         )
         stats = {
             row["key"]: json.loads(row["value"])
-            for row in _catalog_rows(self.connection, "images__stats")
+            for row in _catalog_rows(self.connection, "images_stats")
         }
         np.testing.assert_allclose(
             np.full((3, 1, 1), 73 / 255.0),
@@ -843,10 +843,10 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
                     [first.tolist(), (~first).tolist()],
                     [row["observation.flags"] for row in rows])
                 episode = _catalog_rows(
-                    self.connection, name + "__episodes")[0]
+                    self.connection, name + "_episodes")[0]
                 stats = {
                     row["key"]: json.loads(row["value"])
-                    for row in _catalog_rows(self.connection, name + "__stats")
+                    for row in _catalog_rows(self.connection, name + "_stats")
                 }["observation.flags"]
                 for stat, expected in (("min", np.zeros(shape, dtype=bool)),
                                        ("max", np.ones(shape, dtype=bool))):
@@ -886,10 +886,10 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
                     list(values),
                     [row["observation.counter"] for row in rows])
                 episode = _catalog_rows(
-                    self.connection, table_name + "__episodes")[0]
+                    self.connection, table_name + "_episodes")[0]
                 stats = {
                     row["key"]: json.loads(row["value"])
-                    for row in _catalog_rows(self.connection, table_name + "__stats")
+                    for row in _catalog_rows(self.connection, table_name + "_stats")
                 }["observation.counter"]
                 for stat, expected in (("min", min(values)),
                                        ("max", max(values))):
@@ -957,7 +957,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual([
             {"task_index": 0, "task": "keep"},
             {"task_index": 1, "task": "also keep"},
-        ], _catalog_rows(self.connection, "rerecord__tasks"))
+        ], _catalog_rows(self.connection, "rerecord_tasks"))
         with self.assertRaisesRegex(RuntimeError, "after finalize"):
             writer.add_frame({
                 "action": np.array([2.0], dtype=np.float32),

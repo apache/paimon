@@ -357,6 +357,10 @@ def _plan_merge(plans, fps_mode="dataset"):
         }
         for ordinal, plan in enumerate(plans)
     ], schema=_DATASETS_SCHEMA)
+    # Source metadata already lives in the Dataset row. Only the frame,
+    # Episode, and Dataset tables need physical storage for merged imports.
+    metadata["source_local_metadata"] = True
+    metadata["fps_mode"] = fps_mode
     info.update(total_frames=frame_offset, total_episodes=episode_offset,
                 total_tasks=metadata["tasks_table"].num_rows,
                 splits={"train": "0:%d" % episode_offset})
@@ -419,15 +423,17 @@ def _transform_frames(plan, batch, episode):
             values = column
         else:
             mapping = plan[name]
-            values = pa.array([
+            mapped = pa.array([
                 None if name == "subtask_index" and value is None
                 else mapping[value]
                 for value in column.to_pylist()
             ], type=column.type)
+            values = column
         batch = batch.set_column(batch.schema.get_field_index(name), batch.schema.field(name), values)
-        stat_values = ([value for value in values.to_pylist()
+        stat_column = mapped if name in ("task_index", "subtask_index") else values
+        stat_values = ([value for value in stat_column.to_pylist()
                         if value is not None]
-                       if values.null_count else values.to_numpy())
+                       if stat_column.null_count else stat_column.to_numpy())
         if len(stat_values) == 0:
             continue
         stats = _batch_stats(stat_values)

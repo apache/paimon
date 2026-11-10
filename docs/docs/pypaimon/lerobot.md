@@ -30,8 +30,10 @@ Import a LeRobot Dataset v3 table group, capture frames directly, or train from 
 
 `load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
 repository. It derives the schema from `meta/info.json` and writes one row per
-frame. The import creates `<table>__episodes`, `<table>__tasks`, `<table>__info`,
-and optional `<table>__stats` and `<table>__subtasks` companion tables. Task text
+frame. The supplied name is the table-group prefix: `robot_data` creates
+`robot_data_frames`, `robot_data_episodes`, `robot_data_tasks`, `robot_data_info`,
+and optional `robot_data_stats` and `robot_data_subtasks` tables. Existing groups
+remain readable through their stored table references. Task text
 remains in the task table; frames retain `task_index`. All imported tables use
 Data Evolution with row tracking.
 
@@ -76,28 +78,33 @@ conn.load_from_lerobot(
 )
 ```
 
-Each source has one row in `__datasets`. Its `info` JSON contains the original
+Merged imports create only `robot_all_frames`, `robot_all_episodes`, and
+`robot_all_datasets`. They do not create separate info, stats, tasks, or
+subtasks tables. The frame table keeps each source's `task_index` and
+`subtask_index`; the training reader resolves their text through
+`(dataset_index, task_index)` and `(dataset_index, subtask_index)`.
+
+Each source has one row in `_datasets`. Its `info` JSON contains the original
 `meta/info.json`, including FPS; there is no separate FPS column.
 The table contains `index`, `name`, `info`, `tasks`, `subtasks`,
 and `stats`. Source ranges are derived from the counts in each source's `info`.
 `dataset_names` supplies optional labels; omitted names are null, and duplicate
 labels do not merge sources. Frame and Episode `dataset_index` values reference
-`__datasets.index`. The pair `(dataset_index, episode_index)` identifies an
+`_datasets.index`. The pair `(dataset_index, episode_index)` identifies an
 original Episode. Frames keep a
 merged `index` and their original `source_index`. Source task/subtask ID-to-text
-mappings use the typed arrays of rows `__datasets.tasks` and `__datasets.subtasks`;
+mappings use the typed arrays of rows `_datasets.tasks` and `_datasets.subtasks`;
 stats remain JSON.
 
-Merged `__episodes` keeps typed Episode keys and frame ranges, with
+Merged `_episodes` keeps typed Episode keys and frame ranges, with
 `meta/`, `data/`, `videos/`, and `stats/` fields grouped into JSON columns.
 Grouped fields must use JSON-native Arrow types: null, boolean, integer,
 floating point, string, list, or struct, including nested combinations.
 Binary, temporal, decimal, map, and extension types are rejected before any
 target table is created. Other Episode extension fields are not imported.
 Control-field statistics reflect merged IDs; their original quantiles are
-omitted. Training reads skip `stats`; the group-level `__stats` table is
-unchanged. Repeated task/subtask text within one source is rejected before
-creating tables to avoid losing original frame IDs.
+omitted. Training reads skip `stats`. Repeated task/subtask text within one
+source is rejected before creating tables to avoid losing original frame IDs.
 
 Sources must share robot type and training features. By default they must also
 share FPS; `fps_mode="source"` permits mixed FPS and requires
@@ -140,11 +147,11 @@ this table group. Create a common named tag over the current component snapshots
 
 ```python
 tag = "train-2026-09-07"
-snapshots = conn.create_lerobot_tag("robot_data", tag)
-frames = conn.get_table("robot_data").scan(tag_name=tag).to_arrow()
+snapshots = conn.create_lerobot_tag("robot_data_frames", tag)
+frames = conn.get_table("robot_data_frames").scan(tag_name=tag).to_arrow()
 
 # Companion tables are ordinary Paimon tables, read with the same tag.
-info_table = conn.catalog.get_table("default.robot_data__info").copy(
+info_table = conn.catalog.get_table("default.robot_data_info").copy(
     {"scan.tag-name": tag})
 builder = info_table.new_read_builder()
 info_rows = builder.new_read().to_arrow(builder.new_scan().plan().splits())
@@ -189,10 +196,10 @@ The writer adds the standard `timestamp`, `frame_index`, `episode_index`,
 `index`, and `task_index` features itself.
 
 The writer preserves native LeRobot recording metadata in a managed Paimon
-table group. The named table stores frames, while `<table>__episodes`,
-`<table>__tasks`, `<table>__info`, and `<table>__stats` store episode
+table group. The named table stores frames, while `<table>_episodes`,
+`<table>_tasks`, `<table>_info`, and `<table>_stats` store episode
 boundaries, task labels, JSON-encoded dataset information, and global
-statistics. When `subtask_index` is declared, `<table>__subtasks` stores its
+statistics. When `subtask_index` is declared, `<table>_subtasks` stores its
 ordered text vocabulary. The root table's managed options identify these
 companions.
 
@@ -288,7 +295,7 @@ For map-style training, pass an image- or video-backed table group created by
 ```python
 from pypaimon.multimodal import PaimonLeRobotDataset
 
-table = conn.get_table("robot_data")
+table = conn.get_table("robot_data_frames")
 dataset = PaimonLeRobotDataset(
     table,
     tag_name=tag,
