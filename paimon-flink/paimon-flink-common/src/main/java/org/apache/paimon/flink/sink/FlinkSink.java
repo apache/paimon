@@ -67,6 +67,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEM
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_CPU;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_MANAGED_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_OFFHEAP_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
@@ -171,7 +172,8 @@ public abstract class FlinkSink<T> implements Serializable {
                 written,
                 options.get(SINK_WRITER_CPU),
                 options.get(SINK_WRITER_MEMORY),
-                options.get(SINK_WRITER_MANAGED_MEMORY));
+                options.get(SINK_WRITER_MANAGED_MEMORY),
+                options.get(SINK_WRITER_OFFHEAP_MEMORY));
 
         if (!table.primaryKeys().isEmpty() && options.get(PRECOMMIT_COMPACT)) {
             SingleOutputStreamOperator<Committable> beforeSort =
@@ -306,6 +308,15 @@ public abstract class FlinkSink<T> implements Serializable {
             double cpuCores,
             @Nullable MemorySize heapMemory,
             @Nullable MemorySize managedMemory) {
+        configureSlotSharingGroup(operator, cpuCores, heapMemory, managedMemory, null);
+    }
+
+    public static void configureSlotSharingGroup(
+            SingleOutputStreamOperator<?> operator,
+            double cpuCores,
+            @Nullable MemorySize heapMemory,
+            @Nullable MemorySize managedMemory,
+            @Nullable MemorySize offHeapMemory) {
         if (managedMemory != null) {
             checkArgument(
                     heapMemory != null,
@@ -316,6 +327,17 @@ public abstract class FlinkSink<T> implements Serializable {
                     managedMemory.getBytes() > 0,
                     "'%s' must be positive.",
                     SINK_WRITER_MANAGED_MEMORY.key());
+        }
+        if (offHeapMemory != null) {
+            checkArgument(
+                    heapMemory != null,
+                    "'%s' requires '%s' to configure the writer slot sharing group.",
+                    SINK_WRITER_OFFHEAP_MEMORY.key(),
+                    SINK_WRITER_MEMORY.key());
+            checkArgument(
+                    offHeapMemory.getBytes() > 0,
+                    "'%s' must be positive.",
+                    SINK_WRITER_OFFHEAP_MEMORY.key());
         }
         if (heapMemory == null) {
             return;
@@ -331,6 +353,11 @@ public abstract class FlinkSink<T> implements Serializable {
             builder.setManagedMemory(
                     new org.apache.flink.configuration.MemorySize(managedMemory.getBytes()));
         }
+        if (offHeapMemory != null) {
+            builder.setTaskOffHeapMemory(
+                    new org.apache.flink.configuration.MemorySize(offHeapMemory.getBytes()));
+        }
+
         operator.slotSharingGroup(builder.build());
     }
 

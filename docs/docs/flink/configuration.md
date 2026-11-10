@@ -91,6 +91,34 @@ buffers still use heap memory. The existing downstream slot sharing and explicit
 resource settings are unchanged. Leaving the new option unset preserves existing resource
 configuration, including default-slot managed allocation.
 
+### Task Off-Heap Memory for an Explicit Writer Resource Group
+
+Use `sink.writer-offheap-memory` to request task off-heap memory for the writer slot sharing
+group. This optional budget must be positive and requires `sink.writer-memory`; `sink.writer-cpu`
+retains its default of one core unless explicitly configured. Memory units such as `kb`, `mb`,
+and `gb` are supported, and values retain their byte precision.
+
+```sql
+INSERT INTO paimon_table /*+ OPTIONS(
+    'sink.writer-memory' = '512 mb',
+    'sink.writer-offheap-memory' = '128 mb',
+    'sink.writer-managed-memory' = '64 mb'
+) */
+SELECT * FROM source_table;
+```
+
+Task off-heap memory and managed memory are separate resource budgets. The off-heap budget is
+a request for each shared slot of the writer group, not a total across writer subtasks or a
+guaranteed allocation to the writer alone. It does not switch writer buffers to off-heap memory
+or enable the managed allocator. Allocation follows Flink's
+[fine-grained resource management](https://nightlies.apache.org/flink/flink-docs-release-1.20/docs/deployment/finegrained_resource/)
+requirements and available resources.
+
+This option applies to ordinary sink writers and combined CDC multi-table writers. Existing
+downstream slot sharing is preserved; a committer with its own explicit resource group does not
+receive the writer's off-heap budget. Leaving the option unset preserves existing resource
+configuration.
+
 ## Setting dynamic options
 
 Dynamic options tune a query or a subsequently submitted job without changing the options
