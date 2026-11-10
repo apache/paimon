@@ -2368,6 +2368,23 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
             },
         )
 
+    def test_overwrite_on_equal_ts(self):
+        for setting in (None, "false", "true"):
+            with self.subTest(setting=setting):
+                settings = {} if setting is None else {
+                    "fields.field0." + CoreOptions.MERGE_MAP_OVERWRITE_ON_EQUAL_TS: setting}
+                agg = self._make(options=CoreOptions(Options(settings)))
+                old = {"k": self.row("old", "100")}
+                new = {"k": self.row("new", "100")}
+                self.assertEqual(agg.agg(old, new), new if setting == "true" else old)
+                self.assertEqual(agg.agg(new, old), old if setting == "true" else new)
+                self.assertEqual(agg.agg(old, {"k": self.row("older", "090")}), old)
+                self.assertEqual(agg.agg(old, {"k": self.row("newer", "110")}),
+                                 {"k": self.row("newer", "110")})
+                self.assertEqual(agg.agg(old, {"k": self.row("no-time", None)}), old)
+                self.assertEqual(agg.agg(old, None), old)
+                self.assertEqual(agg.agg(old, {"k": None}), {})
+
     def test_field_merge_map_with_key_time_agg_using_default_ts(self):
         agg = self._make()
         self.assertIsInstance(agg, FieldMergeMapWithKeyTimeAgg)

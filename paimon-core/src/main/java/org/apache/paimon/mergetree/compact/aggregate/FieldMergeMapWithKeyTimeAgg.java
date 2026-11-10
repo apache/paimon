@@ -34,15 +34,22 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
     private final InternalArray.ElementGetter keyGetter;
     private final InternalArray.ElementGetter valueGetter;
     private final int timestampFieldIndex;
+    private final boolean overwriteOnEqualTs;
 
     /** See {@link BinaryMapKeys}: a binary key has no value equality of its own. */
     private final boolean binaryKey;
 
     public FieldMergeMapWithKeyTimeAgg(String name, MapType dataType, int timestampFieldIndex) {
+        this(name, dataType, timestampFieldIndex, false);
+    }
+
+    public FieldMergeMapWithKeyTimeAgg(
+            String name, MapType dataType, int timestampFieldIndex, boolean overwriteOnEqualTs) {
         super(name, dataType);
         this.keyGetter = InternalArray.createElementGetter(dataType.getKeyType());
         this.valueGetter = InternalArray.createElementGetter(dataType.getValueType());
         this.timestampFieldIndex = timestampFieldIndex;
+        this.overwriteOnEqualTs = overwriteOnEqualTs;
         this.binaryKey = BinaryMapKeys.isBinary(dataType.getKeyType());
     }
 
@@ -107,7 +114,8 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
                 } else {
                     String newTs = newRow.getString(timestampFieldIndex).toString();
                     String existingTs = existingRow.getString(timestampFieldIndex).toString();
-                    if (newTs.compareTo(existingTs) > 0) {
+                    int comparison = newTs.compareTo(existingTs);
+                    if (comparison > 0 || (comparison == 0 && overwriteOnEqualTs)) {
                         resultMap.put(key, newRow);
                     }
                 }

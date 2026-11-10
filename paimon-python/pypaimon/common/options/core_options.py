@@ -165,6 +165,7 @@ class CoreOptions:
     NESTED_SEQUENCE_FIELD = "nested-sequence-field"
     COUNT_LIMIT = "count-limit"
     MERGE_MAP_TS_FIELD = "ts-field"
+    MERGE_MAP_OVERWRITE_ON_EQUAL_TS = "overwrite-on-equal-ts"
     MAP_STORAGE_LAYOUT = "map.storage-layout"
     MAP_SHARED_SHREDDING_MAX_COLUMNS = "map.shared-shredding.max-columns"
     MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY = \
@@ -2124,6 +2125,15 @@ class CoreOptions:
             )
             .string_type()
             .no_default_value()
+        )
+
+    def field_merge_map_overwrite_on_equal_ts(self, field_name: str) -> bool:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.MERGE_MAP_OVERWRITE_ON_EQUAL_TS}'
+            )
+            .boolean_type()
+            .default_value(False)
         )
 
     def map_storage_layout(self, field_name: str) -> str:

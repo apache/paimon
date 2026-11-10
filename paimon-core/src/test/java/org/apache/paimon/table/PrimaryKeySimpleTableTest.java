@@ -25,6 +25,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -94,6 +95,7 @@ import org.apache.commons.math3.random.RandomDataGenerator;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -157,6 +159,68 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
 public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    public void testMergeMapOverwriteOnEqualTs(boolean partialUpdate, boolean overwrite)
+            throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.MAP(
+                                    DataTypes.STRING(),
+                                    DataTypes.ROW(
+                                            DataTypes.FIELD(4, "v", DataTypes.STRING()),
+                                            DataTypes.FIELD(5, "ts", DataTypes.STRING()))),
+                            DataTypes.BIGINT()
+                        },
+                        new String[] {"pt", "a", "attrs", "seq"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(MERGE_ENGINE, partialUpdate ? PARTIAL_UPDATE : AGGREGATE);
+                            conf.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 3);
+                            conf.set("fields.attrs.aggregate-function", "merge_map_with_keytime");
+                            conf.set(
+                                    "fields.attrs." + CoreOptions.MERGE_MAP_OVERWRITE_ON_EQUAL_TS,
+                                    String.valueOf(overwrite));
+                            if (partialUpdate) {
+                                conf.set("fields.seq.sequence-group", "attrs");
+                            } else {
+                                conf.set("fields.seq.aggregate-function", "max");
+                            }
+                        },
+                        rowType);
+        Function<String, GenericMap> attrs =
+                value ->
+                        new GenericMap(
+                                Collections.singletonMap(
+                                        BinaryString.fromString("k"),
+                                        GenericRow.of(
+                                                BinaryString.fromString(value),
+                                                BinaryString.fromString("100"))));
+        Function<InternalRow, String> value =
+                row -> row.getMap(2).valueArray().getRow(0, 2).getString(0).toString();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 1, attrs.apply("buffer-old"), 1L));
+            write.write(GenericRow.of(1, 1, attrs.apply("buffer-new"), 2L));
+            commit.commit(0, write.prepareCommit(false, 0));
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), value))
+                    .containsExactly(overwrite ? "buffer-new" : "buffer-old");
+            write.write(GenericRow.of(1, 1, attrs.apply("file-new"), 3L));
+            commit.commit(1, write.prepareCommit(false, 1));
+            String expected = overwrite ? "file-new" : "buffer-old";
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), value))
+                    .containsExactly(expected);
+            write.compact(binaryRow(1), 0, true);
+            commit.commit(2, write.prepareCommit(true, 2));
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), value))
+                    .containsExactly(expected);
+        }
+    }
 
     @Test
     public void testNullablePrimaryKey() throws Exception {
