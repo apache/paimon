@@ -25,6 +25,7 @@ import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
+import org.apache.paimon.flink.utils.OperatorUidAssigner;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -56,6 +57,11 @@ final class PostponeMergeOnRead {
     static final int WRITER_LOCAL_ORDER = 5;
     static final int ROW_KIND = 6;
     static final int VALUE = 7;
+
+    static final String MERGE_INPUTS_NAME = "Postpone merge inputs";
+    static final String MERGE_INPUT_NAME = "Postpone merge input";
+    static final String MERGE_ON_READ_NAME = "Postpone merge on read";
+    static final String EMPTY_SOURCE_NAME = "Postpone merge empty source";
 
     static final byte REAL_SPLIT_KIND = 0;
     static final byte POSTPONE_RECORD_KIND = 1;
@@ -99,21 +105,23 @@ final class PostponeMergeOnRead {
             TypeInformation<RowData> outputType,
             @Nullable NestedProjectedRowData outerProject,
             @Nullable Long limit,
-            boolean blobAsDescriptor) {
+            boolean blobAsDescriptor,
+            OperatorUidAssigner uids) {
         PostponeMergeInputSource inputSource = new PostponeMergeInputSource(plan);
-        DataStream<Split> inputs =
+        SingleOutputStreamOperator<Split> inputs =
                 env.fromSource(
                                 new PaimonDataStreamSource<>(inputSource, table),
                                 WatermarkStrategy.noWatermarks(),
                                 sourceName + " - Postpone merge inputs",
                                 new JavaTypeInfo<>(Split.class))
                         .forceNonParallel();
+        uids.assign(inputs, MERGE_INPUTS_NAME);
 
         DataStream<Split> distributedInputs = FlinkStreamPartitioner.rebalance(inputs, parallelism);
         SingleOutputStreamOperator<InternalRow> carriers =
                 distributedInputs
                         .transform(
-                                "Postpone merge input",
+                                MERGE_INPUT_NAME,
                                 InternalTypeInfo.fromRowType(CARRIER_TYPE),
                                 new PostponeMergeInputOperator(
                                         readBuilder,
@@ -121,22 +129,26 @@ final class PostponeMergeOnRead {
                                         plan.mergeReadType(),
                                         plan.bucketRouter()))
                         .setParallelism(parallelism);
+        uids.assign(carriers, MERGE_INPUT_NAME);
 
         DataStream<InternalRow> partitionedCarriers =
                 FlinkStreamPartitioner.partition(
                         carriers, new CarrierChannelComputer(), parallelism);
-        return partitionedCarriers
-                .transform(
-                        "Postpone merge on read",
-                        outputType,
-                        new PostponeMergeOperator(
-                                readBuilder,
-                                plan.resultReadType(),
-                                table.options(),
-                                outerProject,
-                                limit,
-                                blobAsDescriptor))
-                .setParallelism(parallelism);
+        SingleOutputStreamOperator<RowData> merged =
+                partitionedCarriers
+                        .transform(
+                                MERGE_ON_READ_NAME,
+                                outputType,
+                                new PostponeMergeOperator(
+                                        readBuilder,
+                                        plan.resultReadType(),
+                                        table.options(),
+                                        outerProject,
+                                        limit,
+                                        blobAsDescriptor))
+                        .setParallelism(parallelism);
+        uids.assign(merged, MERGE_ON_READ_NAME);
+        return merged;
     }
 
     private static class CarrierChannelComputer implements ChannelComputer<InternalRow> {
