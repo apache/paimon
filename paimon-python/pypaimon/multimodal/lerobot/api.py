@@ -174,7 +174,6 @@ def load_from_lerobot(
                 "subtasks": _vocabulary_rows(metadata["subtasks_table"], "subtask"),
                 "stats": _stats_json(metadata["stats_table"]),
             }], schema=_DATASETS_SCHEMA)
-            metadata["source_local_metadata"] = True
             metadata["fps_mode"] = "dataset"
             _import_dataset(
                 connection,
@@ -304,8 +303,7 @@ def _create_target_table(
         if str(create_options.get("bucket", "-1")).strip() != "-1":
             raise ValueError(_VIDEO_LAYOUT_ERROR)
         create_options["video-frame-field"] = ",".join(video_fields)
-    managed_options = _managed_table_options(
-        connection._identifier(table_name), metadata)
+    managed_options = _managed_table_options(connection._identifier(table_name))
     reserved_options = set(_COMPANION_OPTION_KEYS.values()).intersection(
         create_options)
     if "pypaimon.lerobot.fps-mode" in create_options:
@@ -315,8 +313,7 @@ def _create_target_table(
             "%s are managed by load_from_lerobot."
             % sorted(reserved_options))
     create_options.update(managed_options)
-    if metadata.get("source_local_metadata"):
-        create_options["pypaimon.lerobot.fps-mode"] = metadata["fps_mode"]
+    create_options["pypaimon.lerobot.fps-mode"] = metadata.get("fps_mode", "dataset")
     frames_name = _companion_identifier(connection._identifier(table_name), "_frames")
     try:
         table = connection.create_table(

@@ -132,38 +132,6 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
                 "table_group", "training")),
         )
 
-    def test_resumes_legacy_metadata_tables(self):
-        features = {"action": {"dtype": "float32", "shape": (1,), "names": None}}
-        original = PaimonLeRobotWriter._writer_metadata
-
-        def legacy_metadata(*args):
-            metadata = original(*args)
-            metadata.pop("datasets_table")
-            metadata.pop("source_local_metadata")
-            return metadata
-
-        with patch.object(PaimonLeRobotWriter, "_writer_metadata",
-                          side_effect=legacy_metadata):
-            writer = PaimonLeRobotWriter(
-                self.connection, "legacy", fps=10, features=features)
-            writer.add_frame({"action": np.array([1.0], dtype=np.float32),
-                              "task": "pick"})
-            writer.save_episode()
-            writer.finalize()
-
-        self.assertEqual(
-            {"legacy", "legacy_episodes", "legacy_tasks", "legacy_info",
-             "legacy_stats"},
-            set(self.connection.catalog.list_tables("default")))
-        resumed = PaimonLeRobotWriter(
-            self.connection, "legacy", fps=10, features=features)
-        self.assertEqual(1, resumed.num_episodes)
-        resumed.add_frame({"action": np.array([2.0], dtype=np.float32),
-                           "task": "place"})
-        resumed.save_episode()
-        resumed.finalize()
-        self.assertEqual(2, len(_catalog_rows(self.connection, "legacy_tasks")))
-
     def test_writes_and_resumes_frame_subtasks(self):
         features = {
             "action": {

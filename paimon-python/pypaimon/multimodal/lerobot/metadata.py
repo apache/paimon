@@ -35,15 +35,10 @@ from pypaimon.multimodal.hdf5 import _SnapshotRecorder
 from pypaimon.multimodal.table import _target_schema
 
 
-_PANDAS_METADATA_OPTION = "pypaimon.lerobot.pandas-metadata"
 _EPISODE_FPS_COLUMN = "fps"
 _TABLE_SUFFIXES = {
-    "info": "_info",
     "datasets": "_datasets",
-    "stats": "_stats",
     "episodes": "_episodes",
-    "tasks": "_tasks",
-    "subtasks": "_subtasks",
 }
 _COMPANION_OPTION_KEYS = {
     name: "pypaimon.lerobot.%s-table" % name
@@ -53,10 +48,6 @@ _COMPANION_OPTION_KEYS = {
 _EMPTY_TASKS_SCHEMA = pa.schema([
     pa.field("task_index", pa.int64(), nullable=False),
     pa.field("task", pa.string(), nullable=False),
-])
-_EMPTY_SUBTASKS_SCHEMA = pa.schema([
-    pa.field("subtask_index", pa.int64(), nullable=False),
-    pa.field("subtask", pa.string(), nullable=False),
 ])
 _EMPTY_EPISODES_SCHEMA = pa.schema([
     pa.field("episode_index", pa.int64(), nullable=False),
@@ -199,22 +190,13 @@ def _quote_identifier_part(value):
     return "`%s`" % value if "." in value else value
 
 
-def _managed_table_options(frames_identifier, metadata=None):
+def _managed_table_options(frames_identifier):
     identifier = Identifier.from_string(str(frames_identifier))
     if identifier.get_branch_name() is not None:
         raise ValueError(
             "LeRobot import does not support table branches.")
     result = {}
     for name, suffix in _TABLE_SUFFIXES.items():
-        if metadata is not None and metadata.get("source_local_metadata") \
-                and name not in ("datasets", "episodes"):
-            continue
-        if name == "datasets" and (metadata is None or
-                                   metadata.get("datasets_table") is None):
-            continue
-        if metadata is not None and name in ("stats", "subtasks") \
-                and metadata[name + "_table"] is None:
-            continue
         result[_COMPANION_OPTION_KEYS[name]] = _companion_identifier(
             frames_identifier, suffix)
     return result
@@ -223,13 +205,9 @@ def _managed_table_options(frames_identifier, metadata=None):
 def _companion_table_identifiers(frames_table):
     options = frames_table.table_schema.options
     identifiers = {}
-    has_datasets = bool(options.get(_COMPANION_OPTION_KEYS["datasets"]))
     for name, key in _COMPANION_OPTION_KEYS.items():
         value = options.get(key)
         if not value:
-            if name in ("datasets", "stats", "subtasks") \
-                    or (has_datasets and name in ("info", "tasks")):
-                continue
             raise ValueError(
                 "LeRobot table %s is missing managed option %s."
                 % (frames_table.identifier, key))
@@ -238,15 +216,8 @@ def _companion_table_identifiers(frames_table):
 
 
 def _prepare_metadata_tables(connection, frames_table, metadata):
-    schemas = {"episodes": metadata["episodes_schema"]}
-    if not metadata.get("source_local_metadata"):
-        schemas.update(info=metadata["info_table"].schema,
-                       tasks=metadata["tasks_table"].schema)
-        for name in ("stats", "subtasks"):
-            if metadata[name + "_table"] is not None:
-                schemas[name] = metadata[name + "_table"].schema
-    if metadata.get("datasets_table") is not None:
-        schemas["datasets"] = metadata["datasets_table"].schema
+    schemas = {"episodes": metadata["episodes_schema"],
+               "datasets": metadata["datasets_table"].schema}
     identifiers = _companion_table_identifiers(frames_table)
     tables = {}
     for name, schema in schemas.items():
@@ -256,10 +227,6 @@ def _prepare_metadata_tables(connection, frames_table, metadata):
             "row-tracking.enabled": "true",
             "data-evolution.enabled": "true",
         }
-        pandas_metadata = (schema.metadata or {}).get(b"pandas")
-        if pandas_metadata is not None:
-            options[_PANDAS_METADATA_OPTION] = pandas_metadata.decode(
-                "utf-8")
         paimon_schema = PaimonSchema.from_pyarrow_schema(
             schema,
             options=options,
@@ -276,16 +243,6 @@ def _prepare_metadata_tables(connection, frames_table, metadata):
     return tables
 
 
-def _restore_pandas_metadata(table, data):
-    pandas_metadata = table.table_schema.options.get(
-        _PANDAS_METADATA_OPTION)
-    if pandas_metadata is None:
-        return data
-    metadata = dict(data.schema.metadata or {})
-    metadata[b"pandas"] = pandas_metadata.encode("utf-8")
-    return data.replace_schema_metadata(metadata)
-
-
 def _commit_metadata(
         connection,
         tables,
@@ -299,13 +256,9 @@ def _commit_metadata(
     component_snapshots = [
         (tables["episodes"].identifier, episodes_snapshot_id),
     ]
-    for name in ("tasks", "subtasks", "stats", "info", "datasets"):
-        if name not in tables:
-            continue
-        snapshot_id = _append_arrow(tables[name], metadata[name + "_table"],
-                                    allow_empty=name == "subtasks")
-        _require_initial_snapshot(name, snapshot_id)
-        component_snapshots.append((tables[name].identifier, snapshot_id))
+    snapshot_id = _append_arrow(tables["datasets"], metadata["datasets_table"])
+    _require_initial_snapshot("datasets", snapshot_id)
+    component_snapshots.append((tables["datasets"].identifier, snapshot_id))
     frames_table = connection.catalog.get_table(frames_identifier)
     frames_snapshot_id = _build_initial_btree(
         frames_table, "index", frames_snapshot_id)

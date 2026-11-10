@@ -33,7 +33,6 @@ repository. It derives the schema from `meta/info.json` and writes one row per
 frame. The supplied name is the table-group prefix: `robot_data` creates
 `robot_data_frames`, `robot_data_episodes`, and `robot_data_datasets`.
 `robot_data_datasets` stores source info, stats, task text, and subtask text.
-Existing groups remain readable through their stored table references.
 Frames retain `task_index`. All imported tables use Data Evolution with row tracking.
 
 Frames with a null `subtask_index` are imported. `PaimonLeRobotDataset[index]`
@@ -249,12 +248,11 @@ instead of silently dropping its frames.
 The writer creates a missing table group and appends to an existing compatible
 group. Before writing, it requires the root columns, order, Arrow types,
 nullability, LeRobot feature metadata, managed options, companion schemas, and
-component counts to match. A legacy frame-only writer table is not implicitly
-migrated. On resume, new `index` and `episode_index` values continue after the
-published metadata; task and subtask mappings and global statistics come from
-the Dataset row in new groups. The episode-local `frame_index` starts again at zero. Snapshot
-properties retain only the next global frame and episode indices; resume does
-not scan frame data. Existing groups with separate metadata tables remain writable.
+component counts to match. On resume, new `index` and `episode_index` values
+continue after the published metadata; task and subtask mappings and global
+statistics come from the Dataset row. The episode-local `frame_index` starts
+again at zero. Snapshot properties retain only the next global frame and
+episode indices; resume does not scan frame data.
 
 Each flush appends Episodes, replaces the Dataset row, and commits frames last. Paimon
 does not provide a transaction across these tables. A component commit

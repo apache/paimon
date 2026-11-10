@@ -42,11 +42,9 @@ from pypaimon.multimodal.lerobot.aggregate import (
 )
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.lerobot.metadata import (
-    _PANDAS_METADATA_OPTION,
     _dataset_fps,
     _positive_integer,
     _companion_table_identifiers,
-    _restore_pandas_metadata,
     _tag_snapshot_id,
     _validate_tag_name,
 )
@@ -1068,66 +1066,36 @@ def _load_dataset(table, tag_name):
     catalog = table.catalog
     frames = _component_table(catalog, raw_table, tag_name)
     source_local_layout = "dataset_index" in _target_schema(frames).names
-    datasets = None
-    source_rows = None
-    if "datasets" in identifiers:
-        datasets_table = _component_table(
-            catalog, catalog.get_table(identifiers["datasets"]), tag_name)
-        projection = [name for name in _target_schema(datasets_table).names
-                      if name not in ("source_tasks", "source_subtasks",
-                                      "episodes_schema_json", "tasks_json", "subtasks_json")
-                      and not name.endswith("_ipc")]
-        dataset_rows = _read_arrow(datasets_table, projection)
-        source_rows = dataset_rows.sort_by(
-            "index" if "index" in dataset_rows.column_names else "dataset_index").to_pylist()
-        if source_local_layout:
-            datasets = [{key: value for key, value in row.items()
-                         if key not in ("tasks", "subtasks", "stats")}
-                        for row in source_rows]
+    datasets_table = _component_table(
+        catalog, catalog.get_table(identifiers["datasets"]), tag_name)
+    source_rows = _read_arrow(datasets_table, [
+        "index", "name", "info", "tasks", "subtasks", "stats",
+    ]).sort_by("index").to_pylist()
+    datasets = ([{key: value for key, value in row.items()
+                  if key not in ("tasks", "subtasks", "stats")}
+                 for row in source_rows] if source_local_layout else None)
     episodes_table = _component_table(
         catalog, catalog.get_table(identifiers["episodes"]), tag_name)
     episodes = _episode_dataset(episodes_table, datasets)
-    source_vocabulary_maps = None
-    if "tasks" in identifiers:
-        tasks_table = _component_table(
-            catalog, catalog.get_table(identifiers["tasks"]), tag_name)
-        tasks = _component_dataframe(tasks_table, "task_index")
-    else:
-        tasks, task_maps = _source_vocabulary(source_rows, "task")
-        if source_local_layout:
-            source_vocabulary_maps = {"task_index": task_maps}
-    subtasks = None
-    if "subtasks" in identifiers:
-        subtasks_table = _component_table(
-            catalog, catalog.get_table(identifiers["subtasks"]), tag_name)
-        subtasks = _component_dataframe(subtasks_table, "subtask_index")
-    elif source_rows is not None:
-        subtasks, subtask_maps = _source_vocabulary(source_rows, "subtask")
-        if source_vocabulary_maps is not None and subtask_maps is not None:
-            source_vocabulary_maps["subtask_index"] = subtask_maps
+    tasks, task_maps = _source_vocabulary(source_rows, "task")
+    source_vocabulary_maps = ({"task_index": task_maps}
+                              if source_local_layout else None)
+    subtasks, subtask_maps = _source_vocabulary(source_rows, "subtask")
+    if source_vocabulary_maps is not None and subtask_maps is not None:
+        source_vocabulary_maps["subtask_index"] = subtask_maps
 
-    if "info" in identifiers:
-        info = _metadata_object(_component_table(
-            catalog, catalog.get_table(identifiers["info"]), tag_name), "info")
-    else:
-        info = (json.loads(source_rows[0]["info"])
-                if not source_local_layout else _merged_source_info(
-                    source_rows, tasks, subtasks,
-                    raw_table.table_schema.options.get(
-                        "pypaimon.lerobot.fps-mode", "dataset")))
+    info = (json.loads(source_rows[0]["info"])
+            if not source_local_layout else _merged_source_info(
+                source_rows, tasks, subtasks,
+                raw_table.table_schema.options.get(
+                    "pypaimon.lerobot.fps-mode", "dataset")))
     for feature in info.get("features", {}).values():
         feature["shape"] = tuple(feature["shape"])
-    stats = None
-    if "stats" in identifiers:
-        stats = _numpy_stats(_metadata_object(_component_table(
-            catalog, catalog.get_table(identifiers["stats"]), tag_name),
-            "stats"))
-    elif "info" not in identifiers:
-        if not source_local_layout:
-            value = source_rows[0]["stats"]
-            stats = _numpy_stats(json.loads(value)) if value is not None else None
-        else:
-            stats = _merged_source_stats(source_rows, episodes_table)
+    if source_local_layout:
+        stats = _merged_source_stats(source_rows, episodes_table)
+    else:
+        value = source_rows[0]["stats"]
+        stats = _numpy_stats(json.loads(value)) if value is not None else None
     metadata = _PaimonLeRobotMetadata(
         str(table.identifier), tag_name, info, stats, episodes, tasks,
         subtasks, datasets)
@@ -1142,7 +1110,7 @@ def _source_vocabulary(sources, singular):
     field = singular + "s"
     index = singular + "_index"
     if not sources:
-        raise ValueError("LeRobot source Datasets are required without %s table." % field)
+        raise ValueError("LeRobot Dataset metadata is required for %s." % field)
     values = [source.get(field) for source in sources]
     if all(value is None for value in values) and singular == "subtask":
         return None, None
@@ -1173,7 +1141,7 @@ def _source_vocabulary(sources, singular):
 
 def _merged_source_info(sources, tasks, subtasks, fps_mode):
     if not sources:
-        raise ValueError("LeRobot source Datasets are required without info table.")
+        raise ValueError("LeRobot Dataset metadata is required for info.")
     infos = []
     for ordinal, source in enumerate(sources):
         try:
@@ -1317,33 +1285,6 @@ def _episode_dataset(table, datasets=None):
     else:
         data = data.sort_by("episode_index")
     return Dataset(data)
-
-
-def _component_dataframe(table, index_field):
-    data = _read_arrow(table).sort_by(index_field)
-    frame = _restore_pandas_metadata(table, data).to_pandas()
-    if table.table_schema.options.get(_PANDAS_METADATA_OPTION) is None:
-        label = index_field[:-len("_index")]
-        if label in frame.columns:
-            frame = frame.set_index(label)
-    return frame
-
-
-def _metadata_object(table, name):
-    result = {}
-    for row in _read_arrow(table).to_pylist():
-        key = row.get("key")
-        if not isinstance(key, str) or key in result:
-            raise ValueError(
-                "Paimon LeRobot %s metadata contains an invalid key."
-                % name)
-        try:
-            result[key] = json.loads(row.get("value"))
-        except (TypeError, ValueError) as error:
-            raise ValueError(
-                "Paimon LeRobot %s metadata value for %r is invalid JSON."
-                % (name, key)) from error
-    return result
 
 
 def _numpy_stats(value):

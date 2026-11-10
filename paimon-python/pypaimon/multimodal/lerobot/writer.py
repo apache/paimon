@@ -39,7 +39,6 @@ from pypaimon.multimodal.lerobot.metadata import (
     _append_arrow,
     _companion_table_identifiers,
     _managed_table_options,
-    _metadata_table,
     _json_value,
     _overwrite_arrow,
     _prepare_metadata_tables,
@@ -144,22 +143,6 @@ def _episode_schema(features):
     return pa.schema(fields)
 
 
-def _metadata_values(table, component):
-    result = {}
-    for row in _read_arrow(table).to_pylist():
-        if row["key"] in result:
-            raise ValueError(
-                "Existing LeRobot %s metadata repeats key %r."
-                % (component, row["key"]))
-        try:
-            result[row["key"]] = json.loads(row["value"])
-        except (TypeError, ValueError) as error:
-            raise ValueError(
-                "Existing LeRobot %s metadata is invalid."
-                % component) from error
-    return result
-
-
 def _image_stats(values):
     try:
         from PIL import Image
@@ -241,23 +224,6 @@ def _aggregate_stats(stats_list, features):
     return result
 
 
-def _indexed_metadata_table(component, entries):
-    import pandas as pd
-
-    entries = list(entries)
-    indices, labels = zip(*entries) if entries else ((), ())
-    return pa.Table.from_pandas(pd.DataFrame(
-        {component + "_index": np.asarray(indices, dtype=np.int64)},
-        index=pd.Index(
-            labels, dtype="string", name=component,
-        ),
-    ))
-
-
-def _subtasks_table(subtasks):
-    return _indexed_metadata_table("subtask", enumerate(subtasks))
-
-
 def _validate_subtasks(subtasks, has_feature):
     if subtasks is None:
         return None
@@ -317,8 +283,7 @@ class PaimonLeRobotWriter:
         self.features.update(copy.deepcopy(_DEFAULT_FEATURES))
         _validate_v3_required_features({"features": self.features})
         self._source_schema = _schema_from_info({"features": self.features})
-        metadata = self._writer_metadata(
-            fps, self.features, requested_subtasks)
+        metadata = self._writer_metadata(self.features)
         self._episodes_schema = metadata["episodes_schema"]
         create_options = dict(options or {})
         reserved_options = set(_COMPANION_OPTION_KEYS.values()).intersection(
@@ -328,7 +293,7 @@ class PaimonLeRobotWriter:
                 "%s are managed by PaimonLeRobotWriter."
                 % sorted(reserved_options))
         create_options.update(_managed_table_options(
-            connection._identifier(table_name), metadata))
+            connection._identifier(table_name)))
         try:
             self._table = connection.get_table(table_name)
             created = False
@@ -382,8 +347,6 @@ class PaimonLeRobotWriter:
         self.pending_episodes = 0
         self._episode_frames = []
         self._pending_episode_rows = []
-        self._committed_task_count = len(self._task_indices)
-        self._subtasks_committed = self.num_frames > 0
         self._table_write = None
         self._table_commit = None
         self._snapshot_recorder = None
@@ -391,44 +354,17 @@ class PaimonLeRobotWriter:
         self._failed = False
 
     @staticmethod
-    def _writer_metadata(fps, features, subtasks):
-        info = {
-            "codebase_version": "v3.0",
-            "fps": fps,
-            "features": features,
-            "total_frames": 0,
-            "total_episodes": 0,
-            "total_tasks": 0,
-            "splits": {},
-        }
+    def _writer_metadata(features):
         return {
-            "info_table": _metadata_table(info),
             "episodes_schema": _episode_schema(features),
-            "tasks_table": _indexed_metadata_table("task", ()),
-            "stats_table": _metadata_table({}),
             "datasets_table": pa.Table.from_pylist([], schema=_DATASETS_SCHEMA),
-            "source_local_metadata": True,
-            "subtasks_table": (
-                _subtasks_table(subtasks or ())
-                if "subtask_index" in features else None
-            ),
         }
 
     @staticmethod
     def _open_metadata_tables(connection, frames_table, metadata):
         identifiers = _companion_table_identifiers(frames_table)
-        if set(identifiers) == {"episodes", "datasets"}:
-            expected = {"episodes": metadata["episodes_schema"],
-                        "datasets": metadata["datasets_table"].schema}
-        else:
-            expected = {
-                "info": metadata["info_table"].schema,
-                "episodes": metadata["episodes_schema"],
-                "tasks": metadata["tasks_table"].schema,
-                "stats": metadata["stats_table"].schema,
-            }
-            if metadata["subtasks_table"] is not None:
-                expected["subtasks"] = metadata["subtasks_table"].schema
+        expected = {"episodes": metadata["episodes_schema"],
+                    "datasets": metadata["datasets_table"].schema}
         if set(identifiers) != set(expected):
             raise ValueError(
                 "PaimonLeRobotWriter companion tables do not match "
@@ -466,15 +402,11 @@ class PaimonLeRobotWriter:
         return self._state_from_companion_tables()
 
     def _state_from_companion_tables(self):
-        source_row = None
-        if "datasets" in self._metadata_tables:
-            sources = _read_arrow(self._metadata_tables["datasets"]).to_pylist()
-            if len(sources) != 1 or sources[0]["index"] != 0:
-                raise ValueError("Existing LeRobot Dataset metadata is invalid.")
-            source_row = sources[0]
-            task_rows = source_row["tasks"]
-        else:
-            task_rows = _read_arrow(self._metadata_tables["tasks"]).to_pylist()
+        sources = _read_arrow(self._metadata_tables["datasets"]).to_pylist()
+        if len(sources) != 1 or sources[0]["index"] != 0:
+            raise ValueError("Existing LeRobot Dataset metadata is invalid.")
+        source_row = sources[0]
+        task_rows = source_row["tasks"]
         task_rows.sort(key=lambda row: row["task_index"])
         task_indices = {}
         for expected, row in enumerate(task_rows):
@@ -486,10 +418,8 @@ class PaimonLeRobotWriter:
             task_indices[task] = expected
 
         subtasks = None
-        if "subtasks" in self._metadata_tables or (source_row is not None
-                                                   and source_row["subtasks"] is not None):
-            subtask_rows = (source_row["subtasks"] if source_row is not None
-                            else _read_arrow(self._metadata_tables["subtasks"]).to_pylist())
+        if source_row["subtasks"] is not None:
+            subtask_rows = source_row["subtasks"]
             subtask_rows.sort(key=lambda row: row["subtask_index"])
             labels = []
             for expected, row in enumerate(subtask_rows):
@@ -524,8 +454,7 @@ class PaimonLeRobotWriter:
                     "Existing LeRobot episode metadata is invalid.")
             next_index = row["dataset_to_index"]
 
-        info = (json.loads(source_row["info"]) if source_row is not None
-                else _metadata_values(self._metadata_tables["info"], "info"))
+        info = json.loads(source_row["info"])
         if int(info.get("fps", -1)) != self.fps \
                 or info.get("features") != json.loads(json.dumps(
                     self.features, ensure_ascii=False)) \
@@ -534,8 +463,7 @@ class PaimonLeRobotWriter:
                 or info.get("total_tasks") != len(task_indices):
             raise ValueError(
                 "Existing LeRobot info metadata is inconsistent.")
-        stats = (json.loads(source_row["stats"]) if source_row is not None
-                 else _metadata_values(self._metadata_tables["stats"], "stats"))
+        stats = json.loads(source_row["stats"])
         expected_stats = {
             name for name, feature in self.features.items()
             if feature.get("dtype") != "string"
@@ -753,46 +681,24 @@ class PaimonLeRobotWriter:
                     "train": "0:%d" % self.num_episodes,
                 },
             }
-            if "datasets" in self._metadata_tables:
-                task_rows = [
-                    {"task_index": index, "task": task}
-                    for task, index in sorted(
-                        self._task_indices.items(), key=lambda item: item[1])]
-                subtask_rows = (None if self.subtasks is None else [
-                    {"subtask_index": index, "subtask": text}
-                    for index, text in enumerate(self.subtasks)])
-                dataset_row = {
-                    "index": 0,
-                    "name": None,
-                    "info": json.dumps(_json_value(info), ensure_ascii=False),
-                    "tasks": task_rows,
-                    "subtasks": subtask_rows,
-                    "stats": json.dumps(_json_value(self._stats), ensure_ascii=False),
-                }
-                _overwrite_arrow(
-                    self._metadata_tables["datasets"],
-                    pa.Table.from_pylist([dataset_row], schema=_DATASETS_SCHEMA))
-            else:
-                if "subtasks" in self._metadata_tables \
-                        and not self._subtasks_committed:
-                    _append_arrow(
-                        self._metadata_tables["subtasks"],
-                        _subtasks_table(self.subtasks),
-                    )
-                task_rows = [
-                    (index, task)
-                    for task, index in sorted(
-                        self._task_indices.items(), key=lambda item: item[1])
-                    if index >= self._committed_task_count
-                ]
-                _append_arrow(
-                    self._metadata_tables["tasks"],
-                    _indexed_metadata_table("task", task_rows),
-                )
-                _overwrite_arrow(
-                    self._metadata_tables["stats"], _metadata_table(self._stats))
-                _overwrite_arrow(
-                    self._metadata_tables["info"], _metadata_table(info))
+            task_rows = [
+                {"task_index": index, "task": task}
+                for task, index in sorted(
+                    self._task_indices.items(), key=lambda item: item[1])]
+            subtask_rows = (None if self.subtasks is None else [
+                {"subtask_index": index, "subtask": text}
+                for index, text in enumerate(self.subtasks)])
+            dataset_row = {
+                "index": 0,
+                "name": None,
+                "info": json.dumps(_json_value(info), ensure_ascii=False),
+                "tasks": task_rows,
+                "subtasks": subtask_rows,
+                "stats": json.dumps(_json_value(self._stats), ensure_ascii=False),
+            }
+            _overwrite_arrow(
+                self._metadata_tables["datasets"],
+                pa.Table.from_pylist([dataset_row], schema=_DATASETS_SCHEMA))
             commit_started = True
             self._table_commit.commit(
                 messages,
@@ -807,8 +713,6 @@ class PaimonLeRobotWriter:
         self._close_batch()
         self.pending_episodes = 0
         self._pending_episode_rows = []
-        self._committed_task_count = len(self._task_indices)
-        self._subtasks_committed = True
         return None
 
     def finalize(self):

@@ -149,30 +149,6 @@ def test_import_uses_group_prefix(setup, multiple):
     assert rows(conn, "robot_frames").num_rows == (10 if multiple else 5)
 
 
-@pytest.mark.parametrize("multiple", [False, True])
-def test_reads_legacy_double_underscore_tables(setup, multiple):
-    pytest.importorskip("torch")
-    from pypaimon.multimodal.lerobot import metadata as metadata_module
-
-    conn, sources = setup
-    legacy_suffixes = {name: "_" + suffix
-                       for name, suffix in metadata_module._TABLE_SUFFIXES.items()}
-    with patch.dict(metadata_module._TABLE_SUFFIXES, legacy_suffixes), \
-            patch("pypaimon.multimodal.lerobot.api._companion_identifier",
-                  side_effect=lambda identifier, suffix: str(identifier)):
-        conn.load_from_lerobot("legacy", sources if multiple else sources[0])
-    table = conn.get_table("legacy")
-    assert table.raw_table.table_schema.options[
-        "pypaimon.lerobot.episodes-table"] == "default.legacy__episodes"
-    dataset = pm.PaimonLeRobotDataset(table)
-    try:
-        assert len(dataset) == (10 if multiple else 5)
-        assert dataset[0]["task"] == "pick"
-        assert dataset[len(dataset) - 1]["task"] == ("stack" if multiple else "place")
-    finally:
-        dataset.close()
-
-
 def test_transform_frames_preserves_unlabelled_subtasks():
     plan = {
         "dataset_index": 1,

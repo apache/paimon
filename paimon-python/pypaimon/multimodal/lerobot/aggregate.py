@@ -357,9 +357,6 @@ def _plan_merge(plans, fps_mode="dataset"):
         }
         for ordinal, plan in enumerate(plans)
     ], schema=_DATASETS_SCHEMA)
-    # Source metadata already lives in the Dataset row. Only the frame,
-    # Episode, and Dataset tables need physical storage for merged imports.
-    metadata["source_local_metadata"] = True
     metadata["fps_mode"] = fps_mode
     info.update(total_frames=frame_offset, total_episodes=episode_offset,
                 total_tasks=metadata["tasks_table"].num_rows,
