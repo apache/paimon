@@ -160,6 +160,8 @@ class CoreOptions:
     FIELDS_PREFIX = "fields"
     DISTINCT = "distinct"
     LIST_AGG_DELIMITER = "list-agg-delimiter"
+    SUM_FAIL_ON_OVERFLOW = "sum.fail-on-overflow"
+    PRODUCT_FAIL_ON_OVERFLOW = "product.fail-on-overflow"
     NESTED_KEY = "nested-key"
     NESTED_KEY_NULL_STRATEGY = "nested-key-null-strategy"
     NESTED_SEQUENCE_FIELD = "nested-sequence-field"
@@ -2055,6 +2057,26 @@ class CoreOptions:
 
     def dynamic_partition_overwrite(self) -> bool:
         return self.options.get(CoreOptions.DYNAMIC_PARTITION_OVERWRITE)
+
+    def field_sum_fail_on_overflow(self, field_name: str) -> bool:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.'
+                f'{CoreOptions.SUM_FAIL_ON_OVERFLOW}'
+            )
+            .boolean_type()
+            .default_value(False)
+        )
+
+    def field_product_fail_on_overflow(self, field_name: str) -> bool:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.'
+                f'{CoreOptions.PRODUCT_FAIL_ON_OVERFLOW}'
+            )
+            .boolean_type()
+            .default_value(False)
+        )
 
     def field_listagg_delimiter(self, field_name: str) -> str:
         return self.options.get(
