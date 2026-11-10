@@ -78,7 +78,8 @@ labels do not merge sources. Use `dataset_index` to link frames and Episodes;
 `(dataset_index, episode_index)` identifies an original Episode. Frames keep a
 merged `index` and their original `source_index`. Source task/subtask metadata
 and original Episode rows (`__episodes.source_episode_ipc`) use Arrow IPC to
-preserve extra columns and native types.
+preserve extra columns and native types. Repeated task/subtask text within one
+source is rejected before creating tables to avoid losing original frame IDs.
 
 Sources must share robot type and training features. By default they must also
 share FPS; `fps_mode="source"` permits mixed FPS and requires
@@ -255,7 +256,8 @@ pin one named snapshot on every component.
 ## Train with Paimon LeRobot data
 
 For nullable `subtask_index`, `to_dataloader()` uses `-1` with a false
-`subtask_index_is_valid` mask; individual samples retain `None`.
+`subtask_index_is_valid` mask; individual samples retain `None`. If a source
+feature uses the mask name, underscores are prepended until the name is unused.
 
 For map-style training, pass an image- or video-backed table group created by
 `load_from_lerobot` to `PaimonLeRobotDataset`. A frame-only table created by

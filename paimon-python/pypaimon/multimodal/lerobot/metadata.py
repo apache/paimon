@@ -138,11 +138,15 @@ def _load_dataset_metadata(dataset, info, source):
     fps = _dataset_fps(info.get("fps"))
     stats = _source_stats(dataset, source)
     stats_table = None if stats is None else _metadata_table(stats)
-    tasks_table = _source_tasks(
-        dataset, source, int(info["total_tasks"]))
+    source_tasks = _source_tasks(
+        dataset, source, int(info["total_tasks"]), normalize=False)
+    tasks_table = (source_tasks if int(info["total_tasks"]) == 0 else
+                   _source_vocabulary_index(source_tasks, "task"))
     task_indices = _task_indices(
         tasks_table, int(info["total_tasks"]))
-    subtasks_table = _source_subtasks(dataset, source)
+    source_subtasks = _source_subtasks(dataset, source, normalize=False)
+    subtasks_table = (None if source_subtasks is None else
+                      _source_vocabulary_index(source_subtasks, "subtask"))
     subtask_indices = _subtask_indices(subtasks_table, info)
     total_episodes = int(info["total_episodes"])
     episode_source = (
@@ -158,6 +162,8 @@ def _load_dataset_metadata(dataset, info, source):
         "episodes": None,
         "episodes_schema": episode_source["schema"],
         "episode_paths": episode_source["paths"],
+        "source_tasks_table": source_tasks,
+        "source_subtasks_table": source_subtasks,
         "tasks_table": tasks_table,
         "subtasks_table": subtasks_table,
         "source": source,
@@ -499,7 +505,7 @@ def _source_stats(dataset, source):
         return json.load(file)
 
 
-def _source_tasks(dataset, source, total_tasks):
+def _source_tasks(dataset, source, total_tasks, normalize=True):
     if total_tasks == 0:
         return pa.Table.from_pylist([], schema=_EMPTY_TASKS_SCHEMA)
     if source.file_io is not None:
@@ -508,17 +514,19 @@ def _source_tasks(dataset, source, total_tasks):
             _remote_path,
         )
         path = _remote_path(source.path, "meta/tasks.parquet")
-        return _source_vocabulary_index(_read_remote_parquet(source.file_io, path), "task")
+        table = _read_remote_parquet(source.file_io, path)
+        return _source_vocabulary_index(table, "task") if normalize else table
     path = _metadata_root(dataset, source) / "meta" / "tasks.parquet"
     try:
-        return _source_vocabulary_index(pq.read_table(path), "task")
+        table = pq.read_table(path)
+        return _source_vocabulary_index(table, "task") if normalize else table
     except (OSError, ValueError, pa.ArrowException) as error:
         raise ValueError(
             "Cannot read LeRobot task metadata %s: %s" % (path, error)
         ) from error
 
 
-def _source_subtasks(dataset, source):
+def _source_subtasks(dataset, source, normalize=True):
     if source.file_io is not None:
         from pypaimon.multimodal.lerobot.source import (
             _read_remote_parquet,
@@ -529,12 +537,14 @@ def _source_subtasks(dataset, source):
             source.file_io.get_file_status(path)
         except FileNotFoundError:
             return None
-        return _source_vocabulary_index(_read_remote_parquet(source.file_io, path), "subtask")
+        table = _read_remote_parquet(source.file_io, path)
+        return _source_vocabulary_index(table, "subtask") if normalize else table
     path = _metadata_root(dataset, source) / "meta" / "subtasks.parquet"
     if not path.is_file():
         return None
     try:
-        return _source_vocabulary_index(pq.read_table(path), "subtask")
+        table = pq.read_table(path)
+        return _source_vocabulary_index(table, "subtask") if normalize else table
     except (OSError, ValueError, pa.ArrowException) as error:
         raise ValueError(
             "Cannot read LeRobot subtask metadata %s: %s" % (path, error)

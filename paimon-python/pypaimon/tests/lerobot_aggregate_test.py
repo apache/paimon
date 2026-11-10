@@ -1110,3 +1110,112 @@ def test_training_projects_out_source_ipc(setup, dataset_index):
     assert set(reads) == {"datasets", "episodes"}
     assert "tasks_ipc" in rows(conn, "merged__datasets").column_names
     assert "source_episode_ipc" in episode_rows(conn, "merged__episodes").column_names
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_merge_canonicalizes_episode_timezone(setup, import_parallelism):
+    conn, sources = setup
+    originals = []
+    for uri in sources:
+        path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
+        data = pq.read_table(path).append_column("capture_time", pa.array(
+            [1700000000123, None], type=pa.timestamp("ms", tz="America/New_York")))
+        pq.write_table(data, path)
+        originals.append(pq.read_table(path))
+    conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
+    data = episode_rows(conn, "merged__episodes")
+    assert data.schema.field("capture_time").type == pa.timestamp("ms", tz="UTC")
+    assert data["capture_time"].cast(pa.int64()).to_pylist() == [1700000000123, None] * 2
+    for row in data.to_pylist():
+        original = originals[row["dataset_index"]].slice(row["episode_index"], 1)
+        assert pa.ipc.open_stream(row["source_episode_ipc"]).read_all().equals(
+            original, check_metadata=True)
+    assert conn.catalog.get_tag(conn._identifier("merged"), "train") is not None
+
+
+@pytest.mark.parametrize("kind", ["task", "subtask"])
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_merge_rejects_ambiguous_source_labels(setup, kind, import_parallelism):
+    conn, sources = setup
+    path = Path(sources[0][7:]) / ("meta/%ss.parquet" % kind)
+    pq.write_table(pa.Table.from_pandas(pd.DataFrame(
+        {kind + "_index": [0, 1]}, index=pd.Index(["same", "same"], name=kind))), path)
+    message = "repeats task" if kind == "task" else "source 0 has duplicate subtask text"
+    with pytest.raises(ValueError, match=message):
+        conn.load_from_lerobot("merged", sources, parallelism=import_parallelism)
+    with pytest.raises(TableNotExistException):
+        conn.get_table("merged")
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_merge_archives_original_arrow_vocabulary(setup, import_parallelism):
+    conn, sources = setup
+    originals = {}
+    for index, uri in enumerate(sources):
+        for kind in ("task", "subtask"):
+            path = Path(uri[7:]) / ("meta/%ss.parquet" % kind)
+            data = pq.read_table(path).select([kind + "_index", kind])
+            schema = pa.schema([
+                data.schema.field(kind + "_index"),
+                pa.field(kind, pa.string(), nullable=False, metadata={b"label": b"original"}),
+            ], metadata={b"producer": b"arrow"})
+            pq.write_table(data.cast(schema), path)
+            originals[index, kind] = pq.read_table(path)
+    conn.load_from_lerobot("merged", sources, parallelism=import_parallelism)
+    for row in rows(conn, "merged__datasets").to_pylist():
+        for kind in ("task", "subtask"):
+            restored = pa.ipc.open_stream(row[kind + "s_ipc"]).read_all()
+            assert restored.equals(originals[row["dataset_index"], kind], check_metadata=True)
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged"))
+    try:
+        assert reader[0]["task"] == "pick"
+        assert reader[5]["subtask"] == "grasp"
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_nullable_mask_preserves_source_feature(setup, import_parallelism):
+    pytest.importorskip("torch")
+    conn, sources = setup
+    for uri in sources:
+        root = Path(uri[7:])
+        path = root / "meta/info.json"
+        info = json.loads(path.read_text())
+        info["features"]["subtask_index_is_valid"] = {
+            "dtype": "bool", "shape": [1], "names": None}
+        path.write_text(json.dumps(info))
+        path = root / "data/chunk-000/file-000.parquet"
+        data = pq.read_table(path).append_column(
+            "subtask_index_is_valid", pa.array([False, True, False, True, False]))
+        data = data.set_column(data.schema.get_field_index("subtask_index"), "subtask_index",
+                               pa.array([0, None, 0, 1, 0], type=pa.int64()))
+        pq.write_table(data, path)
+    conn.load_from_lerobot("merged", sources, parallelism=import_parallelism)
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged"))
+    try:
+        batch = next(iter(reader.to_dataloader(batch_size=2, num_workers=0)))
+        assert batch["subtask_index_is_valid"].tolist() == [False, True]
+        assert batch["_subtask_index_is_valid"].tolist() == [True, False]
+        assert batch["subtask_index"].tolist() == [0, -1]
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+@pytest.mark.parametrize("video_rate", ["10", 10.000005])
+def test_merge_normalizes_video_fps(setup, tmp_path, import_parallelism, video_rate):
+    conn, unused = setup
+    sources = [source(tmp_path / "video_a", video=True),
+               source(tmp_path / "video_b", video=True)]
+    path = tmp_path / "video_b/meta/info.json"
+    info = json.loads(path.read_text())
+    info["features"]["camera"]["info"]["video.fps"] = video_rate
+    path.write_text(json.dumps(info))
+    conn.load_from_lerobot("merged", sources, parallelism=import_parallelism)
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged"), video_backend="pyav")
+    try:
+        assert reader.episode_fps == (10, 10, 10, 10)
+        assert tuple(reader[5]["camera"].shape) == (3, 16, 16)
+    finally:
+        reader.close()

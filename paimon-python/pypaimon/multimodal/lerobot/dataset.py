@@ -1903,6 +1903,9 @@ def _collate_lerobot_batch(rows, video_windows):
     nullable = {}
     if "subtask_index" in rows[0]:
         labels = [row["subtask_index"] for row in rows]
+        mask_name = "subtask_index_is_valid"
+        while any(mask_name in row for row in rows):
+            mask_name = "_" + mask_name
         if any(_contains_none(value) for value in labels):
             def values(label):
                 if isinstance(label, list):
@@ -1911,10 +1914,10 @@ def _collate_lerobot_batch(rows, video_windows):
 
             nullable["subtask_index"] = torch.tensor(
                 [values(label) for label in labels], dtype=torch.int64, device="cpu")
-            nullable["subtask_index_is_valid"] = nullable["subtask_index"] >= 0
+            nullable[mask_name] = nullable["subtask_index"] >= 0
         else:
             nullable["subtask_index"] = default_collate(labels)
-            nullable["subtask_index_is_valid"] = torch.ones_like(
+            nullable[mask_name] = torch.ones_like(
                 nullable["subtask_index"], dtype=torch.bool)
     if "subtask" in rows[0] and any(_contains_none(row["subtask"]) for row in rows):
         nullable["subtask"] = [row["subtask"] for row in rows]

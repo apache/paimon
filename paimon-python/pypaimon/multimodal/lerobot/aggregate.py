@@ -44,6 +44,7 @@ from pypaimon.multimodal.lerobot.source import (
     _validate_info_paths,
 )
 from pypaimon.multimodal.source_utils import _validate_source_kerberos
+from pypaimon.multimodal.table import _target_schema
 
 
 _CONTROLS = ("index", "episode_index", "task_index", "subtask_index")
@@ -156,9 +157,15 @@ def _vocabulary(plans, kind):
                         or pa.types.is_large_string(table.schema.field(source_label).type))):
             raise ValueError("LeRobot source %d has incompatible %s schema." % (ordinal, kind))
         mapping = {}
+        source_texts = set()
         for row in sorted(table.select([index_name, source_label]).to_pylist(),
                           key=lambda row: row[index_name]):
             text = row[source_label]
+            if text in source_texts:
+                raise ValueError("LeRobot source %d has duplicate %s text %r; "
+                                 "original frame IDs would be ambiguous."
+                                 % (ordinal, singular, text))
+            source_texts.add(text)
             if text not in by_text:
                 by_text[text] = len(rows)
                 rows.append({index_name: len(rows), label: text})
@@ -167,16 +174,15 @@ def _vocabulary(plans, kind):
     return pa.Table.from_pylist(rows, schema=schema)
 
 
-def _feature_contract(features, fps_mode):
+def _feature_contract(features):
     result = copy.deepcopy(features)
     for feature in result.values():
         if feature.get("dtype") == "video":
-            if fps_mode == "source":
-                feature.pop("fps", None)
+            feature.pop("fps", None)
             for key in ("info", "video_info"):
                 feature[key] = {k: v for k, v in feature.get(key, {}).items()
                                 if k not in _ENCODER_KEYS
-                                and (fps_mode == "dataset" or k != "video.fps")}
+                                and k != "video.fps"}
     return result
 
 
@@ -211,8 +217,8 @@ def _plan_merge(plans, fps_mode="dataset"):
         for key in compared_keys:
             if info.get(key) != other.get(key):
                 raise ValueError("LeRobot source %d has incompatible info.%s." % (ordinal, key))
-        expected_features = _feature_contract(info["features"], fps_mode)
-        actual_features = _feature_contract(other["features"], fps_mode)
+        expected_features = _feature_contract(info["features"])
+        actual_features = _feature_contract(other["features"])
         for name in set(expected_features) | set(actual_features):
             if expected_features.get(name) != actual_features.get(name):
                 raise ValueError("LeRobot source %d has incompatible features.%s." % (ordinal, name))
@@ -271,8 +277,8 @@ def _plan_merge(plans, fps_mode="dataset"):
             "frame_to_index": plan["frame_offset"] + plan["info"]["total_frames"],
             "info_json": json.dumps(_json_value(plan["info"]),
                                     ensure_ascii=False, separators=(",", ":")),
-            "tasks_ipc": _arrow_ipc(plan["metadata"]["tasks_table"]),
-            "subtasks_ipc": _arrow_ipc(plan["metadata"]["subtasks_table"]),
+            "tasks_ipc": _arrow_ipc(plan["metadata"]["source_tasks_table"]),
+            "subtasks_ipc": _arrow_ipc(plan["metadata"]["source_subtasks_table"]),
             "stats_ipc": _arrow_ipc(plan["metadata"]["stats_table"]),
             "episodes_schema_ipc": plan["metadata"]["episodes_schema"].serialize().to_pybytes(),
         }
@@ -436,6 +442,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
         table = _create_target_table(connection, table_name, target_schema,
                                      options, metadata, plans[0]["videos"])
         tables = _prepare_metadata_tables(connection, table.raw_table, metadata)
+        episode_schema = _target_schema(tables["episodes"])
         commit = table.raw_table.new_batch_write_builder().new_commit()
         try:
             messages = []
@@ -452,8 +459,8 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                             transform=partial(_transform_frames, plan)))
                     plan["dataset_resources"].close()
                     plan["dataset"] = None
-                for episodes in _merged_episodes(plans, metadata["episodes_schema"]):
-                    strict_arrow_table(episodes, metadata["episodes_schema"],
+                for episodes in _merged_episodes(plans, episode_schema):
+                    strict_arrow_table(episodes, episode_schema,
                                        "merged Episodes", 0, "LeRobot")
             except BaseException:
                 commit.abort(messages)
@@ -462,7 +469,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
         finally:
             commit.close()
         episodes_snapshot = _append_arrow_tables(
-            tables["episodes"], _merged_episodes(plans, metadata["episodes_schema"]))
+            tables["episodes"], _merged_episodes(plans, episode_schema))
         if stats is not None:
             for name in _CONTROLS:
                 parts = [s[name] for p in plans for s in p["control_stats"].values() if name in s]
