@@ -151,6 +151,11 @@ public interface GlobalIndexReader
         throw new UnsupportedOperationException();
     }
 
+    /** Executes an ES DSL query. Unsupported readers must not silently return no matches. */
+    default CompletableFuture<ScoredGlobalIndexResult> visitEsSearch(EsSearchQuery query) {
+        throw new UnsupportedOperationException("This global index does not support ES DSL search");
+    }
+
     /**
      * Returns row candidates for the given TopN predicate.
      *

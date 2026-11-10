@@ -115,3 +115,4 @@ org.apache.paimon.flink.procedure.ImportFilesProcedure
 org.apache.paimon.flink.procedure.GrantPermissionProcedure
 org.apache.paimon.flink.procedure.RevokePermissionProcedure
 org.apache.paimon.flink.procedure.ListPermissionsProcedure
+org.apache.paimon.flink.procedure.PaimonEsSearchProcedure

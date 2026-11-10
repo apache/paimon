@@ -274,6 +274,19 @@ under the License.
     <build>
         <plugins>
             <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <configuration><java><includes><include>src/**/*.java</include></includes></java></configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <configuration><testSourceDirectories>
+                    <testSourceDirectory>${project.basedir}/src/test/java</testSourceDirectory>
+                    <testSourceDirectory>${project.basedir}/src/javaTest/java</testSourceDirectory>
+                </testSourceDirectories></configuration>
+            </plugin>
+            <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
                 <executions>
@@ -310,4 +323,29 @@ under the License.
             </plugin>
         </plugins>
     </build>
+    <profiles>
+        <profile>
+            <id>java-es-search-tests</id>
+            <activation><property><name>paimon.es.java.tests</name></property></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.paimon</groupId>
+                    <artifactId>paimon-elasticsearch</artifactId>
+                    <version>${project.version}</version>
+                    <scope>test</scope>
+                </dependency>
+            </dependencies>
+            <build><plugins><plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions><execution>
+                    <id>java-es-search-test-sources</id>
+                    <phase>generate-test-sources</phase>
+                    <goals><goal>add-test-source</goal></goals>
+                    <configuration><sources><source>src/javaTest/java</source></sources></configuration>
+                </execution></executions>
+            </plugin></plugins></build>
+        </profile>
+    </profiles>
 </project>
