@@ -549,10 +549,11 @@ class FileStoreCommit:
                 raise conflict_exception
 
         # Capture existing-row updates before assigning row IDs to new appends.
+        # Deletion vectors make mixed update/delete commits OVERWRITE.
         update_files = [
             entry.file for entry in commit_entries
             if entry.kind == 0 and entry.file.first_row_id is not None
-        ] if commit_kind == 'APPEND' and self.table.options.data_evolution_enabled() else []
+        ] if commit_kind in ('APPEND', 'OVERWRITE') and self.table.options.data_evolution_enabled() else []
 
         # Apply row tracking logic after conflict detection (matches Java ordering)
         row_tracking_enabled = self.table.options.row_tracking_enabled()

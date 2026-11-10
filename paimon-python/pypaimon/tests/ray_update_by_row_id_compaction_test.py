@@ -381,8 +381,14 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
                 self.assertEqual([value['b'] for value in rows['nest']], ['row-1', 'row-2', 'row-3', 'row-4'])
 
     def test_inner_snapshot_retry_revalidates_update_fields(self):
+        self._check_inner_snapshot_retry_revalidates_update_fields(with_delete=False)
+
+    def test_mixed_update_delete_inner_snapshot_retry_revalidates_update_fields(self):
+        self._check_inner_snapshot_retry_revalidates_update_fields(with_delete=True)
+
+    def _check_inner_snapshot_retry_revalidates_update_fields(self, with_delete):
         from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
-        from pypaimon.ray.update_by_row_id import _commit_update_messages
+        from pypaimon.ray.row_id_conflict_rewriter import commit_updates_with_compaction_retry
         from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
 
         changes_by_case = {
@@ -394,11 +400,13 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
         }
         for case, changes in changes_by_case.items():
             with self.subTest(case=case):
-                target = self._create_table()
-                self._write(target, self._source(ids=(1, 2)))
+                target = self._create_table({'deletion-vectors.enabled': 'true'} if with_delete else None)
+                self._write(target, self._source(ids=(1, 2, 3)))
                 table = self.catalog.get_table(target)
                 messages = table.new_batch_write_builder().new_update().update_by_arrow_with_row_id(
                     pa.table({'_ROW_ID': [0], 'age': [99]}))
+                delete_messages = (table.new_batch_write_builder().new_update().delete_by_row_id([1])
+                                   if with_delete else [])
                 attempts, publications, cas_results = [], [], []
                 original_once = FileStoreCommit._try_commit_once
                 original_publish = RenamingSnapshotCommit.commit
@@ -411,14 +419,14 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
                 def publish(commit, base_uuid, snapshot, statistics):
                     if snapshot.commit_user != attempts[0].commit_user:
                         return original_publish(commit, base_uuid, snapshot, statistics)
-                    publications.append(snapshot.schema_id)
+                    publications.append((snapshot.schema_id, snapshot.commit_kind))
                     if len(publications) == 1:
                         # DDL runs after the coordinator check and snapshot construction.
                         # A real competing append wins the same snapshot ID, forcing
                         # FileStoreCommit's inner CAS retry rather than a Ray retry.
                         self.catalog.alter_table(target, changes)
                         current = self.catalog.get_table(target)
-                        values = {'id': [3], 'name': ['x'], 'age': [10]}
+                        values = {'id': [4], 'name': ['x'], 'age': [10]}
                         if case == 'rename':
                             values['renamed'] = [10]
                         self._write(target, pa.Table.from_pydict(
@@ -432,18 +440,27 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
                 ):
                     if case == 'recreate':
                         with self.assertRaisesRegex(RuntimeError, 'cannot restore a dropped field'):
-                            _commit_update_messages(table, messages)
+                            commit_updates_with_compaction_retry(
+                                table, messages, delete_messages, num_partitions=2)
                     else:
-                        _commit_update_messages(table, messages)
+                        commit_updates_with_compaction_retry(
+                            table, messages, delete_messages, num_partitions=2)
                 self.assertEqual(len(attempts), 2)
                 self.assertEqual(cas_results, [False] if case == 'recreate' else [False, True])
-                self.assertEqual(publications, [0] if case == 'recreate' else [0, 1])
+                kind = 'OVERWRITE' if with_delete else 'APPEND'
+                self.assertEqual(publications, [(0, kind)] if case == 'recreate' else [(0, kind), (1, kind)])
                 latest = table.snapshot_manager().get_latest_snapshot()
                 self.assertEqual(latest.id, 2 if case == 'recreate' else 3)
                 self.assertEqual(latest.schema_id, 1)
                 rows = self._read_sorted(target)
                 column = 'renamed' if case == 'rename' else 'age'
-                self.assertEqual(rows[column], [None, None, 10] if case == 'recreate' else [99, 10, 10])
+                if case == 'recreate':
+                    # The failed combined commit must publish neither the update nor the delete.
+                    self.assertEqual(rows['id'], [1, 2, 3, 4])
+                    self.assertEqual(rows[column], [None, None, None, 10])
+                else:
+                    self.assertEqual(rows['id'], [1, 3, 4] if with_delete else [1, 2, 3, 4])
+                    self.assertEqual(rows[column], [99, 10, 10] if with_delete else [99, 10, 10, 10])
                 for message in messages:
                     for file in message.new_files:
                         self.assertTrue(table.file_io.exists(file.file_path))
