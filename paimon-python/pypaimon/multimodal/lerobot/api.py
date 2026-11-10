@@ -16,14 +16,18 @@
 
 """Public LeRobot import API."""
 
+import json
 import numbers
 import sys
 from functools import partial
 from typing import Mapping, Optional
 
+import pyarrow as pa
+
 from pypaimon.catalog.catalog_exception import TableAlreadyExistException
 from pypaimon.multimodal.lerobot.metadata import (
     _COMPANION_OPTION_KEYS,
+    _json_value,
     _companion_identifier,
     _append_arrow_tables,
     _load_dataset_metadata,
@@ -159,6 +163,19 @@ def load_from_lerobot(
             # Preserve source extensions omitted by LeRobot DatasetInfo.to_dict().
             metadata = _load_dataset_metadata(
                 dataset, local_info, resolved_source)
+            from pypaimon.multimodal.lerobot.aggregate import (
+                _DATASETS_SCHEMA, _stats_json, _vocabulary_rows,
+            )
+            metadata["datasets_table"] = pa.Table.from_pylist([{
+                "index": 0,
+                "name": None,
+                "info": json.dumps(_json_value(local_info), ensure_ascii=False),
+                "tasks": _vocabulary_rows(metadata["tasks_table"], "task"),
+                "subtasks": _vocabulary_rows(metadata["subtasks_table"], "subtask"),
+                "stats": _stats_json(metadata["stats_table"]),
+            }], schema=_DATASETS_SCHEMA)
+            metadata["source_local_metadata"] = True
+            metadata["fps_mode"] = "dataset"
             _import_dataset(
                 connection,
                 table_name,

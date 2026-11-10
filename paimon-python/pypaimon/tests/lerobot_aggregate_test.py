@@ -144,11 +144,7 @@ def vocabulary(conn, singular):
 def test_import_uses_group_prefix(setup, multiple):
     conn, sources = setup
     conn.load_from_lerobot("robot", sources if multiple else sources[0])
-    expected = {"robot_" + component for component in
-                ("frames", "info", "stats", "episodes", "tasks", "subtasks")}
-    if multiple:
-        expected = {"robot_frames", "robot_episodes"}
-        expected.add("robot_datasets")
+    expected = {"robot_frames", "robot_episodes", "robot_datasets"}
     assert set(conn.catalog.list_tables("default")) == expected
     assert rows(conn, "robot_frames").num_rows == (10 if multiple else 5)
 
@@ -898,10 +894,11 @@ def test_ray_merge_multifile_sources_matches_serial(setup, ray_cluster):
         pq.write_table(episodes, episodes_path)
     conn.load_from_lerobot("serial", sources, batch_size=1)
     conn.load_from_lerobot("parallel", sources, batch_size=1, parallelism=2)
-    for suffix, key in (("_frames", "index"),
-                        ("_episodes", [("dataset_index", "ascending"),
-                                       ("episode_index", "ascending")]),
-                        ("_datasets", "index")):
+    for suffix, key in (
+            ("_frames", "index"),
+            ("_episodes", [("dataset_index", "ascending"),
+                           ("episode_index", "ascending")]),
+            ("_datasets", "index")):
         assert rows(conn, "serial" + suffix).sort_by(key).equals(
             rows(conn, "parallel" + suffix).sort_by(key))
 

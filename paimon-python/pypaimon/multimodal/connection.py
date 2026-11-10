@@ -146,7 +146,8 @@ class MultimodalConnection:
             dataset_names=None) -> None:
         """Import LeRobot v3 sources using table_name as the group prefix.
 
-        Creates <table_name>_frames and metadata tables with the same prefix.
+        Creates <table_name>_frames, <table_name>_episodes, and
+        <table_name>_datasets.
         """
         from pypaimon.multimodal.lerobot import load_from_lerobot
         load_from_lerobot(

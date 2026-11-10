@@ -271,7 +271,7 @@ class LeRobotRayImportTest(unittest.TestCase):
         self._import_serial()
         self.conn.load_from_lerobot("parallel", source or self.source, parallelism=2,
                                     batch_size=1, tag_name="imported")
-        for suffix in ("_frames", "_episodes", "_tasks", "_info"):
+        for suffix in ("_frames", "_episodes", "_datasets"):
             def read(name, tag=None):
                 table = self.conn.catalog.get_table("default." + name)
                 if tag:

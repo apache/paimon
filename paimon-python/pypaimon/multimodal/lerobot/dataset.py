@@ -1067,6 +1067,7 @@ def _load_dataset(table, tag_name):
     identifiers = _companion_table_identifiers(raw_table)
     catalog = table.catalog
     frames = _component_table(catalog, raw_table, tag_name)
+    source_local_layout = "dataset_index" in _target_schema(frames).names
     datasets = None
     source_rows = None
     if "datasets" in identifiers:
@@ -1079,9 +1080,10 @@ def _load_dataset(table, tag_name):
         dataset_rows = _read_arrow(datasets_table, projection)
         source_rows = dataset_rows.sort_by(
             "index" if "index" in dataset_rows.column_names else "dataset_index").to_pylist()
-        datasets = [{key: value for key, value in row.items()
-                     if key not in ("tasks", "subtasks", "stats")}
-                    for row in source_rows]
+        if source_local_layout:
+            datasets = [{key: value for key, value in row.items()
+                         if key not in ("tasks", "subtasks", "stats")}
+                        for row in source_rows]
     episodes_table = _component_table(
         catalog, catalog.get_table(identifiers["episodes"]), tag_name)
     episodes = _episode_dataset(episodes_table, datasets)
@@ -1092,24 +1094,27 @@ def _load_dataset(table, tag_name):
         tasks = _component_dataframe(tasks_table, "task_index")
     else:
         tasks, task_maps = _source_vocabulary(source_rows, "task")
-        source_vocabulary_maps = {"task_index": task_maps}
+        if source_local_layout:
+            source_vocabulary_maps = {"task_index": task_maps}
     subtasks = None
     if "subtasks" in identifiers:
         subtasks_table = _component_table(
             catalog, catalog.get_table(identifiers["subtasks"]), tag_name)
         subtasks = _component_dataframe(subtasks_table, "subtask_index")
-    elif source_vocabulary_maps is not None:
+    elif source_rows is not None:
         subtasks, subtask_maps = _source_vocabulary(source_rows, "subtask")
-        if subtask_maps is not None:
+        if source_vocabulary_maps is not None and subtask_maps is not None:
             source_vocabulary_maps["subtask_index"] = subtask_maps
 
     if "info" in identifiers:
         info = _metadata_object(_component_table(
             catalog, catalog.get_table(identifiers["info"]), tag_name), "info")
     else:
-        info = _merged_source_info(
-            source_rows, tasks, subtasks,
-            raw_table.table_schema.options.get("pypaimon.lerobot.fps-mode", "dataset"))
+        info = (json.loads(source_rows[0]["info"])
+                if not source_local_layout else _merged_source_info(
+                    source_rows, tasks, subtasks,
+                    raw_table.table_schema.options.get(
+                        "pypaimon.lerobot.fps-mode", "dataset")))
     for feature in info.get("features", {}).values():
         feature["shape"] = tuple(feature["shape"])
     stats = None
@@ -1118,7 +1123,11 @@ def _load_dataset(table, tag_name):
             catalog, catalog.get_table(identifiers["stats"]), tag_name),
             "stats"))
     elif "info" not in identifiers:
-        stats = _merged_source_stats(source_rows, episodes_table)
+        if not source_local_layout:
+            value = source_rows[0]["stats"]
+            stats = _numpy_stats(json.loads(value)) if value is not None else None
+        else:
+            stats = _merged_source_stats(source_rows, episodes_table)
     metadata = _PaimonLeRobotMetadata(
         str(table.identifier), tag_name, info, stats, episodes, tasks,
         subtasks, datasets)
