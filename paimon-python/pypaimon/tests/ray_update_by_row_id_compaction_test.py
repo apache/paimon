@@ -25,7 +25,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from zipfile import ZipFile
 
 import pyarrow as pa
@@ -100,11 +100,14 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
         builder = self.catalog.get_table(target).new_read_builder()
         return builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id').to_pydict()
 
-    def _compact_all_data_files(self, table):
+    def _compact_all_data_files(self, table, partition_filter=None):
         read = table.new_read_builder().with_projection(list(table.field_names) + ['_ROW_ID'])
+        read.with_partition_filter(partition_filter)
         plan = read.new_scan().plan_all()
         old_files = [file for split in plan.splits() for file in split.files]
-        current = read.new_read().to_arrow(plan.splits()).sort_by('_ROW_ID').select(list(table.field_names))
+        current = read.new_read().to_arrow(plan.splits()).sort_by('_ROW_ID')
+        first_row_id = current['_ROW_ID'][0].as_py()
+        current = current.select(list(table.field_names))
         builder = table.new_batch_write_builder()
         writer = builder.new_write()
         commit = builder.new_commit()
@@ -113,7 +116,7 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
             messages = writer.prepare_commit()
             self.assertEqual(len(messages), 1)
             self.assertEqual(len(messages[0].new_files), 1)
-            messages[0].new_files = [messages[0].new_files[0].assign_first_row_id(0)]
+            messages[0].new_files = [messages[0].new_files[0].assign_first_row_id(first_row_id)]
             messages[0].deleted_files.extend(old_files)
             original_try_commit = python_commit(commit).file_store_commit._try_commit
             python_commit(commit).file_store_commit._try_commit = (
@@ -334,6 +337,145 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
         rewrite.assert_not_called()
         self.assertEqual(planned, [{('a', 1), (None, 2)}])
         self.assertEqual(self._read_sorted(target)['age'], [99, 88, 30, 40])
+
+    def test_recovery_reuses_scoped_complete_routing_groups(self):
+        from pypaimon.common.predicate_builder import PredicateBuilder
+        from pypaimon.ray.update_by_row_id import _commit_update_messages
+        from pypaimon.read.table_scan import TableScan
+        from pypaimon.write.row_id_plan import CapturedRowIdPlan
+
+        target = 'default.tbl_' + uuid.uuid4().hex[:8]
+        self.catalog.create_table(target, Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['name'], options=self.de_options), False)
+        for index, partition in enumerate(('a', None, 'b', 'c')):
+            for offset in (0, 2):
+                ids = [index * 4 + offset + 1, index * 4 + offset + 2]
+                self._write(target, pa.table({
+                    'id': ids, 'name': [partition] * 2, 'age': [value * 10 for value in ids],
+                }, schema=self.pa_schema))
+        table = self.catalog.get_table(target)
+        builder = table.new_batch_write_builder()
+        messages = builder.new_update().update_by_arrow_with_row_id(
+            pa.table({'_ROW_ID': [0, 8], 'age': [99, 77]}))
+        messages += builder.new_update().update_by_arrow_with_row_id(pa.table({'_ROW_ID': [4], 'id': [888]}))
+        predicates = PredicateBuilder(table.partition_keys_fields)
+        for predicate in (predicates.equal('name', 'a'), predicates.is_null('name')):
+            self._compact_all_data_files(table, predicate)
+
+        # Current groups contain both compacted anchors and newer partial files.
+        # Recovery must retain these complete groups and their concurrent values.
+        concurrent = builder.new_update().update_by_arrow_with_row_id(pa.table({'_ROW_ID': [0], 'id': [1000]}))
+        concurrent += builder.new_update().update_by_arrow_with_row_id(pa.table({'_ROW_ID': [4], 'age': [2000]}))
+        commit = builder.new_commit()
+        try:
+            commit.commit(concurrent)
+        finally:
+            commit.close()
+        latest = table.snapshot_manager().get_latest_snapshot().id
+        plan = table.new_read_builder().new_scan().plan_all()
+        expected_files = {}
+        for split in plan.splits():
+            expected_files.setdefault(tuple(split.partition.values), set()).update(
+                file.file_name for file in split.files)
+        original_plan, original_put = TableScan.plan_all, ray.put
+        planned, routed = [], []
+
+        def track_plan(scan):
+            result = original_plan(scan)
+            planned.append({tuple(split.partition.values) for split in result.splits()})
+            return result
+
+        def track_put(value, *args, **kwargs):
+            if isinstance(value, CapturedRowIdPlan):
+                partitions = {tuple(split.partition.values) for _, _, split in value.groups}
+                self.assertEqual(value.snapshot_id, latest)
+                self.assertEqual(len(partitions), 1)
+                partition = next(iter(partitions))
+                names = {file.file_name for _, _, split in value.groups for file in split.files}
+                self.assertEqual(names, expected_files[partition])
+                self.assertGreater(len(names), 1)
+                routed.append(partition)
+            return original_put(value, *args, **kwargs)
+
+        with patch.object(TableScan, 'plan_all', new=track_plan), patch.object(ray, 'put', new=track_put):
+            _commit_update_messages(table, messages, num_partitions=2)
+        self.assertEqual(planned, [{('a',), (None,), ('b',)}])
+        self.assertCountEqual(routed, [('a',), (None,)])
+        read = table.new_read_builder().with_projection(['id', 'name', 'age', '_ROW_ID'])
+        rows = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('_ROW_ID').to_pydict()
+        expected_ids = list(range(1, 17))
+        expected_ages = [value * 10 for value in expected_ids]
+        expected_ids[0], expected_ids[4] = 1000, 888
+        expected_ages[0], expected_ages[4], expected_ages[8] = 99, 2000, 77
+        self.assertEqual(rows['id'], expected_ids)
+        self.assertEqual(rows['age'], expected_ages)
+
+    def test_recovery_deadline_stops_after_first_real_rewrite_group(self):
+        for expire in (False, True):
+            with self.subTest(expire=expire):
+                self._check_recovery_deadline(expire)
+
+    def _check_recovery_deadline(self, expire):
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter
+        from pypaimon.ray.update_by_row_id import _commit_update_messages
+        from pypaimon.write.write_builder import BatchWriteBuilder
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        builder = table.new_batch_write_builder()
+        messages = builder.new_update().update_by_arrow_with_row_id(pa.table({'_ROW_ID': [0], 'age': [99]}))
+        messages += builder.new_update().update_by_arrow_with_row_id(pa.table({'_ROW_ID': [1], 'name': ['new']}))
+        self._compact_all_data_files(table)
+        before = table.snapshot_manager().get_latest_snapshot().id
+        # Passing a reduced timeout must not resolve the old scan snapshot's
+        # schema again after recovery has refreshed the current write schema.
+        self.catalog.alter_table(target, [SchemaChange.add_column('extra', AtomicType('INT'))])
+        current_schema_id = self.catalog.get_table(target).table_schema.id
+        commit_table = table.copy({
+            'commit.timeout': '100ms' if expire else '1s', 'scan.snapshot-id': str(before)})
+        clock = Mock()
+        clock.monotonic.return_value = 0.0
+        clock.time.side_effect = clock.monotonic
+        original, original_commit = rewriter._rewrite_group, BatchWriteBuilder.new_commit
+        rewritten = []
+        timeouts = []
+
+        def slow_rewrite(*args, **kwargs):
+            result = original(*args, **kwargs)
+            rewritten.extend(result[0])
+            clock.monotonic.return_value += 0.25
+            return result
+
+        def open_publisher(write_builder):
+            self.assertEqual(write_builder.table.table_schema.id, current_schema_id)
+            publisher = original_commit(write_builder)
+            timeouts.append(python_commit(publisher).file_store_commit.commit_timeout)
+            return publisher
+
+        with patch.object(rewriter, 'time', clock), patch.object(
+            rewriter, '_rewrite_group', side_effect=slow_rewrite,
+        ) as rewrite, patch.object(
+            BatchWriteBuilder, 'new_commit', autospec=True, side_effect=open_publisher,
+        ) as publisher:
+            if expire:
+                with self.assertRaisesRegex(TimeoutError, 'before snapshot publication'):
+                    _commit_update_messages(commit_table, messages, num_partitions=2)
+            else:
+                _commit_update_messages(commit_table, messages, num_partitions=2)
+        self.assertEqual(rewrite.call_count, 1 if expire else 2)
+        self.assertEqual(publisher.call_count, 0 if expire else 1)
+        self.assertEqual(timeouts, [] if expire else [500])
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, before + (0 if expire else 1))
+        if not expire:
+            self.assertEqual(table.snapshot_manager().get_latest_snapshot().schema_id, current_schema_id)
+        self.assertEqual(self._read_sorted(target)['age'], [10 if expire else 99, 10, 10, 10])
+        self.assertEqual(self._read_sorted(target)['name'], ['x', 'x' if expire else 'new', 'x', 'x'])
+        self.assertTrue(rewritten)
+        for message in messages + rewritten:
+            for file in message.new_files:
+                self.assertTrue(table.file_io.exists(file.file_path))
 
     def test_recovery_checks_java_nested_partial_write_history(self):
         from pypaimon.ray.row_id_conflict_rewriter import _rewrite_group

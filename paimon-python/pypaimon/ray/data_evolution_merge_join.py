@@ -616,6 +616,7 @@ def distributed_update_apply(
     estimated_num_rows: Optional[int] = None,
     data_context=None,
     materialize_before_routing: bool = False,
+    scan_plan=None,
 ) -> Tuple[list, int, list]:
     import pickle
 
@@ -642,7 +643,9 @@ def distributed_update_apply(
         if base_snapshot_id is not None else table
     )
     from pypaimon.write.row_id_plan import capture_row_id_plan
-    planner = capture_row_id_plan(scan_table)
+    # Recovery can reuse a partition-pruned plan with complete file groups.
+    # capture_row_id_plan validates it against the pinned snapshot.
+    planner = capture_row_id_plan(scan_table, scan_plan)
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return [], 0, []

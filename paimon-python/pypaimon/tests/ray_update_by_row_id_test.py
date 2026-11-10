@@ -623,6 +623,9 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             def data_evolution_row_id_conflict_rewrite_max_size(self):
                 return 256 * 1024 * 1024
 
+            def commit_timeout(self):
+                return 60_000
+
         class FakeCommit:
             def commit(self, msgs):
                 recorder["commit_calls"] += 1

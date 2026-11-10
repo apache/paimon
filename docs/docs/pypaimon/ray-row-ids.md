@@ -99,6 +99,9 @@ print(metrics)   # {"num_updated": 50}
   positive `data-evolution.row-id-conflict-rewrite.max-size` limit. Setting it
   to `0 B` disables automatic recovery, including Ray recovery. This also applies when
   a `process_row_id_ranges` processor calls `update_by_row_id`.
+  Recovery shares one `commit.timeout` budget across rewrite groups, retry waits,
+  and subsequent commit attempts. An expired recovery stops before publishing;
+  an already successful publication is still reported as successful.
 - Distributed recovery retains the self-merge eligibility checks: the original
   row IDs must remain covered, required snapshot history must be available, and
   conflicting logical updates are rejected. Recovery is not supported for
@@ -109,7 +112,9 @@ print(metrics)   # {"num_updated": 50}
   Dropped update fields, including nested fields in written ROW, ARRAY, and MAP
   columns, are rejected even if their names are reused, file boundaries are unchanged,
   or DDL has not published a data snapshot. Recovery prechecks plan only the partitions
-  present in the staged updates.
+  present in the staged updates. Each rewrite group reuses that snapshot's complete
+  file groups from its candidate partitions for Ray routing, without planning the
+  whole table again.
   Python commits repeat field-identity validation against the schema recorded in each
   snapshot attempt, including retries after a failed snapshot publication. Logical conflict
   checks also resolve nested write paths from Java partial updates using each file's

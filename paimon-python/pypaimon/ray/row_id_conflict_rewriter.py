@@ -21,6 +21,7 @@
 
 import logging
 import random
+import sys
 import time
 from dataclasses import dataclass, replace
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -66,7 +67,9 @@ def commit_updates_with_compaction_retry(
     current_updates = list(update_messages)
     other_messages = list(other_messages)
     retry_count = 0
-    start_millis = int(time.time() * 1000)
+    timeout_millis = table.options.commit_timeout()
+    deadline = time.monotonic() + timeout_millis / 1000.0
+    rewritten = False
     rewrite_enabled = table.options.data_evolution_row_id_conflict_rewrite_max_size() > 0
 
     # Ray performs the rebase below without the local driver's size limit.
@@ -88,8 +91,10 @@ def commit_updates_with_compaction_retry(
             latest_snapshot,
             num_partitions=num_partitions,
             ray_remote_args=ray_remote_args,
+            deadline=deadline,
         )
         if result is not None:
+            rewritten = True
             current_updates = result.update_messages
             logger.info(
                 "Rewrote %d stale row-id update file(s) against snapshot %d "
@@ -111,11 +116,22 @@ def commit_updates_with_compaction_retry(
             # recovery, against the schema used by this commit attempt.
             current_table = _with_latest_schema(commit_table)
             _validate_update_fields(current_table, current_updates)
+            if rewritten:
+                remaining_millis = _check_commit_deadline(deadline)
+                if timeout_millis < sys.maxsize:
+                    # Share the budget without reverting the refreshed write
+                    # schema to the schema of a historical scan snapshot.
+                    current_table = current_table.copy_without_time_travel({
+                        CoreOptions.COMMIT_TIMEOUT.key(): '{} ms'.format(remaining_millis)})
             if current_table is not commit_table:
                 commit_table = current_table
                 write_builder = commit_table.new_batch_write_builder().with_commit_user(
                     write_builder.commit_user)
+            if rewritten:
+                _check_commit_deadline(deadline)
             commit = write_builder.new_commit()
+            if rewritten:
+                _check_commit_deadline(deadline)
             commit.commit(current_updates + other_messages)
         except Exception as error:
             conflict = _find_row_id_conflict(error)
@@ -137,9 +153,8 @@ def commit_updates_with_compaction_retry(
         if not rewrite_enabled:
             raise conflict
 
-        elapsed = int(time.time() * 1000) - start_millis
         if (
-                elapsed > table.options.commit_timeout()
+                time.monotonic() > deadline
                 or retry_count >= table.options.commit_max_retries()
         ):
             raise conflict
@@ -155,7 +170,10 @@ def commit_updates_with_compaction_retry(
                 latest_snapshot,
                 num_partitions=num_partitions,
                 ray_remote_args=ray_remote_args,
+                deadline=deadline,
             )
+        except TimeoutError:
+            raise
         except Exception as rewrite_error:
             raise RuntimeError(
                 "{} {}".format(conflict, rewrite_error)
@@ -164,9 +182,8 @@ def commit_updates_with_compaction_retry(
             raise conflict
 
         current_updates = result.update_messages
-        elapsed = int(time.time() * 1000) - start_millis
-        if elapsed > table.options.commit_timeout():
-            raise conflict
+        rewritten = True
+        _check_commit_deadline(deadline)
 
         logger.info(
             "Rewrote %d stale row-id update file(s) against snapshot %d "
@@ -186,6 +203,7 @@ def _rewrite_updates(
         *,
         num_partitions: Optional[int],
         ray_remote_args=None,
+        deadline=None,
 ) -> Optional[_RewriteResult]:
     if table.options.deletion_vectors_enabled(False):
         return None
@@ -289,6 +307,14 @@ def _rewrite_updates(
             candidate
         )
     for columns, files in groups.items():
+        _check_commit_deadline(deadline)
+        partitions = {(tuple(item.message.partition), item.message.bucket) for item in files}
+        # Keep complete splits, including concurrent partial-column files and
+        # dedicated files, from the same snapshot used by the conflict check.
+        routing_plan = scan_plan._with_splits([
+            split for split in current_splits
+            if (tuple(split.partition.values), split.bucket) in partitions
+        ])
         messages, rewritten_rows, _ = _rewrite_group(
             table,
             list(columns),
@@ -296,7 +322,9 @@ def _rewrite_updates(
             latest_snapshot.id,
             num_partitions=num_partitions,
             ray_remote_args=ray_remote_args,
+            scan_plan=routing_plan,
         )
+        _check_commit_deadline(deadline)
         expected_rows = sum(item.file.row_count for item in files)
         if rewritten_rows != expected_rows:
             raise RuntimeError(
@@ -321,6 +349,14 @@ def _base_snapshot_ids(update_messages: Sequence[CommitMessage]):
         if message.check_from_snapshot is not None
         and message.check_from_snapshot >= 0
     }
+
+
+def _check_commit_deadline(deadline):
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining < 0:
+            raise TimeoutError('Row-id update commit timed out before snapshot publication')
+        return int(remaining * 1000)
 
 
 def _update_partition_filter(table, update_messages):
@@ -350,6 +386,7 @@ def _rewrite_group(
         snapshot_id: int,
         *,
         num_partitions: Optional[int],
+        scan_plan,
         ray_remote_args=None,
 ):
     import ray
@@ -401,6 +438,7 @@ def _rewrite_group(
         base_snapshot_id=snapshot_id,
         estimated_size_bytes=estimated_size_bytes,
         estimated_num_rows=estimated_num_rows,
+        scan_plan=scan_plan,
     )
 
 

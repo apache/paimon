@@ -30,6 +30,21 @@ from pypaimon.tests import ray_update_by_row_id_compaction_test as helpers
 pytestmark = pytest.mark.native_plan
 
 
+def test_partition_scoped_recovery_with_native_plan(native_rest_catalog):
+    ray = pytest.importorskip('ray')
+    initialized_here = not ray.is_initialized()
+    if initialized_here:
+        ray.init(num_cpus=4, include_dashboard=False)
+    try:
+        tables = helpers.RayUpdateByRowIdCompactionTest()
+        tables.catalog = native_rest_catalog
+        tables.de_options = dict(tables.de_options, **{'scan.native-plan.enabled': 'true'})
+        tables.test_recovery_reuses_scoped_complete_routing_groups()
+    finally:
+        if initialized_here:
+            ray.shutdown()
+
+
 @pytest.mark.parametrize('logical_conflict', [False, True])
 @pytest.mark.parametrize('rename', [False, True])
 def test_schema_recovery_preserves_native_rest_commit(native_rest_catalog, logical_conflict, rename):
@@ -42,6 +57,7 @@ def test_schema_recovery_preserves_native_rest_commit(native_rest_catalog, logic
         tables.catalog = native_rest_catalog
         target = tables._create_table({
             'commit.native.enabled': 'true',
+            'commit.timeout': '1 min',
             'data-evolution.row-id-conflict-rewrite.max-size': '1 B'})
         tables._write(target, tables._source(ids=(1, 2)))
         tables._write(target, tables._source(ids=(3, 4)))
@@ -49,6 +65,7 @@ def test_schema_recovery_preserves_native_rest_commit(native_rest_catalog, logic
         messages = table.new_batch_write_builder().new_update().update_by_arrow_with_row_id(
             pa.table({'_ROW_ID': [0], 'age': [99]}))
         baseline = table.snapshot_manager().get_latest_snapshot()
+        table = table.copy({'scan.snapshot-id': str(baseline.id)})
         changes = [SchemaChange.add_column('extra', AtomicType('INT'))]
         column = 'age'
         if rename:

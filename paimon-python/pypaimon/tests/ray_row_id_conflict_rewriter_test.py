@@ -123,6 +123,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         schema = TableSchema(id=0, fields=[])
         commit_table.table_schema = schema
         commit_table.schema_manager.latest.return_value = schema
+        commit_table.copy_without_time_travel.return_value = commit_table
         commit_table.new_batch_write_builder.return_value = builder
         table = Mock()
         table.copy_without_time_travel.return_value = commit_table
@@ -196,6 +197,86 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             )
 
         self.assertIs(conflict, context.exception.__cause__)
+
+    def test_timeout_after_eager_rewrite_or_retry_wait_does_not_open_publisher(self):
+        for eager in (False, True):
+            with self.subTest(eager=eager):
+                update = self._message(1, 'staged')
+                commit = Mock()
+                commit.commit.side_effect = self._conflict('compact')
+                table = self._table([commit, Mock()], [Mock(id=2)] if eager else [Mock(id=1), Mock(id=2)])
+                table.options.commit_timeout.return_value = 100
+                clock = Mock()
+                clock.monotonic.return_value = 0.0
+                clock.time.side_effect = clock.monotonic
+                result = Mock(update_messages=[self._message(2, 'rewritten')], rewritten_file_count=1)
+
+                def rewrite(*args, **kwargs):
+                    if eager:
+                        clock.monotonic.return_value = 0.25
+                    return result
+
+                def wait(*args):
+                    clock.monotonic.return_value = 0.25
+
+                with patch('pypaimon.ray.row_id_conflict_rewriter.time', clock), patch(
+                    'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates', side_effect=rewrite,
+                ), patch('pypaimon.ray.row_id_conflict_rewriter._retry_wait', side_effect=wait), patch(
+                    'pypaimon.execution.python.write.file_store_commit.FileStoreCommit.abort',
+                ) as abort, self.assertRaisesRegex(TimeoutError, 'before snapshot publication'):
+                    commit_updates_with_compaction_retry(table, [update], [], num_partitions=1)
+                builder = table.copy_without_time_travel.return_value.new_batch_write_builder.return_value
+                self.assertEqual(builder.new_commit.call_count, 0 if eager else 1)
+                self.assertEqual(commit.commit.call_count, 0 if eager else 1)
+                abort.assert_not_called()
+
+    def test_successful_publication_past_deadline_is_not_replayed(self):
+        commit = Mock()
+        table = self._table([commit], [Mock(id=2)])
+        table.options.commit_timeout.return_value = 100
+        clock = Mock()
+        clock.monotonic.return_value = 0.0
+        clock.time.side_effect = clock.monotonic
+
+        def publish(*args):
+            clock.monotonic.return_value = 0.25
+
+        commit.commit.side_effect = publish
+        with patch('pypaimon.ray.row_id_conflict_rewriter.time', clock), patch(
+            'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates',
+            return_value=Mock(update_messages=[], rewritten_file_count=1),
+        ) as rewrite:
+            commit_updates_with_compaction_retry(table, [self._message(1, 'staged')], [], num_partitions=1)
+        rewrite.assert_called_once()
+        commit.commit.assert_called_once()
+        commit.close.assert_called_once()
+
+    def test_publisher_preparation_consumes_remaining_timeout(self):
+        commit = Mock()
+        table = self._table([commit], [Mock(id=2)])
+        table.options.commit_timeout.return_value = 100
+        commit_table = table.copy_without_time_travel.return_value
+        builder = commit_table.new_batch_write_builder.return_value
+        clock = Mock()
+        clock.monotonic.return_value = 0.0
+        clock.time.side_effect = clock.monotonic
+
+        def rewrite(*args, **kwargs):
+            clock.monotonic.return_value = 0.04
+            return Mock(update_messages=[], rewritten_file_count=1)
+
+        def open_publisher():
+            clock.monotonic.return_value = 0.25
+            return commit
+
+        builder.new_commit.side_effect = open_publisher
+        with patch('pypaimon.ray.row_id_conflict_rewriter.time', clock), patch(
+            'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates', side_effect=rewrite,
+        ), self.assertRaisesRegex(TimeoutError, 'before snapshot publication'):
+            commit_updates_with_compaction_retry(table, [self._message(1, 'staged')], [], num_partitions=1)
+        commit_table.copy_without_time_travel.assert_called_once_with({'commit.timeout': '60 ms'})
+        commit.commit.assert_not_called()
+        commit.close.assert_called_once()
 
     def test_public_error_does_not_unwrap_regular_cause(self):
         timeout = TimeoutError('commit timeout')
