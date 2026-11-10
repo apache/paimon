@@ -683,10 +683,10 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
                 raise ValueError("LeRobot source dataset_index %d does not exist."
                                  % dataset_index)
             source = sources[dataset_index]
-            if source["dataset_index"] != dataset_index:
+            if source.get("index", source.get("dataset_index")) != dataset_index:
                 raise ValueError("LeRobot source dataset indices are not contiguous.")
-            episodes = list(range(source["episode_from_index"],
-                                  source["episode_to_index"]))
+            begin, end = _source_dataset_ranges(sources)[dataset_index][1:3]
+            episodes = list(range(begin, end))
         self.tag_name = tag_name
         super().__init__(
             meta,
@@ -724,12 +724,12 @@ class _SourceEpisodeFrameReader:
 
     def __init__(self, reader, datasets):
         self._reader = reader
+        ranges = _source_dataset_ranges(datasets)
         self._episode_offsets = pa.array(
-            [source["episode_from_index"] for source in datasets],
+            [source[1] for source in ranges],
             type=pa.int64())
         self._episode_counts = pa.array(
-            [source["episode_to_index"] - source["episode_from_index"]
-             for source in datasets], type=pa.int64())
+            [source[2] - source[1] for source in ranges], type=pa.int64())
         self.num_rows = reader.num_rows
         self.file_io = reader.file_io
         self.snapshot_id = reader.snapshot_id
@@ -1036,10 +1036,12 @@ def _load_dataset(table, tag_name):
         datasets_table = _component_table(
             catalog, catalog.get_table(identifiers["datasets"]), tag_name)
         projection = [name for name in _target_schema(datasets_table).names
-                      if name not in ("source_tasks", "source_subtasks", "stats",
+                      if name not in ("tasks", "subtasks", "source_tasks", "source_subtasks", "stats",
                                       "episodes_schema_json", "tasks_json", "subtasks_json")
                       and not name.endswith("_ipc")]
-        datasets = _read_arrow(datasets_table, projection).sort_by("dataset_index").to_pylist()
+        dataset_rows = _read_arrow(datasets_table, projection)
+        datasets = dataset_rows.sort_by(
+            "index" if "index" in dataset_rows.column_names else "dataset_index").to_pylist()
     episodes_table = _component_table(
         catalog, catalog.get_table(identifiers["episodes"]), tag_name)
     episodes = _episode_dataset(episodes_table, datasets)
@@ -1108,10 +1110,10 @@ def _episode_dataset(table, datasets=None):
             ("episode_index", "ascending"),
         ])
         expected = [
-            (dataset["dataset_index"], local)
-            for dataset in datasets
-            for local in range(dataset["episode_to_index"]
-                               - dataset["episode_from_index"])
+            (index, local)
+            for index, (unused, begin, end, frame_begin, frame_end)
+            in enumerate(_source_dataset_ranges(datasets))
+            for local in range(end - begin)
         ]
         actual = list(zip(data["dataset_index"].to_pylist(),
                           data["episode_index"].to_pylist()))
@@ -1243,48 +1245,60 @@ def _episode_fps(metadata, fps, total_episodes):
     return (fps,) * total_episodes
 
 
+def _source_dataset_ranges(datasets):
+    """Derive source ranges from the original counts in each source's info."""
+    result = []
+    episode_offset = frame_offset = 0
+    for ordinal, dataset in enumerate(datasets):
+        try:
+            if operator.index(dataset.get("index", dataset.get("dataset_index"))) != ordinal:
+                raise ValueError("index must be contiguous")
+            info = json.loads(dataset["info"] if "info" in dataset else dataset["info_json"])
+            if not isinstance(info, dict):
+                raise ValueError("info must be a JSON object")
+            episodes = _positive_integer(info.get("total_episodes"), "total_episodes")
+            frames = _positive_integer(info.get("total_frames"), "total_frames")
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("LeRobot source dataset %d metadata is invalid: %s."
+                             % (ordinal, error)) from error
+        result.append((info, episode_offset, episode_offset + episodes,
+                       frame_offset, frame_offset + frames))
+        episode_offset += episodes
+        frame_offset += frames
+    return result
+
+
 def _source_dataset_fps(metadata, fps, total_episodes):
     datasets = _metadata_member(metadata, "datasets")
     episodes = _metadata_member(metadata, "episodes")
     if not datasets or episodes is None:
         raise ValueError("LeRobot source FPS requires datasets and episodes metadata.")
     rates = []
-    expected_episode = expected_frame = 0
-    for ordinal, dataset in enumerate(datasets):
-        try:
-            index = operator.index(dataset["dataset_index"])
-            begin = operator.index(dataset["episode_from_index"])
-            end = operator.index(dataset["episode_to_index"])
-            frame_begin = operator.index(dataset["frame_from_index"])
-            frame_end = operator.index(dataset["frame_to_index"])
-            source_info = json.loads(dataset["info_json"])
-        except (KeyError, TypeError, ValueError) as error:
-            raise ValueError("LeRobot source dataset %d metadata is invalid." % ordinal) from error
-        rate = _positive_integer(dataset["fps"], "source dataset %d fps" % ordinal)
-        if index != ordinal or begin != expected_episode or end <= begin \
-                or end > total_episodes or frame_begin != expected_frame \
-                or frame_end <= frame_begin or not isinstance(source_info, dict) \
-                or _dataset_fps(source_info.get("fps")) != rate \
-                or source_info.get("total_episodes") != end - begin \
-                or source_info.get("total_frames") != frame_end - frame_begin:
-            raise ValueError(
-                "LeRobot source dataset %d has inconsistent fps or ranges."
-                % ordinal)
+    ranges = _source_dataset_ranges(datasets)
+    for ordinal, (source_info, begin, end, frame_begin, frame_end) in enumerate(ranges):
+        rate = _dataset_fps(source_info.get("fps"))
+        dataset = datasets[ordinal]
+        if "fps" in dataset and _positive_integer(dataset["fps"], "source dataset %d fps" % ordinal) != rate:
+            raise ValueError("LeRobot source dataset %d has inconsistent fps." % ordinal)
         if fps is not None and rate != fps:
             raise ValueError("LeRobot source dataset %d fps does not match info.fps." % ordinal)
         rates.extend([rate] * (end - begin))
-        expected_episode, expected_frame = end, frame_end
-    if expected_episode != total_episodes:
+    if len(rates) != total_episodes:
         raise ValueError("LeRobot source datasets do not cover all episodes.")
-    for ordinal, row in enumerate(_episode_rows(episodes, ("dataset_index",))):
+    columns = ("dataset_index", "dataset_from_index", "dataset_to_index")
+    for ordinal, row in enumerate(_episode_rows(episodes, columns)):
         try:
             index = operator.index(row["dataset_index"])
         except (KeyError, TypeError) as error:
             raise ValueError("LeRobot episode %d is missing dataset_index." % ordinal) from error
-        if index < 0 or index >= len(datasets) \
-                or not (datasets[index]["episode_from_index"] <= ordinal
-                        < datasets[index]["episode_to_index"]):
+        if index < 0 or index >= len(datasets):
             raise ValueError("LeRobot episode %d has invalid dataset_index." % ordinal)
+        unused, begin, end, frame_begin, frame_end = ranges[index]
+        if not begin <= ordinal < end:
+            raise ValueError("LeRobot episode %d has invalid dataset_index." % ordinal)
+        if ((ordinal == begin and row["dataset_from_index"] != frame_begin)
+                or (ordinal == end - 1 and row["dataset_to_index"] != frame_end)):
+            raise ValueError("LeRobot source dataset %d has inconsistent frame ranges." % index)
     return tuple(rates)
 
 
