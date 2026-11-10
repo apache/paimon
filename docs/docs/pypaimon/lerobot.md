@@ -61,19 +61,20 @@ The call returns `None` on success. Omitting `tag_name` imports the tables
 without creating tags. The one-time importer requires a new target table and
 a non-empty source dataset; subsequent table edits use the normal Paimon APIs.
 
-Pass an ordered list to merge sources into one table group:
+Pass an ordered list to merge sources into one table group. `robot_merged` is
+just an example prefix; choose any unused name:
 
 ```python
 conn.load_from_lerobot(
-    "robot_all",
+    "robot_merged",
     ["oss://bucket/dataset_a", "oss://bucket/dataset_b"],
     dataset_names=["dataset_a", "dataset_b"],
     fps_mode="source",  # Allow different source FPS.
 )
 ```
 
-Merged imports also create only `robot_all_frames`, `robot_all_episodes`, and
-`robot_all_datasets`. The frame table keeps each source's `task_index` and
+Merged imports also create only `robot_merged_frames`, `robot_merged_episodes`, and
+`robot_merged_datasets`. The frame table keeps each source's `task_index` and
 `subtask_index`; the training reader resolves their text through
 `(dataset_index, task_index)` and `(dataset_index, subtask_index)`.
 
