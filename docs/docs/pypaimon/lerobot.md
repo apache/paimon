@@ -126,7 +126,7 @@ Scalars map to scalar types, numeric tensors to `ARRAY` (nested for higher ranks
 and images to `BLOB`. Tensor shapes remain in the feature metadata; images keep
 their compressed bytes. Previously imported `VECTOR` features remain readable.
 
-Video features map to `BLOB`. Each MP4 is copied once per aligned file group and indexed for range
+Video features map to `BLOB`. Each MP4 is copied once per aligned file group for range
 reads. Imports require a bucket-unaware table and check rolling before each Episode. Use
 `VideoFrameCollator` for scans or `PaimonLeRobotDataset` for training.
 
@@ -253,9 +253,9 @@ loader = dataset.to_dataloader(
 batches, avoiding a second full-resolution copy during collation.
 
 Without `tag_name`, the latest snapshots are used. Frame lookups use the BTree
-on `index`; payloads remain lazy. Indexed videos prefetch metadata and target GOPs, then fetch
-uncached PyAV reads on demand. Unindexed videos use the TorchCodec/PyAV scan path. Set
-`video_backend` to force either decoder. With `video_backend="torchcodec"`, indexed
+on `index`; payloads remain lazy. Ordinary MP4 sample tables locate target frames and GOPs; other videos use the
+TorchCodec/PyAV scan path. Set
+`video_backend` to force either decoder. With `video_backend="torchcodec"`, supported
 MP4 videos use timestamp seeks verified against their sample table and returned PTS.
 Decoder replicas share read-only timelines; uniform timing is stored compactly.
 Unsupported timelines or mismatched timestamps fall back to TorchCodec exact mode.

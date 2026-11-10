@@ -30,7 +30,7 @@ class VideoFileMeta:
 
     VERSION = 1
     MAGIC_NUMBER = 0x4F454449
-    FOOTER_SIZE = 25
+    FOOTER_SIZE = 29
     NULL_REFERENCE = -1
     PLACE_HOLDER_REFERENCE = -2
 
@@ -44,9 +44,9 @@ class VideoFileMeta:
         footer = stream.read(self.FOOTER_SIZE)
         if len(footer) != self.FOOTER_SIZE:
             raise IOError("Corrupt video file: cannot read footer.")
-        lengths = struct.unpack('<IIIIIIB', footer)
-        index_lengths = lengths[:5]
-        magic, version = lengths[5:]
+        lengths = struct.unpack('<IIIIIIIB', footer)
+        index_lengths = lengths[:6]
+        magic, version = lengths[6:]
         if magic != self.MAGIC_NUMBER:
             raise IOError(
                 "Corrupt video file: invalid footer magic %s." % magic
@@ -54,18 +54,16 @@ class VideoFileMeta:
         if version != self.VERSION:
             raise IOError("Unsupported video format version: %s" % version)
 
-        index_names = (
-            "physical video", "keyframe index", "run length",
-            "run reference", "first frame"
-        )
-
         total_index_length = sum(index_lengths)
         if total_index_length > footer_start:
             raise IOError("Corrupt video file: indexes exceed the file size.")
         index_start = footer_start - total_index_length
         indexes = []
         offset = index_start
-        for name, length in zip(index_names, index_lengths):
+        for name, length in zip(
+                ("physical video", "moov offset", "moov length",
+                 "run length", "run reference", "first frame"),
+                index_lengths):
             stream.seek(offset)
             raw = stream.read(length)
             if len(raw) != length:
@@ -75,49 +73,30 @@ class VideoFileMeta:
             indexes.append(DeltaVarintCompressor.decompress(raw))
             offset += length
 
-        (
-            physical_lengths,
-            keyframe_index_lengths,
-            run_lengths,
-            references,
-            first_frames,
-        ) = indexes
-        if len(keyframe_index_lengths) != len(physical_lengths):
-            raise IOError(
-                "Corrupt video file: physical video and keyframe index "
-                "indexes have different counts."
-            )
-        if any(length < 0 for length in keyframe_index_lengths):
-            raise IOError(
-                "Corrupt video file: negative keyframe index length."
-            )
-
-        keyframe_index_size = sum(keyframe_index_lengths)
-        mapping_start = index_start - keyframe_index_size
-        if mapping_start < 0:
-            raise IOError(
-                "Corrupt video file: keyframe indexes exceed the file size."
-            )
+        physical_lengths, moov_offsets, moov_lengths, run_lengths, references, first_frames = indexes
+        if not (len(physical_lengths) == len(moov_offsets) == len(moov_lengths)):
+            raise IOError("Corrupt video file: video indexes have different counts.")
+        for length, offset, size in zip(physical_lengths, moov_offsets, moov_lengths):
+            if (offset < 0 or size < 0 or offset > length or size > length - offset
+                    or (size == 0 and offset != 0)):
+                raise IOError("Corrupt video file: invalid moov range.")
+        self.moov_offsets = moov_offsets
+        self.moov_lengths = moov_lengths
         physical_offsets = []
         payload_offset = 0
         for ordinal, length in enumerate(physical_lengths):
-            if length <= 0 or length > mapping_start - payload_offset:
+            if length <= 0 or length > index_start - payload_offset:
                 raise IOError(
                     "Corrupt video file: invalid physical video length %s "
                     "at ordinal %s." % (length, ordinal)
                 )
             physical_offsets.append(payload_offset)
             payload_offset += length
-        if payload_offset != mapping_start:
+        if payload_offset != index_start:
             raise IOError(
                 "Corrupt video file: indexed videos use %s bytes, but payload "
-                "region contains %s bytes." % (payload_offset, mapping_start)
+                "region contains %s bytes." % (payload_offset, index_start)
             )
-        keyframe_index_offsets = []
-        mapping_offset = mapping_start
-        for length in keyframe_index_lengths:
-            keyframe_index_offsets.append(mapping_offset)
-            mapping_offset += length
 
         if not (len(run_lengths) == len(references) == len(first_frames)):
             raise IOError(
@@ -153,8 +132,6 @@ class VideoFileMeta:
 
         self.physical_lengths = physical_lengths
         self.physical_offsets = physical_offsets
-        self.keyframe_index_lengths = keyframe_index_lengths
-        self.keyframe_index_offsets = keyframe_index_offsets
         self.run_ends = run_ends
         self.references = references
         self.first_frames = first_frames
@@ -186,6 +163,11 @@ class VideoFileMeta:
             return returned_row
         return self.selected_positions[returned_row]
 
+    def moov_range(self, returned_row):
+        run = bisect.bisect_left(self.run_ends, self.logical_position(returned_row) + 1)
+        reference = self.references[run]
+        return self.moov_offsets[reference], self.moov_lengths[reference]
+
     def frame(self, returned_row: int):
         logical = self.logical_position(returned_row)
         run = bisect.bisect_left(self.run_ends, logical + 1)
@@ -195,16 +177,10 @@ class VideoFileMeta:
         if reference == self.PLACE_HOLDER_REFERENCE:
             return Blob.PLACE_HOLDER
         run_start = 0 if run == 0 else self.run_ends[run - 1]
-        frame = (
+        return (
             self.physical_offsets[reference],
             self.physical_lengths[reference],
             self.first_frames[run] + logical - run_start,
-        )
-        if self.keyframe_index_lengths[reference] == 0:
-            return frame + (-1, 0)
-        return frame + (
-            self.keyframe_index_offsets[reference],
-            self.keyframe_index_lengths[reference],
         )
 
 
@@ -226,7 +202,11 @@ class VideoFrameRecordIterator:
             raise StopIteration
         value = self.meta.frame(self.current_position)
         if isinstance(value, tuple):
-            descriptor = VideoFrameDescriptor(self.file_path, *value)
+            offset, length, frame_index = value
+            descriptor = VideoFrameDescriptor(
+                self.file_path, offset, length, frame_index,
+                *self.meta.moov_range(self.current_position)
+            )
             value = Blob.from_descriptor(self._uri_reader, descriptor)
         self.current_position += 1
         return GenericRow([value], [self.field], RowKind.INSERT)

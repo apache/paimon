@@ -27,7 +27,6 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.multimodal import VideoFrameCollator
 from pypaimon.multimodal.lerobot.dataset import _decode_video_rows
 from pypaimon.table.row.blob import VideoFrameDescriptor
-from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
 class _Decoder:
@@ -392,7 +391,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
 
         def row(request, offset, length, index):
             return {"request": request, "video": VideoFrameDescriptor(
-                path, offset, length, index, -1, 0).serialize()}
+                path, offset, length, index).serialize()}
 
         collator = VideoFrameCollator(
             self.table,
@@ -551,7 +550,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
         file_io = ResolvedFileIO()
         table = SimpleNamespace(raw_table=SimpleNamespace(file_io=file_io))
         descriptor = VideoFrameDescriptor(
-            "oss://bucket/internal.video", 0, 14, 2, -1, 0
+            "oss://bucket/internal.video", 0, 14, 2
         ).serialize()
         collator = VideoFrameCollator(
             table,
@@ -589,83 +588,13 @@ class VideoFrameCollatorTest(unittest.TestCase):
             prefetch_max_bytes=prefetch_max_bytes)
         try:
             for name in ("first", "second"):
-                descriptor = VideoFrameDescriptor(name, 0, 5, 2, 5, 100)
+                descriptor = VideoFrameDescriptor(name, 0, 5, 2)
                 result = collator([{"video": descriptor.serialize()}])
                 self.assertEqual((b"video", 2), result[0]["frame"])
             self.assertTrue(streams[0].closed)
         finally:
             collator.close()
         self.assertTrue(all(stream.closed for stream in streams))
-
-    @parameterized.expand([0, 5])
-    def test_index_is_opened_once_when_decoder_requests_it(self, prefetch_max_bytes):
-        index = VideoKeyframeIndex([], [(0, 0, 0)])
-        try:
-            encoded = index.serialize()
-        finally:
-            index.close()
-        reads = []
-        opened = []
-
-        class IndexedIO:
-            def new_input_stream(self, path):
-                return io.BytesIO(b"video")
-
-            def read_file_range(self, path, offset, length):
-                reads.append((offset, length))
-                return encoded[offset - 5:offset - 5 + length]
-
-        def factory(stream):
-            self.assertEqual([], reads)
-            index = stream.video_keyframe_index
-            self.assertIsInstance(index, VideoKeyframeIndex)
-            count = len(reads)
-            self.assertGreater(count, 0)
-            self.assertIs(index, stream.video_keyframe_index)
-            self.assertEqual(count, len(reads))
-            self.assertEqual((0, 0, 0), tuple(index.keyframes[0]))
-            opened.append(stream)
-            return _Decoder(stream, [])
-
-        collator = VideoFrameCollator(
-            SimpleNamespace(file_io=IndexedIO()), video_column="video",
-            decoder_factory=factory,
-            decode_fn=lambda decoder, index, row: decoder.decode(index),
-            collate_fn=lambda rows: rows, prefetch_max_bytes=prefetch_max_bytes)
-        descriptor = VideoFrameDescriptor("video", 0, 5, 0, 5, len(encoded))
-        try:
-            for _ in range(2):
-                collator([{"video": descriptor.serialize()}])
-            self.assertEqual(1, len(opened))
-            before_close = len(reads)
-        finally:
-            collator.close()
-        self.assertEqual(before_close, len(reads))
-        self.assertTrue(opened[0].closed)
-
-    @parameterized.expand([0, 5])
-    def test_failed_index_open_closes_stream_without_retrying(self, prefetch_max_bytes):
-        source = io.BytesIO(b"video")
-        reads = []
-
-        class FailingIO:
-            def new_input_stream(self, path):
-                return source
-
-            def read_file_range(self, *args):
-                reads.append(args)
-                raise OSError("index unavailable")
-
-        collator = VideoFrameCollator(
-            SimpleNamespace(file_io=FailingIO()), video_column="video",
-            decoder_factory=lambda stream: stream.video_keyframe_index,
-            decode_fn=lambda *args: None, prefetch_max_bytes=prefetch_max_bytes)
-        descriptor = VideoFrameDescriptor("video", 0, 5, 0, 5, 100)
-        with self.assertRaisesRegex(OSError, "index unavailable"):
-            collator([{"video": descriptor.serialize()}])
-        collator.close()
-        self.assertEqual(1, len(reads))
-        self.assertTrue(source.closed)
 
     def test_prefetch_bounds_retained_payloads_and_reuses_reads(self):
         reads = []
@@ -694,8 +623,8 @@ class VideoFrameCollatorTest(unittest.TestCase):
             decoder_factory=factory,
             decode_fn=lambda decoder, index, row: decoder.decode(index),
             collate_fn=lambda rows: rows, prefetch_max_bytes=5)
-        first = VideoFrameDescriptor("first", 0, 5, 0, -1, 0).serialize()
-        second = VideoFrameDescriptor("second", 0, 5, 0, -1, 0).serialize()
+        first = VideoFrameDescriptor("first", 0, 5, 0, 0, 0).serialize()
+        second = VideoFrameDescriptor("second", 0, 5, 0, 0, 0).serialize()
         try:
             for _ in range(2):
                 result = collator([{"video": first}])
@@ -735,7 +664,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
                     decode_fn=lambda decoder, index, row: decoder.decode(index),
                     collate_fn=lambda rows: rows, prefetch_max_bytes=budget)
                 try:
-                    descriptor = VideoFrameDescriptor("video", 0, 5, 0, -1, 0)
+                    descriptor = VideoFrameDescriptor("video", 0, 5, 0, 0, 0)
                     result = collator([{"video": descriptor.serialize()}])
                     self.assertEqual((b"video", 0), result[0]["frame"])
                     self.assertEqual(0, getattr(captured[0], "video_prefetch_bytes", 0))
@@ -748,7 +677,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
             SimpleNamespace(file_io=SimpleNamespace(new_input_stream=lambda path: source)),
             video_column="video", decoder_factory=lambda stream: self.fail("truncated"),
             decode_fn=lambda *args: None, prefetch_max_bytes=10)
-        descriptor = VideoFrameDescriptor("video", 0, 10, 0, -1, 0)
+        descriptor = VideoFrameDescriptor("video", 0, 10, 0, 0, 0)
         with self.assertRaisesRegex(IOError, "Incomplete video"):
             collator([{"video": descriptor.serialize()}])
         self.assertTrue(source.closed)
@@ -770,7 +699,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
             decode_fn=lambda decoder, index, row: decoder.decode(index),
             collate_fn=lambda rows: rows, prefetch_max_bytes=5)
         try:
-            descriptor = VideoFrameDescriptor("video", 0, 5, 0, -1, 0)
+            descriptor = VideoFrameDescriptor("video", 0, 5, 0, 0, 0)
             result = collator([{"video": descriptor.serialize()}])
             self.assertEqual((b"video", 0), result[0]["frame"])
             self.assertEqual([5, 3, 1], reads)
@@ -799,7 +728,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
             collate_fn=lambda rows: rows, prefetch_max_bytes=5, max_open_videos=1)
         try:
             for name in ("first", "second", "third"):
-                descriptor = VideoFrameDescriptor(name, 0, 5, 0, -1, 0)
+                descriptor = VideoFrameDescriptor(name, 0, 5, 0, 0, 0)
                 result = collator([{"video": descriptor.serialize()}])
                 self.assertEqual((b"video", 0), result[0]["frame"])
                 self.assertEqual(1, len(collator._decoders))
@@ -824,7 +753,6 @@ class VideoFrameCollatorTest(unittest.TestCase):
         except ImportError as error:
             self.skipTest(str(error))
         from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
-        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
         target = io.BytesIO()
         with av.open(target, mode="w", format="mp4") as container:
@@ -839,12 +767,11 @@ class VideoFrameCollatorTest(unittest.TestCase):
             for packet in stream.encode():
                 container.mux(packet)
         payload = target.getvalue()
-        index = VideoKeyframeIndex.inspect(io.BytesIO(payload), len(payload))
-        try:
-            encoded_index = index.serialize()
-        finally:
-            index.close()
-        full_file = payload + encoded_index
+        from pypaimon.common.mp4_moov import MoovLocator
+        locator = MoovLocator()
+        locator.feed(payload)
+        moov_offset, moov_length = locator.finish()
+        full_file = payload
         outputs = []
         for budget in (0, len(payload)):
             reads = []
@@ -873,7 +800,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
                 collate_fn=lambda rows: rows, prefetch_max_bytes=budget)
             try:
                 rows = [{"video": VideoFrameDescriptor(
-                    "video", 0, len(payload), frame, len(payload), len(encoded_index)
+                    "video", 0, len(payload), frame, moov_offset, moov_length
                 ).serialize()} for frame in (9, 1, 9, 7)]
                 outputs.append(torch.stack([row["frame"] for row in collator(rows)]))
                 if budget:
@@ -892,7 +819,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
         with open(path, "wb") as output:
             output.write(data)
         return VideoFrameDescriptor(
-            path, 0, len(data), frame_index, -1, 0
+            path, 0, len(data), frame_index
         ).serialize()
 
 

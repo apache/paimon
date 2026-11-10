@@ -96,7 +96,7 @@ from pypaimon.multimodal.lerobot.source import (
     _validate_info_paths,
 )
 from pypaimon.multimodal.table import _target_schema
-from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+from pypaimon.tests.video_frame_index_utils import FrameIndex
 
 try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -616,7 +616,7 @@ class LeRobotValidationTest(unittest.TestCase):
                         container.mux(packet)
 
                 payload = output.getvalue()
-                index = VideoKeyframeIndex.inspect(
+                index = None if container_options else FrameIndex.inspect(
                     io.BytesIO(payload), len(payload))
                 with av.open(io.BytesIO(payload)) as container:
                     expected = np.stack([
@@ -685,7 +685,7 @@ class LeRobotValidationTest(unittest.TestCase):
             for packet in stream.encode():
                 container.mux(packet)
         payload = output.getvalue()
-        index = VideoKeyframeIndex.inspect(io.BytesIO(payload), len(payload))
+        index = FrameIndex.inspect(io.BytesIO(payload), len(payload))
         with av.open(io.BytesIO(payload)) as container:
             expected = [frame.to_ndarray(format="rgb24")
                         for frame in container.decode(video=0)]
@@ -719,7 +719,7 @@ class LeRobotValidationTest(unittest.TestCase):
     @unittest.skipUnless(av is not None, "PyAV is required")
     def test_indexed_pyav_decoder_closes_failed_session_before_retry(self):
         source = io.BytesIO(b"0123456789abcdef")
-        index = VideoKeyframeIndex([(0, 4)], [(0, 0, 4)])
+        index = FrameIndex([(0, 4)], [(0, 0, 4)])
         decoder = _PyAVVideoDecoder(source, index)
         inputs = []
         containers = []
@@ -754,7 +754,7 @@ class LeRobotValidationTest(unittest.TestCase):
     def test_indexed_plan_prefetches_requested_gops_with_bounded_lookahead(self):
         source = io.BytesIO(b"")
         source.video_length = 1000000
-        index = VideoKeyframeIndex(
+        index = FrameIndex(
             [(900000, 100000)],
             [(0, 0, 100000), (10, 10, 300000),
              (20, 20, 500000), (30, 30, 700000)])
@@ -789,7 +789,7 @@ class LeRobotValidationTest(unittest.TestCase):
             for packet in stream.encode():
                 container.mux(packet)
         payload = output.getvalue()
-        index = VideoKeyframeIndex.inspect(io.BytesIO(payload), len(payload))
+        index = FrameIndex.inspect(io.BytesIO(payload), len(payload))
         with av.open(io.BytesIO(payload)) as container:
             expected = [frame.to_ndarray(format="rgb24")
                         for frame in container.decode(video=0)]
@@ -823,7 +823,7 @@ class LeRobotValidationTest(unittest.TestCase):
             self.assertLess(counts[1], counts[0])
 
     def test_default_video_backend_falls_back_on_os_error(self):
-        stream = Mock()
+        stream = Mock(spec=["seek"])
         decoder = object()
         with patch(
                 "pypaimon.multimodal.lerobot.dataset."
@@ -844,7 +844,7 @@ class LeRobotValidationTest(unittest.TestCase):
 
     def test_indexed_default_backend_falls_back_to_torchcodec(self):
         stream = Mock()
-        stream.video_keyframe_index = VideoKeyframeIndex(
+        stream.video_keyframe_index = FrameIndex(
             [], [(0, 0, 0)])
         decoder = object()
         module = "pypaimon.multimodal.lerobot.dataset."
@@ -879,7 +879,7 @@ class LeRobotValidationTest(unittest.TestCase):
             self.fail("Invalid video did not raise InvalidDataError")
 
         stream = Mock()
-        stream.video_keyframe_index = VideoKeyframeIndex(
+        stream.video_keyframe_index = FrameIndex(
             [], [(0, 0, 0)])
         pyav_decoder = Mock()
         pyav_decoder.get_frames_at.side_effect = invalid_data_error
@@ -916,7 +916,7 @@ class LeRobotValidationTest(unittest.TestCase):
         if av is None:
             self.skipTest("PyAV is required for its real exception types")
         stream = Mock()
-        stream.video_keyframe_index = VideoKeyframeIndex(
+        stream.video_keyframe_index = FrameIndex(
             [], [(0, 0, 0)])
         pyav_decoder = Mock()
         pyav_decoder.get_frames_at.side_effect = av.error.FFmpegError(
@@ -1040,7 +1040,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     "frame_index": index, "timestamp": index / 10,
                     "task_index": 0,
                     "camera": pmm.VideoFrameDescriptor(
-                        "file:///shared.video", 0, 5, index + 3, -1, 0
+                        "file:///shared.video", 0, 5, index + 3
                     ).serialize(),
                 } for index in indices], schema=self.schema).select(columns)
 
@@ -1158,7 +1158,7 @@ class LeRobotValidationTest(unittest.TestCase):
             ) as decode_batch:
                 result = collator([{
                     "video": pmm.VideoFrameDescriptor(
-                        "file:///episode.mp4", 0, len(payload), index, -1, 0
+                        "file:///episode.mp4", 0, len(payload), index
                     ).serialize(),
                 } for index in indices])
                 decode_batch.assert_called_once_with(indices=[1, 5, 9, 9])
@@ -1901,7 +1901,7 @@ class LeRobotValidationTest(unittest.TestCase):
 
         key = "camera"
         feature = {key: {"dtype": "video", "shape": [4, 5, 3]}}
-        rows = {i: {key: VideoFrameDescriptor("a.video", 0, 1, i, -1, 0).serialize()}
+        rows = {i: {key: VideoFrameDescriptor("a.video", 0, 1, i).serialize()}
                 for i in range(2)}
         plans = [{"windows": {key: [1, 0, 0]}}] * 2
         pixels = torch.arange(120).reshape(2, 4, 5, 3).to(torch.uint8)
@@ -1961,8 +1961,8 @@ class LeRobotValidationTest(unittest.TestCase):
 
             decoder.get_frames_at.reset_mock()
             separate = dict(rows)
-            separate[2] = {key: VideoFrameDescriptor("b.video", 0, 1, 0, -1, 0).serialize()}
-            separate[3] = {key: VideoFrameDescriptor("b.video", 0, 1, 1, -1, 0).serialize()}
+            separate[2] = {key: VideoFrameDescriptor("b.video", 0, 1, 0).serialize()}
+            separate[3] = {key: VideoFrameDescriptor("b.video", 0, 1, 1).serialize()}
             interleaved = [{"windows": {key: window}}
                            for window in ([1, 0, 0], [2, 3], [0, 1], [3, 2, 2])]
             result = _decode_video_windows(
@@ -1992,7 +1992,7 @@ class LeRobotValidationTest(unittest.TestCase):
 
             open_decoder.reset_mock()
             mixed = dict(rows)
-            mixed[1] = {key: VideoFrameDescriptor("b.video", 0, 1, 0, -1, 0).serialize()}
+            mixed[1] = {key: VideoFrameDescriptor("b.video", 0, 1, 0).serialize()}
             self.assertEqual({}, _decode_video_windows(
                 plans, mixed, [collator], feature, True))
             open_decoder.assert_not_called()
@@ -3476,10 +3476,6 @@ class LeRobotValidationTest(unittest.TestCase):
                 pmm.VideoFrameDescriptor.deserialize(row["camera_b"])
                 for row in rows
             ]
-            self.assertTrue(all(
-                descriptor.keyframe_index_descriptor is not None
-                for descriptor in descriptors + camera_b_descriptors
-            ))
             if not remux:
                 self.assertEqual(
                     [55, 56, 61, 62, 63],
@@ -3548,9 +3544,6 @@ class LeRobotValidationTest(unittest.TestCase):
                         descriptor.offset,
                         descriptor.offset + descriptor.length,
                     ))
-                    index = descriptor.keyframe_index_descriptor
-                    tracked.append((
-                        index.uri, index.offset, index.offset + index.length))
 
                 def track(path, offset, length):
                     end = offset + length

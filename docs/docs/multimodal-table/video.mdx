@@ -81,27 +81,23 @@ to write complete videos and their logical frame rows.
 
 ## Descriptors and Physical Layout
 
-Each `VideoFrameDescriptor` identifies an encoded video range and a frame ordinal. A `.video` file
-packs raw videos, optional keyframe indexes, and delta-varint row mappings. Consecutive frames share
-one run; negative references represent NULL or data-evolution placeholders.
+Each `VideoFrameDescriptor` identifies a complete video byte range and a frame ordinal.
+Consecutive rows referencing consecutive frames share one span.
 
 <pre>
 .video (version 1, in file order)
 ├─ Complete encoded videos A, B, ...
-├─ Keyframe index blocks A, B, ...
-│  ├─ Video metadata ranges: offset and length within the encoded video
-│  └─ Compressed keyframe entries: frame ordinal, PTS, and packet byte position
-├─ Metadata indexes
-│  ├─ Video payload lengths
-│  ├─ Keyframe index block lengths
-│  └─ Run lengths, video references, and starting frame indices
-└─ Footer: five 4-byte index sizes, 4-byte magic, and 1-byte version
+├─ Video byte lengths
+├─ Moov offsets (relative to each video)
+├─ Moov byte lengths (0: absent)
+├─ Span row counts
+├─ Span video references (-1: NULL, -2: placeholder)
+├─ Span starting frame ordinals
+└─ Footer: six 4-byte index sizes, 4-byte magic, and 1-byte version
 </pre>
 
-Each video index stores initialization ranges such as MP4 `moov` and keyframe positions. A cold
-reader prefetches these ranges and a bounded GOP window, then fetches uncached decoder reads on
-demand. Zero length selects the scan fallback. PyPaimon generates indexes for supported ISO BMFF
-videos and preserves them during rewrites. See the
+The six arrays use Delta-Varint encoding. Moov ranges locate MP4 metadata; readers derive
+frame positions in memory; unsupported containers use scanning. See the
 [file format specification](../concepts/spec/fileformat#video).
 
 ## Reuse, Rolling, and Compaction
@@ -117,7 +113,7 @@ BLOB, and vector rolling is deferred until the next payload boundary and all act
 together. The resulting file group remains row-aligned and a single large episode may exceed the
 configured target.
 
-When BLOB compaction is enabled, it copies videos and keyframe indexes into a new self-contained
+When BLOB compaction is enabled, it copies videos and frame mappings into a new self-contained
 `.video` pack without decoding frames. The aligned normal data file contains only application
 columns such as `episode_id`, state, and action.
 `blob-compaction.enabled` defaults to `false`; ordinary normal-file compaction can
