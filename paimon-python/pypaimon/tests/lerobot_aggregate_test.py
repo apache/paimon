@@ -438,6 +438,7 @@ def test_missing_stats_and_existing_target(setup):
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
 def test_single_source_metadata_opt_in(setup, import_parallelism):
+    pytest.importorskip("torch")
     conn, sources = setup
     conn.load_from_lerobot("single", sources[0], fps_mode="source",
                            parallelism=import_parallelism)
@@ -644,6 +645,8 @@ def test_vocabulary_columns_without_pandas_index_are_preserved(setup):
 
 
 def test_official_merge_reference_and_local_sources(tmp_path):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
     module = pytest.importorskip("lerobot.datasets.lerobot_dataset")
     official = pytest.importorskip("lerobot.datasets.aggregate")
     roots = []
@@ -799,6 +802,8 @@ def test_existing_source_episode_fps(setup, tmp_path, import_parallelism, multip
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
 @pytest.mark.parametrize("all_null", [False, True])
 def test_merge_nullable_subtask_import(setup, tmp_path, import_parallelism, all_null):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
     conn, sources = setup
     for directory in ("a", "b"):
         path = tmp_path / directory / "data/chunk-000/file-000.parquet"
@@ -833,6 +838,9 @@ def test_merge_nullable_subtask_import(setup, tmp_path, import_parallelism, all_
 @pytest.mark.parametrize("rate", [None, 0, -1, True, 10.5, 20])
 def test_reader_rejects_invalid_source_fps(setup, rate):
 
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+
     class Reader(pm.PaimonDatasetReader):
         def read_indices(self, indices, columns):
             raise AssertionError("Invalid FPS must fail before reading frames")
@@ -846,6 +854,8 @@ def test_reader_rejects_invalid_source_fps(setup, rate):
 
 
 def test_reader_requires_fps_without_episode_column(setup):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
     from pypaimon.multimodal.lerobot.metadata import _overwrite_arrow
     conn, sources = setup
     conn.load_from_lerobot("merged", sources)
@@ -941,6 +951,8 @@ def test_float_extrema_propagate_nan(setup, reverse):
 @pytest.mark.parametrize("multiple", [False, True])
 @pytest.mark.parametrize("video_rate", ["10", 10.000005])
 def test_default_fps_preserves_importer_contract(tmp_path, multiple, video_rate):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     uri = source(tmp_path / "source", video=True)
     path = tmp_path / "source/meta/info.json"
@@ -962,6 +974,7 @@ def test_default_fps_preserves_importer_contract(tmp_path, multiple, video_rate)
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
 def test_nullable_batch_type_stays_stable_after_import(setup, import_parallelism):
+    pytest.importorskip("datasets")
     torch = pytest.importorskip("torch")
     conn, sources = setup
     path = Path(sources[0][7:]) / "data/chunk-000/file-000.parquet"
@@ -985,6 +998,8 @@ def test_nullable_batch_type_stays_stable_after_import(setup, import_parallelism
 
 
 def test_explicit_source_mode_requires_source_metadata(setup):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
     conn, sources = setup
     conn.load_from_lerobot("merged", sources, fps_mode="source")
     meta = pm.PaimonLeRobotDataset(conn.get_table("merged")).meta
@@ -999,6 +1014,8 @@ def test_explicit_source_mode_requires_source_metadata(setup):
 
 
 def test_source_mode_rejects_broken_episode_link(setup):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
     from datasets import Dataset
 
     class Reader(pm.PaimonDatasetReader):
@@ -1017,6 +1034,8 @@ def test_source_mode_rejects_broken_episode_link(setup):
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
 def test_merge_preserves_vocabulary_extension_columns(setup, import_parallelism):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
     conn, sources = setup
     originals = {}
     for index, uri in enumerate(sources):
@@ -1149,6 +1168,8 @@ def test_merge_rejects_ambiguous_source_labels(setup, kind, import_parallelism):
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
 def test_merge_archives_original_arrow_vocabulary(setup, import_parallelism):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
     conn, sources = setup
     originals = {}
     for index, uri in enumerate(sources):
@@ -1176,6 +1197,7 @@ def test_merge_archives_original_arrow_vocabulary(setup, import_parallelism):
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
 def test_nullable_mask_preserves_source_feature(setup, import_parallelism):
+    pytest.importorskip("datasets")
     pytest.importorskip("torch")
     conn, sources = setup
     for uri in sources:
@@ -1205,6 +1227,8 @@ def test_nullable_mask_preserves_source_feature(setup, import_parallelism):
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
 @pytest.mark.parametrize("video_rate", ["10", 10.000005])
 def test_merge_normalizes_video_fps(setup, tmp_path, import_parallelism, video_rate):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
     conn, unused = setup
     sources = [source(tmp_path / "video_a", video=True),
                source(tmp_path / "video_b", video=True)]
@@ -1224,6 +1248,8 @@ def test_merge_normalizes_video_fps(setup, tmp_path, import_parallelism, video_r
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
 @pytest.mark.parametrize("reverse", [False, True])
 def test_merge_source_specific_episode_extensions(setup, import_parallelism, reverse):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
     conn, sources = setup
     originals = {}
     for index, uri in enumerate(sources):
