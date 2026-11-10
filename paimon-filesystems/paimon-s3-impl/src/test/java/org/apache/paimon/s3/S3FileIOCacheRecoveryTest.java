@@ -32,11 +32,13 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -185,6 +187,138 @@ class S3FileIOCacheRecoveryTest {
                 (RecoverableS3AFileSystem) newFileIO("opts-init-identity").getFileSystem(path);
         assertThat(recovered.isUsable()).isTrue();
         assertThat(recovered).isNotSameAs(oldFs);
+    }
+
+    @Test
+    void testPostPublishUnusableDoesNotCloseBorrowedInstance() throws Exception {
+        Options options = baseOptions("opts-post-publish");
+        Path path = path("s3a", "warehouse/a");
+        CountDownLatch afterPutCheckStarted = new CountDownLatch(1);
+        CountDownLatch borrowerHasFs = new CountDownLatch(1);
+        AtomicReference<CloseTrackingFileSystem> created = new AtomicReference<>();
+        AtomicInteger usableChecksAfterInit = new AtomicInteger();
+
+        S3FileIO creator =
+                newFileIO(
+                        options,
+                        () ->
+                                new CloseTrackingFileSystem() {
+                                    @Override
+                                    public void initialize(URI uri, Configuration conf)
+                                            throws IOException {
+                                        created.set(this);
+                                        super.initialize(uri, conf);
+                                    }
+
+                                    @Override
+                                    boolean isUsable() {
+                                        if (!super.isUsable()) {
+                                            return false;
+                                        }
+                                        // 1st: pre-put health check; 2nd: post-put health check.
+                                        int check = usableChecksAfterInit.incrementAndGet();
+                                        if (check == 1) {
+                                            return true;
+                                        }
+                                        if (check == 2) {
+                                            afterPutCheckStarted.countDown();
+                                            try {
+                                                assertThat(
+                                                                borrowerHasFs.await(
+                                                                        30, TimeUnit.SECONDS))
+                                                        .isTrue();
+                                            } catch (InterruptedException e) {
+                                                Thread.currentThread().interrupt();
+                                                throw new RuntimeException(e);
+                                            }
+                                            markUnusableAndEvict();
+                                            return false;
+                                        }
+                                        return super.isUsable();
+                                    }
+                                });
+
+        S3FileIO borrower = configure(options);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<FileSystem> borrowed =
+                    executor.submit(
+                            () -> {
+                                assertThat(afterPutCheckStarted.await(30, TimeUnit.SECONDS))
+                                        .isTrue();
+                                FileSystem fs = borrower.getFileSystem(path);
+                                borrowerHasFs.countDown();
+                                return fs;
+                            });
+
+            assertThatThrownBy(() -> creator.getFileSystem(path))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("before cache publish completed");
+
+            FileSystem borrowedFs = borrowed.get(30, TimeUnit.SECONDS);
+            assertThat(borrowedFs).isSameAs(created.get());
+            assertThat(created.get().closed).isFalse();
+            assertThat(created.get().isUsable()).isFalse();
+
+            RecoverableS3AFileSystem recovered =
+                    (RecoverableS3AFileSystem) configure(options).getFileSystem(path);
+            assertThat(recovered.isUsable()).isTrue();
+            assertThat(recovered).isNotSameAs(created.get());
+        } finally {
+            borrowerHasFs.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testSameCacheKeyCreateIsSerializedByStripeLock() throws Exception {
+        Options options = baseOptions("opts-lock-mutex");
+        Path path = path("s3a", "warehouse/a");
+        AtomicInteger concurrentInitializes = new AtomicInteger();
+        AtomicInteger maxConcurrentInitializes = new AtomicInteger();
+        CountDownLatch bothEntered = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+
+        Supplier<RecoverableS3AFileSystem> factory =
+                () ->
+                        new CloseTrackingFileSystem() {
+                            @Override
+                            public void initialize(URI uri, Configuration conf) throws IOException {
+                                int active = concurrentInitializes.incrementAndGet();
+                                maxConcurrentInitializes.accumulateAndGet(active, Math::max);
+                                bothEntered.countDown();
+                                try {
+                                    assertThat(release.await(30, TimeUnit.SECONDS)).isTrue();
+                                    super.initialize(uri, conf);
+                                } catch (InterruptedException e) {
+                                    Thread.currentThread().interrupt();
+                                    throw new IOException(e);
+                                } finally {
+                                    concurrentInitializes.decrementAndGet();
+                                }
+                            }
+                        };
+
+        S3FileIO firstIO = newFileIO(options, factory);
+        S3FileIO secondIO = newFileIO(options, factory);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<FileSystem> first = executor.submit(() -> firstIO.getFileSystem(path));
+            Future<FileSystem> second = executor.submit(() -> secondIO.getFileSystem(path));
+
+            // Only one initialize can hold the stripe lock; the second waits outside.
+            assertThat(bothEntered.await(1, TimeUnit.SECONDS)).isFalse();
+            assertThat(maxConcurrentInitializes.get()).isEqualTo(1);
+            release.countDown();
+
+            FileSystem fs1 = first.get(30, TimeUnit.SECONDS);
+            FileSystem fs2 = second.get(30, TimeUnit.SECONDS);
+            assertThat(fs2).isSameAs(fs1);
+            assertThat(maxConcurrentInitializes.get()).isEqualTo(1);
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @Test
@@ -360,6 +494,10 @@ class S3FileIOCacheRecoveryTest {
 
     private static S3FileIO newFileIO(
             String optionMarker, Supplier<RecoverableS3AFileSystem> factory) {
+        return newFileIO(baseOptions(optionMarker), factory);
+    }
+
+    private static S3FileIO newFileIO(Options options, Supplier<RecoverableS3AFileSystem> factory) {
         S3FileIO fileIO =
                 new S3FileIO() {
                     @Override
@@ -367,7 +505,7 @@ class S3FileIOCacheRecoveryTest {
                         return factory.get();
                     }
                 };
-        fileIO.configure(CatalogContext.create(baseOptions(optionMarker)));
+        fileIO.configure(CatalogContext.create(options));
         return fileIO;
     }
 

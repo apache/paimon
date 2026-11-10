@@ -67,10 +67,12 @@ public class S3FileIO extends HadoopCompliantFileIO {
     private static final Map<CacheKey, S3AFileSystem> CACHE = new ConcurrentHashMap<>();
 
     /**
-     * Per-CacheKey locks: create/replace of the same key is serialized; different keys may create
-     * concurrently. Invalidation stays lock-free and does not remove these locks.
+     * Fixed striped locks for create/replace. Same {@link CacheKey} always maps to the same lock;
+     * different keys may share a stripe. Invalidation stays lock-free.
      */
-    private static final Map<CacheKey, Object> CACHE_LOCKS = new ConcurrentHashMap<>();
+    private static final int CACHE_LOCK_COUNT = 128;
+
+    private static final Object[] CACHE_LOCKS = createCacheLocks();
 
     private Options hadoopOptions;
 
@@ -228,16 +230,11 @@ public class S3FileIO extends HadoopCompliantFileIO {
                 throw e;
             }
 
+            // Once put returns, other threads may already observe this instance via CACHE.get.
+            // Evict on post-publish failure, but do not close: a borrower may still be using it.
             CACHE.put(cacheKey, fs);
             if (!fs.isUsable()) {
                 CACHE.remove(cacheKey, fs);
-                try {
-                    fs.close();
-                } catch (Throwable t) {
-                    LOG.warn(
-                            "Failed to close S3AFileSystem that became unusable after cache publish",
-                            t);
-                }
                 throw new IOException(
                         "S3A filesystem became unusable before cache publish completed");
             }
@@ -265,8 +262,16 @@ public class S3FileIO extends HadoopCompliantFileIO {
         }
     }
 
+    private static Object[] createCacheLocks() {
+        Object[] locks = new Object[CACHE_LOCK_COUNT];
+        for (int i = 0; i < locks.length; i++) {
+            locks[i] = new Object();
+        }
+        return locks;
+    }
+
     private static Object getCacheLock(CacheKey key) {
-        return CACHE_LOCKS.computeIfAbsent(key, k -> new Object());
+        return CACHE_LOCKS[Math.floorMod(key.hashCode(), CACHE_LOCK_COUNT)];
     }
 
     static boolean isUsableFileSystem(FileSystem fs) {
