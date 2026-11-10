@@ -68,6 +68,8 @@ from pypaimon.multimodal.lerobot.api import _create_target_table
 from pypaimon.multimodal.lerobot.metadata import (
     _append_arrow_tables,
     _companion_identifier,
+    _dataset_fps,
+    _integer,
     _load_dataset_metadata,
     _managed_table_options,
     _metadata_table,
@@ -166,6 +168,28 @@ def _configure_uint8_transform_worker(unused_worker_id):
 
 
 class LeRobotValidationTest(unittest.TestCase):
+
+    def test_dataset_fps_accepts_integral_numbers(self):
+        for value in (30, 30.0, np.int64(30), np.float32(30), np.float64(30), np.longdouble(30)):
+            with self.subTest(value=value):
+                self.assertEqual(30, _dataset_fps(value))
+                self.assertIsInstance(_dataset_fps(value), int)
+        for value in (True, np.bool_(True), "30", None, 0, -1, 0.0, -30.0,
+                      29.97, float("nan"), float("inf"), -float("inf")):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    _dataset_fps(value)
+        with self.assertRaises(ValueError):
+            _integer(30.0, "episode_index")
+
+    def test_dataset_fps_preserves_extended_precision(self):
+        if np.finfo(np.longdouble).eps >= np.finfo(float).eps:
+            self.skipTest("longdouble has no additional precision on this platform")
+        value = np.longdouble("30.000000000000001")
+        self.assertNotEqual(value, 30)
+        self.assertEqual(float(value), 30.0)
+        with self.assertRaises(ValueError):
+            _dataset_fps(value)
 
     def test_episode_validation_projects_batched_hf_metadata(self):
         try:
@@ -3961,6 +3985,24 @@ class LeRobotImportTest(unittest.TestCase):
                 reader.meta.features["observation.state"]["shape"], (3,))
         finally:
             reader.close()
+
+    def test_import_accepts_integral_float_fps(self):
+        source = self.temp_dir / "float-fps-source"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        info["fps"] = float(info["fps"])
+        info_path.write_text(json.dumps(info))
+
+        for name, location in (("local_fps", source), ("uri_fps", source.as_uri())):
+            with self.subTest(source=name):
+                self.connection.load_from_lerobot(name, location)
+                self.assertEqual(info, _catalog_metadata(self.connection, name + "__info"))
+                data = self.connection.get_table(name).scan().to_arrow()
+                self.assertEqual(info["total_frames"], data.num_rows)
+                dataset = pmm.PaimonLeRobotDataset(self.connection.get_table(name))
+                self.assertEqual(info["fps"], dataset.meta.fps)
+                self.assertEqual(0, dataset[0]["frame_index"].item())
 
     def test_local_import_preserves_extended_info(self):
         source = self.temp_dir / "extended-source"
