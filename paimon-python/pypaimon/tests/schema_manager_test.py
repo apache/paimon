@@ -20,7 +20,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from pypaimon import CatalogFactory
 from pypaimon.branch.branch_manager import BranchManager
+from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
@@ -28,7 +30,7 @@ from pypaimon.common.options.options import Options
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, RowType)
 from pypaimon.schema.schema import Schema
-from pypaimon.schema.schema_change import RemoveOption, SetOption
+from pypaimon.schema.schema_change import RemoveOption, SchemaChange, SetOption
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
@@ -858,6 +860,71 @@ class TestRowTrackingValidation(unittest.TestCase):
 
         self.assertEqual(manager.latest().id, 0)
         self.assertNotIn("row-tracking.enabled", manager.latest().options)
+
+
+class TestColumnAndKeyValidation(unittest.TestCase):
+    """create_table and alter_table reject the column and key lists Java's Schema rejects."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        warehouse = os.path.join(self.temp_dir, "warehouse")
+        self.catalog = CatalogFactory.create({"warehouse": warehouse})
+        self.catalog.create_database("default", True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @staticmethod
+    def _schema(names=("id", "dt"), partition_keys=None, primary_keys=None):
+        return Schema(
+            fields=[DataField(i, name, AtomicType("INT", False))
+                    for i, name in enumerate(names)],
+            partition_keys=partition_keys or [],
+            primary_keys=primary_keys or [],
+            options={"bucket": "1"} if primary_keys else {},
+        )
+
+    def test_create_table_rejects_key_that_is_not_a_column(self):
+        for kwargs, message in (
+                ({"partition_keys": ["dtt"]}, "should include all partition fields"),
+                ({"primary_keys": ["idd"]}, "should include all primary key constraint")):
+            with self.subTest(**kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    self.catalog.create_table("default.t", self._schema(**kwargs), False)
+                # Nothing is persisted, so the name can be used again.
+                with self.assertRaises(TableNotExistException):
+                    self.catalog.get_table("default.t")
+
+    def test_alter_table_rejects_rename_that_drops_a_primary_key(self):
+        self.catalog.create_table(
+            "default.t", self._schema(primary_keys=["id"]), False)
+        # Each rename maps the old key once, so the key becomes 'middle'.
+        with self.assertRaisesRegex(
+                RuntimeError, "should include all primary key constraint"):
+            self.catalog.alter_table("default.t", [
+                SchemaChange.rename_column("id", "middle"),
+                SchemaChange.rename_column("middle", "new_id"),
+            ], False)
+        table = self.catalog.get_table("default.t")
+        self.assertEqual(0, table.table_schema.id)
+        self.assertEqual(["id"], table.table_schema.primary_keys)
+
+        self.catalog.alter_table(
+            "default.t", [SchemaChange.rename_column("id", "new_id")], False)
+        self.assertEqual(
+            ["new_id"], self.catalog.get_table("default.t").table_schema.primary_keys)
+
+    def test_create_table_rejects_duplicates(self):
+        cases = [
+            ({"names": ("id", "id")}, "must not contain duplicate fields"),
+            ({"partition_keys": ["dt", "dt"]}, "Partition key constraint"),
+            ({"primary_keys": ["id", "id"]}, "Primary key constraint"),
+        ]
+        for kwargs, message in cases:
+            with self.subTest(**kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    self.catalog.create_table("default.t", self._schema(**kwargs), False)
 
 
 if __name__ == '__main__':
