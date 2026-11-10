@@ -16,14 +16,19 @@
 
 """Public LeRobot import API."""
 
+import json
 import numbers
 import sys
 from functools import partial
 from typing import Mapping, Optional
 
+import pyarrow as pa
+
 from pypaimon.catalog.catalog_exception import TableAlreadyExistException
 from pypaimon.multimodal.lerobot.metadata import (
     _COMPANION_OPTION_KEYS,
+    _json_value,
+    _companion_identifier,
     _append_arrow_tables,
     _load_dataset_metadata,
     _managed_table_options,
@@ -76,8 +81,9 @@ def load_from_lerobot(
 ) -> None:
     """Import one or more LeRobot v3 sources into a new Paimon table group.
 
+    ``table_name`` is the group prefix; frames are stored in ``<table_name>_frames``.
     Sources must share training features. ``fps_mode='source'`` allows mixed
-    FPS. ``__datasets`` retains source metadata; optional ``dataset_names``
+    FPS. ``_datasets`` retains source metadata; optional ``dataset_names``
     are caller-provided labels, never inferred from paths. ``tag_name`` pins
     component snapshots.
     FileIO credentials come from ``source_options``; ``parallelism > 1`` uses Ray.
@@ -157,6 +163,18 @@ def load_from_lerobot(
             # Preserve source extensions omitted by LeRobot DatasetInfo.to_dict().
             metadata = _load_dataset_metadata(
                 dataset, local_info, resolved_source)
+            from pypaimon.multimodal.lerobot.aggregate import (
+                _DATASETS_SCHEMA, _stats_json, _vocabulary_rows,
+            )
+            metadata["datasets_table"] = pa.Table.from_pylist([{
+                "index": 0,
+                "name": None,
+                "info": json.dumps(_json_value(local_info), ensure_ascii=False),
+                "tasks": _vocabulary_rows(metadata["tasks_table"], "task"),
+                "subtasks": _vocabulary_rows(metadata["subtasks_table"], "subtask"),
+                "stats": _stats_json(metadata["stats_table"]),
+            }], schema=_DATASETS_SCHEMA)
+            metadata["fps_mode"] = "dataset"
             _import_dataset(
                 connection,
                 table_name,
@@ -285,24 +303,27 @@ def _create_target_table(
         if str(create_options.get("bucket", "-1")).strip() != "-1":
             raise ValueError(_VIDEO_LAYOUT_ERROR)
         create_options["video-frame-field"] = ",".join(video_fields)
-    managed_options = _managed_table_options(
-        connection._identifier(table_name), metadata)
+    managed_options = _managed_table_options(connection._identifier(table_name))
     reserved_options = set(_COMPANION_OPTION_KEYS.values()).intersection(
         create_options)
+    if "pypaimon.lerobot.fps-mode" in create_options:
+        reserved_options.add("pypaimon.lerobot.fps-mode")
     if reserved_options:
         raise ValueError(
             "%s are managed by load_from_lerobot."
             % sorted(reserved_options))
     create_options.update(managed_options)
+    create_options["pypaimon.lerobot.fps-mode"] = metadata.get("fps_mode", "dataset")
+    frames_name = _companion_identifier(connection._identifier(table_name), "_frames")
     try:
         table = connection.create_table(
-            table_name,
+            frames_name,
             schema=source_schema,
             options=create_options,
         )
     except TableAlreadyExistException as error:
         raise ValueError(
             "LeRobot target %s already exists; use a new target table."
-            % connection._identifier(table_name)
+            % frames_name
         ) from error
     return table

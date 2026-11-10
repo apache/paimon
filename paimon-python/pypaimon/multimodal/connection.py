@@ -144,7 +144,11 @@ class MultimodalConnection:
             parallelism=1,
             fps_mode="dataset",
             dataset_names=None) -> None:
-        """Import one or an ordered list of LeRobot v3 sources into a new table group."""
+        """Import LeRobot v3 sources using table_name as the group prefix.
+
+        Creates <table_name>_frames, <table_name>_episodes, and
+        <table_name>_datasets.
+        """
         from pypaimon.multimodal.lerobot import load_from_lerobot
         load_from_lerobot(
             self,
@@ -160,10 +164,10 @@ class MultimodalConnection:
         )
 
     def create_lerobot_tag(self, table_name: str, tag_name: str):
-        """Pin all LeRobot components; pause group writes until this returns.
+        """Pin a LeRobot group by prefix or frame table name.
 
-        Returns component snapshot IDs. Use the tag only after success and
-        retain it on every component for the lifetime of a training run.
+        Pause group writes until this returns. Use the tag only after success
+        and retain it on every component for the lifetime of a training run.
         """
         from pypaimon.multimodal.lerobot.metadata import create_lerobot_tag
         return create_lerobot_tag(self, table_name, tag_name)

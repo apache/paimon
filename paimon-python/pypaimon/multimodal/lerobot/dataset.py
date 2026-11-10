@@ -18,6 +18,7 @@
 """LeRobot-compatible map-style reads from a multimodal Paimon table."""
 
 import bisect
+import copy
 import io
 import json
 import math
@@ -36,13 +37,14 @@ from types import SimpleNamespace
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from pypaimon.multimodal.lerobot.aggregate import (
+    _CONTROLS, _REBUILT_INFO, _merge_stats,
+)
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.lerobot.metadata import (
-    _PANDAS_METADATA_OPTION,
     _dataset_fps,
     _positive_integer,
     _companion_table_identifiers,
-    _restore_pandas_metadata,
     _tag_snapshot_id,
     _validate_tag_name,
 )
@@ -715,14 +717,16 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
                 "Paimon table has %d rows but metadata declares %d frames."
                 % (rows.num_rows, self._total_frames))
         if self.meta.datasets is not None:
-            rows = _SourceEpisodeFrameReader(rows, self.meta.datasets)
+            rows = _SourceEpisodeFrameReader(
+                rows, self.meta.datasets,
+                getattr(self.meta, "_source_vocabulary_maps", None))
         return rows
 
 
 class _SourceEpisodeFrameReader:
     """Present source-local Episode IDs as ordinals to the training reader."""
 
-    def __init__(self, reader, datasets):
+    def __init__(self, reader, datasets, vocabulary_maps=None):
         self._reader = reader
         ranges = _source_dataset_ranges(datasets)
         self._episode_offsets = pa.array(
@@ -730,6 +734,17 @@ class _SourceEpisodeFrameReader:
             type=pa.int64())
         self._episode_counts = pa.array(
             [source[2] - source[1] for source in ranges], type=pa.int64())
+        self._vocabulary = {}
+        for name, sources in (vocabulary_maps or {}).items():
+            offsets, counts, values = [], [], []
+            for source in sources:
+                offsets.append(len(values))
+                counts.append(len(source))
+                values.extend(source)
+            self._vocabulary[name] = (
+                pa.array(offsets, type=pa.int64()),
+                pa.array(counts, type=pa.int64()),
+                pa.array(values, type=pa.int64()))
         self.num_rows = reader.num_rows
         self.file_io = reader.file_io
         self.snapshot_id = reader.snapshot_id
@@ -737,28 +752,47 @@ class _SourceEpisodeFrameReader:
         self._locator = reader._locator
 
     def read_indices(self, indices, columns):
-        if "episode_index" not in columns:
+        mapped = [name for name in self._vocabulary if name in columns]
+        if "episode_index" not in columns and not mapped:
             return self._reader.read_indices(indices, columns)
         projection = list(columns)
         if "dataset_index" not in projection:
             projection.append("dataset_index")
         data = self._reader.read_indices(indices, projection)
-        try:
-            source_ids = data["dataset_index"]
-            local_ids = data["episode_index"]
-            offsets = pc.take(self._episode_offsets, source_ids)
-            counts = pc.take(self._episode_counts, source_ids)
-            valid = pc.and_(pc.greater_equal(local_ids, 0),
-                            pc.less(local_ids, counts))
-            if valid.null_count or not pc.all(valid).as_py():
-                raise ValueError("LeRobot frame has an invalid source Episode key.")
-            ordinals = pc.add_checked(offsets, local_ids)
-        except (pa.ArrowInvalid, pa.ArrowIndexError, TypeError) as error:
-            raise ValueError("LeRobot frame has an invalid source Episode key.") from error
-        data = data.set_column(
-            data.schema.get_field_index("episode_index"),
-            data.schema.field("episode_index"),
-            ordinals)
+        if data.num_rows == 0:
+            return data.select(columns)
+        source_ids = data["dataset_index"]
+        if "episode_index" in columns:
+            try:
+                local_ids = data["episode_index"]
+                offsets = pc.take(self._episode_offsets, source_ids)
+                counts = pc.take(self._episode_counts, source_ids)
+                valid = pc.and_(pc.greater_equal(local_ids, 0),
+                                pc.less(local_ids, counts))
+                if valid.null_count or not pc.all(valid).as_py():
+                    raise ValueError("LeRobot frame has an invalid source Episode key.")
+                ordinals = pc.add_checked(offsets, local_ids)
+            except (pa.ArrowInvalid, pa.ArrowIndexError, TypeError) as error:
+                raise ValueError("LeRobot frame has an invalid source Episode key.") from error
+            data = data.set_column(
+                data.schema.get_field_index("episode_index"),
+                data.schema.field("episode_index"), ordinals)
+        for name in mapped:
+            offsets, counts, values = self._vocabulary[name]
+            try:
+                local_ids = data[name]
+                if name == "task_index" and local_ids.null_count:
+                    raise ValueError("LeRobot frame has an invalid source task_index.")
+                valid = pc.and_(pc.greater_equal(local_ids, 0),
+                                pc.less(local_ids, pc.take(counts, source_ids)))
+                if not pc.all(pc.fill_null(valid, True)).as_py():
+                    raise ValueError("LeRobot frame has an invalid source %s." % name)
+                translated = pc.take(
+                    values, pc.add_checked(pc.take(offsets, source_ids), local_ids))
+            except (pa.ArrowInvalid, pa.ArrowIndexError, TypeError) as error:
+                raise ValueError("LeRobot frame has an invalid source %s." % name) from error
+            data = data.set_column(data.schema.get_field_index(name),
+                                   data.schema.field(name), translated)
         return data.select(columns)
 
     def close(self):
@@ -1031,43 +1065,168 @@ def _load_dataset(table, tag_name):
     identifiers = _companion_table_identifiers(raw_table)
     catalog = table.catalog
     frames = _component_table(catalog, raw_table, tag_name)
-    datasets = None
-    if "datasets" in identifiers:
-        datasets_table = _component_table(
-            catalog, catalog.get_table(identifiers["datasets"]), tag_name)
-        projection = [name for name in _target_schema(datasets_table).names
-                      if name not in ("tasks", "subtasks", "source_tasks", "source_subtasks", "stats",
-                                      "episodes_schema_json", "tasks_json", "subtasks_json")
-                      and not name.endswith("_ipc")]
-        dataset_rows = _read_arrow(datasets_table, projection)
-        datasets = dataset_rows.sort_by(
-            "index" if "index" in dataset_rows.column_names else "dataset_index").to_pylist()
     episodes_table = _component_table(
         catalog, catalog.get_table(identifiers["episodes"]), tag_name)
+    source_local_layout = "dataset_index" in _target_schema(episodes_table).names
+    datasets_table = _component_table(
+        catalog, catalog.get_table(identifiers["datasets"]), tag_name)
+    source_rows = _read_arrow(datasets_table, [
+        "index", "name", "info", "tasks", "subtasks", "stats",
+    ]).sort_by("index").to_pylist()
+    datasets = ([{key: value for key, value in row.items()
+                  if key not in ("tasks", "subtasks", "stats")}
+                 for row in source_rows] if source_local_layout else None)
     episodes = _episode_dataset(episodes_table, datasets)
-    tasks_table = _component_table(
-        catalog, catalog.get_table(identifiers["tasks"]), tag_name)
-    tasks = _component_dataframe(tasks_table, "task_index")
-    subtasks = None
-    if "subtasks" in identifiers:
-        subtasks_table = _component_table(
-            catalog, catalog.get_table(identifiers["subtasks"]), tag_name)
-        subtasks = _component_dataframe(subtasks_table, "subtask_index")
+    tasks, task_maps = _source_vocabulary(source_rows, "task")
+    source_vocabulary_maps = ({"task_index": task_maps}
+                              if source_local_layout else None)
+    subtasks, subtask_maps = _source_vocabulary(source_rows, "subtask")
+    if source_vocabulary_maps is not None and subtask_maps is not None:
+        source_vocabulary_maps["subtask_index"] = subtask_maps
 
-    info = _metadata_object(_component_table(
-        catalog, catalog.get_table(identifiers["info"]), tag_name), "info")
+    info = (json.loads(source_rows[0]["info"])
+            if not source_local_layout else _merged_source_info(
+                source_rows, tasks, subtasks,
+                raw_table.table_schema.options.get(
+                    "pypaimon.lerobot.fps-mode", "dataset")))
     for feature in info.get("features", {}).values():
         feature["shape"] = tuple(feature["shape"])
-    stats = None
-    if "stats" in identifiers:
-        stats = _numpy_stats(_metadata_object(_component_table(
-            catalog, catalog.get_table(identifiers["stats"]), tag_name),
-            "stats"))
+    if source_local_layout:
+        stats = _merged_source_stats(source_rows, episodes_table)
+    else:
+        value = source_rows[0]["stats"]
+        stats = _numpy_stats(json.loads(value)) if value is not None else None
     metadata = _PaimonLeRobotMetadata(
         str(table.identifier), tag_name, info, stats, episodes, tasks,
         subtasks, datasets)
+    metadata._source_vocabulary_maps = source_vocabulary_maps
     metadata._compress_episodes = True
     return frames, metadata
+
+
+def _source_vocabulary(sources, singular):
+    import pandas as pd
+
+    field = singular + "s"
+    index = singular + "_index"
+    if not sources:
+        raise ValueError("LeRobot Dataset metadata is required for %s." % field)
+    values = [source.get(field) for source in sources]
+    if all(value is None for value in values) and singular == "subtask":
+        return None, None
+    if any(value is None for value in values):
+        raise ValueError("LeRobot sources disagree on %s metadata." % field)
+    by_text, rows, maps = {}, [], []
+    for ordinal, entries in enumerate(values):
+        mapping = [None] * len(entries)
+        seen = set()
+        for entry in entries:
+            local, label = entry[index], entry[singular]
+            if not isinstance(local, int) or not 0 <= local < len(entries) \
+                    or mapping[local] is not None or not isinstance(label, str) \
+                    or label in seen:
+                raise ValueError("LeRobot source %d has invalid %s metadata." %
+                                 (ordinal, field))
+            seen.add(label)
+            mapping[local] = label
+        for local, label in enumerate(mapping):
+            if label not in by_text:
+                by_text[label] = len(rows)
+                rows.append({index: len(rows), singular: label})
+            mapping[local] = by_text[label]
+        maps.append(mapping)
+    frame = pd.DataFrame(rows, columns=[index, singular]).set_index(singular)
+    return frame, maps
+
+
+def _merged_source_info(sources, tasks, subtasks, fps_mode):
+    if not sources:
+        raise ValueError("LeRobot Dataset metadata is required for info.")
+    infos = []
+    for ordinal, source in enumerate(sources):
+        try:
+            info = json.loads(source["info"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("LeRobot source %d has invalid info." % ordinal) from error
+        if not isinstance(info, dict) or not isinstance(info.get("features"), dict):
+            raise ValueError("LeRobot source %d has invalid info." % ordinal)
+        infos.append(info)
+    merged = copy.deepcopy(infos[0])
+    for key in list(merged):
+        if key not in _REBUILT_INFO and key not in ("codebase_version", "robot_type", "fps") \
+                and any(info.get(key) != merged[key] for info in infos):
+            del merged[key]
+    merged.update(total_frames=sum(info["total_frames"] for info in infos),
+                  total_episodes=sum(info["total_episodes"] for info in infos),
+                  total_tasks=len(tasks))
+    merged["splits"] = {"train": "0:%d" % merged["total_episodes"]}
+    merged.pop("fps_mode", None)
+    if fps_mode == "source":
+        merged["fps_mode"] = "source"
+    if len({info["fps"] for info in infos}) > 1:
+        merged["fps"] = None
+        for feature in merged["features"].values():
+            if feature.get("dtype") != "video":
+                continue
+            feature.pop("fps", None)
+            for key in ("info", "video_info"):
+                if isinstance(feature.get(key), dict):
+                    feature[key].pop("video.fps", None)
+    if subtasks is not None:
+        merged["total_subtasks"] = len(subtasks)
+    for key in ("total_chunks", "total_videos", "data_path", "video_path",
+                "chunks_size", "data_files_size_in_mb", "video_files_size_in_mb"):
+        merged.pop(key, None)
+    for name, feature in merged["features"].items():
+        if feature.get("dtype") != "video":
+            continue
+        for key in ("info", "video_info"):
+            details = [info["features"][name].get(key) for info in infos]
+            details = [value if isinstance(value, dict) else {} for value in details]
+            feature[key] = {k: v for k, v in details[0].items()
+                            if all(value.get(k) == v for value in details[1:])}
+    return merged
+
+
+def _merged_source_stats(sources, episodes_table):
+    values = [source.get("stats") for source in sources]
+    if all(value is None for value in values):
+        return None
+    if any(value is None for value in values):
+        raise ValueError("LeRobot sources disagree on stats metadata.")
+    decoded = [json.loads(value) for value in values]
+    if any(set(value) != set(decoded[0]) for value in decoded[1:]):
+        raise ValueError("LeRobot source statistics features differ.")
+    merged = {name: _merge_stats([value[name] for value in decoded])
+              for name in decoded[0] if name not in _CONTROLS}
+    columns = _target_schema(episodes_table).names
+    if "stats" in columns:
+        stats_rows = _read_arrow(episodes_table, ["stats"])["stats"].to_pylist()
+        decoded_rows = [json.loads(raw) for raw in stats_rows if raw]
+        for name in _CONTROLS:
+            parts = [row[name] for row in decoded_rows if name in row
+                     and row[name].get("count") is not None]
+            if parts:
+                merged[name] = _merge_stats(parts)
+        return _numpy_stats(merged)
+    fields_by_name = {}
+    for name in _CONTROLS:
+        fields = ["stats/%s/%s" % (name, stat)
+                  for stat in ("min", "max", "mean", "std", "count")]
+        if all(field in columns for field in fields):
+            fields_by_name[name] = fields
+    projection = [field for fields in fields_by_name.values() for field in fields]
+    episode_stats = _read_arrow(episodes_table, projection) if projection else None
+    for name, fields in fields_by_name.items():
+        parts = []
+        for row in episode_stats.select(fields).to_pylist():
+            if row[fields[-1]] is None:
+                continue
+            parts.append({stat: row[field]
+                          for stat, field in zip(("min", "max", "mean", "std", "count"), fields)})
+        if parts:
+            merged[name] = _merge_stats(parts)
+    return _numpy_stats(merged)
 
 
 def _component_table(catalog, table, tag_name):
@@ -1126,33 +1285,6 @@ def _episode_dataset(table, datasets=None):
     else:
         data = data.sort_by("episode_index")
     return Dataset(data)
-
-
-def _component_dataframe(table, index_field):
-    data = _read_arrow(table).sort_by(index_field)
-    frame = _restore_pandas_metadata(table, data).to_pandas()
-    if table.table_schema.options.get(_PANDAS_METADATA_OPTION) is None:
-        label = index_field[:-len("_index")]
-        if label in frame.columns:
-            frame = frame.set_index(label)
-    return frame
-
-
-def _metadata_object(table, name):
-    result = {}
-    for row in _read_arrow(table).to_pylist():
-        key = row.get("key")
-        if not isinstance(key, str) or key in result:
-            raise ValueError(
-                "Paimon LeRobot %s metadata contains an invalid key."
-                % name)
-        try:
-            result[key] = json.loads(row.get("value"))
-        except (TypeError, ValueError) as error:
-            raise ValueError(
-                "Paimon LeRobot %s metadata value for %r is invalid JSON."
-                % (name, key)) from error
-    return result
 
 
 def _numpy_stats(value):

@@ -24,27 +24,23 @@ under the License.
 
 # LeRobot Datasets
 
-Import a LeRobot Dataset v3 table group, capture frames directly, or train from retained data. These workflows use a `conn` from [Multimodal Tables](./multimodal-tables#connect). Importing a complete dataset and capturing a frame-only table produce different metadata; choose the workflow needed by your training reader.
+Import a LeRobot Dataset v3 table group, capture frames directly, or train from retained data. These workflows use a `conn` from [Multimodal Tables](./multimodal-tables#connect).
 
 ## Load LeRobot Dataset v3
 
 `load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
 repository. It derives the schema from `meta/info.json` and writes one row per
-frame. The import creates `<table>__episodes`, `<table>__tasks`, `<table>__info`,
-and optional `<table>__stats` and `<table>__subtasks` companion tables. Task text
-remains in the task table; frames retain `task_index`. All imported tables use
-Data Evolution with row tracking.
+frame. The supplied name is the table-group prefix: `robot_data` creates
+`robot_data_frames`, `robot_data_episodes`, and `robot_data_datasets`.
+`robot_data_datasets` stores source info, stats, task text, and subtask text.
+Frames retain `task_index`. All imported tables use Data Evolution with row tracking.
 
 Frames with a null `subtask_index` are imported. `PaimonLeRobotDataset[index]`
 returns `None` for `subtask_index` and `subtask`. DataLoader batches use a
 validity mask for missing indices (see training below).
 
-Info and stats use `key STRING, value STRING`: each top-level info property or
-stats feature becomes one row. Each value is JSON-encoded, preserving nested
-objects, arrays, nulls, and scalar types. Decode it with `json.loads`; for example,
-`fps` stores `30`, while `codebase_version` stores `"v3.0"` (including quotes).
-Statistics may contain `NaN` and `Infinity`, supported by Python's JSON decoder.
-Missing or empty stats create no stats table. The frame table's
+The Dataset row's `info` and `stats` fields are JSON strings. Decode them with
+`json.loads`; `stats` is null when the source has no statistics. The frame table's
 `pypaimon.lerobot.<component>-table` options identify the components created.
 
 ```shell
@@ -65,39 +61,44 @@ The call returns `None` on success. Omitting `tag_name` imports the tables
 without creating tags. The one-time importer requires a new target table and
 a non-empty source dataset; subsequent table edits use the normal Paimon APIs.
 
-Pass an ordered list to merge sources into one table group:
+Pass an ordered list to merge sources into one table group. `robot_merged` is
+just an example prefix; choose any unused name:
 
 ```python
 conn.load_from_lerobot(
-    "robot_all",
+    "robot_merged",
     ["oss://bucket/dataset_a", "oss://bucket/dataset_b"],
     dataset_names=["dataset_a", "dataset_b"],
     fps_mode="source",  # Allow different source FPS.
 )
 ```
 
-Each source has one row in `__datasets`. Its `info` JSON contains the original
+Merged imports also create only `robot_merged_frames`, `robot_merged_episodes`, and
+`robot_merged_datasets`. The frame table keeps each source's `task_index` and
+`subtask_index`; the training reader resolves their text through
+`(dataset_index, task_index)` and `(dataset_index, subtask_index)`.
+
+Each source has one row in `_datasets`. Its `info` JSON contains the original
 `meta/info.json`, including FPS; there is no separate FPS column.
 The table contains `index`, `name`, `info`, `tasks`, `subtasks`,
 and `stats`. Source ranges are derived from the counts in each source's `info`.
 `dataset_names` supplies optional labels; omitted names are null, and duplicate
 labels do not merge sources. Frame and Episode `dataset_index` values reference
-`__datasets.index`. The pair `(dataset_index, episode_index)` identifies an
+`_datasets.index`. The pair `(dataset_index, episode_index)` identifies an
 original Episode. Frames keep a
 merged `index` and their original `source_index`. Source task/subtask ID-to-text
-mappings use the typed arrays of rows `__datasets.tasks` and `__datasets.subtasks`;
+mappings use the typed arrays of rows `_datasets.tasks` and `_datasets.subtasks`;
 stats remain JSON.
 
-Merged `__episodes` keeps typed Episode keys and frame ranges, with
+Merged `_episodes` keeps typed Episode keys and frame ranges, with
 `meta/`, `data/`, `videos/`, and `stats/` fields grouped into JSON columns.
 Grouped fields must use JSON-native Arrow types: null, boolean, integer,
 floating point, string, list, or struct, including nested combinations.
 Binary, temporal, decimal, map, and extension types are rejected before any
 target table is created. Other Episode extension fields are not imported.
 Control-field statistics reflect merged IDs; their original quantiles are
-omitted. Training reads skip `stats`; the group-level `__stats` table is
-unchanged. Repeated task/subtask text within one source is rejected before
-creating tables to avoid losing original frame IDs.
+omitted. Training reads skip `stats`. Repeated task/subtask text within one
+source is rejected before creating tables to avoid losing original frame IDs.
 
 Sources must share robot type and training features. By default they must also
 share FPS; `fps_mode="source"` permits mixed FPS and requires
@@ -136,24 +137,22 @@ shared directories, not Hub IDs. Keep the source unchanged during import.
 Failed imports may leave partial tables; retry with a new name.
 
 Before training, finish any related data/metadata updates and pause writes to
-this table group. Create a common named tag over the current component snapshots:
+this table group. Pass the same name used for `load_from_lerobot` or
+`PaimonLeRobotWriter` to create a common tag over the component snapshots:
 
 ```python
 tag = "train-2026-09-07"
 snapshots = conn.create_lerobot_tag("robot_data", tag)
-frames = conn.get_table("robot_data").scan(tag_name=tag).to_arrow()
+frames = conn.get_table("robot_data_frames").scan(tag_name=tag).to_arrow()
 
 # Companion tables are ordinary Paimon tables, read with the same tag.
-info_table = conn.catalog.get_table("default.robot_data__info").copy(
+datasets_table = conn.catalog.get_table("default.robot_data_datasets").copy(
     {"scan.tag-name": tag})
-builder = info_table.new_read_builder()
-info_rows = builder.new_read().to_arrow(builder.new_scan().plan().splits())
+builder = datasets_table.new_read_builder()
+dataset_rows = builder.new_read().to_arrow(builder.new_scan().plan().splits())
 
 import json
-info = {
-    row["key"]: json.loads(row["value"])
-    for row in info_rows.to_pylist()
-}
+info = json.loads(dataset_rows["info"][0].as_py())
 ```
 
 `create_lerobot_tag` returns component names mapped to snapshot IDs; these IDs
@@ -188,13 +187,9 @@ same user feature mapping that would be passed to `LeRobotDataset.create`.
 The writer adds the standard `timestamp`, `frame_index`, `episode_index`,
 `index`, and `task_index` features itself.
 
-The writer preserves native LeRobot recording metadata in a managed Paimon
-table group. The named table stores frames, while `<table>__episodes`,
-`<table>__tasks`, `<table>__info`, and `<table>__stats` store episode
-boundaries, task labels, JSON-encoded dataset information, and global
-statistics. When `subtask_index` is declared, `<table>__subtasks` stores its
-ordered text vocabulary. The root table's managed options identify these
-companions.
+The writer creates three tables: the named frame table, `<table>_episodes`,
+and `<table>_datasets`. The Dataset row stores info, statistics, task labels,
+and optional subtask labels; it is updated when new Episodes are committed.
 
 ```python
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
@@ -224,9 +219,9 @@ must be NumPy arrays (Torch tensors are converted) with the declared dtype and
 shape. Image dimension names may declare CHW or native HWC layout; image values
 may be CHW, HWC, or PIL. Images are encoded as PNG bytes and stored in Paimon
 `BLOB` columns; no LeRobot data directory or MP4 is created. `video` features
-remain unsupported. Task text is stored once in the tasks table; frame rows
-retain only `task_index`. Optional subtask text is likewise stored once in the
-subtasks table, while each frame supplies its declared NumPy `subtask_index`.
+remain unsupported. Task and optional subtask text are stored in the Dataset
+row; frames retain only their indices. Each frame supplies its declared NumPy
+`subtask_index` when present.
 Subtask labels must be non-empty and unique, and frame indices must reference
 that ordered vocabulary. On resume, the writer restores the vocabulary from
 the existing table; an explicitly supplied vocabulary must match it exactly.
@@ -237,14 +232,15 @@ statistics implementation to calculate `min`, `max`, `mean`, `std`, `count`,
 episode statistics are appended to the episodes table. Image statistics use
 the encoded PNG frames and LeRobot's sampling, downsampling, CHW, and `[0,1]`
 normalization rules. Each flush aggregates the accepted episode statistics and
-replaces the global stats table; it does not rescan frame data.
+replaces the Dataset row's global statistics; it does not rescan frame data.
 
 `save_episode` accepts the current episode and writes it to a long-lived Paimon
 batch writer. The default `episodes_per_commit=-1` keeps all completed episodes
 in that batch until `finalize()`. Set a positive threshold for periodic commits,
-or call `flush()` at an operational boundary. `save_episode`, `flush`, and
-`finalize` always return `None`. Calling `save_episode()` without any buffered
-frames raises `ValueError`, matching native LeRobot.
+or call `flush()` at an operational boundary. Each flush indexes the new frame
+rows for training lookups. `save_episode`, `flush`, and `finalize` always return
+`None`. Calling `save_episode()` without any buffered frames raises
+`ValueError`, matching native LeRobot.
 
 Call `clear_episode_buffer()` before `save_episode()` to discard a re-recorded
 episode without advancing frame or episode indices. Once `save_episode()`
@@ -255,18 +251,13 @@ instead of silently dropping its frames.
 The writer creates a missing table group and appends to an existing compatible
 group. Before writing, it requires the root columns, order, Arrow types,
 nullability, LeRobot feature metadata, managed options, companion schemas, and
-component counts to match. A legacy frame-only writer table is not implicitly
-migrated. An existing group must have the stats companion and must not have a
-subtasks companion unless its frame schema declares `subtask_index`. On resume,
-new `index` and `episode_index` values continue after the published metadata,
-existing task and subtask mappings come from their companion tables, and the
-episode-local `frame_index` starts again at zero. Snapshot properties retain
-only the next global frame and episode indices; resume restores global
-statistics from the stats table and does not scan frame data.
+component counts to match. On resume, new `index` and `episode_index` values
+continue after the published metadata; task and subtask mappings and global
+statistics come from the Dataset row. The episode-local `frame_index` starts
+again at zero. Snapshot properties retain only the next global frame and
+episode indices; resume does not scan frame data.
 
-When configured, the first `flush()` writes the immutable subtask vocabulary.
-Each flush appends new tasks and episodes, replaces global stats and info, and
-commits frames last. Paimon
+Each flush appends Episodes, replaces the Dataset row, and commits frames last. Paimon
 does not provide a transaction across these tables. A component commit
 exception leaves the group result unknown, makes the writer terminal, and is
 not automatically retried. Reopening validates the component state and rejects
@@ -281,14 +272,13 @@ including time windows. Missing labels use `-1` with a false mask; individual
 sample reads retain `None`.
 If a source feature uses the mask name, underscores are prepended until the name is unused.
 
-For map-style training, pass an image- or video-backed table group created by
-`load_from_lerobot` to `PaimonLeRobotDataset`. A frame-only table created by
-`PaimonLeRobotWriter` is not sufficient.
+For map-style training, pass an image- or video-backed table group with LeRobot
+Episode and Dataset companions to `PaimonLeRobotDataset`.
 
 ```python
 from pypaimon.multimodal import PaimonLeRobotDataset
 
-table = conn.get_table("robot_data")
+table = conn.get_table("robot_data_frames")
 dataset = PaimonLeRobotDataset(
     table,
     tag_name=tag,
