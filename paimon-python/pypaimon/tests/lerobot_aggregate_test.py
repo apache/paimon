@@ -16,6 +16,7 @@
 
 import json
 import sys
+from contextlib import nullcontext
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
@@ -28,6 +29,7 @@ import pytest
 
 from pypaimon.catalog.catalog_exception import TableNotExistException
 import pypaimon.multimodal as pm
+from pypaimon.multimodal.lerobot import aggregate
 from pypaimon.multimodal.lerobot.aggregate import _batch_stats, _transform_frames
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 
@@ -124,6 +126,11 @@ def rows(conn, name):
     return conn.get_table(name).scan().to_arrow()
 
 
+def frame_rows(conn, name):
+    return rows(conn, name).sort_by([
+        ("dataset_index", "ascending"), ("index", "ascending")])
+
+
 def episode_rows(conn, name):
     return rows(conn, name).sort_by([
         ("dataset_index", "ascending"), ("episode_index", "ascending")])
@@ -150,6 +157,158 @@ def test_import_uses_group_prefix(setup, multiple):
     assert rows(conn, "robot_frames").num_rows == (10 if multiple else 5)
     assert set(conn.create_lerobot_tag("robot", "training")) == {
         "frames", "episodes", "datasets"}
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_append_source_preserves_existing_indices_and_tags(setup, import_parallelism):
+    conn, sources = setup
+    conn.load_from_lerobot("robot", [sources[0]], tag_name="before")
+    conn.append_to_lerobot("robot", sources[1], dataset_name="second",
+                           tag_name="after", batch_size=2,
+                           parallelism=import_parallelism)
+
+    assert set(conn.catalog.list_tables("default")) == {
+        "robot_frames", "robot_episodes", "robot_datasets"}
+    frames = rows(conn, "robot_frames").sort_by([
+        ("dataset_index", "ascending"), ("index", "ascending")])
+    assert frames["index"].to_pylist() == list(range(5)) * 2
+    assert frames["dataset_index"].to_pylist() == [0] * 5 + [1] * 5
+    episodes = episode_rows(conn, "robot_episodes")
+    assert episodes["dataset_from_index"].to_pylist() == [0, 2, 0, 2]
+    assert episodes["dataset_to_index"].to_pylist() == [2, 5, 2, 5]
+    datasets = rows(conn, "robot_datasets").sort_by("index")
+    assert datasets["index"].to_pylist() == [0, 1]
+    assert datasets["name"].to_pylist() == [None, "second"]
+    with pytest.raises(ValueError, match="already exists"):
+        conn.append_to_lerobot("robot", sources[1], tag_name="before")
+    assert rows(conn, "robot_datasets").num_rows == 2
+
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    before = pm.PaimonLeRobotDataset(conn.get_table("robot_frames"), tag_name="before")
+    after = pm.PaimonLeRobotDataset(conn.get_table("robot_frames"), tag_name="after")
+    try:
+        assert len(before) == 5
+        assert len(after) == 10
+        assert after[5]["task"] == "place"
+        assert after[7]["task"] == "stack"
+        assert [row["index"].item() for row in after.reader.get_items([4, 5, 9])] == [4, 5, 9]
+    finally:
+        before.close()
+        after.close()
+
+
+def test_append_rejects_incompatible_source_without_writing(setup):
+    conn, sources = setup
+    conn.load_from_lerobot("robot", [sources[0]])
+    info_path = Path(sources[1][7:]) / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    info["robot_type"] = "incompatible_robot"
+    info_path.write_text(json.dumps(info))
+
+    with pytest.raises(ValueError, match="info.robot_type"):
+        conn.append_to_lerobot("robot", sources[1])
+    assert rows(conn, "robot_frames").num_rows == 5
+    assert rows(conn, "robot_episodes").num_rows == 2
+    assert rows(conn, "robot_datasets").num_rows == 1
+
+
+def test_append_episode_task_stats_use_group_vocabulary(setup):
+    conn, sources = setup
+    conn.load_from_lerobot("robot", [sources[0]])
+    conn.append_to_lerobot("robot", sources[1])
+
+    episodes = episode_rows(conn, "robot_episodes").to_pylist()
+    task_means = [json.loads(row["stats"])["task_index"]["mean"][0]
+                  for row in episodes]
+    subtask_means = [json.loads(row["stats"])["subtask_index"]["mean"][0]
+                     for row in episodes]
+    assert task_means == [0, 1, 1, 2]
+    assert subtask_means == pytest.approx([0.5, 1 / 3, 1.5, 4 / 3])
+    assert sum(mean * count for mean, count in zip(task_means, (2, 3, 2, 3))) / 10 == 1.1
+
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    dataset = pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))
+    try:
+        frames = dataset.reader.get_items(range(10))
+        assert [int(row["task_index"]) for row in frames] == [0] * 2 + [1] * 5 + [2] * 3
+    finally:
+        dataset.close()
+
+
+@pytest.mark.parametrize("setup", [20], indirect=True)
+def test_append_mixed_fps_group_remains_readable(setup):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn, sources = setup
+    conn.load_from_lerobot("robot", [sources[0]])
+    conn.append_to_lerobot("robot", sources[1])
+
+    dataset = pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))
+    try:
+        assert dataset.fps is None
+        assert dataset.episode_fps == (10, 10, 20, 20)
+        assert "fps_mode" not in dataset.reader.meta.info
+        assert [float(item["timestamp"]) for item in dataset.reader.get_items([5, 6])] == (
+            pytest.approx([0, 0.05]))
+    finally:
+        dataset.close()
+
+
+@pytest.mark.parametrize("manual_recovery", [False, True])
+def test_append_recovers_after_episode_commit_failure(setup, manual_recovery):
+    conn, sources = setup
+    conn.load_from_lerobot("robot", [sources[0]])
+    original_commit = aggregate._commit_messages
+    calls = 0
+
+    def fail_on_episode(commit, messages):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected Episode commit failure")
+        return original_commit(commit, messages)
+
+    recovery_patch = (patch.object(aggregate, "_recover_incomplete_append", return_value=[])
+                      if manual_recovery else nullcontext())
+    with patch.object(aggregate, "_commit_messages", side_effect=fail_on_episode), recovery_patch:
+        with pytest.raises(RuntimeError, match="injected Episode commit failure"):
+            conn.append_to_lerobot("robot", sources[1])
+
+    if manual_recovery:
+        assert rows(conn, "robot_frames").num_rows == 10
+        with pytest.raises(ValueError, match="incomplete frames"):
+            conn.append_to_lerobot("robot", sources[1])
+        assert conn.recover_lerobot_append("robot") == ["frames"]
+    assert rows(conn, "robot_frames").num_rows == 5
+    assert rows(conn, "robot_episodes").num_rows == 2
+    assert rows(conn, "robot_datasets").num_rows == 1
+    conn.append_to_lerobot("robot", sources[1])
+    assert rows(conn, "robot_frames").num_rows == 10
+
+
+def test_append_twice_keeps_source_keys_and_training_order(setup, tmp_path):
+    conn, sources = setup
+    third = source(tmp_path / "third", value=40)
+    conn.load_from_lerobot("robot", [sources[0]])
+    conn.append_to_lerobot("robot", sources[1])
+    conn.append_to_lerobot("robot", third)
+
+    frames = frame_rows(conn, "robot_frames")
+    assert frames["dataset_index"].to_pylist() == [0] * 5 + [1] * 5 + [2] * 5
+    assert frames["index"].to_pylist() == list(range(5)) * 3
+    assert rows(conn, "robot_datasets").sort_by("index")["index"].to_pylist() == [0, 1, 2]
+
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    dataset = pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))
+    try:
+        assert len(dataset) == 15
+        indices = [4, 5, 9, 10, 14]
+        assert [item["index"].item() for item in dataset.reader.get_items(indices)] == indices
+    finally:
+        dataset.close()
 
 
 def test_single_source_feature_named_dataset_index(setup):
@@ -195,10 +354,10 @@ def test_transform_frames_preserves_unlabelled_subtasks():
 
     converted = _transform_frames(plan, batch, 0)
 
-    assert converted["index"].to_pylist() == [5, 6]
+    assert converted["index"].to_pylist() == [0, 1]
     assert converted["episode_index"].to_pylist() == [0, 0]
     assert converted["dataset_index"].to_pylist() == [1, 1]
-    assert converted["source_index"].to_pylist() == [0, 1]
+    assert "source_index" not in converted.column_names
     assert converted["task_index"].to_pylist() == [0, 0]
     assert converted["subtask_index"].to_pylist() == [0, None]
     assert plan["control_stats"][0]["subtask_index"]["count"] == [1]
@@ -230,11 +389,11 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     conn, sources = setup
     conn.load_from_lerobot("merged", sources, batch_size=2, tag_name="train",
                            parallelism=import_parallelism)
-    data = rows(conn, "merged_frames").sort_by("index")
-    assert data["index"].to_pylist() == list(range(10))
+    data = frame_rows(conn, "merged_frames")
+    assert data["index"].to_pylist() == list(range(5)) * 2
     assert data["episode_index"].to_pylist() == [0, 0, 1, 1, 1] * 2
     assert data["dataset_index"].to_pylist() == [0] * 5 + [1] * 5
-    assert data["source_index"].to_pylist() == list(range(5)) * 2
+    assert "source_index" not in data.column_names
     assert data["frame_index"].to_pylist() == [0, 1, 0, 1, 2] * 2
     assert data["task_index"].to_pylist() == [0, 0, 1, 1, 1] * 2
     assert data["subtask_index"].to_pylist() == [0, 1, 0, 1, 0] * 2
@@ -244,8 +403,8 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     assert "fps" not in episodes.column_names
     assert episodes["dataset_index"].to_pylist() == [0, 0, 1, 1]
     assert episodes["episode_index"].to_pylist() == [0, 1, 0, 1]
-    assert episodes["source_frame_from_index"].to_pylist() == [0, 2, 0, 2]
-    assert episodes["source_frame_to_index"].to_pylist() == [2, 5, 2, 5]
+    assert "source_frame_from_index" not in episodes.column_names
+    assert "source_frame_to_index" not in episodes.column_names
     datasets = rows(conn, "merged_datasets").sort_by("index")
     assert datasets.column_names == ["index", "name", "info", "tasks", "subtasks", "stats"]
     assert datasets["name"].to_pylist() == [None, None]
@@ -260,8 +419,8 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     assert "source_episode_patch_json" not in episodes.column_names
     assert conn.catalog.get_tag(
         conn._identifier("merged_datasets"), "train").snapshot.id == 1
-    assert episodes["dataset_from_index"].to_pylist() == [0, 2, 5, 7]
-    assert episodes["dataset_to_index"].to_pylist() == [2, 5, 7, 10]
+    assert episodes["dataset_from_index"].to_pylist() == [0, 2, 0, 2]
+    assert episodes["dataset_to_index"].to_pylist() == [2, 5, 2, 5]
     assert not any(c.startswith("stats/") for c in episodes.column_names)
     episode_stats = [json.loads(value) for value in episodes["stats"].to_pylist()]
     assert [item["index"]["mean"] for item in episode_stats] == [
@@ -281,6 +440,7 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     for name in ("index", "episode_index", "task_index", "subtask_index", "observation.state", "action"):
         values = np.array(([0, 0, 1, 1, 1, 1, 1, 2, 2, 2] if name == "task_index"
                            else [0, 1, 0, 1, 0, 1, 2, 1, 2, 1] if name == "subtask_index"
+                           else list(range(10)) if name == "index"
                            else data[name].to_pylist()))
         np.testing.assert_allclose(stats[name]["mean"], np.atleast_1d(values.mean(0)))
         np.testing.assert_allclose(stats[name]["std"], np.atleast_1d(values.std(0)))
@@ -401,7 +561,7 @@ def test_merge_normalizes_task_text_columns(setup, custom_source):
         frame.index.name = "instruction"
         pq.write_table(pa.Table.from_pandas(frame), path)
     conn.load_from_lerobot("merged", sources)
-    data = rows(conn, "merged_frames").sort_by("index")
+    data = frame_rows(conn, "merged_frames")
     assert data["task_index"].to_pylist() == [0, 0, 1, 1, 1] * 2
     assert data["subtask_index"].to_pylist() == [0, 1, 0, 1, 0] * 2
     for kind, expected in (("task", ["pick", "place", "stack"]),
@@ -444,12 +604,12 @@ def test_merge_accepts_reordered_fields_and_control_quantiles(setup, import_para
     pq.write_table(episodes.select([
         name for name in reversed(episodes.column_names) if not name.endswith("/q50")]), path)
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism)
-    data = rows(conn, "merged_frames").sort_by("index")
-    assert data["index"].to_pylist() == list(range(10))
+    data = frame_rows(conn, "merged_frames")
+    assert data["index"].to_pylist() == list(range(5)) * 2
     assert data["observation.state"].to_pylist() == [
         [float(offset + i), float(i)] for offset in (0, 20) for i in range(5)]
     episodes = episode_rows(conn, "merged_episodes")
-    assert episodes["dataset_from_index"].to_pylist() == [0, 2, 5, 7]
+    assert episodes["dataset_from_index"].to_pylist() == [0, 2, 0, 2]
     assert not any(name.endswith("/q50") for name in episodes.column_names)
 
 
@@ -495,7 +655,7 @@ def test_merge_preserves_integer_statistics(setup):
     np.testing.assert_array_equal(stats["min"], [extremes[0]] * 2)
     np.testing.assert_array_equal(stats["max"], [extremes[1]] * 2)
     np.testing.assert_array_equal(stats["count"], [10])
-    assert rows(conn, "merged_frames").sort_by("index")["observation.state"].to_pylist() == [
+    assert frame_rows(conn, "merged_frames")["observation.state"].to_pylist() == [
         [value, value] for value in extremes for unused in range(5)]
     assert _batch_stats(extremes)["min"] == [extremes[0]]
     from pypaimon.multimodal.lerobot.aggregate import _merge_stats
@@ -695,7 +855,7 @@ def test_video_sources_with_identical_paths(tmp_path, import_parallelism):
     conn.load_from_lerobot("merged", sources, batch_size=2, tag_name="train",
                            parallelism=import_parallelism)
     table = conn.get_table("merged_frames").raw_table
-    imported = rows(conn, "merged_frames").sort_by("index")
+    imported = frame_rows(conn, "merged_frames")
     episodes = episode_rows(conn, "merged_episodes")
     assert not any(name.startswith("videos/") for name in episodes.column_names)
     for episode in episodes.to_pylist():
@@ -735,7 +895,7 @@ def test_mixed_fps_group_keeps_episode_rates(tmp_path, import_parallelism):
                            parallelism=import_parallelism)
     info = metadata(conn, "info")
     assert info["fps"] is None
-    assert info["fps_mode"] == "source"
+    assert "fps_mode" not in info
     datasets = rows(conn, "merged_datasets").sort_by("index")
     assert "fps" not in datasets.column_names
     assert [json.loads(value)["fps"] for value in
@@ -830,14 +990,16 @@ def test_official_merge_reference_and_local_sources(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("merged", roots, tag_name="train", batch_size=2)
     expected = pa.concat_tables([pq.read_table(p) for p in sorted((reference / "data").rglob("*.parquet"))])
-    actual = rows(conn, "merged_frames").sort_by("index")
+    actual = frame_rows(conn, "merged_frames")
     for name in expected.column_names:
-        if name not in ("episode_index", "task_index", "subtask_index"):
+        if name not in ("index", "episode_index", "task_index", "subtask_index"):
             np.testing.assert_allclose(actual[name].to_pylist(), expected[name].to_pylist())
     assert actual["episode_index"].to_pylist() == [0] * 3 + [1] * 3 + [0] * 3 + [1] * 3
     assert actual["dataset_index"].to_pylist() == [0] * 6 + [1] * 6
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), tag_name="train")
     try:
+        assert [int(sample["index"]) for sample in reader.get_items(range(12))] == (
+            expected["index"].to_pylist())
         assert [int(sample["episode_index"]) for sample in reader.get_items(range(12))] == (
             expected["episode_index"].to_pylist())
     finally:
@@ -964,7 +1126,7 @@ def test_merge_nullable_subtask_import(setup, tmp_path, import_parallelism, all_
             pq.write_table(pq.read_table(path).slice(0, 0), path)
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
     expected = [None] * 10 if all_null else [0, None, 0, 1, None] * 2
-    assert rows(conn, "merged_frames").sort_by("index")["subtask_index"].to_pylist() == expected
+    assert frame_rows(conn, "merged_frames")["subtask_index"].to_pylist() == expected
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), tag_name="train")
     assert reader[1]["subtask"] is None
     batch = next(iter(reader.to_dataloader(batch_size=5, num_workers=0)))
@@ -1806,7 +1968,8 @@ def test_schema_evolution_unions_three_tables(setup, import_parallelism, reverse
         sources.reverse()
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism,
                            extra_dataset_fields={"config": "config/*.json", "notes": "notes.md"})
-    data = rows(conn, "merged_frames").sort_by("index")
+    data = rows(conn, "merged_frames").sort_by([
+        ("dataset_index", "ascending"), ("index", "ascending")])
     episodes = episode_rows(conn, "merged_episodes").to_pylist()
     datasets = rows(conn, "merged_datasets").sort_by("index").to_pylist()
     for ordinal, uri in enumerate(sources):
