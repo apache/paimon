@@ -492,7 +492,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 }
                 if (rebuild != null) {
                     createMetadataWithoutBase(
-                            snapshotId,
+                            snapshot,
                             rebuild.inheritUuid,
                             rebuild.lastColumnIdFloor,
                             rebuild.nextRowIdFloor);
@@ -552,34 +552,44 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     // Create metadata afresh
     // -------------------------------------------------------------------------------------
 
-    private void createMetadataWithoutBase(long snapshotId) throws IOException {
-        createMetadataWithoutBase(snapshotId, null, 0, 0L);
-    }
-
-    private void createMetadataWithoutBase(long snapshotId, @Nullable String inheritUuid)
-            throws IOException {
-        createMetadataWithoutBase(snapshotId, inheritUuid, 0, 0L);
-    }
-
+    /**
+     * Rebuilds the metadata from every data file of the snapshot that was checked. The snapshot is
+     * not read again by its id: a rollback can give the id to another commit, and the work is
+     * abandoned when the snapshot on disk is not the checked one any more.
+     */
     private void createMetadataWithoutBase(
-            long snapshotId,
+            Snapshot paimonSnapshot,
             @Nullable String inheritUuid,
             int lastColumnIdFloor,
             long nextRowIdFloor)
             throws IOException {
+        long snapshotId = paimonSnapshot.id();
         replayPoint(ReplayPoint.REBUILD, snapshotId);
-        SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshotId);
-        Snapshot paimonSnapshot = table.snapshotManager().snapshot(snapshotId);
+        if (!isCurrentSource(paimonSnapshot)) {
+            abandonRebuild(paimonSnapshot);
+            return;
+        }
+        SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(paimonSnapshot);
         SchemaCache schemaCache = new SchemaCache();
         List<IcebergManifestEntry> dataFileEntries = new ArrayList<>();
         List<IcebergManifestEntry> dvFileEntries = new ArrayList<>();
         SummaryMetrics metrics = new SummaryMetrics();
         Set<BinaryRow> changedPartitions = new HashSet<>();
 
-        List<DataSplit> filteredDataSplits =
-                snapshotReader.read().dataSplits().stream()
-                        .filter(DataSplit::rawConvertible)
-                        .collect(Collectors.toList());
+        List<DataSplit> filteredDataSplits;
+        try {
+            filteredDataSplits =
+                    snapshotReader.read().dataSplits().stream()
+                            .filter(DataSplit::rawConvertible)
+                            .collect(Collectors.toList());
+        } catch (RuntimeException e) {
+            // a rollback deletes the manifests of the snapshots it drops
+            if (isMissingFile(e) && !isCurrentSource(paimonSnapshot)) {
+                abandonRebuild(paimonSnapshot);
+                return;
+            }
+            throw e;
+        }
         for (DataSplit dataSplit : filteredDataSplits) {
             changedPartitions.add(dataSplit.partition());
             dataSplitToManifestEntries(
@@ -722,6 +732,15 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             files.addAll(applicableMetadataFiles(snapshotId));
             deleteUnderLock(paimonSnapshot, publication.generation, files);
         }
+    }
+
+    private void abandonRebuild(Snapshot paimonSnapshot) {
+        LOG.info(
+                "Snapshot {} of table {} was replaced before its Iceberg metadata was rebuilt, "
+                        + "so nothing is written.",
+                paimonSnapshot.id(),
+                table.fullName());
+        replayPoint(ReplayPoint.ABANDONED, paimonSnapshot.id());
     }
 
     private void dataSplitToManifestEntries(
@@ -1013,16 +1032,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     /**
      * Runs the part of a rollback that deletes snapshots under the lock that the publication of
      * Iceberg metadata takes, so a rollback never happens between the last check of a snapshot and
-     * the publication of its metadata. It takes the lock whatever the Iceberg setting of the handle
-     * that rolls back is, because one table can have handles with Iceberg metadata on and off, and
-     * a rollback through any of them replaces snapshots. The setting of the table decides, and a
-     * table that never has Iceberg metadata rolls back without a lock.
+     * the publication of its metadata. It takes the lock whatever the Iceberg setting is, of the
+     * handle that rolls back or of the table as it is stored: a writer that opened the table
+     * earlier, or that turned Iceberg metadata on for its own job, can still publish after the
+     * stored setting says off. A catalog without a lock gives a lock that does nothing.
      */
     public static void runRollback(FileStoreTable table, Runnable rollback) {
-        if (!icebergMetadataEnabled(table)) {
-            rollback.run();
-            return;
-        }
         SnapshotCommit lock =
                 table.catalogEnvironment()
                         .snapshotCommit(
@@ -1530,7 +1545,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 return;
             case NEEDS_REBUILD:
                 createMetadataWithoutBase(
-                        snapshot.id(),
+                        snapshot,
                         result.inheritUuid,
                         result.lastColumnIdFloor,
                         result.nextRowIdFloor);

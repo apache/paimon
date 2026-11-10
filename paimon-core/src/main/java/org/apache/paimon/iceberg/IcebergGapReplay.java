@@ -253,13 +253,23 @@ final class IcebergGapReplay {
                 problem = e.getMessage();
             }
             if (base != null) {
+                // a valid version names the table for a rebuild, near enough to replay or not
                 baseUuid = base.metadata.tableUuid();
                 maxLastColumnId = Math.max(maxLastColumnId, base.metadata.lastColumnId());
                 if (base.metadata.nextRowId() != null) {
                     maxNextRowId = Math.max(maxNextRowId, base.metadata.nextRowId());
                 }
-                callback.replayPoint(ReplayPoint.BASE_SELECTED, version);
-                return base;
+                if (snapshotId - version <= maxSnapshots) {
+                    callback.replayPoint(ReplayPoint.BASE_SELECTED, version);
+                    return base;
+                }
+                problem =
+                        "it is "
+                                + (snapshotId - version)
+                                + " snapshots behind, more than "
+                                + IcebergOptions.REPLAY_MAX_SNAPSHOTS.key();
+                // every older version is further behind
+                nextCandidate = candidates.size();
             }
             LOG.info(
                     "Iceberg metadata v{} of table {} is not a base for snapshot {}: {}",
@@ -273,13 +283,6 @@ final class IcebergGapReplay {
     }
 
     private ReplayBase checkBase(long version) throws IOException {
-        if (snapshotId - version > maxSnapshots) {
-            throw new ReplayAbort(
-                    "it is "
-                            + (snapshotId - version)
-                            + " snapshots behind, more than "
-                            + IcebergOptions.REPLAY_MAX_SNAPSHOTS.key());
-        }
         Snapshot paimonSnapshot = readSnapshot(version);
         if (paimonSnapshot == null) {
             throw new ReplayAbort("there is no Paimon snapshot " + version);

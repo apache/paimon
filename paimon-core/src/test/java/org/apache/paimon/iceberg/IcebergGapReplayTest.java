@@ -41,7 +41,6 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -1985,24 +1984,6 @@ public class IcebergGapReplayTest {
                 .doesNotContain("v" + (next + 2) + ".metadata.json");
         // what the marker holds is not known, so it is not cleared
         assertThat(fileIO.exists(marker)).isTrue();
-
-        // a table that has no Iceberg metadata has no lock to wait for when it is rolled back
-        ReplayTable plain =
-                new ReplayTable(
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        LocalFileIO.create(),
-                        "plaindb");
-        plain.append(plain.disabled, 1);
-        plain.append(plain.disabled, 2);
-        plain.enabled
-                .schemaManager()
-                .commitChanges(
-                        SchemaChange.setOption(
-                                IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "disabled"));
-        plain.lock.unavailable = true;
-        plain.enabled.rollbackTo(1);
-        assertThat(plain.enabled.snapshotManager().latestSnapshotId()).isEqualTo(1L);
     }
 
     /**
