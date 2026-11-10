@@ -16,6 +16,7 @@
 
 import json
 import sys
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -215,8 +216,11 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
         conn._identifier("merged__datasets"), "train").snapshot.id == 1
     assert episodes["dataset_from_index"].to_pylist() == [0, 2, 5, 7]
     assert episodes["dataset_to_index"].to_pylist() == [2, 5, 7, 10]
-    assert episodes["stats/index/mean"].to_pylist() == [[0.5], [3.0], [5.5], [8.0]]
-    assert not any(c.endswith("/q50") for c in episodes.column_names)
+    assert not any(c.startswith("stats/") for c in episodes.column_names)
+    episode_stats = [json.loads(value) for value in episodes["stats"].to_pylist()]
+    assert [item["index"]["mean"] for item in episode_stats] == [
+        [0.5], [3.0], [5.5], [8.0]]
+    assert all("q50" not in item["index"] for item in episode_stats)
     info = metadata(conn, "info")
     assert info["fps"] == 10
     assert (info["total_frames"], info["total_episodes"], info["total_tasks"]) == (10, 4, 3)
@@ -246,6 +250,58 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     selected = pm.PaimonLeRobotDataset(conn.get_table("merged"), tag_name="train", episodes=[2])
     assert len(selected) == 2
     assert selected[0]["episode_index"].item() == 2
+
+
+def test_merge_keeps_source_specific_episode_statistics_in_json(setup):
+    conn, sources = setup
+    for index, uri in enumerate(sources):
+        path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
+        table = pq.read_table(path)
+        name = "stats/source_%d/mean" % index
+        table = table.append_column(name, pa.array([[index + 0.5]] * 2))
+        table = table.append_column("meta/episodes/chunk_index", pa.array([index] * 2))
+        table = table.append_column("data/vendor_%d" % index, pa.array(["source"] * 2))
+        pq.write_table(table, path)
+
+    conn.load_from_lerobot("merged", sources)
+    episodes = episode_rows(conn, "merged__episodes")
+    assert episodes.schema.field("stats").type == pa.string()
+    assert all(episodes.schema.field(name).type == pa.string()
+               for name in ("meta", "data", "videos", "stats"))
+    assert not any(name.startswith(("meta/", "data/", "videos/", "stats/"))
+                   for name in episodes.column_names)
+    for row in episodes.to_pylist():
+        stats = json.loads(row["stats"])
+        assert stats["source_%d" % row["dataset_index"]]["mean"] == [
+            row["dataset_index"] + 0.5]
+        assert "q50" not in stats["index"]
+        assert json.loads(row["meta"]) == {"episodes/chunk_index": row["dataset_index"]}
+        assert json.loads(row["data"]) == {
+            "chunk_index": 0, "file_index": 0,
+            "vendor_%d" % row["dataset_index"]: "source"}
+        assert json.loads(row["videos"]) == {}
+
+
+@pytest.mark.parametrize("name,values", [
+    ("data/checksum", pa.array([b"\xff", None], type=pa.binary())),
+    ("meta/captured_at", pa.array(
+        [1700000000123456789, None], type=pa.timestamp("ns", tz="UTC"))),
+    ("stats/measurement/mean", pa.array(
+        [Decimal("123456789.123"), None], type=pa.decimal128(12, 3))),
+])
+def test_merge_rejects_non_json_episode_fields_before_create(setup, name, values):
+    conn, sources = setup
+    path = Path(sources[0][7:]) / "meta/episodes/chunk-000/file-000.parquet"
+    pq.write_table(pq.read_table(path).append_column(name, values), path)
+
+    with pytest.raises(ValueError, match=(
+            "source 0 Episode field .* must use a JSON-native Arrow type")):
+        conn.load_from_lerobot("merged", sources)
+
+    for suffix in ("", "__datasets", "__episodes", "__info", "__stats",
+                   "__subtasks", "__tasks"):
+        with pytest.raises(TableNotExistException):
+            conn.get_table("merged" + suffix)
 
 
 @pytest.mark.parametrize("component", ["tasks", "subtasks", "episodes"])
@@ -586,6 +642,12 @@ def test_video_sources_with_identical_paths(tmp_path, import_parallelism):
                            parallelism=import_parallelism, fps_mode="source")
     table = conn.get_table("merged").raw_table
     imported = rows(conn, "merged").sort_by("index")
+    episodes = episode_rows(conn, "merged__episodes")
+    assert not any(name.startswith("videos/") for name in episodes.column_names)
+    for episode in episodes.to_pylist():
+        video = json.loads(episode["videos"])
+        assert set(video) == {"camera/" + suffix for suffix in (
+            "chunk_index", "file_index", "from_timestamp", "to_timestamp")}
     for source_index, uri in enumerate(sources):
         descriptor = VideoFrameDescriptor.deserialize(
             imported["camera"][source_index * 5].as_py()).payload_descriptor
@@ -869,7 +931,9 @@ def test_merge_nullable_subtask_import(setup, tmp_path, import_parallelism, all_
     assert not batch["subtask_index_is_valid"][1].item()
     if all_null:
         assert "subtask_index" not in metadata(conn, "stats")
-        assert rows(conn, "merged__episodes")["stats/subtask_index/mean"].to_pylist() == [None] * 4
+        assert all(all(metric is None for metric in json.loads(value)
+                       ["subtask_index"].values()) for value in
+                   rows(conn, "merged__episodes")["stats"].to_pylist())
     if not all_null:
         windowed = pm.PaimonLeRobotDataset(
             conn.get_table("merged"), delta_timestamps={"subtask_index": [-0.1, 0, 0.1]})
@@ -973,9 +1037,10 @@ def test_reconstructed_subtask_stats_use_output_schema(setup, import_parallelism
         pq.write_table(episodes.cast(schema), path)
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism)
     episodes = episode_rows(conn, "merged__episodes")
-    assert episodes["stats/subtask_index/mean"].to_pylist()[::2] == (
+    stats = [json.loads(value) for value in episodes["stats"].to_pylist()]
+    assert [value.get("subtask_index", {}).get("mean") for value in stats[::2]] == (
         [None, None] if empty_episode else [[0.0], [1.0]])
-    assert episodes.schema.field("stats/subtask_index/min").nullable
+    assert not any(name.startswith("stats/") for name in episodes.column_names)
     assert rows(conn, "merged").num_rows == 10
 
 
@@ -1028,7 +1093,11 @@ def test_default_fps_preserves_importer_contract(tmp_path, multiple, video_rate)
     path = tmp_path / "source/meta/episodes/chunk-000/file-000.parquet"
     pq.write_table(pq.read_table(path).append_column("fps", pa.array([10.0, 10.0])), path)
     conn.load_from_lerobot("merged", [uri] if multiple else uri)
-    assert rows(conn, "merged__episodes")["fps"].to_pylist() == [10.0, 10.0]
+    episodes = rows(conn, "merged__episodes")
+    if multiple:
+        assert "fps" not in episodes.column_names
+    else:
+        assert episodes["fps"].to_pylist() == [10.0, 10.0]
     assert "fps_mode" not in metadata(conn, "info")
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged"), video_backend="pyav")
     try:
@@ -1139,11 +1208,8 @@ def test_merge_archives_standard_vocabulary_columns(setup, import_parallelism):
 
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
-def test_merge_preserves_shared_arrow_episode_fields(setup, import_parallelism):
-    from decimal import Decimal
-
+def test_merge_omits_unmapped_arrow_native_episode_fields(setup, import_parallelism):
     conn, sources = setup
-    originals = []
     for index, uri in enumerate(sources):
         path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
         table = pq.read_table(path)
@@ -1154,12 +1220,10 @@ def test_merge_preserves_shared_arrow_episode_fields(setup, import_parallelism):
             [Decimal("123456789.123"), None], type=pa.decimal128(12, 3)))
         table = table.replace_schema_metadata({b"producer": b"native-source"})
         pq.write_table(table, path)
-        originals.append(pq.read_table(path))
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
-    columns = ["native_bytes", "captured_at", "measurement"]
-    episodes = episode_rows(conn, "merged__episodes").select(columns)
-    expected = pa.concat_tables([table.select(columns) for table in originals])
-    assert episodes.equals(expected, check_metadata=False)
+    episodes = episode_rows(conn, "merged__episodes")
+    assert not {"native_bytes", "captured_at", "measurement"}.intersection(
+        episodes.column_names)
     assert rows(conn, "merged").num_rows == 10
 
 
@@ -1182,6 +1246,8 @@ def test_training_projects_out_source_archives(setup, dataset_index):
             if name.endswith("__datasets"):
                 assert "tasks" not in projection
                 assert "subtasks" not in projection
+            else:
+                assert "stats" not in projection
             reads[name.rsplit("__", 1)[1]] = projection
         result = read_arrow(table, projection)
         if name.endswith(("__datasets", "__episodes")):
@@ -1194,6 +1260,7 @@ def test_training_projects_out_source_archives(setup, dataset_index):
         try:
             assert dataset[0]["task"] == ("pick" if dataset_index is None else "place")
             assert "source_episode_patch_json" not in dataset.meta.episodes.column_names
+            assert "stats" not in dataset.meta.episodes.column_names
             assert all("tasks" not in row and "subtasks" not in row
                        for row in dataset.meta.datasets)
         finally:
@@ -1205,7 +1272,7 @@ def test_training_projects_out_source_archives(setup, dataset_index):
 
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
-def test_merge_canonicalizes_episode_timezone(setup, import_parallelism):
+def test_merge_omits_unmapped_episode_timestamp(setup, import_parallelism):
     conn, sources = setup
     for uri in sources:
         path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
@@ -1214,8 +1281,7 @@ def test_merge_canonicalizes_episode_timezone(setup, import_parallelism):
         pq.write_table(data, path)
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
     data = episode_rows(conn, "merged__episodes")
-    assert data.schema.field("capture_time").type == pa.timestamp("ms", tz="UTC")
-    assert data["capture_time"].cast(pa.int64()).to_pylist() == [1700000000123, None] * 2
+    assert "capture_time" not in data.column_names
     assert conn.catalog.get_tag(conn._identifier("merged"), "train") is not None
 
 
@@ -1318,7 +1384,6 @@ def test_merge_source_specific_episode_extensions(setup, import_parallelism, rev
     pytest.importorskip("datasets")
     pytest.importorskip("torch")
     conn, sources = setup
-    originals = {}
     for index, uri in enumerate(sources):
         path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
         data = pq.read_table(path)
@@ -1329,17 +1394,13 @@ def test_merge_source_specific_episode_extensions(setup, import_parallelism, rev
         field = pa.field("shared_note", pa.string(), nullable=index == 1)
         data = data.append_column(field, pa.array(["shared", "note"] if index == 0 else [None, "note"]))
         pq.write_table(data, path)
-        originals[uri] = pq.read_table(path)
     if reverse:
         sources.reverse()
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
     data = episode_rows(conn, "merged__episodes")
     assert "vendor_note" not in data.column_names
     assert "vendor_value" not in data.column_names
-    assert "shared_note" in data.column_names
-    for row in data.to_pylist():
-        expected = originals[sources[row["dataset_index"]]].slice(row["episode_index"], 1).to_pylist()[0]
-        assert row["shared_note"] == expected["shared_note"]
+    assert "shared_note" not in data.column_names
     reader = pm.PaimonLeRobotDataset(conn.get_table("merged"), tag_name="train")
     try:
         assert [int(sample["episode_index"]) for sample in reader.get_items([0, 2, 5, 7])] == [0, 1, 2, 3]

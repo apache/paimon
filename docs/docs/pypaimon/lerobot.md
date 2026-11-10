@@ -86,11 +86,18 @@ labels do not merge sources. Frame and Episode `dataset_index` values reference
 original Episode. Frames keep a
 merged `index` and their original `source_index`. Source task/subtask ID-to-text
 mappings use the typed arrays of rows `__datasets.tasks` and `__datasets.subtasks`;
-stats remain JSON. Episode extension columns are retained only
-when present with matching types in every source; source-specific extension
-columns and original Episode schemas are not archived. Repeated task/subtask text
-within one source is rejected before creating tables to avoid losing original
-frame IDs.
+stats remain JSON.
+
+Merged `__episodes` keeps typed Episode keys and frame ranges, with
+`meta/`, `data/`, `videos/`, and `stats/` fields grouped into JSON columns.
+Grouped fields must use JSON-native Arrow types: null, boolean, integer,
+floating point, string, list, or struct, including nested combinations.
+Binary, temporal, decimal, map, and extension types are rejected before any
+target table is created. Other Episode extension fields are not imported.
+Control-field statistics reflect merged IDs; their original quantiles are
+omitted. Training reads skip `stats`; the group-level `__stats` table is
+unchanged. Repeated task/subtask text within one source is rejected before
+creating tables to avoid losing original frame IDs.
 
 Sources must share robot type and training features. By default they must also
 share FPS; `fps_mode="source"` permits mixed FPS and requires

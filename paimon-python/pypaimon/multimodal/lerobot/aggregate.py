@@ -62,6 +62,7 @@ _REBUILT_INFO = {
 }
 _DATASET_INDEX_COLUMN = "dataset_index"
 _SOURCE_FRAME_INDEX_COLUMN = "source_index"
+_EPISODE_JSON_GROUPS = ("meta", "data", "videos", "stats")
 _SOURCE_TASKS_TYPE = pa.list_(pa.struct([
     pa.field("task_index", pa.int64(), nullable=False),
     pa.field("task", pa.string(), nullable=False),
@@ -82,6 +83,53 @@ _DATASETS_SCHEMA = pa.schema([
 
 def _json_table(table):
     return {row["key"]: json.loads(row["value"]) for row in table.to_pylist()}
+
+
+def _json_native_arrow_type(data_type):
+    if pa.types.is_null(data_type) or pa.types.is_boolean(data_type) \
+            or pa.types.is_integer(data_type) or pa.types.is_floating(data_type) \
+            or pa.types.is_string(data_type) or pa.types.is_large_string(data_type):
+        return True
+    if pa.types.is_list(data_type) or pa.types.is_large_list(data_type) \
+            or pa.types.is_fixed_size_list(data_type):
+        return _json_native_arrow_type(data_type.value_type)
+    if pa.types.is_struct(data_type):
+        return all(_json_native_arrow_type(field.type) for field in data_type)
+    if pa.types.is_dictionary(data_type):
+        return _json_native_arrow_type(data_type.value_type)
+    return False
+
+
+def _episode_json_group(original, group):
+    prefix = group + "/"
+    return json.dumps(
+        _json_value({key[len(prefix):]: value
+                     for key, value in original.items()
+                     if key.startswith(prefix)}),
+        ensure_ascii=False, separators=(",", ":"))
+
+
+def _validate_episode_json(table, source_index):
+    fields = [
+        field for field in table.schema
+        if field.name.startswith(tuple(group + "/" for group in _EPISODE_JSON_GROUPS))
+    ]
+    for field in fields:
+        if not _json_native_arrow_type(field.type):
+            raise ValueError(
+                "LeRobot source %d Episode field %r must use a JSON-native "
+                "Arrow type; found %s."
+                % (source_index, field.name, field.type))
+    names = [field.name for field in fields]
+    for row_index, original in enumerate(table.select(names).to_pylist()):
+        for group in _EPISODE_JSON_GROUPS:
+            try:
+                _episode_json_group(original, group)
+            except (TypeError, ValueError, OverflowError) as error:
+                raise ValueError(
+                    "LeRobot source %d Episode row %d has invalid JSON-native "
+                    "%s metadata: %s."
+                    % (source_index, row_index, group, error)) from error
 
 
 def _vocabulary_rows(table, label):
@@ -210,11 +258,11 @@ def _plan_merge(plans, fps_mode="dataset"):
         raise ValueError("LeRobot source frame features use reserved source index columns.")
     info = copy.deepcopy(first["info"])
     metadata = dict(first["metadata"])
-    # Quantiles are omitted rather than presenting source summaries as merged values.
+    # Keep source file locations and statistics in four JSON columns rather
+    # than expanding their source-specific fields into the target schema.
     metadata["episodes_schema"] = pa.schema([
-        field.with_nullable(True) if field.name.startswith("stats/subtask_index/") else field
-        for field in metadata["episodes_schema"]
-        if not any(field.name.startswith("stats/%s/q" % name) for name in _CONTROLS)
+        field for field in metadata["episodes_schema"]
+        if not field.name.startswith("stats/")
         and not (fps_mode == "source" and field.name == _EPISODE_FPS_COLUMN)
     ], metadata=metadata["episodes_schema"].metadata)
     required_episode_fields = set(_EPISODE_CONTROL_COLUMNS) | {
@@ -260,8 +308,8 @@ def _plan_merge(plans, fps_mode="dataset"):
         try:
             for name in plan["videos"]:
                 _video_fps(other, other["features"][name], name)
-            for unused in _validated_episode_tables(plan["metadata"], first["videos"]):
-                pass
+            for table in _validated_episode_tables(plan["metadata"], first["videos"]):
+                _validate_episode_json(table, ordinal)
         except ValueError as error:
             raise ValueError("LeRobot source %d: %s" % (ordinal, error)) from error
         plan["frame_offset"] = frame_offset
@@ -275,16 +323,27 @@ def _plan_merge(plans, fps_mode="dataset"):
             del info[key]
     metadata["tasks_table"] = _vocabulary(plans, "tasks")
     metadata["subtasks_table"] = _vocabulary(plans, "subtasks")
+    metadata["episodes_schema"] = pa.schema([
+        metadata["episodes_schema"].field(name)
+        for name in _EPISODE_CONTROL_COLUMNS
+    ], metadata=metadata["episodes_schema"].metadata)
     reserved_episode_fields = {
         _DATASET_INDEX_COLUMN,
         "source_frame_from_index", "source_frame_to_index",
+        "meta", "data", "videos", "stats",
     }
-    if reserved_episode_fields.intersection(metadata["episodes_schema"].names):
+    if any(reserved_episode_fields.intersection(
+            plan["metadata"]["episodes_schema"].names)
+           for plan in plans):
         raise ValueError("Source Episode metadata uses reserved source index columns.")
     for field in (
             pa.field(_DATASET_INDEX_COLUMN, pa.int64(), nullable=False),
             pa.field("source_frame_from_index", pa.int64(), nullable=False),
-            pa.field("source_frame_to_index", pa.int64(), nullable=False)):
+            pa.field("source_frame_to_index", pa.int64(), nullable=False),
+            pa.field("meta", pa.string(), nullable=False),
+            pa.field("data", pa.string(), nullable=False),
+            pa.field("videos", pa.string(), nullable=False),
+            pa.field("stats", pa.string(), nullable=False)):
         metadata["episodes_schema"] = metadata["episodes_schema"].append(field)
     metadata["datasets_table"] = pa.Table.from_pylist([
         {
@@ -378,14 +437,6 @@ def _transform_frames(plan, batch, episode):
     return batch
 
 
-def _stat_value(data_type, value):
-    if pa.types.is_list(data_type) or pa.types.is_large_list(data_type):
-        return [_stat_value(data_type.value_type, value)]
-    if pa.types.is_fixed_size_list(data_type):
-        return [_stat_value(data_type.value_type, value)] * data_type.list_size
-    return value
-
-
 def _merged_episodes(plans, schema):
     for dataset_index, plan in enumerate(plans):
         for table in _source_episode_tables(plan["metadata"]):
@@ -393,6 +444,16 @@ def _merged_episodes(plans, schema):
             for original in table.to_pylist():
                 row = {name: original[name] for name in schema.names
                        if name in original}
+                for group in ("meta", "data", "videos"):
+                    row[group] = _episode_json_group(original, group)
+                stats = {}
+                for key, value in original.items():
+                    if key.startswith("stats/"):
+                        feature, statistic = key[6:].rsplit("/", 1)
+                        # Rebased control values have new statistics. Their
+                        # original quantiles cannot describe the merged IDs.
+                        if feature not in _CONTROLS or not statistic.startswith("q"):
+                            stats.setdefault(feature, {})[statistic] = value
                 row[_DATASET_INDEX_COLUMN] = dataset_index
                 row["source_frame_from_index"] = original["dataset_from_index"]
                 row["source_frame_to_index"] = original["dataset_to_index"]
@@ -400,14 +461,13 @@ def _merged_episodes(plans, schema):
                 for key in ("dataset_from_index", "dataset_to_index"):
                     row[key] += plan["frame_offset"]
                 if "subtask_index" not in plan["control_stats"][episode]:
-                    for key in row:
-                        if key.startswith("stats/subtask_index/"):
-                            row[key] = None
-                for name, stats in plan["control_stats"][episode].items():
-                    for stat, value in stats.items():
-                        key = "stats/%s/%s" % (name, stat)
-                        if key in row:
-                            row[key] = _stat_value(schema.field(key).type, value[0])
+                    if "subtask_index" in stats:
+                        stats["subtask_index"] = {
+                            metric: None for metric in stats["subtask_index"]}
+                for name, values in plan["control_stats"][episode].items():
+                    stats[name] = values
+                row["stats"] = json.dumps(
+                    _json_value(stats), ensure_ascii=False, separators=(",", ":"))
                 records.append(row)
             yield pa.Table.from_pylist(records, schema=schema)
 
