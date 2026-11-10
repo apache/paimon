@@ -84,6 +84,7 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -756,7 +757,25 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private void validateDestructiveRollback() {
-        Snapshot latest = snapshotManager().latestSnapshot();
+        SnapshotManager snapshotManager = snapshotManager();
+        Snapshot latest;
+        try {
+            latest = snapshotManager.latestSnapshot();
+        } catch (RuntimeException e) {
+            if (!(e.getCause() instanceof FileNotFoundException)) {
+                throw e;
+            }
+            // Rollback can recover from a latest hint pointing to a missing snapshot. Check the
+            // latest existing snapshot so that recovery still respects retained guard history.
+            try {
+                latest =
+                        snapshotManager.safelyGetAllSnapshots().stream()
+                                .max(Comparator.comparingLong(Snapshot::id))
+                                .orElse(null);
+            } catch (IOException ex) {
+                throw new UncheckedIOException(ex);
+            }
+        }
         if (coreOptions().deleteOrderingGuardsEnabled()
                 || DeleteOrderingGuardGeneration.isTracked(latest)
                 || DeleteOrderingGuardFile.mayContainGuards(latest)) {
