@@ -79,8 +79,9 @@ Merged imports also create only `robot_merged_frames`, `robot_merged_episodes`, 
 
 Each source has one row in `_datasets`. Its `info` JSON contains the original
 `meta/info.json`, including FPS; there is no separate FPS column.
-The table contains `index`, `name`, `info`, `tasks`, `subtasks`,
-and `stats`. Source ranges are derived from the counts in each source's `info`.
+The table contains `index`, `name`, `info`, `tasks`, `subtasks`, `stats`,
+and `read_control_stats` (derived statistics for the combined training reader).
+Source ranges are derived from the counts in each source's `info`.
 `dataset_name` accepts a string for one source or a list/tuple with one label per
 source in input order. Omitted names are null, and duplicate labels do not merge
 sources. Frame and Episode `dataset_index` values reference
@@ -100,8 +101,8 @@ rejected before any target table is created. Episode fields without `/` retain
 their original names and Paimon-supported Arrow types as columns in `_episodes`;
 unsupported types are rejected before table creation.
 Training metadata reads only Episode controls; query `_episodes` for extensions.
-Control-field statistics reflect merged IDs; their original quantiles are
-omitted. Training reads skip `stats`. Repeated task/subtask text within one
+Episode statistics retain the original source values, including quantiles.
+Training reads skip Episode `stats`. Repeated task/subtask text within one
 source is rejected before creating tables to avoid losing original frame IDs.
 
 Sources must share robot type and compatible definitions for common features. Each source retains its own

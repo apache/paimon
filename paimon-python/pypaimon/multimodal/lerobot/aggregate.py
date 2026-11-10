@@ -82,6 +82,8 @@ _DATASETS_SCHEMA = pa.schema([
     pa.field("tasks", _SOURCE_TASKS_TYPE, nullable=False),
     pa.field("subtasks", _SOURCE_SUBTASKS_TYPE),
     pa.field("stats", pa.string()),
+    # The combined reader needs derived control statistics; Episode stats stay source-local.
+    pa.field("read_control_stats", pa.string()),
 ])
 
 
@@ -417,6 +419,7 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
             "tasks": _vocabulary_rows(plan["metadata"]["source_tasks_table"], "task"),
             "subtasks": _vocabulary_rows(plan["metadata"]["source_subtasks_table"], "subtask"),
             "stats": _stats_json(plan["metadata"]["stats_table"]),
+            "read_control_stats": None,
             **plan.get("extra_dataset_fields", {}),
         }
         for ordinal, plan in enumerate(plans)
@@ -523,22 +526,27 @@ def _merged_episodes(plans, schema):
                 for key, value in original.items():
                     if key.startswith("stats/"):
                         feature, statistic = key[6:].rsplit("/", 1)
-                        # Rebased control values have new statistics. Their
-                        # original quantiles cannot describe the merged IDs.
-                        if feature not in _CONTROLS or not statistic.startswith("q"):
-                            stats.setdefault(feature, {})[statistic] = value
+                        stats.setdefault(feature, {})[statistic] = value
                 row[_DATASET_INDEX_COLUMN] = plan[_DATASET_INDEX_COLUMN]
-                episode = row["episode_index"]
-                if "subtask_index" not in plan["control_stats"][episode]:
-                    if "subtask_index" in stats:
-                        stats["subtask_index"] = {
-                            metric: None for metric in stats["subtask_index"]}
-                for name, values in plan["control_stats"][episode].items():
-                    stats[name] = values
                 row["stats"] = json.dumps(
                     _json_value(stats), ensure_ascii=False, separators=(",", ":"))
                 records.append(row)
             yield pa.Table.from_pylist(records, schema=schema)
+
+
+def _store_read_control_stats(metadata, plans):
+    rows = metadata["datasets_table"].to_pylist()
+    for plan, row in zip(plans, rows):
+        stats = {}
+        for name in _CONTROLS:
+            parts = [values[name] for values in plan["control_stats"].values()
+                     if name in values]
+            if parts:
+                stats[name] = _merge_stats(parts)
+        row["read_control_stats"] = json.dumps(
+            _json_value(stats), ensure_ascii=False, separators=(",", ":"))
+    metadata["datasets_table"] = pa.Table.from_pylist(
+        rows, schema=metadata["datasets_table"].schema)
 
 
 def _import_sources(connection, table_name, sources, batch_size, options,
@@ -724,6 +732,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                             transform=partial(_transform_frames, plan)))
                     plan["dataset_resources"].close()
                     plan["dataset"] = None
+                _store_read_control_stats(metadata, plans)
                 for episodes in _merged_episodes(plans, episode_schema):
                     strict_arrow_table(episodes, episode_schema,
                                        "merged Episodes", 0, "LeRobot")
