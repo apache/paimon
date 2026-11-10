@@ -274,6 +274,7 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
           try {
             spark.sparkContext.addSparkListener(listener)
             sql(s"INSERT INTO T VALUES 1, 2, 3")
+            Utils.waitUntilEventEmpty(spark)
           } finally {
             spark.sparkContext.removeSparkListener(listener)
           }
