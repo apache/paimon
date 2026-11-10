@@ -106,9 +106,10 @@ print(metrics)   # {"num_updated": 50}
   BLOB/vector files. It handles normal forward snapshot progress, not table rollback.
 - Compatible schema changes, such as adding nullable columns or renaming fields,
   are resolved by field ID using the current schema and normal read-time conversions.
-  Dropped update fields are rejected even if their names are reused, file boundaries
-  are unchanged, or DDL has not published a data snapshot. Recovery prechecks plan
-  only the partitions present in the staged updates.
+  Dropped update fields, including nested fields in written ROW, ARRAY, and MAP
+  columns, are rejected even if their names are reused, file boundaries are unchanged,
+  or DDL has not published a data snapshot. Recovery prechecks plan only the partitions
+  present in the staged updates.
 
 ## Read By Row Id
 

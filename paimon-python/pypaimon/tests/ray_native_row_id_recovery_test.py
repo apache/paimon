@@ -108,3 +108,55 @@ def test_schema_recovery_preserves_native_rest_commit(native_rest_catalog, logic
     finally:
         if initialized_here:
             ray.shutdown()
+
+
+@pytest.mark.parametrize('recreate', [False, True])
+def test_nested_schema_recovery_with_native_rest_commit(native_rest_catalog, recreate):
+    ray = pytest.importorskip('ray')
+    initialized_here = not ray.is_initialized()
+    if initialized_here:
+        ray.init(num_cpus=4, include_dashboard=False)
+    try:
+        tables = helpers.RayUpdateByRowIdCompactionTest()
+        tables.catalog = native_rest_catalog
+        target, table, messages, child_path, _ = tables._nested_update_fixture(
+            'row', {'commit.native.enabled': 'true'})
+        path = ['profile'] + child_path
+        changes = [SchemaChange.drop_column(path)] if recreate else [
+            SchemaChange.rename_column(path, 'renamed'),
+            SchemaChange.update_column_type(['profile', 'renamed'], AtomicType('BIGINT'))]
+        changes.append(SchemaChange.add_column(path, AtomicType('INT')))
+        native_rest_catalog.alter_table(target, changes)
+        current = native_rest_catalog.get_table(target)
+        tables._compact_all_data_files(current.copy({'commit.native.enabled': 'false'}))
+        before_snapshot = current.snapshot_manager().get_latest_snapshot().id
+        from pypaimon.execution.native.write.commit import NativeTableCommit
+
+        native_calls = []
+        original = NativeTableCommit.commit
+
+        def native_commit(commit, *args, **kwargs):
+            native_calls.append(commit)
+            return original(commit, *args, **kwargs)
+
+        with patch.object(NativeTableCommit, 'commit', new=native_commit), patch(
+            'pypaimon.execution.python.write.file_store_commit.FileStoreCommit.commit',
+            side_effect=AssertionError('Native publication must not fall back to Python'),
+        ):
+            if recreate:
+                with pytest.raises(RuntimeError, match='cannot restore a dropped field'):
+                    _commit_update_messages(table, messages, num_partitions=2)
+            else:
+                _commit_update_messages(table, messages, num_partitions=2)
+        assert len(native_calls) == (0 if recreate else 1)
+        assert current.snapshot_manager().get_latest_snapshot().id == before_snapshot + (0 if recreate else 1)
+        read = current.copy({'scan.native-plan.enabled': 'true'}).new_read_builder()
+        rows = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id').to_pydict()
+        assert [value['age'] for value in rows['profile']] == [None, None]
+        assert [value['name'] for value in rows['profile']] == (
+            ['original', 'original'] if recreate else ['updated', 'original'])
+        if not recreate:
+            assert [value['renamed'] for value in rows['profile']] == [99, 20]
+    finally:
+        if initialized_here:
+            ray.shutdown()

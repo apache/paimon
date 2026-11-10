@@ -122,6 +122,100 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
             writer.close()
             commit.close()
 
+    def _nested_update_fixture(self, kind, options=None):
+        child_type = pa.struct([('age', pa.int32()), ('name', pa.string())])
+        if kind == 'array':
+            nested_type = pa.list_(child_type)
+            wrap = lambda value: [value]
+            unwrap = lambda value: value[0]
+            child_path = ['element', 'age']
+        elif kind == 'map':
+            nested_type = pa.map_(pa.string(), child_type)
+            wrap = lambda value: [('key', value)]
+            unwrap = lambda value: dict(value)['key']
+            child_path = ['value', 'age']
+        else:
+            nested_type = child_type
+            wrap = lambda value: value
+            unwrap = lambda value: value
+            child_path = ['age']
+        schema = pa.schema([('id', pa.int32()), ('profile', nested_type), ('other', nested_type)])
+        target = 'default.tbl_' + uuid.uuid4().hex[:8]
+        table_options = dict(self.de_options)
+        table_options.update(options or {})
+        self.catalog.create_table(target, Schema.from_pyarrow_schema(schema, options=table_options), False)
+        for row_id in (1, 2):
+            self._write(target, pa.Table.from_pydict({
+                'id': [row_id],
+                'profile': [wrap({'age': 10 * row_id, 'name': 'original'})],
+                'other': [wrap({'age': 10 * row_id, 'name': 'untouched'})],
+            }, schema=schema))
+        table = self.catalog.get_table(target)
+        messages = table.new_batch_write_builder().new_update().update_by_arrow_with_row_id(
+            pa.table({
+                '_ROW_ID': pa.array([0], pa.int64()),
+                'profile': pa.array([wrap({'age': 99, 'name': 'updated'})], type=nested_type),
+            }))
+        return target, table, messages, child_path, unwrap
+
+    def test_nested_update_rejects_recreated_child_fields(self):
+        from pypaimon.ray.update_by_row_id import _commit_update_messages
+
+        for kind in ('row', 'array', 'map'):
+            for compact in (False, True):
+                with self.subTest(kind=kind, compact=compact):
+                    target, table, messages, child_path, _ = self._nested_update_fixture(kind)
+                    path = ['profile'] + child_path
+                    self.catalog.alter_table(target, [
+                        SchemaChange.drop_column(path),
+                        SchemaChange.add_column(path, AtomicType('INT'))])
+                    if compact:
+                        self._compact_all_data_files(self.catalog.get_table(target))
+                    before_snapshot = table.snapshot_manager().get_latest_snapshot().id
+                    before_rows = self._read_sorted(target)
+                    with patch('pypaimon.ray.row_id_conflict_rewriter._rewrite_group',
+                               side_effect=AssertionError('Dropped fields must fail before rewriting')) as rewrite:
+                        with self.assertRaisesRegex(RuntimeError, 'cannot restore a dropped field'):
+                            _commit_update_messages(table, messages, num_partitions=2)
+                    rewrite.assert_not_called()
+                    self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, before_snapshot)
+                    self.assertEqual(self._read_sorted(target), before_rows)
+                    for message in messages:
+                        for file in message.new_files:
+                            self.assertTrue(table.file_io.exists(file.file_path))
+
+    def test_nested_update_accepts_compatible_and_unrelated_ddl(self):
+        from pypaimon.ray.row_id_conflict_rewriter import _rewrite_group
+        from pypaimon.ray.update_by_row_id import _commit_update_messages
+
+        for kind in ('row', 'array', 'map'):
+            for compact in (False, True):
+                for rename in (False, True):
+                    with self.subTest(kind=kind, compact=compact, rename=rename):
+                        target, table, messages, child_path, unwrap = self._nested_update_fixture(kind)
+                        if rename:
+                            path = ['profile'] + child_path
+                            self.catalog.alter_table(target, [
+                                SchemaChange.rename_column(path, 'renamed'),
+                                SchemaChange.update_column_type(path[:-1] + ['renamed'], AtomicType('BIGINT')),
+                                SchemaChange.add_column(path, AtomicType('INT'))])
+                        else:
+                            self.catalog.alter_table(target, [SchemaChange.drop_column(['other'] + child_path)])
+                        if compact:
+                            self._compact_all_data_files(self.catalog.get_table(target))
+                        untouched = self._read_sorted(target)['other']
+                        with patch('pypaimon.ray.row_id_conflict_rewriter._rewrite_group',
+                                   wraps=_rewrite_group) as rewrite:
+                            _commit_update_messages(table, messages, num_partitions=2)
+                        self.assertEqual(rewrite.call_count, 1 if compact else 0)
+                        rows = self._read_sorted(target)
+                        profiles = [unwrap(value) for value in rows['profile']]
+                        self.assertEqual([value['renamed' if rename else 'age'] for value in profiles], [99, 20])
+                        self.assertEqual([value['name'] for value in profiles], ['updated', 'original'])
+                        if rename:
+                            self.assertEqual([value['age'] for value in profiles], [None, None])
+                        self.assertEqual(rows['other'], untouched)
+
     def test_staged_commit_rejects_dropped_fields_without_rewriting(self):
         from pypaimon.ray.row_id_conflict_rewriter import commit_updates_with_compaction_retry
         from pypaimon.ray.update_by_row_id import _commit_update_messages

@@ -29,6 +29,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.split import DataSplit
+from pypaimon.schema.data_types import collect_field_ids
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
@@ -477,8 +478,18 @@ def _partial_file_write_cols(table, file: DataFileMeta):
         if name not in file_fields:
             raise RuntimeError("Column '{}' not found in schema {}".format(name, file.schema_id))
         fields.append(file_fields[name])
-    if any(field.id not in current_fields for field in fields):
-        raise RuntimeError('Row-id update cannot restore a dropped field')
+    for field in fields:
+        current_field = current_fields.get(field.id)
+        if current_field is None:
+            raise RuntimeError('Row-id update cannot restore a dropped field')
+        # A parent ROW can keep its ID while a written child is dropped and
+        # recreated. Validate only the written subtree, including children
+        # inside ARRAY/MAP types; unrelated schema changes remain allowed.
+        written_ids, current_ids = {field.id}, {current_field.id}
+        collect_field_ids(field.type, written_ids)
+        collect_field_ids(current_field.type, current_ids)
+        if not written_ids.issubset(current_ids):
+            raise RuntimeError('Row-id update cannot restore a dropped field')
     # Resolve renamed fields by identity, including when an old name has been
     # reused. TableRead applies the normal schema-evolution casts to the data.
     return None if columns is None else [current_fields[field.id].name for field in fields]
