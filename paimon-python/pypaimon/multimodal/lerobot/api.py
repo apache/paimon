@@ -71,15 +71,16 @@ def load_from_lerobot(
         source_options: Optional[Mapping[str, object]] = None,
         tag_name: Optional[str] = None,
         parallelism: int = 1,
+        fps_mode: str = "dataset",
+        dataset_names=None,
 ) -> None:
-    """Import LeRobot Dataset v3 into a new Paimon table group.
+    """Import one or more LeRobot v3 sources into a new Paimon table group.
 
-    A new target table is created from LeRobot metadata. Episode, task, and
-    info/stats metadata are stored in companion Paimon tables. If provided,
-    ``tag_name`` pins all components to their imported snapshots.
-    FileIO URI credentials come only from ``source_options`` and are not
-    inherited from the target Catalog. ``parallelism > 1`` distributes Episode
-    groups on an initialized Ray cluster. All workers need source and target access.
+    Sources must share training features. ``fps_mode='source'`` allows mixed
+    FPS. ``__datasets`` retains source metadata; optional ``dataset_names``
+    are caller-provided labels, never inferred from paths. ``tag_name`` pins
+    component snapshots.
+    FileIO credentials come from ``source_options``; ``parallelism > 1`` uses Ray.
     """
     if sys.version_info < (3, 10):
         raise RuntimeError(
@@ -92,6 +93,28 @@ def load_from_lerobot(
     if isinstance(parallelism, bool) or not isinstance(parallelism, int) \
             or parallelism <= 0:
         raise ValueError("parallelism must be a positive integer.")
+    if fps_mode not in ("dataset", "source"):
+        raise ValueError("fps_mode must be 'dataset' or 'source'.")
+    if dataset_names is not None:
+        if not isinstance(dataset_names, (list, tuple)) or len(dataset_names) != (
+                len(source) if isinstance(source, (list, tuple)) else 1) \
+                or any(not isinstance(name, str) or not name.strip()
+                       for name in dataset_names):
+            raise ValueError("dataset_names must contain one non-empty name per source.")
+        dataset_names = [name.strip() for name in dataset_names]
+    if isinstance(source, (list, tuple)) or fps_mode == "source" \
+            or dataset_names is not None:
+        if not isinstance(source, (list, tuple)):
+            source = [source]
+        if not source:
+            raise ValueError("LeRobot sources must not be empty.")
+        if tag_name is not None:
+            _validate_tag_name(tag_name)
+        from pypaimon.multimodal.lerobot.aggregate import _import_sources
+        return _import_sources(
+            connection, table_name, source, batch_size, options,
+            _validated_source_options(source_options), tag_name, parallelism,
+            fps_mode, dataset_names)
     if parallelism > 1:
         from pypaimon.multimodal.lerobot.ray_loader import _require_ray, _ray_source_uri
         _require_ray()
@@ -115,7 +138,8 @@ def load_from_lerobot(
         _validate_v3_required_features(local_info)
         video_fields = _video_feature_names(local_info)
         LeRobotDataset = (_import_lerobot_dataset()
-                          if parallelism == 1 else None)
+                          if parallelism == 1 and resolved_source.file_io is None
+                          else None)
         dataset = _open_resolved_dataset(
             LeRobotDataset,
             resolved_source,

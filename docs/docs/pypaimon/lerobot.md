@@ -65,6 +65,32 @@ The call returns `None` on success. Omitting `tag_name` imports the tables
 without creating tags. The one-time importer requires a new target table and
 a non-empty source dataset; subsequent table edits use the normal Paimon APIs.
 
+Pass an ordered list to merge sources into one table group:
+
+```python
+conn.load_from_lerobot(
+    "robot_all",
+    ["oss://bucket/dataset_a", "oss://bucket/dataset_b"],
+    dataset_names=["dataset_a", "dataset_b"],
+    fps_mode="source",  # Allow different source FPS.
+)
+```
+
+Each source has one row in `__datasets`, including its original metadata and FPS.
+`dataset_names` supplies optional labels; omitted names are null, and duplicate
+labels do not merge sources. Use `dataset_index` to link frames and Episodes;
+`(dataset_index, episode_index)` identifies an original Episode. Frames keep a
+merged `index` and their original `source_index`. Source task/subtask metadata
+and original Episode rows (`__episodes.source_episode_ipc`) use Arrow IPC to
+preserve extra columns and native types. Episode extension columns are shared
+only when present with matching types in every source. Repeated task/subtask text within one
+source is rejected before creating tables to avoid losing original frame IDs.
+
+Sources must share robot type and training features. By default they must also
+share FPS; `fps_mode="source"` permits mixed FPS and requires
+`PaimonLeRobotDataset` for training. Pass `dataset_index=N` to that reader to
+select one source.
+
 For FileIO URIs, pass credentials through `source_options`:
 
 ```python
@@ -89,7 +115,9 @@ conn.load_from_lerobot("robot_data", "oss://source-bucket/lerobot_dataset",
                        parallelism=8)
 ```
 
-The default `parallelism=1` uses one process. Workers need source and target
+The default `parallelism=1` uses one process. Ray groups Episodes within each source,
+keeping shared files together and limiting total concurrency to `parallelism`.
+Workers need source and target
 storage access; pass OSS `source_options` as above. Ray accepts FileIO URIs or
 shared directories, not Hub IDs. Keep the source unchanged during import.
 Failed imports may leave partial tables; retry with a new name.
@@ -238,6 +266,7 @@ For datasets with `subtask_index`, `to_dataloader()` always returns integer
 `subtask_index` tensors and matching boolean `subtask_index_is_valid` masks,
 including time windows. Missing labels use `-1` with a false mask; individual
 sample reads retain `None`.
+If a source feature uses the mask name, underscores are prepended until the name is unused.
 
 For map-style training, pass an image- or video-backed table group created by
 `load_from_lerobot` to `PaimonLeRobotDataset`. A frame-only table created by
