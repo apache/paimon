@@ -29,12 +29,13 @@ from pypaimon.multimodal.lerobot.loader import (
     _commit_messages, _prepare_dataset, _video_fps,
 )
 from pypaimon.multimodal.lerobot.metadata import (
-    _EPISODE_CONTROL_COLUMNS, _EPISODE_FPS_COLUMN, _commit_metadata, _json_value,
+    _EPISODE_CONTROL_COLUMNS, _commit_metadata, _json_value,
     _load_dataset_metadata,
     _metadata_table, _prepare_metadata_tables,
     _source_episode_tables, _validated_episode_tables,
 )
 from pypaimon.multimodal.lerobot.schema import (
+    _V3_REQUIRED_FEATURE_DTYPES, _merge_schemas,
     _require_v3, _schema_from_info, _validate_v3_required_features,
     _video_feature_names,
 )
@@ -197,15 +198,17 @@ def _vocabulary(plans, kind):
     tables = [plan["metadata"][key] for plan in plans]
     if all(table is None for table in tables):
         return None
-    if any(table is None for table in tables):
-        raise ValueError("LeRobot sources disagree on %s metadata." % kind)
     singular = kind[:-1]
     index_name = singular + "_index"
-    schema = tables[0].schema
+    first_table = next(table for table in tables if table is not None)
+    schema = first_table.schema
     label = _pandas_index_column(schema, singular)
-    schema = tables[0].select([index_name, label]).schema
+    schema = first_table.select([index_name, label]).schema
     rows, by_text = [], {}
     for ordinal, (plan, table) in enumerate(zip(plans, tables)):
+        if table is None:
+            plan[index_name] = {}
+            continue
         source_label = _pandas_index_column(table.schema, singular)
         if (not table.schema.field(index_name).equals(
                 schema.field(index_name), check_metadata=False)
@@ -233,6 +236,7 @@ def _vocabulary(plans, kind):
 def _feature_contract(features):
     result = copy.deepcopy(features)
     for feature in result.values():
+        feature.pop("nullable", None)
         if feature.get("dtype") == "video":
             feature.pop("fps", None)
             for key in ("info", "video_info"):
@@ -244,45 +248,36 @@ def _feature_contract(features):
     return result
 
 
-def _same_fields(left, right):
-    return (set(left.names) == set(right.names)
-            and all(left.field(name).equals(right.field(name), check_metadata=False)
-                    for name in right.names))
-
-
-def _plan_merge(plans, extra_dataset_fields=None):
+def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True):
     first = plans[0]
     mixed_fps = len({plan["metadata"]["fps"] for plan in plans}) > 1
-    reserved_frame_fields = {
-        _DATASET_INDEX_COLUMN, _SOURCE_FRAME_INDEX_COLUMN,
-    }
-    if reserved_frame_fields.intersection(first["schema"].names):
-        raise ValueError("LeRobot source frame features use reserved source index columns.")
+    reserved_frame_fields = {_DATASET_INDEX_COLUMN, _SOURCE_FRAME_INDEX_COLUMN}
+    for plan in plans:
+        if reserved_frame_fields.intersection(plan["schema"].names):
+            raise ValueError("LeRobot source frame features use reserved source index columns.")
+    frame_schema = _merge_schemas([plan["schema"] for plan in plans], schema_evolution,
+                                  _V3_REQUIRED_FEATURE_DTYPES)
+    features, contracts = {}, {}
+    for ordinal, plan in enumerate(plans):
+        for name, feature in plan["info"]["features"].items():
+            contract = _feature_contract({name: feature})[name]
+            if name in contracts and contracts[name] != contract:
+                raise ValueError("LeRobot source %d has incompatible features.%s." % (ordinal, name))
+            contracts[name] = contract
+            features.setdefault(name, copy.deepcopy(feature))
+    for field in frame_schema:
+        if field.nullable:
+            features[field.name]["nullable"] = True
     info = copy.deepcopy(first["info"])
+    info["features"] = features
     metadata = dict(first["metadata"])
-    # Keep source file locations and statistics in four JSON columns rather
-    # than expanding their source-specific fields into the target schema.
-    metadata["episodes_schema"] = pa.schema([
-        field for field in metadata["episodes_schema"]
-        if not field.name.startswith("stats/")
-        and not (mixed_fps and field.name == _EPISODE_FPS_COLUMN)
-    ], metadata=metadata["episodes_schema"].metadata)
-    required_episode_fields = set(_EPISODE_CONTROL_COLUMNS) | {
-        "videos/%s/%s" % (name, suffix)
-        for name in first["videos"]
-        for suffix in ("chunk_index", "file_index", "from_timestamp", "to_timestamp")
-    }
-    # Retain only compatible Episode fields shared by every source.
-    metadata["episodes_schema"] = pa.schema([
-        field if field.name in required_episode_fields else field.with_nullable(
-            field.nullable or any(plan["metadata"]["episodes_schema"].field(field.name).nullable
-                                  for plan in plans))
-        for field in metadata["episodes_schema"]
-        if field.name in required_episode_fields or all(
-            field.name in plan["metadata"]["episodes_schema"].names
-            and field.type.equals(plan["metadata"]["episodes_schema"].field(field.name).type)
-            for plan in plans)
-    ], metadata=metadata["episodes_schema"].metadata)
+    metadata["frame_schema"] = frame_schema
+    # Merged Episode extensions are stored in JSON, not added as typed columns.
+    schemas = [pa.schema([
+        plan["metadata"]["episodes_schema"].field(name)
+        for name in _EPISODE_CONTROL_COLUMNS
+    ]) for plan in plans]
+    metadata["episodes_schema"] = _merge_schemas(schemas, schema_evolution, _EPISODE_CONTROL_COLUMNS)
     frame_offset = episode_offset = 0
     for ordinal, plan in enumerate(plans):
         other = plan["info"]
@@ -290,26 +285,13 @@ def _plan_merge(plans, extra_dataset_fields=None):
         for key in compared_keys:
             if info.get(key) != other.get(key):
                 raise ValueError("LeRobot source %d has incompatible info.%s." % (ordinal, key))
-        expected_features = _feature_contract(info["features"])
-        actual_features = _feature_contract(other["features"])
-        for name in set(expected_features) | set(actual_features):
-            if expected_features.get(name) != actual_features.get(name):
-                raise ValueError("LeRobot source %d has incompatible features.%s." % (ordinal, name))
-        if not _same_fields(plan["schema"], first["schema"]):
-            raise ValueError("LeRobot source %d has incompatible frame schema." % ordinal)
-        episode_schema = plan["metadata"]["episodes_schema"]
-        if any(name not in episode_schema.names
-               or not episode_schema.field(name).equals(
-                   metadata["episodes_schema"].field(name), check_metadata=False)
-               for name in required_episode_fields):
-            raise ValueError("LeRobot source %d has incompatible Episode schema." % ordinal)
         # Validate every Episode before creating any target table.
         if mixed_fps:
             plan["metadata"]["fps_mode"] = "source"
         try:
             for name in plan["videos"]:
                 _video_fps(other, other["features"][name], name)
-            for table in _validated_episode_tables(plan["metadata"], first["videos"]):
+            for table in _validated_episode_tables(plan["metadata"], plan["videos"]):
                 _validate_episode_json(table, ordinal)
         except ValueError as error:
             raise ValueError("LeRobot source %d: %s" % (ordinal, error)) from error
@@ -380,9 +362,10 @@ def _plan_merge(plans, extra_dataset_fields=None):
                 "chunks_size", "data_files_size_in_mb", "video_files_size_in_mb"):
         info.pop(key, None)
     # Encoder descriptions are not training features. Retain only shared values.
-    for name in first["videos"]:
+    for name in _video_feature_names(info):
         for key in ("info", "video_info"):
-            details = [p["info"]["features"][name].get(key) for p in plans]
+            details = [p["info"]["features"][name].get(key) for p in plans
+                       if name in p["info"]["features"]]
             details = [d if isinstance(d, dict) else {} for d in details]
             info["features"][name][key] = {
                 k: v for k, v in details[0].items()
@@ -393,10 +376,9 @@ def _plan_merge(plans, extra_dataset_fields=None):
     merged_stats = None
     if stats[0] is not None:
         decoded = [_json_table(s) for s in stats]
-        if any(set(s) != set(decoded[0]) for s in decoded[1:]):
-            raise ValueError("LeRobot statistics features must match.")
-        merged_stats = {name: _merge_stats([s[name] for s in decoded])
-                        for name in decoded[0] if name not in _CONTROLS}
+        names = dict.fromkeys(name for item in decoded for name in item)
+        merged_stats = {name: _merge_stats([item[name] for item in decoded if name in item])
+                        for name in names if name not in _CONTROLS}
     metadata["info_table"] = _metadata_table(info)
     metadata["stats_table"] = (None if merged_stats is None
                                else _metadata_table(merged_stats))
@@ -477,7 +459,7 @@ def _merged_episodes(plans, schema):
 
 def _import_sources(connection, table_name, sources, batch_size, options,
                     source_options, tag_name, parallelism=1,
-                    dataset_name=None, extra_dataset_fields=None):
+                    dataset_name=None, extra_dataset_fields=None, schema_evolution=True):
     from functools import partial
     from pypaimon.multimodal.lerobot.api import _create_target_table, _validated_counts
 
@@ -512,14 +494,14 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                           "schema": schema, "videos": videos,
                           "extra_dataset_fields": _read_text_fields(resolved, extra_dataset_fields),
                           "metadata": _load_dataset_metadata(dataset, info, resolved)})
-        metadata, stats = _plan_merge(plans, extra_dataset_fields)
-        target_schema = plans[0]["schema"]
+        metadata, stats = _plan_merge(plans, extra_dataset_fields, schema_evolution)
+        target_schema = metadata["frame_schema"]
         for field in (
                 pa.field(_DATASET_INDEX_COLUMN, pa.int64(), nullable=False),
                 pa.field(_SOURCE_FRAME_INDEX_COLUMN, pa.int64(), nullable=False)):
             target_schema = target_schema.append(field)
         table = _create_target_table(connection, table_name, target_schema,
-                                     options, metadata, plans[0]["videos"])
+                                     options, metadata, _video_feature_names(_json_table(metadata["info_table"])))
         tables = _prepare_metadata_tables(connection, table.raw_table, metadata)
         episode_schema = _target_schema(tables["episodes"])
         commit = table.raw_table.new_batch_write_builder().new_commit()

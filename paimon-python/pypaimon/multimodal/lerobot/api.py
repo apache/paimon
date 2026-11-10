@@ -79,12 +79,14 @@ def load_from_lerobot(
         parallelism: int = 1,
         dataset_name=None,
         extra_dataset_fields: Optional[Mapping[str, str]] = None,
+        schema_evolution: bool = True,
 ) -> None:
     """Import one or more LeRobot v3 sources into a new Paimon table group.
 
     ``table_name`` is the group prefix; frames are stored in ``<table_name>_frames``.
-    Sources must share training features; differing source FPS is handled
-    automatically. ``dataset_name`` is a label for one source or an ordered
+    Schema evolution adds new columns by default; missing values become null.
+    Common fields must keep their types and feature definitions. Differing
+    source FPS is handled automatically. ``dataset_name`` is a label or an ordered
     list of labels. ``extra_dataset_fields`` maps columns to relative UTF-8
     text file paths or globs in each source. Globs produce maps keyed by paths
     relative to their static directory prefix, without the final suffix.
@@ -102,6 +104,8 @@ def load_from_lerobot(
     if isinstance(parallelism, bool) or not isinstance(parallelism, int) \
             or parallelism <= 0:
         raise ValueError("parallelism must be a positive integer.")
+    if not isinstance(schema_evolution, bool):
+        raise ValueError("schema_evolution must be a boolean.")
     if dataset_name is not None:
         if isinstance(dataset_name, str):
             dataset_name = [dataset_name]
@@ -125,7 +129,7 @@ def load_from_lerobot(
         return _import_sources(
             connection, table_name, source, batch_size, options,
             _validated_source_options(source_options), tag_name, parallelism,
-            dataset_name, extra_dataset_fields)
+            dataset_name, extra_dataset_fields, schema_evolution)
     if parallelism > 1:
         from pypaimon.multimodal.lerobot.ray_loader import _require_ray, _ray_source_uri
         _require_ray()

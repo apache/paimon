@@ -1462,7 +1462,7 @@ def test_merge_rejects_incompatible_episode_controls(setup):
     data = pq.read_table(path)
     data = data.set_column(data.schema.get_field_index("length"), "length", data["length"].cast(pa.int32()))
     pq.write_table(data, path)
-    with pytest.raises(ValueError, match="incompatible Episode schema"):
+    with pytest.raises(ValueError, match="incompatible type.*length"):
         conn.load_from_lerobot("merged", sources)
     with pytest.raises(TableNotExistException):
         conn.get_table("merged_frames")
@@ -1729,25 +1729,21 @@ def test_extra_dataset_fields_validate_before_source_access(tmp_path, fields):
     assert conn.catalog.list_databases() == []
 
 
-@pytest.mark.parametrize("failure", ["missing", "empty_glob", "unsupported", "encoding", "duplicate", "later_source"])
+@pytest.mark.parametrize("failure", ["unsupported", "encoding", "duplicate"])
 def test_invalid_extra_dataset_text_fails_before_table_creation(setup, failure):
     conn, sources = setup
     root = Path(sources[0][7:])
     (root / "config").mkdir()
     (root / "config/model.json").write_text("{}")
     fields = {"config": "config/*"}
-    if failure == "missing":
-        fields = {"notes": "missing.txt"}
-    elif failure == "empty_glob":
-        fields = {"notes": "missing/*.txt"}
-    elif failure == "unsupported":
+    if failure == "unsupported":
         (root / "config/model.bin").write_bytes(b"binary")
     elif failure == "encoding":
         (root / "config/model.json").write_bytes(b"\xff")
     elif failure == "duplicate":
         (root / "config/model.txt").write_text("same key")
     with pytest.raises(ValueError):
-        conn.load_from_lerobot("merged", sources if failure == "later_source" else sources[0],
+        conn.load_from_lerobot("merged", sources[0],
                                extra_dataset_fields=fields)
     with pytest.raises(TableNotExistException):
         conn.get_table("merged_frames")
@@ -1765,4 +1761,178 @@ def test_invalid_dataset_name_for_multiple_sources(tmp_path, name):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     with pytest.raises(ValueError, match="dataset_name"):
         conn.load_from_lerobot("merged", ["a", "b"], dataset_name=name)
+    assert conn.catalog.list_databases() == []
+
+
+def add_frame_feature(uri, name, dtype, values, shape=(1,)):
+    root = Path(uri[7:])
+    path = root / "meta/info.json"
+    info = json.loads(path.read_text())
+    info["features"][name] = {"dtype": dtype, "shape": list(shape), "names": None}
+    path.write_text(json.dumps(info))
+    path = root / "data/chunk-000/file-000.parquet"
+    from pypaimon.multimodal.lerobot.schema import _schema_from_info
+    field = _schema_from_info(info).field(name)
+    pq.write_table(pq.read_table(path).append_column(field, pa.array(values, type=field.type)), path)
+    if shape == (1,) and dtype.startswith("float"):
+        path = root / "meta/stats.json"
+        stats = json.loads(path.read_text())
+        stats[name] = _batch_stats(values)
+        path.write_text(json.dumps(stats))
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+@pytest.mark.parametrize("reverse", [False, True])
+def test_schema_evolution_unions_three_tables(setup, import_parallelism, reverse):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn, sources = setup
+    original = sources[:]
+    add_frame_feature(sources[0], "temperature", "float32", [1., 2., 3., 4., 5.])
+    add_frame_feature(sources[1], "pressure", "float64", [6., 7., 8., 9., 10.])
+    for index, uri in enumerate(sources):
+        root = Path(uri[7:])
+        path = root / "meta/episodes/chunk-000/file-000.parquet"
+        data = pq.read_table(path)
+        data = data.append_column("meta/note", pa.array(["a", "b"])) if index == 0 else (
+            data.append_column("meta/score", pa.array([0.5, 0.8])))
+        pq.write_table(data, path)
+        if index == 0:
+            (root / "config").mkdir()
+            (root / "config/model.json").write_text('{"name":"model"}')
+        else:
+            (root / "notes.md").write_text("# Notes")
+    if reverse:
+        sources.reverse()
+    conn.load_from_lerobot("merged", sources, parallelism=import_parallelism,
+                           extra_dataset_fields={"config": "config/*.json", "notes": "notes.md"})
+    data = rows(conn, "merged_frames").sort_by("index")
+    episodes = episode_rows(conn, "merged_episodes").to_pylist()
+    datasets = rows(conn, "merged_datasets").sort_by("index").to_pylist()
+    for ordinal, uri in enumerate(sources):
+        first = uri == original[0]
+        assert data["temperature"].slice(ordinal * 5, 5).to_pylist() == (
+            [1., 2., 3., 4., 5.] if first else [None] * 5)
+        assert data["pressure"].slice(ordinal * 5, 5).to_pylist() == (
+            [None] * 5 if first else [6., 7., 8., 9., 10.])
+        assert json.loads(episodes[ordinal * 2]["meta"]).get("note") == ("a" if first else None)
+        assert json.loads(episodes[ordinal * 2]["meta"]).get("score") == (None if first else 0.5)
+        assert datasets[ordinal]["notes"] == (None if first else "# Notes")
+        assert datasets[ordinal]["config"] == ([("model", '{"name":"model"}')] if first else None)
+    assert metadata(conn, "stats")["temperature"]["count"] == [5]
+    assert metadata(conn, "stats")["pressure"]["mean"] == [8.]
+    assert data.schema.field("temperature").nullable
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"),
+                                     delta_timestamps={"temperature": [-0.1, 0., 0.1]})
+    try:
+        samples = reader.get_items([0, 5])
+        for item, uri in zip(samples, sources):
+            assert (item["temperature"] is None) == (uri != original[0])
+            assert (item["pressure"] is None) == (uri == original[0])
+        batch = next(iter(reader.to_dataloader(batch_size=10, num_workers=0)))
+        assert isinstance(batch["temperature"], list)
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("add_new", [False, True])
+def test_schema_evolution_disabled_keeps_first_source_schema(setup, add_new):
+    conn, sources = setup
+    add_frame_feature(sources[1 if add_new else 0], "temperature", "float32", [1.] * 5)
+    if add_new:
+        with pytest.raises(ValueError, match="schema_evolution disabled"):
+            conn.load_from_lerobot("merged", sources, schema_evolution=False)
+        with pytest.raises(TableNotExistException):
+            conn.get_table("merged_frames")
+    else:
+        conn.load_from_lerobot("merged", sources, schema_evolution=False)
+        assert rows(conn, "merged_frames")["temperature"].null_count == 5
+
+
+@pytest.mark.parametrize("kind", ["frame", "shape"])
+def test_schema_evolution_rejects_type_changes(setup, kind):
+    conn, sources = setup
+    for index, uri in enumerate(sources):
+        if kind == "frame":
+            add_frame_feature(uri, "temperature", "float32" if index == 0 else "float64", [1.] * 5)
+        elif kind == "shape":
+            add_frame_feature(uri, "vector", "float32", [[1.] * (index + 2)] * 5, (index + 2,))
+    with pytest.raises(ValueError, match="incompatible"):
+        conn.load_from_lerobot("merged", sources)
+    with pytest.raises(TableNotExistException):
+        conn.get_table("merged_frames")
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_schema_evolution_allows_missing_video(tmp_path, import_parallelism):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    sources = [source(tmp_path / "with_video", video=True), source(tmp_path / "without_video")]
+    conn.load_from_lerobot("merged", sources, parallelism=import_parallelism)
+    assert rows(conn, "merged_frames")["camera"].null_count == 5
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), video_backend="pyav",
+                                     delta_timestamps={"camera": [-0.1, 0., 0.1]})
+    try:
+        samples = reader.get_items([0, 5])
+        assert tuple(samples[0]["camera"].shape) == (3, 3, 16, 16)
+        assert samples[1]["camera"] is None
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_schema_evolution_allows_missing_images(setup, import_parallelism):
+    from PIL import Image
+    import io
+
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn, sources = setup
+    buffer = io.BytesIO()
+    Image.new("RGB", (2, 2), color="red").save(buffer, format="PNG")
+    add_frame_feature(sources[0], "image", "image", [buffer.getvalue()] * 5, (2, 2, 3))
+    conn.load_from_lerobot("merged", sources, parallelism=import_parallelism)
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"))
+    try:
+        samples = reader.get_items([0, 5])
+        assert tuple(samples[0]["image"].shape) == (3, 2, 2)
+        assert samples[1]["image"] is None
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_schema_evolution_allows_optional_subtask_column(setup, import_parallelism):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn, sources = setup
+    root = Path(sources[0][7:])
+    path = root / "meta/info.json"
+    info = json.loads(path.read_text())
+    del info["features"]["subtask_index"]
+    path.write_text(json.dumps(info))
+    path = root / "data/chunk-000/file-000.parquet"
+    pq.write_table(pq.read_table(path).drop(["subtask_index"]), path)
+    (root / "meta/subtasks.parquet").unlink()
+    path = root / "meta/stats.json"
+    stats = json.loads(path.read_text())
+    del stats["subtask_index"]
+    path.write_text(json.dumps(stats))
+    conn.load_from_lerobot("merged", sources, parallelism=import_parallelism)
+    assert rows(conn, "merged_frames")["subtask_index"].null_count == 5
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"))
+    try:
+        samples = reader.get_items([0, 5])
+        assert samples[0]["subtask"] is None
+        assert samples[1]["subtask"] == "grasp"
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("value", [None, 1, "true"])
+def test_schema_evolution_option_requires_boolean(tmp_path, value):
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    with pytest.raises(ValueError, match="schema_evolution"):
+        conn.load_from_lerobot("merged", "unused", schema_evolution=value)
     assert conn.catalog.list_databases() == []

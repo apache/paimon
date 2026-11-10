@@ -143,7 +143,8 @@ class MultimodalConnection:
             tag_name=None,
             parallelism=1,
             dataset_name=None,
-            extra_dataset_fields=None) -> None:
+            extra_dataset_fields=None,
+            schema_evolution=True) -> None:
         """Import LeRobot v3 sources using table_name as the group prefix.
 
         Creates <table_name>_frames, <table_name>_episodes, and
@@ -161,6 +162,7 @@ class MultimodalConnection:
             parallelism=parallelism,
             dataset_name=dataset_name,
             extra_dataset_fields=extra_dataset_fields,
+            schema_evolution=schema_evolution,
         )
 
     def create_lerobot_tag(self, table_name: str, tag_name: str):

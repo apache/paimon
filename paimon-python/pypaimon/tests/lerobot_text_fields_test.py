@@ -73,9 +73,11 @@ def test_text_file_globs_keep_directory_boundaries(tmp_path, backend):
         assert len(recursive["config"]) == 3
         single = _read_text_fields(source, {"config": "config/model.json*"})
         assert single == {"config": {"model": files["config/model.json"]}}
+        assert _read_text_fields(source, {"notes": "missing.md", "config": "missing/*.json"}) == {
+            "notes": None, "config": None}
         if backend == "hub":
             assert listing.call_args.kwargs == {"repo_type": "dataset"}
-            assert download.call_count == 7
+            assert download.call_count == 8
         else:
             listing.assert_not_called()
             download.assert_not_called()

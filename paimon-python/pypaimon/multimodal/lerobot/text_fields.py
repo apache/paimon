@@ -55,7 +55,7 @@ def _validated_text_fields(fields, reserved):
 
 def _text_fields_schema(fields):
     return [pa.field(name, pa.map_(pa.string(), pa.string()) if has_magic(pattern) else pa.string(),
-                     nullable=False) for name, pattern in fields.items()]
+                     nullable=True) for name, pattern in fields.items()]
 
 
 def _validate_text_suffix(path):
@@ -125,6 +125,10 @@ def _read_text_fields(source, fields):
     if root is None and urlparse(source.path).scheme == "file":
         root = Path(source.file_io.to_filesystem_path(source.path))
     hub_files = None
+    missing_errors = (FileNotFoundError,)
+    if root is None and source.file_io is None:
+        from huggingface_hub.errors import EntryNotFoundError
+        missing_errors += (EntryNotFoundError,)
     if root is None and source.file_io is None and any(has_magic(pattern) for pattern in fields.values()):
         from huggingface_hub import list_repo_files
         hub_files = list_repo_files(source.repo_id, repo_type="dataset")
@@ -141,7 +145,8 @@ def _read_text_fields(source, fields):
         else:
             paths = sorted(path for path in hub_files if _matches_path(path, pattern))
         if not paths:
-            raise ValueError("No extra dataset text files match %s: %s." % (name, pattern))
+            result[name] = None
+            continue
         base = []
         for part in pattern.split("/"):
             if has_magic(part):
@@ -161,6 +166,9 @@ def _read_text_fields(source, fields):
                     from huggingface_hub import hf_hub_download
                     content = Path(hf_hub_download(source.repo_id, path, repo_type="dataset")).read_bytes()
                 text = content.decode("utf-8")
+            except missing_errors:
+                result[name] = None
+                break
             except (OSError, UnicodeError) as error:
                 raise ValueError("Cannot read UTF-8 extra dataset field %s from %s: %s."
                                  % (name, path, error)) from error
@@ -171,6 +179,6 @@ def _read_text_fields(source, fields):
                 values[key] = text
             else:
                 result[name] = text
-        if multiple:
+        if multiple and name not in result:
             result[name] = values
     return result

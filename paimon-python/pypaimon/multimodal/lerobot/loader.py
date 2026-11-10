@@ -183,7 +183,12 @@ def _prepare_dataset(
             )
             observed_tasks.update(seen_tasks)
             if transform is not None:
-                batch = transform(batch, episode_index).select(target_schema.names)
+                batch = transform(batch, episode_index)
+                batch = pa.Table.from_arrays([
+                    batch[field.name] if field.name in batch.column_names
+                    else pa.nulls(batch.num_rows, type=field.type)
+                    for field in target_schema
+                ], schema=target_schema)
             batch = _strict_lerobot_table(
                 batch,
                 target_schema,
