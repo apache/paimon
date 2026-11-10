@@ -119,6 +119,39 @@ downstream slot sharing is preserved; a committer with its own explicit resource
 receive the writer's off-heap budget. Leaving the option unset preserves existing resource
 configuration.
 
+## Memory for an Explicit Committer Resource Group
+
+Use `sink.committer-memory` to configure the committer slot sharing group's task heap, and
+`sink.committer-cpu` to configure its CPU cores (one core by default). Add
+`sink.committer-offheap-memory` and `sink.committer-managed-memory` to request task off-heap
+and managed memory independently or together. Both optional budgets must be positive and
+require `sink.committer-memory`. Units such as `kb`, `mb`, and `gb` retain their byte precision.
+
+```sql
+INSERT INTO paimon_table /*+ OPTIONS(
+    'sink.committer-cpu' = '0.25',
+    'sink.committer-memory' = '256 mb',
+    'sink.committer-offheap-memory' = '64 mb',
+    'sink.committer-managed-memory' = '128 mb'
+) */
+SELECT * FROM source_table;
+```
+
+These settings apply to ordinary global committers and combined CDC multi-table committers,
+including database synchronization table options. An explicit committer resource group uses
+its own budgets independently of the writer group. Leaving the new options unset preserves
+existing resource configuration and downstream slot sharing.
+
+Each budget is a resource request for a shared slot of the committer group, not a total across
+committer subtasks or a guaranteed allocation to one operator. Allocation follows Flink's
+[fine-grained resource management](https://nightlies.apache.org/flink/flink-docs-release-1.20/docs/deployment/finegrained_resource/)
+requirements and available resources. Declaring a managed budget does not introduce an allocator
+or managed memory consumer, or change the writer's allocator and allocation weight.
+
+When `sink.coordinator-commit.enabled` is enabled, commits run in the writer's
+`OperatorCoordinator` on the JobManager. That path has no global committer operator, so these
+slot sharing group settings do not configure its resources.
+
 ## Setting dynamic options
 
 Dynamic options tune a query or a subsequently submitted job without changing the options

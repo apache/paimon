@@ -25,6 +25,7 @@ import org.apache.paimon.flink.compact.changelog.ChangelogCompactSortOperator;
 import org.apache.paimon.flink.compact.changelog.ChangelogCompactWorkerOperator;
 import org.apache.paimon.flink.compact.changelog.ChangelogTaskTypeInfo;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
@@ -59,7 +60,9 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PRECOMMIT_COMPACT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_CPU;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_MANAGED_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OFFHEAP_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SUFFIX;
@@ -291,24 +294,13 @@ public abstract class FlinkSink<T> implements Serializable {
         if (!options.get(SINK_COMMITTER_OPERATOR_CHAINING)) {
             committed = committed.startNewChain();
         }
-        configureSlotSharingGroup(
-                committed, options.get(SINK_COMMITTER_CPU), options.get(SINK_COMMITTER_MEMORY));
+        configureCommitterSlotSharingGroup(
+                committed,
+                options.get(SINK_COMMITTER_CPU),
+                options.get(SINK_COMMITTER_MEMORY),
+                options.get(SINK_COMMITTER_MANAGED_MEMORY),
+                options.get(SINK_COMMITTER_OFFHEAP_MEMORY));
         return committed.sinkTo(new PaimonDiscardingSink<>(table)).name("end").setParallelism(1);
-    }
-
-    public static void configureSlotSharingGroup(
-            SingleOutputStreamOperator<?> operator,
-            double cpuCores,
-            @Nullable MemorySize heapMemory) {
-        configureSlotSharingGroup(operator, cpuCores, heapMemory, null);
-    }
-
-    public static void configureSlotSharingGroup(
-            SingleOutputStreamOperator<?> operator,
-            double cpuCores,
-            @Nullable MemorySize heapMemory,
-            @Nullable MemorySize managedMemory) {
-        configureSlotSharingGroup(operator, cpuCores, heapMemory, managedMemory, null);
     }
 
     public static void configureSlotSharingGroup(
@@ -317,27 +309,60 @@ public abstract class FlinkSink<T> implements Serializable {
             @Nullable MemorySize heapMemory,
             @Nullable MemorySize managedMemory,
             @Nullable MemorySize offHeapMemory) {
+        applySlotSharingGroupResources(
+                operator,
+                cpuCores,
+                heapMemory,
+                managedMemory,
+                offHeapMemory,
+                SINK_WRITER_MEMORY,
+                SINK_WRITER_MANAGED_MEMORY,
+                SINK_WRITER_OFFHEAP_MEMORY);
+    }
+
+    public static void configureCommitterSlotSharingGroup(
+            SingleOutputStreamOperator<?> operator,
+            double cpuCores,
+            @Nullable MemorySize heapMemory,
+            @Nullable MemorySize managedMemory,
+            @Nullable MemorySize offHeapMemory) {
+        applySlotSharingGroupResources(
+                operator,
+                cpuCores,
+                heapMemory,
+                managedMemory,
+                offHeapMemory,
+                SINK_COMMITTER_MEMORY,
+                SINK_COMMITTER_MANAGED_MEMORY,
+                SINK_COMMITTER_OFFHEAP_MEMORY);
+    }
+
+    private static void applySlotSharingGroupResources(
+            SingleOutputStreamOperator<?> operator,
+            double cpuCores,
+            @Nullable MemorySize heapMemory,
+            @Nullable MemorySize managedMemory,
+            @Nullable MemorySize offHeapMemory,
+            ConfigOption<MemorySize> heapOption,
+            ConfigOption<MemorySize> managedOption,
+            ConfigOption<MemorySize> offHeapOption) {
         if (managedMemory != null) {
             checkArgument(
                     heapMemory != null,
-                    "'%s' requires '%s' to configure the writer slot sharing group.",
-                    SINK_WRITER_MANAGED_MEMORY.key(),
-                    SINK_WRITER_MEMORY.key());
+                    "'%s' requires '%s' to configure the slot sharing group.",
+                    managedOption.key(),
+                    heapOption.key());
             checkArgument(
-                    managedMemory.getBytes() > 0,
-                    "'%s' must be positive.",
-                    SINK_WRITER_MANAGED_MEMORY.key());
+                    managedMemory.getBytes() > 0, "'%s' must be positive.", managedOption.key());
         }
         if (offHeapMemory != null) {
             checkArgument(
                     heapMemory != null,
-                    "'%s' requires '%s' to configure the writer slot sharing group.",
-                    SINK_WRITER_OFFHEAP_MEMORY.key(),
-                    SINK_WRITER_MEMORY.key());
+                    "'%s' requires '%s' to configure the slot sharing group.",
+                    offHeapOption.key(),
+                    heapOption.key());
             checkArgument(
-                    offHeapMemory.getBytes() > 0,
-                    "'%s' must be positive.",
-                    SINK_WRITER_OFFHEAP_MEMORY.key());
+                    offHeapMemory.getBytes() > 0, "'%s' must be positive.", offHeapOption.key());
         }
         if (heapMemory == null) {
             return;
