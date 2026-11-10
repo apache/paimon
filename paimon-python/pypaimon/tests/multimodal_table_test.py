@@ -3304,6 +3304,163 @@ class MultimodalTableTest(unittest.TestCase):
             rows,
         )
 
+    def test_update_by_row_id_preserves_duplicate_keys_and_media(self):
+        users = self.conn.create_table(
+            "users", schema=_schema({"id": pa.int32(), "label": pa.string(), "image": pa.large_binary()}),
+            data=[{"id": 7, "label": "first", "image": b"first"},
+                  {"id": 7, "label": "second", "image": b"second"}],
+            options=_PARQUET_OPTIONS)
+        row_ids = {row["label"]: row["_ROW_ID"]
+                   for row in users.scan().select(["label"]).with_row_id().to_list()}
+        files = {file.file_name for split in users.raw_table.new_read_builder().new_scan().plan_all().splits()
+                 for file in split.files}
+        with patch.object(users.raw_table.file_io, "read_ranges_coalesced",
+                          side_effect=AssertionError("must not fetch media")):
+            result = users.update(where="_ROW_ID = %s" % row_ids["second"], values={"label": "car"})
+        self.assertIs(users, result)
+        self.assertEqual(
+            {row_ids["first"]: "first", row_ids["second"]: "car"},
+            {row["_ROW_ID"]: row["label"]
+             for row in users.scan().select(["label"]).with_row_id().to_list()})
+        current_files = {file.file_name: file
+                         for split in users.raw_table.new_read_builder().new_scan().plan_all().splits()
+                         for file in split.files}
+        self.assertTrue(files.issubset(current_files))
+        self.assertTrue(all(file.write_cols == ["label"] for name, file in current_files.items() if name not in files))
+
+    def test_update_by_row_id_conditions_skip_missing_and_deleted_rows(self):
+        users = self.conn.create_table(
+            "users", schema=_schema({"part": pa.string(), "id": pa.int32(), "label": pa.string()}),
+            partitioned=["part"],
+            data=[{"part": "a" if i < 3 else "b", "id": i, "label": "old"} for i in [3, 4, 5, 0, 1, 2]],
+            options=_PARQUET_OPTIONS)
+        row_ids = {row["id"]: row["_ROW_ID"] for row in users.scan().select(["id"]).with_row_id().to_list()}
+        users.delete("id = 1")
+        users.update(
+            where="_ROW_ID IN (%s, %s, 999999) AND id = 0" % (row_ids[0], row_ids[1]),
+            values={"label": "selected"})
+        users.update(where="_ROW_ID = %s OR id = 2" % row_ids[5], values={"label": "either"})
+        users.update(
+            where="_ROW_ID >= %s AND _ROW_ID <= %s" % (row_ids[3], row_ids[3]), values={"label": None})
+        users.update(where="_ROW_ID BETWEEN %s AND %s" % (row_ids[4], row_ids[4]), values={"label": "range"})
+        expected = [
+            {"id": 0, "label": "selected"}, {"id": 2, "label": "either"},
+            {"id": 3, "label": None}, {"id": 4, "label": "range"}, {"id": 5, "label": "either"}]
+        self.assertEqual(expected, sorted(users.scan().select(["id", "label"]).to_list(), key=lambda row: row["id"]))
+        for row_id in (row_ids[1], 999999):
+            with self.subTest(row_id=row_id):
+                self.assertIs(users.update(where="_ROW_ID = %s" % row_id, values={"label": "absent"}), users)
+        self.assertEqual(expected, sorted(users.scan().select(["id", "label"]).to_list(), key=lambda row: row["id"]))
+        users.update(
+            where="_ROW_ID = %s OR _ROW_ID = %s AND id = 999" % (row_ids[0], row_ids[3]),
+            values={"label": "precedence"})
+        expected[0]["label"] = "precedence"
+        users.update(
+            where="(_ROW_ID = %s OR _ROW_ID = %s) AND id = 999" % (row_ids[0], row_ids[3]),
+            values={"label": "parenthesized"})
+        self.assertEqual(expected, sorted(users.scan().select(["id", "label"]).to_list(), key=lambda row: row["id"]))
+
+    def test_update_by_row_id_on_empty_and_fully_deleted_table(self):
+        users = self.conn.create_table(
+            "users", schema=_schema({"id": pa.int32(), "label": pa.string()}), options=_PARQUET_OPTIONS)
+        for deleted in (False, True):
+            with self.subTest(deleted=deleted):
+                if deleted:
+                    users.add([{"id": 7, "label": "old"}])
+                    users.delete("id = 7")
+                self.assertIs(users.update(where="_ROW_ID >= 0", values={"label": "new"}), users)
+                self.assertEqual([], users.scan().to_list())
+
+    def test_update_by_row_id_with_inverted_between(self):
+        users = self.conn.create_table(
+            "users", schema=_schema({"id": pa.int32(), "label": pa.string()}),
+            data=[{"id": i, "label": "old"} for i in range(3)], options=_PARQUET_OPTIONS)
+        row_ids = {row["id"]: row["_ROW_ID"] for row in users.scan().select(["id"]).with_row_id().to_list()}
+        lower, upper = max(row_ids.values()), min(row_ids.values())
+        users.update(
+            where="_ROW_ID BETWEEN %s AND %s OR _ROW_ID = %s" % (lower, upper, row_ids[1]),
+            values={"label": "new"})
+        expected = [{"id": i, "label": "new" if i == 1 else "old"} for i in range(3)]
+        self.assertEqual(expected, users.scan().to_list())
+        users.update(where="_ROW_ID BETWEEN %s AND %s" % (lower, upper), values={"label": "empty"})
+        self.assertEqual(expected, users.scan().to_list())
+
+    def test_update_row_id_predicates_keep_system_columns_read_only(self):
+        users = self.conn.create_table(
+            "users", schema=_schema({"id": pa.int32(), "label": pa.string()}),
+            data=[{"id": 7, "label": "old"}], options=_PARQUET_OPTIONS)
+        row_id = users.scan().select(["id"]).with_row_id().to_list()[0]["_ROW_ID"]
+        for field in ("_SEQUENCE_NUMBER", "_VALUE_KIND"):
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "Unknown field"):
+                users.update(where="%s = 0" % field, values={"label": "new"})
+            with self.subTest(assignment=field), self.assertRaisesRegex(ValueError, "not in table schema"):
+                users.update(where="_ROW_ID = %s" % row_id, values={field: 0})
+        with self.assertRaisesRegex(ValueError, "not in table schema"):
+            users.update(where="_ROW_ID = %s" % row_id, values={"_ROW_ID": 999})
+        with self.assertRaises(ValueError):
+            users.update(where="_ROW_ID = 'invalid'", values={"label": "new"})
+        self.assertEqual([{"id": 7, "label": "old"}], users.scan().to_list())
+        self.assertIs(users.update(where=None, values={"label": "all"}), users)
+        self.assertEqual([{"id": 7, "label": "all"}], users.scan().to_list())
+        with self.assertRaisesRegex(ValueError, "Unknown field '_ROW_ID'"):
+            users.copy({"row-tracking.enabled": "false"}).update(
+                where="_ROW_ID = %s" % row_id, values={"label": "new"})
+
+    @pytest.mark.native_plan
+    def test_update_by_row_id_uses_native_predicate_update(self):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdate
+
+        users = self.conn.create_table(
+            "users", schema=_schema({"id": pa.int32(), "label": pa.string()}),
+            data=[{"id": 7, "label": "first"}, {"id": 7, "label": "second"}],
+            options=dict(_PARQUET_OPTIONS, **{"write.native.enabled": "true"}))
+        row_ids = {row["label"]: row["_ROW_ID"]
+                   for row in users.scan().select(["label"]).with_row_id().to_list()}
+        with patch.object(PythonTableUpdate, "_execute_predicate_update",
+                          side_effect=AssertionError("must use native predicate update")):
+            users.update(where="_ROW_ID = %s" % row_ids["second"], values={"label": "car"})
+        self.assertEqual(
+            {row_ids["first"]: "first", row_ids["second"]: "car"},
+            {row["_ROW_ID"]: row["label"]
+             for row in users.scan().select(["label"]).with_row_id().to_list()})
+
+    def test_update_by_row_id_keeps_the_existing_backend_fallback_boundary(self):
+        from unittest.mock import Mock
+
+        users = self.conn.create_table(
+            "users", schema=_schema({"id": pa.int32(), "label": pa.string()}),
+            data=[{"id": 7, "label": "first"}, {"id": 7, "label": "second"}], options=_PARQUET_OPTIONS)
+        row_ids = {row["label"]: row["_ROW_ID"]
+                   for row in users.scan().select(["label"]).with_row_id().to_list()}
+        users = users.copy({"write.native.enabled": "true"})
+        prepare = Mock(return_value=None)
+        with patch("pypaimon.write.update_dispatch.prepare_native_write_operation", prepare), patch(
+                "pypaimon.write.backend_dispatch.prepare_native_write_operation", prepare):
+            users.update(where="_ROW_ID = %s" % row_ids["second"], values={"label": "fallback"})
+        prepare.assert_called_once()
+        self.assertEqual("predicate_update", prepare.call_args[0][0])
+        predicate = prepare.call_args[0][3]
+        self.assertEqual("_ROW_ID", predicate.field)
+        self.assertEqual([row_ids["second"]], predicate.literals)
+        expected = {row_ids["first"]: "first", row_ids["second"]: "fallback"}
+        self.assertEqual(expected, {row["_ROW_ID"]: row["label"]
+                                    for row in users.scan().select(["label"]).with_row_id().to_list()})
+
+        snapshot = users.raw_table.snapshot_manager().get_latest_snapshot().id
+        backend = Mock()
+        error = OSError("native execution failed")
+        backend.update.side_effect = error
+        with patch("pypaimon.write.update_dispatch.prepare_native_write_operation", return_value=backend), patch(
+                "pypaimon.write.update_dispatch.create_python_update_operation",
+                side_effect=AssertionError("must not replay a failed Native update")):
+            with self.assertRaises(OSError) as failure:
+                users.update(where="_ROW_ID = %s" % row_ids["second"], values={"label": "bad"})
+        backend.update.assert_called_once()
+        self.assertIs(failure.exception, error)
+        self.assertEqual(snapshot, users.raw_table.snapshot_manager().get_latest_snapshot().id)
+        self.assertEqual(expected, {row["_ROW_ID"]: row["label"]
+                                    for row in users.scan().select(["label"]).with_row_id().to_list()})
+
     def test_delete_by_filter(self):
         users = self.conn.create_table(
             "users",

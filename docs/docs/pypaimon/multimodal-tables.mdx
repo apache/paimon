@@ -255,7 +255,26 @@ docs.update(
     where="id = 2",
     values={"category": "docs"},
 )
+
+# Target a row using a row ID obtained from this table.
+docs.update(where="_ROW_ID = 42", values={"category": "docs"})
 ```
+
+On row-tracking tables, `update` accepts `_ROW_ID` conditions, including `IN`
+and combinations with business-column predicates using `AND` or `OR`.
+Only matching visible rows are updated; missing or deleted row IDs do not
+match, and no rows are inserted. `_ROW_ID` cannot be assigned a new value.
+The method returns the table and uses the existing predicate-update backend.
+For external per-row values with strict matching of every supplied ID, use
+`update_columns_by_row_id` instead.
+Updates with `_ROW_ID` predicates require the handle's schema to match the
+current target branch. Reopen the table after schema changes or a branch copy
+with a different schema; mismatches are rejected before writing.
+
+`_ROW_ID` conditions are currently supported only by `update`, not by
+`delete` or `scan().where(...)`. Calling `with_row_id()` on a scan adds the
+ID to its output; it does not enable `_ROW_ID` string conditions. Use
+`take_row_ids(...)` for lookups by row ID.
 
 On a frame table, updating ordinary columns leaves the configured
 `video-frame-field` untouched. Replacing that field requires the specialized
@@ -301,6 +320,12 @@ frames.add_columns(pa.schema([("caption", pa.string())]))
 # Recompute an existing column without changing its schema.
 result = frames.compute_columns(
     ["image_size"], inputs=["image"], fn=image_sizes, batch_size=128)
+
+# Import annotations carrying row IDs from this table, in any order.
+result = frames.update_columns_by_row_id(pa.table({
+    "_ROW_ID": pa.array([1, 0], type=pa.int64()),
+    "label": ["vehicle", "pedestrian"],
+}), columns=["label"])
 ```
 
 For embeddings, declare a fixed-size list such as
@@ -334,14 +359,41 @@ rows with the same key. Multiple source rows matching the same target row are
 rejected by the MERGE executor. Partition and match keys cannot be updated;
 use `replace_video` to replace configured video-frame columns.
 
+`update_columns_by_row_id(data, *, columns)` accepts one local Arrow Table
+and requires an explicit output column name or sequence of names. The input
+must contain `_ROW_ID` and each selected output column exactly once. Only
+selected columns are written; extra input columns are ignored, so carrying old
+values for other columns does not overwrite their current values.
+IDs must be unique, non-NULL,
+non-negative integers representable as int64. All IDs must identify visible rows
+in the captured snapshot; missing or deleted IDs reject the entire call before
+writing. Input order does not affect matching, even when business keys repeat.
+Outputs must be existing, non-partition columns with the table's types and
+nullability. Other system columns and video-frame outputs are rejected; use
+`replace_video` for video-frame columns. Omitted rows keep their values and
+explicit NULL values clear nullable outputs. No rows or columns are added.
+Empty input creates no data snapshot. The method does not remap historical row
+IDs or determine whether external annotations are stale.
+A table schema that differs from the current target branch is rejected before
+writing; reopen the table after external schema changes or a branch copy with
+a different schema.
+
+Rollback followed by a new append can reuse both row IDs and numeric snapshot
+IDs. Discard pending annotations from the rolled-back history before writing
+them back. A matching numeric snapshot ID alone does not establish that those
+annotations are still valid.
+
 `merge_columns` delegates matching and updates to the standard MERGE executor.
 With a compatible `pypaimon_rust` runtime and `write.native.enabled=true`,
 supported tables use native MERGE without a separate Python target-key scan.
 `add_columns` and `compute_columns` can use the native shard reader and writer
 with the same option; the supplied `fn` still runs in Python. Unsupported native
 routes select Python before execution.
+`update_columns_by_row_id` uses the standard row-ID update backend with the same
+native selection rules. ID visibility checks and writing use the same captured
+snapshot, and all prepared updates are committed together.
 
-All three methods retain files for untouched columns. Computing an image embedding
+All four methods retain files for untouched columns. Computing an image embedding
 still reads the image, but does not rewrite it. Normal partial updates write the
 selected columns over affected file row-ID ranges; they are not single-cell
 physical writes. `add_columns` and `compute_columns` buffer outputs per original
@@ -360,7 +412,8 @@ Successful calls return `ColumnUpdateResult` with added column names,
 the source and final data snapshot IDs, and the schema ID. `updated_rows` is the
 computed row count for `add_columns` (zero for schema-only additions) and
 `compute_columns`, and `None` for `merge_columns`, because MERGE does not return
-logical row counts. `compute_columns` returns `added_columns=()` and leaves
+logical row counts. `update_columns_by_row_id` reports the input row count in
+`updated_rows`. Both it and `compute_columns` return `added_columns=()` and leave
 the schema unchanged on success or failure. Schema-only changes
 leave the data snapshot ID unchanged. Schema publication and data publication
 are separate operations. Failures during schema publication or data preparation
@@ -369,13 +422,15 @@ and commit raise
 
 | Attribute | Meaning |
 | --- | --- |
-| `phase` | The stage that failed: schema, compute, write, commit, result, or close |
+| `phase` | The stage that failed: schema, validate, compute, write, commit, result, or close |
 | `schema_changed` | `True` if schema publication succeeded, `False` if it did not start, or `None` if its outcome is unknown |
 | `schema_id` | The last known schema ID |
 | `source_snapshot_id` | The snapshot used to match or compute rows |
 | `commit_outcome` | `not_started`, `unknown`, or `committed` |
 
-Input validation errors remain ordinary exceptions. Failed
+Input shape and type validation errors remain ordinary exceptions. Missing or
+deleted row IDs raise `ColumnUpdateError` with `phase="validate"` and
+`commit_outcome="not_started"`. Failed
 computation can leave new columns visible as NULL, without publishing any data
 updates. Prepared files are retained on failure; ordinary orphan-file maintenance
 can remove abandoned files. If publication has an unknown outcome, inspect the
@@ -384,8 +439,9 @@ or delete prepared files after a commit error.
 
 ## Delete
 
-`delete` removes rows matched by a SQL-like predicate. It uses the same
-predicate syntax as `scan().where(...)` and `update(...)`. Row-level deletes
+`delete` removes rows matched by a SQL-like predicate on business columns.
+It shares business-column predicate syntax with `scan().where(...)` and
+`update(...)`; `_ROW_ID` conditions are supported only by `update`. Row-level deletes
 require `deletion-vectors.enabled` set to `true` when creating the table.
 On partitioned tables, a predicate that references only partition columns uses
 the partition drop path.

@@ -546,7 +546,7 @@ def test_compute_columns_rejects_video_frame_outputs(tmp_path):
         table.compute_columns(["video"], inputs=["id"], fn=lambda batch: batch)
 
 
-@pytest.mark.parametrize("method", ["merge_columns", "compute_columns"])
+@pytest.mark.parametrize("method", ["merge_columns", "compute_columns", "update_columns_by_row_id"])
 def test_column_updates_preserve_files_if_commit_response_is_lost(frames, method):
     commit = BatchTableCommit.commit
 
@@ -559,6 +559,8 @@ def test_column_updates_preserve_files_if_commit_response_is_lost(frames, method
         with pytest.raises(pmm.ColumnUpdateError) as failure:
             if method == "merge_columns":
                 frames.merge_columns(pa.table({"id": [0], "label": ["committed"]}), on="id")
+            elif method == "update_columns_by_row_id":
+                frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["committed"]}), columns=["label"])
             else:
                 frames.compute_columns(["label"], inputs=["id"], fn=lambda batch: pa.table({
                     "label": ["committed"] * batch.num_rows}))
@@ -652,6 +654,8 @@ def test_enrichment_rejects_historical_views(frames):
         historical.merge_columns(pa.table({"id": [0], "label": ["old"]}), on="id")
     with pytest.raises(ValueError, match="current full-table"):
         historical.compute_columns(["label"], inputs=["label"], fn=lambda batch: batch)
+    with pytest.raises(ValueError, match="current full-table"):
+        historical.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["old"]}), columns=["label"])
 
 
 @pytest.mark.parametrize("options", [
@@ -796,3 +800,532 @@ def test_native_merge_columns_uses_standard_merge_cardinality(frames):
     assert "multiple source rows" in str(failure.value.__cause__)
     assert failure.value.commit_outcome == "not_started"
     assert _snapshot(table) == snapshot
+
+
+@pytest.mark.parametrize("id_type", [pa.int8(), pa.int64(), pa.uint64()])
+def test_update_columns_by_row_id_matches_duplicate_keys_without_rewriting_media(frames, id_type):
+    frames.add([{"id": 1, "label": "duplicate", "image": b"other"}])
+    raw = frames.raw_table
+    snapshot = _snapshot(frames)
+    schema_id = raw.table_schema.id
+    files, blobs = set(_files(frames)), _blobs(frames)
+    data = pa.table({"label": ["second", "first"], "_ROW_ID": pa.chunked_array(
+        [[5], [1]], type=id_type)})
+    with patch.object(raw.file_io, "read_ranges_coalesced",
+                      side_effect=AssertionError("must not fetch media")):
+        result = frames.update_columns_by_row_id(data, columns="label")
+
+    assert isinstance(result, pmm.ColumnUpdateResult)
+    assert result.source_snapshot_id == snapshot
+    assert result.snapshot_id == snapshot + 1
+    assert result.schema_id == schema_id
+    assert result.updated_rows == 2
+    assert result.added_columns == ()
+    assert frames.raw_table is raw
+    actual = frames.scan().select(["id", "label"]).with_row_id().to_arrow().sort_by("_ROW_ID")
+    assert actual["id"].to_pylist() == [0, 1, 2, 3, 4, 1]
+    assert actual["label"].to_pylist() == ["old", "first", "old", "old", "old", "second"]
+    assert _blobs(frames) == blobs
+    assert files.issubset(_files(frames))
+    assert all(file.write_cols == ["label"] for name, file in _files(frames).items() if name not in files)
+    assert frames.scan(snapshot_id=snapshot).select(["label"]).to_arrow()["label"].to_pylist() == [
+        "old", "old", "old", "old", "old", "duplicate"]
+
+
+def test_update_columns_by_row_id_only_writes_explicit_columns(frames):
+    frames.add_columns(pa.schema([("score", pa.int64())]))
+    frames.update("id = 1", {"label": "current"})
+    files, blobs = set(_files(frames)), _blobs(frames)
+    payload = pa.table({
+        "_ROW_ID": [1], "id": [999], "label": ["old"],
+        "image": pa.array([b"stale media"], type=pa.large_binary()), "score": [42], "unused": ["ignored"]})
+    with patch.object(frames.raw_table.file_io, "read_ranges_coalesced",
+                      side_effect=AssertionError("must not fetch media")):
+        result = frames.update_columns_by_row_id(payload, columns=["score"])
+    assert result.updated_rows == 1
+    assert result.added_columns == ()
+    assert _rows(frames, ["id", "label", "score"]) == [
+        {"id": i, "label": "current" if i == 1 else "old", "score": 42 if i == 1 else None} for i in range(5)]
+    assert _blobs(frames) == blobs
+    assert all(file.write_cols == ["score"] for name, file in _files(frames).items() if name not in files)
+
+
+def test_update_columns_by_row_id_requires_explicit_columns(frames):
+    snapshot = _snapshot(frames)
+    with pytest.raises(TypeError, match="columns"):
+        frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}))
+    assert _snapshot(frames) == snapshot
+
+
+@pytest.mark.parametrize("row_count", [0, 1])
+@pytest.mark.parametrize("method", ["batch", "predicate"])
+def test_row_id_updates_reject_stale_schema_before_staging(frames, row_count, method):
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.schema.schema_change import SchemaChange
+
+    connection = pmm.MultimodalConnection(frames.catalog)
+    table = connection.get_table(frames.identifier)
+    raw = table.raw_table
+    snapshot, files = _snapshot(table), set(_files(table))
+    table.catalog.alter_table(table.identifier, [
+        SchemaChange.drop_column("label"), SchemaChange.add_column("label", AtomicType("STRING"))])
+    current = connection.get_table(table.identifier)
+    assert current.raw_table.field_dict["label"].id != raw.field_dict["label"].id
+    assert _snapshot(current) == snapshot
+    assert current.raw_table.snapshot_manager().get_latest_snapshot().schema_id == raw.table_schema.id
+    data = pa.table({"_ROW_ID": pa.array([0][:row_count], type=pa.int64()),
+                     "label": pa.array(["new"][:row_count], type=pa.string())})
+    with patch("pypaimon.table.file_store_table.FileStoreTable.new_batch_write_builder",
+               side_effect=AssertionError("must not stage files")):
+        with pytest.raises(ValueError, match="schema has changed.*Reopen"):
+            if method == "batch":
+                table.update_columns_by_row_id(data, columns=["label"])
+            else:
+                table.update("_ROW_ID = %s" % (0 if row_count else 999999), {"label": "new"})
+    assert table.raw_table is raw
+    assert _snapshot(current) == snapshot
+    assert set(_files(current)) == files
+    assert current.scan().select(["label"]).to_list() == [{"label": None}] * 5
+
+    if method == "batch":
+        result = current.update_columns_by_row_id(
+            pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+        assert result.updated_rows == 1
+        assert result.schema_id == current.raw_table.table_schema.id
+    else:
+        assert current.update("_ROW_ID = 0", {"label": "new"}) is current
+    assert _rows(connection.get_table(table.identifier), ["id", "label"]) == [
+        {"id": i, "label": "new" if i == 0 else None} for i in range(5)]
+
+
+@pytest.mark.parametrize("method", ["batch", "predicate"])
+def test_row_id_updates_do_not_write_if_schema_lookup_fails(frames, method):
+    snapshot, files = _snapshot(frames), set(_files(frames))
+    with patch.object(frames.catalog, "get_table", side_effect=OSError("schema lookup failed")):
+        with patch("pypaimon.table.file_store_table.FileStoreTable.new_batch_write_builder",
+                   side_effect=AssertionError("must not stage files")):
+            with pytest.raises(OSError, match="schema lookup failed"):
+                if method == "batch":
+                    frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+                else:
+                    frames.update("id = 1 OR (_ROW_ID = 0 AND label = 'old')", {"label": "new"})
+    assert _snapshot(frames) == snapshot
+    assert set(_files(frames)) == files
+
+
+def test_update_columns_by_row_id_checks_current_branch_schema_and_keeps_dynamic_options(frames):
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.schema.schema_change import SchemaChange
+
+    connection = pmm.MultimodalConnection(frames.catalog)
+    frames.catalog.create_tag(frames.identifier, "base", _snapshot(frames))
+    frames.catalog.create_branch(frames.identifier, "dev", tag_name="base")
+    frames.catalog.alter_table(frames.identifier, [SchemaChange.add_column("score", AtomicType("INT"))])
+    table = connection.get_table(frames.identifier + "$branch_dev").copy({"write.native.enabled": "false"})
+    raw = table.raw_table
+    assert raw.table_schema.id != connection.get_table(frames.identifier).raw_table.table_schema.id
+    result = table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["branch"]}), columns=["label"])
+    assert result.updated_rows == 1
+    assert result.schema_id == raw.table_schema.id
+    assert table.raw_table is raw
+    assert not raw.options.native_write_enabled()
+    assert _rows(connection.get_table(table.identifier), ["id", "label"]) == [
+        {"id": i, "label": "branch" if i == 0 else "old"} for i in range(5)]
+    assert connection.get_table(frames.identifier).scan().select(["label"]).to_list() == [{"label": "old"}] * 5
+
+
+@pytest.mark.parametrize("method", ["batch", "predicate"])
+def test_row_id_updates_reject_branch_copy_with_same_schema_id_and_different_field_ids(frames, method):
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.schema.schema_change import Move, SchemaChange
+
+    connection = pmm.MultimodalConnection(frames.catalog)
+    frames.catalog.create_tag(frames.identifier, "base", _snapshot(frames))
+    frames.catalog.create_branch(frames.identifier, "dev", tag_name="base")
+    frames.catalog.alter_table(frames.identifier, [SchemaChange.set_option("read.batch-size", "3")])
+    identifier = frames.identifier + "$branch_dev"
+    frames.catalog.alter_table(identifier, [
+        SchemaChange.drop_column("label"),
+        SchemaChange.add_column("label", AtomicType("STRING"), move=Move.before("label", "image"))])
+    copied = connection.get_table(frames.identifier).copy({"branch": "dev"})
+    current = connection.get_table(identifier)
+    assert copied.raw_table.table_schema.id == current.raw_table.table_schema.id
+    assert copied.raw_table.field_names == current.raw_table.field_names
+    assert [field.type for field in copied.raw_table.fields] == [field.type for field in current.raw_table.fields]
+    assert copied.raw_table.field_dict["label"].id != current.raw_table.field_dict["label"].id
+    snapshot, files = _snapshot(current), set(_files(current))
+    with patch("pypaimon.table.file_store_table.FileStoreTable.new_batch_write_builder",
+               side_effect=AssertionError("must not stage files")):
+        with pytest.raises(ValueError, match="schema has changed.*Reopen"):
+            if method == "batch":
+                copied.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+            else:
+                copied.update("_ROW_ID = 0", {"label": "new"})
+    assert _snapshot(current) == snapshot
+    assert set(_files(current)) == files
+    assert current.scan().select(["label"]).to_list() == [{"label": None}] * 5
+    if method == "batch":
+        current.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+    else:
+        current.update("_ROW_ID = 0", {"label": "new"})
+    assert _rows(connection.get_table(identifier), ["id", "label"]) == [
+        {"id": i, "label": "new" if i == 0 else None} for i in range(5)]
+
+
+def test_business_predicate_with_row_id_string_literal_does_not_check_schema(frames):
+    snapshot = _snapshot(frames)
+    with patch.object(frames.catalog, "get_table", side_effect=AssertionError("must not check schema")):
+        assert frames.update("label = '_ROW_ID'", {"label": "new"}) is frames
+    assert _snapshot(frames) == snapshot
+
+
+@pytest.mark.parametrize("row_order", [
+    pytest.param([0, 1, 2, 3, 4, 5], id="a-first"),
+    pytest.param([3, 4, 5, 0, 1, 2], id="b-first"),
+])
+def test_update_columns_by_row_id_preserves_deletions_and_crosses_partitions(tmp_path, row_order):
+    connection = pmm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    table = connection.create_table(
+        "partitioned", schema=pa.schema([("part", pa.string()), ("id", pa.int64()), ("label", pa.string())]),
+        partitioned=["part"],
+        data=[{"part": "a" if i < 3 else "b", "id": i, "label": "old"} for i in row_order],
+        options={"file.format": "parquet", "deletion-vectors.enabled": "true"})
+    table.delete("id = 1 OR id = 4")
+    row_ids = {row["id"]: row["_ROW_ID"] for row in table.scan().select(["id"]).with_row_id().to_list()}
+    snapshot = _snapshot(table)
+    commit = BatchTableCommit.commit
+    with patch.object(BatchTableCommit, "commit", autospec=True, side_effect=commit) as publish:
+        result = table.update_columns_by_row_id(pa.table({
+            "_ROW_ID": [row_ids[5], row_ids[0]], "label": ["last", None]}), columns=["label"])
+    publish.assert_called_once()
+    messages = publish.call_args[0][1]
+    assert len(messages) == 2
+    assert all(message.check_from_snapshot == snapshot for message in messages)
+    assert result.source_snapshot_id == snapshot
+    assert result.snapshot_id == snapshot + 1
+    assert result.updated_rows == 2
+    assert _rows(table, ["id", "label"]) == [
+        {"id": 0, "label": None}, {"id": 2, "label": "old"},
+        {"id": 3, "label": "old"}, {"id": 5, "label": "last"}]
+
+
+@pytest.mark.parametrize("ids, error, message", [
+    (pa.array([1.0]), TypeError, "integer Arrow"),
+    (pa.array([1.5]), TypeError, "integer Arrow"),
+    (pa.array([True]), TypeError, "integer Arrow"),
+    (pa.array(["1"]), TypeError, "integer Arrow"),
+    (pa.nulls(1), TypeError, "integer Arrow"),
+    (pa.array([None], type=pa.int64()), ValueError, "must not be null"),
+    (pa.chunked_array([[1], [1]], type=pa.int64()), ValueError, "duplicate _ROW_ID"),
+    (pa.array([-1]), ValueError, "non-negative"),
+    (pa.array([2 ** 63], type=pa.uint64()), ValueError, "range"),
+])
+def test_update_columns_by_row_id_rejects_invalid_ids_before_writing(frames, ids, error, message):
+    from pypaimon.write.table_update import BatchTableUpdate
+
+    snapshot, files = _snapshot(frames), set(_files(frames))
+    with patch.object(BatchTableUpdate, "update_by_arrow_with_row_id",
+                      side_effect=AssertionError("must not write")):
+        with pytest.raises(error, match=message):
+            frames.update_columns_by_row_id(pa.table({"_ROW_ID": ids, "label": ["new"] * len(ids)}), columns=["label"])
+    assert _snapshot(frames) == snapshot
+    assert set(_files(frames)) == files
+
+
+@pytest.mark.parametrize("data, columns, message", [
+    ([{"_ROW_ID": 0, "label": "new"}], ["label"], "pyarrow.Table"),
+    (pa.record_batch([pa.array([0]), pa.array(["new"])], names=["_ROW_ID", "label"]), ["label"], "pyarrow.Table"),
+    (pa.table({"label": ["new"]}), ["label"], "exactly one _ROW_ID"),
+    (pa.table({"_ROW_ID": [0]}), [], "unique column names"),
+    (pa.table({"_ROW_ID": [0], "absent": ["new"]}), ["absent"], "Output columns do not exist"),
+    (pa.table({"_ROW_ID": [0], "_SEQUENCE_NUMBER": [1]}), ["_SEQUENCE_NUMBER"], "system columns"),
+    (pa.table({"_ROW_ID": [0], "label": [123]}), ["label"], "Incompatible type"),
+    (pa.table({"_ROW_ID": [0], "label": ["new"]}), ["id"], "exactly one id column"),
+    (pa.table({"_ROW_ID": [0], "label": ["new"]}), ["label", "label"], "unique column names"),
+    (pa.table({"_ROW_ID": [0], "label": ["new"]}), ["_ROW_ID"], "system columns"),
+    (pa.table([pa.array([0]), pa.array([0]), pa.array(["new"])],
+              names=["_ROW_ID", "_ROW_ID", "label"]), ["label"], "exactly one _ROW_ID"),
+    (pa.table([pa.array([0]), pa.array(["a"]), pa.array(["b"])],
+              names=["_ROW_ID", "label", "label"]), ["label"], "exactly one label column"),
+])
+def test_update_columns_by_row_id_validates_input_without_schema_changes(frames, data, columns, message):
+    snapshot, schema_id = _snapshot(frames), frames.raw_table.table_schema.id
+    with patch.object(frames.catalog, "alter_table", side_effect=AssertionError("must not alter schema")):
+        with pytest.raises(ValueError, match=message):
+            frames.update_columns_by_row_id(data, columns=columns)
+    assert _snapshot(frames) == snapshot
+    assert frames.catalog.get_table(frames.identifier).table_schema.id == schema_id
+
+
+@pytest.mark.parametrize("options, message", [
+    ({"data-evolution.enabled": "false"}, "Data Evolution"),
+    ({"row-tracking.enabled": "false"}, "row tracking"),
+    ({"scan.mode": "from-snapshot"}, "current full-table"),
+    ({"incremental-between": "1,2"}, "current full-table"),
+    ({"scan.file-creation-time-millis": "1"}, "current full-table"),
+])
+def test_update_columns_by_row_id_rejects_unsupported_views(frames, options, message):
+    snapshot = _snapshot(frames)
+    with pytest.raises(ValueError, match=message):
+        frames.copy(options).update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+    assert _snapshot(frames) == snapshot
+
+
+def test_update_columns_by_row_id_rejects_partition_and_video_outputs(tmp_path):
+    connection = pmm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    table = connection.create_table(
+        "videos", schema=pa.schema([("part", pa.string()), ("video", pa.large_binary())]),
+        partitioned=["part"], options={"video-frame-field": "video"})
+    with pytest.raises(ValueError, match="partition columns"):
+        table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "part": ["new"]}), columns=["part"])
+    with pytest.raises(ValueError, match="replace_video"):
+        table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "video": [b"new"]}), columns=["video"])
+    assert table.raw_table.snapshot_manager().get_latest_snapshot() is None
+
+
+def test_update_columns_by_row_id_enforces_existing_nullability(tmp_path):
+    connection = pmm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    table = connection.create_table(
+        "required", schema=pa.schema([pa.field("value", pa.int64(), nullable=False)]),
+        data=[{"value": 1}], options={"file.format": "parquet"})
+    snapshot = _snapshot(table)
+    with pytest.raises(ValueError, match="non-null column value"):
+        table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "value": [None]}), columns=["value"])
+    assert _snapshot(table) == snapshot
+    assert table.scan().to_list() == [{"value": 1}]
+
+
+def test_update_columns_by_row_id_backfills_vectors_and_replaces_blobs(frames):
+    vector_type = pa.list_(pa.float32(), 2)
+    frames.add_columns(pa.schema([("embedding", vector_type)]))
+    blobs = _blobs(frames)
+    result = frames.update_columns_by_row_id(pa.table({
+        "_ROW_ID": [3, 1], "embedding": pa.array([[3., 4.], [1., 2.]], type=vector_type)}), columns=["embedding"])
+    assert result.added_columns == ()
+    assert result.updated_rows == 2
+    assert _blobs(frames) == blobs
+    frames.update_columns_by_row_id(pa.table({
+        "_ROW_ID": [1, 3], "image": pa.array([b"replacement", None], type=pa.large_binary())}), columns=["image"])
+    assert _rows(frames, ["id", "embedding"]) == [
+        {"id": i, "embedding": [float(i), float(i + 1)] if i in (1, 3) else None} for i in range(5)]
+    _, actual = frames.scan().select(["id", "image"]).read_blobs()
+    assert actual["image"] == [bytes([0]) * 100, b"replacement", bytes([2]) * 100, None, bytes([4]) * 100]
+
+
+@pytest.mark.parametrize("invalid, deleted", [(99, False), (1, True), (3, True)])
+def test_update_columns_by_row_id_rejects_all_targets_before_writing(frames, invalid, deleted):
+    from pypaimon.write.table_update import BatchTableUpdate
+
+    if deleted:
+        frames.delete("id = %s" % invalid)
+        # Validate against a group that already has a partial-column version.
+        frames.merge_columns(pa.table({"id": [2], "label": ["prior"]}), on="id")
+    snapshot, files = _snapshot(frames), set(_files(frames))
+    before = _rows(frames, ["id", "label"])
+    with patch.object(BatchTableUpdate, "update_by_arrow_with_row_id",
+                      side_effect=AssertionError("must not write")):
+        with pytest.raises(pmm.ColumnUpdateError) as failure:
+            frames.update_columns_by_row_id(
+                pa.table({"_ROW_ID": [0, invalid], "label": ["new", "bad"]}), columns=["label"])
+    assert failure.value.phase == "validate"
+    assert failure.value.schema_changed is False
+    assert failure.value.commit_outcome == "not_started"
+    assert isinstance(failure.value.__cause__, ValueError)
+    assert "not found or deleted: [%s]" % invalid in str(failure.value.__cause__)
+    assert _snapshot(frames) == snapshot
+    assert set(_files(frames)) == files
+    assert _rows(frames, ["id", "label"]) == before
+
+
+@pytest.mark.parametrize("empty_table", [False, True])
+def test_update_columns_by_row_id_empty_input_does_not_commit(frames, tmp_path, empty_table):
+    table = frames
+    if empty_table:
+        connection = pmm.connect(options={"warehouse": str(tmp_path / "empty-warehouse")})
+        table = connection.create_table("empty", schema=pa.schema([("label", pa.string())]))
+    snapshot = table.raw_table.snapshot_manager().get_latest_snapshot()
+    with patch.object(BatchTableCommit, "commit", side_effect=AssertionError("must not commit")):
+        result = table.update_columns_by_row_id(pa.table({
+            "_ROW_ID": pa.array([], type=pa.int64()), "label": pa.array([], type=pa.string())}), columns=["label"])
+    assert result.source_snapshot_id == (None if snapshot is None else snapshot.id)
+    assert result.snapshot_id == result.source_snapshot_id
+    assert result.updated_rows == 0
+    assert result.added_columns == ()
+
+
+@pytest.mark.parametrize("append_after_capture", [False, True])
+def test_update_columns_by_row_id_rejects_ids_in_an_empty_source_snapshot(tmp_path, append_after_capture):
+    from pypaimon.multimodal.columns import _ColumnUpdate
+
+    table = pmm.connect(options={"warehouse": str(tmp_path)}).create_table(
+        "empty", schema=pa.schema([("label", pa.string())]))
+    enter = _ColumnUpdate.__enter__
+
+    def maybe_append(operation):
+        if append_after_capture:
+            table.add([{"label": "appended"}])
+        return enter(operation)
+
+    with patch.object(_ColumnUpdate, "__enter__", maybe_append):
+        with pytest.raises(pmm.ColumnUpdateError) as failure:
+            table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+    assert failure.value.source_snapshot_id is None
+    assert failure.value.phase == "validate"
+    assert "not found or deleted: [0]" in str(failure.value.__cause__)
+    assert table.scan().to_list() == ([{"label": "appended"}] if append_after_capture else [])
+
+
+def test_update_columns_by_row_id_pins_validation_and_writing_to_one_snapshot(frames):
+    from pypaimon.multimodal.columns import _ColumnUpdate
+    from pypaimon.write.table_update import BatchTableUpdate
+
+    snapshot = _snapshot(frames)
+    enter, update = _ColumnUpdate.__enter__, BatchTableUpdate.update_by_arrow_with_row_id
+    write_snapshots = []
+
+    def append_after_capture(operation):
+        frames.add([{"id": 5, "label": "appended", "image": b"new"}])
+        return enter(operation)
+
+    def capture_write(self, data):
+        write_snapshots.append(self.table._read_snapshot.id)
+        messages = update(self, data)
+        assert all(message.check_from_snapshot == snapshot for message in messages)
+        return messages
+
+    with patch.object(_ColumnUpdate, "__enter__", append_after_capture), patch.object(
+            BatchTableUpdate, "update_by_arrow_with_row_id", capture_write):
+        result = frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+    assert result.source_snapshot_id == snapshot
+    assert write_snapshots == [snapshot]
+    assert _rows(frames, ["id", "label"])[-1] == {"id": 5, "label": "appended"}
+
+    with patch.object(_ColumnUpdate, "__enter__", append_after_capture):
+        with pytest.raises(pmm.ColumnUpdateError, match="validate"):
+            frames.update_columns_by_row_id(pa.table({"_ROW_ID": [6], "label": ["not in snapshot"]}), columns=["label"])
+
+
+@pytest.mark.python_write
+def test_update_columns_by_row_id_late_write_failure_does_not_publish(frames):
+    from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
+
+    frames = frames.copy({"write.native.enabled": "false"})
+    frames.add([{"id": 5, "label": "old", "image": b"other"}])
+    snapshot = _snapshot(frames)
+    write_group = PythonTableUpdateByRowId._write_group
+    written = []
+
+    def fail_second(self, *args, **kwargs):
+        if written:
+            raise OSError("second group failed")
+        result = write_group(self, *args, **kwargs)
+        written.append(args[1])
+        return result
+
+    with patch.object(PythonTableUpdateByRowId, "_write_group", fail_second):
+        with pytest.raises(pmm.ColumnUpdateError) as failure:
+            frames.update_columns_by_row_id(
+                pa.table({"_ROW_ID": [0, 5], "label": ["first", "second"]}), columns=["label"])
+    assert len(written) == 1
+    assert failure.value.phase == "write"
+    assert failure.value.commit_outcome == "not_started"
+    assert _snapshot(frames) == snapshot
+    assert all(row["label"] == "old" for row in _rows(frames, ["id", "label"]))
+    result = frames.update_columns_by_row_id(
+        pa.table({"_ROW_ID": [0, 5], "label": ["first", "second"]}), columns=["label"])
+    assert result.updated_rows == 2
+    assert _snapshot(frames) == snapshot + 1
+
+
+@pytest.mark.native_plan
+@pytest.mark.parametrize("native_read", [False, True])
+def test_update_columns_by_row_id_uses_native_update(frames, native_read):
+    from pypaimon.execution.python.write.table_update import PythonTableUpdate
+
+    frames.delete("id = 4")
+    table = frames.copy({"write.native.enabled": "true", "read.native.enabled": str(native_read).lower()})
+    snapshot = _snapshot(table)
+    with patch.object(PythonTableUpdate, "update_by_arrow_with_row_id",
+                      side_effect=AssertionError("must not write invalid IDs")):
+        with pytest.raises(pmm.ColumnUpdateError) as failure:
+            table.update_columns_by_row_id(
+                pa.table({"_ROW_ID": [0, 4], "label": ["new", "deleted"]}), columns=["label"])
+    assert failure.value.phase == "validate"
+    assert failure.value.commit_outcome == "not_started"
+    assert "not found or deleted: [4]" in str(failure.value.__cause__)
+    assert _snapshot(table) == snapshot
+    with patch.object(PythonTableUpdate, "update_by_arrow_with_row_id",
+                      side_effect=AssertionError("must use native update")):
+        result = table.update_columns_by_row_id(
+            pa.table({"_ROW_ID": [3, 1], "label": ["three", "one"]}), columns=["label"])
+    assert result.updated_rows == 2
+    assert _rows(table, ["id", "label"]) == [
+        {"id": i, "label": "one" if i == 1 else "three" if i == 3 else "old"} for i in range(4)]
+
+
+def test_update_columns_by_row_id_validation_read_failure_never_writes(frames):
+    from pypaimon.read.table_read import TableRead
+    from pypaimon.write.table_update import BatchTableUpdate
+
+    snapshot, files = _snapshot(frames), set(_files(frames))
+    read_error = OSError("validation read failed")
+    with patch.object(TableRead, "to_arrow", side_effect=read_error), patch.object(
+            BatchTableUpdate, "update_by_arrow_with_row_id", side_effect=AssertionError("must not write")):
+        with pytest.raises(pmm.ColumnUpdateError) as failure:
+            frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+    assert failure.value.phase == "validate"
+    assert failure.value.commit_outcome == "not_started"
+    assert failure.value.__cause__ is read_error
+    assert _snapshot(frames) == snapshot
+    assert set(_files(frames)) == files
+
+
+@pytest.mark.parametrize("lose_response", [False, True])
+def test_update_columns_by_row_id_preserves_commit_state_when_close_fails(frames, lose_response):
+    snapshot = _snapshot(frames)
+    commit, close = BatchTableCommit.commit, BatchTableCommit.close
+    commit_error, close_error = OSError("lost commit response"), OSError("commit close failed")
+
+    def maybe_lose_response(self, messages, *args, **kwargs):
+        commit(self, messages, *args, **kwargs)
+        if lose_response:
+            raise commit_error
+
+    def failed_close(self):
+        close(self)
+        raise close_error
+
+    with patch.object(BatchTableCommit, "commit", maybe_lose_response), patch.object(
+            BatchTableCommit, "close", failed_close), patch.object(
+            BatchTableCommit, "abort", side_effect=AssertionError("must preserve committed files")):
+        with pytest.raises(pmm.ColumnUpdateError) as failure:
+            frames.update_columns_by_row_id(
+                pa.table({"_ROW_ID": [3, 0], "label": ["three", "zero"]}), columns=["label"])
+    assert failure.value.phase == ("commit" if lose_response else "close")
+    assert failure.value.commit_outcome == ("unknown" if lose_response else "committed")
+    assert failure.value.__cause__ is (commit_error if lose_response else close_error)
+    assert _snapshot(frames) == snapshot + 1
+    assert _rows(frames, ["id", "label"]) == [
+        {"id": i, "label": "zero" if i == 0 else "three" if i == 3 else "old"} for i in range(5)]
+
+
+def test_update_columns_by_row_id_does_not_replay_failed_native_execution(frames):
+    from unittest.mock import Mock
+
+    backend = Mock()
+    backend.update_by_arrow_with_row_id.side_effect = OSError("native execution failed")
+    snapshot = _snapshot(frames)
+    with patch("pypaimon.write.update_dispatch.prepare_native_write_operation", return_value=backend) as prepare:
+        with patch("pypaimon.write.update_dispatch.create_python_update_operation",
+                   side_effect=AssertionError("must not replay after execution")):
+            with pytest.raises(pmm.ColumnUpdateError) as failure:
+                frames.update_columns_by_row_id(pa.table({"_ROW_ID": [1], "label": ["new"]}), columns=["label"])
+    prepare.assert_called_once()
+    assert prepare.call_args[0][0] == "update"
+    assert prepare.call_args[0][1]._read_snapshot.id == snapshot
+    backend.update_by_arrow_with_row_id.assert_called_once()
+    assert failure.value.phase == "write"
+    assert failure.value.commit_outcome == "not_started"
+    assert str(failure.value.__cause__) == "native execution failed"
+    assert _snapshot(frames) == snapshot
+    assert all(row["label"] == "old" for row in _rows(frames, ["id", "label"]))

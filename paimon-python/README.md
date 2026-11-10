@@ -144,6 +144,9 @@ result = table.add_columns(schema=nullable_columns)
 # Fill existing columns, or recompute them after changing the model.
 result = table.compute_columns(
     ["embedding"], inputs=["image"], fn=compute_embeddings, batch_size=128)
+
+# Import external annotations carrying _ROW_ID and existing output columns.
+result = table.update_columns_by_row_id(annotations, columns=["label"])
 ```
 
 `table` is a `pypaimon.multimodal.MultimodalTable`. `merge_columns` uses ordinary
@@ -170,10 +173,31 @@ MERGE when `write.native.enabled=true` and a compatible `pypaimon_rust` is avail
 `add_columns` and `compute_columns` can use the native shard reader and writer;
 their `fn` runs in Python.
 
+`update_columns_by_row_id(data, *, columns)` accepts one Arrow Table and requires
+an explicit output column name or sequence of names. The input must contain
+`_ROW_ID` and each selected column exactly once. Extra input columns are ignored
+and cannot overwrite the corresponding current table values. `_ROW_ID` must contain
+unique, non-NULL, non-negative integers representable as int64. Every ID must
+identify a visible row in the captured snapshot; missing or deleted IDs reject
+the entire call before writing. Input order does not affect matching. Outputs
+must be existing, non-partition columns with the table's types and nullability;
+use `replace_video` for video-frame outputs. Omitted rows keep their values and
+untouched columns retain their files. The method uses the standard Python/native
+row-ID update backend and commits all updates together. Empty input creates no
+snapshot. A schema mismatch with the current target branch is rejected before
+writing; reopen the table after schema changes or copying to a branch with a
+different schema. It does not insert rows, add columns, remap
+historical IDs, or check whether external results are stale.
+
+Rollback followed by a new append can reuse both row IDs and numeric snapshot
+IDs. Discard pending annotations from the rolled-back history before writeback;
+a matching numeric snapshot ID alone does not prove that they remain valid.
+
 `ColumnUpdateResult` reports `updated_rows`, `added_columns`, `source_snapshot_id`,
 `snapshot_id`, and `schema_id`. `updated_rows` is the backfilled row count for
 `add_columns` (zero for schema-only additions) and `compute_columns`, and `None`
-for `merge_columns`. `compute_columns` always returns `added_columns=()`.
+for `merge_columns`. `update_columns_by_row_id` returns the input row count in
+`updated_rows`. Both it and `compute_columns` always return `added_columns=()`.
 Schema publication and data
 commit are separate. A schema-only call does not create a data snapshot.
 Failures during publication or data preparation raise `ColumnUpdateError` with `phase`,
