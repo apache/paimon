@@ -89,10 +89,6 @@ module.exports = [
     "to": "/concepts/functions"
   },
   {
-    "from": "/concepts/lake-stream",
-    "to": "/flink/lake-stream"
-  },
-  {
     "from": "/concepts/rest/bear.html",
     "to": "/concepts/rest/bear"
   },
