@@ -90,6 +90,7 @@ from pypaimon.multimodal.lerobot.schema import (
     _validate_v3_required_features,
 )
 from pypaimon.multimodal.lerobot.source import (
+    _pandas_index_column,
     _LeRobotSource,
     _RemoteLeRobotDataset,
     _import_lerobot_dataset,
@@ -190,6 +191,22 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual(float(value), 30.0)
         with self.assertRaises(ValueError):
             _dataset_fps(value)
+
+    def test_arrow_task_columns_without_pandas_metadata(self):
+        for component in ("task", "subtask"):
+            for text_type in (pa.string(), pa.large_string()):
+                schema = pa.schema([(component, text_type), (component + "_index", pa.int64())])
+                self.assertEqual(component, _pandas_index_column(schema, component))
+            for fields in (
+                    [(component + "_index", pa.int64())],
+                    [(component + "_index", pa.int64()), ("description", pa.string())],
+                    [(component + "_index", pa.int64()), (component, pa.int64())]):
+                with self.subTest(component=component, fields=fields):
+                    with self.assertRaises(ValueError):
+                        _pandas_index_column(pa.schema(fields), component)
+            schema = pa.schema([(component + "_index", pa.int64()), (component, pa.string())])
+            with self.assertRaises(ValueError):
+                _pandas_index_column(schema.with_metadata({b"pandas": b"invalid"}), component)
 
     def test_episode_validation_projects_batched_hf_metadata(self):
         try:
@@ -4256,6 +4273,37 @@ class LeRobotImportTest(unittest.TestCase):
             for file in split.files
         }
         self.assertEqual(1, len(files))
+
+    def test_import_arrow_tasks_and_subtasks(self):
+        source = self.temp_dir / "arrow_tasks"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        info["features"]["subtask_index"] = {"dtype": "int64", "shape": [1], "names": None}
+        info_path.write_text(json.dumps(info))
+        for path in (source / "data").rglob("*.parquet"):
+            data = pq.read_table(path)
+            pq.write_table(data.append_column(
+                "subtask_index", pa.array([0] * data.num_rows, type=pa.int64())), path)
+        task_path = source / "meta" / "tasks.parquet"
+        tasks = pq.read_table(task_path).to_pandas()
+        expected_tasks = tasks.index.tolist()
+        pq.write_table(pa.table({"task_index": tasks["task_index"].tolist(),
+                                "task": expected_tasks}), task_path)
+        pq.write_table(pa.table({"subtask_index": [0], "subtask": ["reach"]}),
+                       source / "meta" / "subtasks.parquet")
+
+        for name, location in (("local_tasks", source), ("uri_tasks", source.as_uri())):
+            with self.subTest(source=name):
+                self.connection.load_from_lerobot(name, location, tag_name="train")
+                dataset = pmm.PaimonLeRobotDataset(
+                    self.connection.get_table(name), tag_name="train")
+                self.assertEqual(expected_tasks, dataset.meta.tasks.index.tolist())
+                self.assertEqual(["reach"], dataset.meta.subtasks.index.tolist())
+                row = dataset[0]
+                self.assertEqual(expected_tasks[int(row["task_index"])], row["task"])
+                self.assertEqual("reach", row["subtask"])
+                self.assertEqual(info["total_frames"], len(dataset))
 
     def test_import_publishes_optional_subtasks(self):
         import pandas as pd

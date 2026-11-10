@@ -499,6 +499,17 @@ class _SourceUriReaderFactory:
 
 def _pandas_index_column(schema, component):
     encoded = (schema.metadata or {}).get(b"pandas")
+    if encoded is None:
+        # Arrow-written task tables may omit Pandas index metadata.
+        expected = {component + "_index", component}
+        if len(schema.names) == 2 and set(schema.names) == expected \
+                and (pa.types.is_string(schema.field(component).type)
+                     or pa.types.is_large_string(schema.field(component).type)):
+            return component
+        raise ValueError(
+            "LeRobot %s metadata must contain a Pandas index or the "
+            "canonical %s and %s columns."
+            % (component, component + "_index", component))
     try:
         pandas_metadata = json.loads(encoded.decode("utf-8"))
         index_columns = pandas_metadata["index_columns"]
