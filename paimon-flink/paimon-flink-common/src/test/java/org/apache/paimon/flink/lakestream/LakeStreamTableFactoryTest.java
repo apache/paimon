@@ -31,6 +31,7 @@ import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.fs.IsolatedDirectoryFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 
@@ -425,14 +426,13 @@ public class LakeStreamTableFactoryTest {
     }
 
     @Test
-    public void testRealTimeWriteInConnectorModeIsRejected() throws Exception {
+    public void testRealTimeWriteToALakeStreamConnectorMappingIsRejected() throws Exception {
         FlinkCatalog catalog = newCatalog(null);
-        // a plain table, so the name alone has to be enough to refuse the read-only view
-        createTable(catalog, T2, false);
-        ResolvedCatalogTable paimonTable = resolved(catalog.getTable(T2), idSchema());
+        createTable(catalog, T1, true);
+        ResolvedCatalogTable paimonTable = resolved(catalog.getTable(T1), idSchema());
         FlinkTableFactory factory = new FlinkTableFactory();
 
-        assertThatThrownBy(() -> factory.createDynamicTableSink(context(id("t2$rt"), paimonTable)))
+        assertThatThrownBy(() -> factory.createDynamicTableSink(context(id("t1$rt"), paimonTable)))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining(CatalogOptions.LAKE_STREAM_STORE.key());
         assertThat(FakeStoreTableFactory.sinkContexts()).isEmpty();
@@ -725,9 +725,10 @@ public class LakeStreamTableFactoryTest {
         ResolvedCatalogTable pathOnly = pathOnlyMapping(location, Collections.emptyMap());
         FlinkTableFactory factory = new FlinkTableFactory();
 
-        DynamicTableSink sink = factory.createDynamicTableSink(context(id("t2"), pathOnly));
+        DynamicTableFactory.Context mapping = context(id("t2$rt"), pathOnly);
 
-        assertThat(sink).isInstanceOf(FlinkTableSink.class);
+        assertThat(factory.createDynamicTableSource(mapping)).isInstanceOf(DataTableSource.class);
+        assertThat(factory.createDynamicTableSink(mapping)).isInstanceOf(FlinkTableSink.class);
         assertThat(FakeStoreTableFactory.sinkContexts()).isEmpty();
     }
 
@@ -755,13 +756,19 @@ public class LakeStreamTableFactoryTest {
         // same name and count, so only the type can tell the two columns apart
         ResolvedSchema schema = bigIntIdSchema();
         createTable(catalog, T1, true, schema);
+        catalog.catalog()
+                .alterTable(
+                        Identifier.create("db1", "t1"),
+                        SchemaChange.setOption("s3.secret-key", "review-test-credential"),
+                        false);
         ResolvedCatalogTable paimonTable = resolved(catalog.getTable(T1), schema);
         FlinkTableFactory factory = (FlinkTableFactory) catalog.getFactory().get();
 
         assertThatThrownBy(() -> factory.createDynamicTableSink(context(id("t1"), paimonTable)))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("`id` INT")
-                .hasMessageContaining("`id` BIGINT");
+                .hasMessageContaining("`id` BIGINT")
+                .hasMessageNotContaining("review-test-credential");
         assertThat(FakeStoreTableFactory.sinkContexts()).isEmpty();
         catalog.close();
     }

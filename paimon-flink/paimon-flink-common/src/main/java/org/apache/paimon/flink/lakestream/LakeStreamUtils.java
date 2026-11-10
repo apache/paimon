@@ -20,6 +20,7 @@ package org.apache.paimon.flink.lakestream;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.DataCatalogTable;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.schema.Schema;
@@ -30,14 +31,22 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogTable;
+import org.apache.flink.table.catalog.DataTypeFactory;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
+import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.catalog.UniqueConstraint;
 import org.apache.flink.table.types.AbstractDataType;
 import org.apache.flink.table.types.DataType;
 
+import java.lang.reflect.Constructor;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -102,7 +111,8 @@ public class LakeStreamUtils {
     }
 
     /** A store table expressed as a Paimon schema with only shared table options retained. */
-    public static Schema toPaimonSchema(CatalogBaseTable table) {
+    public static Schema toPaimonSchema(
+            CatalogBaseTable table, ClassLoader classLoader, ReadableConfig configuration) {
         if (!(table instanceof CatalogTable)) {
             throw new ValidationException(
                     "Expected a table from the Lakestream Store, but got "
@@ -114,14 +124,30 @@ public class LakeStreamUtils {
                         .partitionKeys(((CatalogTable) table).getPartitionKeys())
                         .options(sharedPaimonOptions(table.getOptions()))
                         .comment(table.getComment());
+        ResolvedSchema resolvedSchema =
+                table instanceof ResolvedCatalogTable
+                        ? ((ResolvedCatalogTable) table).getResolvedSchema()
+                        : null;
+        DataTypeFactory dataTypeFactory = null;
         for (org.apache.flink.table.api.Schema.UnresolvedColumn column : storeSchema.getColumns()) {
             if (column instanceof org.apache.flink.table.api.Schema.UnresolvedPhysicalColumn) {
+                AbstractDataType<?> type =
+                        ((org.apache.flink.table.api.Schema.UnresolvedPhysicalColumn) column)
+                                .getDataType();
+                DataType resolvedType;
+                if (type instanceof DataType) {
+                    resolvedType = (DataType) type;
+                } else if (resolvedSchema != null) {
+                    resolvedType = resolvedSchema.getColumn(column.getName()).get().getDataType();
+                } else {
+                    if (dataTypeFactory == null) {
+                        dataTypeFactory = createDataTypeFactory(classLoader, configuration);
+                    }
+                    resolvedType = dataTypeFactory.createDataType(type);
+                }
                 builder.column(
                         column.getName(),
-                        toPaimonType(
-                                ((org.apache.flink.table.api.Schema.UnresolvedPhysicalColumn)
-                                                column)
-                                        .getDataType()),
+                        LogicalTypeConversion.toDataType(resolvedType.getLogicalType()),
                         column.getComment().orElse(null));
             }
         }
@@ -139,8 +165,56 @@ public class LakeStreamUtils {
                 && equalSelectedOptions(paimonSchema.options(), storeSchema.options());
     }
 
-    private static org.apache.paimon.types.DataType toPaimonType(AbstractDataType<?> type) {
-        return LogicalTypeConversion.toDataType(((DataType) type).getLogicalType());
+    static boolean matchesPlannedLayout(ResolvedCatalogTable planned, Schema storeSchema) {
+        ResolvedSchema schema = planned.getResolvedSchema();
+        RowType rowType =
+                (RowType)
+                        LogicalTypeConversion.toDataType(
+                                schema.toPhysicalRowDataType().getLogicalType());
+        List<String> primaryKeys =
+                schema.getPrimaryKey()
+                        .map(UniqueConstraint::getColumns)
+                        .orElseGet(
+                                () -> {
+                                    CatalogTable origin = planned.getOrigin();
+                                    // Flink omits the constraint for nullable Paimon keys.
+                                    return origin instanceof DataCatalogTable
+                                            ? ((DataCatalogTable) origin).table().primaryKeys()
+                                            : Collections.emptyList();
+                                });
+        return equalFields(rowType.getFields(), storeSchema.fields())
+                && planned.getPartitionKeys().equals(storeSchema.partitionKeys())
+                && primaryKeys.equals(storeSchema.primaryKeys());
+    }
+
+    private static DataTypeFactory createDataTypeFactory(
+            ClassLoader classLoader, ReadableConfig configuration) {
+        try {
+            Class<?> factoryClass =
+                    Class.forName(
+                            "org.apache.flink.table.catalog.DataTypeFactoryImpl",
+                            true,
+                            DataTypeFactory.class.getClassLoader());
+            Constructor<?> constructor;
+            try {
+                // Newer Flink versions take SerializerConfig instead of ExecutionConfig.
+                constructor =
+                        factoryClass.getDeclaredConstructor(
+                                ClassLoader.class,
+                                ReadableConfig.class,
+                                ExecutionConfig.class
+                                        .getMethod("getSerializerConfig")
+                                        .getReturnType());
+            } catch (NoSuchMethodException e) {
+                constructor =
+                        factoryClass.getDeclaredConstructor(
+                                ClassLoader.class, ReadableConfig.class, ExecutionConfig.class);
+            }
+            constructor.setAccessible(true);
+            return (DataTypeFactory) constructor.newInstance(classLoader, configuration, null);
+        } catch (ReflectiveOperationException e) {
+            throw new ValidationException("Could not initialize Flink's data type resolver.", e);
+        }
     }
 
     private static Map<String, String> sharedPaimonOptions(Map<String, String> options) {

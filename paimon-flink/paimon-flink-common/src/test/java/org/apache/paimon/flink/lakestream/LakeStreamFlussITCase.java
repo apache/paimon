@@ -28,6 +28,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.StatementSet;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.factories.FactoryUtil;
@@ -216,6 +217,27 @@ public class LakeStreamFlussITCase {
         // the refused write reached neither side
         assertThat(queryRows(tEnv, "SELECT a, b FROM drift$rt " + BOUNDED_SCAN))
                 .containsExactly(Row.of(1, "x"));
+    }
+
+    @Test
+    public void testWritePlannedBeforeBothSchemasChangedIsRejected() throws Exception {
+        StreamTableEnvironment tEnv = newTableEnv();
+        String storeTable = "fluss_store." + DATABASE + ".stale_layout";
+        tEnv.executeSql("CREATE TABLE " + storeTable + " (a INT, b INT)");
+        tEnv.executeSql(
+                "CREATE TABLE stale_layout (a INT, b INT) WITH ('lakestream.enabled' = 'true')");
+        StatementSet delayed = tEnv.createStatementSet();
+        delayed.addInsertSql("INSERT INTO stale_layout VALUES (11, 22)");
+
+        tEnv.executeSql("ALTER TABLE stale_layout MODIFY b INT FIRST");
+        tEnv.executeSql("DROP TABLE " + storeTable);
+        tEnv.executeSql("CREATE TABLE " + storeTable + " (b INT, a INT)");
+
+        tEnv.executeSql("INSERT INTO stale_layout VALUES (44, 33)").await();
+        assertThatThrownBy(() -> delayed.execute().await())
+                .hasStackTraceContaining("Replan the statement");
+        assertThat(queryRows(tEnv, "SELECT a, b FROM stale_layout$rt " + BOUNDED_SCAN))
+                .containsExactly(Row.of(33, 44));
     }
 
     @Test

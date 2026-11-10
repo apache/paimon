@@ -28,6 +28,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.junit.jupiter.api.Test;
@@ -59,7 +60,7 @@ public class LakeStreamUtilsTest {
                         Collections.singletonList("id"),
                         options);
 
-        Schema converted = LakeStreamUtils.toPaimonSchema(storeTable);
+        Schema converted = toPaimonSchema(storeTable);
 
         assertThat(converted.rowType().getFieldNames()).containsExactly("id");
         assertThat(
@@ -76,6 +77,30 @@ public class LakeStreamUtilsTest {
                 .containsOnlyKeys(CoreOptions.MERGE_ENGINE.key())
                 .containsEntry(CoreOptions.MERGE_ENGINE.key(), "deduplicate");
         assertThat(converted.comment()).isEqualTo("store comment");
+    }
+
+    @Test
+    public void testStoreSchemaWithUnresolvedTypes() {
+        CatalogTable store =
+                storeTable(
+                        org.apache.flink.table.api.Schema.newBuilder()
+                                .column("id", "INT NOT NULL")
+                                .column("nested", "ARRAY<ROW<item BIGINT>>")
+                                .primaryKey("id")
+                                .build(),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+
+        Schema schema = toPaimonSchema(store);
+        assertThat(schema.fields().get(0).type())
+                .isEqualTo(org.apache.paimon.types.DataTypes.INT().notNull());
+        assertThat(schema.fields().get(1).type()).isInstanceOf(ArrayType.class);
+        assertThat(schema.primaryKeys()).containsExactly("id");
+    }
+
+    private static Schema toPaimonSchema(CatalogTable table) {
+        return LakeStreamUtils.toPaimonSchema(
+                table, LakeStreamUtilsTest.class.getClassLoader(), new Configuration());
     }
 
     @Test
@@ -98,8 +123,7 @@ public class LakeStreamUtilsTest {
                         Collections.emptyList(),
                         Collections.emptyMap());
 
-        assertThat(LakeStreamUtils.isCompatible(paimon, LakeStreamUtils.toPaimonSchema(store)))
-                .isFalse();
+        assertThat(LakeStreamUtils.isCompatible(paimon, toPaimonSchema(store))).isFalse();
     }
 
     @Test
@@ -119,8 +143,7 @@ public class LakeStreamUtilsTest {
                         Collections.emptyList(),
                         Collections.emptyMap());
 
-        assertThat(LakeStreamUtils.isCompatible(paimon, LakeStreamUtils.toPaimonSchema(store)))
-                .isFalse();
+        assertThat(LakeStreamUtils.isCompatible(paimon, toPaimonSchema(store))).isFalse();
     }
 
     @Test
@@ -144,8 +167,7 @@ public class LakeStreamUtilsTest {
                         Collections.emptyList(),
                         storeOptions);
 
-        assertThat(LakeStreamUtils.isCompatible(paimon, LakeStreamUtils.toPaimonSchema(store)))
-                .isFalse();
+        assertThat(LakeStreamUtils.isCompatible(paimon, toPaimonSchema(store))).isFalse();
     }
 
     @Test
@@ -168,8 +190,7 @@ public class LakeStreamUtilsTest {
                         Collections.emptyList(),
                         Collections.emptyMap());
 
-        assertThat(LakeStreamUtils.isCompatible(paimon, LakeStreamUtils.toPaimonSchema(store)))
-                .isFalse();
+        assertThat(LakeStreamUtils.isCompatible(paimon, toPaimonSchema(store))).isFalse();
     }
 
     @Test
@@ -195,8 +216,7 @@ public class LakeStreamUtilsTest {
                         Collections.emptyList(),
                         Collections.emptyMap());
 
-        assertThat(LakeStreamUtils.isCompatible(paimon, LakeStreamUtils.toPaimonSchema(store)))
-                .isTrue();
+        assertThat(LakeStreamUtils.isCompatible(paimon, toPaimonSchema(store))).isTrue();
     }
 
     @Test
@@ -229,8 +249,7 @@ public class LakeStreamUtilsTest {
                         Collections.emptyList(),
                         Collections.emptyMap());
 
-        assertThat(LakeStreamUtils.isCompatible(paimon, LakeStreamUtils.toPaimonSchema(store)))
-                .isTrue();
+        assertThat(LakeStreamUtils.isCompatible(paimon, toPaimonSchema(store))).isTrue();
     }
 
     @Test
@@ -258,8 +277,7 @@ public class LakeStreamUtilsTest {
                         Collections.emptyList(),
                         Collections.emptyMap());
 
-        assertThat(LakeStreamUtils.isCompatible(paimon, LakeStreamUtils.toPaimonSchema(store)))
-                .isFalse();
+        assertThat(LakeStreamUtils.isCompatible(paimon, toPaimonSchema(store))).isFalse();
     }
 
     @Test
@@ -292,8 +310,7 @@ public class LakeStreamUtilsTest {
                         Collections.emptyList(),
                         storeOptions);
 
-        assertThat(LakeStreamUtils.isCompatible(paimon, LakeStreamUtils.toPaimonSchema(store)))
-                .isTrue();
+        assertThat(LakeStreamUtils.isCompatible(paimon, toPaimonSchema(store))).isTrue();
     }
 
     @Test

@@ -76,8 +76,7 @@ const sidebars = {
             "items": ["concepts/spec/tableindex", "concepts/spec/fileindex"]
           }
         ]
-      },
-      "concepts/lake-stream"
+      }
     ]
   },
   {
