@@ -27,6 +27,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -43,6 +44,7 @@ import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.CommonTestUtils;
@@ -72,6 +74,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -883,6 +886,122 @@ public class HiveCatalogTest extends CatalogTestBase {
         } else {
             assertHmsDts(databaseName, tableName, "20990101");
         }
+    }
+
+    @Test
+    public void testExpireTimestampPartitionNamedAsDefaultPartition() throws Exception {
+        // The epoch partition is stored under the same name as the NULL partition, so parsing the
+        // name back would drop the NULL partition instead of the selected one.
+        String databaseName = "test_expire_default_named_partition";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, "t");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.PARTITION_DEFAULT_NAME.key(), "1970-01-01 00:00:00")
+                        .option(CoreOptions.PARTITION_GENERATE_LEGACY_NAME.key(), "false")
+                        .option(PARTITION_TIMESTAMP_FORMATTER.key(), "yyyy-MM-dd'T'HH:mm")
+                        .option(PARTITION_TIMESTAMP_PATTERN.key(), "$dt")
+                        .column("col", DataTypes.STRING())
+                        .column("dt", DataTypes.TIMESTAMP(0))
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        // Commit separately: both partitions share one metastore partition name.
+        for (GenericRow row :
+                Arrays.asList(
+                        GenericRow.of(
+                                BinaryString.fromString("epoch"), Timestamp.fromEpochMillis(0)),
+                        GenericRow.of(BinaryString.fromString("null"), null))) {
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(row);
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        table = table.copy(valuesTimeExpirationOptions());
+        table.store().newPartitionExpire("expire", table).expire(Long.MAX_VALUE);
+
+        assertThat(readFirstColumn(table)).containsExactly("null");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testExpireDropsSelectedLocalZonedTimestampPartition(boolean legacyPartitionName)
+            throws Exception {
+        TimeZone defaultZone = TimeZone.getDefault();
+        TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"));
+        try {
+            // The LTZ key is not used for time extraction. A legacy name of it is the UTC
+            // Timestamp#toString spelling, which a spec would parse back in the default time zone
+            // and match another partition.
+            String databaseName = "test_expire_ltz_sub_partition_" + legacyPartitionName;
+            catalog.createDatabase(databaseName, false);
+            Identifier identifier = Identifier.create(databaseName, "t");
+            catalog.createTable(
+                    identifier,
+                    Schema.newBuilder()
+                            .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                            .option(
+                                    CoreOptions.PARTITION_GENERATE_LEGACY_NAME.key(),
+                                    String.valueOf(legacyPartitionName))
+                            .option(PARTITION_TIMESTAMP_PATTERN.key(), "$dt")
+                            .option(CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(), "1")
+                            .column("col", DataTypes.STRING())
+                            .column("dt", DataTypes.TIMESTAMP(0))
+                            .column("ts", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0))
+                            .partitionKeys("dt", "ts")
+                            .build(),
+                    false);
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            Timestamp day = Timestamp.fromEpochMillis(0);
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(BinaryString.fromString("00:00Z"), day, day));
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString("05:00Z"),
+                                day,
+                                Timestamp.fromEpochMillis(5 * 60 * 60 * 1000L)));
+                commit.commit(write.prepareCommit());
+            }
+
+            table = table.copy(valuesTimeExpirationOptions());
+            table.store().newPartitionExpire("expire", table).expire(Long.MAX_VALUE);
+
+            assertThat(readFirstColumn(table)).containsExactly("05:00Z");
+            // the metastore partition is dropped by its stored name
+            assertThat(
+                            ((HiveCatalog) catalog)
+                                    .getHmsClient()
+                                    .listPartitions(databaseName, "t", Short.MAX_VALUE))
+                    .hasSize(1);
+        } finally {
+            TimeZone.setDefault(defaultZone);
+        }
+    }
+
+    private static Map<String, String> valuesTimeExpirationOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), "1 d");
+        options.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "0 s");
+        options.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), "values-time");
+        return options;
+    }
+
+    private static List<String> readFirstColumn(FileStoreTable table) throws Exception {
+        List<String> values = new ArrayList<>();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(row -> values.add(row.getString(0).toString()));
+        return values;
     }
 
     @Test

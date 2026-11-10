@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.partition.PartitionStatistics;
 
 import java.util.List;
@@ -32,6 +33,13 @@ public interface PartitionModification extends AutoCloseable {
             throws Catalog.TableNotExistException;
 
     void dropPartitions(List<Map<String, String>> partitions) throws Catalog.TableNotExistException;
+
+    /** Drop partitions given by their partition rows, see {@link Catalog#dropBinaryPartitions}. */
+    default void dropBinaryPartitions(List<BinaryRow> partitions)
+            throws Catalog.TableNotExistException {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support dropping partitions by partition rows.");
+    }
 
     void alterPartitions(List<PartitionStatistics> partitions)
             throws Catalog.TableNotExistException;
@@ -49,6 +57,12 @@ public interface PartitionModification extends AutoCloseable {
             public void dropPartitions(List<Map<String, String>> partitions)
                     throws Catalog.TableNotExistException {
                 catalog.dropPartitions(identifier, partitions);
+            }
+
+            @Override
+            public void dropBinaryPartitions(List<BinaryRow> partitions)
+                    throws Catalog.TableNotExistException {
+                catalog.dropBinaryPartitions(identifier, partitions);
             }
 
             @Override

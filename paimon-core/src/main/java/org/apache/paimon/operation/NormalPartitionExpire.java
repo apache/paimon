@@ -206,30 +206,26 @@ public class NormalPartitionExpire implements PartitionExpire {
 
     private void doBatchExpire(
             List<ExpiredPartition> expiredBatchPartitions, long commitIdentifier) {
+        // Drop the selected partitions themselves: a stored name is not always parsed back to the
+        // same partition, e.g. when it equals the default partition name or is a TIMESTAMP_LTZ
+        // value spelled in UTC but parsed in the local time zone.
+        List<BinaryRow> partitions =
+                expiredBatchPartitions.stream().map(p -> p.partition).collect(Collectors.toList());
         if (partitionModification != null) {
-            // the metastore identifies partitions by their stored names
-            List<Map<String, String>> names =
-                    expiredBatchPartitions.stream().map(p -> p.name).collect(Collectors.toList());
+            // the metastore still drops its metadata by the stored names
             try {
-                partitionModification.dropPartitions(names);
+                partitionModification.dropBinaryPartitions(partitions);
             } catch (Catalog.TableNotExistException e) {
                 throw new RuntimeException(e);
             }
         } else {
-            // Drop the selected partitions themselves: a stored name is not always parsed back
-            // to the same partition, e.g. when it equals the default partition name or is a
-            // TIMESTAMP_LTZ value spelled in UTC but parsed in the local time zone.
-            commit.dropBinaryPartitions(
-                    expiredBatchPartitions.stream()
-                            .map(p -> p.partition)
-                            .collect(Collectors.toList()),
-                    commitIdentifier);
+            commit.dropBinaryPartitions(partitions, commitIdentifier);
         }
     }
 
     /**
-     * A partition selected for expiration. The stored name is for reporting and the metastore,
-     * while local deletion uses the original partition.
+     * A partition selected for expiration. The stored name is for reporting, while deletion uses
+     * the original partition.
      */
     private static class ExpiredPartition {
 

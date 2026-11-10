@@ -89,6 +89,7 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Consumer;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
@@ -143,6 +144,35 @@ public class PartitionExpireTest {
                     @Override
                     public void dropPartitions(List<Map<String, String>> partitions)
                             throws Catalog.TableNotExistException {
+                        dropPartitions(
+                                partitions,
+                                commit ->
+                                        commit.dropPartitions(
+                                                partitions, BatchWriteBuilder.COMMIT_IDENTIFIER));
+                    }
+
+                    @Override
+                    public void dropBinaryPartitions(List<BinaryRow> partitions)
+                            throws Catalog.TableNotExistException {
+                        // Model HiveCatalog: metadata by the stored names, data by the rows.
+                        List<Map<String, String>> partitionSpecs = new ArrayList<>();
+                        for (BinaryRow partition : partitions) {
+                            partitionSpecs.add(
+                                    table.store()
+                                            .pathFactory()
+                                            .partitionComputer()
+                                            .generatePartValues(partition));
+                        }
+                        dropPartitions(
+                                partitionSpecs,
+                                commit ->
+                                        commit.dropBinaryPartitions(
+                                                partitions, BatchWriteBuilder.COMMIT_IDENTIFIER));
+                    }
+
+                    private void dropPartitions(
+                            List<Map<String, String>> partitions,
+                            Consumer<FileStoreCommit> dropData) {
                         dropPartitionMetadata(partitions);
                         try (FileStoreCommit commit =
                                 table.store()
@@ -150,7 +180,7 @@ public class PartitionExpireTest {
                                                 createCommitUser(
                                                         table.coreOptions().toConfiguration()),
                                                 null)) {
-                            commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
+                            dropData.accept(commit);
                         }
                         // Model HiveCatalog's cleanup of markers after deleting ordinary data.
                         List<Map<String, String>> donePartitions = new ArrayList<>();
@@ -440,11 +470,14 @@ public class PartitionExpireTest {
         assertThat(readTimestamps()).containsExactly(retainedTs);
     }
 
-    @Test
-    public void testExpireTimestampPartitionNamedAsDefaultPartition() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testExpireTimestampPartitionNamedAsDefaultPartition(boolean metastorePartitioned)
+            throws Exception {
         // The epoch partition is stored under the same name as the NULL partition, so parsing
         // the name back would drop the NULL partition instead of the selected one.
         Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(METASTORE_PARTITIONED_TABLE.key(), String.valueOf(metastorePartitioned));
         tableOptions.put(CoreOptions.PARTITION_DEFAULT_NAME.key(), "1970-01-01 00:00:00");
         tableOptions.put(CoreOptions.PARTITION_GENERATE_LEGACY_NAME.key(), "false");
         createPartitionedTable(
@@ -462,24 +495,28 @@ public class PartitionExpireTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testExpireDropsSelectedLocalZonedTimestampPartition(boolean legacyPartitionName)
-            throws Exception {
+    @CsvSource({"false, false", "false, true", "true, false", "true, true"})
+    public void testExpireDropsSelectedLocalZonedTimestampPartition(
+            boolean legacyPartitionName, boolean metastorePartitioned) throws Exception {
         TimeZone defaultZone = TimeZone.getDefault();
         TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"));
         try {
             // The LTZ key is not used for time extraction. Its reported value is the UTC
             // Timestamp#toString spelling, which a partition spec would parse back in the default
             // time zone and match another partition.
+            Map<String, String> tableOptions = new HashMap<>();
+            tableOptions.put(
+                    CoreOptions.PARTITION_GENERATE_LEGACY_NAME.key(),
+                    String.valueOf(legacyPartitionName));
+            tableOptions.put(
+                    METASTORE_PARTITIONED_TABLE.key(), String.valueOf(metastorePartitioned));
             createPartitionedTable(
                     RowType.of(
                             DataTypes.TIMESTAMP(0),
                             DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0),
                             VarCharType.STRING_TYPE),
                     Arrays.asList("f0", "f1"),
-                    Collections.singletonMap(
-                            CoreOptions.PARTITION_GENERATE_LEGACY_NAME.key(),
-                            String.valueOf(legacyPartitionName)));
+                    tableOptions);
             Timestamp day = Timestamp.fromLocalDateTime(date(1));
             write(GenericRow.of(day, day, BinaryString.fromString("00:00Z")));
             write(
@@ -516,7 +553,7 @@ public class PartitionExpireTest {
             throws Exception {
         SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         Map<String, String> tableOptions = new HashMap<>(extraOptions);
-        tableOptions.put(METASTORE_PARTITIONED_TABLE.key(), "false");
+        tableOptions.putIfAbsent(METASTORE_PARTITIONED_TABLE.key(), "false");
         schemaManager.createTable(
                 new Schema(rowType.getFields(), partitionKeys, emptyList(), tableOptions, ""));
         newTable();

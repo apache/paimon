@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -385,6 +386,15 @@ public class CachingCatalog extends DelegateCatalog {
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         wrapped.dropPartitions(identifier, partitions);
+        if (partitionCache != null) {
+            partitionCache.invalidate(identifier);
+        }
+    }
+
+    @Override
+    public void dropBinaryPartitions(Identifier identifier, List<BinaryRow> partitions)
+            throws TableNotExistException {
+        wrapped.dropBinaryPartitions(identifier, partitions);
         if (partitionCache != null) {
             partitionCache.invalidate(identifier);
         }

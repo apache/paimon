@@ -218,6 +218,15 @@ public class TableCommitImpl implements InnerTableCommit {
         commit.dropPartitions(partitionSpecs, COMMIT_IDENTIFIER);
     }
 
+    /**
+     * Truncate the given partitions. Unlike {@link #truncatePartitions}, the partitions are not
+     * parsed back from their names, see {@link FileStoreCommit#dropBinaryPartitions}.
+     */
+    public void truncateBinaryPartitions(List<BinaryRow> partitions) {
+        commit.withOperation(Snapshot.Operation.TRUNCATE);
+        commit.dropBinaryPartitions(partitions, COMMIT_IDENTIFIER);
+    }
+
     @Override
     public void updateStatistics(Statistics statistics) {
         commit.commitStatistics(statistics, COMMIT_IDENTIFIER);
