@@ -268,6 +268,11 @@ The method returns the table and uses the existing predicate-update backend.
 For external per-row values with strict matching of every supplied ID, use
 `update_columns_by_row_id` instead.
 
+`_ROW_ID` conditions are currently supported only by `update`, not by
+`delete` or `scan().where(...)`. Calling `with_row_id()` on a scan adds the
+ID to its output; it does not enable `_ROW_ID` string conditions. Use
+`take_row_ids(...)` for lookups by row ID.
+
 On a frame table, updating ordinary columns leaves the configured
 `video-frame-field` untouched. Replacing that field requires the specialized
 `replace_video()` API described in [Video Frame Storage](./video#update-frame-rows-and-replace-a-video).
@@ -317,7 +322,7 @@ result = frames.compute_columns(
 result = frames.update_columns_by_row_id(pa.table({
     "_ROW_ID": pa.array([1, 0], type=pa.int64()),
     "label": ["vehicle", "pedestrian"],
-}))
+}), columns=["label"])
 ```
 
 For embeddings, declare a fixed-size list such as
@@ -351,8 +356,12 @@ rows with the same key. Multiple source rows matching the same target row are
 rejected by the MERGE executor. Partition and match keys cannot be updated;
 use `replace_video` to replace configured video-frame columns.
 
-`update_columns_by_row_id(data)` accepts one local Arrow Table containing
-`_ROW_ID` and at least one existing output column. IDs must be unique, non-NULL,
+`update_columns_by_row_id(data, *, columns)` accepts one local Arrow Table
+and requires an explicit output column name or sequence of names. The input
+must contain `_ROW_ID` and each selected output column exactly once. Only
+selected columns are written; extra input columns are ignored, so carrying old
+values for other columns does not overwrite their current values.
+IDs must be unique, non-NULL,
 non-negative integers representable as int64. All IDs must identify visible rows
 in the captured snapshot; missing or deleted IDs reject the entire call before
 writing. Input order does not affect matching, even when business keys repeat.
@@ -362,6 +371,11 @@ nullability. Other system columns and video-frame outputs are rejected; use
 explicit NULL values clear nullable outputs. No rows or columns are added.
 Empty input creates no data snapshot. The method does not remap historical row
 IDs or determine whether external annotations are stale.
+
+Rollback followed by a new append can reuse both row IDs and numeric snapshot
+IDs. Discard pending annotations from the rolled-back history before writing
+them back. A matching numeric snapshot ID alone does not establish that those
+annotations are still valid.
 
 `merge_columns` delegates matching and updates to the standard MERGE executor.
 With a compatible `pypaimon_rust` runtime and `write.native.enabled=true`,
@@ -419,8 +433,9 @@ or delete prepared files after a commit error.
 
 ## Delete
 
-`delete` removes rows matched by a SQL-like predicate. It uses the same
-predicate syntax as `scan().where(...)` and `update(...)`. Row-level deletes
+`delete` removes rows matched by a SQL-like predicate on business columns.
+It shares business-column predicate syntax with `scan().where(...)` and
+`update(...)`; `_ROW_ID` conditions are supported only by `update`. Row-level deletes
 require `deletion-vectors.enabled` set to `true` when creating the table.
 On partitioned tables, a predicate that references only partition columns uses
 the partition drop path.

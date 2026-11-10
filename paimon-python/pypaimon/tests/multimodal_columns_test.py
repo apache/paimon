@@ -560,7 +560,7 @@ def test_column_updates_preserve_files_if_commit_response_is_lost(frames, method
             if method == "merge_columns":
                 frames.merge_columns(pa.table({"id": [0], "label": ["committed"]}), on="id")
             elif method == "update_columns_by_row_id":
-                frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["committed"]}))
+                frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["committed"]}), columns=["label"])
             else:
                 frames.compute_columns(["label"], inputs=["id"], fn=lambda batch: pa.table({
                     "label": ["committed"] * batch.num_rows}))
@@ -655,7 +655,7 @@ def test_enrichment_rejects_historical_views(frames):
     with pytest.raises(ValueError, match="current full-table"):
         historical.compute_columns(["label"], inputs=["label"], fn=lambda batch: batch)
     with pytest.raises(ValueError, match="current full-table"):
-        historical.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["old"]}))
+        historical.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["old"]}), columns=["label"])
 
 
 @pytest.mark.parametrize("options", [
@@ -813,7 +813,7 @@ def test_update_columns_by_row_id_matches_duplicate_keys_without_rewriting_media
         [[5], [1]], type=id_type)})
     with patch.object(raw.file_io, "read_ranges_coalesced",
                       side_effect=AssertionError("must not fetch media")):
-        result = frames.update_columns_by_row_id(data)
+        result = frames.update_columns_by_row_id(data, columns="label")
 
     assert isinstance(result, pmm.ColumnUpdateResult)
     assert result.source_snapshot_id == snapshot
@@ -830,6 +830,31 @@ def test_update_columns_by_row_id_matches_duplicate_keys_without_rewriting_media
     assert all(file.write_cols == ["label"] for name, file in _files(frames).items() if name not in files)
     assert frames.scan(snapshot_id=snapshot).select(["label"]).to_arrow()["label"].to_pylist() == [
         "old", "old", "old", "old", "old", "duplicate"]
+
+
+def test_update_columns_by_row_id_only_writes_explicit_columns(frames):
+    frames.add_columns(pa.schema([("score", pa.int64())]))
+    frames.update("id = 1", {"label": "current"})
+    files, blobs = set(_files(frames)), _blobs(frames)
+    payload = pa.table({
+        "_ROW_ID": [1], "id": [999], "label": ["old"],
+        "image": pa.array([b"stale media"], type=pa.large_binary()), "score": [42], "unused": ["ignored"]})
+    with patch.object(frames.raw_table.file_io, "read_ranges_coalesced",
+                      side_effect=AssertionError("must not fetch media")):
+        result = frames.update_columns_by_row_id(payload, columns=["score"])
+    assert result.updated_rows == 1
+    assert result.added_columns == ()
+    assert _rows(frames, ["id", "label", "score"]) == [
+        {"id": i, "label": "current" if i == 1 else "old", "score": 42 if i == 1 else None} for i in range(5)]
+    assert _blobs(frames) == blobs
+    assert all(file.write_cols == ["score"] for name, file in _files(frames).items() if name not in files)
+
+
+def test_update_columns_by_row_id_requires_explicit_columns(frames):
+    snapshot = _snapshot(frames)
+    with pytest.raises(TypeError, match="columns"):
+        frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}))
+    assert _snapshot(frames) == snapshot
 
 
 @pytest.mark.parametrize("row_order", [
@@ -849,7 +874,7 @@ def test_update_columns_by_row_id_preserves_deletions_and_crosses_partitions(tmp
     commit = BatchTableCommit.commit
     with patch.object(BatchTableCommit, "commit", autospec=True, side_effect=commit) as publish:
         result = table.update_columns_by_row_id(pa.table({
-            "_ROW_ID": [row_ids[5], row_ids[0]], "label": ["last", None]}))
+            "_ROW_ID": [row_ids[5], row_ids[0]], "label": ["last", None]}), columns=["label"])
     publish.assert_called_once()
     messages = publish.call_args[0][1]
     assert len(messages) == 2
@@ -880,29 +905,32 @@ def test_update_columns_by_row_id_rejects_invalid_ids_before_writing(frames, ids
     with patch.object(BatchTableUpdate, "update_by_arrow_with_row_id",
                       side_effect=AssertionError("must not write")):
         with pytest.raises(error, match=message):
-            frames.update_columns_by_row_id(pa.table({"_ROW_ID": ids, "label": ["new"] * len(ids)}))
+            frames.update_columns_by_row_id(pa.table({"_ROW_ID": ids, "label": ["new"] * len(ids)}), columns=["label"])
     assert _snapshot(frames) == snapshot
     assert set(_files(frames)) == files
 
 
-@pytest.mark.parametrize("data, message", [
-    ([{"_ROW_ID": 0, "label": "new"}], "pyarrow.Table"),
-    (pa.record_batch([pa.array([0]), pa.array(["new"])], names=["_ROW_ID", "label"]), "pyarrow.Table"),
-    (pa.table({"label": ["new"]}), "exactly one _ROW_ID"),
-    (pa.table({"_ROW_ID": [0]}), "unique column names"),
-    (pa.table({"_ROW_ID": [0], "absent": ["new"]}), "Output columns do not exist"),
-    (pa.table({"_ROW_ID": [0], "_SEQUENCE_NUMBER": [1]}), "system columns"),
-    (pa.table({"_ROW_ID": [0], "label": [123]}), "Incompatible type"),
+@pytest.mark.parametrize("data, columns, message", [
+    ([{"_ROW_ID": 0, "label": "new"}], ["label"], "pyarrow.Table"),
+    (pa.record_batch([pa.array([0]), pa.array(["new"])], names=["_ROW_ID", "label"]), ["label"], "pyarrow.Table"),
+    (pa.table({"label": ["new"]}), ["label"], "exactly one _ROW_ID"),
+    (pa.table({"_ROW_ID": [0]}), [], "unique column names"),
+    (pa.table({"_ROW_ID": [0], "absent": ["new"]}), ["absent"], "Output columns do not exist"),
+    (pa.table({"_ROW_ID": [0], "_SEQUENCE_NUMBER": [1]}), ["_SEQUENCE_NUMBER"], "system columns"),
+    (pa.table({"_ROW_ID": [0], "label": [123]}), ["label"], "Incompatible type"),
+    (pa.table({"_ROW_ID": [0], "label": ["new"]}), ["id"], "exactly one id column"),
+    (pa.table({"_ROW_ID": [0], "label": ["new"]}), ["label", "label"], "unique column names"),
+    (pa.table({"_ROW_ID": [0], "label": ["new"]}), ["_ROW_ID"], "system columns"),
     (pa.table([pa.array([0]), pa.array([0]), pa.array(["new"])],
-              names=["_ROW_ID", "_ROW_ID", "label"]), "exactly one _ROW_ID"),
+              names=["_ROW_ID", "_ROW_ID", "label"]), ["label"], "exactly one _ROW_ID"),
     (pa.table([pa.array([0]), pa.array(["a"]), pa.array(["b"])],
-              names=["_ROW_ID", "label", "label"]), "unique column names"),
+              names=["_ROW_ID", "label", "label"]), ["label"], "exactly one label column"),
 ])
-def test_update_columns_by_row_id_validates_input_without_schema_changes(frames, data, message):
+def test_update_columns_by_row_id_validates_input_without_schema_changes(frames, data, columns, message):
     snapshot, schema_id = _snapshot(frames), frames.raw_table.table_schema.id
     with patch.object(frames.catalog, "alter_table", side_effect=AssertionError("must not alter schema")):
         with pytest.raises(ValueError, match=message):
-            frames.update_columns_by_row_id(data)
+            frames.update_columns_by_row_id(data, columns=columns)
     assert _snapshot(frames) == snapshot
     assert frames.catalog.get_table(frames.identifier).table_schema.id == schema_id
 
@@ -917,7 +945,7 @@ def test_update_columns_by_row_id_validates_input_without_schema_changes(frames,
 def test_update_columns_by_row_id_rejects_unsupported_views(frames, options, message):
     snapshot = _snapshot(frames)
     with pytest.raises(ValueError, match=message):
-        frames.copy(options).update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}))
+        frames.copy(options).update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
     assert _snapshot(frames) == snapshot
 
 
@@ -927,9 +955,9 @@ def test_update_columns_by_row_id_rejects_partition_and_video_outputs(tmp_path):
         "videos", schema=pa.schema([("part", pa.string()), ("video", pa.large_binary())]),
         partitioned=["part"], options={"video-frame-field": "video"})
     with pytest.raises(ValueError, match="partition columns"):
-        table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "part": ["new"]}))
+        table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "part": ["new"]}), columns=["part"])
     with pytest.raises(ValueError, match="replace_video"):
-        table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "video": [b"new"]}))
+        table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "video": [b"new"]}), columns=["video"])
     assert table.raw_table.snapshot_manager().get_latest_snapshot() is None
 
 
@@ -940,7 +968,7 @@ def test_update_columns_by_row_id_enforces_existing_nullability(tmp_path):
         data=[{"value": 1}], options={"file.format": "parquet"})
     snapshot = _snapshot(table)
     with pytest.raises(ValueError, match="non-null column value"):
-        table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "value": [None]}))
+        table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "value": [None]}), columns=["value"])
     assert _snapshot(table) == snapshot
     assert table.scan().to_list() == [{"value": 1}]
 
@@ -950,12 +978,12 @@ def test_update_columns_by_row_id_backfills_vectors_and_replaces_blobs(frames):
     frames.add_columns(pa.schema([("embedding", vector_type)]))
     blobs = _blobs(frames)
     result = frames.update_columns_by_row_id(pa.table({
-        "_ROW_ID": [3, 1], "embedding": pa.array([[3., 4.], [1., 2.]], type=vector_type)}))
+        "_ROW_ID": [3, 1], "embedding": pa.array([[3., 4.], [1., 2.]], type=vector_type)}), columns=["embedding"])
     assert result.added_columns == ()
     assert result.updated_rows == 2
     assert _blobs(frames) == blobs
     frames.update_columns_by_row_id(pa.table({
-        "_ROW_ID": [1, 3], "image": pa.array([b"replacement", None], type=pa.large_binary())}))
+        "_ROW_ID": [1, 3], "image": pa.array([b"replacement", None], type=pa.large_binary())}), columns=["image"])
     assert _rows(frames, ["id", "embedding"]) == [
         {"id": i, "embedding": [float(i), float(i + 1)] if i in (1, 3) else None} for i in range(5)]
     _, actual = frames.scan().select(["id", "image"]).read_blobs()
@@ -975,7 +1003,8 @@ def test_update_columns_by_row_id_rejects_all_targets_before_writing(frames, inv
     with patch.object(BatchTableUpdate, "update_by_arrow_with_row_id",
                       side_effect=AssertionError("must not write")):
         with pytest.raises(pmm.ColumnUpdateError) as failure:
-            frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0, invalid], "label": ["new", "bad"]}))
+            frames.update_columns_by_row_id(
+                pa.table({"_ROW_ID": [0, invalid], "label": ["new", "bad"]}), columns=["label"])
     assert failure.value.phase == "validate"
     assert failure.value.schema_changed is False
     assert failure.value.commit_outcome == "not_started"
@@ -995,7 +1024,7 @@ def test_update_columns_by_row_id_empty_input_does_not_commit(frames, tmp_path, 
     snapshot = table.raw_table.snapshot_manager().get_latest_snapshot()
     with patch.object(BatchTableCommit, "commit", side_effect=AssertionError("must not commit")):
         result = table.update_columns_by_row_id(pa.table({
-            "_ROW_ID": pa.array([], type=pa.int64()), "label": pa.array([], type=pa.string())}))
+            "_ROW_ID": pa.array([], type=pa.int64()), "label": pa.array([], type=pa.string())}), columns=["label"])
     assert result.source_snapshot_id == (None if snapshot is None else snapshot.id)
     assert result.snapshot_id == result.source_snapshot_id
     assert result.updated_rows == 0
@@ -1017,7 +1046,7 @@ def test_update_columns_by_row_id_rejects_ids_in_an_empty_source_snapshot(tmp_pa
 
     with patch.object(_ColumnUpdate, "__enter__", maybe_append):
         with pytest.raises(pmm.ColumnUpdateError) as failure:
-            table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}))
+            table.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
     assert failure.value.source_snapshot_id is None
     assert failure.value.phase == "validate"
     assert "not found or deleted: [0]" in str(failure.value.__cause__)
@@ -1044,14 +1073,14 @@ def test_update_columns_by_row_id_pins_validation_and_writing_to_one_snapshot(fr
 
     with patch.object(_ColumnUpdate, "__enter__", append_after_capture), patch.object(
             BatchTableUpdate, "update_by_arrow_with_row_id", capture_write):
-        result = frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}))
+        result = frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
     assert result.source_snapshot_id == snapshot
     assert write_snapshots == [snapshot]
     assert _rows(frames, ["id", "label"])[-1] == {"id": 5, "label": "appended"}
 
     with patch.object(_ColumnUpdate, "__enter__", append_after_capture):
         with pytest.raises(pmm.ColumnUpdateError, match="validate"):
-            frames.update_columns_by_row_id(pa.table({"_ROW_ID": [6], "label": ["not in snapshot"]}))
+            frames.update_columns_by_row_id(pa.table({"_ROW_ID": [6], "label": ["not in snapshot"]}), columns=["label"])
 
 
 @pytest.mark.python_write
@@ -1073,13 +1102,15 @@ def test_update_columns_by_row_id_late_write_failure_does_not_publish(frames):
 
     with patch.object(PythonTableUpdateByRowId, "_write_group", fail_second):
         with pytest.raises(pmm.ColumnUpdateError) as failure:
-            frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0, 5], "label": ["first", "second"]}))
+            frames.update_columns_by_row_id(
+                pa.table({"_ROW_ID": [0, 5], "label": ["first", "second"]}), columns=["label"])
     assert len(written) == 1
     assert failure.value.phase == "write"
     assert failure.value.commit_outcome == "not_started"
     assert _snapshot(frames) == snapshot
     assert all(row["label"] == "old" for row in _rows(frames, ["id", "label"]))
-    result = frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0, 5], "label": ["first", "second"]}))
+    result = frames.update_columns_by_row_id(
+        pa.table({"_ROW_ID": [0, 5], "label": ["first", "second"]}), columns=["label"])
     assert result.updated_rows == 2
     assert _snapshot(frames) == snapshot + 1
 
@@ -1095,14 +1126,16 @@ def test_update_columns_by_row_id_uses_native_update(frames, native_read):
     with patch.object(PythonTableUpdate, "update_by_arrow_with_row_id",
                       side_effect=AssertionError("must not write invalid IDs")):
         with pytest.raises(pmm.ColumnUpdateError) as failure:
-            table.update_columns_by_row_id(pa.table({"_ROW_ID": [0, 4], "label": ["new", "deleted"]}))
+            table.update_columns_by_row_id(
+                pa.table({"_ROW_ID": [0, 4], "label": ["new", "deleted"]}), columns=["label"])
     assert failure.value.phase == "validate"
     assert failure.value.commit_outcome == "not_started"
     assert "not found or deleted: [4]" in str(failure.value.__cause__)
     assert _snapshot(table) == snapshot
     with patch.object(PythonTableUpdate, "update_by_arrow_with_row_id",
                       side_effect=AssertionError("must use native update")):
-        result = table.update_columns_by_row_id(pa.table({"_ROW_ID": [3, 1], "label": ["three", "one"]}))
+        result = table.update_columns_by_row_id(
+            pa.table({"_ROW_ID": [3, 1], "label": ["three", "one"]}), columns=["label"])
     assert result.updated_rows == 2
     assert _rows(table, ["id", "label"]) == [
         {"id": i, "label": "one" if i == 1 else "three" if i == 3 else "old"} for i in range(4)]
@@ -1117,7 +1150,7 @@ def test_update_columns_by_row_id_validation_read_failure_never_writes(frames):
     with patch.object(TableRead, "to_arrow", side_effect=read_error), patch.object(
             BatchTableUpdate, "update_by_arrow_with_row_id", side_effect=AssertionError("must not write")):
         with pytest.raises(pmm.ColumnUpdateError) as failure:
-            frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}))
+            frames.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
     assert failure.value.phase == "validate"
     assert failure.value.commit_outcome == "not_started"
     assert failure.value.__cause__ is read_error
@@ -1144,7 +1177,8 @@ def test_update_columns_by_row_id_preserves_commit_state_when_close_fails(frames
             BatchTableCommit, "close", failed_close), patch.object(
             BatchTableCommit, "abort", side_effect=AssertionError("must preserve committed files")):
         with pytest.raises(pmm.ColumnUpdateError) as failure:
-            frames.update_columns_by_row_id(pa.table({"_ROW_ID": [3, 0], "label": ["three", "zero"]}))
+            frames.update_columns_by_row_id(
+                pa.table({"_ROW_ID": [3, 0], "label": ["three", "zero"]}), columns=["label"])
     assert failure.value.phase == ("commit" if lose_response else "close")
     assert failure.value.commit_outcome == ("unknown" if lose_response else "committed")
     assert failure.value.__cause__ is (commit_error if lose_response else close_error)
@@ -1163,7 +1197,7 @@ def test_update_columns_by_row_id_does_not_replay_failed_native_execution(frames
         with patch("pypaimon.write.update_dispatch.create_python_update_operation",
                    side_effect=AssertionError("must not replay after execution")):
             with pytest.raises(pmm.ColumnUpdateError) as failure:
-                frames.update_columns_by_row_id(pa.table({"_ROW_ID": [1], "label": ["new"]}))
+                frames.update_columns_by_row_id(pa.table({"_ROW_ID": [1], "label": ["new"]}), columns=["label"])
     prepare.assert_called_once()
     assert prepare.call_args[0][0] == "update"
     assert prepare.call_args[0][1]._read_snapshot.id == snapshot

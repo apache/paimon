@@ -244,7 +244,7 @@ def merge_columns(owner, data, *, on):
         return operation.finish(None, commit=commit, messages=messages)
 
 
-def update_columns_by_row_id(owner, data):
+def update_columns_by_row_id(owner, data, *, columns):
     if not isinstance(data, pa.Table):
         raise ValueError("data must be a pyarrow.Table.")
     raw = owner.raw_table
@@ -254,7 +254,7 @@ def update_columns_by_row_id(owner, data):
     row_id = SpecialFields.ROW_ID.name
     if data.column_names.count(row_id) != 1:
         raise ValueError("Input must contain exactly one _ROW_ID column.")
-    columns = [name for name in data.column_names if name != row_id]
+    columns = [columns] if isinstance(columns, str) else list(columns)
     _validate_names(columns, "Output")
     missing = set(columns).difference(raw.field_names)
     if missing:
@@ -263,6 +263,9 @@ def update_columns_by_row_id(owner, data):
         raise ValueError("update_columns_by_row_id cannot update partition columns.")
     if set(columns).intersection(raw.options.video_frame_fields()):
         raise ValueError("Use replace_video() to update video-frame columns.")
+    for name in columns:
+        if data.column_names.count(name) != 1:
+            raise ValueError("Input must contain exactly one %s column." % name)
     row_ids = normalize_row_ids(data[row_id])
     if len(pc.unique(row_ids)) != data.num_rows:
         raise ValueError("Input data contains duplicate _ROW_ID values.")

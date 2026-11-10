@@ -3399,6 +3399,20 @@ class MultimodalTableTest(unittest.TestCase):
                 self.assertIs(users.update(where="_ROW_ID >= 0", values={"label": "new"}), users)
                 self.assertEqual([], users.scan().to_list())
 
+    def test_update_by_row_id_with_inverted_between(self):
+        users = self.conn.create_table(
+            "users", schema=_schema({"id": pa.int32(), "label": pa.string()}),
+            data=[{"id": i, "label": "old"} for i in range(3)], options=_PARQUET_OPTIONS)
+        row_ids = {row["id"]: row["_ROW_ID"] for row in users.scan().select(["id"]).with_row_id().to_list()}
+        lower, upper = max(row_ids.values()), min(row_ids.values())
+        users.update(
+            where="_ROW_ID BETWEEN %s AND %s OR _ROW_ID = %s" % (lower, upper, row_ids[1]),
+            values={"label": "new"})
+        expected = [{"id": i, "label": "new" if i == 1 else "old"} for i in range(3)]
+        self.assertEqual(expected, users.scan().to_list())
+        users.update(where="_ROW_ID BETWEEN %s AND %s" % (lower, upper), values={"label": "empty"})
+        self.assertEqual(expected, users.scan().to_list())
+
     def test_update_row_id_predicates_keep_system_columns_read_only(self):
         users = self.conn.create_table(
             "users", schema=_schema({"id": pa.int32(), "label": pa.string()}),

@@ -146,7 +146,7 @@ result = table.compute_columns(
     ["embedding"], inputs=["image"], fn=compute_embeddings, batch_size=128)
 
 # Import external annotations carrying _ROW_ID and existing output columns.
-result = table.update_columns_by_row_id(annotations)
+result = table.update_columns_by_row_id(annotations, columns=["label"])
 ```
 
 `table` is a `pypaimon.multimodal.MultimodalTable`. `merge_columns` uses ordinary
@@ -173,7 +173,10 @@ MERGE when `write.native.enabled=true` and a compatible `pypaimon_rust` is avail
 `add_columns` and `compute_columns` can use the native shard reader and writer;
 their `fn` runs in Python.
 
-`update_columns_by_row_id` accepts one Arrow Table. `_ROW_ID` must contain
+`update_columns_by_row_id(data, *, columns)` accepts one Arrow Table and requires
+an explicit output column name or sequence of names. The input must contain
+`_ROW_ID` and each selected column exactly once. Extra input columns are ignored
+and cannot overwrite the corresponding current table values. `_ROW_ID` must contain
 unique, non-NULL, non-negative integers representable as int64. Every ID must
 identify a visible row in the captured snapshot; missing or deleted IDs reject
 the entire call before writing. Input order does not affect matching. Outputs
@@ -183,6 +186,10 @@ untouched columns retain their files. The method uses the standard Python/native
 row-ID update backend and commits all updates together. Empty input creates no
 snapshot. It does not insert rows, add columns, remap historical IDs, or check
 whether external results are stale.
+
+Rollback followed by a new append can reuse both row IDs and numeric snapshot
+IDs. Discard pending annotations from the rolled-back history before writeback;
+a matching numeric snapshot ID alone does not prove that they remain valid.
 
 `ColumnUpdateResult` reports `updated_rows`, `added_columns`, `source_snapshot_id`,
 `snapshot_id`, and `schema_id`. `updated_rows` is the backfilled row count for
