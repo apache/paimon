@@ -82,12 +82,33 @@ def _iter_arrow_table_rows(table: Table) -> Iterator[tuple]:
 
     Polars converts ``Datetime(time_unit='ns')`` values to microsecond
     ``datetime.datetime``, collapsing distinct TIMESTAMP(9) /
-    TIMESTAMP_LTZ(9) tails. Arrow ``Table.to_pylist()`` keeps those
-    nanosecond differences on the supported PyArrow versions used here.
+    TIMESTAMP_LTZ(9) tails. Prefer Arrow ``Table.to_pylist()`` when
+    present so field order and nested conversions stay unchanged.
+    Older PyArrow builds without table-level ``to_pylist`` fall back to
+    per-column ``to_pylist`` over ``table.to_batches()`` — never to
+    Polars row iteration.
     """
-    names = table.column_names
-    for row in table.to_pylist():
-        yield tuple(row[name] for name in names)
+    to_pylist = getattr(table, "to_pylist", None)
+    if callable(to_pylist):
+        names = table.column_names
+        for row in to_pylist():
+            yield tuple(row[name] for name in names)
+        return
+
+    num_columns = table.num_columns
+    if num_columns == 0:
+        for _ in range(table.num_rows):
+            yield ()
+        return
+
+    for batch in table.to_batches():
+        if batch.num_columns == 0:
+            for _ in range(batch.num_rows):
+                yield ()
+            continue
+        columns = [batch.column(i).to_pylist() for i in range(batch.num_columns)]
+        for row in zip(*columns):
+            yield tuple(row)
 
 
 class RecordBatchReader(RecordReader):
