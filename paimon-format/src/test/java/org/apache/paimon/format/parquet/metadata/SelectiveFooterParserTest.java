@@ -1181,8 +1181,9 @@ public class SelectiveFooterParserTest {
         try (ParquetFileReader reader =
                 new ParquetFileReader(
                         ParquetInputFile.fromPath(fileIO, path, length),
+                        // no withRange: a non-NO_FILTER metadata filter would keep the read
+                        // on the official parse (the selective parse does not apply it)
                         ParquetReadOptions.builder()
-                                .withRange(0, length)
                                 .set(SelectiveFooterParser.SELECTIVE_PARSER_ENABLED_KEY, "true")
                                 .set(SelectiveFooterParser.REQUESTED_COLUMNS_KEY, "id" + sep + "g")
                                 .set(SelectiveFooterParser.SKIP_STATISTICS_KEY, "true")
@@ -1220,7 +1221,6 @@ public class SelectiveFooterParserTest {
                 new ParquetFileReader(
                         ParquetInputFile.fromPath(fileIO, path, length),
                         ParquetReadOptions.builder()
-                                .withRange(0, length)
                                 .set(SelectiveFooterParser.SELECTIVE_PARSER_ENABLED_KEY, "true")
                                 .set(SelectiveFooterParser.REQUESTED_COLUMNS_KEY, "missing")
                                 .build(),
@@ -1236,7 +1236,6 @@ public class SelectiveFooterParserTest {
                 new ParquetFileReader(
                         ParquetInputFile.fromPath(fileIO, path, length),
                         ParquetReadOptions.builder()
-                                .withRange(0, length)
                                 .set(SelectiveFooterParser.REQUESTED_COLUMNS_KEY, "id")
                                 .build(),
                         null)) {
@@ -1258,13 +1257,27 @@ public class SelectiveFooterParserTest {
                 new ParquetFileReader(
                         ParquetInputFile.fromPath(fileIO, path, length),
                         ParquetReadOptions.builder()
-                                .withRange(0, length)
                                 .set(SelectiveFooterParser.SELECTIVE_PARSER_ENABLED_KEY, "true")
                                 .build(),
                         null)) {
             ParquetMetadata full = reader.getFooter();
             Assertions.assertEquals(
                     ParquetMetadata.toPrettyJSON(official), ParquetMetadata.toPrettyJSON(full));
+        }
+
+        // F: restricted range + selective properties -> the metadata filter must still apply:
+        // the selective parse does not apply it, so the read stays on the official parse and
+        // the range excludes every row group (pre-fix, the selective parse returned them all)
+        try (ParquetFileReader reader =
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(fileIO, path, length),
+                        ParquetReadOptions.builder()
+                                .withRange(0, 4)
+                                .set(SelectiveFooterParser.SELECTIVE_PARSER_ENABLED_KEY, "true")
+                                .set(SelectiveFooterParser.REQUESTED_COLUMNS_KEY, "id")
+                                .build(),
+                        null)) {
+            Assertions.assertEquals(0, reader.getFooter().getBlocks().size());
         }
     }
 
@@ -1397,6 +1410,88 @@ public class SelectiveFooterParserTest {
                 SelectiveFooterParser.parse(ByteBuffer.wrap(footer), null, converter);
         Assertions.assertEquals(
                 ParquetMetadata.toPrettyJSON(official), ParquetMetadata.toPrettyJSON(selective));
+    }
+
+    /**
+     * GEOMETRY and GEOGRAPHY (union members 17/18, supported by parquet 1.16 and Paimon's writer):
+     * their annotations must be materialized — skipping the member leaves an unset union that only
+     * fails in the converter after the whole footer has been scanned, forcing the official parser
+     * to parse the footer a second time. Projecting only id over the geospatial file must not fall
+     * back, and the annotations must survive the selective parse.
+     */
+    @Test
+    public void testGeospatialLogicalTypes() throws IOException {
+        MessageType schema =
+                new MessageType(
+                        "geo",
+                        Types.primitive(
+                                        PrimitiveType.PrimitiveTypeName.INT64,
+                                        Type.Repetition.REQUIRED)
+                                .named("id"),
+                        Types.primitive(
+                                        PrimitiveType.PrimitiveTypeName.BINARY,
+                                        Type.Repetition.OPTIONAL)
+                                .as(LogicalTypeAnnotation.geometryType("OGC:CRS84"))
+                                .named("geom"),
+                        Types.primitive(
+                                        PrimitiveType.PrimitiveTypeName.BINARY,
+                                        Type.Repetition.OPTIONAL)
+                                .as(
+                                        LogicalTypeAnnotation.geographyType(
+                                                "OGC:CRS84",
+                                                org.apache.parquet.column.schema
+                                                        .EdgeInterpolationAlgorithm.SPHERICAL))
+                                .named("geog"));
+        File file = tempDir.resolve("geo.parquet").toFile();
+        SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
+        try (ParquetWriter<Group> writer =
+                ExampleParquetWriter.builder(
+                                org.apache.parquet.hadoop.util.HadoopOutputFile.fromPath(
+                                        new org.apache.hadoop.fs.Path(file.toURI().toString()),
+                                        new Configuration()))
+                        .withConf(new Configuration())
+                        .withType(schema)
+                        .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+                        .withRowGroupSize(1024)
+                        .build()) {
+            for (int i = 0; i < 20; i++) {
+                Group group = groupFactory.newGroup();
+                group.append("id", (long) i);
+                group.append(
+                        "geom", Binary.fromConstantByteArray(new byte[] {(byte) i, 0x01, 0x02}));
+                group.append(
+                        "geog", Binary.fromConstantByteArray(new byte[] {(byte) i, 0x03, 0x04}));
+                writer.write(group);
+            }
+        }
+
+        byte[] footer = readFooterBytes(file);
+        ParquetMetadataConverter converter = new ParquetMetadataConverter();
+        ParquetMetadata official =
+                converter.readParquetMetadata(
+                        new ByteArrayInputStream(footer), ParquetMetadataConverter.NO_FILTER);
+
+        // full-mode equivalence: no FallbackSignalException, annotations materialize correctly
+        ParquetMetadata selective =
+                SelectiveFooterParser.parse(ByteBuffer.wrap(footer), null, converter);
+        Assertions.assertEquals(
+                ParquetMetadata.toPrettyJSON(official), ParquetMetadata.toPrettyJSON(selective));
+
+        // projecting only id: the selective parse must succeed without falling back, keep every
+        // row group, preserve the full schema (annotations included) and retain only the id chunk
+        ParquetMetadata subset =
+                SelectiveFooterParser.parse(
+                        ByteBuffer.wrap(footer),
+                        new HashSet<>(Collections.singletonList("id")),
+                        converter);
+        Assertions.assertEquals(official.getBlocks().size(), subset.getBlocks().size());
+        Assertions.assertEquals(
+                official.getFileMetaData().getSchema(), subset.getFileMetaData().getSchema());
+        for (BlockMetaData block : subset.getBlocks()) {
+            for (ColumnChunkMetaData chunk : block.getColumns()) {
+                Assertions.assertEquals("id", chunk.getPath().toDotString());
+            }
+        }
     }
 
     // ------------------------------------------------------------------ buffer variants
@@ -1746,7 +1841,6 @@ public class SelectiveFooterParserTest {
                                         ParquetFileReader.readFooter(
                                                 inputFile,
                                                 ParquetReadOptions.builder()
-                                                        .withRange(0, fileBytes.length)
                                                         .set(
                                                                 SelectiveFooterParser
                                                                         .SELECTIVE_PARSER_ENABLED_KEY,

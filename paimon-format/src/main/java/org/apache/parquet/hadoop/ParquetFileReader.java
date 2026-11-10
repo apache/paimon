@@ -235,6 +235,11 @@ public class ParquetFileReader implements Closeable {
                 // (ParquetReaderFactory sets them together when the footer option is enabled and
                 // no predicates are present). With either one absent, the official parse below
                 // runs unchanged — the risks of the selective path never reach the default path.
+                // The selective parse does not apply the metadata filter (e.g. a restricted
+                // withRange), so it only runs with NO_FILTER: any other filter can exclude row
+                // groups, and those reads stay on the official parse to keep the filter's
+                // semantics. ParquetReaderFactory passes the full-file range, which filters
+                // nothing, as NO_FILTER.
                 boolean selectiveParserEnabled =
                         "true"
                                 .equals(
@@ -243,7 +248,10 @@ public class ParquetFileReader implements Closeable {
                                                         .SELECTIVE_PARSER_ENABLED_KEY));
                 String requestedColumns =
                         options.getProperty(SelectiveFooterParser.REQUESTED_COLUMNS_KEY);
-                if (selectiveParserEnabled && requestedColumns != null && fileDecryptor == null) {
+                if (selectiveParserEnabled
+                        && requestedColumns != null
+                        && fileDecryptor == null
+                        && options.getMetadataFilter() == ParquetMetadataConverter.NO_FILTER) {
                     boolean includeStatistics =
                             !"true"
                                     .equals(

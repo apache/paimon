@@ -25,10 +25,13 @@ import org.apache.parquet.format.CompressionCodec;
 import org.apache.parquet.format.ConvertedType;
 import org.apache.parquet.format.DateType;
 import org.apache.parquet.format.DecimalType;
+import org.apache.parquet.format.EdgeInterpolationAlgorithm;
 import org.apache.parquet.format.Encoding;
 import org.apache.parquet.format.EnumType;
 import org.apache.parquet.format.FieldRepetitionType;
 import org.apache.parquet.format.FileMetaData;
+import org.apache.parquet.format.GeographyType;
+import org.apache.parquet.format.GeometryType;
 import org.apache.parquet.format.IntType;
 import org.apache.parquet.format.JsonType;
 import org.apache.parquet.format.KeyValue;
@@ -48,6 +51,7 @@ import org.apache.parquet.format.TimestampType;
 import org.apache.parquet.format.Type;
 import org.apache.parquet.format.TypeDefinedOrder;
 import org.apache.parquet.format.UUIDType;
+import org.apache.parquet.format.VariantType;
 import org.apache.parquet.format.converter.ParquetMetadataConverter;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 
@@ -459,8 +463,70 @@ public final class SelectiveFooterParser {
                     skipEmptyStruct();
                     logicalType.setFLOAT16(new org.apache.parquet.format.Float16Type());
                     break;
+                case 16: // VARIANT {1: optional i8 specification_version}
+                    {
+                        VariantType variant = new VariantType();
+                        in.structBegin();
+                        int inner;
+                        while ((inner = in.readFieldHeader()) != ThriftCompactReader.STOP) {
+                            if (ThriftCompactReader.fieldId(inner) == 1) {
+                                variant.setSpecification_version(in.readByteValue());
+                            } else {
+                                in.skip(ThriftCompactReader.type(inner));
+                            }
+                        }
+                        in.structEnd();
+                        logicalType.setVARIANT(variant);
+                        break;
+                    }
+                case 17: // GEOMETRY {1: optional string crs}
+                    {
+                        GeometryType geometry = new GeometryType();
+                        in.structBegin();
+                        int inner;
+                        while ((inner = in.readFieldHeader()) != ThriftCompactReader.STOP) {
+                            if (ThriftCompactReader.fieldId(inner) == 1) {
+                                geometry.setCrs(in.readString());
+                            } else {
+                                in.skip(ThriftCompactReader.type(inner));
+                            }
+                        }
+                        in.structEnd();
+                        logicalType.setGEOMETRY(geometry);
+                        break;
+                    }
+                case 18: // GEOGRAPHY {1: optional string crs, 2: optional algorithm (enum)}
+                    {
+                        GeographyType geography = new GeographyType();
+                        in.structBegin();
+                        int inner;
+                        while ((inner = in.readFieldHeader()) != ThriftCompactReader.STOP) {
+                            switch (ThriftCompactReader.fieldId(inner)) {
+                                case 1:
+                                    geography.setCrs(in.readString());
+                                    break;
+                                case 2:
+                                    geography.setAlgorithm(
+                                            EdgeInterpolationAlgorithm.findByValue(in.readI32()));
+                                    break;
+                                default:
+                                    in.skip(ThriftCompactReader.type(inner));
+                            }
+                        }
+                        in.structEnd();
+                        logicalType.setGEOGRAPHY(geography);
+                        break;
+                    }
                 default:
-                    in.skip(ThriftCompactReader.type(header));
+                    // An unknown future member cannot be materialized, and skipping it would
+                    // leave an unset union that makes the converter throw only after the whole
+                    // footer has been scanned — the official parser would then parse the footer
+                    // a second time. Fail fast into the fallback instead.
+                    throw new FallbackSignalException(
+                            "unsupported logical type member "
+                                    + ThriftCompactReader.fieldId(header)
+                                    + " at "
+                                    + in.position());
             }
         }
         in.structEnd();
