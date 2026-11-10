@@ -97,7 +97,8 @@ Grouped fields must use JSON-native Arrow types: null, boolean, integer,
 floating point, string, list, or struct, including nested combinations.
 Binary, temporal, decimal, map, and extension types in these JSON groups are
 rejected before any target table is created. Episode fields without `/` retain
-their original names and Arrow types as columns in `_episodes`.
+their original names and Paimon-supported Arrow types as columns in `_episodes`;
+unsupported types are rejected before table creation.
 Control-field statistics reflect merged IDs; their original quantiles are
 omitted. Training reads skip `stats`. Repeated task/subtask text within one
 source is rejected before creating tables to avoid losing original frame IDs.

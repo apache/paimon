@@ -220,6 +220,42 @@ def test_append_rejects_incompatible_source_without_writing(setup):
     assert rows(conn, "robot_datasets").num_rows == 1
 
 
+@pytest.mark.parametrize("group_first", [False, True])
+def test_append_rejects_episode_group_plain_column_collision(setup, group_first):
+    conn, sources = setup
+    for index, uri in enumerate(sources):
+        path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
+        grouped = (index == 0) == group_first
+        name = "camera_intrinsics/head_left" if grouped else "camera_intrinsics"
+        values = pa.array([[1.], [2.]] if grouped else ["plain one", "plain two"])
+        pq.write_table(pq.read_table(path).append_column(name, values), path)
+    conn.load_from_lerobot("robot", [sources[0]])
+    before = episode_rows(conn, "robot_episodes")["camera_intrinsics"].to_pylist()
+
+    with pytest.raises(ValueError, match="JSON groups conflict with plain columns"):
+        conn.append_to_lerobot("robot", sources[1])
+
+    assert episode_rows(conn, "robot_episodes")["camera_intrinsics"].to_pylist() == before
+    assert rows(conn, "robot_frames").num_rows == 5
+    assert rows(conn, "robot_datasets").num_rows == 1
+
+
+def test_append_preserves_episode_group_kind(setup):
+    conn, sources = setup
+    for index, uri in enumerate(sources):
+        path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
+        values = pa.array([[float(index)], [float(index + 1)]])
+        pq.write_table(pq.read_table(path).append_column(
+            "camera_intrinsics/head_left", values), path)
+    conn.load_from_lerobot("robot", [sources[0]])
+    conn.append_to_lerobot("robot", sources[1])
+    actual = episode_rows(conn, "robot_episodes")["camera_intrinsics"].to_pylist()
+    assert [json.loads(value) for value in actual] == [
+        {"head_left": [0.]}, {"head_left": [1.]},
+        {"head_left": [1.]}, {"head_left": [2.]},
+    ]
+
+
 def test_append_episode_task_stats_use_group_vocabulary(setup):
     conn, sources = setup
     conn.load_from_lerobot("robot", [sources[0]])
@@ -1672,6 +1708,21 @@ def test_merge_rejects_episode_json_group_column_collision(setup):
         conn.load_from_lerobot("merged", sources)
     with pytest.raises(TableNotExistException):
         conn.get_table("merged_frames")
+
+
+@pytest.mark.parametrize("name,values,error", [
+    ("dataset_index/vendor", pa.array([1, 2]), "reserved column dataset_index"),
+    ("vendor_flag", pa.array([1, 2], type=pa.uint8()), "Unsupported pyarrow type: uint8"),
+])
+def test_merge_rejects_unwritable_episode_extensions_before_create(setup, name, values, error):
+    conn, sources = setup
+    path = Path(sources[0][7:]) / "meta/episodes/chunk-000/file-000.parquet"
+    pq.write_table(pq.read_table(path).append_column(name, values), path)
+    with pytest.raises(ValueError, match=error):
+        conn.load_from_lerobot("merged", sources)
+    for component in ("frames", "episodes", "datasets"):
+        with pytest.raises(TableNotExistException):
+            conn.get_table("merged_" + component)
 
 
 def test_merge_rejects_incompatible_episode_controls(setup):
