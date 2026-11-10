@@ -35,6 +35,10 @@ and optional `<table>__stats` and `<table>__subtasks` companion tables. Task tex
 remains in the task table; frames retain `task_index`. All imported tables use
 Data Evolution with row tracking.
 
+Frames with a null `subtask_index` are imported. `PaimonLeRobotDataset[index]`
+returns `None` for `subtask_index` and `subtask`. DataLoader batches use a
+validity mask for missing indices (see training below).
+
 Info and stats use `key STRING, value STRING`: each top-level info property or
 stats feature becomes one row. Each value is JSON-encoded, preserving nested
 objects, arrays, nulls, and scalar types. Decode it with `json.loads`; for example,
@@ -229,6 +233,11 @@ a partial batch. Pause writes and use `create_lerobot_tag` before training to
 pin one named snapshot on every component.
 
 ## Train with Paimon LeRobot data
+
+For datasets with `subtask_index`, `to_dataloader()` always returns integer
+`subtask_index` tensors and matching boolean `subtask_index_is_valid` masks,
+including time windows. Missing labels use `-1` with a false mask; individual
+sample reads retain `None`.
 
 For map-style training, pass an image- or video-backed table group created by
 `load_from_lerobot` to `PaimonLeRobotDataset`. A frame-only table created by

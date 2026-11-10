@@ -332,6 +332,8 @@ def _validate_frame_controls(
                    sorted(allowed_tasks)))
         seen_tasks.add(task_index)
         if subtask_indices is not None:
+            if values["subtask_index"][offset] is None:
+                continue
             subtask_index = _control_integer(
                 values["subtask_index"][offset], "subtask_index", index)
             if subtask_index not in subtask_indices:
