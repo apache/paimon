@@ -33,6 +33,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -40,7 +41,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.StringJoiner;
 import java.util.concurrent.TimeUnit;
+import java.util.jar.Attributes;
+import java.util.jar.JarOutputStream;
+import java.util.jar.Manifest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -60,9 +65,7 @@ class CdcDebeziumDeserializationSchemaTest {
                                         .getAbsolutePath(),
                                 "-Dfile.encoding=" + charset,
                                 "-cp",
-                                System.getProperty(
-                                        "surefire.test.class.path",
-                                        System.getProperty("java.class.path")),
+                                createClasspathJar().toString(),
                                 CharsetCheck.class.getName(),
                                 charset)
                         .redirectErrorStream(true)
@@ -80,6 +83,27 @@ class CdcDebeziumDeserializationSchemaTest {
         } finally {
             process.destroyForcibly();
         }
+    }
+
+    private Path createClasspathJar() throws IOException {
+        String classpath =
+                System.getProperty(
+                        "surefire.test.class.path", System.getProperty("java.class.path"));
+        StringJoiner entries = new StringJoiner(" ");
+        for (String entry : classpath.split(File.pathSeparator)) {
+            entries.add(new File(entry).toURI().toASCIIString());
+        }
+
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().put(Attributes.Name.CLASS_PATH, entries.toString());
+        Path classpathJar = tempDir.resolve("classpath.jar");
+        // Keep the child JVM command line below the Windows length limit.
+        try (JarOutputStream ignored =
+                new JarOutputStream(Files.newOutputStream(classpathJar), manifest)) {
+            // The manifest references the original classpath; no class entries are needed.
+        }
+        return classpathJar;
     }
 
     /** Entry point for the JVM with an explicitly configured default charset. */
