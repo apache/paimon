@@ -29,6 +29,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.split import DataSplit
+from pypaimon.schema.data_types import RowType, collect_field_ids
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
@@ -474,6 +475,19 @@ def _partial_file_write_cols(table, file: DataFileMeta):
             raise RuntimeError("Column '{}' not found in schema {}".format(name, file.schema_id))
         fields.append(file_fields[name])
     validate_row_id_update_fields(table.table_schema, table.schema_manager, [file])
+    if columns is not None:
+        for field in fields:
+            if isinstance(field.type, RowType):
+                written_ids, current_ids = set(), set()
+                collect_field_ids(field.type, written_ids)
+                collect_field_ids(current_fields[field.id].type, current_ids)
+                if not current_ids.issubset(written_ids):
+                    # Reading the old file with the current ROW type fills added
+                    # children with nulls. A whole-ROW rewrite would publish those
+                    # nulls over concurrent partial writes to the new children.
+                    raise RuntimeError(
+                        "Row-id conflict rewrite cannot expand ROW field '{}' with added nested fields; "
+                        "restage the update against the current schema".format(field.name))
     # Resolve renamed fields by identity, including when an old name has been
     # reused. TableRead applies the normal schema-evolution casts to the data.
     return None if columns is None else [current_fields[field.id].name for field in fields]

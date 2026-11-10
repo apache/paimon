@@ -114,6 +114,10 @@ print(metrics)   # {"num_updated": 50}
   snapshot attempt, including retries after a failed snapshot publication. Logical conflict
   checks also resolve nested write paths from Java partial updates using each file's
   historical schema.
+  If a written ROW has gained nested fields since the update was staged, recovery
+  rejects the rewrite: reading it with the expanded current type would replace the
+  new fields with nulls. Restage that update against the current schema. Renames and
+  compatible type widening that preserve the written field IDs remain supported.
 
 ## Read By Row Id
 

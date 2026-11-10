@@ -47,10 +47,13 @@ import java.util.List;
  * Generates java-nested-history.zip's table using the Java writer and compactor. Compile with the
  * paimon-core test classpath, run with an empty warehouse directory as the only argument, then zip
  * default.db/nested/ relative to that warehouse. Snapshots 1-2 are initial appends, 3 updates
- * nest.a after adding a column, and 4 compacts.
+ * nest.a after adding a column, and 4 compacts. Pass added-child as a second argument to generate
+ * java-nested-added-child-history.zip instead: schema 0 contains only nest.a, then Java adds and
+ * partially updates nest.b before compacting.
  */
 public final class NestedHistoryFixtureGenerator {
     public static void main(String[] args) throws Exception {
+        boolean addedChild = args.length > 1 && "added-child".equals(args[1]);
         Identifier identifier = Identifier.create("default", "nested");
         try (Catalog catalog =
                 CatalogFactory.createCatalog(CatalogContext.create(new Path(args[0])))) {
@@ -61,9 +64,12 @@ public final class NestedHistoryFixtureGenerator {
                             .column("age", DataTypes.INT())
                             .column(
                                     "nest",
-                                    DataTypes.ROW(
-                                            DataTypes.FIELD(0, "a", DataTypes.INT()),
-                                            DataTypes.FIELD(1, "b", DataTypes.STRING())))
+                                    addedChild
+                                            ? DataTypes.ROW(
+                                                    DataTypes.FIELD(0, "a", DataTypes.INT()))
+                                            : DataTypes.ROW(
+                                                    DataTypes.FIELD(0, "a", DataTypes.INT()),
+                                                    DataTypes.FIELD(1, "b", DataTypes.STRING())))
                             .option("row-tracking.enabled", "true")
                             .option("data-evolution.enabled", "true")
                             .option("data-evolution.nested-field.enabled", "true")
@@ -84,28 +90,46 @@ public final class NestedHistoryFixtureGenerator {
                                 GenericRow.of(
                                         id,
                                         id * 10,
-                                        GenericRow.of(
-                                                id * 100, BinaryString.fromString("row-" + id))));
+                                        addedChild
+                                                ? GenericRow.of(id * 100)
+                                                : GenericRow.of(
+                                                        id * 100,
+                                                        BinaryString.fromString("row-" + id))));
                     }
                     commit(builder, writer.prepareCommit());
                 }
             }
-            catalog.alterTable(identifier, SchemaChange.addColumn("extra", DataTypes.INT()), false);
+            catalog.alterTable(
+                    identifier,
+                    addedChild
+                            ? SchemaChange.addColumn(
+                                    new String[] {"nest", "b"}, DataTypes.STRING(), null, null)
+                            : SchemaChange.addColumn("extra", DataTypes.INT()),
+                    false);
             table = (FileStoreTable) catalog.getTable(identifier);
+            String writePath = addedChild ? "nest.b" : "nest.a";
             BatchWriteBuilder builder = table.newBatchWriteBuilder();
             try (BatchTableWrite writer =
                     builder.newWrite()
                             .withWriteType(
                                     table.rowType()
-                                            .projectByPaths(Collections.singletonList("nest.a")))) {
-                writer.write(GenericRow.of(GenericRow.of(1000)));
-                writer.write(GenericRow.of(GenericRow.of(2000)));
+                                            .projectByPaths(
+                                                    Collections.singletonList(writePath)))) {
+                for (int id = 1; id <= 2; id++) {
+                    writer.write(
+                            GenericRow.of(
+                                    GenericRow.of(
+                                            addedChild
+                                                    ? BinaryString.fromString("preserve-" + id)
+                                                    : id * 1000)));
+                }
                 List<CommitMessage> messages = writer.prepareCommit();
                 for (CommitMessage message : messages) {
                     List<DataFileMeta> files =
                             ((CommitMessageImpl) message).newFilesIncrement().newFiles();
                     for (int i = 0; i < files.size(); i++) {
-                        if (!Collections.singletonList("nest.a").equals(files.get(i).writeCols())) {
+                        if (!Collections.singletonList(writePath)
+                                .equals(files.get(i).writeCols())) {
                             throw new IllegalStateException("Expected a Java dotted write column");
                         }
                         files.set(i, files.get(i).assignFirstRowId(0));

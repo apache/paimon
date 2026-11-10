@@ -197,10 +197,12 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
                         target, table, messages, child_path, unwrap = self._nested_update_fixture(kind)
                         if rename:
                             path = ['profile'] + child_path
-                            self.catalog.alter_table(target, [
+                            changes = [
                                 SchemaChange.rename_column(path, 'renamed'),
-                                SchemaChange.update_column_type(path[:-1] + ['renamed'], AtomicType('BIGINT')),
-                                SchemaChange.add_column(path, AtomicType('INT'))])
+                                SchemaChange.update_column_type(path[:-1] + ['renamed'], AtomicType('BIGINT'))]
+                            if kind != 'row':
+                                changes.append(SchemaChange.add_column(path, AtomicType('INT')))
+                            self.catalog.alter_table(target, changes)
                         else:
                             self.catalog.alter_table(target, [SchemaChange.drop_column(['other'] + child_path)])
                         if compact:
@@ -214,7 +216,7 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
                         profiles = [unwrap(value) for value in rows['profile']]
                         self.assertEqual([value['renamed' if rename else 'age'] for value in profiles], [99, 20])
                         self.assertEqual([value['name'] for value in profiles], ['updated', 'original'])
-                        if rename:
+                        if rename and kind != 'row':
                             self.assertEqual([value['age'] for value in profiles], [None, None])
                         self.assertEqual(rows['other'], untouched)
 
@@ -379,6 +381,57 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
                 self.assertEqual(rows['age'], [10 if overlap else 99, 20, 30, 40])
                 self.assertEqual([value['a'] for value in rows['nest']], [1000, 2000, 300, 400])
                 self.assertEqual([value['b'] for value in rows['nest']], ['row-1', 'row-2', 'row-3', 'row-4'])
+
+    def test_recovery_rejects_expanded_java_row_write_scope(self):
+        from pypaimon.ray.row_id_conflict_rewriter import _rewrite_group
+        from pypaimon.ray.update_by_row_id import _commit_update_messages
+
+        fixture = Path(__file__).parent / 'resources' / 'row-id' / 'java-nested-added-child-history.zip'
+        for update_row in (False, True):
+            with self.subTest(update_row=update_row):
+                warehouse = Path(self.tempdir) / uuid.uuid4().hex
+                with ZipFile(str(fixture)) as archive:
+                    archive.extractall(str(warehouse))
+                directory = warehouse / 'default.db' / 'nested'
+                pending = {}
+                for name in ('schema/schema-1', 'snapshot/snapshot-3', 'snapshot/snapshot-4', 'snapshot/LATEST'):
+                    path = directory / name
+                    pending[name] = path.read_bytes()
+                    path.unlink()
+                (directory / 'snapshot/LATEST').write_text('2')
+                catalog = CatalogFactory.create({'warehouse': str(warehouse)})
+                table = catalog.get_table('default.nested')
+                self.assertEqual(table.table_schema.id, 0)
+                self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 2)
+                values = {'_ROW_ID': pa.array([0], pa.int64())}
+                values.update({'nest': [{'a': 999}]} if update_row else {'age': [999]})
+                messages = table.new_batch_write_builder().new_update().update_by_arrow_with_row_id(pa.table(values))
+                self.assertTrue(all(file.write_cols == ['nest' if update_row else 'age']
+                                    for msg in messages for file in msg.new_files))
+
+                for name, contents in pending.items():
+                    (directory / name).write_bytes(contents)
+                current = catalog.get_table('default.nested')
+                history = current.copy({'scan.snapshot-id': '3'}).new_read_builder().new_scan().plan_all()
+                self.assertTrue(any(
+                    file.write_cols == ['nest.b'] for split in history.splits() for file in split.files))
+                with patch('pypaimon.ray.row_id_conflict_rewriter._rewrite_group', wraps=_rewrite_group) as rewrite:
+                    if update_row:
+                        with self.assertRaisesRegex(RuntimeError, 'cannot expand ROW field'):
+                            _commit_update_messages(table, messages, num_partitions=2)
+                    else:
+                        _commit_update_messages(table, messages, num_partitions=2)
+                self.assertEqual(rewrite.call_count, 0 if update_row else 1)
+                self.assertEqual(current.snapshot_manager().get_latest_snapshot().id,
+                                 4 if update_row else 5)
+                read = current.new_read_builder()
+                rows = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id').to_pydict()
+                self.assertEqual(rows['age'], [10 if update_row else 999, 20, 30, 40])
+                self.assertEqual([value['a'] for value in rows['nest']], [100, 200, 300, 400])
+                self.assertEqual([value['b'] for value in rows['nest']], ['preserve-1', 'preserve-2', None, None])
+                for message in messages:
+                    for file in message.new_files:
+                        self.assertTrue(table.file_io.exists(file.file_path))
 
     def test_inner_snapshot_retry_revalidates_update_fields(self):
         self._check_inner_snapshot_retry_revalidates_update_fields(with_delete=False)

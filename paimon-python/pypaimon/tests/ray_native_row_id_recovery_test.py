@@ -110,8 +110,8 @@ def test_schema_recovery_preserves_native_rest_commit(native_rest_catalog, logic
             ray.shutdown()
 
 
-@pytest.mark.parametrize('recreate', [False, True])
-def test_nested_schema_recovery_with_native_rest_commit(native_rest_catalog, recreate):
+@pytest.mark.parametrize('change', ['rename', 'recreate', 'add_child'])
+def test_nested_schema_recovery_with_native_rest_commit(native_rest_catalog, change):
     ray = pytest.importorskip('ray')
     initialized_here = not ray.is_initialized()
     if initialized_here:
@@ -122,10 +122,11 @@ def test_nested_schema_recovery_with_native_rest_commit(native_rest_catalog, rec
         target, table, messages, child_path, _ = tables._nested_update_fixture(
             'row', {'commit.native.enabled': 'true'})
         path = ['profile'] + child_path
-        changes = [SchemaChange.drop_column(path)] if recreate else [
+        changes = [SchemaChange.drop_column(path)] if change == 'recreate' else [
             SchemaChange.rename_column(path, 'renamed'),
             SchemaChange.update_column_type(['profile', 'renamed'], AtomicType('BIGINT'))]
-        changes.append(SchemaChange.add_column(path, AtomicType('INT')))
+        if change != 'rename':
+            changes.append(SchemaChange.add_column(path, AtomicType('INT')))
         native_rest_catalog.alter_table(target, changes)
         current = native_rest_catalog.get_table(target)
         tables._compact_all_data_files(current.copy({'commit.native.enabled': 'false'}))
@@ -143,20 +144,22 @@ def test_nested_schema_recovery_with_native_rest_commit(native_rest_catalog, rec
             'pypaimon.execution.python.write.file_store_commit.FileStoreCommit.commit',
             side_effect=AssertionError('Native publication must not fall back to Python'),
         ):
-            if recreate:
-                with pytest.raises(RuntimeError, match='cannot restore a dropped field'):
+            if change != 'rename':
+                error = 'cannot restore a dropped field' if change == 'recreate' else 'cannot expand ROW field'
+                with pytest.raises(RuntimeError, match=error):
                     _commit_update_messages(table, messages, num_partitions=2)
             else:
                 _commit_update_messages(table, messages, num_partitions=2)
-        assert len(native_calls) == (0 if recreate else 1)
-        assert current.snapshot_manager().get_latest_snapshot().id == before_snapshot + (0 if recreate else 1)
+        assert len(native_calls) == (1 if change == 'rename' else 0)
+        assert current.snapshot_manager().get_latest_snapshot().id == before_snapshot + (1 if change == 'rename' else 0)
         read = current.copy({'scan.native-plan.enabled': 'true'}).new_read_builder()
         rows = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id').to_pydict()
-        assert [value['age'] for value in rows['profile']] == [None, None]
+        if change != 'rename':
+            assert [value['age'] for value in rows['profile']] == [None, None]
         assert [value['name'] for value in rows['profile']] == (
-            ['original', 'original'] if recreate else ['updated', 'original'])
-        if not recreate:
-            assert [value['renamed'] for value in rows['profile']] == [99, 20]
+            ['updated', 'original'] if change == 'rename' else ['original', 'original'])
+        if change != 'recreate':
+            assert [value['renamed'] for value in rows['profile']] == ([99, 20] if change == 'rename' else [10, 20])
     finally:
         if initialized_here:
             ray.shutdown()

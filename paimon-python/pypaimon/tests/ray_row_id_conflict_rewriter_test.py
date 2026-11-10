@@ -25,7 +25,7 @@ from pypaimon.ray.row_id_conflict_rewriter import (
     _validate_no_logical_conflict,
     commit_updates_with_compaction_retry,
 )
-from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.data_types import AtomicType, DataField, RowType
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.write.row_id_conflict import RowIdExistenceConflict
 
@@ -76,6 +76,30 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         self.assertEqual(
             ['id', 'name'], _partial_file_write_cols(table, file)
         )
+
+    def test_rewrite_preserves_row_descendant_identity_scope(self):
+        for nested in (False, True):
+            for added_child in (False, True):
+                with self.subTest(nested=nested, added_child=added_child):
+                    old_type = RowType(True, [DataField(10, 'a', AtomicType('INT'))])
+                    children = [DataField(10, 'renamed', AtomicType('BIGINT'))]
+                    if added_child:
+                        # Reusing the historical name still introduces a new field ID.
+                        children.append(DataField(11, 'a', AtomicType('INT')))
+                    current_type = RowType(True, children)
+                    if nested:
+                        old_type = RowType(True, [DataField(5, 'inner', old_type)])
+                        current_type = RowType(True, [DataField(5, 'inner', current_type)])
+                    historical = TableSchema(id=0, fields=[DataField(1, 'nest', old_type)])
+                    current = TableSchema(id=1, fields=[DataField(1, 'renamed_nest', current_type)])
+                    table = Mock(table_schema=current)
+                    table.schema_manager.get_schema.return_value = historical
+                    file = Mock(schema_id=0, write_cols=['nest'], first_row_id=0)
+                    if added_child:
+                        with self.assertRaisesRegex(RuntimeError, 'cannot expand ROW field'):
+                            _partial_file_write_cols(table, file)
+                    else:
+                        self.assertEqual(_partial_file_write_cols(table, file), ['renamed_nest'])
 
     @staticmethod
     def _message(snapshot_id, name):
