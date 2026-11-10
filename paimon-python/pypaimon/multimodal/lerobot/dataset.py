@@ -38,7 +38,6 @@ import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.lerobot.metadata import (
-    _EPISODE_FPS_COLUMN,
     _PANDAS_METADATA_OPTION,
     _dataset_fps,
     _positive_integer,
@@ -1096,7 +1095,8 @@ def _episode_dataset(table, datasets=None):
 
     projection = [
         name for name in _target_schema(table).names
-        if not name.startswith("stats/") and name != "source_episode_ipc"
+        if not name.startswith("stats/")
+        and (datasets is None or name != "source_episode_ipc")
     ]
     data = _read_arrow(table, projection)
     if datasets is not None:
@@ -1233,29 +1233,11 @@ def _episode_ranges(metadata, total_frames, total_episodes):
 
 def _episode_fps(metadata, fps, total_episodes):
     mode = _info_dict(_metadata_member(metadata, "info")).get("fps_mode")
-    if mode == "source":
+    if _metadata_member(metadata, "datasets") is not None and mode == "source":
         return _source_dataset_fps(metadata, fps, total_episodes)
-    if mode != "episode":
-        if fps is None:
-            raise ValueError("LeRobot metadata is missing fps; enable episode FPS explicitly.")
-        return (fps,) * total_episodes
-    episodes = _metadata_member(metadata, "episodes")
-    if episodes is None:
-        if fps is None:
-            raise ValueError("LeRobot metadata must define info.fps or episode fps.")
-        return (fps,) * total_episodes
-    rates = []
-    for ordinal, row in enumerate(_episode_rows(episodes, (_EPISODE_FPS_COLUMN,))):
-        if _EPISODE_FPS_COLUMN in row:
-            rate = _positive_integer(row[_EPISODE_FPS_COLUMN], "episode %d fps" % ordinal)
-        else:
-            raise ValueError("LeRobot episode %d is missing fps." % ordinal)
-        if fps is not None and rate != fps:
-            raise ValueError("LeRobot episode %d fps does not match info.fps." % ordinal)
-        rates.append(rate)
-    if len(rates) != total_episodes:
-        raise ValueError("LeRobot episode FPS metadata has the wrong length.")
-    return tuple(rates)
+    if fps is None:
+        raise ValueError("LeRobot metadata is missing fps; enable source FPS explicitly.")
+    return (fps,) * total_episodes
 
 
 def _source_dataset_fps(metadata, fps, total_episodes):

@@ -29,7 +29,7 @@ from pypaimon.multimodal.lerobot.loader import (
     _commit_messages, _prepare_dataset, _video_fps,
 )
 from pypaimon.multimodal.lerobot.metadata import (
-    _EPISODE_CONTROL_COLUMNS, _EPISODE_FPS_COLUMN, _append_arrow_tables, _commit_metadata, _json_value,
+    _EPISODE_CONTROL_COLUMNS, _EPISODE_FPS_COLUMN, _commit_metadata, _json_value,
     _load_dataset_metadata,
     _metadata_table, _prepare_metadata_tables,
     _source_episode_tables, _validated_episode_tables,
@@ -462,6 +462,13 @@ def _import_sources(connection, table_name, sources, batch_size, options,
         tables = _prepare_metadata_tables(connection, table.raw_table, metadata)
         episode_schema = _target_schema(tables["episodes"])
         commit = table.raw_table.new_batch_write_builder().new_commit()
+        stack.callback(commit.close)
+        episode_builder = tables["episodes"].new_batch_write_builder()
+        episode_commit = episode_builder.new_commit()
+        stack.callback(episode_commit.close)
+        episode_write = episode_builder.new_write()
+        stack.callback(episode_write.close)
+        episode_commit_started = False
         try:
             messages = []
             try:
@@ -480,14 +487,17 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                 for episodes in _merged_episodes(plans, episode_schema):
                     strict_arrow_table(episodes, episode_schema,
                                        "merged Episodes", 0, "LeRobot")
+                    episode_write.write_arrow(episodes)
+                episode_messages = episode_write.prepare_commit()
             except BaseException:
                 commit.abort(messages)
                 raise
             frames_snapshot = _commit_messages(commit, messages)
+            episode_commit_started = True
+            episodes_snapshot = _commit_messages(episode_commit, episode_messages)
         finally:
-            commit.close()
-        episodes_snapshot = _append_arrow_tables(
-            tables["episodes"], _merged_episodes(plans, episode_schema))
+            if not episode_commit_started:
+                episode_write.abort()
         if stats is not None:
             for name in _CONTROLS:
                 parts = [s[name] for p in plans for s in p["control_stats"].values() if name in s]

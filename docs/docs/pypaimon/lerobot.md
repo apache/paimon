@@ -115,7 +115,9 @@ conn.load_from_lerobot("robot_data", "oss://source-bucket/lerobot_dataset",
                        parallelism=8)
 ```
 
-The default `parallelism=1` uses one process. Workers need source and target
+The default `parallelism=1` uses one process. Ray groups Episodes within each source,
+keeping shared files together and limiting total concurrency to `parallelism`.
+Workers need source and target
 storage access; pass OSS `source_options` as above. Ray accepts FileIO URIs or
 shared directories, not Hub IDs. Keep the source unchanged during import.
 Failed imports may leave partial tables; retry with a new name.

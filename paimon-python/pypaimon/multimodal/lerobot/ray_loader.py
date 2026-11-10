@@ -173,14 +173,14 @@ def _write_dataset_ray(table, dataset, info, source, source_schema, batch_size,
 
 
 def _prepare_merged_source(table, source_path, source_options, info, schema,
-                           batch_size, metadata, video_fields, mapping):
+                           batch_size, metadata, video_fields, mapping, episode_indices):
     from functools import partial
     from pypaimon.multimodal.lerobot.aggregate import _transform_frames
 
     mapping = dict(mapping, control_stats={})
     messages = _prepare_group(
         table, source_path, source_options, info, schema, batch_size,
-        metadata, video_fields, None, partial(_transform_frames, mapping))
+        metadata, video_fields, episode_indices, partial(_transform_frames, mapping))
     return messages, mapping["control_stats"]
 
 
@@ -199,9 +199,11 @@ def _prepare_sources_ray(table, plans, source_options, batch_size, parallelism):
             mapping_ref = ray.put({key: plan[key] for key in (
                 "dataset_index", "frame_offset", "episode_offset",
                 "task_index", "subtask_index") if key in plan})
-            yield ordinal, (table_ref, plan["source"].path, source_options,
-                            info_ref, plan["schema"], batch_size, metadata_ref,
-                            plan["videos"], mapping_ref)
+            for group in _task_groups(plan["info"], plan["dataset"]._episodes,
+                                      plan["videos"], parallelism):
+                yield ordinal, (table_ref, plan["source"].path, source_options,
+                                info_ref, plan["schema"], batch_size, metadata_ref,
+                                plan["videos"], mapping_ref, group)
 
     tasks = iter(arguments())
     pending, messages = {}, []

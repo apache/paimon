@@ -997,20 +997,27 @@ def test_nullable_batch_type_stays_stable_after_import(setup, import_parallelism
         reader.close()
 
 
-def test_explicit_source_mode_requires_source_metadata(setup):
+@pytest.mark.parametrize("mode", ["episode", "source"])
+def test_legacy_single_source_extensions(setup, mode):
     pytest.importorskip("datasets")
     pytest.importorskip("torch")
     conn, sources = setup
-    conn.load_from_lerobot("merged", sources, fps_mode="source")
-    meta = pm.PaimonLeRobotDataset(conn.get_table("merged")).meta
-    meta.datasets = None
-
-    class Reader(pm.PaimonDatasetReader):
-        def read_indices(self, indices, columns):
-            raise AssertionError("Invalid metadata must fail before reading")
-
-    with pytest.raises(ValueError, match="requires datasets"):
-        Reader(meta)
+    root = Path(sources[0][7:])
+    path = root / "meta/info.json"
+    info = json.loads(path.read_text())
+    info["fps_mode"] = mode
+    path.write_text(json.dumps(info))
+    path = root / "meta/episodes/chunk-000/file-000.parquet"
+    data = pq.read_table(path).append_column("source_episode_ipc", pa.array([b"a", b"b"]))
+    pq.write_table(data, path)
+    conn.load_from_lerobot("single", sources[0], tag_name="train")
+    reader = pm.PaimonLeRobotDataset(conn.get_table("single"), tag_name="train")
+    try:
+        assert reader.episode_fps == (10, 10)
+        assert reader.meta.episodes["source_episode_ipc"] == [b"a", b"b"]
+        assert int(reader[2]["episode_index"]) == 1
+    finally:
+        reader.close()
 
 
 def test_source_mode_rejects_broken_episode_link(setup):
@@ -1369,3 +1376,111 @@ def test_merge_int32_source_episode_ids(setup, import_parallelism):
         assert [int(s["episode_index"]) for s in reader.get_items([0, 2, 5, 7])] == [0, 1, 2, 3]
     finally:
         reader.close()
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_episode_sources_read_only_before_commit(setup, import_parallelism):
+    from pypaimon.multimodal.lerobot import aggregate
+    conn, sources = setup
+    original = aggregate._source_episode_tables
+    committed = []
+    real_commit = aggregate._commit_messages
+
+    def read_episodes(metadata):
+        if committed:
+            raise OSError("Episode source unavailable after Frames commit")
+        return original(metadata)
+
+    def commit(committer, messages):
+        snapshot = real_commit(committer, messages)
+        committed.append(snapshot)
+        return snapshot
+
+    with patch.object(aggregate, "_source_episode_tables", side_effect=read_episodes), \
+            patch.object(aggregate, "_commit_messages", side_effect=commit):
+        conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
+    assert rows(conn, "merged").num_rows == 10
+    assert rows(conn, "merged__episodes").num_rows == 4
+    assert len(committed) == 2
+
+
+@pytest.mark.parametrize("multiple", [False, True])
+def test_ray_groups_within_each_source(setup, ray_cluster, multiple):
+    conn, sources = setup
+    for uri in sources:
+        root = Path(uri[7:])
+        path = root / "meta/episodes/chunk-000/file-000.parquet"
+        episodes = pq.read_table(path)
+        episodes = episodes.set_column(episodes.schema.get_field_index("data/file_index"),
+                                       "data/file_index", pa.array([0, 1]))
+        pq.write_table(episodes, path)
+        path = root / "data/chunk-000/file-000.parquet"
+        data = pq.read_table(path)
+        pq.write_table(data.slice(0, 2), path)
+        pq.write_table(data.slice(2), path.with_name("file-001.parquet"))
+    dispatched = []
+    remote = ray_cluster.remote
+
+    def track_remote(**options):
+        def decorate(function):
+            worker = remote(**options)(function)
+
+            class TrackedWorker:
+                def remote(self, *args):
+                    dispatched.append(args[-1])
+                    return worker.remote(*args)
+
+            return TrackedWorker()
+        return decorate
+
+    with patch.object(ray_cluster, "remote", side_effect=track_remote):
+        conn.load_from_lerobot("merged", sources if multiple else sources[0],
+                               dataset_names=["A", "B"] if multiple else ["A"], parallelism=2)
+    assert dispatched == [[0], [1]] * (2 if multiple else 1)
+    assert rows(conn, "merged").num_rows == (10 if multiple else 5)
+    assert rows(conn, "merged__episodes").num_rows == (4 if multiple else 2)
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_episode_prepare_io_failure_publishes_no_snapshots(setup, import_parallelism):
+    from pypaimon.multimodal.lerobot import aggregate
+    conn, sources = setup
+    original = aggregate._merged_episodes
+
+    def fail_after_first_batch(plans, schema):
+        batches = original(plans, schema)
+        yield next(batches)
+        raise OSError("Episode source read failed")
+
+    with patch.object(aggregate, "_merged_episodes", side_effect=fail_after_first_batch):
+        with pytest.raises(OSError, match="Episode source read failed"):
+            conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
+    for name in ("merged", "merged__episodes"):
+        table = conn.get_table(name).raw_table
+        assert table.snapshot_manager().get_latest_snapshot() is None
+        assert not table.tag_manager().tag_exists("train")
+
+
+@pytest.mark.parametrize("fail_commit", [1, 2])
+def test_uncertain_commit_preserves_published_files(setup, fail_commit):
+    from pypaimon.multimodal.lerobot import aggregate
+    conn, sources = setup
+    original = aggregate._commit_messages
+    calls = []
+
+    def lose_response(committer, messages):
+        result = original(committer, messages)
+        calls.append(result)
+        if len(calls) == fail_commit:
+            raise OSError("Lost commit response")
+        return result
+
+    with patch.object(aggregate, "_commit_messages", side_effect=lose_response):
+        with pytest.raises(OSError, match="Lost commit response"):
+            conn.load_from_lerobot("merged", sources, tag_name="train")
+    assert rows(conn, "merged").num_rows == 10
+    if fail_commit == 2:
+        assert rows(conn, "merged__episodes").num_rows == 4
+    else:
+        assert conn.get_table("merged__episodes").raw_table.snapshot_manager().get_latest_snapshot() is None
+    assert not conn.get_table("merged").raw_table.tag_manager().tag_exists("train")
