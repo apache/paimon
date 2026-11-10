@@ -49,6 +49,7 @@ import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ChainSplit;
@@ -259,6 +260,9 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
+        if (!split.deleteOrderingGuards().isEmpty()) {
+            SchemaValidation.validateRetainedDeleteOrderingGuards(tableSchema);
+        }
         if (split.isStreaming() || split.bucket() == BucketMode.POSTPONE_BUCKET) {
             if (!split.isStreaming() && !split.deleteOrderingGuards().isEmpty()) {
                 throw new UnsupportedOperationException(
@@ -283,6 +287,10 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     /** Reads a writer-grouped postpone split with key predicates only. */
     public RecordReader<KeyValue> createPostponeReader(DataSplit split) throws IOException {
+        if (!split.deleteOrderingGuards().isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "Postpone reads cannot resolve delete ordering guards.");
+        }
         if (split.isStreaming() || split.bucket() != BucketMode.POSTPONE_BUCKET) {
             throw new IllegalArgumentException(
                     "Postpone reader requires a batch split from the postpone bucket.");
@@ -338,6 +346,9 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             boolean keepDelete,
             List<IndexFileMeta> guardFiles)
             throws IOException {
+        if (!guardFiles.isEmpty()) {
+            SchemaValidation.validateRetainedDeleteOrderingGuards(tableSchema);
+        }
         // Sections are read by SortMergeReader, which sorts and merges records by keys.
         // So we cannot project keys or else the sorting will be incorrect.
         DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);

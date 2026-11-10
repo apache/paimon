@@ -132,6 +132,7 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
 
     def setUp(self):
         self.mock_table = Mock()
+        self.mock_table.is_primary_key_table = False
         self.mock_table.partition_keys = ['dt', 'region']
         self.mock_table.path_factory.return_value = FileStorePathFactory(
             '/test/table/path', ['dt', 'region'], '__DEFAULT_PARTITION__', 'parquet',
@@ -354,6 +355,7 @@ class TestFileStoreCommit(unittest.TestCase):
         """Set up test fixtures."""
         # Mock table with required attributes
         self.mock_table = Mock()
+        self.mock_table.is_primary_key_table = False
         self.mock_table.partition_keys = ['dt', 'region']
         self.mock_table.partition_keys_fields = [
             DataField(0, 'dt', AtomicType('STRING')),

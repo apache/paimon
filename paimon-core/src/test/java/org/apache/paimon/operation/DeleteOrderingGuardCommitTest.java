@@ -229,6 +229,138 @@ class DeleteOrderingGuardCommitTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"lookup", "full-compaction"})
+    void testCompactionRejectsGuardsPublishedAfterWriterRestore(String producer) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(DELETE_ORDERING_GUARDS_ENABLED.key(), "true");
+        options.put("changelog-producer", producer);
+        PrimaryKeyFileStoreTable table = createTable(options);
+        try (TableWriteImpl<KeyValue> stale = newWrite(table)) {
+            stale.write(row(RowKind.INSERT, 1, 1, 2));
+            append(table, 0, row(RowKind.DELETE, 1, 1, 4));
+            commit(table, 1, compactNatively(table, 1, PARTITION));
+            long latest = table.snapshotManager().latestSnapshotId();
+
+            stale.compact(PARTITION, 0, true);
+            List<CommitMessage> pending = stale.prepareCommit(true, 2);
+            assertThat(pending.get(0).deleteOrderingGuardSources()).isEmpty();
+            assertThatThrownBy(() -> commit(table, 2, pending))
+                    .hasMessageContaining("guard sources changed")
+                    .hasMessageContaining("recompute compaction");
+            assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(latest);
+        }
+        try (TableWriteImpl<KeyValue> refreshed = newWrite(table)) {
+            refreshed.write(row(RowKind.INSERT, 1, 1, 2));
+            refreshed.write(row(RowKind.INSERT, 1, 2, 5));
+            refreshed.compact(PARTITION, 0, true);
+            List<CommitMessage> messages = refreshed.prepareCommit(true, 2);
+            assertThat(messages.get(0).deleteOrderingGuardSources()).hasSize(1);
+            commit(table, 2, messages);
+            assertThat(changelog(table, messages, false)).doesNotContain("INSERT/2/payload");
+        }
+        assertThat(readRows(table))
+                .singleElement()
+                .satisfies(value -> assertThat(value.getInt(1)).isEqualTo(2));
+    }
+
+    @Test
+    void testCompactionRechecksGuardSourcesOnPublicationRetry() throws Exception {
+        PrimaryKeyFileStoreTable table =
+                createTable(Collections.singletonMap(DELETE_ORDERING_GUARDS_ENABLED.key(), "true"));
+        append(table, 0, row(RowKind.INSERT, 1, 2, 1));
+        List<CommitMessage> pending = compactNatively(table, 9, PARTITION);
+        AtomicInteger publications = new AtomicInteger();
+        SnapshotCommit publisher =
+                new SnapshotCommit(Lock.empty()) {
+                    @Override
+                    protected boolean commitImpl(
+                            @Nullable String baseSnapshotUuid,
+                            Snapshot snapshot,
+                            String branch,
+                            List<PartitionStatistics> statistics)
+                            throws Exception {
+                        publications.incrementAndGet();
+                        append(table, 3, row(RowKind.DELETE, 1, 1, 4));
+                        DeleteOrderingGuardCommitTest.this.commit(
+                                table, 4, compactNatively(table, 4, PARTITION));
+                        return false;
+                    }
+                };
+        try (FileStoreCommit commit = newCommit(table, publisher, Collections.emptyList())) {
+            assertThatThrownBy(() -> commit.commit(committable(9, pending), false))
+                    .hasMessageContaining("guard sources changed");
+        }
+        assertThat(publications).hasValue(1);
+        assertThat(guards(table)).hasSize(1);
+    }
+
+    @Test
+    void testCompactionAllowsGuardsPublishedInAnotherPartition() throws Exception {
+        PrimaryKeyFileStoreTable table =
+                createTable(Collections.singletonMap(DELETE_ORDERING_GUARDS_ENABLED.key(), "true"));
+        BinaryRow otherPartition = partition(2);
+        append(table, 0, row(RowKind.INSERT, 2, 2, 1));
+        List<CommitMessage> pending = compactNatively(table, 9, otherPartition);
+        append(table, 3, row(RowKind.DELETE, 1, 1, 4));
+        commit(table, 4, compactNatively(table, 4, PARTITION));
+
+        commit(table, 9, pending);
+        assertThat(guards(table)).hasSize(1);
+        assertThat(readRows(table))
+                .singleElement()
+                .satisfies(value -> assertThat(value.getInt(0)).isEqualTo(2));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testDestructiveRollbackCannotReviveFencedWrites(boolean disableCapture) throws Exception {
+        PrimaryKeyFileStoreTable table =
+                createTable(Collections.singletonMap(DELETE_ORDERING_GUARDS_ENABLED.key(), "true"));
+        append(table, 0, row(RowKind.INSERT, 1, 1, 1));
+        Snapshot target = table.snapshotManager().latestSnapshot();
+        table.createTag("before-reset", target.id());
+        List<CommitMessage> pending;
+        try (TableWriteImpl<KeyValue> write = newWrite(table)) {
+            write.write(row(RowKind.INSERT, 1, 2, 2));
+            pending = write.prepareCommit(true, 9);
+        }
+        try (FileStoreCommit reset = table.store().newCommit(USER, null)) {
+            reset.truncateTable(2);
+        }
+        if (disableCapture) {
+            TableSchema disabled =
+                    new FileSystemSchemaManager(table.fileIO(), table.location())
+                            .commitChanges(
+                                    SchemaChange.setOption(
+                                            DELETE_ORDERING_GUARDS_ENABLED.key(), "false"));
+            table =
+                    (PrimaryKeyFileStoreTable)
+                            FileStoreTableFactory.create(
+                                    table.fileIO(), table.location(), disabled);
+        }
+        PrimaryKeyFileStoreTable retained = table;
+        long latest = table.snapshotManager().latestSnapshotId();
+        assertThatThrownBy(() -> commit(retained, 9, pending))
+                .hasMessageContaining("generation changed");
+        assertThatThrownBy(() -> retained.rollbackTo(target.id()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("sys.rollback_to_as_latest");
+        assertThatThrownBy(() -> retained.rollbackTo("before-reset"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("sys.rollback_to_as_latest");
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(latest);
+        try (FileStoreCommit rollback = table.store().newCommit(USER, null)) {
+            assertThat(rollback.rollbackToAsLatest(target)).isTrue();
+        }
+        assertThatThrownBy(() -> commit(retained, 9, pending))
+                .hasMessageContaining("generation changed");
+        append(table, 10, row(RowKind.INSERT, 1, 3, 3));
+        assertThat(readRows(table))
+                .extracting(value -> value.getInt(1))
+                .containsExactlyInAnyOrder(1, 3);
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"partition", "table", "disabled"})
     void testResetFencesStaleOrdinaryAppendsAfterSnapshotExpiration(String reset) throws Exception {
         PrimaryKeyFileStoreTable table =
@@ -437,7 +569,7 @@ class DeleteOrderingGuardCommitTest {
         }
         commit(table, 4, first);
         assertThatThrownBy(() -> commit(table, 5, second))
-                .hasStackTraceContaining("guard compaction source is no longer active");
+                .hasMessageContaining("guard sources changed");
         try (FileStoreCommit abort = table.store().newCommit(USER, null)) {
             abort.abort(second);
         }
@@ -867,7 +999,9 @@ class DeleteOrderingGuardCommitTest {
         }
         long latest = table.snapshotManager().latestSnapshotId();
         List<IndexManifestEntry> retained = guards(table);
-        assertThatThrownBy(() -> commit(table, 3, stale)).hasStackTraceContaining("conflict");
+        assertThatThrownBy(() -> commit(table, 3, stale))
+                .hasStackTraceContaining(
+                        reset.equals("rewrite") ? "guard sources changed" : "conflict");
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(latest);
         assertThat(guards(table)).isEqualTo(retained);
         try (FileStoreCommit commit = table.store().newCommit(USER, null)) {
@@ -925,7 +1059,9 @@ class DeleteOrderingGuardCommitTest {
                         Collections.emptyList(),
                         Collections.singletonList(retained.get(0).indexFile()));
         CommitMessage message =
-                new CommitMessageImpl(PARTITION, 0, 1, DataIncrement.emptyIncrement(), retirement);
+                new CommitMessageImpl(PARTITION, 0, 1, DataIncrement.emptyIncrement(), retirement)
+                        .withDeleteOrderingGuardSources(
+                                Collections.singletonList(retained.get(0).indexFile().fileName()));
         assertThatThrownBy(() -> commit(table, 2, Collections.singletonList(message)))
                 .hasStackTraceContaining("can only be removed by overwrite/reset");
         assertThat(guards(table)).isEqualTo(retained);

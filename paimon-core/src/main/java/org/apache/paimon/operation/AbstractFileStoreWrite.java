@@ -38,6 +38,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.commit.DeleteOrderingGuardCommit;
 import org.apache.paimon.operation.commit.DeleteOrderingGuardGeneration;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.partition.PartitionTimeExtractor;
@@ -296,6 +297,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 compactIncrement,
                                 requiresCompactionBaseline ? writerContainer.baseSnapshotId : null,
                                 writerContainer.deleteOrderingGuardGeneration);
+                if (writerContainer.deleteOrderingGuardGeneration != null) {
+                    committable =
+                            committable.withDeleteOrderingGuardSources(
+                                    DeleteOrderingGuardCommit.sources(
+                                            writerContainer.writer.deleteOrderingGuards(),
+                                            compactIncrement));
+                }
                 result.add(committable);
 
                 if (committable.isEmpty()) {

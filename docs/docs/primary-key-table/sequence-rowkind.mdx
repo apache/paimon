@@ -137,11 +137,18 @@ reads also resolve retained guards. Raw input changelogs continue to report the 
 Upgrade job coordinators and
 workers together before using guarded incremental splits.
 
-Scoped overwrites and truncation change the ordering-history generation. Rollback and full manifest
-replacement also fence pending writes from the previous generation. Writes to unaffected partitions
+Scoped overwrites and truncation change the ordering-history generation. Rollback-as-latest and full manifest
+replacement also fence pending writes from the previous generation. Destructive rollback through
+`rollbackTo` or `sys.rollback_to` is rejected once guard history is tracked, including after capture is
+disabled or the table is truncated. Use `sys.rollback_to_as_latest` to restore an earlier snapshot
+atomically while preserving writer fencing. Writes to unaffected partitions
 can continue after a scoped reset. Affected writers must reopen from current state; restoring an old
 checkpoint does not bypass this check. Generation state stays in the current snapshot, so expiration
 of older snapshots cannot let a stale write cross a reset.
+
+Compactions also validate the guard files observed by their bucket writer. If another writer publishes
+or consolidates guards in that bucket, reopen the writer and recompute its compaction and changelog
+output before retrying. Reusing output built from the previous guard set is rejected.
 
 Retained guards require their original ordering and deletion policy. ALTER operations cannot
 change the merge engine, sequence fields, sort directions or delete handling while
@@ -157,6 +164,18 @@ deletion vectors, primary-key indexes, chain tables and Iceberg compatibility ar
 enabling it and while guards are retained. Use native
 snapshot and incremental reads and the native input, lookup or full-compaction changelog
 producers. Guard metadata grows with the number of distinct deleted keys.
+
+Upgrade all Java clients, job coordinators and workers to a release supporting guards before enabling
+capture. PyPaimon and other clients that do not resolve guards must not read or write guarded tables.
+PyPaimon rejects these operations, including when capture is disabled and guard history is retained.
+Older clients cannot enforce this restriction themselves; stop them before enabling the feature and
+keep them off guarded histories and their retained snapshots or tags.
+
+The checkpoint committable format changes in this release, including for jobs that leave capture
+disabled. New clients can restore supported older checkpoints. Restoring a checkpoint or savepoint
+created by this release with an older Paimon release is unsupported and is rejected by the checkpoint
+envelope version. Retain a pre-upgrade savepoint and its matching table recovery point when planning
+a release rollback. See [Savepoint](../flink/savepoint).
 
 ## Row Kind Field
 

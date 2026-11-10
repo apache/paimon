@@ -42,6 +42,7 @@ import java.util.List;
 import static org.apache.paimon.data.BinaryArray.fromLongArray;
 import static org.apache.paimon.data.BinaryRow.singleColumn;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Compatibility Test for {@link ManifestCommittableSerializer}. */
 public class ManifestCommittableSerializerCompatibilityTest {
@@ -50,7 +51,28 @@ public class ManifestCommittableSerializerCompatibilityTest {
             "generateManifestCommittableGoldenFiles";
 
     @Test
-    public void testCompatibilityToV5CommitV13V14AndV15() throws IOException {
+    public void testOrdinaryMessageListsUseTheNewCheckpointEnvelope() throws IOException {
+        ManifestCommittable committable = new ManifestCommittable(1L);
+        for (String partition : Arrays.asList("first", "second")) {
+            committable.addFileCommittable(
+                    new CommitMessageImpl(
+                            singleColumn(partition),
+                            0,
+                            1,
+                            DataIncrement.emptyIncrement(),
+                            CompactIncrement.emptyIncrement()));
+        }
+        ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
+        assertThat(serializer.getVersion()).isEqualTo(6);
+        byte[] bytes = serializer.serialize(committable);
+        assertThat(serializer.deserialize(serializer.getVersion(), bytes)).isEqualTo(committable);
+        assertThatThrownBy(() -> serializer.deserialize(serializer.getVersion() + 1, bytes))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("version");
+    }
+
+    @Test
+    public void testCompatibilityToV6CommitV16AndOlderVersions() throws IOException {
         DataFileMeta dataFile =
                 DataFileMeta.create(
                                 "column-sequence-file",
@@ -97,7 +119,9 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Collections.singletonList(
                                 legacyMessage
                                         .withCheckFromSnapshot(3L)
-                                        .withDeleteOrderingGuardGeneration("generation-A")),
+                                        .withDeleteOrderingGuardGeneration("generation-A")
+                                        .withDeleteOrderingGuardSources(
+                                                Arrays.asList("guard-source-1", "guard-source-2"))),
                         legacyCommittable.properties());
 
         ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
@@ -105,7 +129,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
         byte[] serialized;
         if (Boolean.parseBoolean(
                 System.getProperties().getProperty(GENERATE_GOLDEN_FILES_PROPERTY))) {
-            CompatibilityUtils.writeCompatibilityFile("manifest-committable-v15-v5", current);
+            CompatibilityUtils.writeCompatibilityFile("manifest-committable-v16-v6", current);
             serialized = current;
         } else {
             serialized =
@@ -113,16 +137,31 @@ public class ManifestCommittableSerializerCompatibilityTest {
                             ManifestCommittableSerializerCompatibilityTest.class
                                     .getClassLoader()
                                     .getResourceAsStream(
-                                            "compatibility/manifest-committable-v15-v5"),
+                                            "compatibility/manifest-committable-v16-v6"),
                             true);
         }
 
         assertThat(current).isEqualTo(serialized);
-        ManifestCommittable restored = serializer.deserialize(5, serialized);
+        ManifestCommittable restored = serializer.deserialize(6, serialized);
         assertThat(restored).isEqualTo(committable);
         assertThat(restored.fileCommittables().get(0).checkFromSnapshot()).isEqualTo(3L);
         assertThat(restored.fileCommittables().get(0).deleteOrderingGuardGeneration())
                 .isEqualTo("generation-A");
+        assertThat(restored.fileCommittables().get(0).deleteOrderingGuardSources())
+                .containsExactly("guard-source-1", "guard-source-2");
+
+        byte[] version15Serialized =
+                IOUtils.readFully(
+                        ManifestCommittableSerializerCompatibilityTest.class
+                                .getClassLoader()
+                                .getResourceAsStream("compatibility/manifest-committable-v15-v5"),
+                        true);
+        ManifestCommittable restoredVersion15 = serializer.deserialize(5, version15Serialized);
+        assertThat(restoredVersion15.fileCommittables().get(0))
+                .isEqualTo(
+                        legacyMessage
+                                .withCheckFromSnapshot(3L)
+                                .withDeleteOrderingGuardGeneration("generation-A"));
 
         byte[] version14Serialized =
                 IOUtils.readFully(

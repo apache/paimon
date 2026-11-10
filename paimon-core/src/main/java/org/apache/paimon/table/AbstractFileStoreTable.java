@@ -33,6 +33,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.commit.DeleteOrderingGuardGeneration;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.FallbackKey;
@@ -714,6 +715,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(long snapshotId) {
+        validateDestructiveRollback();
         IcebergCommitCallback.markRetirePendingForRollback(this);
         SnapshotManager snapshotManager = snapshotManager();
         try {
@@ -740,6 +742,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(String tagName) {
+        validateDestructiveRollback();
         IcebergCommitCallback.markRetirePendingForRollback(this);
         SnapshotManager snapshotManager = snapshotManager();
         try {
@@ -749,6 +752,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             RollbackHelper rollbackHelper = rollbackHelper();
             rollbackHelper.cleanLargerThan(taggedSnapshot);
             rollbackHelper.createSnapshotFileIfNeeded(taggedSnapshot);
+        }
+    }
+
+    private void validateDestructiveRollback() {
+        Snapshot latest = snapshotManager().latestSnapshot();
+        if (coreOptions().deleteOrderingGuardsEnabled()
+                || DeleteOrderingGuardGeneration.isTracked(latest)
+                || DeleteOrderingGuardFile.mayContainGuards(latest)) {
+            throw new UnsupportedOperationException(
+                    "Destructive rollback is not supported for delete ordering guard histories. "
+                            + "Use rollbackToAsLatest or sys.rollback_to_as_latest to preserve writer fencing.");
         }
     }
 

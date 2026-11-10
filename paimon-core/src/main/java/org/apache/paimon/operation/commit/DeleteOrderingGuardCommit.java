@@ -20,15 +20,27 @@ package org.apache.paimon.operation.commit;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.index.DeleteOrderingGuardFile.DELETE_ORDERING_GUARD;
@@ -39,6 +51,102 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class DeleteOrderingGuardCommit {
 
     private DeleteOrderingGuardCommit() {}
+
+    /** Recover the committed input set from the writer's delivered compaction state. */
+    public static List<String> sources(List<IndexFileMeta> current, CompactIncrement increment) {
+        Set<String> sources = guardNames(current);
+        sources.removeAll(guardNames(increment.newIndexFiles()));
+        sources.addAll(guardNames(increment.deletedIndexFiles()));
+        List<String> result = new ArrayList<>(sources);
+        Collections.sort(result);
+        return result;
+    }
+
+    /** Validate both reset generations and compaction inputs on every publication attempt. */
+    public static CommitChangesProvider fence(
+            CommitChangesProvider delegate,
+            List<CommitMessage> messages,
+            Function<Snapshot, List<IndexManifestEntry>> indexFiles) {
+        return new CommitChangesProvider() {
+            @Override
+            public CommitChanges provide(@Nullable Snapshot latestSnapshot) {
+                DeleteOrderingGuardGeneration.validate(latestSnapshot, messages);
+                validateSources(latestSnapshot, messages, indexFiles);
+                return delegate.provide(latestSnapshot);
+            }
+
+            @Override
+            public Set<Long> rebasedReassignments() {
+                return delegate.rebasedReassignments();
+            }
+
+            @Override
+            public boolean resetsDeleteOrderingGuards() {
+                return delegate.resetsDeleteOrderingGuards();
+            }
+
+            @Nullable
+            @Override
+            public PartitionPredicate deleteOrderingGuardResetFilter() {
+                return delegate.deleteOrderingGuardResetFilter();
+            }
+        };
+    }
+
+    private static void validateSources(
+            @Nullable Snapshot latest,
+            List<CommitMessage> messages,
+            Function<Snapshot, List<IndexManifestEntry>> indexFiles) {
+        List<CommitMessage> compactions =
+                messages.stream()
+                        .filter(
+                                message ->
+                                        !((CommitMessageImpl) message).compactIncrement().isEmpty())
+                        .collect(Collectors.toList());
+        if (compactions.isEmpty()) {
+            return;
+        }
+        Map<Pair<BinaryRow, Integer>, Set<String>> active = new HashMap<>();
+        if (latest != null
+                && (DeleteOrderingGuardFile.mayContainGuards(latest)
+                        || compactions.stream()
+                                .anyMatch(
+                                        message ->
+                                                message.deleteOrderingGuardSources() != null
+                                                        && !message.deleteOrderingGuardSources()
+                                                                .isEmpty()))) {
+            for (IndexManifestEntry entry : indexFiles.apply(latest)) {
+                if (entry.kind() == FileKind.ADD
+                        && DELETE_ORDERING_GUARD.equals(entry.indexFile().indexType())) {
+                    active.computeIfAbsent(
+                                    Pair.of(entry.partition(), entry.bucket()),
+                                    ignored -> new HashSet<>())
+                            .add(entry.indexFile().fileName());
+                }
+            }
+        }
+        for (CommitMessage message : compactions) {
+            List<String> observed = message.deleteOrderingGuardSources();
+            Set<String> expected =
+                    observed == null ? Collections.emptySet() : new HashSet<>(observed);
+            checkState(
+                    expected.equals(
+                            active.getOrDefault(
+                                    Pair.of(message.partition(), message.bucket()),
+                                    Collections.emptySet())),
+                    "Delete ordering guard sources changed for partition %s, bucket %s. "
+                            + "Reload the bucket and recompute compaction before retrying.",
+                    message.partition(),
+                    message.bucket());
+        }
+    }
+
+    private static Set<String> guardNames(List<IndexFileMeta> files) {
+        return files.stream()
+                .filter(file -> DELETE_ORDERING_GUARD.equals(file.indexType()))
+                .map(IndexFileMeta::fileName)
+                .collect(Collectors.toSet());
+    }
 
     /**
      * Every new guard must replace source data or active guard segments in the same bucket and

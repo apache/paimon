@@ -53,7 +53,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    public static final int CURRENT_VERSION = 15;
+    public static final int CURRENT_VERSION = 16;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
@@ -132,6 +132,14 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         if (generation != null) {
             view.writeUTF(generation);
         }
+        List<String> guardSources = message.deleteOrderingGuardSources();
+        view.writeBoolean(guardSources != null);
+        if (guardSources != null) {
+            view.writeInt(guardSources.size());
+            for (String source : guardSources) {
+                view.writeUTF(source);
+            }
+        }
     }
 
     @Override
@@ -150,6 +158,12 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     }
 
     private CommitMessage deserialize(int version, DataInputView view) throws IOException {
+        if (version > CURRENT_VERSION) {
+            throw new UnsupportedOperationException(
+                    "Unsupported commit message version "
+                            + version
+                            + ". Upgrade the Paimon reader.");
+        }
         IOExceptionSupplier<List<DataFileMeta>> fileDeserializer = fileDeserializer(version, view);
         IOExceptionSupplier<List<IndexFileMeta>> indexEntryDeserializer =
                 indexEntryDeserializer(version, view);
@@ -173,6 +187,14 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
                             indexEntryDeserializer.get());
             Long checkFromSnapshot = version >= 14 && view.readBoolean() ? view.readLong() : null;
             String generation = version >= 15 && view.readBoolean() ? view.readUTF() : null;
+            List<String> guardSources = null;
+            if (version >= 16 && view.readBoolean()) {
+                int size = view.readInt();
+                guardSources = new ArrayList<>(size);
+                for (int i = 0; i < size; i++) {
+                    guardSources.add(view.readUTF());
+                }
+            }
             return new CommitMessageImpl(
                     partition,
                     bucket,
@@ -180,7 +202,8 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
                     dataIncrement,
                     compactIncrement,
                     checkFromSnapshot,
-                    generation);
+                    generation,
+                    guardSources);
         } else {
             BinaryRow partition = deserializeBinaryRow(view);
             int bucket = view.readInt();

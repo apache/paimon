@@ -29,6 +29,9 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializedBytes;
@@ -47,6 +50,7 @@ public class CommitMessageImpl implements CommitMessage {
     private transient @Nullable Integer totalBuckets;
     private transient @Nullable Long checkFromSnapshot;
     private transient @Nullable String deleteOrderingGuardGeneration;
+    private transient @Nullable List<String> deleteOrderingGuardSources;
     private transient DataIncrement dataIncrement;
     private transient CompactIncrement compactIncrement;
 
@@ -84,6 +88,26 @@ public class CommitMessageImpl implements CommitMessage {
             CompactIncrement compactIncrement,
             @Nullable Long checkFromSnapshot,
             @Nullable String deleteOrderingGuardGeneration) {
+        this(
+                partition,
+                bucket,
+                totalBuckets,
+                dataIncrement,
+                compactIncrement,
+                checkFromSnapshot,
+                deleteOrderingGuardGeneration,
+                null);
+    }
+
+    public CommitMessageImpl(
+            BinaryRow partition,
+            int bucket,
+            @Nullable Integer totalBuckets,
+            DataIncrement dataIncrement,
+            CompactIncrement compactIncrement,
+            @Nullable Long checkFromSnapshot,
+            @Nullable String deleteOrderingGuardGeneration,
+            @Nullable List<String> deleteOrderingGuardSources) {
         this.partition = partition;
         this.bucket = bucket;
         this.totalBuckets = totalBuckets;
@@ -91,6 +115,10 @@ public class CommitMessageImpl implements CommitMessage {
         this.compactIncrement = compactIncrement;
         this.checkFromSnapshot = checkFromSnapshot;
         this.deleteOrderingGuardGeneration = deleteOrderingGuardGeneration;
+        this.deleteOrderingGuardSources =
+                deleteOrderingGuardSources == null
+                        ? null
+                        : Collections.unmodifiableList(new ArrayList<>(deleteOrderingGuardSources));
     }
 
     @Override
@@ -121,7 +149,8 @@ public class CommitMessageImpl implements CommitMessage {
                 dataIncrement,
                 compactIncrement,
                 snapshotId,
-                deleteOrderingGuardGeneration);
+                deleteOrderingGuardGeneration,
+                deleteOrderingGuardSources);
     }
 
     @Override
@@ -137,7 +166,25 @@ public class CommitMessageImpl implements CommitMessage {
                 dataIncrement,
                 compactIncrement,
                 checkFromSnapshot,
-                generation);
+                generation,
+                deleteOrderingGuardSources);
+    }
+
+    @Override
+    public @Nullable List<String> deleteOrderingGuardSources() {
+        return deleteOrderingGuardSources;
+    }
+
+    public CommitMessageImpl withDeleteOrderingGuardSources(List<String> sources) {
+        return new CommitMessageImpl(
+                partition,
+                bucket,
+                totalBuckets,
+                dataIncrement,
+                compactIncrement,
+                checkFromSnapshot,
+                deleteOrderingGuardGeneration,
+                sources);
     }
 
     public DataIncrement newFilesIncrement() {
@@ -169,6 +216,7 @@ public class CommitMessageImpl implements CommitMessage {
         this.totalBuckets = message.totalBuckets;
         this.checkFromSnapshot = message.checkFromSnapshot;
         this.deleteOrderingGuardGeneration = message.deleteOrderingGuardGeneration;
+        this.deleteOrderingGuardSources = message.deleteOrderingGuardSources;
         this.dataIncrement = message.dataIncrement;
         this.compactIncrement = message.compactIncrement;
     }
@@ -188,6 +236,7 @@ public class CommitMessageImpl implements CommitMessage {
                 && Objects.equals(totalBuckets, that.totalBuckets)
                 && Objects.equals(checkFromSnapshot, that.checkFromSnapshot)
                 && Objects.equals(deleteOrderingGuardGeneration, that.deleteOrderingGuardGeneration)
+                && Objects.equals(deleteOrderingGuardSources, that.deleteOrderingGuardSources)
                 && Objects.equals(dataIncrement, that.dataIncrement)
                 && Objects.equals(compactIncrement, that.compactIncrement);
     }
@@ -200,6 +249,7 @@ public class CommitMessageImpl implements CommitMessage {
                 totalBuckets,
                 checkFromSnapshot,
                 deleteOrderingGuardGeneration,
+                deleteOrderingGuardSources,
                 dataIncrement,
                 compactIncrement);
     }
@@ -213,6 +263,7 @@ public class CommitMessageImpl implements CommitMessage {
                         + "totalBuckets = %s, "
                         + "checkFromSnapshot = %s, "
                         + "deleteOrderingGuardGeneration = %s, "
+                        + "deleteOrderingGuardSources = %s, "
                         + "newFilesIncrement = %s, "
                         + "compactIncrement = %s}",
                 partition,
@@ -220,6 +271,7 @@ public class CommitMessageImpl implements CommitMessage {
                 totalBuckets,
                 checkFromSnapshot,
                 deleteOrderingGuardGeneration,
+                deleteOrderingGuardSources,
                 dataIncrement,
                 compactIncrement);
     }

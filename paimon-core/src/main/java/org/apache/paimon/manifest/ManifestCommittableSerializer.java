@@ -35,7 +35,8 @@ import java.util.Map;
 /** {@link VersionedSerializer} for {@link ManifestCommittable}. */
 public class ManifestCommittableSerializer implements VersionedSerializer<ManifestCommittable> {
 
-    private static final int CURRENT_VERSION = 5;
+    // Older envelopes accepted unknown inner versions and could misread message boundaries.
+    private static final int CURRENT_VERSION = 6;
 
     private final CommitMessageSerializer commitMessageSerializer;
 

@@ -94,6 +94,8 @@ def _initialize_python_write(owner, table, commit_user, static_partition, stream
 
 def _prepare_write(table, commit_user, static_partition, stream,
                    restore_snapshot_id, fixed_bucket, bucket_plan):
+    from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guards
+    validate_delete_ordering_guards(table)
     from pypaimon.read.merge_engine_support import check_sequence_field_supported
     check_sequence_field_supported(table)
     if table.options.native_write_enabled():
@@ -437,6 +439,8 @@ def commit_table_messages(
         commit_identifier,
         snapshot_properties=None):
     """Publish prepared messages while preserving files on any failure."""
+    from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guards
+    validate_delete_ordering_guards(owner.table)
     commit_identifier = validate_commit_identifier(commit_identifier)
     non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
     # Never abort files in response to a commit exception. Preserving
@@ -478,6 +482,8 @@ def abort_table_commit(owner, messages):
 
 
 def truncate_table_commit(owner, commit_identifier):
+    from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guards
+    validate_delete_ordering_guards(owner.table)
     prepared = owner._prepare_native_commit([], batch=True)
     if prepared is not None:
         prepared[0].truncate_table(commit_identifier)
@@ -486,6 +492,8 @@ def truncate_table_commit(owner, commit_identifier):
 
 
 def truncate_partitions_commit(owner, partitions, commit_identifier):
+    from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guards
+    validate_delete_ordering_guards(owner.table)
     prepared = owner._prepare_native_commit([], batch=True)
     if prepared is not None:
         prepared[0].truncate_partitions(partitions, commit_identifier)

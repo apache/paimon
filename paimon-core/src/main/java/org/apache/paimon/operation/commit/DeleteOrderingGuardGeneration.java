@@ -39,7 +39,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -106,34 +105,6 @@ public class DeleteOrderingGuardGeneration {
                             + "Reopen the writer after the ordering-history reset.",
                     message.partition());
         }
-    }
-
-    /** Check again against each publication attempt, including optimistic commit retries. */
-    public static CommitChangesProvider fence(
-            CommitChangesProvider delegate, List<CommitMessage> messages) {
-        return new CommitChangesProvider() {
-            @Override
-            public CommitChanges provide(@Nullable Snapshot latestSnapshot) {
-                validate(latestSnapshot, messages);
-                return delegate.provide(latestSnapshot);
-            }
-
-            @Override
-            public Set<Long> rebasedReassignments() {
-                return delegate.rebasedReassignments();
-            }
-
-            @Override
-            public boolean resetsDeleteOrderingGuards() {
-                return delegate.resetsDeleteOrderingGuards();
-            }
-
-            @Nullable
-            @Override
-            public PartitionPredicate deleteOrderingGuardResetFilter() {
-                return delegate.deleteOrderingGuardResetFilter();
-            }
-        };
     }
 
     /** Inherit the state on every snapshot; atomically advance it with an explicit scoped reset. */
