@@ -1036,7 +1036,9 @@ def _load_dataset(table, tag_name):
     if "datasets" in identifiers:
         datasets_table = _component_table(
             catalog, catalog.get_table(identifiers["datasets"]), tag_name)
-        datasets = _read_arrow(datasets_table).sort_by("dataset_index").to_pylist()
+        projection = [name for name in _target_schema(datasets_table).names
+                      if not name.endswith("_ipc")]
+        datasets = _read_arrow(datasets_table, projection).sort_by("dataset_index").to_pylist()
     episodes_table = _component_table(
         catalog, catalog.get_table(identifiers["episodes"]), tag_name)
     episodes = _episode_dataset(episodes_table, datasets)
@@ -1094,7 +1096,7 @@ def _episode_dataset(table, datasets=None):
 
     projection = [
         name for name in _target_schema(table).names
-        if not name.startswith("stats/")
+        if not name.startswith("stats/") and name != "source_episode_ipc"
     ]
     data = _read_arrow(table, projection)
     if datasets is not None:

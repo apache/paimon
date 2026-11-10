@@ -1073,3 +1073,40 @@ def test_merge_preserves_arrow_native_episode_rows(setup, import_parallelism):
         assert restored.schema.equals(schema, check_metadata=True)
         assert restored.equals(expected, check_metadata=True)
     assert rows(conn, "merged").num_rows == 10
+
+
+@pytest.mark.parametrize("dataset_index", [None, 1])
+def test_training_projects_out_source_ipc(setup, dataset_index):
+    from pypaimon.multimodal.lerobot import dataset as dataset_module
+
+    pytest.importorskip("torch")
+    pytest.importorskip("datasets")
+    conn, sources = setup
+    conn.load_from_lerobot("merged", sources, tag_name="train")
+    reads = {}
+    read_arrow = dataset_module._read_arrow
+
+    def checked_read(table, projection=None):
+        name = table.identifier.object
+        if name.endswith(("__datasets", "__episodes")):
+            assert projection is not None
+            assert not any(column.endswith("_ipc") for column in projection)
+            reads[name.rsplit("__", 1)[1]] = projection
+        result = read_arrow(table, projection)
+        if name.endswith(("__datasets", "__episodes")):
+            assert result.column_names == projection
+        return result
+
+    with patch.object(dataset_module, "_read_arrow", side_effect=checked_read):
+        dataset = pm.PaimonLeRobotDataset(
+            conn.get_table("merged"), tag_name="train", dataset_index=dataset_index)
+        try:
+            assert dataset[0]["task"] == ("pick" if dataset_index is None else "place")
+            assert not any(name.endswith("_ipc") for name in dataset.meta.episodes.column_names)
+            assert all(not any(name.endswith("_ipc") for name in row)
+                       for row in dataset.meta.datasets)
+        finally:
+            dataset.close()
+    assert set(reads) == {"datasets", "episodes"}
+    assert "tasks_ipc" in rows(conn, "merged__datasets").column_names
+    assert "source_episode_ipc" in episode_rows(conn, "merged__episodes").column_names
