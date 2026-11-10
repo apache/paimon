@@ -29,7 +29,7 @@ from pypaimon.multimodal.lerobot.loader import (
     _commit_messages, _prepare_dataset, _video_fps,
 )
 from pypaimon.multimodal.lerobot.metadata import (
-    _EPISODE_FPS_COLUMN, _append_arrow_tables, _commit_metadata, _json_value,
+    _EPISODE_CONTROL_COLUMNS, _EPISODE_FPS_COLUMN, _append_arrow_tables, _commit_metadata, _json_value,
     _load_dataset_metadata,
     _metadata_table, _prepare_metadata_tables,
     _source_episode_tables, _validated_episode_tables,
@@ -208,6 +208,22 @@ def _plan_merge(plans, fps_mode="dataset"):
         if not any(field.name.startswith("stats/%s/q" % name) for name in _CONTROLS)
         and not (fps_mode == "source" and field.name == _EPISODE_FPS_COLUMN)
     ], metadata=metadata["episodes_schema"].metadata)
+    required_episode_fields = set(_EPISODE_CONTROL_COLUMNS) | {
+        "videos/%s/%s" % (name, suffix)
+        for name in first["videos"]
+        for suffix in ("chunk_index", "file_index", "from_timestamp", "to_timestamp")
+    }
+    # Optional source-specific fields remain lossless in source_episode_ipc.
+    metadata["episodes_schema"] = pa.schema([
+        field if field.name in required_episode_fields else field.with_nullable(
+            field.nullable or any(plan["metadata"]["episodes_schema"].field(field.name).nullable
+                                  for plan in plans))
+        for field in metadata["episodes_schema"]
+        if field.name in required_episode_fields or all(
+            field.name in plan["metadata"]["episodes_schema"].names
+            and field.type.equals(plan["metadata"]["episodes_schema"].field(field.name).type)
+            for plan in plans)
+    ], metadata=metadata["episodes_schema"].metadata)
     frame_offset = episode_offset = 0
     for ordinal, plan in enumerate(plans):
         other = plan["info"]
@@ -224,13 +240,11 @@ def _plan_merge(plans, fps_mode="dataset"):
                 raise ValueError("LeRobot source %d has incompatible features.%s." % (ordinal, name))
         if not _same_fields(plan["schema"], first["schema"]):
             raise ValueError("LeRobot source %d has incompatible frame schema." % ordinal)
-        episode_schema = pa.schema([
-            field.with_nullable(True) if field.name.startswith("stats/subtask_index/") else field
-            for field in plan["metadata"]["episodes_schema"]
-            if not any(field.name.startswith("stats/%s/q" % name) for name in _CONTROLS)
-            and not (fps_mode == "source" and field.name == _EPISODE_FPS_COLUMN)
-        ])
-        if not _same_fields(episode_schema, metadata["episodes_schema"]):
+        episode_schema = plan["metadata"]["episodes_schema"]
+        if any(name not in episode_schema.names
+               or not episode_schema.field(name).equals(
+                   metadata["episodes_schema"].field(name), check_metadata=False)
+               for name in required_episode_fields):
             raise ValueError("LeRobot source %d has incompatible Episode schema." % ordinal)
         # Validate every Episode before creating any target table.
         plan["metadata"]["fps_mode"] = fps_mode

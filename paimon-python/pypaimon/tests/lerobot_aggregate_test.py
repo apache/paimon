@@ -1219,3 +1219,49 @@ def test_merge_normalizes_video_fps(setup, tmp_path, import_parallelism, video_r
         assert tuple(reader[5]["camera"].shape) == (3, 16, 16)
     finally:
         reader.close()
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+@pytest.mark.parametrize("reverse", [False, True])
+def test_merge_source_specific_episode_extensions(setup, import_parallelism, reverse):
+    conn, sources = setup
+    originals = {}
+    for index, uri in enumerate(sources):
+        path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
+        data = pq.read_table(path)
+        if index == 1:
+            data = data.append_column("vendor_note", pa.array(["note", None]))
+        data = data.append_column("vendor_value", pa.array(
+            [1, 2] if index == 0 else [b"a", b"b"]))
+        field = pa.field("shared_note", pa.string(), nullable=index == 1)
+        data = data.append_column(field, pa.array(["shared", "note"] if index == 0 else [None, "note"]))
+        pq.write_table(data, path)
+        originals[uri] = pq.read_table(path)
+    if reverse:
+        sources.reverse()
+    conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
+    data = episode_rows(conn, "merged__episodes")
+    assert "vendor_note" not in data.column_names
+    assert "vendor_value" not in data.column_names
+    assert "shared_note" in data.column_names
+    for row in data.to_pylist():
+        expected = originals[sources[row["dataset_index"]]].slice(row["episode_index"], 1)
+        restored = pa.ipc.open_stream(row["source_episode_ipc"]).read_all()
+        assert restored.equals(expected, check_metadata=True)
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged"), tag_name="train")
+    try:
+        assert [int(sample["episode_index"]) for sample in reader.get_items([0, 2, 5, 7])] == [0, 1, 2, 3]
+    finally:
+        reader.close()
+
+
+def test_merge_rejects_incompatible_episode_controls(setup):
+    conn, sources = setup
+    path = Path(sources[1][7:]) / "meta/episodes/chunk-000/file-000.parquet"
+    data = pq.read_table(path)
+    data = data.set_column(data.schema.get_field_index("length"), "length", data["length"].cast(pa.int32()))
+    pq.write_table(data, path)
+    with pytest.raises(ValueError, match="incompatible Episode schema"):
+        conn.load_from_lerobot("merged", sources)
+    with pytest.raises(TableNotExistException):
+        conn.get_table("merged")
