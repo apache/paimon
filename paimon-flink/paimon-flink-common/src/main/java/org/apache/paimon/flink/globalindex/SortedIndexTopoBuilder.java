@@ -31,9 +31,9 @@ import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.sink.CommitterOperatorFactory;
 import org.apache.paimon.flink.sink.NoopCommittableStateManager;
 import org.apache.paimon.flink.sink.StoreCommitter;
+import org.apache.paimon.flink.sorter.OrderSorter;
 import org.apache.paimon.flink.sorter.SortOperator;
 import org.apache.paimon.flink.sorter.TableSortInfo;
-import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
@@ -64,6 +64,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.flink.api.common.functions.Partitioner;
 import org.apache.flink.api.java.functions.KeySelector;
@@ -189,7 +190,11 @@ public class SortedIndexTopoBuilder {
             GlobalIndexKeyExtractor keyExtractor = indexWriter.keyExtractor();
             RowType sortReadType =
                     normalizedReadType(
-                            dataReadType, buildTaskIdField, indexColumn, keyExtractor.keyType());
+                            dataReadType,
+                            buildTaskIdField,
+                            indexColumn,
+                            keyExtractor.keyType(),
+                            keyExtractor.isIdentity() && sourceReadType.getFieldCount() == 1);
             int taskIdPos = sortReadType.getFieldIndex(buildTaskIdField);
             int indexFieldPos = sortReadType.getFieldIndex(indexColumn);
             int rowIdPos = sortReadType.getFieldIndex(SpecialFields.ROW_ID.name());
@@ -425,8 +430,17 @@ public class SortedIndexTopoBuilder {
                         .setGlobalSampleSize(parallelism * 1000)
                         .setRangeNumber(parallelism * 10)
                         .build();
-        return TableSorter.getSorter(env, rowData, coreOptions, readType, sortInfo)
-                .sort()
+        return new OrderSorter(env, rowData, coreOptions, readType, sortInfo)
+                .sort(
+                        readType.getFieldCount() == 4
+                                ? new NullBitmapShuffleOperator(
+                                        readType.project(
+                                                createSortColumns(
+                                                        readType.getFieldNames().get(taskIdPos),
+                                                        readType.getFieldNames()
+                                                                .get(indexFieldPos))))
+                                : null,
+                        readType.getFieldCount() == 4 ? new NullBitmapExpandOperator() : null)
                 .map(FlinkRowWrapper::new, InternalTypeInfo.fromRowType(readType))
                 .setParallelism(parallelism);
     }
@@ -471,13 +485,24 @@ public class SortedIndexTopoBuilder {
     }
 
     private static RowType normalizedReadType(
-            RowType readType, String buildTaskIdField, String indexColumn, DataType keyType) {
+            RowType readType,
+            String buildTaskIdField,
+            String indexColumn,
+            DataType keyType,
+            boolean compressNulls) {
         List<DataField> fields = new ArrayList<>();
         fields.add(
                 new DataField(BUILD_TASK_ID_FIELD_ID, buildTaskIdField, DataTypes.INT().notNull()));
         DataField sourceField = readType.getField(indexColumn);
         fields.add(new DataField(sourceField.id(), sourceField.name(), keyType));
         fields.add(readType.getField(SpecialFields.ROW_ID.name()));
+        if (compressNulls) {
+            String payloadField = "_SORTED_INDEX_NULL_BITMAP";
+            while (readType.containsField(payloadField) || payloadField.equals(buildTaskIdField)) {
+                payloadField = "_" + payloadField;
+            }
+            fields.add(new DataField(-2, payloadField, DataTypes.BYTES()));
+        }
         return new RowType(readType.isNullable(), fields);
     }
 
@@ -557,6 +582,18 @@ public class SortedIndexTopoBuilder {
                                     tuple.setField(i, compositeGetters[i].getFieldOrNull(row));
                                 }
                                 sourceValue = InternalRowUtils.copy(tuple, sourceReadType);
+                            }
+                            if (keyExtractor.isIdentity() && sourceReadType.getFieldCount() == 1) {
+                                // Sampling must see every original row before transport
+                                // compression.
+                                output.collect(
+                                        new StreamRecord<>(
+                                                GenericRow.of(
+                                                        buildTask.taskId,
+                                                        sourceValue,
+                                                        rowId,
+                                                        null)));
+                                continue;
                             }
                             boolean[] emitted = new boolean[1];
                             keyExtractor.extract(
@@ -652,8 +689,16 @@ public class SortedIndexTopoBuilder {
                 currentWriter = writer.createTaskWriter(currentTask.rowRange);
             }
 
-            long localRowId = row.getLong(rowIdPos) - currentTask.rowRange.from;
-            currentWriter.write(indexFieldGetter.getFieldOrNull(row), localRowId);
+            if (row.getFieldCount() > 3 && !row.isNullAt(3)) {
+                RoaringNavigableMap64 nullRows = new RoaringNavigableMap64();
+                nullRows.deserialize(row.getBinary(3));
+                for (long rowId : nullRows) {
+                    currentWriter.write(null, rowId - currentTask.rowRange.from);
+                }
+            } else {
+                long localRowId = row.getLong(rowIdPos) - currentTask.rowRange.from;
+                currentWriter.write(indexFieldGetter.getFieldOrNull(row), localRowId);
+            }
         }
 
         @Override

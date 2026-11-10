@@ -20,24 +20,35 @@ package org.apache.paimon.flink.globalindex;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder.SortedBuildTask;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
+import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.sorted.NullBitmapBuffer;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.globalindex.sorted.SortedSingleColumnIndexWriter;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.streaming.api.transformations.StreamExchangeMode;
+import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.Test;
 
 import java.io.Closeable;
@@ -57,6 +68,164 @@ import static org.mockito.Mockito.when;
 
 /** Tests for {@link SortedIndexTopoBuilder}. */
 public class SortedIndexTopoBuilderTest {
+
+    @Test
+    public void testNormalizedNullPayloadRoundTripsWithoutNameCollision() throws Exception {
+        String column = "_SORTED_INDEX_NULL_BITMAP";
+        RowType source =
+                SpecialFields.rowTypeWithRowId(
+                        RowType.of(
+                                new org.apache.paimon.types.DataField(0, column, DataTypes.INT())));
+        Method normalize =
+                SortedIndexTopoBuilder.class.getDeclaredMethod(
+                        "normalizedReadType",
+                        RowType.class,
+                        String.class,
+                        String.class,
+                        org.apache.paimon.types.DataType.class,
+                        boolean.class);
+        normalize.setAccessible(true);
+        RowType type =
+                (RowType) normalize.invoke(null, source, "task", column, DataTypes.INT(), true);
+        assertThat(type.getFieldNames())
+                .containsExactly(
+                        "task", column, SpecialFields.ROW_ID.name(), "__SORTED_INDEX_NULL_BITMAP");
+        assertThat(type.getTypeAt(3)).isEqualTo(DataTypes.BYTES());
+        NullBitmapBuffer buffer = new NullBitmapBuffer();
+        buffer.add(5);
+        buffer.add(1L << 33);
+        byte[] payload = buffer.drain();
+        BinaryRow row =
+                new org.apache.paimon.data.serializer.InternalRowSerializer(type)
+                        .toBinaryRow(GenericRow.of(2, null, 5L, payload));
+        assertThat(row.getBinary(3)).isEqualTo(payload);
+        assertThat(row.getInt(0)).isEqualTo(2);
+        assertThat(row.getLong(2)).isEqualTo(5L);
+        assertThat(
+                        ((RowType)
+                                        normalize.invoke(
+                                                null,
+                                                source,
+                                                "task",
+                                                column,
+                                                DataTypes.INT(),
+                                                false))
+                                .getFieldCount())
+                .isEqualTo(3);
+    }
+
+    @Test
+    public void testScalarReaderPreservesEverySamplingRow() throws Exception {
+        checkUncompressedReaderRows(false);
+    }
+
+    @Test
+    public void testAllNullReaderPreservesEverySamplingRow() throws Exception {
+        checkUncompressedReaderRows(true);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void checkUncompressedReaderRows(boolean allNull) throws Exception {
+        ReadBuilder readBuilder = mock(ReadBuilder.class);
+        TableRead read = mock(TableRead.class);
+        Split split = mock(Split.class);
+        RecordReader<InternalRow> reader = mock(RecordReader.class);
+        RecordReader.RecordIterator<InternalRow> batch = mock(RecordReader.RecordIterator.class);
+        when(readBuilder.newRead()).thenReturn(read);
+        when(read.createReader(split)).thenReturn(reader);
+        when(reader.readBatch()).thenReturn(batch).thenReturn(null);
+        final int[] position = {0};
+        when(batch.next())
+                .thenAnswer(
+                        invocation -> {
+                            int i = position[0]++;
+                            return i <= NullBitmapBuffer.MAX_ROWS * 2 + 1
+                                    ? GenericRow.of(!allNull && i == 1 ? 7 : null, (1L << 33) + i)
+                                    : null;
+                        });
+        OneInputStreamOperator<SortedIndexTopoBuilder.SortedSplitTask, InternalRow> operator =
+                (OneInputStreamOperator<SortedIndexTopoBuilder.SortedSplitTask, InternalRow>)
+                        newOperator(
+                                "ReadDataOperator",
+                                readBuilder,
+                                GlobalIndexKeyExtractor.identity(DataTypes.INT()),
+                                RowType.of(DataTypes.INT()));
+        try (OneInputStreamOperatorTestHarness<SortedIndexTopoBuilder.SortedSplitTask, InternalRow>
+                harness = new OneInputStreamOperatorTestHarness<>(operator)) {
+            harness.open();
+            harness.processElement(
+                    new StreamRecord<>(new SortedIndexTopoBuilder.SortedSplitTask(3, split)));
+            List<InternalRow> rows = harness.extractOutputValues();
+            assertThat(rows).hasSize(NullBitmapBuffer.MAX_ROWS * 2 + 2);
+            for (int i = 0; i < rows.size(); i++) {
+                InternalRow row = rows.get(i);
+                assertThat(row.getFieldCount()).isEqualTo(4);
+                assertThat(row.getInt(0)).isEqualTo(3);
+                assertThat(row.getLong(2)).isEqualTo((1L << 33) + i);
+                assertThat(row.isNullAt(1)).isEqualTo(allNull || i != 1);
+                assertThat(row.isNullAt(3)).isTrue();
+            }
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testBitmapBatchesReuseCurrentWriterAndLocalRowIds() throws Exception {
+        long start = 1L << 33;
+        Range range = new Range(start, start + 100);
+        SortedGlobalIndexWriter writer = mock(SortedGlobalIndexWriter.class);
+        GlobalIndexSingleColumnWriter underlying = mock(GlobalIndexSingleColumnWriter.class);
+        SortedSingleColumnIndexWriter taskWriter =
+                SortedSingleColumnIndexWriter.forSourceRowCount(101, underlying);
+        when(writer.createTaskWriter(range)).thenReturn(taskWriter);
+        OneInputStreamOperator<InternalRow, org.apache.paimon.flink.sink.Committable> operator =
+                (OneInputStreamOperator<InternalRow, org.apache.paimon.flink.sink.Committable>)
+                        newOperator(
+                                "WriteIndexOperator",
+                                Collections.singletonList(
+                                        new SortedBuildTask(
+                                                0,
+                                                range,
+                                                new BinaryRowSerializer(0)
+                                                        .serializeToBytes(BinaryRow.EMPTY_ROW))),
+                                0,
+                                writer,
+                                1L,
+                                0,
+                                1,
+                                2,
+                                DataTypes.INT());
+        try (OneInputStreamOperatorTestHarness<
+                        InternalRow, org.apache.paimon.flink.sink.Committable>
+                harness = new OneInputStreamOperatorTestHarness<>(operator)) {
+            harness.open();
+            for (int i = 0; i < 2; i++) {
+                NullBitmapBuffer buffer = new NullBitmapBuffer();
+                buffer.add(start + i * 2);
+                buffer.add(start + i * 2 + 1);
+                harness.processElement(
+                        new StreamRecord<>(
+                                GenericRow.of(0, null, buffer.firstRowId(), buffer.drain())));
+            }
+            harness.processElement(new StreamRecord<>(GenericRow.of(0, 7, start + 4, null)));
+            verify(writer).createTaskWriter(range);
+            for (long i = 0; i < 4; i++) {
+                verify(underlying).write(null, i);
+            }
+            verify(underlying).write(7, 4L);
+        }
+    }
+
+    private static Object newOperator(String name, Object... args) throws Exception {
+        for (Class<?> candidate : SortedIndexTopoBuilder.class.getDeclaredClasses()) {
+            if (candidate.getSimpleName().equals(name)) {
+                Constructor<?> constructor = candidate.getDeclaredConstructors()[0];
+                constructor.setAccessible(true);
+                return constructor.newInstance(args);
+            }
+        }
+        throw new AssertionError("Missing operator " + name);
+    }
 
     @Test
     public void testSupportsBitmapAndBTree() {

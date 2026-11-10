@@ -218,7 +218,11 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                         calculateParallelism(buildTasks, recordsPerRange, maxParallelism);
                 Dataset<Row> partitioned =
                         combineAndSortBuildTaskInputs(
-                                taskInputs, partitionNum, taskIdField, indexField.name());
+                                taskInputs,
+                                partitionNum,
+                                taskIdField,
+                                indexField.name(),
+                                extraFields.isEmpty());
                 Map<Long, SortedBuildTask> buildTasksById = new HashMap<>();
                 for (SortedBuildTask task : buildTasks) {
                     buildTasksById.put(task.taskId, task);
@@ -226,6 +230,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                 JavaRDD<byte[]> written =
                         partitioned
                                 .javaRDD()
+                                .mapPartitions(NullBitmapShuffle::expandRows)
                                 .map(row -> (InternalRow) (new SparkRow(normalizedReadType, row)))
                                 .mapPartitions(
                                         (FlatMapFunction<Iterator<InternalRow>, byte[]>)
@@ -334,9 +339,23 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             int partitionNum,
             String taskIdField,
             String indexField) {
+        return combineAndSortBuildTaskInputs(
+                taskInputs, partitionNum, taskIdField, indexField, false);
+    }
+
+    static Dataset<Row> combineAndSortBuildTaskInputs(
+            List<Dataset<Row>> taskInputs,
+            int partitionNum,
+            String taskIdField,
+            String indexField,
+            boolean compressNulls) {
         Dataset<Row> combined = taskInputs.get(0);
         for (int i = 1; i < taskInputs.size(); i++) {
             combined = combined.union(taskInputs.get(i));
+        }
+
+        if (compressNulls) {
+            return NullBitmapShuffle.sort(combined, partitionNum, true);
         }
 
         Column[] sortFields =

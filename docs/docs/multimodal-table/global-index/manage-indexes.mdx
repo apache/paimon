@@ -438,6 +438,25 @@ matched_files = table.drop_global_index(
 
 </Tabs>
 
+## Null-Heavy Scalar Index Builds
+
+Spark and Flink automatically batch null row IDs into compressed bitmaps when
+building single-column BTree and Bitmap indexes with a high observed null ratio
+(currently at least 80%). Sparse and non-null inputs use the compact original-row
+encoding instead. This is an internal build optimization, with no additional
+table option or change to the persisted index format.
+
+Spark reuses the range-sampling pass to measure the null ratio. If sampling does
+not provide a ratio, such as with a single output partition, it conservatively
+uses original rows. Flink adapts to bounded observation windows as it reads rows.
+Bitmap buffers contain at most 4,096 row IDs and never cross assigned shuffle
+destinations. Rows are restored before local sorting, preserving the original
+file rotation and query layout for the same sampled boundaries.
+
+This reduces network traffic for null-heavy builds; it does not remove local
+sorting or guarantee lower elapsed time for every workload. Composite and
+Multivalue indexes retain their existing build paths.
+
 ## Shared Options
 
 These table options affect global index build and read behavior:

@@ -25,6 +25,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
+import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
@@ -72,6 +74,132 @@ import static org.assertj.core.api.Assertions.entry;
 
 /** Test case for sorted global indexes. */
 public class SortedGlobalIndexITCase extends CatalogITCaseBase {
+
+    @Test
+    public void testCompressedScalarNullBitmapShuffleAndQueries() throws Exception {
+        checkCompressedScalarNullBitmap(20000, "btree", false);
+    }
+
+    @Test
+    public void testCompressedScalarNullBitmapParallelShuffleAndRotation() throws Exception {
+        checkCompressedScalarNullBitmap(4000, "btree", false);
+    }
+
+    @Test
+    public void testCompressedBitmapNullShuffleAndQueries() throws Exception {
+        checkCompressedScalarNullBitmap(4000, "bitmap", false);
+    }
+
+    @Test
+    public void testCompressedBTreeAllNullBatchesShareOneFile() throws Exception {
+        checkCompressedScalarNullBitmap(20000, "btree", true);
+    }
+
+    @Test
+    public void testCompressedBitmapAllNullBatchesShareOneFile() throws Exception {
+        checkCompressedScalarNullBitmap(20000, "bitmap", true);
+    }
+
+    @Test
+    public void testCompressedBTreeHotKeyShuffleAndQueries() throws Exception {
+        checkCompressedScalarNullBitmap(4000, "btree", false, true);
+    }
+
+    @Test
+    public void testCompressedBitmapHotKeyShuffleAndQueries() throws Exception {
+        checkCompressedScalarNullBitmap(4000, "bitmap", false, true);
+    }
+
+    @Test
+    public void testCompressedBTreeSingleWriterRotation() throws Exception {
+        checkCompressedScalarNullBitmap(4000, "btree", false, false, 1);
+    }
+
+    @Test
+    public void testCompressedBitmapSingleWriterRotation() throws Exception {
+        checkCompressedScalarNullBitmap(4000, "bitmap", false, false, 1);
+    }
+
+    private void checkCompressedScalarNullBitmap(
+            int recordsPerFile, String indexType, boolean allNull) throws Exception {
+        checkCompressedScalarNullBitmap(recordsPerFile, indexType, allNull, false);
+    }
+
+    private void checkCompressedScalarNullBitmap(
+            int recordsPerFile, String indexType, boolean allNull, boolean hotKey)
+            throws Exception {
+        checkCompressedScalarNullBitmap(recordsPerFile, indexType, allNull, hotKey, 2);
+    }
+
+    private void checkCompressedScalarNullBitmap(
+            int recordsPerFile,
+            String indexType,
+            boolean allNull,
+            boolean hotKey,
+            int maxParallelism)
+            throws Exception {
+        sql(
+                "CREATE TABLE T_NULL_BITMAP (id INT, idx INT) WITH ("
+                        + "'bucket' = '-1', 'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'sorted-index.records-per-file' = '"
+                        + recordsPerFile
+                        + "', "
+                        + "'scalar-index.search-mode' = 'fast')");
+        FileStoreTable table = paimonTable("T_NULL_BITMAP");
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < 9000; i++) {
+                Integer value = null;
+                if (!allNull && (hotKey ? i % 2 == 0 : i % 1000 == 0)) {
+                    value = hotKey ? 7 : i;
+                }
+                write.write(GenericRow.of(i, value));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        Options options = new Options(table.options());
+        options.set(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM, maxParallelism);
+        SortedIndexTopoBuilder.buildIndexAndExecute(
+                streamExecutionEnvironmentBuilder().batchMode().parallelism(2).build(),
+                table,
+                Collections.singletonList(Collections.singletonList("idx")),
+                indexType,
+                null,
+                options);
+        List<IndexManifestEntry> entries = indexEntries(table, indexType);
+        if (recordsPerFile == 20000) {
+            assertThat(entries).hasSize(1);
+        } else {
+            // Use the actual rotation threshold, including the writer's floating allowance.
+            long threshold =
+                    new SortedGlobalIndexWriter(table, indexType, options).recordsPerRange();
+            int minimumFiles = (int) ((9000L + threshold - 1) / threshold);
+            assertThat(entries.size()).isBetween(minimumFiles, minimumFiles + maxParallelism - 1);
+        }
+        assertThat(entries.stream().mapToLong(entry -> entry.indexFile().rowCount()).sum())
+                .isEqualTo(9000L);
+        assertThat(sql("SELECT COUNT(*) FROM T_NULL_BITMAP WHERE idx IS NULL"))
+                .containsExactly(Row.of(allNull ? 9000L : hotKey ? 4500L : 8991L));
+        assertThat(sql("SELECT COUNT(*) FROM T_NULL_BITMAP WHERE idx IS NOT NULL"))
+                .containsExactly(Row.of(allNull ? 0L : hotKey ? 4500L : 9L));
+        if (hotKey) {
+            assertThat(sql("SELECT COUNT(*) FROM T_NULL_BITMAP WHERE idx = 7"))
+                    .containsExactly(Row.of(4500L));
+            assertThat(sql("SELECT COUNT(*) FROM T_NULL_BITMAP WHERE idx >= 7"))
+                    .containsExactly(Row.of(4500L));
+            assertThat(sql("SELECT id FROM T_NULL_BITMAP WHERE idx = 4000")).isEmpty();
+        } else if (allNull) {
+            assertThat(sql("SELECT id FROM T_NULL_BITMAP WHERE idx = 4000")).isEmpty();
+            assertThat(sql("SELECT id FROM T_NULL_BITMAP WHERE idx >= 7000")).isEmpty();
+        } else {
+            assertThat(sql("SELECT id FROM T_NULL_BITMAP WHERE idx = 4000"))
+                    .containsExactly(Row.of(4000));
+            assertThat(sql("SELECT id FROM T_NULL_BITMAP WHERE idx >= 7000"))
+                    .containsExactlyInAnyOrder(Row.of(7000), Row.of(8000));
+        }
+    }
 
     @Test
     public void testBTreeIndex() throws Catalog.TableNotExistException {
