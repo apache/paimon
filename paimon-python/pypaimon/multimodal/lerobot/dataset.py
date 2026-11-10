@@ -42,6 +42,7 @@ from pypaimon.multimodal.lerobot.aggregate import (
 )
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.lerobot.metadata import (
+    _EPISODE_CONTROL_COLUMNS,
     _dataset_fps,
     _positive_integer,
     _companion_table_identifiers,
@@ -1282,12 +1283,12 @@ def _episode_dataset(table, datasets=None):
             "PaimonLeRobotDataset requires datasets from "
             "'pypaimon[lerobot]'.") from error
 
-    projection = [
-        name for name in _target_schema(table).names
-        if not name.startswith("stats/") and name != "stats"
-        and (datasets is None or name not in (
-            "source_episode_patch_json", "source_episode_json", "source_episode_ipc"))
-    ]
+    if datasets is not None:
+        # Merged Episodes may contain Arrow extensions unsupported by HF Dataset.
+        projection = _EPISODE_CONTROL_COLUMNS + ["dataset_index"]
+    else:
+        projection = [name for name in _target_schema(table).names
+                      if not name.startswith("stats/") and name != "stats"]
     data = _read_arrow(table, projection)
     if datasets is not None:
         data = data.sort_by([
