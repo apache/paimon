@@ -96,20 +96,30 @@ def test_commit_resolves_updated_index_columns_by_file_schema(native_rest_catalo
     else:
         assert messages[0].new_files[0].schema_id == original.table_schema.id
     target = latest.copy({'commit.native.enabled': str(native).lower()})
-    if action == 'THROW_ERROR' and evolution != 'drop_readd':
-        with pytest.raises(Exception, match='globally indexed columns'):
+    # Python publication rejects removed field IDs even when the index now
+    # belongs to a different field with the same name.
+    dropped_update = evolution == 'drop_readd' and not native
+    if dropped_update or (action == 'THROW_ERROR' and evolution != 'drop_readd'):
+        error = 'cannot restore a dropped field' if dropped_update else 'globally indexed columns'
+        with pytest.raises(Exception, match=error):
             _commit(target, messages, native)
         assert latest.snapshot_manager().get_latest_snapshot().id == before.id
+        expected_indexes = ['identity.index']
+        expected_value = None if dropped_update else 10
     else:
         _commit(target, messages, native)
         after = latest.snapshot_manager().get_latest_snapshot()
         assert after.id == before.id + 1
-        indexes = scan_global_index_entries(latest, after)
-        expected = [] if action == 'DROP_PARTITION_INDEX' and evolution != 'drop_readd' else ['identity.index']
-        assert [entry.index_file.file_name for entry in indexes] == expected
-        read = latest.new_read_builder()
-        rows = read.new_read().to_arrow(read.new_scan().plan().splits()).to_pydict()
-        assert rows == {'id': [1], index_field.name: [None if evolution == 'drop_readd' else 11]}
+        expected_indexes = [] if action == 'DROP_PARTITION_INDEX' and evolution != 'drop_readd' else ['identity.index']
+        expected_value = None if evolution == 'drop_readd' else 11
+    snapshot = latest.snapshot_manager().get_latest_snapshot()
+    indexes = scan_global_index_entries(latest, snapshot)
+    assert [entry.index_file.file_name for entry in indexes] == expected_indexes
+    read = latest.new_read_builder()
+    rows = read.new_read().to_arrow(read.new_scan().plan().splits()).to_pydict()
+    assert rows == {'id': [1], index_field.name: [expected_value]}
+    if dropped_update:
+        assert all(latest.file_io.exists(file.file_path) for message in messages for file in message.new_files)
 
 
 @pytest.mark.parametrize('native', _ENGINES)
