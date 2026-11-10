@@ -20,6 +20,10 @@ import json
 
 import pyarrow as pa
 
+from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.schema.column_directive_utils import VIDEO_FRAME_FIELD_DIRECTIVE
+
 
 _SCALAR_DTYPES = {
     "bool": pa.bool_(),
@@ -212,3 +216,25 @@ def _merge_schemas(schemas, schema_evolution=True, required=()):
                                 for schema in schemas))
         for name, field in fields.items()
     ], metadata=schemas[0].metadata)
+
+
+def _plan_schema_evolution(target_schema, incoming_schema, schema_evolution,
+                           required=(), video_fields=()):
+    """Validate an append and plan nullable column additions without changing types."""
+    # Compare the storage representation, including Arrow aliases for STRING/ARRAY.
+    incoming_schema = PyarrowFieldParser.from_paimon_schema(
+        PyarrowFieldParser.to_paimon_schema(incoming_schema))
+    merged = _merge_schemas([target_schema, incoming_schema], schema_evolution, required)
+    changes = []
+    for field in merged:
+        if field.name not in target_schema.names:
+            comment = _description(field) or None
+            if field.name in video_fields:
+                comment = VIDEO_FRAME_FIELD_DIRECTIVE + ("; " + comment if comment else "")
+            changes.append(SchemaChange.add_column(
+                field.name, PyarrowFieldParser.to_paimon_type(field.type, True),
+                comment=comment))
+        elif field.name not in required and field.nullable \
+                and not target_schema.field(field.name).nullable:
+            changes.append(SchemaChange.update_column_nullability(field.name, True))
+    return changes

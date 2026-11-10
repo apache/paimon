@@ -137,11 +137,18 @@ def episode_rows(conn, name):
 
 
 def metadata(conn, suffix):
-    dataset = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"))
-    try:
-        return getattr(dataset.reader.meta, suffix)
-    finally:
-        dataset.close()
+    from pypaimon.multimodal.lerobot.dataset import (
+        _merged_source_info, _merged_source_stats, _source_vocabulary,
+    )
+
+    sources = rows(conn, "merged_datasets").sort_by("index").to_pylist()
+    tasks, _ = _source_vocabulary(sources, "task")
+    subtasks, _ = _source_vocabulary(sources, "subtask")
+    if suffix == "info":
+        return _merged_source_info(sources, tasks, subtasks)
+    if suffix == "stats":
+        return _merged_source_stats(sources, conn.get_table("merged_episodes").raw_table)
+    return {"tasks": tasks, "subtasks": subtasks}[suffix]
 
 
 def vocabulary(conn, singular):
@@ -509,6 +516,8 @@ def test_merge_rejects_non_json_episode_fields_before_create(setup, name, values
 
 
 def test_merge_reordered_source_tasks_match_published_stats(setup):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
     conn, sources = setup
     path = Path(sources[0][7:]) / "meta/tasks.parquet"
     tasks = pq.read_table(path)
@@ -697,6 +706,7 @@ def test_missing_stats_and_existing_target(setup):
 
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
 def test_single_source_metadata_opt_in(setup, import_parallelism):
+    pytest.importorskip("datasets")
     pytest.importorskip("torch")
     conn, sources = setup
     conn.load_from_lerobot("single", sources[0], dataset_name="single",
@@ -2099,3 +2109,184 @@ def test_schema_evolution_option_requires_boolean(tmp_path, value):
     with pytest.raises(ValueError, match="schema_evolution"):
         conn.load_from_lerobot("merged", "unused", schema_evolution=value)
     assert conn.catalog.list_databases() == []
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+@pytest.mark.parametrize("via_load", [False, True])
+def test_append_evolves_frame_and_dataset_columns(setup, tmp_path, import_parallelism, via_load):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn, sources = setup
+    add_frame_feature(sources[0], "temperature", "float32", [1.] * 5)
+    add_frame_feature(sources[1], "pressure", "float64", [2.] * 5)
+    conn.load_from_lerobot("merged", sources, tag_name="before",
+                           extra_dataset_fields={"config": "config/*.json"})
+    before = frame_rows(conn, "merged_frames")
+    field_ids = {f.name: f.id for f in conn.get_table("merged_frames").raw_table.fields}
+    third = source(tmp_path / "third", fps=20)
+    add_frame_feature(third, "humidity", "float32", [40., 41., 42., 43., 44.])
+    (tmp_path / "third/notes.md").write_text("# Third dataset")
+    kwargs = dict(parallelism=import_parallelism, tag_name="after", dataset_name="third",
+                  extra_dataset_fields={"notes": "notes.md"})
+    if via_load:
+        from pypaimon.multimodal.lerobot import load_from_lerobot
+        load_from_lerobot(conn, "merged", third, append=True, **kwargs)
+    else:
+        conn.append_to_lerobot("merged", third, **kwargs)
+
+    frames = frame_rows(conn, "merged_frames")
+    assert frames.slice(0, 10).select(before.column_names).equals(before)
+    assert frames["humidity"].to_pylist() == [None] * 10 + [40., 41., 42., 43., 44.]
+    assert frames["temperature"].slice(10).to_pylist() == [None] * 5
+    assert frames["pressure"].slice(10).to_pylist() == [None] * 5
+    assert frames["dataset_index"].to_pylist() == [0] * 5 + [1] * 5 + [2] * 5
+    assert frames["index"].to_pylist() == list(range(5)) * 3
+    current = conn.get_table("merged_frames").raw_table
+    assert {f.name: f.id for f in current.fields if f.name in field_ids} == field_ids
+    assert next(f.type.nullable for f in current.fields if f.name == "humidity")
+    datasets = rows(conn, "merged_datasets").sort_by("index")
+    assert datasets["notes"].to_pylist() == [None, None, "# Third dataset"]
+    assert datasets["config"].to_pylist() == [None, None, None]
+    assert datasets["index"].to_pylist() == [0, 1, 2]
+    assert metadata(conn, "stats")["humidity"]["count"] == [5]
+    assert metadata(conn, "stats")["temperature"]["count"] == [5]
+    assert set(conn.catalog.list_tables("default")) == {
+        "merged_frames", "merged_episodes", "merged_datasets"}
+    old = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), tag_name="before")
+    new = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), tag_name="after")
+    try:
+        assert len(old) == 10
+        assert "humidity" not in old[0]
+        assert len(new) == 15
+        samples = new.reader.get_items([0, 5, 10])
+        assert samples[0]["humidity"] is None and samples[1]["humidity"] is None
+        assert float(samples[2]["humidity"]) == 40.
+        assert samples[2]["temperature"] is None
+        assert new.episode_fps == (10, 10, 10, 10, 20, 20)
+    finally:
+        old.close()
+        new.close()
+
+
+@pytest.mark.parametrize("schema_evolution", [False, True])
+def test_append_missing_optional_columns_uses_existing_schema(setup, tmp_path, schema_evolution):
+    conn, sources = setup
+    add_frame_feature(sources[0], "temperature", "float32", [1.] * 5)
+    third = source(tmp_path / "third")
+    add_frame_feature(third, "temperature", "float32", [3.] * 5)
+    conn.load_from_lerobot("merged", [sources[0]])
+    conn.append_to_lerobot("merged", [sources[1], third], schema_evolution=schema_evolution)
+    assert frame_rows(conn, "merged_frames")["temperature"].to_pylist() == (
+        [1.] * 5 + [None] * 5 + [3.] * 5)
+
+
+@pytest.mark.parametrize("kind", ["frame", "dataset"])
+def test_append_disabled_evolution_rejects_new_columns(setup, tmp_path, kind):
+    conn, sources = setup
+    conn.load_from_lerobot("merged", [sources[0]])
+    kwargs = {}
+    if kind == "frame":
+        add_frame_feature(sources[1], "humidity", "float32", [1.] * 5)
+    else:
+        (Path(sources[1][7:]) / "notes.md").write_text("notes")
+        kwargs["extra_dataset_fields"] = {"notes": "notes.md"}
+    with patch.object(conn.catalog, "alter_table", side_effect=AssertionError("must not alter")):
+        with pytest.raises(ValueError, match="schema_evolution disabled"):
+            conn.append_to_lerobot("merged", sources[1], schema_evolution=False, **kwargs)
+    assert rows(conn, "merged_frames").num_rows == 5
+    assert rows(conn, "merged_datasets").num_rows == 1
+
+
+@pytest.mark.parametrize("conflict", ["dtype", "shape", "names", "dataset_type", "episode_type"])
+def test_append_conflicts_are_rejected_before_any_schema_changes(setup, tmp_path, conflict):
+    conn, sources = setup
+    add_frame_feature(sources[1], "temperature", "float32", [[1., 2.]] * 5, (2,))
+    conn.load_from_lerobot("merged", sources,
+                           extra_dataset_fields={"config": "config/*.json"})
+    third = source(tmp_path / "third")
+    add_frame_feature(third, "humidity", "float32", [1.] * 5)
+    kwargs = {}
+    if conflict in ("dtype", "shape", "names"):
+        shape = (3,) if conflict == "shape" else (2,)
+        add_frame_feature(third, "temperature", "float64" if conflict == "dtype" else "float32",
+                          [[1.] * shape[0]] * 5, shape)
+        if conflict == "names":
+            path = tmp_path / "third/meta/info.json"
+            info = json.loads(path.read_text())
+            info["features"]["temperature"]["names"] = ["a", "b"]
+            path.write_text(json.dumps(info))
+    elif conflict == "dataset_type":
+        (tmp_path / "third/config.json").write_text("{}")
+        kwargs["extra_dataset_fields"] = {"config": "config.json"}
+    else:
+        path = tmp_path / "third/meta/episodes/chunk-000/file-000.parquet"
+        data = pq.read_table(path)
+        data = data.set_column(data.schema.get_field_index("length"), "length", data["length"].cast(pa.int32()))
+        pq.write_table(data, path)
+    with patch.object(conn.catalog, "alter_table", side_effect=AssertionError("must not alter")):
+        with pytest.raises(ValueError, match="incompatible"):
+            conn.append_to_lerobot("merged", third, **kwargs)
+    assert "humidity" not in rows(conn, "merged_frames").column_names
+    assert rows(conn, "merged_frames").num_rows == 10
+    assert rows(conn, "merged_datasets").num_rows == 2
+
+
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+@pytest.mark.parametrize("media", ["image", "video"])
+@pytest.mark.parametrize("add_new", [False, True])
+def test_append_nullable_visual_features(tmp_path, import_parallelism, media, add_new):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    sources = [source(tmp_path / name, video=media == "video" and index == int(add_new))
+               for index, name in enumerate(("first", "second"))]
+    key = "camera" if media == "video" else "image"
+    if media == "image":
+        import io
+        from PIL import Image
+        content = io.BytesIO()
+        Image.new("RGB", (2, 2), "red").save(content, format="PNG")
+        add_frame_feature(sources[int(add_new)], key, "image", [content.getvalue()] * 5, (2, 2, 3))
+    conn.load_from_lerobot("merged", [sources[0]])
+    conn.append_to_lerobot("merged", sources[1], parallelism=import_parallelism)
+    assert rows(conn, "merged_frames")[key].null_count == 5
+    if media == "video":
+        assert conn.get_table("merged_frames").raw_table.options.video_frame_fields() == {key}
+    reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), video_backend="pyav")
+    try:
+        samples = reader.reader.get_items([0, 5])
+        assert samples[1 - int(add_new)][key] is None
+        assert tuple(samples[int(add_new)][key].shape) == ((3, 16, 16) if media == "video" else (3, 2, 2))
+    finally:
+        reader.close()
+
+
+def test_append_recovery_keeps_new_columns_nullable_and_allows_retry(setup):
+    conn, sources = setup
+    conn.load_from_lerobot("merged", [sources[0]])
+    add_frame_feature(sources[1], "humidity", "float32", [1.] * 5)
+    original_commit = aggregate._commit_messages
+    calls = 0
+
+    def fail_on_episode(commit, messages):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected Episode commit failure")
+        return original_commit(commit, messages)
+
+    with patch.object(aggregate, "_commit_messages", side_effect=fail_on_episode):
+        with pytest.raises(RuntimeError, match="injected Episode commit failure"):
+            conn.append_to_lerobot("merged", sources[1])
+    assert rows(conn, "merged_frames")["humidity"].to_pylist() == [None] * 5
+    assert rows(conn, "merged_datasets").num_rows == 1
+    path = Path(sources[1][7:]) / "meta/info.json"
+    original_info = path.read_text()
+    changed_info = json.loads(original_info)
+    changed_info["features"]["humidity"]["dtype"] = "float16"
+    path.write_text(json.dumps(changed_info))
+    with pytest.raises(ValueError, match="LeRobot feature humidity"):
+        conn.append_to_lerobot("merged", sources[1])
+    path.write_text(original_info)
+    conn.append_to_lerobot("merged", sources[1])
+    assert frame_rows(conn, "merged_frames")["humidity"].to_pylist() == [None] * 5 + [1.] * 5

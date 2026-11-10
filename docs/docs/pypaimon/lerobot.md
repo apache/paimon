@@ -110,13 +110,18 @@ require an import option.
 
 `schema_evolution=True` is the default. The importer plans the union of source
 columns before creating `_frames` and any declared extra `_datasets` columns.
+For appends, it compares the incoming columns with the existing table group and
+adds new nullable columns. Existing rows read as null in those columns; incoming
+rows receive nulls for omitted optional columns. Existing optional columns are
+made nullable when necessary. All three component schemas are checked before
+catalog changes, and existing field IDs are preserved.
 Merged `_episodes` keeps its fixed typed controls and JSON group columns;
 source-specific keys remain inside those JSON values.
 Missing columns receive typed nulls. Optional columns become nullable; source
 indices, timestamps, task indices, and required Episode controls remain required.
 Common columns must have identical types, and common frame features must retain
 their dtype, shape, and names. Type promotion and nested schema changes are
-rejected before creating tables.
+rejected before creating or altering tables.
 
 ```python
 conn.load_from_lerobot(
@@ -134,7 +139,9 @@ feature statistics combine only sources with that feature.
 
 With `schema_evolution=False`, the first source defines the columns. Later
 sources may omit optional columns, which still receive nulls, but adding a column
-is rejected. This applies to the sources of one import into a new table group.
+is rejected. For appends, the existing tables define the allowed columns instead
+of the first incoming source. The setting does not allow type or tensor-shape
+changes in either workflow.
 
 Readers return `None` for missing features. The built-in training batch reader
 keeps columns containing missing features as lists with `None` entries; fully
@@ -178,16 +185,23 @@ rejected before creating target tables. Training readers project only required
 source metadata and skip extra text columns.
 
 Append another Dataset to a source-local group with `append_to_lerobot`.
-To make a one-source group appendable, import it as a one-element list:
+Create the group by importing a list, including a one-element list for one source:
 
 ```python
-conn.load_from_lerobot("robot_merged", ["/data/source_a"])
-conn.append_to_lerobot("robot_merged", "/data/source_b", tag_name="after-append")
+conn.load_from_lerobot("robot_merged", ["/data/source_a", "/data/source_b"])
+conn.append_to_lerobot("robot_merged", "/data/source_c", tag_name="after-append")
 ```
+
+If source C adds `humidity`, the append adds that column to `_frames`, keeps A
+and B, and reads their humidity values as null. New `extra_dataset_fields` columns
+are added to `_datasets` in the same way; omitted extra fields receive nulls.
+Pass `schema_evolution=False` to `append_to_lerobot` to reject new columns.
 
 If a process stops between component commits, call
 `conn.recover_lerobot_append("robot_merged")` before retrying. This rolls
 unfinished Frame and Episode commits back to the Dataset metadata boundary.
+Nullable columns added before a failed append remain in the schema and are
+reused on retry.
 
 For FileIO URIs, pass credentials through `source_options`:
 
