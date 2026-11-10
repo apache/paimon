@@ -214,7 +214,7 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     assert [len(value) for value in datasets["source_tasks"].to_pylist()] == [2, 2]
     assert [len(value) for value in datasets["source_subtasks"].to_pylist()] == [2, 2]
     assert [len(json.loads(value)) for value in
-            datasets["stats_json"].to_pylist()] == [6, 6]
+            datasets["stats"].to_pylist()] == [6, 6]
     for value in datasets["episodes_schema_json"].to_pylist():
         names = _schema_from_json(value).names
         assert "episode_index" in names

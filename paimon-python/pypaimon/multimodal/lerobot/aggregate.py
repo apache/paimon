@@ -82,7 +82,7 @@ _DATASETS_SCHEMA = pa.schema([
     pa.field("info_json", pa.string(), nullable=False),
     pa.field("source_tasks", _SOURCE_TASKS_TYPE, nullable=False),
     pa.field("source_subtasks", _SOURCE_SUBTASKS_TYPE),
-    pa.field("stats_json", pa.string()),
+    pa.field("stats", pa.string()),
     pa.field("episodes_schema_json", pa.string(), nullable=False),
 ])
 
@@ -309,7 +309,7 @@ def _plan_merge(plans, fps_mode="dataset"):
                                     ensure_ascii=False, separators=(",", ":")),
             "source_tasks": _vocabulary_rows(plan["metadata"]["source_tasks_table"], "task"),
             "source_subtasks": _vocabulary_rows(plan["metadata"]["source_subtasks_table"], "subtask"),
-            "stats_json": _stats_json(plan["metadata"]["stats_table"]),
+            "stats": _stats_json(plan["metadata"]["stats_table"]),
             "episodes_schema_json": _schema_json(plan["metadata"]["episodes_schema"]),
         }
         for ordinal, plan in enumerate(plans)

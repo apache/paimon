@@ -1036,7 +1036,7 @@ def _load_dataset(table, tag_name):
         datasets_table = _component_table(
             catalog, catalog.get_table(identifiers["datasets"]), tag_name)
         projection = [name for name in _target_schema(datasets_table).names
-                      if name not in ("source_tasks", "source_subtasks", "stats_json",
+                      if name not in ("source_tasks", "source_subtasks", "stats",
                                       "episodes_schema_json", "tasks_json", "subtasks_json")
                       and not name.endswith("_ipc")]
         datasets = _read_arrow(datasets_table, projection).sort_by("dataset_index").to_pylist()
