@@ -122,6 +122,153 @@ class RayUpdateByRowIdCompactionTest(unittest.TestCase):
             writer.close()
             commit.close()
 
+    def test_staged_commit_rejects_dropped_fields_without_rewriting(self):
+        from pypaimon.ray.row_id_conflict_rewriter import commit_updates_with_compaction_retry
+        from pypaimon.ray.update_by_row_id import _commit_update_messages
+
+        for append in (False, True):
+            for entry_point in ('update_by_row_id', 'self_merge'):
+                for rewrite_size in ('0 B', '1 B'):
+                    with self.subTest(append=append, entry_point=entry_point, rewrite_size=rewrite_size):
+                        target = self._create_table({
+                            'data-evolution.row-id-conflict-rewrite.max-size': rewrite_size})
+                        self._write(target, self._source(ids=(1, 2)))
+                        table = self.catalog.get_table(target)
+                        messages = table.new_batch_write_builder().new_update().update_by_arrow_with_row_id(
+                            pa.table({'_ROW_ID': [0], 'age': [99]}))
+                        if append:
+                            self._write(target, self._source(ids=(3,)))
+                        self.catalog.alter_table(target, [
+                            SchemaChange.drop_column('age'),
+                            SchemaChange.add_column('age', AtomicType('INT'))])
+                        before = table.snapshot_manager().get_latest_snapshot().id
+                        with patch('pypaimon.ray.row_id_conflict_rewriter._rewrite_group') as rewrite:
+                            with self.assertRaisesRegex(RuntimeError, 'cannot restore a dropped field'):
+                                if entry_point == 'update_by_row_id':
+                                    _commit_update_messages(table, messages)
+                                else:
+                                    commit_updates_with_compaction_retry(
+                                        table, messages, [], num_partitions=2)
+                        rewrite.assert_not_called()
+                        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, before)
+                        self.assertEqual(self._read_sorted(target)['age'], [None] * (3 if append else 2))
+                        for message in messages:
+                            for file in message.new_files:
+                                self.assertTrue(table.file_io.exists(file.file_path))
+
+    def test_staged_commit_preserves_compatible_ddl_without_a_new_snapshot(self):
+        from pypaimon.ray.update_by_row_id import _commit_update_messages
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        table = self.catalog.get_table(target)
+        messages = table.new_batch_write_builder().new_update().update_by_arrow_with_row_id(
+            pa.table({'_ROW_ID': [0], 'age': [99]}))
+        self.catalog.alter_table(target, [
+            SchemaChange.rename_column('age', 'renamed'),
+            SchemaChange.update_column_type('renamed', AtomicType('BIGINT')),
+            SchemaChange.add_column('age', AtomicType('INT'))])
+        with patch('pypaimon.ray.row_id_conflict_rewriter._rewrite_group') as rewrite:
+            _commit_update_messages(table, messages)
+        rewrite.assert_not_called()
+        output = self._read_sorted(target)
+        self.assertEqual(output['renamed'], [99, 10])
+        self.assertEqual(output['age'], [None, None])
+
+    def test_zero_rewrite_size_disables_precheck_and_retry_recovery(self):
+        from pypaimon.ray.update_by_row_id import _commit_update_messages
+
+        for compact_before_precheck in (False, True):
+            with self.subTest(compact_before_precheck=compact_before_precheck):
+                target = self._create_table({
+                    'data-evolution.row-id-conflict-rewrite.max-size': '0 B'})
+                self._write(target, self._source(ids=(1, 2)))
+                self._write(target, self._source(ids=(3, 4)))
+                table = self.catalog.get_table(target)
+                messages = table.new_batch_write_builder().new_update().update_by_arrow_with_row_id(
+                    pa.table({'_ROW_ID': [0], 'age': [99]}))
+                before_compact = table.snapshot_manager().get_latest_snapshot()
+                self._compact_all_data_files(table)
+                manager = table.snapshot_manager()
+                latest = manager.get_latest_snapshot()
+                # The second case models compaction winning after the initial
+                # snapshot read, so the first commit reports the range conflict.
+                with patch.object(table, 'snapshot_manager', return_value=manager), patch.object(
+                    manager, 'get_latest_snapshot', return_value=(
+                        latest if compact_before_precheck else before_compact),
+                ), patch('pypaimon.ray.row_id_conflict_rewriter._rewrite_updates') as rewrite:
+                    with self.assertRaisesRegex(Exception, 'Row ID existence conflict'):
+                        _commit_update_messages(table, messages)
+                rewrite.assert_not_called()
+                self.assertEqual(self._read_sorted(target)['age'], [10] * 4)
+
+    def test_recovery_precheck_prunes_unaffected_and_null_partitions(self):
+        from pypaimon.ray.update_by_row_id import _commit_update_messages
+        from pypaimon.read.table_scan import TableScan
+
+        target = 'default.tbl_' + uuid.uuid4().hex[:8]
+        self.catalog.create_table(target, Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['name', 'id'], options=self.de_options), False)
+        self._write(target, pa.Table.from_pydict({
+            'id': [1, 2, 3], 'name': ['a', None, 'b'], 'age': [10, 20, 30],
+        }, schema=self.pa_schema))
+        table = self.catalog.get_table(target)
+        read = table.new_read_builder().with_projection(['id', '_ROW_ID'])
+        rows = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
+        row_ids = rows['_ROW_ID'].to_pylist()[:2]
+        messages = table.new_batch_write_builder().new_update().update_by_arrow_with_row_id(
+            pa.table({'_ROW_ID': row_ids, 'age': [99, 88]}))
+        self._write(target, pa.Table.from_pydict({
+            'id': [4], 'name': ['b'], 'age': [40],
+        }, schema=self.pa_schema))
+        original = TableScan.plan_all
+        planned = []
+
+        def track(scan):
+            plan = original(scan)
+            planned.append({tuple(split.partition.values) for split in plan.splits()})
+            return plan
+
+        with patch.object(TableScan, 'plan_all', new=track), patch(
+            'pypaimon.ray.row_id_conflict_rewriter._rewrite_group',
+        ) as rewrite:
+            _commit_update_messages(table, messages)
+        rewrite.assert_not_called()
+        self.assertEqual(planned, [{('a', 1), (None, 2)}])
+        self.assertEqual(self._read_sorted(target)['age'], [99, 88, 30, 40])
+
+    def test_retry_rechecks_fields_after_ddl_without_snapshot_progress(self):
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter
+        from pypaimon.ray.update_by_row_id import _commit_update_messages
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        messages = table.new_batch_write_builder().new_update().update_by_arrow_with_row_id(
+            pa.table({'_ROW_ID': [0], 'age': [99]}))
+        self._compact_all_data_files(table)
+        before = table.snapshot_manager().get_latest_snapshot().id
+        original = rewriter._rewrite_updates
+        attempts = []
+
+        def miss_precheck(*args, **kwargs):
+            attempts.append(args[2].id)
+            return None if len(attempts) == 1 else original(*args, **kwargs)
+
+        def alter_before_retry(*args):
+            self.catalog.alter_table(target, [
+                SchemaChange.drop_column('age'),
+                SchemaChange.add_column('age', AtomicType('INT'))])
+
+        with patch.object(rewriter, '_rewrite_updates', side_effect=miss_precheck), patch.object(
+            rewriter, '_retry_wait', side_effect=alter_before_retry,
+        ), self.assertRaisesRegex(RuntimeError, 'cannot restore a dropped field'):
+            _commit_update_messages(table, messages, num_partitions=2)
+        self.assertEqual(attempts, [before, before])
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, before)
+        self.assertEqual(self._read_sorted(target)['age'], [None] * 4)
+
     def test_row_id_range_pipeline_rebases_without_reexecuting_source(self):
         from pypaimon.ray import read_by_row_id
         from pypaimon.execution.python.write.commit.row_id_conflict_rewriter import RowIdConflictRewriter

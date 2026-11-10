@@ -96,7 +96,8 @@ print(metrics)   # {"num_updated": 50}
   staged, eligible updates are rebased by Ray workers before retrying the commit.
   Recovery reads the staged files without rerunning the source transformations
   and is not subject to the local Python
-  `data-evolution.row-id-conflict-rewrite.max-size` limit. This also applies when
+  positive `data-evolution.row-id-conflict-rewrite.max-size` limit. Setting it
+  to `0 B` disables automatic recovery, including Ray recovery. This also applies when
   a `process_row_id_ranges` processor calls `update_by_row_id`.
 - Distributed recovery retains the self-merge eligibility checks: the original
   row IDs must remain covered, required snapshot history must be available, and
@@ -105,8 +106,9 @@ print(metrics)   # {"num_updated": 50}
   BLOB/vector files. It handles normal forward snapshot progress, not table rollback.
 - Compatible schema changes, such as adding nullable columns or renaming fields,
   are resolved by field ID using the current schema and normal read-time conversions.
-  Dropped update fields are rejected even if their names are reused. Commits with
-  unchanged file boundaries do not run rebase-only checks.
+  Dropped update fields are rejected even if their names are reused, file boundaries
+  are unchanged, or DDL has not published a data snapshot. Recovery prechecks plan
+  only the partitions present in the staged updates.
 
 ## Read By Row Id
 

@@ -37,7 +37,8 @@ def check_row_id_conflicts(table, messages, latest_snapshot_id, check_from_snaps
         raise ValueError('Row-ID conflict check snapshots must exist in the current table')
     # Logical conflicts compare field IDs resolved in each file's historical
     # schema, just like ordinary commits. Different schema versions alone do
-    # not imply a conflict; the caller validates fields when rewriting data.
+    # not imply a conflict; the caller validates staged field identities against
+    # the current schema before rewriting or committing data.
     entries = []
     for message in messages:
         partition = GenericRow(list(message.partition), table.partition_keys_fields)

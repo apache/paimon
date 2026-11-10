@@ -600,7 +600,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         if recorder is None:
             recorder = {}
         recorder.update({
-            "msgs": [types.SimpleNamespace(check_from_snapshot=1)],
+            "msgs": [types.SimpleNamespace(check_from_snapshot=1, new_files=[])],
             "new_commit_errors": list(new_commit_errors or []),
             "commit_error": commit_error,
             "close_error": close_error,
@@ -619,6 +619,9 @@ class RayUpdateByRowIdTest(unittest.TestCase):
 
             def deletion_vectors_enabled(self):
                 return False
+
+            def data_evolution_row_id_conflict_rewrite_max_size(self):
+                return 256 * 1024 * 1024
 
         class FakeCommit:
             def commit(self, msgs):
@@ -647,12 +650,16 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             field_names = ["age"]
             partition_keys = []
             options = FakeOptions()
-            table_schema = types.SimpleNamespace(fields=[
+            table_schema = types.SimpleNamespace(id=0, fields=[
                 types.SimpleNamespace(
                     name="age",
                     type=types.SimpleNamespace(type="INT"),
                 )
             ])
+
+            @property
+            def schema_manager(self):
+                return types.SimpleNamespace(latest=lambda: self.table_schema)
 
             def snapshot_manager(self):
                 return types.SimpleNamespace(get_latest_snapshot=lambda: types.SimpleNamespace(

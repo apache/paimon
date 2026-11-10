@@ -22,6 +22,7 @@ from unittest.mock import Mock, patch
 from pypaimon.ray.data_evolution_merge_into import _reraise_inner
 from pypaimon.ray.row_id_conflict_rewriter import (
     _partial_file_write_cols,
+    _validate_no_logical_conflict,
     commit_updates_with_compaction_retry,
 )
 from pypaimon.schema.data_types import AtomicType, DataField
@@ -30,6 +31,31 @@ from pypaimon.write.row_id_conflict import RowIdExistenceConflict
 
 
 class RayRowIdConflictRewriterTest(unittest.TestCase):
+
+    def test_cross_schema_check_selects_python_before_dispatch(self):
+        table = Mock()
+        table.options.native_commit_enabled.return_value = True
+        base = Mock(id=1, schema_id=0)
+        latest = Mock(id=2, schema_id=1)
+        messages = [self._message(1, 'staged')]
+        with patch('pypaimon.ray.row_id_conflict_rewriter.check_row_id_conflicts') as check:
+            _validate_no_logical_conflict(table, messages, latest, base)
+        table.copy.assert_called_once_with({'commit.native.enabled': 'false'})
+        check.assert_called_once_with(table.copy.return_value, messages, 2, 1)
+
+    def test_same_schema_native_check_failure_is_not_replayed(self):
+        table = Mock()
+        table.options.native_commit_enabled.return_value = True
+        base = Mock(id=1, schema_id=0)
+        latest = Mock(id=2, schema_id=0)
+        failure = PermissionError('native authorization failed')
+        with patch('pypaimon.ray.row_id_conflict_rewriter.check_row_id_conflicts',
+                   side_effect=failure) as check:
+            with self.assertRaises(PermissionError) as raised:
+                _validate_no_logical_conflict(table, [], latest, base)
+        self.assertIs(raised.exception, failure)
+        table.copy.assert_not_called()
+        check.assert_called_once_with(table, [], 2, 1)
 
     def test_resolve_compact_null_write_cols_for_rewrite(self):
         schema = TableSchema(
@@ -53,7 +79,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
 
     @staticmethod
     def _message(snapshot_id, name):
-        return Mock(check_from_snapshot=snapshot_id, name=name)
+        return Mock(check_from_snapshot=snapshot_id, name=name, new_files=[])
 
     @staticmethod
     def _conflict(name):
@@ -70,6 +96,9 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         builder = Mock()
         builder.new_commit.side_effect = commits
         commit_table = Mock()
+        schema = TableSchema(id=0, fields=[])
+        commit_table.table_schema = schema
+        commit_table.schema_manager.latest.return_value = schema
         commit_table.new_batch_write_builder.return_value = builder
         table = Mock()
         table.copy_without_time_travel.return_value = commit_table
@@ -78,6 +107,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         )
         table.options.commit_timeout.return_value = 60_000
         table.options.commit_max_retries.return_value = max_retries
+        table.options.data_evolution_row_id_conflict_rewrite_max_size.return_value = 256 * 1024 * 1024
         return table
 
     def test_nested_row_id_conflict_is_rebased(self):

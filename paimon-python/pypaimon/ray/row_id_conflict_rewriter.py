@@ -26,6 +26,7 @@ from dataclasses import dataclass, replace
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
@@ -63,6 +64,7 @@ def commit_updates_with_compaction_retry(
     other_messages = list(other_messages)
     retry_count = 0
     start_millis = int(time.time() * 1000)
+    rewrite_enabled = table.options.data_evolution_row_id_conflict_rewrite_max_size() > 0
 
     # Ray performs the rebase below without the local driver's size limit.
     commit_table = table.copy_without_time_travel({
@@ -72,7 +74,8 @@ def commit_updates_with_compaction_retry(
     base_snapshot_ids = _base_snapshot_ids(current_updates)
     latest_snapshot = table.snapshot_manager().get_latest_snapshot()
     if (
-            len(base_snapshot_ids) == 1
+            rewrite_enabled
+            and len(base_snapshot_ids) == 1
             and latest_snapshot is not None
             and latest_snapshot.id != next(iter(base_snapshot_ids))
     ):
@@ -93,13 +96,22 @@ def commit_updates_with_compaction_retry(
                 table.identifier,
             )
 
-    # Match Spark's PaimonSparkWriter: every outer rebase attempt creates a
-    # fresh commit from one write builder, preserving the commit user.
+    # Every outer rebase attempt creates a fresh commit. Preserve the commit
+    # user even when a schema refresh requires replacing the write builder.
     write_builder = commit_table.new_batch_write_builder()
     while True:
         commit = None
         conflict = None
         try:
+            # DDL need not publish a data snapshot. Validate every staged
+            # update, including unchanged ranges and explicitly disabled
+            # recovery, against the schema used by this commit attempt.
+            current_table = _with_latest_schema(commit_table)
+            _validate_update_fields(current_table, current_updates)
+            if current_table is not commit_table:
+                commit_table = current_table
+                write_builder = commit_table.new_batch_write_builder().with_commit_user(
+                    write_builder.commit_user)
             commit = write_builder.new_commit()
             commit.commit(current_updates + other_messages)
         except Exception as error:
@@ -119,6 +131,8 @@ def commit_updates_with_compaction_retry(
 
         if conflict is None:
             return
+        if not rewrite_enabled:
+            raise conflict
 
         elapsed = int(time.time() * 1000) - start_millis
         if (
@@ -189,10 +203,14 @@ def _rewrite_updates(
     if base_snapshot is None:
         return None
 
+    table = _with_latest_schema(table)
+    _validate_update_fields(table, update_messages)
     scan_table = table.copy_without_time_travel({
         CoreOptions.SCAN_SNAPSHOT_ID.key(): str(latest_snapshot.id),
     })
-    scan_plan = scan_table.new_read_builder().new_scan().plan_all()
+    scan_plan = (scan_table.new_read_builder()
+                 .with_partition_filter(_update_partition_filter(table, update_messages))
+                 .new_scan().plan_all())
     if scan_plan.snapshot_id != latest_snapshot.id:
         return None
     current_splits = list(scan_plan.splits())
@@ -237,12 +255,11 @@ def _rewrite_updates(
     # An append can advance the snapshot without changing update file ranges.
     # Ordinary commits retain their own validation; only actual rewrites need
     # this extra check before advancing the conflict baseline.
-    table = _with_latest_schema(table)
     _validate_no_logical_conflict(
         table,
         update_messages,
         latest_snapshot,
-        min(base_snapshot_ids),
+        base_snapshot,
     )
 
     candidate_ids = {id(candidate.file) for candidate in candidates}
@@ -301,6 +318,32 @@ def _base_snapshot_ids(update_messages: Sequence[CommitMessage]):
         if message.check_from_snapshot is not None
         and message.check_from_snapshot >= 0
     }
+
+
+def _update_partition_filter(table, update_messages):
+    if not table.partition_keys:
+        return None
+    builder = PredicateBuilder(table.partition_keys_fields)
+    partitions = {tuple(message.partition) for message in update_messages if message.new_files}
+    return builder.or_predicates([
+        builder.and_predicates([
+            builder.is_null(key) if value is None else builder.equal(key, value)
+            for key, value in zip(table.partition_keys, partition)
+        ])
+        for partition in partitions
+    ])
+
+
+def _validate_update_fields(table, update_messages):
+    checked = set()
+    for message in update_messages:
+        for file in message.new_files:
+            if file.first_row_id is None:
+                continue
+            key = (file.schema_id, None if file.write_cols is None else tuple(file.write_cols))
+            if key not in checked:
+                _partial_file_write_cols(table, file)
+                checked.add(key)
 
 
 def _rewrite_group(
@@ -368,10 +411,17 @@ def _validate_no_logical_conflict(
         table,
         update_messages: List[CommitMessage],
         latest_snapshot,
-        base_snapshot_id: int,
+        base_snapshot,
 ) -> None:
     """Reject non-compaction changes before advancing the rewrite baseline."""
-    check_row_id_conflicts(table, update_messages, latest_snapshot.id, base_snapshot_id)
+    # The native checker requires identical snapshot schema IDs. Choose the
+    # Python read-only check for this unsupported case before dispatch, while
+    # leaving the actual commit backend unchanged. Native check failures must
+    # still propagate without retrying the check through another backend.
+    if (table.options.native_commit_enabled()
+            and base_snapshot.schema_id != latest_snapshot.schema_id):
+        table = table.copy({CoreOptions.COMMIT_NATIVE_ENABLED.key(): 'false'})
+    check_row_id_conflicts(table, update_messages, latest_snapshot.id, base_snapshot.id)
 
 
 def _find_row_id_conflict(error) -> Optional[RowIdExistenceConflict]:
@@ -418,20 +468,20 @@ def _partial_file_write_cols(table, file: DataFileMeta):
     if schema is None:
         raise RuntimeError(f"Schema {file.schema_id} not found")
     columns = schema.partial_file_write_cols(file.write_cols)
-    if columns is None or any(SpecialFields.is_system_field(name) for name in columns):
+    if columns is not None and any(SpecialFields.is_system_field(name) for name in columns):
         return columns
     current_fields = {field.id: field for field in table.table_schema.fields}
     file_fields = {field.name: field for field in schema.fields}
     fields = []
-    for name in columns:
+    for name in columns if columns is not None else file_fields:
         if name not in file_fields:
             raise RuntimeError("Column '{}' not found in schema {}".format(name, file.schema_id))
         fields.append(file_fields[name])
     if any(field.id not in current_fields for field in fields):
-        raise RuntimeError('Distributed row-id conflict rewrite cannot restore a dropped field')
+        raise RuntimeError('Row-id update cannot restore a dropped field')
     # Resolve renamed fields by identity, including when an old name has been
     # reused. TableRead applies the normal schema-evolution casts to the data.
-    return [current_fields[field.id].name for field in fields]
+    return None if columns is None else [current_fields[field.id].name for field in fields]
 
 
 def _with_latest_schema(table):
