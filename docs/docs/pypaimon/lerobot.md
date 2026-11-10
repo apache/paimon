@@ -137,11 +137,12 @@ shared directories, not Hub IDs. Keep the source unchanged during import.
 Failed imports may leave partial tables; retry with a new name.
 
 Before training, finish any related data/metadata updates and pause writes to
-this table group. Create a common named tag over the current component snapshots:
+this table group. Pass the same name used for `load_from_lerobot` or
+`PaimonLeRobotWriter` to create a common tag over the component snapshots:
 
 ```python
 tag = "train-2026-09-07"
-snapshots = conn.create_lerobot_tag("robot_data_frames", tag)
+snapshots = conn.create_lerobot_tag("robot_data", tag)
 frames = conn.get_table("robot_data_frames").scan(tag_name=tag).to_arrow()
 
 # Companion tables are ordinary Paimon tables, read with the same tag.
@@ -236,9 +237,10 @@ replaces the Dataset row's global statistics; it does not rescan frame data.
 `save_episode` accepts the current episode and writes it to a long-lived Paimon
 batch writer. The default `episodes_per_commit=-1` keeps all completed episodes
 in that batch until `finalize()`. Set a positive threshold for periodic commits,
-or call `flush()` at an operational boundary. `save_episode`, `flush`, and
-`finalize` always return `None`. Calling `save_episode()` without any buffered
-frames raises `ValueError`, matching native LeRobot.
+or call `flush()` at an operational boundary. Each flush indexes the new frame
+rows for training lookups. `save_episode`, `flush`, and `finalize` always return
+`None`. Calling `save_episode()` without any buffered frames raises
+`ValueError`, matching native LeRobot.
 
 Call `clear_episode_buffer()` before `save_episode()` to discard a re-recorded
 episode without advancing frame or episode indices. Once `save_episode()`

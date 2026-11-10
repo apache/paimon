@@ -164,10 +164,10 @@ class MultimodalConnection:
         )
 
     def create_lerobot_tag(self, table_name: str, tag_name: str):
-        """Pin all LeRobot components; pause group writes until this returns.
+        """Pin a LeRobot group by prefix or frame table name.
 
-        Returns component snapshot IDs. Use the tag only after success and
-        retain it on every component for the lifetime of a training run.
+        Pause group writes until this returns. Use the tag only after success
+        and retain it on every component for the lifetime of a training run.
         """
         from pypaimon.multimodal.lerobot.metadata import create_lerobot_tag
         return create_lerobot_tag(self, table_name, tag_name)

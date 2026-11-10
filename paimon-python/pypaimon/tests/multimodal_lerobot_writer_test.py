@@ -293,7 +293,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
 
         self.assertIsNone(writer.finalize())
         self.assertEqual(
-            1, table.raw_table.snapshot_manager().get_latest_snapshot().id)
+            2, table.raw_table.snapshot_manager().get_latest_snapshot().id)
 
     def test_existing_table_resumes_global_and_task_indices(self):
         features = {
@@ -313,8 +313,10 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         first.save_episode()
         first.finalize()
 
-        snapshot = self.connection.get_table(
-            "resume").raw_table.snapshot_manager().get_latest_snapshot()
+        manager = self.connection.get_table(
+            "resume").raw_table.snapshot_manager()
+        self.assertEqual(2, manager.get_latest_snapshot().id)
+        snapshot = manager.get_snapshot_by_id(1)
         self.assertEqual("1", snapshot.properties[
             "pypaimon.lerobot.state-version"])
         with patch(
@@ -363,9 +365,10 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         writer.save_episode()
         writer.finalize()
 
-        snapshot = self.connection.get_table(
-            "snapshot_state").raw_table.snapshot_manager() \
-            .get_latest_snapshot()
+        manager = self.connection.get_table(
+            "snapshot_state").raw_table.snapshot_manager()
+        self.assertEqual(2, manager.get_latest_snapshot().id)
+        snapshot = manager.get_snapshot_by_id(1)
         self.assertEqual("1", snapshot.properties[
             "pypaimon.lerobot.state-version"])
         self.assertNotIn(
@@ -518,7 +521,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         })
         self.assertIsNone(writer.save_episode())
         self.assertEqual(
-            1, table.raw_table.snapshot_manager().get_latest_snapshot().id)
+            2, table.raw_table.snapshot_manager().get_latest_snapshot().id)
 
         rows = table.scan().select([
             "episode_index",
@@ -738,6 +741,24 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
             stats["observation.image"]["mean"],
         )
         self.assertEqual([1], stats["observation.image"]["count"])
+
+        writer.add_frame({
+            "observation.image": np.full((4, 5, 3), 91, dtype=np.uint8),
+            "task": "inspect",
+        })
+        writer.save_episode()
+        writer.finalize()
+        self.connection.create_lerobot_tag("images", "training")
+        reader = pmm.PaimonLeRobotDataset(
+            table, tag_name="training", return_uint8=True)
+        try:
+            sample = reader[0]
+            self.assertEqual("inspect", sample["task"])
+            self.assertEqual((3, 4, 5), tuple(sample["observation.image"].shape))
+            self.assertEqual(73, int(sample["observation.image"][0, 0, 0]))
+            self.assertEqual(91, int(reader[1]["observation.image"][0, 0, 0]))
+        finally:
+            reader.close()
 
     @unittest.skipUnless(Image is not None, "Pillow is required for image tests")
     def test_writes_native_hwc_image_frame_as_png_blob(self):

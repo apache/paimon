@@ -1065,7 +1065,9 @@ def _load_dataset(table, tag_name):
     identifiers = _companion_table_identifiers(raw_table)
     catalog = table.catalog
     frames = _component_table(catalog, raw_table, tag_name)
-    source_local_layout = "dataset_index" in _target_schema(frames).names
+    episodes_table = _component_table(
+        catalog, catalog.get_table(identifiers["episodes"]), tag_name)
+    source_local_layout = "dataset_index" in _target_schema(episodes_table).names
     datasets_table = _component_table(
         catalog, catalog.get_table(identifiers["datasets"]), tag_name)
     source_rows = _read_arrow(datasets_table, [
@@ -1074,8 +1076,6 @@ def _load_dataset(table, tag_name):
     datasets = ([{key: value for key, value in row.items()
                   if key not in ("tasks", "subtasks", "stats")}
                  for row in source_rows] if source_local_layout else None)
-    episodes_table = _component_table(
-        catalog, catalog.get_table(identifiers["episodes"]), tag_name)
     episodes = _episode_dataset(episodes_table, datasets)
     tasks, task_maps = _source_vocabulary(source_rows, "task")
     source_vocabulary_maps = ({"task_index": task_maps}

@@ -147,6 +147,33 @@ def test_import_uses_group_prefix(setup, multiple):
     expected = {"robot_frames", "robot_episodes", "robot_datasets"}
     assert set(conn.catalog.list_tables("default")) == expected
     assert rows(conn, "robot_frames").num_rows == (10 if multiple else 5)
+    assert set(conn.create_lerobot_tag("robot", "training")) == {
+        "frames", "episodes", "datasets"}
+
+
+def test_single_source_feature_named_dataset_index(setup):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn, sources = setup
+    root = Path(sources[0][7:])
+    info_path = root / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    info["features"]["dataset_index"] = {
+        "dtype": "int64", "shape": [1], "names": None,
+    }
+    info_path.write_text(json.dumps(info))
+    data_path = root / "data/chunk-000/file-000.parquet"
+    data = pq.read_table(data_path).append_column(
+        "dataset_index", pa.array([7] * 5, type=pa.int64()))
+    pq.write_table(data, data_path)
+
+    conn.load_from_lerobot("single", sources[0])
+    reader = pm.PaimonLeRobotDataset(conn.get_table("single_frames"))
+    try:
+        assert len(reader) == 5
+        assert reader[0]["dataset_index"].item() == 7
+    finally:
+        reader.close()
 
 
 def test_transform_frames_preserves_unlabelled_subtasks():
@@ -315,8 +342,7 @@ def test_merge_rejects_non_json_episode_fields_before_create(setup, name, values
             "source 0 Episode field .* must use a JSON-native Arrow type")):
         conn.load_from_lerobot("merged", sources)
 
-    for suffix in ("_frames", "_datasets", "_episodes", "_info", "_stats",
-                   "_subtasks", "_tasks"):
+    for suffix in ("_frames", "_datasets", "_episodes"):
         with pytest.raises(TableNotExistException):
             conn.get_table("merged" + suffix)
 

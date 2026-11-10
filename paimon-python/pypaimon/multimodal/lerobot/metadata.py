@@ -28,6 +28,7 @@ from pypaimon import Schema as PaimonSchema
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.catalog.catalog_exception import (
     TableAlreadyExistException,
+    TableNotExistException,
     TagNotExistException,
 )
 from pypaimon.common.identifier import Identifier
@@ -285,7 +286,7 @@ def _build_initial_btree(table, column, data_snapshot_id):
 
 
 def create_lerobot_tag(connection, table_name, tag_name):
-    """Tag the current snapshots of a LeRobot table group for training.
+    """Tag a LeRobot group by its prefix or frame table name for training.
 
     Pause group writes until this call returns. Tags across tables are not an
     atomic transaction: use the name only after success, and read every
@@ -294,7 +295,12 @@ def create_lerobot_tag(connection, table_name, tag_name):
     Returns a mapping from component name to tagged snapshot ID.
     """
     _validate_tag_name(tag_name)
-    frames = connection.catalog.get_table(connection._identifier(table_name))
+    frames_identifier = connection._identifier(table_name)
+    try:
+        frames = connection.catalog.get_table(frames_identifier)
+    except TableNotExistException:
+        frames = connection.catalog.get_table(
+            _companion_identifier(frames_identifier, "_frames"))
     identifiers = _companion_table_identifiers(frames)
     identifiers["frames"] = frames.identifier
     snapshots = {}

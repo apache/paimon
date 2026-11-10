@@ -707,10 +707,14 @@ class PaimonLeRobotWriter:
             if snapshot_id is None:
                 raise RuntimeError(
                     "LeRobot batch committed without reporting a snapshot id.")
+            self._close_batch()
+            if self._table.raw_table.create_global_index(
+                    "index", index_type="btree") <= 0:
+                raise RuntimeError(
+                    "LeRobot frames committed without a readable index.")
         except BaseException:
             self._fail_batch(abort=not commit_started)
             raise
-        self._close_batch()
         self.pending_episodes = 0
         self._pending_episode_rows = []
         return None
