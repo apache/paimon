@@ -27,6 +27,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.factories.Factory;
 import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.manifest.IcebergConversions;
@@ -634,7 +635,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
      * would be rejected again by the first replay step, and a rebuild must never select a base its
      * own replay refuses to extend.
      */
-    private boolean isUsableReplayBase(IcebergMetadata metadata, long baseId, long startId) {
+    private boolean isUsableReplayBase(IcebergMetadata metadata, long baseId, long startId)
+            throws IOException {
         if (!isSameFormatVersion(metadata.formatVersion())) {
             return false;
         }
@@ -655,6 +657,30 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             if (known.schemaId() > latestSchemaId
                     || !known.equals(schemaCache.get(known.schemaId()))) {
                 return false;
+            }
+        }
+        return referencesExistingManifests(metadata);
+    }
+
+    /**
+     * Whether the manifest lists of all snapshots, and the manifests of the current one, still
+     * exist. Expiration with {@link IcebergOptions#METADATA_DELETE_AFTER_COMMIT} disabled deletes
+     * lists but keeps the metadata files that reference them, and the replay would fail extending
+     * such a base on every attempt.
+     */
+    private boolean referencesExistingManifests(IcebergMetadata metadata) throws IOException {
+        FileIO fileIO = table.fileIO();
+        for (IcebergSnapshot snapshot : metadata.snapshots()) {
+            Path listPath = new Path(snapshot.manifestList());
+            if (!fileIO.exists(listPath)) {
+                return false;
+            }
+            if (snapshot.snapshotId() == metadata.currentSnapshotId()) {
+                for (IcebergManifestFileMeta meta : manifestList.read(listPath.getName())) {
+                    if (!fileIO.exists(new Path(meta.manifestPath()))) {
+                        return false;
+                    }
+                }
             }
         }
         return true;
@@ -764,10 +790,15 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     private void promotePosition(String rebuildUuid, long snapshotId) throws IOException {
-        table.fileIO()
-                .overwriteFileUtf8(
-                        pathFactory.toMetadataPath(snapshotId),
-                        table.fileIO().readFileUtf8(stagedMetadataPath(rebuildUuid, snapshotId)));
+        FileIO fileIO = table.fileIO();
+        Path target = pathFactory.toMetadataPath(snapshotId);
+        String content = fileIO.readFileUtf8(stagedMetadataPath(rebuildUuid, snapshotId));
+        // Hadoop readers probe versions past the hint, so a new position must never become
+        // visible half-written
+        if (!fileIO.exists(target) && fileIO.tryToWriteAtomic(target, content)) {
+            return;
+        }
+        fileIO.overwriteFileUtf8(target, content);
     }
 
     /** Identity recovered from the newest readable metadata below an unreadable base. */

@@ -476,6 +476,87 @@ public class IcebergSyncFullHistoryTest {
     }
 
     @Test
+    public void testPartialWriteOfNewVersionStaysInvisible() throws Exception {
+        HookedFileIO fileIO = new HookedFileIO();
+        createFormatChangeRebuild(fileIO);
+        String publishedBefore = table.fileIO().readFileUtf8(metadataPath(2));
+
+        // the rebuild for snapshot 3 fails partway through writing the new head
+        fileIO.shortWriteOf = "v3.metadata.json";
+        assertThatThrownBy(() -> writeCommit(3, GenericRow.of(3, 30)))
+                .hasStackTraceContaining("injected short write");
+        fileIO.shortWriteOf = null;
+
+        // Hadoop readers probe versions past the hint, so no partial v3 may be visible
+        assertThat(table.fileIO().exists(metadataPath(3))).isFalse();
+        assertThat(readVersionHint()).isEqualTo(2);
+        assertThat(table.fileIO().readFileUtf8(metadataPath(2))).isEqualTo(publishedBefore);
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        writeCommit(4, GenericRow.of(4, 40));
+        assertThat(readVersionHint()).isEqualTo(4);
+        assertThat(
+                        readMetadata(4).snapshots().stream()
+                                .map(IcebergSnapshot::snapshotId)
+                                .collect(Collectors.toList()))
+                .containsExactly(1L, 2L, 3L, 4L);
+    }
+
+    @Test
+    public void testResumeRejectsBaseWithExpiredManifestLists() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.TABLE_LOCATION.toString());
+        options.put(IcebergOptions.SYNC_FULL_HISTORY.key(), "true");
+        options.put(IcebergOptions.METADATA_DELETE_AFTER_COMMIT.key(), "false");
+        createAppendTable(options);
+        writeCommit(1, GenericRow.of(1, 10));
+        writeCommit(2, GenericRow.of(2, 20));
+        writeCommit(3, GenericRow.of(3, 30));
+        table.fileIO().deleteQuietly(metadataPath(3));
+
+        // a single-snapshot recovery expires the manifest lists of the older metadata files
+        // but keeps the files themselves
+        Map<String, String> latestOnly = new HashMap<>();
+        latestOnly.put(IcebergOptions.SYNC_FULL_HISTORY.key(), "false");
+        reopen(latestOnly);
+        writeCommit(4, GenericRow.of(4, 40));
+        assertThat(table.fileIO().exists(metadataPath(2))).isTrue();
+        assertThat(
+                        table.fileIO()
+                                .exists(
+                                        new Path(
+                                                readMetadata(2).snapshots().stream()
+                                                        .filter(s -> s.snapshotId() == 2)
+                                                        .findFirst()
+                                                        .get()
+                                                        .manifestList())))
+                .isFalse();
+
+        // with full history back on and the newest metadata lost, v2 is the newest candidate
+        // but cannot be extended
+        table.fileIO().deleteQuietly(metadataPath(4));
+        Map<String, String> fullHistory = new HashMap<>();
+        fullHistory.put(IcebergOptions.SYNC_FULL_HISTORY.key(), "true");
+        reopen(fullHistory);
+        writeCommit(5, GenericRow.of(5, 50));
+
+        assertThat(
+                        readMetadata(5).snapshots().stream()
+                                .map(IcebergSnapshot::snapshotId)
+                                .collect(Collectors.toList()))
+                .containsExactly(1L, 2L, 3L, 4L, 5L);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, 10)",
+                        "Record(2, 20)",
+                        "Record(3, 30)",
+                        "Record(4, 40)",
+                        "Record(5, 50)");
+    }
+
+    @Test
     public void testNewerCommitDuringPromotionIsNotRolledBack() throws Exception {
         HookedFileIO fileIO = new HookedFileIO();
         createFormatChangeRebuild(fileIO);
@@ -543,22 +624,38 @@ public class IcebergSyncFullHistoryTest {
     private static class HookedFileIO extends LocalFileIO {
 
         private volatile String failOverwriteOf;
+        private volatile String shortWriteOf;
         private volatile Runnable beforeHintWrite;
 
         @Override
         public PositionOutputStream newOutputStream(Path path, boolean overwrite)
                 throws IOException {
-            if (overwrite && path.getName().equals(failOverwriteOf)) {
+            String shortWrite = shortWriteOf;
+            if (shortWrite != null
+                    && (path.getName().equals(shortWrite)
+                            || path.getName().startsWith("." + shortWrite + "."))) {
+                // the stream is opened and partially written before the failure
+                try (PositionOutputStream out = super.newOutputStream(path, overwrite)) {
+                    out.write('{');
+                }
+                throw new IOException("injected short write to " + path);
+            }
+            return super.newOutputStream(path, overwrite);
+        }
+
+        @Override
+        public void overwriteFileUtf8(Path path, String content) throws IOException {
+            if (path.getName().equals(failOverwriteOf)) {
                 throw new IOException("injected failure writing " + path);
             }
-            if (overwrite && path.getName().equals("version-hint.text")) {
+            if (path.getName().equals("version-hint.text")) {
                 Runnable hook = beforeHintWrite;
                 if (hook != null) {
                     beforeHintWrite = null;
                     hook.run();
                 }
             }
-            return super.newOutputStream(path, overwrite);
+            super.overwriteFileUtf8(path, content);
         }
 
         @Override
