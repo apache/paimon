@@ -1461,8 +1461,9 @@ def test_episode_prepare_io_failure_publishes_no_snapshots(setup, import_paralle
         assert not table.tag_manager().tag_exists("train")
 
 
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
 @pytest.mark.parametrize("fail_commit", [1, 2])
-def test_uncertain_commit_preserves_published_files(setup, fail_commit):
+def test_uncertain_commit_preserves_published_files(setup, tmp_path, fail_commit, import_parallelism):
     from pypaimon.multimodal.lerobot import aggregate
     conn, sources = setup
     original = aggregate._commit_messages
@@ -1477,10 +1478,14 @@ def test_uncertain_commit_preserves_published_files(setup, fail_commit):
 
     with patch.object(aggregate, "_commit_messages", side_effect=lose_response):
         with pytest.raises(OSError, match="Lost commit response"):
-            conn.load_from_lerobot("merged", sources, tag_name="train")
+            conn.load_from_lerobot("merged", sources, tag_name="train", parallelism=import_parallelism)
     assert rows(conn, "merged").num_rows == 10
     if fail_commit == 2:
         assert rows(conn, "merged__episodes").num_rows == 4
     else:
         assert conn.get_table("merged__episodes").raw_table.snapshot_manager().get_latest_snapshot() is None
     assert not conn.get_table("merged").raw_table.tag_manager().tag_exists("train")
+    files = list((tmp_path / "warehouse").rglob("*.parquet"))
+    assert any("merged" in path.parts for path in files)
+    episode_files = [path for path in files if "merged__episodes" in path.parts]
+    assert bool(episode_files) == (fail_commit == 2)

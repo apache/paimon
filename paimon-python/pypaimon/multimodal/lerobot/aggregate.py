@@ -469,6 +469,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
         episode_write = episode_builder.new_write()
         stack.callback(episode_write.close)
         episode_commit_started = False
+        episode_messages = None
         try:
             messages = []
             try:
@@ -497,7 +498,10 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             episodes_snapshot = _commit_messages(episode_commit, episode_messages)
         finally:
             if not episode_commit_started:
-                episode_write.abort()
+                if episode_messages is None:
+                    episode_write.abort()
+                else:
+                    episode_commit.abort(episode_messages)
         if stats is not None:
             for name in _CONTROLS:
                 parts = [s[name] for p in plans for s in p["control_stats"].values() if name in s]
