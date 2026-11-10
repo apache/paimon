@@ -51,6 +51,7 @@ import java.io.Serializable;
 import java.util.Collections;
 
 import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
+import static org.apache.paimon.flink.sink.FlinkSink.configureCommitterSlotSharingGroup;
 import static org.apache.paimon.flink.sink.FlinkSink.configureSlotSharingGroup;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
@@ -76,6 +77,8 @@ public class FlinkCdcMultiTableSink implements Serializable {
     @Nullable private final MemorySize writeOffHeapMemory;
     private final double commitCpuCores;
     @Nullable private final MemorySize commitHeapMemory;
+    @Nullable private final MemorySize commitManagedMemory;
+    @Nullable private final MemorySize commitOffHeapMemory;
     private final String commitUser;
     @Nullable private final String databaseName;
     private boolean eagerInit = false;
@@ -105,6 +108,8 @@ public class FlinkCdcMultiTableSink implements Serializable {
         this.writeOffHeapMemory = null;
         this.commitCpuCores = commitCpuCores;
         this.commitHeapMemory = commitHeapMemory;
+        this.commitManagedMemory = null;
+        this.commitOffHeapMemory = null;
         this.commitUser = commitUser;
         this.eagerInit = eagerInit;
         this.tableFilter = tableFilter;
@@ -170,6 +175,36 @@ public class FlinkCdcMultiTableSink implements Serializable {
             String commitUser,
             boolean eagerInit,
             TableFilter tableFilter) {
+        this(
+                catalogLoader,
+                databaseName,
+                writeCpuCores,
+                writeHeapMemory,
+                writeManagedMemory,
+                writeOffHeapMemory,
+                commitCpuCores,
+                commitHeapMemory,
+                null,
+                null,
+                commitUser,
+                eagerInit,
+                tableFilter);
+    }
+
+    public FlinkCdcMultiTableSink(
+            CatalogLoader catalogLoader,
+            String databaseName,
+            double writeCpuCores,
+            @Nullable MemorySize writeHeapMemory,
+            @Nullable MemorySize writeManagedMemory,
+            @Nullable MemorySize writeOffHeapMemory,
+            double commitCpuCores,
+            @Nullable MemorySize commitHeapMemory,
+            @Nullable MemorySize commitManagedMemory,
+            @Nullable MemorySize commitOffHeapMemory,
+            String commitUser,
+            boolean eagerInit,
+            TableFilter tableFilter) {
         this.catalogLoader = catalogLoader;
         this.databaseName = Preconditions.checkNotNull(databaseName);
         this.writeCpuCores = writeCpuCores;
@@ -178,6 +213,8 @@ public class FlinkCdcMultiTableSink implements Serializable {
         this.writeOffHeapMemory = writeOffHeapMemory;
         this.commitCpuCores = commitCpuCores;
         this.commitHeapMemory = commitHeapMemory;
+        this.commitManagedMemory = commitManagedMemory;
+        this.commitOffHeapMemory = commitOffHeapMemory;
         this.commitUser = commitUser;
         this.eagerInit = eagerInit;
         this.tableFilter = tableFilter;
@@ -272,7 +309,12 @@ public class FlinkCdcMultiTableSink implements Serializable {
                                 createCommitterFactory(tableFilter),
                                 createCommittableStateManager()));
         forwardParallelism(committed, shuffled);
-        configureSlotSharingGroup(committed, commitCpuCores, commitHeapMemory);
+        configureCommitterSlotSharingGroup(
+                committed,
+                commitCpuCores,
+                commitHeapMemory,
+                commitManagedMemory,
+                commitOffHeapMemory);
         return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 

@@ -273,6 +273,18 @@ under the License.
             <td>Sink committer memory to control heap memory of global committer.</td>
         </tr>
         <tr>
+            <td><h5>sink.committer-offheap-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Task off-heap memory resource budget for the committer slot sharing group. Must be positive and requires sink.committer-memory.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.committer-managed-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Managed memory resource budget for the committer slot sharing group. Must be positive and requires sink.committer-memory.</td>
+        </tr>
+        <tr>
             <td><h5>sink.committer-operator-chaining</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>

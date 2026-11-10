@@ -143,7 +143,8 @@ class WriterOffHeapMemoryTest extends CommitterTestBase {
                 operator,
                 2.5,
                 org.apache.paimon.options.MemorySize.ofMebiBytes(512),
-                org.apache.paimon.options.MemorySize.ofMebiBytes(64));
+                org.apache.paimon.options.MemorySize.ofMebiBytes(64),
+                null);
         operator.print();
         ResourceProfile resources =
                 env.getStreamGraph().getSlotSharingGroupResource(operator.getName()).get();
