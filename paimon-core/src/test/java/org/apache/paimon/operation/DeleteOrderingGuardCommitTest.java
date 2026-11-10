@@ -312,8 +312,9 @@ class DeleteOrderingGuardCommitTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void testDestructiveRollbackCannotReviveFencedWrites(boolean disableCapture) throws Exception {
+    @CsvSource({"false, false", "false, true", "true, false", "true, true"})
+    void testDestructiveRollbackCannotReviveFencedWrites(
+            boolean disableCapture, boolean missingLatestSnapshot) throws Exception {
         PrimaryKeyFileStoreTable table =
                 createTable(Collections.singletonMap(DELETE_ORDERING_GUARDS_ENABLED.key(), "true"));
         append(table, 0, row(RowKind.INSERT, 1, 1, 1));
@@ -342,13 +343,16 @@ class DeleteOrderingGuardCommitTest {
         long latest = table.snapshotManager().latestSnapshotId();
         assertThatThrownBy(() -> commit(retained, 9, pending))
                 .hasMessageContaining("generation changed");
+        long latestHint = missingLatestSnapshot ? latest + 100 : latest;
+        table.snapshotManager().commitLatestHint(latestHint);
         assertThatThrownBy(() -> retained.rollbackTo(target.id()))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("sys.rollback_to_as_latest");
         assertThatThrownBy(() -> retained.rollbackTo("before-reset"))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("sys.rollback_to_as_latest");
-        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(latest);
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(latestHint);
+        table.snapshotManager().commitLatestHint(latest);
         try (FileStoreCommit rollback = table.store().newCommit(USER, null)) {
             assertThat(rollback.rollbackToAsLatest(target)).isTrue();
         }

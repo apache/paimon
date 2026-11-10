@@ -63,6 +63,8 @@ def _scan(native_enabled, file_scanner):
     scan.table.options.native_read_enabled.return_value = False
     scan.table.options.options.contains_key.return_value = False   # no time-travel
     scan.table.options.options.contains.return_value = False       # no incremental
+    scan.table.options.options.to_map.return_value = {}
+    scan.table.snapshot_manager.return_value.get_latest_snapshot.return_value = None
     scan.table.options.merge_engine.return_value = None            # not first-row
     scan.table.options.query_auth_enabled = False
     scan.table.options.data_file_path_directory.return_value = None  # no relocated dir
