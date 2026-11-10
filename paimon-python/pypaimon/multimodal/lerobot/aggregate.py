@@ -45,6 +45,7 @@ from pypaimon.multimodal.lerobot.source import (
 )
 from pypaimon.multimodal.source_utils import _validate_source_kerberos
 from pypaimon.multimodal.table import _target_schema
+from pypaimon.multimodal.lerobot.text_fields import _read_text_fields, _text_fields_schema
 
 
 _CONTROLS = ("index", "episode_index", "task_index", "subtask_index")
@@ -249,7 +250,7 @@ def _same_fields(left, right):
                     for name in right.names))
 
 
-def _plan_merge(plans, fps_mode="dataset"):
+def _plan_merge(plans, fps_mode="dataset", extra_dataset_fields=None):
     first = plans[0]
     reserved_frame_fields = {
         _DATASET_INDEX_COLUMN, _SOURCE_FRAME_INDEX_COLUMN,
@@ -354,9 +355,10 @@ def _plan_merge(plans, fps_mode="dataset"):
             "tasks": _vocabulary_rows(plan["metadata"]["source_tasks_table"], "task"),
             "subtasks": _vocabulary_rows(plan["metadata"]["source_subtasks_table"], "subtask"),
             "stats": _stats_json(plan["metadata"]["stats_table"]),
+            **plan.get("extra_dataset_fields", {}),
         }
         for ordinal, plan in enumerate(plans)
-    ], schema=_DATASETS_SCHEMA)
+    ], schema=pa.schema(list(_DATASETS_SCHEMA) + _text_fields_schema(extra_dataset_fields or {})))
     metadata["fps_mode"] = fps_mode
     info.update(total_frames=frame_offset, total_episodes=episode_offset,
                 total_tasks=metadata["tasks_table"].num_rows,
@@ -477,7 +479,7 @@ def _merged_episodes(plans, schema):
 
 def _import_sources(connection, table_name, sources, batch_size, options,
                     source_options, tag_name, parallelism=1,
-                    fps_mode="dataset", dataset_names=None):
+                    fps_mode="auto", dataset_name=None, extra_dataset_fields=None):
     from functools import partial
     from pypaimon.multimodal.lerobot.api import _create_target_table, _validated_counts
 
@@ -507,11 +509,14 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             plans.append({"dataset": dataset, "dataset_resources": dataset_resources,
                           "source": resolved, "info": info,
                           _DATASET_INDEX_COLUMN: ordinal,
-                          "dataset_name": (dataset_names[ordinal] if dataset_names is not None
+                          "dataset_name": (dataset_name[ordinal] if dataset_name is not None
                                            else None),
                           "schema": schema, "videos": videos,
+                          "extra_dataset_fields": _read_text_fields(resolved, extra_dataset_fields),
                           "metadata": _load_dataset_metadata(dataset, info, resolved)})
-        metadata, stats = _plan_merge(plans, fps_mode)
+        if fps_mode == "auto":
+            fps_mode = "source" if len({plan["metadata"]["fps"] for plan in plans}) > 1 else "dataset"
+        metadata, stats = _plan_merge(plans, fps_mode, extra_dataset_fields)
         target_schema = plans[0]["schema"]
         for field in (
                 pa.field(_DATASET_INDEX_COLUMN, pa.int64(), nullable=False),

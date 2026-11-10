@@ -517,7 +517,7 @@ def test_incompatible_sources_fail_before_creation(setup, field):
             info[field] = 20 if field == "fps" else "different"
         path.write_text(json.dumps(info))
     with pytest.raises(ValueError):
-        conn.load_from_lerobot("merged", sources)
+        conn.load_from_lerobot("merged", sources, fps_mode="dataset")
     with pytest.raises(TableNotExistException):
         conn.get_table("merged_frames")
 
@@ -560,7 +560,7 @@ def test_source_info_remains_distinct_from_merged_info(setup):
         info["vendor_extension"] = {"source": ordinal}
         path.write_text(json.dumps(info))
     conn.load_from_lerobot("merged", sources,
-                           dataset_names=["move cup", "empty cup"])
+                           dataset_name=["move cup", "empty cup"])
     assert "vendor_extension" not in metadata(conn, "info")
     datasets = rows(conn, "merged_datasets").sort_by("index")
     assert datasets["name"].to_pylist() == ["move cup", "empty cup"]
@@ -633,7 +633,7 @@ def test_nested_lerobot_source_does_not_infer_business_name(tmp_path):
 def test_shared_business_label_does_not_merge_source_datasets(setup):
     conn, sources = setup
     conn.load_from_lerobot("merged", sources,
-                           dataset_names=["same task", "same task"])
+                           dataset_name=["same task", "same task"])
     datasets = rows(conn, "merged_datasets").sort_by("index")
     assert datasets["index"].to_pylist() == [0, 1]
     assert datasets["name"].to_pylist() == ["same task", "same task"]
@@ -641,13 +641,13 @@ def test_shared_business_label_does_not_merge_source_datasets(setup):
         0, 1, 0, 1]
 
 
-def test_dataset_names_validate_before_source_access(tmp_path):
+def test_dataset_name_validate_before_source_access(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     with patch("pypaimon.multimodal.lerobot.source._resolved_source",
                side_effect=AssertionError("source accessed")):
-        with pytest.raises(ValueError, match="dataset_names"):
+        with pytest.raises(ValueError, match="dataset_name"):
             conn.load_from_lerobot("merged", ["a", "b"],
-                                   dataset_names=["only one name"])
+                                   dataset_name=["only one name"])
 
 
 @pytest.mark.parametrize("sources,parallelism", [([], 1), (["unused", "unused"], 0)])
@@ -732,11 +732,12 @@ def test_mixed_fps_group_keeps_episode_rates(tmp_path, import_parallelism):
     sources = [source(tmp_path / "a", video=True, fps=25, frames=16),
                source(tmp_path / "b", video=True, fps=30, value=100, frames=16)]
     with pytest.raises(ValueError, match="incompatible info.fps"):
-        conn.load_from_lerobot("default_rejected", sources, parallelism=import_parallelism)
+        conn.load_from_lerobot("default_rejected", sources, parallelism=import_parallelism,
+                               fps_mode="dataset")
     with pytest.raises(TableNotExistException):
         conn.get_table("default_rejected_frames")
     conn.load_from_lerobot("merged", sources, batch_size=2, tag_name="train",
-                           parallelism=import_parallelism, fps_mode="source")
+                           parallelism=import_parallelism)
     info = metadata(conn, "info")
     assert info["fps"] is None
     assert info["fps_mode"] == "source"
@@ -1614,7 +1615,7 @@ def test_ray_groups_within_each_source(setup, ray_cluster, multiple):
 
     with patch.object(ray_cluster, "remote", side_effect=track_remote):
         conn.load_from_lerobot("merged", sources if multiple else sources[0],
-                               dataset_names=["A", "B"] if multiple else ["A"], parallelism=2)
+                               dataset_name=["A", "B"] if multiple else ["A"], parallelism=2)
     assert dispatched == [[0], [1]] * (2 if multiple else 1)
     assert rows(conn, "merged_frames").num_rows == (10 if multiple else 5)
     assert rows(conn, "merged_episodes").num_rows == (4 if multiple else 2)
@@ -1668,3 +1669,116 @@ def test_uncertain_commit_preserves_published_files(setup, tmp_path, fail_commit
     assert any("merged_frames" in path.parts for path in files)
     episode_files = [path for path in files if "merged_episodes" in path.parts]
     assert bool(episode_files) == (fail_commit == 2)
+
+
+@pytest.mark.parametrize("multiple", [False, True])
+@pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
+def test_extra_dataset_text_fields(setup, multiple, import_parallelism):
+    from pypaimon.multimodal.lerobot import dataset as dataset_module
+
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn, sources = setup
+    expected = []
+    for ordinal, uri in enumerate(sources):
+        root = Path(uri[7:])
+        (root / "config").mkdir()
+        contents = {"model_a": '{ "value": %d }\r\n' % ordinal,
+                    "model_b": '{ "label": "示例" }\n'}
+        for name, text in contents.items():
+            (root / "config" / (name + ".json")).write_bytes(text.encode("utf-8"))
+        notes = "# Dataset %d\r\nNotes.\n" % ordinal
+        (root / "notes.md").write_bytes(notes.encode("utf-8"))
+        expected.append((contents, notes))
+    conn.load_from_lerobot(
+        table_name="merged", source=sources if multiple else sources[0],
+        dataset_name=["A", "B"] if multiple else "A", parallelism=import_parallelism,
+        extra_dataset_fields={"config": "config/*.json", "notes": "notes.md"}, tag_name="train")
+    data = rows(conn, "merged_datasets").sort_by("index")
+    assert pa.types.is_map(data.schema.field("config").type)
+    assert data.schema.field("notes").type == pa.string()
+    assert data["name"].to_pylist() == (["A", "B"] if multiple else ["A"])
+    for actual, (config, notes) in zip(data.to_pylist(), expected):
+        assert dict(actual["config"]) == config
+        assert actual["notes"] == notes
+    read_arrow = dataset_module._read_arrow
+
+    def checked_read(table, projection=None):
+        if table.identifier.object.endswith("_datasets"):
+            assert "config" not in projection
+            assert "notes" not in projection
+        return read_arrow(table, projection)
+
+    with patch.object(dataset_module, "_read_arrow", side_effect=checked_read):
+        reader = pm.PaimonLeRobotDataset(conn.get_table("merged_frames"), tag_name="train")
+        try:
+            assert len(reader) == (10 if multiple else 5)
+            assert "config" not in reader.meta.datasets[0]
+            assert reader[0]["task"] == "pick"
+        finally:
+            reader.close()
+
+
+@pytest.mark.parametrize("suffix", ["json", "txt", "md", "yaml", "yml", "jsonl", "ndjson", "csv", "tsv"])
+def test_extra_dataset_supported_text_suffixes(setup, suffix):
+    conn, sources = setup
+    root = Path(sources[0][7:])
+    text = "Unparsed text\r\n示例\n"
+    filename = "notes." + suffix
+    (root / filename).write_bytes(text.encode("utf-8"))
+    conn.load_from_lerobot(table_name="merged", source=sources[0],
+                           extra_dataset_fields={"notes": filename})
+    assert rows(conn, "merged_datasets")["notes"].to_pylist() == [text]
+
+
+@pytest.mark.parametrize("fields", [
+    [], {"info": "notes.txt"}, {"name": "notes.txt"}, {"": "notes.txt"},
+    {1: "notes.txt"}, {"notes": None}, {"notes": "../notes.txt"},
+    {"notes": "/notes.txt"}, {"notes": "notes.bin"},
+])
+def test_extra_dataset_fields_validate_before_source_access(tmp_path, fields):
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    with patch("pypaimon.multimodal.lerobot.aggregate._resolved_source",
+               side_effect=AssertionError("source accessed")):
+        with pytest.raises(ValueError):
+            conn.load_from_lerobot("merged", "unused", extra_dataset_fields=fields)
+    assert conn.catalog.list_databases() == []
+
+
+@pytest.mark.parametrize("failure", ["missing", "empty_glob", "unsupported", "encoding", "duplicate", "later_source"])
+def test_invalid_extra_dataset_text_fails_before_table_creation(setup, failure):
+    conn, sources = setup
+    root = Path(sources[0][7:])
+    (root / "config").mkdir()
+    (root / "config/model.json").write_text("{}")
+    fields = {"config": "config/*"}
+    if failure == "missing":
+        fields = {"notes": "missing.txt"}
+    elif failure == "empty_glob":
+        fields = {"notes": "missing/*.txt"}
+    elif failure == "unsupported":
+        (root / "config/model.bin").write_bytes(b"binary")
+    elif failure == "encoding":
+        (root / "config/model.json").write_bytes(b"\xff")
+    elif failure == "duplicate":
+        (root / "config/model.txt").write_text("same key")
+    with pytest.raises(ValueError):
+        conn.load_from_lerobot("merged", sources if failure == "later_source" else sources[0],
+                               extra_dataset_fields=fields)
+    with pytest.raises(TableNotExistException):
+        conn.get_table("merged_frames")
+
+
+@pytest.mark.parametrize("name", ["A", ["A"]])
+def test_single_dataset_name_forms(setup, name):
+    conn, sources = setup
+    conn.load_from_lerobot("merged", sources[0], dataset_name=name)
+    assert rows(conn, "merged_datasets")["name"].to_pylist() == ["A"]
+
+
+@pytest.mark.parametrize("name", ["A", ["A"], ["A", ""], ["A", 1], 1])
+def test_invalid_dataset_name_for_multiple_sources(tmp_path, name):
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    with pytest.raises(ValueError, match="dataset_name"):
+        conn.load_from_lerobot("merged", ["a", "b"], dataset_name=name)
+    assert conn.catalog.list_databases() == []

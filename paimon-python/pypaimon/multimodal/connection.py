@@ -142,8 +142,9 @@ class MultimodalConnection:
             source_options=None,
             tag_name=None,
             parallelism=1,
-            fps_mode="dataset",
-            dataset_names=None) -> None:
+            fps_mode="auto",
+            dataset_name=None,
+            extra_dataset_fields=None) -> None:
         """Import LeRobot v3 sources using table_name as the group prefix.
 
         Creates <table_name>_frames, <table_name>_episodes, and
@@ -160,7 +161,8 @@ class MultimodalConnection:
             tag_name=tag_name,
             parallelism=parallelism,
             fps_mode=fps_mode,
-            dataset_names=dataset_names,
+            dataset_name=dataset_name,
+            extra_dataset_fields=extra_dataset_fields,
         )
 
     def create_lerobot_tag(self, table_name: str, tag_name: str):
