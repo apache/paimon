@@ -271,8 +271,20 @@ def test_historical_partial_files_keep_original_field_ids(native_rest_catalog, n
             assert file.schema_id == historical.table_schema.id
             if message.check_from_snapshot is not None:
                 assert file.write_cols == ['value']
+    if change == 'drop_readd':
+        # Both writer backends publish through the Python committer here.
+        # Reject the entire commit, including new rows from upsert/merge.
+        before = latest.snapshot_manager().get_latest_snapshot()
+        with pytest.raises(RuntimeError, match='cannot restore a dropped field'):
+            _commit(historical, messages)
+        assert latest.snapshot_manager().get_latest_snapshot().id == before.id
+        assert _rows(latest) == {
+            'id': [1, 2, 3, 4], 'value': [None, None, None, 40],
+            'keep': [100, 200, 300, 400], 'extra': [None, None, 999, 1000]}
+        assert all(latest.file_io.exists(file.file_path) for message in messages for file in message.new_files)
+        return
     _commit(historical, messages)
-    values = [None, None, None, 40] if change == 'drop_readd' else [11, 20, 30, 2 ** 40 if change == 'widen' else 40]
+    values = [11, 20, 30, 2 ** 40 if change == 'widen' else 40]
     expected = {
         'id': [1, 2, 3, 4], value_name: values, 'keep': [100, 200, 300, 400],
         'extra': [None, None, 999, 1000]}
@@ -280,7 +292,7 @@ def test_historical_partial_files_keep_original_field_ids(native_rest_catalog, n
         # A second row with logical key 4 is new to snapshot 1 and receives a
         # fresh physical row ID, even though latest already contains key 4.
         expected['id'].append(4)
-        expected[value_name].append(None if change == 'drop_readd' else 40)
+        expected[value_name].append(40)
         expected['keep'].append(400)
         expected['extra'].append(None)
     assert _rows(latest) == expected

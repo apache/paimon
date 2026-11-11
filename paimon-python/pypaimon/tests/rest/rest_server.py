@@ -98,7 +98,7 @@ from pypaimon.management.resource_type import ResourceType
 from pypaimon.management.row_filter import RowFilter
 from pypaimon import Schema
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField, DataType, DataTypeParser, MapType,
-                                        MultisetType, RowType, VectorType)
+                                        MultisetType, RowType, VectorType, current_highest_field_id)
 from pypaimon.schema.schema_change import Actions, SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
@@ -2680,7 +2680,7 @@ class RESTCatalogServer:
             version=TableSchema.CURRENT_VERSION,
             id=schema_id,
             fields=schema.fields,
-            highest_field_id=len(schema.fields) - 1,
+            highest_field_id=current_highest_field_id(schema.fields),
             partition_keys=schema.partition_keys,
             primary_keys=schema.primary_keys,
             options=options,

@@ -49,6 +49,7 @@ from pypaimon.execution.python.write.commit.overwrite_changes_provider import Ov
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.row_id_conflict import validate_row_id_update_fields
 from pypaimon.execution.python.write.partition_spec import _UNREPRESENTABLE_PARTITION_VALUE, _partition_spec_value
 
 logger = logging.getLogger(__name__)
@@ -547,6 +548,13 @@ class FileStoreCommit:
                 # Automatic rollback can delete snapshots and tags already used by readers.
                 raise conflict_exception
 
+        # Capture existing-row updates before assigning row IDs to new appends.
+        # Deletion vectors make mixed update/delete commits OVERWRITE.
+        update_files = [
+            entry.file for entry in commit_entries
+            if entry.kind == 0 and entry.file.first_row_id is not None
+        ] if commit_kind in ('APPEND', 'OVERWRITE') and self.table.options.data_evolution_enabled() else []
+
         # Apply row tracking logic after conflict detection (matches Java ordering)
         row_tracking_enabled = self.table.options.row_tracking_enabled()
         next_row_id = None
@@ -611,10 +619,16 @@ class FileStoreCommit:
                 if index_manifest != previous_index_manifest:
                     new_index_manifest = index_manifest
 
+            # Each internal CAS retry can observe a newer schema. Validate the
+            # staged IDs against the exact schema recorded by this attempt,
+            # rather than relying only on the coordinator's earlier check.
+            snapshot_schema = self.table.schema_manager.latest()
+            if update_files:
+                validate_row_id_update_fields(snapshot_schema, self.table.schema_manager, update_files)
             snapshot_data = Snapshot(
                 version=3,
                 id=new_snapshot_id,
-                schema_id=self.table.schema_manager.latest().id,
+                schema_id=snapshot_schema.id,
                 base_manifest_list=base_manifest_list,
                 base_manifest_list_size=base_manifest_list_size,
                 delta_manifest_list=delta_manifest_list,

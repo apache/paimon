@@ -583,9 +583,9 @@ def _execute_and_commit(
         if all_msgs:
             if self_merge_update and update_msgs:
                 from pypaimon.ray.row_id_conflict_rewriter import (
-                    commit_self_merge_with_compaction_retry,
+                    commit_updates_with_compaction_retry,
                 )
-                commit_self_merge_with_compaction_retry(
+                commit_updates_with_compaction_retry(
                     table,
                     update_msgs,
                     delete_msgs + insert_msgs,

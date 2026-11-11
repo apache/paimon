@@ -3030,7 +3030,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self._write(target, self._source(ids=(1, 2, 3, 4)))
         table = self.catalog.get_table(target)
         real_commit = (
-            rewriter_module.commit_self_merge_with_compaction_retry
+            rewriter_module.commit_updates_with_compaction_retry
         )
         real_rewrite = rewriter_module._rewrite_updates
         rewrite_results = []
@@ -3046,7 +3046,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
 
         with patch.object(
                 rewriter_module,
-                'commit_self_merge_with_compaction_retry',
+                'commit_updates_with_compaction_retry',
                 side_effect=compact_then_commit,
         ), patch.object(
                 rewriter_module,

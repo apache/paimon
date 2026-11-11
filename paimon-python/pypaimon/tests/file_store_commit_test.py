@@ -475,6 +475,7 @@ class TestFileStoreCommit(unittest.TestCase):
         )
         commit_entry = Mock(kind=0)
         commit_entry.file.row_count = 2
+        commit_entry.file.first_row_id = None
         result = file_store_commit._try_commit_once(
             retry_result=retry_result,
             commit_kind='APPEND',
@@ -987,6 +988,7 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_entry.kind = 0
         commit_entry.file = Mock()
         commit_entry.file.row_count = 2
+        commit_entry.file.first_row_id = None
 
         result = file_store_commit._try_commit_once(
             retry_result=None,
