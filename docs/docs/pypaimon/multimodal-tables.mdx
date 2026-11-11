@@ -337,8 +337,8 @@ Ordinary BLOB inputs are bytes; video-frame inputs retain their descriptor
 semantics and need decoding in the function. With no `fn`, omit `inputs`.
 New columns must be nullable; existing column names are rejected by `add_columns`.
 
-`compute_columns(columns, *, inputs, fn, batch_size=1024)` fills or replaces
-existing columns without changing the schema. `columns` is a name or a sequence
+`compute_columns` fills or replaces existing columns without changing the schema.
+`columns` is a name or a sequence
 of names; output types and nullability come from the table schema. The function
 follows the same batch contract as `add_columns`. Every call processes all
 visible rows in the captured source snapshot, including rows whose output values
@@ -348,16 +348,25 @@ Use this method after a schema-only addition or to recompute a column left by
 failed `add_columns` computation. A new call starts a complete run, without
 resuming an earlier run or retrying function calls automatically.
 
-To recompute an existing column on Ray, install `pypaimon[ray]` and set
-`execution="ray"`. The driver plans one source snapshot and assigns complete
+To backfill a new column or recompute an existing one on Ray, install
+`pypaimon[ray]` and set `execution="ray"` on `add_columns` or `compute_columns`.
+For `add_columns`, Ray execution requires `fn`. Before publishing the schema,
+the driver validates the Ray task definition. In `ray_remote_args["resources"]`,
+it rejects reserved keys such as `bundle`, requires integer or floating-point
+quantities, and checks that positive quantities have ASCII resource names.
+Ray checks placement group compatibility at task submission, and runtime
+environment setup and the function can fail during execution. If submission or
+execution fails before the data commit, the new columns remain visible as NULL.
+The driver plans one source snapshot and assigns complete
 Data Evolution file groups to workers. Each worker reads the requested inputs
 and uses the Python shard updater to prepare the output files. The driver
 publishes them in one commit after all shards succeed. A worker failure leaves
-the prepared files unpublished.
+the prepared files unpublished. The following call adds `image_size` to a table
+that does not already have that column.
 
 ```python
-result = frames.compute_columns(
-    "image_size", inputs=["image"], fn=image_sizes, batch_size=128,
+result = frames.add_columns(
+    pa.schema([("image_size", pa.int64())]), inputs=["image"], fn=image_sizes, batch_size=128,
     execution="ray", concurrency=4, ray_remote_args={"num_cpus": 1},
 )
 ```
@@ -406,7 +415,7 @@ annotations are still valid.
 `merge_columns` delegates matching and updates to the standard MERGE executor.
 With a compatible `pypaimon_rust` runtime and `write.native.enabled=true`,
 supported tables use native MERGE without a separate Python target-key scan.
-`add_columns` and local `compute_columns` can use the native shard reader and writer
+Local `add_columns` and `compute_columns` can use the native shard reader and writer
 with the same option; the supplied `fn` still runs in Python. Unsupported native
 routes select Python before execution.
 `update_columns_by_row_id` uses the standard row-ID update backend with the same
