@@ -24,24 +24,156 @@ under the License.
 
 # LeRobot Datasets
 
-Import a LeRobot Dataset v3 table group, capture frames directly, or train from retained data. These workflows use a `conn` from [Multimodal Tables](./multimodal-tables#connect).
+Import a LeRobot Dataset v3 table group, capture frames directly, or train from
+retained data. These workflows use a `conn` from
+[Multimodal Tables](./multimodal-tables#connect).
+
+## Data model
+
+A LeRobot dataset contains frame data, Episode boundaries, and metadata shared
+by the source dataset. Paimon represents these at three granularities. For
+`load_from_lerobot(table_name="robot_data", ...)`, the name is a table-group
+prefix:
+
+| Table | One row represents | Contents |
+| --- | --- | --- |
+| `robot_data_datasets` | One source dataset | Feature definitions, FPS, task/subtask vocabularies, and global statistics. |
+| `robot_data_episodes` | One Episode in a source | Episode length, frame range, task labels, and source metadata extensions. |
+| `robot_data_frames` | One frame in an Episode | Frame indices, timestamp, observations, actions, and image/video features. |
+
+All three are [Data Evolution append tables](../multimodal-table/data-evolution)
+with row tracking, no primary key, and `bucket=-1`. The indices below identify
+LeRobot records; they are independent of Paimon's internal row IDs. These
+relationships are used by the reader and do not declare database foreign keys.
+
+The diagram and field tables below describe **list imports**, including a
+one-element list such as `source=["/data/source_a"]`. This form adds
+`dataset_index` to frames and Episodes and also supports later appends.
+[Single-source shorthand](#single-source-shorthand) has a smaller schema.
+
+[![LeRobot metadata files map to the Dataset table, Episode Parquet maps to the Episode table, and frame Parquet plus media map to the Frame table. Dataset and Episode indices relate the three tables.](/img/lerobot-data-model.svg)](/img/lerobot-data-model.svg)
+
+### Dataset fields
+
+`robot_data_datasets` has one row for each source, even when multiple sources
+have the same label. Source ordinals follow the input order; appends allocate
+new ordinals after the existing sources.
+
+| Field | Paimon type | Meaning |
+| --- | --- | --- |
+| `index` | `BIGINT` | Source ordinal, starting at 0. Referenced by frame and Episode `dataset_index`. |
+| `name` | `STRING`, nullable | Optional label supplied through `dataset_name`; omitted names are null. |
+| `info` | `STRING` | JSON containing the source's original `meta/info.json`, including `features`, `fps`, robot type, and counts. FPS is not a separate column. |
+| `tasks` | `ARRAY<ROW<task_index BIGINT, task STRING>>` | Source-local task IDs and their text from `meta/tasks.parquet`. |
+| `subtasks` | `ARRAY<ROW<subtask_index BIGINT, subtask STRING>>`, nullable | Optional source-local subtask IDs and text from `meta/subtasks.parquet`. |
+| `stats` | `STRING`, nullable | Source-level feature statistics as JSON; null when `meta/stats.json` is absent. |
+| Extra text columns | `STRING` or `MAP<STRING, STRING>`, nullable | Columns declared by [extra dataset text fields](#extra-dataset-text-fields). |
+
+Decode `info` and `stats` with `json.loads`. `tasks` and `subtasks` are typed
+arrays of records, not JSON strings. No separate info, task, subtask, or global
+stats tables are created.
+
+### Episode fields
+
+`robot_data_episodes` preserves source-local Episode IDs and frame ranges.
+Fields without `/` retain their source Arrow types; integer widths are not
+forced to `BIGINT`.
+
+| Field | Representation | Meaning |
+| --- | --- | --- |
+| `dataset_index` | `BIGINT` | Source ordinal referencing `_datasets.index`. |
+| `episode_index` | Source integer type | Episode number within that source, starting at 0. |
+| `dataset_from_index` | Source integer type | Inclusive start of the Episode's source-local frame `index` range. |
+| `dataset_to_index` | Source integer type | Exclusive end of that frame range. |
+| `length` | Source integer type | Number of frames; equals `dataset_to_index - dataset_from_index`. |
+| `tasks` | Source task-label list | Task texts used by the Episode, rather than frame task IDs. |
+| `meta`, `data`, `videos`, `stats` | JSON `STRING` columns | Grouped source fields describing metadata locations, data shards, per-camera video locations/timestamps, and per-Episode feature statistics. Empty groups are `{}`. |
+| Other source fields | Source type, or a JSON `STRING` for a `/` prefix group | Custom Episode metadata, such as quality labels or camera calibration. |
+
+For list imports, a field such as `data/chunk_index` becomes the
+`"chunk_index"` key inside `_episodes.data`. A field such as
+`videos/observation.images.front/from_timestamp` becomes the
+`"observation.images.front/from_timestamp"` key inside `_episodes.videos`.
+Likewise, `camera_intrinsics/head_left` becomes the `"head_left"` key in a
+`camera_intrinsics` JSON column. Episode `stats` is grouped by feature and then
+statistic, for example `{"action":{"mean":[0.1,0.2]}}`.
+
+These data/video locations describe the original LeRobot files. Paimon reads
+the imported media through the frame table's BLOB values.
+
+### Frame fields
+
+`robot_data_frames` derives its feature columns from `info.features`. Feature
+names, including dots such as `observation.state`, remain column names.
+
+| Field | Paimon type | Meaning |
+| --- | --- | --- |
+| `dataset_index` | `BIGINT` | Source ordinal referencing `_datasets.index`. |
+| `index` | `BIGINT` | Frame position within the original source, across all its Episodes. |
+| `episode_index` | `BIGINT` | Episode containing this frame, within the same source. |
+| `frame_index` | `BIGINT` | Frame position within the Episode; restarts at 0 for each Episode. |
+| `timestamp` | `FLOAT` | Seconds from the Episode's start, consistent with `frame_index / fps` for that source. |
+| `task_index` | `BIGINT` | ID resolved through that source's `_datasets.tasks`. |
+| `subtask_index` | `BIGINT`, nullable, when declared | ID resolved through that source's `_datasets.subtasks`; null means no subtask label. |
+| Feature columns | Scalars, `ARRAY`, or `BLOB` | Observations, actions, and other features, mapped as described below. |
+
+Within a table group, `(dataset_index, index)` identifies a frame and
+`(dataset_index, episode_index)` identifies an Episode. Task/subtask IDs are
+also scoped to a source. For example, two sources can both contain frame
+`index=0`, Episode `episode_index=0`, and task `task_index=0` with different
+task texts; `dataset_index` keeps them distinct. The training reader derives
+continuous sample positions at read time without rewriting the stored IDs.
+
+### Mapping the native LeRobot v3 format
+
+The importer reads the Parquet/MP4 layout described by the
+[LeRobot Dataset v3 format](https://huggingface.co/docs/lerobot/lerobot-dataset-v3).
+File paths below are relative to each source root; data/video path templates
+come from `meta/info.json`.
+
+| LeRobot source | Paimon destination | Mapping |
+| --- | --- | --- |
+| `meta/info.json` | `_datasets.info` and frame schema | Retain the original source info as JSON; derive frame feature columns from `features`. |
+| `meta/tasks.parquet` | `_datasets.tasks` | Retain source-local ID-to-text mappings; frames keep `task_index`. |
+| Optional `meta/subtasks.parquet` | `_datasets.subtasks` | Retain subtask mappings; declared frame `subtask_index` values may be null. |
+| Optional `meta/stats.json` | `_datasets.stats` | Store source-level statistics as JSON. |
+| `meta/episodes/**/*.parquet` | `_episodes` | Keep one row per Episode, its frame range, and extensions; group `/` fields as described above. |
+| `data/**/*.parquet` | `_frames` | Write one row per source frame, preserving its indices and feature names. |
+| Image feature bytes or referenced images | Image `BLOB` columns in `_frames` | Store compressed image bytes. |
+| MP4 files under `videos/` | Video `BLOB` columns in `_frames` | Copy shared video data into Paimon and associate each logical frame with its video sample; the default import does not decode every frame into an image. |
+
+Scalar features with shape `[]` or `[1]` become scalar columns. Larger numeric
+shapes become `ARRAY` columns, nested for multiple dimensions. For example,
+`action` with `dtype="float32", shape=[6]` becomes `ARRAY<FLOAT>`. Feature
+shape, dtype, and dimension names are retained in column metadata. Images and
+videos become `BLOB`, so each camera remains a feature column rather than a
+separate Paimon table. See [video import options](#load-lerobot-dataset-v3)
+for optional Episode remuxing.
+
+### Single-source shorthand
+
+For a new import with a single source string and no `dataset_name` or non-empty
+`extra_dataset_fields`, `load_from_lerobot("robot_data", "/data/source_a")`
+still creates the same three tables. Its Dataset row has `index=0` and
+`name=null`, but frames and Episodes do not gain a source `dataset_index`.
+Episode fields such as `data/chunk_index` and `stats/action/mean` retain their
+original names and types instead of being grouped into JSON columns.
+
+To use the source-indexed schema above, or to append more sources later, pass
+`source=["/data/source_a"]`. Supplying `dataset_name` or non-empty
+`extra_dataset_fields` also selects this schema, even for one source.
 
 ## Load LeRobot Dataset v3
 
 `load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
-repository. It derives the schema from `meta/info.json` and writes one row per
-frame. The supplied name is the table-group prefix: `robot_data` creates
-`robot_data_frames`, `robot_data_episodes`, and `robot_data_datasets`.
-`robot_data_datasets` stores source info, stats, task text, and subtask text.
-Frames retain `task_index`. All imported tables use Data Evolution with row tracking.
+repository into the [three-table model](#data-model) above.
 
 Frames with a null `subtask_index` are imported. `PaimonLeRobotDataset[index]`
 returns `None` for `subtask_index` and `subtask`. DataLoader batches use a
 validity mask for missing indices (see training below).
 
-The Dataset row's `info` and `stats` fields are JSON strings. Decode them with
-`json.loads`; `stats` is null when the source has no statistics. The frame table's
-`pypaimon.lerobot.<component>-table` options identify the components created.
+The frame table's `pypaimon.lerobot.<component>-table` options identify the
+components created.
 
 ```shell
 pip install 'pypaimon[lerobot]'
@@ -72,28 +204,11 @@ conn.load_from_lerobot(
 )
 ```
 
-Merged imports also create only `robot_merged_frames`, `robot_merged_episodes`, and
-`robot_merged_datasets`. The frame table keeps each source's `task_index` and
-`subtask_index`; the training reader resolves their text through
-`(dataset_index, task_index)` and `(dataset_index, subtask_index)`.
-
-Each source has one row in `_datasets`. Its `info` JSON contains the original
-`meta/info.json`, including FPS; there is no separate FPS column.
-The table contains `index`, `name`, `info`, `tasks`, `subtasks`,
-and `stats`. Source ranges are derived from the counts in each source's `info`.
 `dataset_name` accepts a string for one source or a list/tuple with one label per
 source in input order. Omitted names are null, and duplicate labels do not merge
-sources. Frame and Episode `dataset_index` values reference
-`_datasets.index`. The pair `(dataset_index, episode_index)` identifies an
-original Episode. Frames keep the source-local `index`; `(dataset_index, index)`
-identifies a frame. The training reader derives continuous positions at read
-time. Source task/subtask ID-to-text mappings use `_datasets.tasks` and
-`_datasets.subtasks`; stats remain JSON.
+sources. [Dataset fields](#dataset-fields) describes the retained source metadata.
 
-Merged `_episodes` keeps source-local Episode keys and frame ranges. Fields with
-`/` are grouped by prefix into JSON columns, including `meta/`,
-`data/`, `videos/`, and `stats/`.
-Grouped fields must use JSON-native Arrow types: null, boolean, integer,
+Grouped Episode fields must use JSON-native Arrow types: null, boolean, integer,
 floating point, string, list, or struct, including nested combinations.
 Binary, temporal, decimal, map, and extension types in these JSON groups are
 rejected before any target table is created. Episode fields without `/` retain
