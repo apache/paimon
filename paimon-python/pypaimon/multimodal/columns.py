@@ -62,7 +62,8 @@ class ColumnUpdateError(RuntimeError):
     ``schema_changed=None`` means the schema request had an unknown outcome.
     ``commit_outcome`` is ``not_started``, ``unknown``, or ``committed``. Never
     retry blindly after an unknown outcome; inspect the table first. The
-    original failure is retained as ``__cause__``.
+    underlying error is retained as ``__cause__``. Ray preserves a worker
+    exception's type only if it can serialize and deserialize the exception.
     """
 
     def __init__(self, operation):
@@ -319,7 +320,12 @@ def add_columns(owner, schema, *, inputs, fn, batch_size):
         return _compute_columns(operation, pa.schema(fields), inputs, fn, batch_size)
 
 
-def compute_columns(owner, columns, *, inputs, fn, batch_size):
+def compute_columns(owner, columns, *, inputs, fn, batch_size,
+                    execution="local", concurrency=None, ray_remote_args=None):
+    if execution not in ("local", "ray"):
+        raise ValueError("execution must be 'local' or 'ray'.")
+    if execution == "local" and (concurrency is not None or ray_remote_args is not None):
+        raise ValueError("Ray options require execution='ray'.")
     columns = [columns] if isinstance(columns, str) else list(columns)
     _validate_names(columns, "Output")
     _validate_batch_size(batch_size)
@@ -335,32 +341,49 @@ def compute_columns(owner, columns, *, inputs, fn, batch_size):
     inputs = _validate_inputs(raw, inputs, fn)
     target_schema = _target_schema(raw)
     schema = pa.schema([target_schema.field(name) for name in columns])
+    if execution == "ray":
+        from pypaimon.ray.compute_columns import validate_ray_options
+        concurrency, ray_remote_args = validate_ray_options(concurrency, ray_remote_args)
     with _ColumnUpdate(owner, raw) as operation:
-        return _compute_columns(operation, schema, inputs, fn, batch_size)
+        return _compute_columns(operation, schema, inputs, fn, batch_size, execution=execution,
+                                concurrency=concurrency, ray_remote_args=ray_remote_args)
 
 
-def _compute_columns(operation, schema, inputs, fn, batch_size):
+def _compute_columns(operation, schema, inputs, fn, batch_size, *,
+                     execution="local", concurrency=None, ray_remote_args=None):
     operation.phase = "compute"
-    table = operation.raw.copy_without_time_travel({
+    options = {
         "blob-as-descriptor": "false", "read.batch-size": str(batch_size),
-    })._copy_with_snapshot(operation.snapshot)
+    }
+    if execution == "ray":
+        options[CoreOptions.SCALAR_INDEX_SEARCH_MODE.key()] = "full"
+    table = operation.raw.copy_without_time_travel(options)._copy_with_snapshot(operation.snapshot)
     builder = table.new_batch_write_builder()
     commit = operation.keep(builder.new_commit())
-    update = builder.new_update().with_update_type(schema.names)
-    update.with_read_projection(inputs)
-    shard = operation.keep(update.new_shard_updator(0, 1))
+    if execution == "local":
+        update = builder.new_update().with_update_type(schema.names)
+        update.with_read_projection(inputs)
+        shard = operation.keep(update.new_shard_updator(0, 1))
+        messages, updated_rows = _prepare_column_shard(shard, schema, fn, batch_size, operation)
+    else:
+        from pypaimon.ray.compute_columns import prepare_ray_column_update
+        messages, updated_rows = prepare_ray_column_update(
+            operation, table, builder.commit_user, inputs, schema, fn, batch_size, concurrency, ray_remote_args)
+    return operation.finish(updated_rows, commit=commit, messages=messages)
+
+
+def _prepare_column_shard(shard, schema, fn, batch_size, progress):
     updated_rows = 0
     for batch in shard.arrow_reader():
         for start in range(0, batch.num_rows, batch_size):
-            operation.phase = "compute"
+            progress.phase = "compute"
             piece = batch.slice(start, batch_size)
             output = _normalize_output(fn(piece), schema)
             if output.num_rows != piece.num_rows:
                 raise ValueError("Column function must return one output row per input row, in input order.")
-            operation.phase = "write"
+            progress.phase = "write"
             for output_batch in output.to_batches(max_chunksize=batch_size):
                 shard.update_by_arrow_batch(output_batch)
             updated_rows += output.num_rows
-    operation.phase = "write"
-    messages = shard.prepare_commit()
-    return operation.finish(updated_rows, commit=commit, messages=messages)
+    progress.phase = "write"
+    return shard.prepare_commit(), updated_rows

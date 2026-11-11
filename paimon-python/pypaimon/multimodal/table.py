@@ -583,7 +583,8 @@ class MultimodalTable:
         from pypaimon.multimodal.columns import update_columns_by_row_id
         return update_columns_by_row_id(self, data, columns=columns)
 
-    def compute_columns(self, columns, *, inputs, fn, batch_size=1024):
+    def compute_columns(self, columns, *, inputs, fn, batch_size=1024, execution="local",
+                        concurrency=None, ray_remote_args=None):
         """Compute existing columns for all visible rows without changing the schema.
 
         ``columns`` is a column name or a sequence of names. Outputs must be
@@ -592,14 +593,20 @@ class MultimodalTable:
         ``fn`` follows the same input and output contract as ``add_columns``.
         Inputs may also be outputs; all reads use the captured source snapshot.
 
-        Execution is local and requires a current full-table view and a single
-        writer. Every call recomputes all visible rows, including non-NULL
-        outputs. Untouched columns retain their files. There are no automatic
-        retries or checkpoints. Returns :class:`pypaimon.multimodal.ColumnUpdateResult`
+        Execution requires a current full-table view and a single writer.
+        With ``execution="ray"``, workers use the Python shard updater on
+        disjoint file groups, then the driver commits once after all succeed.
+        ``concurrency`` bounds the number of shards (default 4) and
+        ``ray_remote_args`` configures Ray task resources. Workers must be able
+        to serialize and run ``fn`` and access the table storage.
+        Every call recomputes all visible rows, including non-NULL outputs.
+        Untouched columns retain their files. There are no automatic retries
+        or checkpoints. Returns :class:`pypaimon.multimodal.ColumnUpdateResult`
         with ``added_columns=()`` and the computed row count in ``updated_rows``.
         """
         from pypaimon.multimodal.columns import compute_columns
-        return compute_columns(self, columns, inputs=inputs, fn=fn, batch_size=batch_size)
+        return compute_columns(self, columns, inputs=inputs, fn=fn, batch_size=batch_size,
+                               execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)
 
     def map_with_blobs(self, dataset, columns, fn, **kwargs):
         from pypaimon.ray import map_with_blobs

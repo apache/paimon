@@ -528,6 +528,8 @@ class ShardTableUpdator:
             commit_user,
             shard_num: int,
             total_shard_count: int,
+            *,
+            splits: Optional[List[DataSplit]] = None,
     ):
         from pypaimon.table.file_store_table import FileStoreTable
         snapshot = TimeTravelUtil.resolve_snapshot(table)
@@ -539,11 +541,13 @@ class ShardTableUpdator:
         self.commit_user = commit_user
         self.total_shard_count = total_shard_count
         self.shard_num = shard_num
-        scanner = self.table.new_read_builder().new_scan()
-        plan = scanner.plan_all()
-        self.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
-        splits = plan.splits()
-        splits = _filter_by_whole_file_shard(splits, shard_num, total_shard_count)
+        if splits is None:
+            plan = self.table.new_read_builder().new_scan().plan_all()
+            self.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+            splits = _filter_by_whole_file_shard(plan.splits(), shard_num, total_shard_count)
+        else:
+            # The driver already assigned complete groups from this snapshot.
+            self.snapshot_id = snapshot.id
         self.splits = splits
         self._files_info = RowIdFileIndex.from_splits(self.snapshot_id, splits)
         self._write_schema = PyarrowFieldParser.from_paimon_schema(
