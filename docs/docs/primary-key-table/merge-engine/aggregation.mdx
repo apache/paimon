@@ -195,9 +195,18 @@ count of distinct event IDs.
 ### merge_map_with_keytime
 
   The merge_map_with_keytime function merges input maps with key-level partial updates based on timestamps.
-  Each key in the map carries a string timestamp. During merging, the entry with the greater
-  timestamp in lexicographic order is retained. Use equally padded numeric strings or a consistent
-  sortable date/time format; the implementation reads this field as a string.
+  Each key in the map carries a timestamp. During merging, the entry with the greater
+  timestamp is retained. The timestamp field supports:
+
+  - `CHAR`, `VARCHAR`, or `STRING`: compared lexicographically by UTF-8 bytes. Use equally padded
+    numeric strings or a consistent sortable date/time format. This differs from the previous Java
+    UTF-16 string ordering for some supplementary Unicode characters; ASCII timestamps are unaffected.
+  - `TINYINT`, `SMALLINT`, `INT`, or `BIGINT`: compared numerically without conversion to floating point.
+  - `DATE`: compared by date.
+  - `TIME`: compared by time of day, without a date component.
+  - `TIMESTAMP` or `TIMESTAMP_LTZ`: compared at the declared precision, including nanoseconds.
+    Spark's `TIMESTAMP_NTZ` maps to Paimon's `TIMESTAMP` and is also supported.
+
   It only supports `MAP<key_type, ROW<value_field, ts_field>>` type, where the ROW must have at least 2 fields.
 
   Use `fields.<field-name>.ts-field=<field_name_in_row>` to specify the timestamp field name in the ROW type.

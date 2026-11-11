@@ -72,6 +72,9 @@ import org.apache.paimon.utils.TypeCheckUtils;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -3079,25 +3082,43 @@ public class FieldAggregatorTest {
         return result;
     }
 
-    @Test
-    public void testFieldMergeMapWithKeyTimeAgg() {
+    private static Stream<Arguments> mergeMapTimestampValues() {
+        return Stream.of(
+                Arguments.of(DataTypes.STRING(), "100", "110"),
+                Arguments.of(DataTypes.TINYINT(), (byte) 100, (byte) 110),
+                Arguments.of(DataTypes.SMALLINT(), (short) 100, (short) 110),
+                Arguments.of(DataTypes.INT(), 9, 100),
+                Arguments.of(DataTypes.BIGINT(), Long.MAX_VALUE - 1, Long.MAX_VALUE),
+                Arguments.of(DataTypes.DATE(), -1, 0),
+                Arguments.of(DataTypes.TIME(3), 86_399_998, 86_399_999),
+                Arguments.of(
+                        DataTypes.TIMESTAMP(9),
+                        Timestamp.fromEpochMillis(0, 1),
+                        Timestamp.fromEpochMillis(0, 2)),
+                Arguments.of(
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9),
+                        Timestamp.fromEpochMillis(0, 1),
+                        Timestamp.fromEpochMillis(0, 2)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("mergeMapTimestampValues")
+    public void testFieldMergeMapWithKeyTimeAgg(DataType tsType, Object older, Object newer) {
         MapType mapType =
                 DataTypes.MAP(
                         DataTypes.STRING(),
                         DataTypes.ROW(
                                 DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
-                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
-        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
+                                DataTypes.FIELD(1, "dbsync_ts", tsType)));
+        FieldAggregator agg =
+                new FieldMergeMapWithKeyTimeAggFactory()
+                        .create(mapType, new CoreOptions(new HashMap<>()), "f");
 
         GenericMap map1 =
-                createTestMap(
-                        createEntry("key1", "A", "17682882903686900100"),
-                        createEntry("key2", "B", "17682882903686900100"));
+                createTestMap(createEntry("key1", "A", older), createEntry("key2", "B", newer));
         GenericMap map2 =
-                createTestMap(
-                        createEntry("key1", "A1", "17682882903686900200"),
-                        createEntry("key3", "C", "17682882903686900200"));
-        GenericMap map3 = createTestMap(createEntry("key2", "B2", "17682882903686900050"));
+                createTestMap(createEntry("key1", "A1", newer), createEntry("key3", "C", newer));
+        GenericMap map3 = createTestMap(createEntry("key2", "B2", older));
 
         Object acc = agg.agg(null, map1);
         assertTestMap(acc, createExpectedEntry("key1", "A"), createExpectedEntry("key2", "B"));
@@ -3165,37 +3186,22 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldMergeMapWithKeyTimeAggFactoryRejectsNonStringTsField() {
-        // The merge path reads the ts field via InternalRow#getString, so a non-string ts field
-        // (declared BIGINT/TIMESTAMP/INT, which is natural for a "ts" field) is accepted at DDL
-        // today and only throws ClassCastException at the first merge/compaction, naming neither
-        // the field nor the function. Validate it is a string type at factory creation.
+    public void testFieldMergeMapWithKeyTimeAggFactoryRejectsUnsupportedTsField() {
         MapType mapType =
                 DataTypes.MAP(
                         DataTypes.STRING(),
                         DataTypes.ROW(
                                 DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
-                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.BIGINT())));
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.DOUBLE())));
         assertThatThrownBy(
                         () ->
                                 new FieldMergeMapWithKeyTimeAggFactory()
                                         .create(mapType, new CoreOptions(new HashMap<>()), "f"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must be a string type");
-    }
-
-    @Test
-    public void testFieldMergeMapWithKeyTimeAggFactoryAcceptsStringTsField() {
-        MapType mapType =
-                DataTypes.MAP(
-                        DataTypes.STRING(),
-                        DataTypes.ROW(
-                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
-                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
-        assertThat(
-                        new FieldMergeMapWithKeyTimeAggFactory()
-                                .create(mapType, new CoreOptions(new HashMap<>()), "f"))
-                .isNotNull();
+                .hasMessage(
+                        "Timestamp field 'dbsync_ts' for field 'f' must be CHAR/VARCHAR/STRING, "
+                                + "TINYINT/SMALLINT/INT/BIGINT or DATE/TIME/TIMESTAMP/TIMESTAMP_LTZ "
+                                + "but was 'DOUBLE'.");
     }
 
     /**
@@ -3279,12 +3285,12 @@ public class FieldAggregatorTest {
         return row.getString(0).toString();
     }
 
-    private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, String ts) {
+    private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, Object ts) {
         return new AbstractMap.SimpleEntry<>(
                 BinaryString.fromString(key),
                 GenericRow.of(
                         value == null ? null : BinaryString.fromString(value),
-                        ts == null ? null : BinaryString.fromString(ts)));
+                        ts instanceof String ? BinaryString.fromString((String) ts) : ts));
     }
 
     private Map.Entry<String, String> createExpectedEntry(String key, String value) {

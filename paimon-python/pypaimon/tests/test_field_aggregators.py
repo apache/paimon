@@ -2572,6 +2572,54 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
             fields = self.DEFAULT_FIELDS
         return GenericRow(list(values), fields)
 
+    def test_timestamp_types(self):
+        cases = [
+            ("TINYINT", -128, 127),
+            ("SMALLINT", -32768, 32767),
+            ("INT", 9, 100),
+            ("BIGINT", -(1 << 63), (1 << 63) - 1),
+            ("BIGINT", (1 << 63) - 2, (1 << 63) - 1),
+            ("DATE", datetime.date(1969, 12, 31), datetime.date(1970, 1, 1)),
+            ("TIME(3)", datetime.time(23, 59, 59, 998000), datetime.time(23, 59, 59, 999000)),
+            ("TIMESTAMP(9)", Timestamp(0, 1), Timestamp(0, 2)),
+            ("TIMESTAMP_LTZ(9)", Timestamp(-1, 999998), Timestamp(-1, 999999)),
+            ("TIMESTAMP(6)", datetime.datetime(2026, 1, 1, microsecond=1),
+             datetime.datetime(2026, 1, 1, microsecond=2)),
+            ("TIMESTAMP_LTZ(6)",
+             datetime.datetime(2026, 1, 1, 8, tzinfo=datetime.timezone(datetime.timedelta(hours=8))),
+             datetime.datetime(2026, 1, 1, 0, 0, 1, tzinfo=datetime.timezone.utc)),
+        ]
+        for type_name, older, newer in cases:
+            for overwrite in (False, True):
+                for named in (False, True):
+                    for dict_row in (False, True):
+                        with self.subTest(type=type_name, overwrite=overwrite, named=named, dict_row=dict_row):
+                            fields = [DataField(0, "v", AtomicType("STRING")),
+                                      DataField(1, "ts", AtomicType(type_name))]
+                            settings = {"fields.field0.overwrite-on-equal-ts": str(overwrite).lower()}
+                            if named:
+                                fields.reverse()
+                                settings["fields.field0.ts-field"] = "ts"
+                            agg = self._make(RowType(True, fields), CoreOptions(Options(settings)))
+
+                            def entry(value, ts):
+                                row = {"v": value, "ts": ts}
+                                if not dict_row:
+                                    row = GenericRow([row[f.name] for f in fields], fields)
+                                return {"k": row}
+
+                            old = entry("old", older)
+                            new = entry("new", newer)
+                            equal = entry("equal", newer)
+                            null_ts = entry("null", None)
+                            self.assertEqual(agg.agg(old, new), new)
+                            self.assertEqual(agg.agg(new, old), new)
+                            self.assertEqual(agg.agg(new, equal), equal if overwrite else new)
+                            self.assertEqual(agg.agg(equal, new), new if overwrite else equal)
+                            self.assertEqual(agg.agg(new, null_ts), new)
+                            self.assertEqual(agg.agg(null_ts, new), new)
+                            self.assertEqual(agg.agg(new, {"k": None}), {})
+
     def test_field_merge_map_with_key_time_dict_row_default_ts(self):
         agg = self._make()
 
