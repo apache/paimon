@@ -207,11 +207,28 @@ Output:
 
 ## Table Snapshot
 
-Get and display the latest snapshot information of a Paimon table in JSON format. The snapshot contains metadata about the current state of the table.
+Get the latest snapshot or inspect a specific retained snapshot. JSON remains the default output
+format for compatibility with existing scripts. The snapshot includes its schema ID, manifest-list
+references, commit information, record counts, and other available metadata.
 
 ```shell
 paimon table snapshot mydb.users
+
+# Inspect a historical snapshot without falling back to the latest snapshot
+paimon table snapshot mydb.users --snapshot-id 42 --format json
+
+# Display all available fields as a readable table
+paimon table snapshot mydb.users --snapshot-id 42 --format table
 ```
+
+**Options:**
+
+- `--snapshot-id`: Positive snapshot ID to inspect. Omit it to resolve the latest snapshot once.
+- `--format, -f`: Output format: `json` (default) or `table`. Table output includes the UTC commit
+  time alongside the original epoch-millisecond value.
+
+The command fails with a non-zero exit status if the table has no snapshots, the requested snapshot
+is unavailable, or its metadata cannot be read. Errors are written to stderr.
 
 Output:
 ```json
@@ -234,6 +251,38 @@ Output:
   "nextRowId": null
 }
 ```
+
+## Table List Snapshots
+
+List retained snapshots in ascending numeric snapshot-ID order. The default table output shows
+the snapshot ID, schema ID, commit time in UTC, commit kind, commit user, and total, delta, and
+changelog record counts. Missing optional counts are displayed as `-`.
+
+```shell
+# List all available snapshots, oldest first
+paimon table list-snapshots mydb.users
+
+# Show the first 20 snapshots in that order
+paimon table list-snapshots mydb.users --limit 20
+
+# Export complete snapshot metadata as a JSON array
+paimon table list-snapshots mydb.users --format json
+```
+
+**Options:**
+
+- `--limit, -l`: Maximum number of snapshots to display; must be a positive integer.
+  Omit it to list all available snapshots.
+- `--format, -f`: Output format: `table` (default) or `json`.
+
+JSON output contains the same snapshot objects as `table snapshot`, preserving metadata field
+names such as `schemaId`, `timeMillis`, and `baseManifestList`. Timestamps remain epoch milliseconds
+and record counts remain integers. Optional fields with no value are omitted.
+
+An empty table returns an empty JSON array or a `No snapshots found` message, with a successful
+exit status. Expired snapshots are not reconstructed. If a snapshot disappears during listing,
+it is skipped; other metadata read errors fail the command. These commands read snapshot metadata
+without opening manifest or data files or modifying the table.
 
 ## Table List Partitions
 
