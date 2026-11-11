@@ -22,6 +22,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
 import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.PrefixHistory;
 import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
@@ -49,6 +51,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -414,6 +417,36 @@ public class JindoIoCacheRoutingTest {
     }
 
     @Test
+    public void testStreamsOfViewsAreCounted() throws Exception {
+        Options options = cacheTargetOptions();
+        options.set("jindo.io-stats.interval", "10 ms");
+        JindoFileIO fileIO = configuredFileIO(options);
+        for (FileIO reader :
+                Arrays.asList(
+                        fileIO.withTableView(view("data-")),
+                        fileIO.originOnly(),
+                        IoCacheViewableFileIO.originOnly(fileIO.withTableView(view("data-"))))) {
+            long inputs = JindoIOStats.INPUT.openedTotal();
+            long inputCloses = JindoIOStats.INPUT.closedTotal();
+            long outputs = JindoIOStats.OUTPUT.openedTotal();
+            long outputCloses = JindoIOStats.OUTPUT.closedTotal();
+            long bytesRead = JindoIOStats.INPUT.bytesTotal();
+            long bytesWritten = JindoIOStats.OUTPUT.bytesTotal();
+            try (SeekableInputStream input = reader.newInputStream(DATA);
+                    PositionOutputStream output = reader.newOutputStream(DATA, true)) {
+                assertThat(input.read()).isEqualTo(1);
+                output.write(1);
+                assertThat(JindoIOStats.INPUT.openedTotal()).isEqualTo(inputs + 1);
+                assertThat(JindoIOStats.OUTPUT.openedTotal()).isEqualTo(outputs + 1);
+            }
+            assertThat(JindoIOStats.INPUT.closedTotal()).isEqualTo(inputCloses + 1);
+            assertThat(JindoIOStats.OUTPUT.closedTotal()).isEqualTo(outputCloses + 1);
+            assertThat(JindoIOStats.INPUT.bytesTotal()).isEqualTo(bytesRead + 1);
+            assertThat(JindoIOStats.OUTPUT.bytesTotal()).isEqualTo(bytesWritten + 1);
+        }
+    }
+
+    @Test
     public void testViewsUseTheFileSystemsOfTheirBase() throws Exception {
         Options options = cacheTargetOptions();
         options.set(FILE_IO_ALLOW_CACHE, false);
@@ -429,7 +462,8 @@ public class JindoIoCacheRoutingTest {
 
         // a serialized view keeps its routes
         JindoFileIO plain = new JindoFileIO();
-        plain.configure(CatalogContext.create(cacheTargetOptions()));
+        options.set("jindo.io-stats.interval", "10 ms");
+        plain.configure(CatalogContext.create(options));
         Path custom = new Path(TABLE + "/dt=1/bucket-0/custom-" + UUID + "-1.orc");
         JindoFileIO copy =
                 InstantiationUtil.clone(
@@ -437,6 +471,7 @@ public class JindoIoCacheRoutingTest {
                         getClass().getClassLoader());
         assertThat(copy.routedHadoopOptions(custom, "read").get("fs.oss.endpoint"))
                 .isEqualTo(CLUSTER_HOST);
+        assertThat(copy.ioStatsInterval()).isEqualTo(Duration.ofMillis(10));
         assertThat(plain.routedHadoopOptions(custom, "read").get("fs.oss.endpoint"))
                 .isEqualTo(OSS_HOST);
     }

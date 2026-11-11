@@ -235,6 +235,7 @@ public class JindoFileIO extends HadoopCompliantFileIO
         view.writeCacheEnabled = writeCacheEnabled;
         view.existsCacheEnabled = existsCacheEnabled;
         view.allowCache = allowCache;
+        view.ioStatsInterval = ioStatsInterval;
         view.hadoopOptions = hadoopOptions;
         view.hadoopOptionsWithCache = hadoopOptionsWithCache;
         view.cacheTargetOptions = cacheTargetOptions;
