@@ -30,8 +30,10 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -79,6 +81,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CompactedChangelogPathResolver;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
@@ -94,6 +97,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -324,12 +329,87 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     result.add(committable);
                 } else {
                     commitCallbacks.forEach(callback -> callback.retry(committable));
+                    Snapshot snapshot = latestSnapshot.get();
+                    if (committable.identifier() == snapshot.commitIdentifier()
+                            && (snapshot.commitKind() == CommitKind.APPEND
+                                    || snapshot.commitKind() == CommitKind.OVERWRITE)) {
+                        ManifestCommittable recovery = recoverCompact(committable);
+                        if (recovery != null) {
+                            result.add(recovery);
+                        }
+                    }
                 }
             }
             return result;
         } else {
             // if there is no previous snapshots then nothing should be filtered
             return committables;
+        }
+    }
+
+    @Nullable
+    private ManifestCommittable recoverCompact(ManifestCommittable committable) {
+        List<CommitMessage> messages = new ArrayList<>();
+        Set<Path> outputs = new HashSet<>();
+        DataFilePathFactories dataFactories = new DataFilePathFactories(pathFactory);
+        IndexFilePathFactories indexFactories = new IndexFilePathFactories(pathFactory);
+        for (CommitMessage message : committable.fileCommittables()) {
+            CompactIncrement compact = ((CommitMessageImpl) message).compactIncrement();
+            if (compact.isEmpty()) {
+                continue;
+            }
+            messages.add(
+                    new CommitMessageImpl(
+                            message.partition(),
+                            message.bucket(),
+                            message.totalBuckets(),
+                            DataIncrement.emptyIncrement(),
+                            compact,
+                            message.checkFromSnapshot()));
+            DataFilePathFactory dataFactory =
+                    dataFactories.get(message.partition(), message.bucket());
+            compact.compactAfter().forEach(file -> outputs.addAll(file.collectFiles(dataFactory)));
+            compact.changelogFiles()
+                    .forEach(file -> outputs.addAll(file.collectFiles(dataFactory)));
+            IndexPathFactory indexFactory =
+                    indexFactories.get(message.partition(), message.bucket());
+            compact.newIndexFiles().forEach(file -> outputs.add(indexFactory.toPath(file)));
+        }
+        if (messages.isEmpty()) {
+            return null;
+        }
+        // An expired or orphan-cleaned output cannot be replayed. Skip the whole identifier,
+        // rather than publishing only some of its buckets. I/O failures must still fail recovery.
+        for (Path output : outputs) {
+            Path physicalPath =
+                    CompactedChangelogPathResolver.resolveCompactedChangelogPath(output);
+            try {
+                if (!fileIO.exists(physicalPath)) {
+                    LOG.warn(
+                            "Skipping compaction recovery for table {}, user {}, identifier {}: output {} is missing",
+                            tableName,
+                            commitUser,
+                            committable.identifier(),
+                            physicalPath);
+                    return null;
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+        return new CompactRecoveryCommittable(committable, messages);
+    }
+
+    /** Runtime-only marker: the first phase was published, even if empty commits are enabled. */
+    private static class CompactRecoveryCommittable extends ManifestCommittable {
+
+        private CompactRecoveryCommittable(
+                ManifestCommittable original, List<CommitMessage> messages) {
+            super(
+                    original.identifier(),
+                    original.watermark(),
+                    messages,
+                    new HashMap<>(original.properties()));
         }
     }
 
@@ -356,10 +436,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         try {
             List<SimpleFileEntry> appendSimpleEntries =
                     SimpleFileEntry.from(changes.appendTableFiles);
-            if (!ignoreEmptyCommit
-                    || !changes.appendTableFiles.isEmpty()
-                    || !changes.appendChangelog.isEmpty()
-                    || !changes.appendIndexFiles.isEmpty()) {
+            if (!(committable instanceof CompactRecoveryCommittable)
+                    && (!ignoreEmptyCommit
+                            || !changes.appendTableFiles.isEmpty()
+                            || !changes.appendChangelog.isEmpty()
+                            || !changes.appendIndexFiles.isEmpty())) {
                 CommitKind commitKind = CommitKind.APPEND;
                 if (appendCommitCheckConflict) {
                     checkAppendFiles = true;
@@ -549,7 +630,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         try {
-            boolean skipOverwrite = false;
+            boolean skipOverwrite = committable instanceof CompactRecoveryCommittable;
             // partition filter is built from static or dynamic partitions
             PartitionPredicate partitionFilter = null;
             if (partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite()) {
