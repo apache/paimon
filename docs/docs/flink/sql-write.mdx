@@ -79,43 +79,6 @@ expiration, and partition expiration.
 
 For multiple jobs to write the same table, you can refer to [dedicated compaction job](../maintenance/dedicated-compaction#dedicated-compaction-job) for more info.
 
-### Committing on the JobManager
-
-For a bucket-unaware append table, set `sink.coordinator-commit.enabled = true` to run commits
-on the JobManager. This path requires streaming mode, checkpointing, `bucket = -1`,
-`write-only = true`, `precommit-compact = false`, and one concurrent checkpoint.
-For bounded inputs, Flink's checkpoints-after-tasks-finish feature must also be enabled:
-`execution.checkpointing.checkpoints-after-tasks-finish` in Flink 1.20 and later, or
-`execution.checkpointing.checkpoints-after-tasks-finish.enabled` in earlier versions.
-
-Bounded inputs are supported in streaming mode. Each writer captures its last records in a
-real checkpoint. After those records are committed, the coordinator performs a separate,
-data-free final commit with identifier `Long.MAX_VALUE`. The final writer waits for this commit
-and its listeners before finishing. Data can therefore become visible before finalization
-side effects complete; these two commits are not a single atomic operation. Commit listeners
-must tolerate replay after a failure.
-
-Checkpoint recovery and savepoint submission can retain finished writers or start fresh writer
-attempts, depending on Flink's restored operator state. Fresh active writers participate in
-checkpoint alignment again. An operator restored as fully finished does not reopen its writers
-or create additional table snapshots. Rescaling a checkpoint that contains terminal writer
-coverage is not supported.
-
-For a draining stop-with-savepoint, the final writer waits for the checkpoint commit,
-the tag when `sink.savepoint.auto-tag = true`, and finalization before finishing.
-A non-draining stop does not mark input complete and does not use the EndInput completion barrier.
-The tag refers to the real savepoint checkpoint identifier. To produce a
-snapshot and tag even for a savepoint with no new files, enable `commit.force-create-snapshot`.
-
-In watermark partition completion mode, an empty final commit marks pending partitions done
-when `partition.end-input-to-done = true`. With this option disabled, the empty commit does not
-reevaluate pending partitions using `end-input.watermark`.
-Checkpoint/savepoint recovery with
-`partition.mark-done-action.mode = watermark` is currently rejected when partition mark-done
-is enabled: per-partition watermarks are not persisted. This also applies to
-`partition.end-input-to-done = true`. Use processing-time partition completion if recovery is
-required with coordinator commit.
-
 ### Clustering
 
 Clustering groups append-table rows by selected columns to improve data skipping. This write
