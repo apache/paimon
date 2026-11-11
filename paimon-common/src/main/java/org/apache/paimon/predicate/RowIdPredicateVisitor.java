@@ -56,11 +56,16 @@ public class RowIdPredicateVisitor implements PredicateVisitor<Optional<List<Ran
             if (function instanceof Equal || function instanceof In) {
                 ArrayList<Long> rowIds = new ArrayList<>();
                 for (Object literal : predicate.literals()) {
-                    rowIds.add((Long) literal);
+                    if (literal != null) {
+                        rowIds.add((Long) literal);
+                    }
                 }
                 return Optional.of(Range.toRanges(rowIds));
             } else if (function instanceof Between) {
                 List<Object> literals = predicate.literals();
+                if (literals.get(0) == null || literals.get(1) == null) {
+                    return Optional.of(new ArrayList<>());
+                }
                 long from = (Long) literals.get(0);
                 long to = (Long) literals.get(1);
                 // BETWEEN with inverted bounds (SQL allows BETWEEN 10 AND 5) is empty.
