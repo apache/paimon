@@ -120,8 +120,13 @@ public class MergeFunctionTestUtils {
                     Long sum = null;
                     for (ReusingTestData data : group) {
                         if (data.valueKind == RowKind.INSERT) {
+                            // a removing delete drops the record, so the next insert starts a
+                            // new aggregation instead of adding onto the deleted value
+                            sum =
+                                    sum == null || rowKind == RowKind.DELETE
+                                            ? data.value
+                                            : sum + data.value;
                             rowKind = RowKind.INSERT;
-                            sum = sum == null ? data.value : sum + data.value;
                         } else {
                             rowKind = RowKind.DELETE;
                             sum = data.value;
