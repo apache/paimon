@@ -91,6 +91,8 @@ class FileStoreWrite:
         self.options.set(
             CoreOptions.TARGET_FILE_SIZE, str(max_value))
         self.options.set(
+            CoreOptions.VECTOR_TARGET_FILE_SIZE, str(max_value))
+        self.options.set(
             CoreOptions.TARGET_FILE_ROW_NUM, str(max_value))
 
     def write(
