@@ -23,7 +23,7 @@ import pyarrow
 
 from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.read.read_support import close_read_source
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.common.predicate import Predicate
 from pypaimon.execution.native import runtime
 from pypaimon.execution.native import table as native_table
@@ -39,6 +39,71 @@ _NATIVE_READ_FILE_FORMATS = frozenset({
 })
 _NATIVE_READ_FILE_SUFFIXES = tuple('.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
 _NATIVE_BLOB_FILE_SUFFIXES = ('.blob', '.video')
+
+
+def _native_merge_map_keytime_timestamp_supported(table) -> bool:
+    """Whether Native can run ``merge_map_with_keytime`` for this table.
+
+    Rust resolves the timestamp column at merge time by downcasting to
+    ``StringArray`` and raises ``DataInvalid`` (``requires STRING``,
+    ``source: None``) for any other Arrow type. That matches Python's
+    ``_KEYTIME_STRING_TYPES`` (CHAR / VARCHAR / STRING), so this probe
+    reuses that set rather than inventing a second allow-list.
+
+    The failure happens while iterating batches after setup, which
+    bypasses the usual setup-time fallback. Typed timestamps that
+    Python already accepts (TIMESTAMP, DOUBLE, ...) must take the
+    Python aggregator path before Native is opened.
+
+    A non-atomic / unresolvable timestamp type returns ``False`` so
+    Python can raise the precise schema validation error; that is not
+    treated as "unsupported but known".
+    """
+    if not getattr(table, 'is_primary_key_table', False):
+        return True
+    options = table.options
+    if options.merge_engine() != MergeEngine.AGGREGATE:
+        return True
+
+    from pypaimon.execution.python.read.reader.aggregate.aggregators import (
+        NAME_MERGE_MAP_WITH_KEYTIME,
+        _KEYTIME_STRING_TYPES,
+        _atomic_base_name,
+    )
+    from pypaimon.execution.python.read.reader.aggregation_merge_function import (
+        resolve_agg_func_name,
+    )
+    from pypaimon.schema.data_types import MapType, RowType
+
+    options_map = options.options.to_map()
+    pk_set = set(table.primary_keys)
+    sequence_fields = set(options.sequence_field())
+    for field in table.fields:
+        if resolve_agg_func_name(
+                field.name, pk_set, options_map, sequence_fields
+        ) != NAME_MERGE_MAP_WITH_KEYTIME:
+            continue
+        field_type = field.type
+        if (not isinstance(field_type, MapType)
+                or not isinstance(field_type.value, RowType)
+                or not field_type.value.fields):
+            return False
+        row_type = field_type.value
+        ts_field_name = options.field_merge_map_ts_field(field.name)
+        if ts_field_name is None:
+            ts_type = row_type.fields[-1].type
+        else:
+            try:
+                ts_index = row_type.get_field_index(ts_field_name)
+            except ValueError:
+                return False
+            if ts_index < 0:
+                return False
+            ts_type = row_type.fields[ts_index].type
+        # None => type parse / non-atomic failure; not a supported native type.
+        if _atomic_base_name(ts_type) not in _KEYTIME_STRING_TYPES:
+            return False
+    return True
 
 
 def _prepare_native_read(table, predicate: Optional[Predicate] = None,
@@ -114,6 +179,13 @@ class NativeTableRead:
         if not self._blob_view_supported():
             return self._fallback(
                 "the table uses an unsupported BLOB view")
+        # Native still requires STRING timestamps for merge_map_with_keytime
+        # and fails lazily while iterating batches. Fall back before setup so
+        # typed timestamps (TIMESTAMP / DOUBLE / ...) use the Python aggregator.
+        if not _native_merge_map_keytime_timestamp_supported(read.table):
+            return self._fallback(
+                "merge_map_with_keytime timestamp is not STRING; "
+                "native reader requires STRING")
         try:
             from pypaimon.execution.native.read.split_adapter import native_split_from_python
         except Exception as e:
