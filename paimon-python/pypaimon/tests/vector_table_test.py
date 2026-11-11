@@ -127,6 +127,66 @@ class VectorOnlyTableTest(unittest.TestCase):
 
 class VectorTableWriteReadTest(unittest.TestCase):
 
+    def test_update_vector_column_preserves_aligned_file_groups(self):
+        self._check_update_vector_file_groups(False)
+
+    def test_update_vector_column_preserves_rolled_file_groups(self):
+        self._check_update_vector_file_groups(True)
+
+    def _check_update_vector_file_groups(self, rolled_vectors):
+        vector_type = pa.list_(pa.float32(), 2)
+        arrow_schema = pa.schema([('id', pa.int64()), ('embedding', vector_type)])
+        name = 'test_db.vector_update_groups_{}'.format(rolled_vectors)
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(arrow_schema, options={
+            'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+            'file.format': 'parquet', 'vector.file.format': 'parquet',
+            'vector.target-file-size': '1 b', 'read.batch-size': '2',
+        }), False)
+        table = self.catalog.get_table(name)
+        append_table = table.copy({
+            'vector.target-file-size': '16 b' if rolled_vectors else '1 mb'})
+        for start in (0, 6):
+            builder = append_table.new_batch_write_builder()
+            writer = builder.new_write()
+            for offset in range(start, start + 6, 2):
+                writer.write_arrow(pa.Table.from_pylist([
+                    {'id': i, 'embedding': [float(i), -1.]}
+                    for i in range(offset, offset + 2)], schema=arrow_schema))
+            commit = builder.new_commit()
+            commit.commit(writer.prepare_commit())
+            writer.close()
+            commit.close()
+
+        def files(current):
+            return {f.file_name: f for split in current.new_read_builder().new_scan().plan().splits()
+                    for f in split.files}
+
+        before = files(table)
+        self.assertEqual(sorted((f.first_row_id, f.row_count) for f in before.values()
+                                if not DataFileMeta.is_vector_file(f.file_name)), [(0, 6), (6, 6)])
+        expected = [(i, 2) for i in range(0, 12, 2)] if rolled_vectors else [(0, 6), (6, 6)]
+        self.assertEqual(sorted((f.first_row_id, f.row_count) for f in before.values()
+                                if DataFileMeta.is_vector_file(f.file_name)), expected)
+        builder = table.new_batch_write_builder()
+        updater = builder.new_update().with_update_type(['embedding'])
+        messages = updater.update_by_arrow_with_row_id(pa.table({
+            '_ROW_ID': pa.array(list(range(12)), type=pa.int64()),
+            'embedding': pa.array([[float(i), 1.] for i in range(12)], type=vector_type),
+        }))
+        commit = builder.new_commit()
+        commit.commit(messages)
+        commit.close()
+        table = self.catalog.get_table(name)
+        reader = table.new_read_builder()
+        result = reader.new_read().to_arrow(reader.new_scan().plan().splits()).sort_by('id')
+        self.assertEqual(result.select(['id', 'embedding']).to_pylist(), [
+            {'id': i, 'embedding': [float(i), 1.]} for i in range(12)])
+        after = files(table)
+        self.assertTrue(set(before).issubset(after))
+        added = [f for name, f in after.items() if name not in before]
+        self.assertTrue(all(DataFileMeta.is_vector_file(f.file_name) for f in added))
+        self.assertEqual(sorted((f.first_row_id, f.row_count) for f in added), [(0, 6), (6, 6)])
+
     @classmethod
     def setUpClass(cls):
         cls.temp_dir = tempfile.mkdtemp()
