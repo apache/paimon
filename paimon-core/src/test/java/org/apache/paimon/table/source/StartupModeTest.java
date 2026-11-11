@@ -129,6 +129,8 @@ public class StartupModeTest extends ScannerTestBase {
         Map<String, String> properties = new HashMap<>();
         properties.put(
                 CoreOptions.MERGE_ENGINE.key(), CoreOptions.MergeEngine.FIRST_ROW.toString());
+        // Keep level 0 files even if background compaction could finish immediately.
+        properties.put(CoreOptions.WRITE_ONLY.key(), "true");
         initializeTable(StartupMode.LATEST_DELTA, properties);
         try (IOManager ioManager = IOManager.create(tempDir.resolve("latest-delta").toString());
                 StreamTableWrite levelZeroWrite =
@@ -138,6 +140,7 @@ public class StartupModeTest extends ScannerTestBase {
             levelZeroCommit.commit(1, levelZeroWrite.prepareCommit(false, 1));
         }
 
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(1);
         TableScan.Plan plan = table.newScan().plan();
         assertThat(plan.splits()).isNotEmpty();
         assertThat(plan.splits())

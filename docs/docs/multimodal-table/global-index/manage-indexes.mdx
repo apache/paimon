@@ -438,6 +438,31 @@ matched_files = table.drop_global_index(
 
 </Tabs>
 
+## Null-Heavy Scalar Index Builds
+
+Set `sorted-index.null-bitmap-shuffle.enabled=true` in the table or build options
+to enable adaptive null bitmap shuffle for Spark and Flink single-column BTree
+and Bitmap index builds. The default is `false`, which retains Spark's original
+SQL range shuffle and Flink's original three-field shuffle without bitmap
+compression or expansion operators.
+
+When enabled, the builder batches null row IDs into compressed bitmaps only
+with a high observed null ratio (currently at least 80%). Sparse and non-null
+inputs use the compact original-row encoding instead. The optimization does not
+change the persisted index format.
+
+Spark reuses the range-sampling pass to measure the null ratio. If sampling does
+not provide a ratio, such as with a single output partition, it conservatively
+uses original rows. Flink adapts to bounded observation windows as it reads rows.
+Bitmap buffers contain at most 4,096 row IDs and never cross assigned shuffle
+destinations. Rows are restored before local sorting, preserving the original
+three-field values, file rotation and query layout for the same sampled boundaries.
+
+This reduces network traffic for null-heavy builds; it does not remove local
+sorting or guarantee lower elapsed time for every workload. Composite and
+Multivalue indexes retain their existing build paths. Evaluate CPU, network and
+spill costs on a representative cluster before enabling it for a workload.
+
 ## Shared Options
 
 These table options affect global index build and read behavior:
@@ -454,6 +479,7 @@ These table options affect global index build and read behavior:
 | `global-index.column-update-action` | `THROW_ERROR` | Update policy: `THROW_ERROR`, `DROP_PARTITION_INDEX`, or `IGNORE`. See [Update Indexed Columns](#update-indexed-columns) for refresh requirements and engine differences. |
 | `sorted-index.records-per-file` | `25000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. Falls back to `sorted-index.records-per-range`, then `btree-index.records-per-range`. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
+| `sorted-index.null-bitmap-shuffle.enabled` | `false` | Enable adaptive null bitmap compression during Spark/Flink single-column BTree and Bitmap index shuffle. Disabled builds retain their original shuffle paths. |
 | `global-index.row-count-per-shard` | `100000` | Target row count per shard for non-sorted global index builds such as vector and full-text indexes. |
 | `global-index.build.parallelism` | `1` | Number of shards built concurrently by the local PyPaimon builder. Each shard may use native worker threads, so increase this value conservatively. |
 | `global-index.build.max-shard` | `32` | Preferred maximum shard count for global index builds. |
