@@ -19,6 +19,8 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.codegen.CodeGenUtils;
+import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
@@ -28,9 +30,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MurmurHashUtils;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * A {@link RowDataChannelComputer} that stripes each bucket's writes across multiple writer
@@ -38,8 +38,8 @@ import java.util.Map;
  *
  * <p>Each bucket is routed to several channels. For a primary-key table the record's primary key
  * picks the channel, so records sharing a key still land on the same channel; for an append-only
- * table records are distributed round-robin. A single writer per bucket is equivalent to {@link
- * RowDataChannelComputer}.
+ * table the bucket key is hashed to pick a channel, so records sharing a bucket key stay together.
+ * A single writer per bucket is equivalent to {@link RowDataChannelComputer}.
  */
 public class StripedBucketWriteChannelComputer extends RowDataChannelComputer {
 
@@ -54,6 +54,8 @@ public class StripedBucketWriteChannelComputer extends RowDataChannelComputer {
     private final int writesPerBucket;
     private final int numBuckets;
     private final boolean hasPrimaryKey;
+    private final RowType rowType;
+    private final int[] bucketKeyMapping;
 
     // Positions of FLOAT/DOUBLE fields in the trimmed primary key, whose NaN payloads must be
     // canonicalized before hashing so that keys equal under the key comparator hash alike.
@@ -61,16 +63,17 @@ public class StripedBucketWriteChannelComputer extends RowDataChannelComputer {
     private final boolean[] floatingKeyIsDouble;
 
     private transient int numStripes;
-    // Round-robin progress per (partition, bucket). A single shared counter would correlate with
-    // the bucket arrival pattern (e.g. alternating buckets always pick the same stripe), leaving
-    // each bucket on one writer even though more are available.
-    private transient Map<BinaryRow, int[]> stripeCounters;
+    // Append-only routing hashes the bucket key, the same key the bucket assignment hashes, so it
+    // adds no skew beyond what bucketing already has. The projection reuses one output row.
+    private transient Projection bucketKeyProjection;
 
     public StripedBucketWriteChannelComputer(TableSchema schema, int writesPerBucket) {
         super(schema);
         this.writesPerBucket = writesPerBucket;
         this.numBuckets = new CoreOptions(schema.options()).bucket();
         this.hasPrimaryKey = !schema.primaryKeys().isEmpty();
+        this.rowType = schema.logicalRowType();
+        this.bucketKeyMapping = schema.projection(schema.bucketKeys());
 
         List<Integer> positions = new ArrayList<>();
         List<Boolean> isDouble = new ArrayList<>();
@@ -99,7 +102,9 @@ public class StripedBucketWriteChannelComputer extends RowDataChannelComputer {
     public void setup(int numChannels) {
         super.setup(numChannels);
         this.numStripes = resolveNumStripes();
-        this.stripeCounters = new HashMap<>();
+        if (!hasPrimaryKey && numStripes > 1) {
+            this.bucketKeyProjection = CodeGenUtils.newProjection(rowType, bucketKeyMapping);
+        }
     }
 
     private int resolveNumStripes() {
@@ -119,15 +124,18 @@ public class StripedBucketWriteChannelComputer extends RowDataChannelComputer {
         BinaryRow partition = extractor.partition();
         int bucket = extractor.bucket();
         int stripe;
-        if (hasPrimaryKey) {
+        if (numStripes == 1) {
+            stripe = 0;
+        } else if (hasPrimaryKey) {
             stripe = keyStripe(extractor.trimmedPrimaryKey());
         } else {
-            int[] counters = stripeCounters.get(partition);
-            if (counters == null) {
-                counters = new int[numBuckets];
-                stripeCounters.put(partition.copy(), counters);
-            }
-            stripe = Math.floorMod(counters[bucket]++, numStripes);
+            // Hash the bucket key, the same key bucketing hashes, so records of one bucket key stay
+            // together. Avalanche before the modulo so the stripe is independent of the bucket
+            // (otherwise a stripe count dividing the bucket count would fix one stripe per bucket).
+            stripe =
+                    Math.floorMod(
+                            MurmurHashUtils.fmix(bucketKeyProjection.apply(record).hashCode()),
+                            numStripes);
         }
         // Widen to long so that bucket * numStripes cannot overflow for large bucket counts
         long bucketSlot = (long) bucket * numStripes + stripe;

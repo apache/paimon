@@ -39,6 +39,7 @@ import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
@@ -77,6 +78,18 @@ public class StripedBucketWriteSinkITCase {
     private static final DataType INPUT_TYPE =
             DataTypes.ROW(
                     DataTypes.FIELD("k", DataTypes.INT()), DataTypes.FIELD("v", DataTypes.INT()));
+
+    private static final RowType INDEX_TABLE_TYPE =
+            new RowType(
+                    Arrays.asList(
+                            new RowType.RowField("id", new IntType()),
+                            new RowType.RowField(
+                                    "content", new VarCharType(VarCharType.MAX_LENGTH))));
+
+    private static final DataType INDEX_INPUT_TYPE =
+            DataTypes.ROW(
+                    DataTypes.FIELD("id", DataTypes.INT()),
+                    DataTypes.FIELD("content", DataTypes.STRING()));
 
     private static final int NUM_KEYS = 100;
     private static final int NUM_BUCKETS = 2;
@@ -221,6 +234,30 @@ public class StripedBucketWriteSinkITCase {
     }
 
     @Test
+    public void testStripedWriteRejectsPrimaryKeyIndex() throws Exception {
+        // a full-text index on a FIRST_ROW table is valid without deletion vectors, so the
+        // primary-key index guard (not the deletion-vectors guard) must reject striped write:
+        // each writer would publish a conflicting index for the same bucket
+        Map<String, String> options = new HashMap<>();
+        options.put("sink.striped-bucket-write.enabled", "true");
+        options.put("write-only", "true");
+        options.put("merge-engine", "first-row");
+        options.put("pk-full-text.index.columns", "content");
+        FileStoreTable table =
+                buildTableWithType(options, INDEX_TABLE_TYPE, Collections.singletonList("id"), 1);
+        StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment(batchConfiguration(4));
+        DataStream<Row> source =
+                env.fromSequence(1, 3).map(x -> Row.of(x.intValue(), "content-" + x));
+        source.getTransformation().setParallelism(source.getParallelism(), false);
+        FlinkSinkBuilder builder =
+                new FlinkSinkBuilder(table).forRow(source, INDEX_INPUT_TYPE).parallelism(4);
+        assertThatThrownBy(() -> builder.build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("primary-key indexes");
+    }
+
+    @Test
     public void testStripedWriteIgnoredForDynamicBucket() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put("sink.striped-bucket-write.enabled", "true");
@@ -312,6 +349,12 @@ public class StripedBucketWriteSinkITCase {
     private FileStoreTable buildTable(
             Map<String, String> tableOptions, List<String> primaryKeys, int bucket)
             throws Exception {
+        return buildTableWithType(tableOptions, TABLE_TYPE, primaryKeys, bucket);
+    }
+
+    private FileStoreTable buildTableWithType(
+            Map<String, String> tableOptions, RowType rowType, List<String> primaryKeys, int bucket)
+            throws Exception {
         Options options = new Options();
         String path = new File(temporaryFolder.toFile(), UUID.randomUUID() + "/").toString();
         options.set(PATH, path);
@@ -323,7 +366,7 @@ public class StripedBucketWriteSinkITCase {
         Path tablePath = new CoreOptions(options.toMap()).path();
         Schema schema =
                 new Schema(
-                        toDataType(TABLE_TYPE).getFields(),
+                        toDataType(rowType).getFields(),
                         Collections.emptyList(),
                         primaryKeys,
                         options.toMap(),

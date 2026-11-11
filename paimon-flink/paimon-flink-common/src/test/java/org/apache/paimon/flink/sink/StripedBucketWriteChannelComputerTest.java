@@ -224,7 +224,7 @@ public class StripedBucketWriteChannelComputerTest {
     }
 
     @Test
-    public void testAppendAlternatingBucketsFanOut() throws Exception {
+    public void testAppendBucketKeyHashFanOut() throws Exception {
         int numBuckets = 2;
         int numStripes = 2;
         int numChannels = numBuckets * numStripes;
@@ -239,37 +239,42 @@ public class StripedBucketWriteChannelComputerTest {
                         numBuckets,
                         Collections.singletonMap("bucket-key", "k"));
 
-        // find two bucket-key values that land on bucket 0 and bucket 1
+        // a real bucket holds many distinct bucket-key values; collect several for each bucket
         FixedBucketRowKeyExtractor extractor = new FixedBucketRowKeyExtractor(schema);
-        int key0 = -1;
-        int key1 = -1;
-        for (int x = 0; x < 1000 && (key0 < 0 || key1 < 0); x++) {
+        List<Integer> keys0 = new ArrayList<>();
+        List<Integer> keys1 = new ArrayList<>();
+        for (int x = 0; x < 10000 && (keys0.size() < 64 || keys1.size() < 64); x++) {
             extractor.setRecord(GenericRow.of(x, 0));
             int bucket = extractor.bucket();
-            if (bucket == 0 && key0 < 0) {
-                key0 = x;
-            } else if (bucket == 1 && key1 < 0) {
-                key1 = x;
+            if (bucket == 0 && keys0.size() < 64) {
+                keys0.add(x);
+            } else if (bucket == 1 && keys1.size() < 64) {
+                keys1.add(x);
             }
         }
-        assertThat(key0).isGreaterThanOrEqualTo(0);
-        assertThat(key1).isGreaterThanOrEqualTo(0);
+        assertThat(keys0).hasSize(64);
+        assertThat(keys1).hasSize(64);
 
         StripedBucketWriteChannelComputer computer =
                 new StripedBucketWriteChannelComputer(schema, numStripes);
         computer.setup(numChannels);
 
-        // alternate the two buckets so a shared stripe counter would correlate with the bucket
+        // interleave the two buckets' keys; hashing the bucket key must fan each bucket out to
+        // every stripe regardless of arrival order. numStripes divides numBuckets here, so without
+        // avalanching the hash the stripe would equal bucket % numStripes and fix one per bucket.
         Map<Integer, Set<Integer>> channelsByBucket = new HashMap<>();
         for (int i = 0; i < 2000; i++) {
-            InternalRow row = GenericRow.of(i % 2 == 0 ? key0 : key1, i);
+            int key =
+                    (i % 2 == 0)
+                            ? keys0.get((i / 2) % keys0.size())
+                            : keys1.get((i / 2) % keys1.size());
+            InternalRow row = GenericRow.of(key, i);
             extractor.setRecord(row);
             int bucket = extractor.bucket();
             int channel = computer.channel(row);
             assertThat(channel).isBetween(0, numChannels - 1);
             channelsByBucket.computeIfAbsent(bucket, k -> new HashSet<>()).add(channel);
         }
-        // each bucket must still fan out to all numStripes writers, not just one
         assertStripesPerBucket(channelsByBucket, numBuckets, numStripes);
     }
 
@@ -302,6 +307,106 @@ public class StripedBucketWriteChannelComputerTest {
             // equal primary keys must never be split across writers, or they acquire independent
             // sequence streams and a stale upsert can win
             assertThat(computer.channel(a)).isEqualTo(computer.channel(b));
+        }
+    }
+
+    @Test
+    public void testAppendSingleStripeEqualsRowDataChannelComputer() throws Exception {
+        int numBuckets = 4;
+        int numChannels = 4;
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        TableSchema schema =
+                createSchema(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        numBuckets,
+                        Collections.singletonMap("bucket-key", "k"));
+
+        // a single writer per bucket needs no round-robin state and degenerates to bucket routing
+        StripedBucketWriteChannelComputer striped =
+                new StripedBucketWriteChannelComputer(schema, 1);
+        striped.setup(numChannels);
+        RowDataChannelComputer base = new RowDataChannelComputer(schema);
+        base.setup(numChannels);
+
+        Random random = new Random(31L);
+        for (int i = 0; i < 2000; i++) {
+            InternalRow row = GenericRow.of(random.nextInt(1000), i);
+            assertThat(striped.channel(row)).isEqualTo(base.channel(row));
+        }
+    }
+
+    @Test
+    public void testPartitionedAppendFanOut() throws Exception {
+        int numBuckets = 2;
+        int numStripes = 2;
+        int numChannels = numBuckets * numStripes;
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "k", "v"});
+        TableSchema schema =
+                createSchema(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Collections.emptyList(),
+                        numBuckets,
+                        Collections.singletonMap("bucket-key", "k"));
+
+        StripedBucketWriteChannelComputer computer =
+                new StripedBucketWriteChannelComputer(schema, numStripes);
+        computer.setup(numChannels);
+        FixedBucketRowKeyExtractor extractor = new FixedBucketRowKeyExtractor(schema);
+
+        // hash-based routing must fan each (partition, bucket) pair out to every stripe
+        Random random = new Random(77L);
+        Map<String, Set<Integer>> channelsByPartitionBucket = new HashMap<>();
+        for (int i = 0; i < 6000; i++) {
+            InternalRow row = GenericRow.of(random.nextInt(5), random.nextInt(1000), i);
+            extractor.setRecord(row);
+            BinaryRow partition = extractor.partition();
+            int bucket = extractor.bucket();
+            int channel = computer.channel(row);
+            assertThat(channel).isBetween(0, numChannels - 1);
+            channelsByPartitionBucket
+                    .computeIfAbsent(partition.hashCode() + ":" + bucket, k -> new HashSet<>())
+                    .add(channel);
+        }
+        for (Set<Integer> channels : channelsByPartitionBucket.values()) {
+            assertThat(channels).hasSize(numStripes);
+        }
+    }
+
+    @Test
+    public void testAppendHashesRecordStatelessly() throws Exception {
+        int numBuckets = 2;
+        int numStripes = 3;
+        int numChannels = numBuckets * numStripes;
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        TableSchema schema =
+                createSchema(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        numBuckets,
+                        Collections.singletonMap("bucket-key", "k"));
+
+        StripedBucketWriteChannelComputer computer =
+                new StripedBucketWriteChannelComputer(schema, numStripes);
+        computer.setup(numChannels);
+
+        // append routing hashes the bucket key and keeps no counter, so the same record always maps
+        // to the same channel regardless of what arrived in between (round-robin would not)
+        InternalRow row = GenericRow.of(7, 42);
+        int expected = computer.channel(row);
+        for (int i = 0; i < 100; i++) {
+            computer.channel(GenericRow.of(i, i));
+            assertThat(computer.channel(row)).isEqualTo(expected);
         }
     }
 

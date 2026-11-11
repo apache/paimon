@@ -162,9 +162,9 @@ throughput and resource utilization without rescaling the table:
 | `sink.striped-bucket-write.writers-per-bucket` | Number of writer subtasks per bucket; the writer parallelism becomes this number times the bucket count. Set to -1 to let every writer subtask write every bucket. Only takes effect when enabled |
 
 For a primary-key table, records that share a primary key still land on the same writer, so each
-writer produces sorted runs over a hash-partitioned subset of the bucket's keys rather than
-duplicating the whole key space. For an append-only table, records are distributed across the
-writers round-robin.
+writer produces sorted runs over a hash-partitioned subset of the bucket's keys. For an append-only
+table, the bucket key is hashed to one of the bucket's writers, so records that share a bucket key
+stay together.
 
 :::warning Requirements and costs
 
@@ -186,10 +186,10 @@ Striped write trades extra compaction work and more small files for higher write
 raise compaction parallelism, which stays bounded by the bucket count. Prefer increasing the bucket
 count when a [rescale](../maintenance/rescale-bucket) is acceptable.
 
-Do not change the writer parallelism or the number of writers per bucket when restoring from a
-savepoint: each bucket's writer states are redistributed by bucket, and states for the same bucket
-that land on one subtask overwrite each other, losing data. Start a fresh job rather than rescaling a
-striped-write savepoint.
+You can change the writer parallelism or the number of writers per bucket when restoring from a
+savepoint. A striped writer is write-only and keeps no per-bucket state in the savepoint: records are
+committed at the checkpoint barrier and each writer rebuilds from the table on restore, so committed
+rows survive the rescale.
 
 :::
 

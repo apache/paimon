@@ -5114,6 +5114,19 @@ public class CoreOptions implements Serializable {
         return !fmIndexColumns().isEmpty();
     }
 
+    /**
+     * Whether any source-backed primary-key index (vector, full-text, FM, BTree, bitmap,
+     * multivalue) is configured.
+     */
+    public boolean primaryKeyIndexEnabled() {
+        return !VectorIndexOptions.columns(options).isEmpty()
+                || fullTextIndexEnabled()
+                || fmIndexEnabled()
+                || !btreeIndexColumns().isEmpty()
+                || !bitmapIndexColumns().isEmpty()
+                || !multiValueIndexColumns().isEmpty();
+    }
+
     public List<String> btreeIndexColumns() {
         return globalIndexColumns("btree");
     }

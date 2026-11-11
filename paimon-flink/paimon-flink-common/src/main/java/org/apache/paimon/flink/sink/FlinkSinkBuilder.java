@@ -375,6 +375,15 @@ public class FlinkSinkBuilder {
                             + "table: striping spreads successive rows across independent writers, "
                             + "breaking the append order that ordered reads rely on. Set "
                             + "bucket-append-ordered=false or disable striped bucket write.");
+            // Mirrors the primary-key index enablement in KeyValueFileStore#newFixedBucketWrite:
+            // all of these are maintained per bucket by a single publisher, so multiple writers
+            // per bucket would each publish a conflicting index for the same bucket.
+            checkArgument(
+                    !table.coreOptions().primaryKeyIndexEnabled(),
+                    "Striped bucket write does not support primary-key indexes (vector, full-text, "
+                            + "FM, BTree, bitmap, multivalue): each writer would maintain and publish "
+                            + "a conflicting index for the same bucket. Remove the primary-key "
+                            + "indexes or disable striped bucket write.");
             Optional<Integer> configuredWritersPerBucket =
                     options.getOptional(
                             FlinkConnectorOptions.SINK_STRIPED_BUCKET_WRITE_WRITERS_PER_BUCKET);
