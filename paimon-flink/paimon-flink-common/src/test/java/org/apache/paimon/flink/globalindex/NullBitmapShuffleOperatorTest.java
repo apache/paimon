@@ -39,6 +39,7 @@ import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.serialization.SerializerConfig;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
@@ -414,7 +415,7 @@ class NullBitmapShuffleOperatorTest {
     @Test
     void testAdaptiveActualExchangeBytesAgainstOriginalThreeFieldSchema() throws Exception {
         final int count = 20000;
-        ExecutionConfig config = new ExecutionConfig();
+        SerializerConfig config = new ExecutionConfig().getSerializerConfig();
         TypeSerializer<Tuple2<Integer, Tuple2<InternalRow, RowData>>> baselineSerializer =
                 new TupleTypeInfo<Tuple2<Integer, Tuple2<InternalRow, RowData>>>(
                                 BasicTypeInfo.INT_TYPE_INFO,
