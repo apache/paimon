@@ -695,16 +695,27 @@ connection.load_from_lerobot(
 ```
 
 The source dataset must be non-empty. Its schema comes from `meta/info.json`.
-Each frame becomes one row; media uses BLOB columns. The import creates frame,
-Episode, task, info, and optional stats/subtask tables. Info and stats use
-`key STRING, value STRING` rows, with each value JSON-encoded to preserve
-nested metadata. Decode values with `json.loads`.
+Each frame becomes one row; media uses BLOB columns. The supplied name is the
+table-group prefix: `robot_data` creates three tables, `robot_data_frames`,
+`robot_data_episodes`, and `robot_data_datasets`. They store frames, Episode
+metadata, and source dataset metadata, respectively.
+
+`robot_data_datasets` stores one row per source, including `info`, `stats`,
+`tasks`, and `subtasks`. The task/subtask fields map source-local IDs to text.
+`info` and `stats` are JSON strings; decode them with `json.loads`. `stats` is
+null when the source has no statistics.
+
+Pass an ordered source list to merge multiple datasets into the same three
+tables. Frames and Episodes retain source-local indices and use `dataset_index`
+to reference `_datasets.index`.
+See the [LeRobot data model](../docs/docs/pypaimon/lerobot.md#data-model) for the
+field definitions, native file mapping, and single-source schema differences.
 
 Before training, pause writes and create a shared tag:
 
 ```python
 connection.create_lerobot_tag("robot_data", "train-2026-09-07")
-frames = connection.get_table("robot_data").scan(
+frames = connection.get_table("robot_data_frames").scan(
     tag_name="train-2026-09-07").to_arrow()
 ```
 
