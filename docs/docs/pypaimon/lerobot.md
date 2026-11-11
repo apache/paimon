@@ -316,16 +316,31 @@ conn.load_from_lerobot("robot_merged", ["/data/source_a", "/data/source_b"])
 conn.append_to_lerobot("robot_merged", "/data/source_c", tag_name="after-append")
 ```
 
+One driver submits and commits the entire append; Ray workers can prepare its
+sources concurrently. Do not run separate `append_to_lerobot` calls against the
+same table group at the same time. The three component tables do not share a
+transaction, so interleaved appends can leave the group inconsistent. Queue
+additional appends through the same driver. To append multiple sources with
+Ray-parallel preparation:
+
+```python
+import ray
+
+ray.init(address="auto")
+conn.append_to_lerobot("robot_merged", ["/data/source_d", "/data/source_e"],
+                       parallelism=2)
+```
+
 If source C adds `humidity`, the append adds that column to `_frames`, keeps A
 and B, and reads their humidity values as null. New `extra_dataset_fields` columns
 are added to `_datasets` in the same way; omitted extra fields receive nulls.
 Pass `schema_evolution=False` to `append_to_lerobot` to reject new columns.
 
-If a process stops between component commits, call
+If the sole writer stops between component commits, call
 `conn.recover_lerobot_append("robot_merged")` before retrying. This rolls
 unfinished Frame and Episode commits back to the Dataset metadata boundary.
 Nullable columns added before a failed append remain in the schema and are
-reused on retry.
+reused on retry. This recovery is not a repair mechanism for concurrent appends.
 
 For FileIO URIs, pass credentials through `source_options`:
 

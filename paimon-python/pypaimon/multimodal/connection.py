@@ -177,7 +177,12 @@ class MultimodalConnection:
             dataset_name=None,
             extra_dataset_fields=None,
             schema_evolution=True) -> None:
-        """Append LeRobot v3 datasets to a source-local three-table group."""
+        """Append LeRobot v3 datasets to a source-local three-table group.
+
+        Pass multiple sources in one call for Ray-parallel preparation. Only
+        one append call may commit to a given group at a time; its three tables
+        do not share a transaction.
+        """
         from pypaimon.multimodal.lerobot import load_from_lerobot
         load_from_lerobot(
             self, table_name, source, batch_size=batch_size,
