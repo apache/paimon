@@ -70,7 +70,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -366,6 +368,363 @@ public class FallbackReadFileStoreTableTest {
 
         assertThat(readAndCollect((FallbackReadFileStoreTable) versioned, scan -> {}))
                 .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
+        FallbackReadFileStoreTable fromFactory =
+                createFromFactory(
+                        mainTable,
+                        "bc",
+                        true,
+                        Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), "2"));
+        assertThat(fromFactory.other().coreOptions().scanSnapshotId()).isEqualTo(1L);
+        assertThat(readAndCollect(fromFactory, scan -> {}))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testFactoryWithPersistedSnapshot(boolean wrappedFirst) throws Exception {
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        mainTable.createBranch("bc");
+        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
+        long firstSnapshotTime = mainTable.snapshotManager().snapshot(1).timeMillis();
+        while (System.currentTimeMillis() <= firstSnapshotTime) {
+            Thread.yield();
+        }
+        writeDataIntoTable(branchTable, 0, rowData(3, 30));
+        writeDataIntoTable(mainTable, 1, rowData(2, 20));
+        long snapshotTime = mainTable.snapshotManager().snapshot(2).timeMillis();
+        while (System.currentTimeMillis() <= snapshotTime) {
+            Thread.yield();
+        }
+        writeDataIntoTable(branchTable, 1, rowData(4, 40));
+        mainTable
+                .schemaManager()
+                .commitChanges(
+                        SchemaChange.setOption(
+                                (wrappedFirst
+                                                ? CoreOptions.SCAN_FALLBACK_BRANCH
+                                                : CoreOptions.SCAN_PRIMARY_BRANCH)
+                                        .key(),
+                                "bc"),
+                        SchemaChange.setOption(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
+
+        FallbackReadFileStoreTable historical =
+                (FallbackReadFileStoreTable) FileStoreTableFactory.create(fileIO, tablePath);
+        assertThat(readAndCollect(historical, scan -> {}))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 30));
+        assertThat(historical.other().coreOptions().scanSnapshotId()).isEqualTo(1L);
+        historical =
+                (FallbackReadFileStoreTable)
+                        historical.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT
+                                                .key(),
+                                        "false"));
+        assertThat(readAndCollect(historical, scan -> {}))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 30));
+
+        Options overrides = new Options();
+        overrides.set(CoreOptions.PATH, tablePath.toString());
+        overrides.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
+        assertThatThrownBy(() -> FileStoreTableFactory.create(fileIO, overrides).newScan().plan())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("later than");
+        overrides.remove(CoreOptions.SCAN_SNAPSHOT_ID.key());
+        overrides.set(CoreOptions.SCAN_VERSION, "1");
+        assertThatThrownBy(() -> FileStoreTableFactory.create(fileIO, overrides).newScan().plan())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("later than");
+        overrides.set(CoreOptions.SCAN_VERSION.key(), null);
+        overrides.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), null);
+        assertThat(
+                        readAndCollect(
+                                (FallbackReadFileStoreTable)
+                                        FileStoreTableFactory.create(fileIO, overrides),
+                                scan -> {}))
+                .containsExactlyInAnyOrder(
+                        Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 30), Pair.of(4, 40));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false,false", "false,true,true", "true,false,true", "true,true,false"})
+    public void testTimeTravelWithEmptyOtherBranch(
+            boolean wrappedFirst, boolean scanVersion, boolean allowEarliest) throws Exception {
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        mainTable.createBranch("empty");
+        FileStoreTable branchTable = createTableFromBranch(mainTable, "empty");
+        assertThat(branchTable.snapshotManager().latestSnapshotId()).isNull();
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                scanVersion ? CoreOptions.SCAN_VERSION.key() : CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                "1");
+        options.put(
+                CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(),
+                String.valueOf(allowEarliest));
+
+        FallbackReadFileStoreTable latest =
+                new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
+        assertThat(readAndCollect(latest, scan -> {})).containsExactly(Pair.of(1, 10));
+        FallbackReadFileStoreTable fromFactory =
+                createFromFactory(mainTable, "empty", wrappedFirst, options);
+        assertThat(fromFactory.other().coreOptions().scanSnapshotId()).isEqualTo(-1L);
+        assertThat(readAndCollect(fromFactory, scan -> {})).containsExactly(Pair.of(1, 10));
+        FallbackReadFileStoreTable table = (FallbackReadFileStoreTable) latest.copy(options);
+        assertThat(table.other().coreOptions().scanSnapshotId()).isEqualTo(-1L);
+
+        long snapshotTime = mainTable.snapshotManager().snapshot(1).timeMillis();
+        while (System.currentTimeMillis() <= snapshotTime) {
+            Thread.yield();
+        }
+        writeDataIntoTable(branchTable, 0, rowData(2, 20));
+
+        assertThat(readAndCollect(fromFactory, scan -> {})).containsExactly(Pair.of(1, 10));
+        assertThat(readAndCollect(table, scan -> {})).containsExactly(Pair.of(1, 10));
+        assertThat(table.newScan().listPartitionEntries())
+                .map(entry -> entry.partition().getInt(0))
+                .containsExactly(1);
+        for (FileStoreTable copied :
+                Arrays.asList(
+                        table.copy(Collections.emptyMap()),
+                        table.copyWithoutTimeTravel(Collections.emptyMap()),
+                        table.copyWithLatestSchema(),
+                        table.copy(table.schema()),
+                        InstantiationUtil.deserializeObject(
+                                InstantiationUtil.serializeObject(table),
+                                getClass().getClassLoader()))) {
+            assertThat(readAndCollect((FallbackReadFileStoreTable) copied, scan -> {}))
+                    .containsExactly(Pair.of(1, 10));
+        }
+        if (allowEarliest) {
+            FallbackReadFileStoreTable resolved = (FallbackReadFileStoreTable) table.copy(options);
+            assertThat(resolved.other().coreOptions().scanSnapshotId()).isEqualTo(1L);
+            assertThat(readAndCollect(resolved, scan -> {}))
+                    .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
+        } else {
+            assertThatThrownBy(() -> table.copy(options).newScan().plan())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("later than");
+        }
+
+        options.clear();
+        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), null);
+        options.put(CoreOptions.SCAN_VERSION.key(), null);
+        options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.LATEST_FULL.toString());
+        assertThat(readAndCollect((FallbackReadFileStoreTable) table.copy(options), scan -> {}))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
+        writeDataIntoTable(mainTable, 1, rowData(3, 30));
+        Map<String, String> newSelector =
+                Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
+        for (FileStoreTable copied :
+                Arrays.asList(
+                        table.copy(newSelector),
+                        table.copy(
+                                table.schema()
+                                        .copy(
+                                                new Options(table.options(), newSelector)
+                                                        .toMap())))) {
+            assertThat(readAndCollect((FallbackReadFileStoreTable) copied, scan -> {}))
+                    .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 30));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSchemaValidationWithEmptyOtherBranch(boolean wrappedFirst) throws Exception {
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        mainTable.createBranch("bc");
+        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
+        branchTable
+                .schemaManager()
+                .commitChanges(SchemaChange.addColumn("extra", DataTypes.STRING()));
+        branchTable = branchTable.copyWithLatestSchema();
+        FallbackReadFileStoreTable historical =
+                createFromFactory(
+                        mainTable,
+                        "bc",
+                        wrappedFirst,
+                        Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
+        assertThat(readAndCollect(historical, scan -> {})).containsExactly(Pair.of(1, 10));
+        assertThat(historical.newScan().listPartitions()).hasSize(1);
+
+        writeDataIntoTable(branchTable, 0, rowData(2, 20, null));
+        writeDataIntoTable(mainTable, 1, rowData(3, 30));
+        assertThat(readAndCollect(historical, scan -> {})).containsExactly(Pair.of(1, 10));
+        for (String snapshotId : Arrays.asList(null, "2")) {
+            FallbackReadFileStoreTable nonempty =
+                    createFromFactory(
+                            mainTable,
+                            "bc",
+                            wrappedFirst,
+                            Collections.singletonMap(
+                                    CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshotId));
+            assertThatThrownBy(nonempty::newScan)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("does not have the same row type");
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    public void testTimeTravelBeforeOtherSnapshots(boolean wrappedFirst, boolean expired)
+            throws Exception {
+        String policyKey = CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key();
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        long snapshotTime = mainTable.snapshotManager().snapshot(1).timeMillis();
+        mainTable.createBranch("bc");
+        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
+        while (System.currentTimeMillis() <= snapshotTime) {
+            Thread.yield();
+        }
+        writeDataIntoTable(branchTable, 0, rowData(1, 100), rowData(2, 20));
+        if (expired) {
+            writeDataIntoTable(branchTable, 1, rowData(3, 30));
+            branchTable.snapshotManager().deleteSnapshot(1);
+            branchTable.snapshotManager().commitEarliestHint(2);
+        }
+        // The latest snapshot must differ from earliest; its extra row must not be read.
+        writeDataIntoTable(branchTable, 2, rowData(4, 40));
+        if (expired) {
+            branchTable
+                    .schemaManager()
+                    .commitChanges(SchemaChange.addColumn("extra", DataTypes.STRING()));
+            branchTable = branchTable.copyWithLatestSchema();
+        }
+        FallbackReadFileStoreTable table =
+                new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
+        assertThatThrownBy(() -> table.copy(options).newScan().plan())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("later than");
+        assertThatThrownBy(
+                        () ->
+                                createFromFactory(mainTable, "bc", wrappedFirst, options)
+                                        .newScan()
+                                        .plan())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("later than");
+
+        options.put(policyKey, "true");
+        FallbackReadFileStoreTable historical = (FallbackReadFileStoreTable) table.copy(options);
+        long earliestId = expired ? 2L : 1L;
+        assertThat(historical.other().coreOptions().scanSnapshotId()).isEqualTo(earliestId);
+        assertThat(historical.other().rowType()).isEqualTo(mainTable.rowType());
+        List<Pair<Integer, Integer>> expected =
+                new ArrayList<>(Arrays.asList(Pair.of(1, wrappedFirst ? 10 : 100), Pair.of(2, 20)));
+        if (expired) {
+            expected.add(Pair.of(3, 30));
+        }
+        assertThat(readAndCollect(historical, scan -> {}))
+                .containsExactlyInAnyOrderElementsOf(expected);
+        FallbackReadFileStoreTable fromFactory =
+                createFromFactory(mainTable, "bc", wrappedFirst, options);
+        assertThat(fromFactory.other().coreOptions().scanSnapshotId()).isEqualTo(earliestId);
+        assertThat(fromFactory.other().rowType()).isEqualTo(mainTable.rowType());
+        assertThat(readAndCollect(fromFactory, scan -> {}))
+                .containsExactlyInAnyOrderElementsOf(expected);
+
+        options.remove(policyKey);
+        assertThat(
+                        ((FallbackReadFileStoreTable) historical.copy(options))
+                                .other()
+                                .coreOptions()
+                                .scanSnapshotId())
+                .isEqualTo(earliestId);
+        Map<String, String> schemaOptions = new HashMap<>(historical.options());
+        schemaOptions.remove(policyKey);
+        List<FileStoreTable> strictCopies = new ArrayList<>();
+        strictCopies.add(historical.copy(historical.schema().copy(schemaOptions)));
+        for (String override : Arrays.asList("false", null)) {
+            options.put(policyKey, override);
+            strictCopies.add(historical.copy(options));
+            Map<String, String> policyOptions = new HashMap<>();
+            policyOptions.put(policyKey, override);
+            strictCopies.add(historical.copy(policyOptions));
+            strictCopies.add(historical.copyWithoutTimeTravel(policyOptions));
+            policyOptions.put(CoreOptions.SCAN_VERSION.key(), null);
+            strictCopies.add(historical.copy(policyOptions));
+        }
+        for (FileStoreTable strict : strictCopies) {
+            assertThatThrownBy(() -> strict.newScan().plan())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("later than");
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,1", "false,-1", "true,1", "true,-1"})
+    public void testExplicitMissingSnapshotIsNotReplaced(boolean expired, String snapshotId)
+            throws Exception {
+        FileStoreTable table = createTable();
+        if (expired) {
+            writeDataIntoTable(table, 0, rowData(1, 10));
+            writeDataIntoTable(table, 1, rowData(2, 20));
+            table.snapshotManager().deleteSnapshot(1);
+            table.snapshotManager().commitEarliestHint(2);
+        }
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshotId);
+        options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), "true");
+
+        assertThatThrownBy(() -> table.copy(options).newScan().plan())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        expired
+                                ? "out of available snapshotId range"
+                                : "There is currently no snapshot.");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"scan.tag-name,base", "scan.version,1"})
+    public void testTagTimeTravelWithoutActiveOtherSnapshots(String scanOption, String tagName)
+            throws Exception {
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        mainTable.createTag(tagName);
+        mainTable.createBranch("bc");
+        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
+        writeDataIntoTable(branchTable, 0, rowData(2, 20));
+        branchTable.createTag(tagName);
+        branchTable.snapshotManager().deleteSnapshot(1);
+        branchTable.snapshotManager().deleteLatestHint();
+        assertThat(branchTable.snapshotManager().latestSnapshotId()).isNull();
+        FallbackReadFileStoreTable table =
+                (FallbackReadFileStoreTable)
+                        new FallbackReadFileStoreTable(mainTable, branchTable, true)
+                                .copy(Collections.singletonMap(scanOption, tagName));
+
+        assertThat(readAndCollect(table, scan -> {}))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
+        assertThat(
+                        readAndCollect(
+                                createFromFactory(
+                                        mainTable,
+                                        "bc",
+                                        true,
+                                        Collections.singletonMap(scanOption, tagName)),
+                                scan -> {}))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
+    }
+
+    private FallbackReadFileStoreTable createFromFactory(
+            FileStoreTable table,
+            String branch,
+            boolean wrappedFirst,
+            Map<String, String> options) {
+        Options dynamicOptions = new Options(options);
+        dynamicOptions.set(
+                wrappedFirst ? CoreOptions.SCAN_FALLBACK_BRANCH : CoreOptions.SCAN_PRIMARY_BRANCH,
+                branch);
+        return (FallbackReadFileStoreTable)
+                FileStoreTableFactory.create(
+                        fileIO,
+                        tablePath,
+                        table.schema(),
+                        dynamicOptions,
+                        CatalogEnvironment.empty());
     }
 
     private DataTableScan queryAuthScan(DataTableScan delegate, TableQueryAuthResult authResult) {

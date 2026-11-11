@@ -22,18 +22,57 @@ import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
 import org.apache.paimon.fs.Path;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Jindo implementation of TwoPhaseOutputStream using multipart upload. */
 public class JindoTwoPhaseOutputStream
         extends MultiPartUploadTwoPhaseOutputStream<SerializableJdoObjectPart, String> {
 
+    @Nullable private final JindoIOStats.StreamCounter stats;
+
+    private final AtomicBoolean closed = new AtomicBoolean();
+
     public JindoTwoPhaseOutputStream(
             MultiPartUploadStore<SerializableJdoObjectPart, String> multiPartUploadStore,
             org.apache.hadoop.fs.Path hadoopPath,
-            Path targetPath)
+            Path targetPath,
+            @Nullable Duration ioStatsInterval)
             throws IOException {
         super(multiPartUploadStore, hadoopPath, targetPath);
+        // counted once the upload has started, so a failed start leaves nothing open
+        this.stats = JindoIOStats.track(JindoIOStats.OUTPUT, ioStatsInterval);
+    }
+
+    @Override
+    public void write(int b) throws IOException {
+        super.write(b);
+        if (stats != null) {
+            stats.bytes(1);
+        }
+    }
+
+    @Override
+    public void write(byte[] b, int off, int len) throws IOException {
+        super.write(b, off, len);
+        if (stats != null) {
+            stats.bytes(len);
+        }
+    }
+
+    @Override
+    public Committer closeForCommit() throws IOException {
+        try {
+            return super.closeForCommit();
+        } finally {
+            // even a failed attempt ends the stream: it holds no native stream and cannot retry
+            if (stats != null && closed.compareAndSet(false, true)) {
+                stats.closed();
+            }
+        }
     }
 
     @Override

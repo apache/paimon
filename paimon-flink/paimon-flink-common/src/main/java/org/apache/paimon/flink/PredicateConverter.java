@@ -55,6 +55,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.apache.flink.table.types.logical.utils.LogicalTypeCasts.supportsImplicitCast;
+import static org.apache.flink.table.types.logical.utils.LogicalTypeChecks.getLength;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 
 /**
@@ -567,6 +568,17 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                                     .toInternalOrNull(value),
                             expectedLogicalType);
                 } else if (supportsImplicitCast(actualLogicalType, expectedLogicalType)) {
+                    if (actualLogicalType.is(LogicalTypeFamily.BINARY_STRING)
+                            || expectedLogicalType.is(LogicalTypeFamily.BINARY_STRING)) {
+                        // An array's toString() is its identity, not its SQL binary value.
+                        // Only widening BINARY -> VARBINARY preserves the bytes unchanged.
+                        if (actualLogicalType.getTypeRoot() == LogicalTypeRoot.BINARY
+                                && expectedLogicalType.getTypeRoot() == LogicalTypeRoot.VARBINARY
+                                && getLength(actualLogicalType) <= getLength(expectedLogicalType)) {
+                            return ((byte[]) value).clone();
+                        }
+                        throw new UnsupportedExpression();
+                    }
                     try {
                         return TypeUtils.castFromString(
                                 value.toString(), toDataType(expectedLogicalType));

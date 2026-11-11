@@ -241,6 +241,9 @@ class CatalogEnvironmentTest {
     void testAppendTableUsesDependencyReadContext() {
         CatalogEnvironment environment = mock(CatalogEnvironment.class);
         when(environment.dependencyReadContext()).thenReturn(CatalogContext.create(new Options()));
+        Options options = new Options();
+        options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, true);
         TableSchema schema =
                 new TableSchema(
                         0,
@@ -248,7 +251,7 @@ class CatalogEnvironmentTest {
                         0,
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        Collections.singletonMap(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true"),
+                        options.toMap(),
                         null);
         AppendOnlyFileStoreTable table =
                 new AppendOnlyFileStoreTable(

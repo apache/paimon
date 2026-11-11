@@ -58,7 +58,7 @@ public class FormatTableRollingFileWriter implements AutoCloseable {
             long targetFileSize,
             long targetFileRowNum,
             RowType writeSchema,
-            DataFilePathFactory pathFactory,
+            FormatTableFilePathFactory pathFactory,
             String fileCompression) {
         Preconditions.checkArgument(
                 targetFileRowNum > 0,

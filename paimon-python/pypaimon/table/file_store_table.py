@@ -218,8 +218,8 @@ class FileStoreTable(Table):
         - int: rollback to the snapshot with that ID
         - str: rollback to the tag with that name
 
-        First tries catalog-based rollback (e.g., REST). If catalog rollback
-        is not available, falls back to local file cleanup.
+        Catalogs that provide rollback handle the entire operation. Tables
+        without catalog rollback clean up their filesystem metadata directly.
 
         Args:
             target: Snapshot ID (int) or tag name (str).
@@ -227,35 +227,25 @@ class FileStoreTable(Table):
         Raises:
             ValueError: If the target doesn't exist or type is unsupported.
         """
-        if isinstance(target, int):
-            self._rollback_to_snapshot(target)
-        elif isinstance(target, str):
-            self._rollback_to_tag(target)
-        else:
-            raise ValueError("Unsupported rollback target type: {}".format(type(target)))
-
-    def _rollback_to_snapshot(self, snapshot_id):
-        """Rollback to a snapshot by ID.
-
-        First tries catalog-based rollback. If not available, falls back to
-        local file cleanup. If the snapshot file has been expired, tries to
-        recover from a tag with the same snapshot ID.
-
-        Args:
-            snapshot_id: The snapshot ID to rollback to.
-
-        Raises:
-            ValueError: If the snapshot doesn't exist.
-        """
         from pypaimon.table.instant import Instant
+
+        if not isinstance(target, (int, str)):
+            raise ValueError("Unsupported rollback target type: {}".format(type(target)))
 
         table_rollback = self.catalog_environment.catalog_table_rollback()
         if table_rollback is not None:
-            table_rollback.rollback_to(Instant.snapshot(snapshot_id))
+            instant = Instant.snapshot(target) if isinstance(target, int) else Instant.tag(target)
+            table_rollback.rollback_to(instant)
             return
 
-        snapshot_mgr = self.snapshot_manager()
-        snapshot = snapshot_mgr.get_snapshot_by_id(snapshot_id)
+        if isinstance(target, int):
+            self._rollback_to_snapshot(target)
+        else:
+            tag = self.tag_manager().get_or_throw(target)
+            self._rollback_to_tagged_snapshot(tag.trim_to_snapshot())
+
+    def _rollback_to_snapshot(self, snapshot_id):
+        snapshot = self.snapshot_manager().get_snapshot_by_id(snapshot_id)
         if snapshot is not None:
             self.rollback_helper().clean_larger_than(snapshot)
             return
@@ -263,36 +253,14 @@ class FileStoreTable(Table):
         tag_mgr = self.tag_manager()
         for tag_name in tag_mgr.list_tags():
             tag = tag_mgr.get(tag_name)
-            if tag is not None:
-                tag_snapshot = tag.trim_to_snapshot()
-                if tag_snapshot.id == snapshot_id:
-                    self.rollback_to(tag_name)
-                    return
+            if tag is not None and tag.id == snapshot_id:
+                self._rollback_to_tagged_snapshot(tag.trim_to_snapshot())
+                return
 
         raise ValueError(
             "Rollback snapshot '{}' doesn't exist.".format(snapshot_id))
 
-    def _rollback_to_tag(self, tag_name):
-        """Rollback to a tag by name.
-
-        First tries catalog-based rollback. If not available, falls back to
-        local file cleanup and recreates the snapshot file if needed.
-
-        Args:
-            tag_name: The tag name to rollback to.
-
-        Raises:
-            ValueError: If the tag doesn't exist.
-        """
-        from pypaimon.table.instant import Instant
-
-        table_rollback = self.catalog_environment.catalog_table_rollback()
-        if table_rollback is not None:
-            table_rollback.rollback_to(Instant.tag(tag_name))
-            return
-
-        tag_mgr = self.tag_manager()
-        tagged_snapshot = tag_mgr.get_or_throw(tag_name).trim_to_snapshot()
+    def _rollback_to_tagged_snapshot(self, tagged_snapshot):
         helper = self.rollback_helper()
         helper.clean_larger_than(tagged_snapshot)
         helper.create_snapshot_file_if_needed(tagged_snapshot)
@@ -301,7 +269,7 @@ class FileStoreTable(Table):
         """Create a RollbackHelper instance for this table."""
         from pypaimon.table.rollback_helper import RollbackHelper
         return RollbackHelper(
-            self.snapshot_manager(), self.tag_manager(), self.file_io)
+            self.snapshot_manager(), self.changelog_manager(), self.tag_manager(), self.file_io)
 
     def rollback_to_timestamp(self, timestamp_millis: int) -> None:
         """Rollback table to the latest snapshot with commit time <= the given timestamp.

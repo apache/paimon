@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.GenericRow;
@@ -194,7 +195,7 @@ public class TimeTravelSchemaEvolutionTest extends TableTestBase {
         Map<String, String> queryOptions = new HashMap<>();
         queryOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
         queryOptions.put(CoreOptions.VECTOR_FIELD.key(), "missing");
-        assertThatThrownBy(() -> table.copy(queryOptions))
+        assertThatThrownBy(() -> table.copy(queryOptions).newScan())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Some of the columns specified as vector-field are unknown.");
 
@@ -216,6 +217,40 @@ public class TimeTravelSchemaEvolutionTest extends TableTestBase {
                                                 CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"))
                                 .options())
                 .doesNotContainKey(CoreOptions.VECTOR_FIELD.key());
+    }
+
+    @Test
+    public void testTimeTravelProjectionWithEvolvedAggregateFunction() throws Exception {
+        // Time travel combines the historical column type with the current aggregation options,
+        // so a projection that does not read the aggregated column must stay readable.
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("seq", DataTypes.BIGINT())
+                        .column("label", DataTypes.VARCHAR(16))
+                        .primaryKey("id")
+                        .option(CoreOptions.MERGE_ENGINE.key(), "partial-update")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option("fields.seq.sequence-group", "label")
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+        write(getTableDefault(), GenericRow.of(1, 1L, BinaryString.fromString("a")));
+
+        catalog.alterTable(
+                identifier(), SchemaChange.updateColumnType("label", DataTypes.STRING()), false);
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.setOption("fields.label.aggregate-function", "listagg"),
+                false);
+
+        FileStoreTable historicalTable =
+                getTableDefault()
+                        .copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
+        assertThat(historicalTable.schema().fields().get(2).type())
+                .isEqualTo(DataTypes.VARCHAR(16));
+        assertThat(read(historicalTable, new int[] {0}))
+                .extracting(row -> row.getInt(0))
+                .containsExactly(1);
     }
 
     private void assertHistoricalTable(FileStoreTable historicalTable, TableSchema historicalSchema)

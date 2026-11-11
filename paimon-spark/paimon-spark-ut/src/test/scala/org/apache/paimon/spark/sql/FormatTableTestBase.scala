@@ -40,6 +40,7 @@ import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.datasources.InsertIntoHadoopFsRelationCommand
 import org.apache.spark.sql.execution.datasources.v2.{BatchScanExec, DataSourceV2Relation, FileTable}
+import org.apache.spark.sql.functions.col
 import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -510,6 +511,60 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
     withSparkSQLConf("spark.paimon.format-table.implementation" -> "engine") {
       checkRejected("")
       checkRejected("TBLPROPERTIES ('format-table.implementation'='paimon')")
+    }
+  }
+
+  test("Format table: DataFrame writes to a partitioned engine table are rejected") {
+    withSparkSQLConf("spark.paimon.format-table.implementation" -> "engine") {
+      withTable("t") {
+        sql("CREATE TABLE t (a INT, b STRING, pt STRING) USING csv PARTITIONED BY (pt)")
+        sql("INSERT INTO t VALUES (1, 'old1', 'p1')")
+
+        // Spark's V2 file write does not write partition directories, so these rows would land
+        // in the table root, where the partitioned file index never reads them.
+        val source = Seq((5, "x5", "p1")).toDF("a", "b", "pt")
+        val writes: Seq[() => Unit] = Seq(
+          () => source.writeTo("t").append(),
+          () => source.writeTo("t").overwrite(col("pt") === "p1"),
+          () => source.write.insertInto("t"),
+          () => source.write.mode("overwrite").insertInto("t")
+        )
+        writes.foreach {
+          write =>
+            val e = intercept[UnsupportedOperationException](write())
+            assert(e.getMessage.contains("partitioned engine format table"))
+        }
+        checkAnswer(sql("SELECT * FROM t"), Row(1, "old1", "p1"))
+
+        // SQL INSERT is rewritten to Spark's V1 write and is unaffected.
+        sql("INSERT INTO t VALUES (5, 'x5', 'p1')")
+        checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, "old1", "p1"), Row(5, "x5", "p1")))
+
+        // RTAS writes the same way, so it is rejected before the old table is dropped.
+        val replaces: Seq[() => Unit] = Seq(
+          () =>
+            sql(
+              "CREATE OR REPLACE TABLE t USING csv PARTITIONED BY (pt) " +
+                "AS SELECT 6 AS a, 'x6' AS b, 'p1' AS pt"),
+          () => source.write.format("csv").partitionBy("pt").mode("overwrite").saveAsTable("t")
+        )
+        replaces.foreach {
+          replace =>
+            val e = intercept[UnsupportedOperationException](replace())
+            assert(e.getMessage.contains("partitioned engine format table"))
+        }
+        checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, "old1", "p1"), Row(5, "x5", "p1")))
+      }
+      // Spark 3.2 and 3.3 have no SupportsOverwriteV2, so these V2 writes fail there
+      if (gteqSpark3_4) {
+        withTable("t") {
+          sql("CREATE TABLE t (a INT, b STRING) USING csv")
+          Seq((5, "x5")).toDF("a", "b").writeTo("t").append()
+          checkAnswer(sql("SELECT * FROM t"), Row(5, "x5"))
+          sql("CREATE OR REPLACE TABLE t USING csv AS SELECT 6 AS a, 'x6' AS b")
+          checkAnswer(sql("SELECT * FROM t"), Row(6, "x6"))
+        }
+      }
     }
   }
 

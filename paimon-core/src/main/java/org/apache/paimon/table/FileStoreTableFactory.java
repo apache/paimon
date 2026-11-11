@@ -98,25 +98,34 @@ public class FileStoreTableFactory {
                         fileIO, tablePath, tableSchema, dynamicOptions, catalogEnvironment);
 
         Options options = new Options(table.options());
+        Options branchReadOptions = new Options(dynamicOptions.toMap());
+        // Reuse the resolved selector, including persisted options and numeric scan.version.
+        if (options.contains(CoreOptions.SCAN_SNAPSHOT_ID)) {
+            branchReadOptions.set(
+                    CoreOptions.SCAN_SNAPSHOT_ID, options.get(CoreOptions.SCAN_SNAPSHOT_ID));
+            branchReadOptions.set(CoreOptions.SCAN_VERSION.key(), null);
+        }
         String fallbackBranch = options.get(CoreOptions.SCAN_FALLBACK_BRANCH);
         String primaryBranch = options.get(CoreOptions.SCAN_PRIMARY_BRANCH);
         if (ChainTableUtils.isChainTable(options.toMap())) {
             table = createChainTable(table, fileIO, tablePath, dynamicOptions, catalogEnvironment);
         } else if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
             FileStoreTable otherTable =
-                    createOtherBranchTable(
-                            fileIO, tablePath, fallbackBranch, dynamicOptions, catalogEnvironment);
+                    createOtherBranchTable(fileIO, tablePath, fallbackBranch, catalogEnvironment);
             if (otherTable != null) {
-                table = new FallbackReadFileStoreTable(table, otherTable, true);
+                table =
+                        new FallbackReadFileStoreTable(table, otherTable, true)
+                                .copy(branchReadOptions.toMap());
             } else {
                 LOG.error("Fallback branch {} not found for table {}", fallbackBranch, tablePath);
             }
         } else if (!StringUtils.isNullOrWhitespaceOnly(primaryBranch)) {
             FileStoreTable otherTable =
-                    createOtherBranchTable(
-                            fileIO, tablePath, primaryBranch, dynamicOptions, catalogEnvironment);
+                    createOtherBranchTable(fileIO, tablePath, primaryBranch, catalogEnvironment);
             if (otherTable != null) {
-                table = new FallbackReadFileStoreTable(table, otherTable, false);
+                table =
+                        new FallbackReadFileStoreTable(table, otherTable, false)
+                                .copy(branchReadOptions.toMap());
             } else {
                 LOG.error("Primary branch {} not found for table {}", primaryBranch, tablePath);
             }
@@ -188,9 +197,9 @@ public class FileStoreTableFactory {
             FileIO fileIO,
             Path tablePath,
             String branchName,
-            Options dynamicOptions,
             CatalogEnvironment catalogEnvironment) {
-        Options branchOptions = new Options(dynamicOptions.toMap());
+        // Apply dynamic options after wrapping so snapshot IDs are aligned across branches.
+        Options branchOptions = new Options();
         branchOptions.set(CoreOptions.BRANCH, branchName);
         Optional<TableSchema> schema =
                 new FileSystemSchemaManager(fileIO, tablePath, branchName).latest();

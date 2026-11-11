@@ -36,6 +36,7 @@ import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Statistics}
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
+import org.apache.spark.sql.execution.SQLExecution
 
 import scala.collection.JavaConverters._
 
@@ -63,9 +64,10 @@ abstract class PaimonBaseScan(table: InnerTable)
   final private[spark] def registerReadProtectionTagCleanup(tagName: String): Unit = {
     Option(tagName).foreach {
       name =>
-        BatchReadTagCleanupListener
-          .getOrCreate(SparkSession.active)
-          .registerCleanup(name, table)
+        val spark = SparkSession.active
+        val executionId =
+          Option(spark.sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)).map(_.toLong)
+        BatchReadTagCleanupListener.getOrCreate(spark).registerCleanup(executionId, name, table)
     }
   }
 

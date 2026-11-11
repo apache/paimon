@@ -297,6 +297,15 @@ class SnapshotManager:
         cleaned them) are skipped silently, so the result reflects
         only snapshots that can still be inspected.
         """
+        snapshots: List[Snapshot] = []
+        for snapshot_id in self.list_snapshot_ids():
+            snapshot = self.get_snapshot_by_id(snapshot_id)
+            if snapshot is not None:
+                snapshots.append(snapshot)
+        return snapshots
+
+    def list_snapshot_ids(self) -> List[int]:
+        """List persisted snapshot IDs in ascending order."""
         import re
 
         if not self.file_io.exists(self.snapshot_dir):
@@ -313,14 +322,7 @@ class SnapshotManager:
             match = pattern.match(name)
             if match:
                 ids.append(int(match.group(1)))
-        ids.sort()
-
-        snapshots: List[Snapshot] = []
-        for snapshot_id in ids:
-            snapshot = self.get_snapshot_by_id(snapshot_id)
-            if snapshot is not None:
-                snapshots.append(snapshot)
-        return snapshots
+        return sorted(ids)
 
     def later_or_equal_watermark(self, watermark: int) -> Optional[Snapshot]:
         """

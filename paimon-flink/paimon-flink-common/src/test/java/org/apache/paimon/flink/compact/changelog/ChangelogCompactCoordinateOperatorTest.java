@@ -256,6 +256,42 @@ public class ChangelogCompactCoordinateOperatorTest {
         testHarness.close();
     }
 
+    @Test
+    public void testPreservesCompactionBaseline() throws Exception {
+        ChangelogCompactCoordinateOperator operator =
+                new ChangelogCompactCoordinateOperator(new CoreOptions(new Options()));
+        try (OneInputStreamOperatorTestHarness<
+                        Committable, Either<Committable, ChangelogCompactTask>>
+                testHarness = createTestHarness(operator)) {
+            testHarness.open();
+            List<DataFileMeta> before = Collections.singletonList(createDataFileMetaOfSize(1));
+            List<DataFileMeta> after = Collections.singletonList(createDataFileMetaOfSize(2));
+            List<DataFileMeta> changelog = Collections.singletonList(createDataFileMetaOfSize(1));
+            CommitMessageImpl message =
+                    new CommitMessageImpl(
+                            BinaryRow.EMPTY_ROW,
+                            0,
+                            2,
+                            DataIncrement.emptyIncrement(),
+                            new CompactIncrement(before, after, changelog),
+                            37L);
+            testHarness.processElement(new StreamRecord<>(new Committable(1, message)));
+
+            List<Either<Committable, ChangelogCompactTask>> output =
+                    testHarness.extractOutputValues();
+            assertThat(output).hasSize(1);
+            assertThat(output.get(0).left().commitMessage())
+                    .isEqualTo(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    0,
+                                    2,
+                                    DataIncrement.emptyIncrement(),
+                                    new CompactIncrement(before, after, Collections.emptyList()),
+                                    37L));
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private void assertCommittable(
             Object o,

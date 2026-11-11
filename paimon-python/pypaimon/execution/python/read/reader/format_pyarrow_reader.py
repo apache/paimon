@@ -53,6 +53,7 @@ from pypaimon.data.variant_shredding import (
 )
 from pypaimon.execution.python.read.variant_shredding import assemble_shredded_column
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.schema.arrow_schema import parquet_storage_schema
 from pypaimon.schema.data_types import (
     ArrayType,
     AtomicType,
@@ -468,6 +469,8 @@ class FormatPyArrowReader(RecordBatchReader):
         self._has_nested_path = has_nested_path
 
         file_schema = self.dataset.schema
+        physical_parquet_schema = parquet_storage_schema(file_schema) if file_format == 'parquet' else file_schema
+        has_fixed_size_lists = not file_schema.equals(physical_parquet_schema)
         has_logical_map = any(
             isinstance(field.type, MapType)
             or is_map_selected_keys_field(field)
@@ -573,6 +576,7 @@ class FormatPyArrowReader(RecordBatchReader):
         self._orc_file = None
         self._orc_source = None
         if (self._bounded_variant_read
+                or has_fixed_size_lists
                 or self._selected_parquet_row_groups is not None
                 or (file_format == 'parquet'
                     and self._selected_shared_map_paths)):
@@ -580,7 +584,17 @@ class FormatPyArrowReader(RecordBatchReader):
             # ParquetFile(filesystem=...) is unavailable in PyArrow 6.
             self._parquet_source = _open_pyarrow_input_file(file_io, file_path, file_size)
             try:
-                self._parquet_file = pq.ParquetFile(self._parquet_source)
+                metadata = None
+                if has_fixed_size_lists:
+                    # Native/older writers can retain fixed-size lists in
+                    # ARROW:schema. Preserve every physical footer field,
+                    # including INT96/DECIMAL encodings and page-index offsets.
+                    from pypaimon.execution.python.read.reader.parquet_page_index_reader import (
+                        parquet_metadata_with_arrow_schema,
+                    )
+                    fragment = next(iter(self.dataset.get_fragments()))
+                    metadata = parquet_metadata_with_arrow_schema(fragment.metadata, physical_parquet_schema)
+                self._parquet_file = pq.ParquetFile(self._parquet_source, metadata=metadata)
                 if (self._selected_parquet_row_groups is not None
                         and options is not None
                         and options.parquet_column_index_enabled()

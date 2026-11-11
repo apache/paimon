@@ -137,11 +137,11 @@ class MultimodalTableTest(unittest.TestCase):
         options = table.raw_table.table_schema.options
         self.assertEqual("true", options["row-tracking.enabled"])
         self.assertEqual("true", options["data-evolution.enabled"])
-        self.assertEqual("true", options["deletion-vectors.enabled"])
+        self.assertNotIn("deletion-vectors.enabled", options)
         self.assertEqual("true", options["blob-as-descriptor"])
         self.assertNotIn("data-evolution.row-sidecar.enabled", options)
         self.assertEqual("full", options["global-index.search-mode"])
-        self.assertEqual("parquet", options["vector.file.format"])
+        self.assertNotIn("vector.file.format", options)
         self.assertEqual("default.docs", self.conn.get_table("docs").identifier)
         self.assertEqual(["id", "content", "embedding", "payload"],
                          [field.name for field in table.raw_table.fields])
@@ -353,8 +353,7 @@ class MultimodalTableTest(unittest.TestCase):
         from fractions import Fraction
         from pathlib import Path
         from pypaimon.multimodal.lerobot.dataset import _PyAVVideoDecoder
-        from pypaimon.table.row.blob import Blob
-        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+        from pypaimon.multimodal.mp4 import ContainerFrameIndex
 
         cases = [(0, 24), (3, Fraction(30000, 1001)), (3, 59.94), (3, Fraction(60000, 1001))]
         for number, (b_frames, fps) in enumerate(cases):
@@ -376,14 +375,9 @@ class MultimodalTableTest(unittest.TestCase):
                 self.assertTrue(all(r["episode_id"] == 42 for r in rows))
                 descriptor = pmm.VideoFrameDescriptor.deserialize(rows[0]["video"])
                 self.assertTrue(descriptor.uri.endswith(".video"))
-                index_descriptor = descriptor.keyframe_index_descriptor
-                self.assertIsNotNone(index_descriptor)
-                index = VideoKeyframeIndex.deserialize(Blob.from_file(
-                    table.raw_table.file_io, index_descriptor.uri,
-                    index_descriptor.offset, index_descriptor.length).to_data(), descriptor.length)
-                self.assertGreater(len(index.keyframes), 1)
                 _, bodies = table.scan().read_blobs("video")
                 payload = bodies["video"][0]
+                index = ContainerFrameIndex(io.BytesIO(payload), len(payload))
                 self.assertTrue(all(b == payload for b in bodies["video"]))
                 with av.open(io.BytesIO(payload)) as container:
                     stream = container.streams.video[0]
@@ -986,7 +980,7 @@ class MultimodalTableTest(unittest.TestCase):
         np = pytest.importorskip("numpy")
         from fractions import Fraction
         from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
-        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+        from pypaimon.multimodal.mp4 import ContainerFrameIndex
 
         table = self.conn.create_table(
             "local_video_indexes",
@@ -1030,21 +1024,13 @@ class MultimodalTableTest(unittest.TestCase):
         ]
         self.assertEqual([0, 1], [value.frame_index for value in descriptors])
         for descriptor in descriptors:
-            stored_index = descriptor.keyframe_index_descriptor
-            self.assertIsNotNone(stored_index)
-            VideoKeyframeIndex.deserialize(
-                Blob.from_file(
-                    table.raw_table.file_io,
-                    stored_index.uri,
-                    stored_index.offset,
-                    stored_index.length,
-                ).to_data(),
-                descriptor.length,
-            )
+            payload = Blob.from_file(table.raw_table.file_io, descriptor.uri,
+                                     descriptor.offset, descriptor.length).to_data()
+            self.assertEqual(open(video_path, "rb").read(), payload)
+            self.assertGreater(len(ContainerFrameIndex(io.BytesIO(payload), len(payload)).keyframes), 1)
 
-    def test_video_write_apis_preserve_existing_keyframe_index(self):
+    def test_video_write_apis_preserve_payload(self):
         from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
-        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
         table = self.conn.create_table(
             "indexed_video_write_apis",
@@ -1058,19 +1044,14 @@ class MultimodalTableTest(unittest.TestCase):
             }),
         )
         video = b"indexed-video"
-        index = VideoKeyframeIndex(
-            [(0, 1)], [(0, 0, 1)]
-        ).serialize()
         source_path = os.path.join(self.temp_dir, "indexed-source.mp4")
         with open(source_path, "wb") as output:
-            output.write(video + index)
+            output.write(video)
         source = VideoFrameDescriptor(
             "file://" + source_path,
             0,
             len(video),
             0,
-            len(video),
-            len(index),
         )
 
         table.add_video(source, [{"frame_id": 1}], first_frame=1)
@@ -1091,17 +1072,8 @@ class MultimodalTableTest(unittest.TestCase):
         ]
         self.assertEqual([1, 2, 3], [value.frame_index for value in descriptors])
         for descriptor in descriptors:
-            stored_index = descriptor.keyframe_index_descriptor
-            self.assertIsNotNone(stored_index)
-            self.assertEqual(
-                index,
-                Blob.from_file(
-                    table.raw_table.file_io,
-                    stored_index.uri,
-                    stored_index.offset,
-                    stored_index.length,
-                ).to_data(),
-            )
+            self.assertEqual(video, Blob.from_file(
+                table.raw_table.file_io, descriptor.uri, descriptor.offset, descriptor.length).to_data())
 
     def test_normal_update_preserves_video_descriptors(self):
         from pypaimon.table.row.blob import Blob
@@ -1245,7 +1217,7 @@ class MultimodalTableTest(unittest.TestCase):
 
         payload = Blob.from_local(video_path).to_descriptor()
         valid = VideoFrameDescriptor(
-            payload.uri, payload.offset, payload.length, 0, -1, 0
+            payload.uri, payload.offset, payload.length, 0
         ).serialize()
         with self.assertRaisesRegex(ValueError, "VideoFrameDescriptor"):
             table.add_batches([
@@ -2200,6 +2172,85 @@ class MultimodalTableTest(unittest.TestCase):
         )
 
         self.assertEqual([], docs.take_row_ids([]).select(["id"]).to_list())
+
+    def test_row_id_filter_and_ordered_batch_have_distinct_contracts(self):
+        docs = self.conn.create_table(
+            "docs",
+            data=[{"id": i, "content": str(i)} for i in range(3)],
+            schema=_schema({"id": pa.int32(), "content": pa.string()}),
+            options=_PARQUET_OPTIONS,
+        )
+        requested = [2, 0, 2]
+
+        filtered = docs.take_row_ids(requested).select("id").with_row_id().to_list()
+        self.assertEqual(
+            [{"id": 0, "_ROW_ID": 0}, {"id": 2, "_ROW_ID": 2}],
+            sorted(filtered, key=lambda row: row["_ROW_ID"]),
+        )
+        batch = docs.take_batch(requested, columns=["content", "_ROW_ID"])
+        self.assertIsInstance(batch, pa.Table)
+        self.assertEqual(["content", "_ROW_ID"], batch.column_names)
+        self.assertEqual(
+            [{"content": str(i), "_ROW_ID": i} for i in requested],
+            batch.to_pylist(),
+        )
+        self.assertEqual(
+            [{"id": i, "content": str(i)} for i in requested],
+            docs.take_batch(iter(requested)).to_pylist(),
+        )
+        self.assertEqual(
+            [{"id": i} for i in requested],
+            docs.take_batch(pa.chunked_array([[2], [0, 2]]), columns="id").to_pylist(),
+        )
+
+    def test_take_batch_empty_and_missing_rows(self):
+        docs = self.conn.create_table(
+            "docs", data=[{"id": i} for i in range(3)],
+            schema=_schema({"id": pa.int32()}), options=_PARQUET_OPTIONS,
+        )
+        empty = docs.take_batch([], columns=["id", "_ROW_ID"])
+        self.assertEqual(
+            pa.schema([pa.field("id", pa.int32()), pa.field("_ROW_ID", pa.int64())]),
+            empty.schema,
+        )
+        self.assertEqual([], empty.to_pylist())
+        self.assertEqual(3, docs.take_batch([2, 0, 2], columns=[]).num_rows)
+
+        docs.delete(where="id = 1")
+        for row_ids in ([2, 1, 2], [99], [99, 1, 99]):
+            with self.subTest(row_ids=row_ids):
+                with self.assertRaisesRegex(KeyError, "Row IDs not found"):
+                    docs.take_batch(row_ids, columns="id")
+        self.assertEqual(
+            [2, 0, 2], docs.take_batch([2, 0, 2], columns="id")["id"].to_pylist())
+
+    def test_take_batch_reads_one_snapshot_with_order_and_duplicates(self):
+        docs = self.conn.create_table(
+            "docs", data=[{"id": i} for i in range(3)],
+            schema=_schema({"id": pa.int32()}), options=_PARQUET_OPTIONS,
+        )
+        snapshot_id = docs.raw_table.snapshot_manager().get_latest_snapshot().id
+        docs.raw_table.create_tag("training", snapshot_id=snapshot_id)
+        docs.delete(where="id = 2")
+
+        for selection in ({"snapshot_id": snapshot_id}, {"tag_name": "training"}):
+            with self.subTest(selection=selection):
+                self.assertEqual(
+                    [{"id": i, "_ROW_ID": i} for i in [2, 0, 2]],
+                    docs.take_batch(
+                        [2, 0, 2], columns=["id", "_ROW_ID"], **selection).to_pylist(),
+                )
+        with self.assertRaisesRegex(ValueError, "cannot be set at the same time"):
+            docs.take_batch([0], snapshot_id=snapshot_id, tag_name="training")
+
+    def test_row_id_reads_require_row_tracking(self):
+        docs = self.conn.create_table(
+            "docs", schema=_schema({"id": pa.int32()}), options=_PARQUET_OPTIONS)
+        untracked = docs.copy({"row-tracking.enabled": "false"})
+        for read in (untracked.take_row_ids, untracked.take_batch):
+            with self.subTest(read=read.__name__):
+                with self.assertRaisesRegex(ValueError, "require row-tracking.enabled=true"):
+                    read([0])
 
     def test_take_row_ids_supports_snapshot_and_tag_time_travel(self):
         docs = self.conn.create_table(

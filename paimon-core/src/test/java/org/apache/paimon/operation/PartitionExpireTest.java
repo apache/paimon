@@ -139,12 +139,7 @@ public class PartitionExpireTest {
                     @Override
                     public void dropPartitions(List<Map<String, String>> partitions)
                             throws Catalog.TableNotExistException {
-                        for (Map<String, String> partition : partitions) {
-                            // only record partitions that were created
-                            if (createdPartitions.remove(partition)) {
-                                deletedPartitions.add(partition);
-                            }
-                        }
+                        dropPartitionMetadata(partitions);
                         try (FileStoreCommit commit =
                                 table.store()
                                         .newCommit(
@@ -152,6 +147,27 @@ public class PartitionExpireTest {
                                                         table.coreOptions().toConfiguration()),
                                                 null)) {
                             commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
+                        }
+                        // Model HiveCatalog's cleanup of markers after deleting ordinary data.
+                        List<Map<String, String>> donePartitions = new ArrayList<>();
+                        String lastKey =
+                                tableSchema
+                                        .partitionKeys()
+                                        .get(tableSchema.partitionKeys().size() - 1);
+                        for (Map<String, String> partition : partitions) {
+                            Map<String, String> donePartition = new HashMap<>(partition);
+                            donePartition.put(lastKey, partition.get(lastKey) + ".done");
+                            donePartitions.add(donePartition);
+                        }
+                        dropPartitionMetadata(donePartitions);
+                    }
+
+                    private void dropPartitionMetadata(List<Map<String, String>> partitions) {
+                        for (Map<String, String> partition : partitions) {
+                            // only record partitions that were created
+                            if (createdPartitions.remove(partition)) {
+                                deletedPartitions.add(partition);
+                            }
                         }
                     }
 

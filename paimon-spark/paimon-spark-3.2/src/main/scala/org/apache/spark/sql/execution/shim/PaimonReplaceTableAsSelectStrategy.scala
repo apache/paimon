@@ -18,13 +18,32 @@
 
 package org.apache.spark.sql.execution.shim
 
+import org.apache.paimon.spark.SparkCatalog
+
 import org.apache.spark.sql.{SparkSession, Strategy}
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReplaceTableAsSelect}
+import org.apache.spark.sql.connector.catalog.{CatalogV2Util, TableCatalog}
 import org.apache.spark.sql.execution.SparkPlan
+
+import scala.collection.JavaConverters._
 
 case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession) extends Strategy {
 
-  override def apply(plan: LogicalPlan): Seq[SparkPlan] = Nil
+  // Spark plans the replace itself, which drops the old table before it writes, so reject what
+  // it cannot write before that. The check uses the properties Spark creates the table with.
+  override def apply(plan: LogicalPlan): Seq[SparkPlan] = {
+    plan match {
+      case ReplaceTableAsSelect(catalog: SparkCatalog, ident, parts, _, props, _, _) =>
+        val properties = CatalogV2Util.withDefaultOwnership(props)
+        catalog.checkPartitionedFormatTableCtas(
+          ident,
+          properties.get(TableCatalog.PROP_PROVIDER).orNull,
+          parts.nonEmpty,
+          properties.asJava)
+      case _ =>
+    }
+    Nil
+  }
 }
 
 case class PaimonReplaceTableStrategy(spark: SparkSession) extends Strategy {

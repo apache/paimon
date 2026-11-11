@@ -284,9 +284,13 @@ def _write_field(buf: _BlockBuffer, value: Any, data_type) -> None:
         elif type_name.startswith('TIMESTAMP'):
             precision = _parse_timestamp_precision(type_name)
             if isinstance(value, datetime.datetime):
-                epoch = datetime.datetime(1970, 1, 1, tzinfo=value.tzinfo)
-                delta = value - epoch
-                total_micros = int(delta.total_seconds() * 1_000_000)
+                is_ltz = type_name.startswith('TIMESTAMP_LTZ') or 'WITH LOCAL TIME ZONE' in type_name
+                if is_ltz and value.utcoffset() is not None:
+                    value = value.astimezone(datetime.timezone.utc)
+                # TIMESTAMP stores wall-clock fields; naive LTZ values use UTC.
+                delta = value.replace(tzinfo=None) - datetime.datetime(1970, 1, 1)
+                total_micros = ((delta.days * 86400 + delta.seconds) * 1_000_000
+                                + delta.microseconds)
                 if precision <= 3:
                     buf.write_long_le(total_micros // 1000)
                 else:

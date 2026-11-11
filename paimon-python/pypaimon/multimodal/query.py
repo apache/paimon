@@ -623,10 +623,13 @@ class _PreFilterQuery(ScanQuery):
                override_num_blocks=None):
         """Return search rows as a Ray Dataset, with BLOB descriptors.
 
-        Search resolves candidates eagerly on one snapshot. Projected row data
-        is fetched lazily by Ray workers on that same snapshot. Retain its files
-        until the Dataset has finished executing.
+        ``execution`` selects where candidate search runs. Projected rows are
+        always fetched lazily by Ray workers on the search snapshot. Retain
+        that snapshot's files until the Dataset has finished executing.
         """
+        if isinstance(self, _RayTextQuery) and not self._table.options.data_evolution_enabled():
+            raise NotImplementedError("Ray Dataset output for text and hybrid search requires a data-evolution table.")
+
         from pypaimon.ray.search_result import read_search_result
         from pypaimon.ray.search_execution import execution_options
 
@@ -649,11 +652,77 @@ class _PreFilterQuery(ScanQuery):
             "not search queries."
         )
 
-    def to_contiguous_window_dataset(self, *args, **kwargs):
-        raise TypeError(
-            "to_contiguous_window_dataset is only supported on scan(), "
-            "not search queries."
-        )
+    def _training_selection(self, execution, concurrency, ray_remote_args):
+        if not self._table.options.data_evolution_enabled():
+            raise NotImplementedError("Search training datasets require a data-evolution table.")
+        if self._score_column or self._sort_by_score:
+            raise ValueError(
+                "Training datasets do not expose search scores or score ordering; "
+                "remove with_score() and order_by_score().")
+        query = self._for_execution()
+        lookup = copy(query)
+        # Resolve only row IDs, including post-filtering, on the captured
+        # snapshot. Keep payloads lazy and leave the reusable query untouched.
+        lookup._projection = [SpecialFields.ROW_ID.name]
+        lookup._include_row_id = False
+        matches = lookup.to_arrow(
+            execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)
+        return query, matches
+
+    def to_torch(self, *args, execution="local", concurrency=None, ray_remote_args=None, **kwargs):
+        """Read search hits as a snapshot-pinned PyTorch Dataset.
+
+        Accepts the same Dataset options as ``scan().to_torch()`` and search
+        execution options as ``to_arrow()``. Search and post-filtering resolve
+        row IDs eagerly; projected payloads are read lazily, with BLOBs kept as
+        descriptors. Samples use scan order, or the requested Torch shuffle.
+        Search score output and score ordering are unsupported. Requires a
+        data-evolution table. Batch vector search returns one Dataset per query.
+        Retain the captured snapshot's files until training finishes.
+        """
+        query, matches = self._training_selection(execution, concurrency, ray_remote_args)
+
+        def convert(rows):
+            scan = ScanQuery(query._table)
+            scan._projection = query._projection
+            scan._include_row_id = query._include_row_id
+            builder = query._table.new_read_builder().with_projection(
+                [field.name for field in query._table.fields] + [SpecialFields.ROW_ID.name])
+            scan._predicate = builder.new_predicate_builder().is_in(
+                SpecialFields.ROW_ID.name, rows.column(SpecialFields.ROW_ID.name).to_pylist())
+            return scan.to_torch(*args, **kwargs)
+
+        return [convert(rows) for rows in matches] if isinstance(matches, list) else convert(matches)
+
+    def to_contiguous_window_dataset(
+            self, *, context_filter=None, execution="local", concurrency=None,
+            ray_remote_args=None, **kwargs):
+        """Build training windows anchored at search hits on the same snapshot.
+
+        Search pre_filter(), where() and limit() select anchors only. History
+        and future frames come from a separate scan of the captured snapshot,
+        optionally restricted by the SQL-like ``context_filter``. Keep complete
+        episodes in that context to preserve their bounds and stride schedule.
+        Other arguments match ``scan().to_contiguous_window_dataset()`` except
+        ``anchor_row_ids``, which this method supplies from the search results.
+        Search score output and score ordering are unsupported. Requires a
+        data-evolution table. Batch vector search returns one Dataset per query.
+        Retain the captured snapshot's files until training finishes.
+        """
+        if kwargs.pop("anchor_row_ids", None) is not None:
+            raise ValueError("Search supplies anchor_row_ids; use where() to further select anchors.")
+        predicate = self._coerce_predicate(context_filter, "context_filter")
+        query, matches = self._training_selection(execution, concurrency, ray_remote_args)
+        context = ScanQuery(query._table)
+        context._projection = query._projection
+        context._predicate = predicate
+
+        if isinstance(matches, list):
+            from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
+            return ContiguousWindowDataset._from_anchor_selections(
+                context, [rows.column(SpecialFields.ROW_ID.name).to_pylist() for rows in matches], **kwargs)
+        return context.to_contiguous_window_dataset(
+            anchor_row_ids=matches.column(SpecialFields.ROW_ID.name).to_pylist(), **kwargs)
 
 
 class VectorQuery(_PreFilterQuery):
@@ -675,7 +744,8 @@ class VectorQuery(_PreFilterQuery):
     def to_arrow(self, *, execution="local", concurrency=None, ray_remote_args=None):
         """Execute a vector query locally or on Ray workers, returning an Arrow table.
 
-        Ray execution supports data-evolution tables. ``concurrency`` bounds
+        Ray execution supports data-evolution tables and vector search on
+        primary-key tables using the Python read backend. ``concurrency`` bounds
         in-flight tasks (defaults to 4); ``ray_remote_args`` configures their
         resources and retries. Result lookup runs on the driver.
         """
@@ -856,9 +926,10 @@ class BatchVectorQuery(_PreFilterQuery):
     def to_arrow(self, *, execution="local", concurrency=None, ray_remote_args=None):
         """Return one Arrow table per query, optionally searching splits on Ray.
 
-        Ray execution supports data-evolution tables. ``concurrency`` bounds
+        Ray execution supports data-evolution tables and vector search on
+        primary-key tables using the Python read backend. ``concurrency`` bounds
         in-flight tasks (defaults to 4); ``ray_remote_args`` configures their
-        resources and retries. Shared result lookup runs on the driver,
+        resources and retries. Result lookup runs on the driver,
         using the same snapshot as all workers, including refinement tasks.
         """
         if execution == "local":
@@ -879,7 +950,12 @@ class BatchVectorQuery(_PreFilterQuery):
 
     def to_ray(self, *, execution="ray", concurrency=None, ray_remote_args=None,
                override_num_blocks=None):
-        """Return one lazy Ray Dataset per query, with distributed row lookup."""
+        """Return one lazy Ray Dataset per query, with distributed row lookup.
+
+        ``execution`` selects where candidate search runs. The Datasets share
+        that search snapshot and execute their lookups independently when
+        consumed. Retain its files until the Datasets have finished executing.
+        """
         from pypaimon.ray.batch_vector_search import _execute_batch_vector_search
         from pypaimon.ray.search_result import read_search_result
         from pypaimon.ray.search_execution import execution_options
@@ -899,10 +975,17 @@ class BatchVectorQuery(_PreFilterQuery):
 
     def _read_batch_results(self, results):
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
+        from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
         from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
         projection = self._effective_projection()
-        if (len(results) <= 1 or self._metadata_only_result()
+        if len(results) > 1 and self._table.is_primary_key_table:
+            from pypaimon.multimodal.primary_key_batch_lookup import read_primary_key_batch
+            shared = read_primary_key_batch(self, results)
+            if shared is not None:
+                return shared
+        if (len(results) <= 1 or any(isinstance(result, GlobalIndexSplitResult) for result in results)
+                or self._metadata_only_result()
                 or (projection and not self._configured_read_builder()._output_fields())):
             return [self._read_global_index_result(result) for result in results]
 

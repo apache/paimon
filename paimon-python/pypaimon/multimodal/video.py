@@ -19,6 +19,7 @@
 
 import io
 import os
+import weakref
 from collections import OrderedDict, deque
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -27,7 +28,6 @@ from fractions import Fraction
 from itertools import chain
 
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
-from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
 def _require_video_av():
@@ -275,6 +275,60 @@ def _encode_images_to_video(
     return count
 
 
+class _PrefetchedVideo(io.BytesIO):
+    """Buffer a payload while preserving its source metadata and lifetime."""
+
+    def __init__(self, payload, source):
+        self._source = source
+        super().__init__(payload)
+        self.video_prefetch_bytes = len(payload)
+
+    def __getattr__(self, name):
+        return getattr(self._source, name)
+
+    def close(self):
+        if not self.closed:
+            try:
+                self._source.close()
+            finally:
+                super().close()
+
+
+class _VideoMetadataCache(weakref.WeakValueDictionary):
+    """Retain bounded container mappings across decoder eviction."""
+
+    def __init__(self, max_bytes=16 * 1024 * 1024, max_entries=64):
+        super().__init__()
+        self._retained = OrderedDict()
+        self._bytes = 0
+        self._max_bytes = max_bytes
+        self._max_entries = max_entries
+
+    def get(self, key, default=None):
+        if key in self._retained:
+            self._retained.move_to_end(key)
+        return super().get(key, default)
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        previous = self._retained.pop(key, None)
+        if previous is not None:
+            self._bytes -= previous.nbytes
+        size = getattr(value, "nbytes", None)
+        if size is None or size > self._max_bytes:
+            return
+        self._retained[key] = value
+        self._bytes += size
+        while self._bytes > self._max_bytes or len(self._retained) > self._max_entries:
+            _, removed = self._retained.popitem(last=False)
+            self._bytes -= removed.nbytes
+
+    def clear(self):
+        self._retained.clear()
+        self._bytes = 0
+        super().clear()
+
+
 class VideoFrameCollator:
     """Decode frame rows in a DataLoader worker while reusing video sessions.
 
@@ -293,6 +347,11 @@ class VideoFrameCollator:
     dictionaries, and returns a sequence with one frame per row in that order.
     At least one of ``decode_fn`` or ``decode_batch_fn`` must be provided.
 
+    ``prefetch_max_bytes`` opts into whole-payload prefetch for videos fitting
+    the remaining encoded-byte budget across cached decoders (default: disabled).
+    Larger videos or a full budget retain range reads. The budget is per collator
+    and worker; decoder buffers, RGB outputs and temporary copies are additional.
+
     The cache is process-local and keyed by physical video payload identity.
     ``collate_fn`` defaults to PyTorch's ``default_collate`` and may be replaced
     for decoders that already return batched objects.
@@ -309,7 +368,8 @@ class VideoFrameCollator:
             max_open_videos=16,
             collate_fn=None,
             decode_batch_fn=None,
-            range_parallelism=4):
+            range_parallelism=4,
+            prefetch_max_bytes=0):
         if not video_column:
             raise ValueError("video_column is required.")
         if not callable(decoder_factory):
@@ -334,6 +394,11 @@ class VideoFrameCollator:
                 or range_parallelism <= 0):
             raise ValueError("range_parallelism must be a positive int.")
 
+        if (isinstance(prefetch_max_bytes, bool)
+                or not isinstance(prefetch_max_bytes, int)
+                or prefetch_max_bytes < 0):
+            raise ValueError("prefetch_max_bytes must be a non-negative int.")
+
         raw_table = getattr(table, "raw_table", table)
         file_io = getattr(raw_table, "file_io", None)
         if file_io is None:
@@ -348,7 +413,9 @@ class VideoFrameCollator:
         self.max_open_videos = max_open_videos
         self.collate_fn = collate_fn
         self.range_parallelism = range_parallelism
+        self.prefetch_max_bytes = prefetch_max_bytes
         self._decoders = OrderedDict()
+        self._video_metadata_cache = _VideoMetadataCache()
         self._owner_pid = os.getpid()
 
     def __call__(self, rows):
@@ -363,6 +430,7 @@ class VideoFrameCollator:
     def close(self):
         resources = list(self._decoders.values())
         self._decoders.clear()
+        self._video_metadata_cache = _VideoMetadataCache()
         first_error = None
         for resource in resources:
             try:
@@ -378,6 +446,7 @@ class VideoFrameCollator:
         # stream state opened in the parent process.
         state = self.__dict__.copy()
         state["_decoders"] = OrderedDict()
+        state["_video_metadata_cache"] = None
         state["_owner_pid"] = None
         return state
 
@@ -428,17 +497,11 @@ class VideoFrameCollator:
             if descriptor is None:
                 decoded[position] = output
                 continue
-            payload = descriptor.payload_descriptor
-            index = descriptor.keyframe_index_descriptor
-            group = grouped.setdefault(payload, [index, []])
-            if group[0] != index:
-                raise ValueError(
-                    "One video payload references different keyframe indexes."
-                )
-            group[1].append((descriptor.frame_index, position, output))
+            payload = descriptor.video_descriptor
+            grouped.setdefault(payload, []).append((descriptor.frame_index, position, output))
 
-        for payload, (index, frames) in grouped.items():
-            decoder = self._decoder(payload, index)
+        for payload, frames in grouped.items():
+            decoder = self._decoder(payload)
             frames.sort(key=lambda frame: frame[0])
             if self.decode_batch_fn is not None:
                 values = self.decode_batch_fn(
@@ -491,12 +554,17 @@ class VideoFrameCollator:
             )
         return output, descriptor
 
-    def _decoder(self, descriptor, keyframe_index_descriptor=None, replica=0):
-        cache_key = (descriptor, keyframe_index_descriptor, replica)
+    def _decoder(self, descriptor, replica=0):
+        cache_key = (descriptor, replica)
         resource = self._decoders.pop(cache_key, None)
         if resource is not None:
             self._decoders[cache_key] = resource
             return resource[0]
+
+        # Release the oldest decoder's payload before admitting a new one.
+        if len(self._decoders) >= self.max_open_videos:
+            _, evicted = self._decoders.popitem(last=False)
+            self._close_resource(evicted)
 
         # Reuse the table's resolved FileIO. Rebuilding a reader from raw URI
         # options can drop merged REST/DLF storage credentials in workers.
@@ -507,35 +575,45 @@ class VideoFrameCollator:
             descriptor.length,
         ).new_input_stream()
         try:
-            if keyframe_index_descriptor is not None:
-                index = keyframe_index_descriptor
-                stream.video_keyframe_index = VideoKeyframeIndex.open(
-                    lambda offset, length: self.file_io.read_file_range(
-                        index.uri, index.offset + offset, length),
-                    index.length, descriptor.length)
+            retained = sum(
+                getattr(cached_stream, "video_prefetch_bytes", 0)
+                for _, cached_stream in self._decoders.values())
+            if 0 < descriptor.length <= self.prefetch_max_bytes - retained:
+                payload = bytearray()
+                while len(payload) < descriptor.length:
+                    chunk = stream.read(descriptor.length - len(payload))
+                    if not chunk:
+                        raise IOError("Incomplete video payload during prefetch.")
+                    payload.extend(chunk)
+                del chunk
+                stream = _PrefetchedVideo(payload, stream)
+                del payload
+            # Replica decoders share metadata, while their decode state stays separate.
+            stream.video_metadata_cache = self._video_metadata_cache
+            stream.video_metadata_key = descriptor
+            stream.video_length = descriptor.length
+            stream.video_moov_range = (getattr(descriptor, "moov_offset", 0),
+                                       getattr(descriptor, "moov_length", 0))
+            if callable(getattr(self.file_io, "read_ranges_coalesced", None)):
+                stream.video_read_ranges = lambda ranges: self.file_io.read_ranges_coalesced(
+                    [(descriptor.uri, descriptor.offset + offset, length)
+                     for offset, length in ranges], self.range_parallelism)
+            if getattr(stream, "video_prefetch_bytes", 0):
+                # Indexed readers must use the prefetched payload too, rather
+                # than issuing ranges against FileIO behind the decoder's back.
+                def read_prefetched(ranges):
+                    with stream.getbuffer() as payload:
+                        return [bytes(payload[offset:offset + length])
+                                for offset, length in ranges]
+                stream.video_read_ranges = read_prefetched
                 stream.video_length = descriptor.length
-                stream.video_read_ranges = lambda ranges: (
-                    self.file_io.read_ranges_coalesced(
-                        [(
-                            descriptor.uri,
-                            descriptor.offset + offset,
-                            length,
-                        ) for offset, length in ranges],
-                        self.range_parallelism,
-                    )
-                )
+
             decoder = self.decoder_factory(stream)
         except Exception:
-            mapping = getattr(stream, "video_keyframe_index", None)
-            if mapping is not None:
-                mapping.close()
             stream.close()
             raise
         resource = (decoder, stream)
         self._decoders[cache_key] = resource
-        if len(self._decoders) > self.max_open_videos:
-            _, evicted = self._decoders.popitem(last=False)
-            self._close_resource(evicted)
         return decoder
 
     def _collate(self, rows):
@@ -569,7 +647,4 @@ class VideoFrameCollator:
             if close is not None:
                 close()
         finally:
-            mapping = getattr(stream, "video_keyframe_index", None)
-            if mapping is not None:
-                mapping.close()
             stream.close()

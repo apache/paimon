@@ -1176,6 +1176,15 @@ class CoreOptions:
         .with_description("Read batch size for any file format if it supports.")
     )
 
+    WRITE_LEROBOT_REMUX_EPISODES: ConfigOption[bool] = (
+        ConfigOptions.key("write.lerobot.remux-episodes")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Copy each LeRobot Episode's video packets into a separate MP4 "
+            "payload without re-encoding. Requires PyAV.")
+    )
+
     READ_VIDEO_MAX_OPEN_DECODERS: ConfigOption[int] = (
         ConfigOptions.key("read.video.max-open-decoders")
         .int_type()
@@ -1183,6 +1192,16 @@ class CoreOptions:
         .with_description(
             "Maximum cached video decoders per video feature in a PyPaimon "
             "LeRobot DataLoader worker.")
+    )
+
+    READ_VIDEO_PREFETCH_MAX_BYTES: ConfigOption[int] = (
+        ConfigOptions.key("read.video.prefetch-max-bytes")
+        .int_type()
+        .default_value(0)
+        .with_description(
+            "Encoded video bytes retained by whole-payload prefetch across cached "
+            "decoders per video feature and worker. 0 disables prefetch. "
+            "Decoder buffers, decoded frames and temporary copies are additional.")
     )
 
     READ_VIDEO_DECODE_PARALLELISM: ConfigOption[int] = (
@@ -1199,7 +1218,7 @@ class CoreOptions:
         .int_type()
         .default_value(1)
         .with_description(
-            "FFmpeg threads per PyAV video decoder in a LeRobot worker. "
+            "FFmpeg threads per PyAV or indexed TorchCodec decoder in a LeRobot worker. "
             "0 keeps automatic selection; 1 avoids nested codec parallelism.")
     )
 
@@ -1995,7 +2014,12 @@ class CoreOptions:
         return self._positive_video_option(CoreOptions.READ_VIDEO_DECODERS_PER_PAYLOAD)
 
     def read_video_codec_threads(self) -> int:
-        option = CoreOptions.READ_VIDEO_CODEC_THREADS
+        return self._non_negative_video_option(CoreOptions.READ_VIDEO_CODEC_THREADS)
+
+    def read_video_prefetch_max_bytes(self) -> int:
+        return self._non_negative_video_option(CoreOptions.READ_VIDEO_PREFETCH_MAX_BYTES)
+
+    def _non_negative_video_option(self, option) -> int:
         raw = self.options.to_map().get(option.key())
         try:
             value = self.options.get(option)

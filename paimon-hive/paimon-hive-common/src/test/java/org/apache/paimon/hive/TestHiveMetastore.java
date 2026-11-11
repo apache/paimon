@@ -228,6 +228,10 @@ public class TestHiveMetastore {
         conf.setIfUnset(
                 HiveConf.ConfVars.HIVE_IN_TEST.varname,
                 HiveConf.ConfVars.HIVE_IN_TEST.getDefaultValue());
+        // Don't rely on the test hive-site.xml for this: a HiveCatalog created with hive-conf-dir
+        // stops later HiveConfs in the JVM from reading it, and the default BoneCP pool is not on
+        // the Spark 4 test classpath.
+        conf.setIfUnset(HiveConf.ConfVars.METASTORE_CONNECTION_POOLING_TYPE.varname, "DBCP");
         return new HiveConf(conf, TestHiveMetastore.class);
     }
 

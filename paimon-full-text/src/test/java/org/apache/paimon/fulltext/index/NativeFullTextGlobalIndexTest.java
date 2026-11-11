@@ -205,6 +205,48 @@ public class NativeFullTextGlobalIndexTest {
     }
 
     @Test
+    public void testIcuSplitTokenizerFindsChineseWordsAndIdentifierParts() throws IOException {
+        Options options = new Options();
+        options.set("full-text.tokenizer", "icu/split");
+        options.set("full-text.stem", "false");
+        options.set("full-text.remove-stop-words", "false");
+
+        List<ResultEntry> results;
+        try (NativeFullTextGlobalIndexWriter writer =
+                new NativeFullTextGlobalIndexWriter(
+                        createFileWriter(indexPath), indexOptions(options))) {
+            writer.write(
+                    BinaryString.fromString(
+                            "Paimon支持中文搜索和Rust开发 hello_world alpha.beta getUserName"),
+                    0);
+            writer.write(
+                    BinaryString.fromString("Paimon支持英文搜索和Java开发 hello planet alpha gamma"), 1);
+            results = writer.finish();
+        }
+        assertThat(serializedOptions(results.get(0).meta()))
+                .containsEntry("tokenizer", "icu/split");
+
+        try (NativeFullTextGlobalIndexReader reader =
+                createReader(createFileReader(), toIOMetas(results, indexPath))) {
+            for (String query : new String[] {"中文", "RUST", "world", "beta", "getusername"}) {
+                Optional<ScoredGlobalIndexResult> searchResult =
+                        reader.visitFullTextSearch(
+                                        new FullTextSearch("text", matchQuery(query), 10))
+                                .join();
+                assertThat(searchResult).as("query: %s", query).isPresent();
+                assertThat(searchResult.get().results()).as("query: %s", query).containsExactly(0L);
+            }
+
+            // Splitting identifiers on punctuation must not split camelCase identifiers.
+            Optional<ScoredGlobalIndexResult> searchResult =
+                    reader.visitFullTextSearch(new FullTextSearch("text", matchQuery("user"), 10))
+                            .join();
+            assertThat(searchResult).isPresent();
+            assertThat(searchResult.get().results()).isEmpty();
+        }
+    }
+
+    @Test
     public void testSearchNoResults() throws IOException {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         NativeFullTextGlobalIndexWriter writer = new NativeFullTextGlobalIndexWriter(fileWriter);

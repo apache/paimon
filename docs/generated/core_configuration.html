@@ -855,6 +855,12 @@ under the License.
             <td>Format table file compression.</td>
         </tr>
         <tr>
+            <td><h5>format-table.file.suffix.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to include the file format suffix in data file names written by the Paimon implementation of a format table. Compression suffixes are unaffected.</td>
+        </tr>
+        <tr>
             <td><h5>format-table.implementation</h5></td>
             <td style="word-wrap: break-word;">paimon</td>
             <td><p>Enum</p></td>
@@ -1435,6 +1441,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>Enables clustering by non-primary key fields. When set to true, the physical sort order of data files is determined by the configured 'clustering.columns' instead of the primary key, optimizing query performance for non-PK columns.</td>
         </tr>
         <tr>
+            <td><h5>pk-index.build.parallelism</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent primary-key index build tasks per writer instance, shared by its index columns and buckets. Must be greater than zero. Increasing this value may increase memory and I/O usage.</td>
+        </tr>
+        <tr>
             <td><h5>postpone.batch-write-fixed-bucket</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
@@ -1571,6 +1583,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>When a batch job queries from a table, if a partition does not exist in the current branch, the reader will try to get this partition from this fallback branch.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.fallback-branch.allow-earliest-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to allow reading the earliest available snapshot of a fallback or primary branch when no snapshot exists at or before the current branch's requested snapshot time. This applies to snapshot-ID time travel, including numeric scan.version. By default, such reads fail unless the other branch has no snapshots. Enabling this option may read data committed after the requested time.</td>
         </tr>
         <tr>
             <td><h5>scan.fallback-branch.read-fail-fast</h5></td>

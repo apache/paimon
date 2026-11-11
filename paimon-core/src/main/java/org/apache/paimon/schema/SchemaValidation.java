@@ -30,7 +30,10 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexerFactory;
 import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
+import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
@@ -57,6 +60,8 @@ import org.apache.paimon.utils.GeneratedColumn;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SetUtils;
 import org.apache.paimon.utils.StringUtils;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -175,6 +180,7 @@ public class SchemaValidation {
         // reject here rather than only at create time, so ALTER cannot turn the option on for a
         // table type that ignores it
         validateQueryAuthTableType(options.type(), options.queryAuthEnabled());
+        validateCsvSkipEmptyLines(options);
 
         if (options.primaryKeyNullable() && schema.primaryKeys().isEmpty()) {
             throw new IllegalArgumentException(
@@ -401,6 +407,8 @@ public class SchemaValidation {
                 fieldNamesSpecifiedAsVector.isEmpty(),
                 "Some of the columns specified as vector-field are unknown.");
 
+        options.primaryKeyIndexBuildParallelism();
+
         validateMergeFunctionFactory(schema);
 
         validateMapStorageLayout(schema, options);
@@ -437,6 +445,21 @@ public class SchemaValidation {
         validatePkClusteringOverride(options);
 
         validateManifestSort(schema, options);
+    }
+
+    /**
+     * Skipping empty lines drops rows at read time, while the data files of a table still record
+     * the number of rows that were written. Readers that answer COUNT(*) from that metadata would
+     * then disagree with a normal scan, so the option is only allowed for format tables, whose
+     * splits do not report row counts.
+     */
+    private static void validateCsvSkipEmptyLines(CoreOptions options) {
+        checkArgument(
+                options.type() == TableType.FORMAT_TABLE
+                        || !options.toConfiguration().get(CsvOptions.SKIP_EMPTY_LINES),
+                "%s is only supported for format tables, but the table type is %s.",
+                CsvOptions.SKIP_EMPTY_LINES.key(),
+                options.type());
     }
 
     /**
@@ -1372,6 +1395,72 @@ public class SchemaValidation {
                         aggFuncName);
             }
         }
+    }
+
+    /**
+     * Rejects type-incompatible aggregation functions (e.g. 'collect' on a non-array column) when
+     * the schema is committed. Only called on the schema commit path, not when loading tables.
+     */
+    public static void validateAggregationFunctionTypes(TableSchema schema) {
+        if (schema.primaryKeys().isEmpty()) {
+            return;
+        }
+        CoreOptions options = new CoreOptions(schema.options());
+        switch (options.mergeEngine()) {
+            case DEDUPLICATE:
+            case FIRST_ROW:
+                return;
+            default:
+        }
+
+        RowType rowType = schema.logicalRowType();
+        List<String> primaryKeys = schema.primaryKeys();
+        List<String> sequenceFields = options.sequenceField();
+        List<String> orderingFields = new ArrayList<>();
+        List<String> protectedFields = new ArrayList<>();
+        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
+            if (isSequenceGroupOption(entry.getKey())) {
+                orderingFields.addAll(sequenceGroupOrderingFields(entry.getKey()));
+                protectedFields.addAll(sequenceGroupProtectedFields(entry.getValue()));
+            }
+        }
+
+        for (int i = 0; i < rowType.getFieldNames().size(); i++) {
+            String fieldName = rowType.getFieldNames().get(i);
+            String aggFuncName =
+                    resolveAggFuncName(
+                            options,
+                            fieldName,
+                            primaryKeys,
+                            sequenceFields,
+                            orderingFields,
+                            protectedFields);
+            if (aggFuncName == null) {
+                continue;
+            }
+            FieldAggregatorFactory.create(
+                    rowType.getFieldTypes().get(i), fieldName, aggFuncName, options);
+        }
+    }
+
+    /** Mirrors how each merge engine resolves the aggregation function of a field. */
+    @Nullable
+    private static String resolveAggFuncName(
+            CoreOptions options,
+            String fieldName,
+            List<String> primaryKeys,
+            List<String> sequenceFields,
+            List<String> orderingFields,
+            List<String> protectedFields) {
+        if (options.mergeEngine() == MergeEngine.AGGREGATE) {
+            return AggregateMergeFunction.getAggFuncName(
+                    fieldName, options, primaryKeys, sequenceFields);
+        }
+
+        // partial-update only excludes sequence-group ordering fields from aggregation; a
+        // sequence.field column can still be configured with an aggregate function.
+        return PartialUpdateMergeFunction.getAggFuncName(
+                fieldName, options, primaryKeys, orderingFields, protectedFields);
     }
 
     /** Rejects changes which invalidate stored generated values or their dependencies. */

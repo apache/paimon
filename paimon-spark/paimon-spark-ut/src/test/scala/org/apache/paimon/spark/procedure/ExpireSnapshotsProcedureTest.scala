@@ -18,7 +18,11 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.data.GenericRow
+import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.source.{DataSplit, Split}
 import org.apache.paimon.utils.SnapshotManager
 
 import org.apache.spark.sql.{Dataset, Row}
@@ -27,6 +31,9 @@ import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions.{assertThat, assertThatIllegalArgumentException}
 
 import java.sql.Timestamp
+import java.util.Collections
+
+import scala.collection.JavaConverters._
 
 class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
 
@@ -273,6 +280,105 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
             stream.stop()
           }
       }
+    }
+  }
+
+  Seq("none", "table", "dynamic", "retain_max").foreach {
+    retentionSource =>
+      test(s"Paimon Procedure: expire snapshots changelog retention from $retentionSource") {
+        val independent = retentionSource != "none"
+        val snapshotRetainMax = if (retentionSource == "retain_max") 4 else 1
+        val tableRetention = retentionSource match {
+          case "table" => ", 'changelog.time-retained' = '7 d'"
+          case "retain_max" => ", 'changelog.num-retained.max' = '4'"
+          case _ => ""
+        }
+        sql(
+          "CREATE TABLE T (a INT, b INT) TBLPROPERTIES (" +
+            "'primary-key' = 'a', 'bucket' = '1', 'write-only' = 'true', " +
+            "'changelog-producer' = 'input', 'snapshot.num-retained.min' = '1', " +
+            s"'snapshot.num-retained.max' = '$snapshotRetainMax'" + tableRetention + ")")
+        val table = loadTable("T")
+        val builder = table.newStreamWriteBuilder().withCommitUser("test")
+        val writer = builder.newWrite()
+        val commit = builder.newCommit()
+        try {
+          (1 to 4).foreach {
+            i =>
+              writer.write(GenericRow.of(Int.box(i), Int.box(i * 10)))
+              commit.commit(i.toLong, writer.prepareCommit(true, i.toLong))
+          }
+        } finally {
+          writer.close()
+          commit.close()
+        }
+        checkSnapshots(table.snapshotManager(), 1, 4)
+        val scan = table.newReadBuilder().newStreamScan()
+        scan.restore(1L)
+        val firstChangelog = scan.plan().splits()
+        assert(readChangelogIds(table, firstChangelog) == List(1))
+
+        val procedureArgs = retentionSource match {
+          case "dynamic" => ", options => 'changelog.time-retained=7 d'"
+          case "retain_max" => ", retain_max => 1"
+          case _ => ""
+        }
+        checkAnswer(
+          spark.sql(s"CALL paimon.sys.expire_snapshots(table => 'test.T'$procedureArgs)"),
+          Row(3) :: Nil)
+        checkSnapshots(table.snapshotManager(), 4, 4)
+        firstChangelog.asScala.foreach {
+          split =>
+            val dataSplit = split.asInstanceOf[DataSplit]
+            dataSplit.dataFiles().asScala.foreach {
+              file =>
+                assert(
+                  table
+                    .fileIO()
+                    .exists(new Path(dataSplit.bucketPath(), file.fileName())) == independent)
+            }
+        }
+        if (independent) {
+          assert(table.changelogManager().earliestLongLivedChangelogId() == 1L)
+          assert(table.changelogManager().latestLongLivedChangelogId() == 3L)
+          assert(readChangelogIds(table, firstChangelog) == List(1))
+          // Operation-local overrides do not change the reader's persisted configuration.
+          // Retained history is discovered only when the reader also uses decoupled retention.
+          val reloaded = loadTable("T")
+          val readTable = retentionSource match {
+            case "dynamic" =>
+              reloaded.copy(Collections.singletonMap("changelog.time-retained", "7 d"))
+            case "retain_max" =>
+              assert(reloaded.options().get("snapshot.num-retained.max") == "4")
+              assert(reloaded.options().get("changelog.num-retained.max") == "4")
+              val coupledScan = reloaded.newReadBuilder().newStreamScan()
+              coupledScan.restore(1L)
+              // This first plan cannot discover the retained changelog through coupled options.
+              assert(coupledScan.plan().splits().isEmpty)
+              assert(readChangelogIds(reloaded, firstChangelog) == List(1))
+              reloaded.copy(Collections.singletonMap("changelog.num-retained.max", "5"))
+            case _ => reloaded
+          }
+          val restored = readTable.newReadBuilder().newStreamScan()
+          restored.restore(1L)
+          (1 to 4).foreach(
+            i => assert(readChangelogIds(readTable, restored.plan().splits()) == List(i)))
+        } else {
+          assert(table.changelogManager().safelyGetAllChangelogs().isEmpty)
+        }
+        if (retentionSource == "dynamic") {
+          assert(!loadTable("T").options().containsKey("changelog.time-retained"))
+        }
+        checkAnswer(sql("SELECT * FROM T"), (1 to 4).map(i => Row(i, i * 10)))
+      }
+  }
+
+  private def readChangelogIds(table: FileStoreTable, splits: java.util.List[Split]): List[Int] = {
+    val iter = table.newReadBuilder().newRead().createReader(splits).toCloseableIterator()
+    try {
+      iter.asScala.map(_.getInt(0)).toList
+    } finally {
+      iter.close()
     }
   }
 

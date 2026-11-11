@@ -1571,9 +1571,7 @@ public class BlobTableTest extends TableTestBase {
                                                 new Path(source.toUri()).toString(),
                                                 0,
                                                 payload.length,
-                                                7,
-                                                -1,
-                                                0)))));
+                                                7)))));
         rows = read(table, org.apache.paimon.utils.Pair.of(CoreOptions.BLOB_AS_DESCRIPTOR, "true"));
         rows.sort((a, b) -> Integer.compare(a.getInt(0), b.getInt(0)));
         assertThat(rows.size()).isEqualTo(3);
@@ -1718,31 +1716,31 @@ public class BlobTableTest extends TableTestBase {
                                 Blob.fromDescriptor(
                                         sourceReader,
                                         new VideoFrameDescriptor(
-                                                firstUri, 0, firstBytes.length, 0, -1, 0))),
+                                                firstUri, 0, firstBytes.length, 0))),
                         GenericRow.of(
                                 1,
                                 Blob.fromDescriptor(
                                         sourceReader,
                                         new VideoFrameDescriptor(
-                                                firstUri, 0, firstBytes.length, 1, -1, 0))),
+                                                firstUri, 0, firstBytes.length, 1))),
                         GenericRow.of(
                                 2,
                                 Blob.fromDescriptor(
                                         sourceReader,
                                         new VideoFrameDescriptor(
-                                                firstUri, 0, firstBytes.length, 2, -1, 0))),
+                                                firstUri, 0, firstBytes.length, 2))),
                         GenericRow.of(
                                 3,
                                 Blob.fromDescriptor(
                                         sourceReader,
                                         new VideoFrameDescriptor(
-                                                secondUri, 0, secondBytes.length, 0, -1, 0))),
+                                                secondUri, 0, secondBytes.length, 0))),
                         GenericRow.of(
                                 4,
                                 Blob.fromDescriptor(
                                         sourceReader,
                                         new VideoFrameDescriptor(
-                                                secondUri, 0, secondBytes.length, 1, -1, 0)))));
+                                                secondUri, 0, secondBytes.length, 1)))));
 
         FileStoreTable table = getTableDefault();
         List<DataFileMeta> videoFiles = liveVideoFiles(table);
@@ -1808,7 +1806,7 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.column("id", DataTypes.INT());
         schemaBuilder.column("video", DataTypes.BLOB());
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "1 GB");
-        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "20 b");
+        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "10 b");
         schemaBuilder.option(CoreOptions.TARGET_FILE_ROW_NUM.key(), "1000");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
@@ -1817,15 +1815,10 @@ public class BlobTableTest extends TableTestBase {
 
         byte[] firstBytes = "first-video".getBytes();
         byte[] secondBytes = "second-video".getBytes();
-        byte[] keyframeIndex =
-                fromHex(
-                        "0149464b4f4544495601000000020000000000000000000000000000000100000000000000000000"
-                                + "0000000000000000000000000000000000000000000c00000000000000a08c000000000000020000"
-                                + "0000000000dfd9164b");
         java.nio.file.Path firstSource = tempPath.resolve("size-first-source.mp4");
         java.nio.file.Path secondSource = tempPath.resolve("size-second-source.mp4");
-        java.nio.file.Files.write(firstSource, concat("first-video".getBytes(), keyframeIndex));
-        java.nio.file.Files.write(secondSource, concat("second-video".getBytes(), keyframeIndex));
+        java.nio.file.Files.write(firstSource, firstBytes);
+        java.nio.file.Files.write(secondSource, secondBytes);
         UriReader sourceReader = UriReader.fromFile(LocalFileIO.create());
         String firstUri = new Path(firstSource.toUri()).toString();
         String secondUri = new Path(secondSource.toUri()).toString();
@@ -1838,12 +1831,7 @@ public class BlobTableTest extends TableTestBase {
                             Blob.fromDescriptor(
                                     sourceReader,
                                     new VideoFrameDescriptor(
-                                            firstUri,
-                                            0,
-                                            firstBytes.length,
-                                            frame,
-                                            firstBytes.length,
-                                            keyframeIndex.length))));
+                                            firstUri, 0, firstBytes.length, frame))));
         }
         for (int frame = 0; frame < 2; frame++) {
             rows.add(
@@ -1852,12 +1840,7 @@ public class BlobTableTest extends TableTestBase {
                             Blob.fromDescriptor(
                                     sourceReader,
                                     new VideoFrameDescriptor(
-                                            secondUri,
-                                            0,
-                                            secondBytes.length,
-                                            frame,
-                                            secondBytes.length,
-                                            keyframeIndex.length))));
+                                            secondUri, 0, secondBytes.length, frame))));
         }
         writeRows(getTableDefault(), rows);
 
@@ -1911,21 +1894,11 @@ public class BlobTableTest extends TableTestBase {
                             Blob.fromDescriptor(
                                     sourceReader,
                                     new VideoFrameDescriptor(
-                                            uris[cameraA],
-                                            0,
-                                            payloads[cameraA].length,
-                                            frame,
-                                            -1,
-                                            0)),
+                                            uris[cameraA], 0, payloads[cameraA].length, frame)),
                             Blob.fromDescriptor(
                                     sourceReader,
                                     new VideoFrameDescriptor(
-                                            uris[cameraB],
-                                            0,
-                                            payloads[cameraB].length,
-                                            frame,
-                                            -1,
-                                            0))));
+                                            uris[cameraB], 0, payloads[cameraB].length, frame))));
         }
         writeRows(getTableDefault(), input);
 
@@ -1989,12 +1962,11 @@ public class BlobTableTest extends TableTestBase {
                             row,
                             Blob.fromDescriptor(
                                     sourceReader,
-                                    new VideoFrameDescriptor(
-                                            uris[0], 0, payload.length, row, -1, 0)),
+                                    new VideoFrameDescriptor(uris[0], 0, payload.length, row)),
                             Blob.fromDescriptor(
                                     sourceReader,
                                     new VideoFrameDescriptor(
-                                            uris[cameraB], 0, payload.length, row % 2, -1, 0))));
+                                            uris[cameraB], 0, payload.length, row % 2))));
         }
         writeRows(getTableDefault(), rows);
 

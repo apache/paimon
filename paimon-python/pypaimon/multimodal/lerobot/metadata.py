@@ -133,7 +133,7 @@ class _EpisodeIndex:
 
 
 def _load_dataset_metadata(dataset, info, source):
-    fps = _positive_integer(info.get("fps"), "fps")
+    fps = _dataset_fps(info.get("fps"))
     stats = _source_stats(dataset, source)
     stats_table = None if stats is None else _metadata_table(stats)
     tasks_table = _source_tasks(
@@ -234,7 +234,11 @@ def _prepare_metadata_tables(connection, frames_table, metadata):
     tables = {}
     for name, schema in schemas.items():
         identifier = identifiers[name]
-        options = {"bucket": "-1"}
+        options = {
+            "bucket": "-1",
+            "row-tracking.enabled": "true",
+            "data-evolution.enabled": "true",
+        }
         pandas_metadata = (schema.metadata or {}).get(b"pandas")
         if pandas_metadata is not None:
             options[_PANDAS_METADATA_OPTION] = pandas_metadata.decode(
@@ -781,6 +785,18 @@ def _json_value(value):
     if callable(item):
         return _json_value(item())
     raise TypeError("LeRobot metadata contains a non-JSON value: %r" % value)
+
+
+def _dataset_fps(value):
+    if isinstance(value, numbers.Real) and not isinstance(value, numbers.Integral):
+        try:
+            integer = int(value)
+        except (ValueError, OverflowError):
+            pass
+        else:
+            if value == integer:
+                value = integer
+    return _positive_integer(value, "fps")
 
 
 def _positive_integer(value, name):

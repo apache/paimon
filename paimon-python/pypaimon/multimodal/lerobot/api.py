@@ -28,7 +28,7 @@ from pypaimon.multimodal.lerobot.metadata import (
     _load_dataset_metadata,
     _managed_table_options,
     _prepare_metadata_tables,
-    _positive_integer,
+    _dataset_fps,
     _commit_metadata,
     _validate_tag_name,
     _validated_episode_tables,
@@ -110,7 +110,7 @@ def load_from_lerobot(
         _require_v3(local_info, resolved_source.path)
         _validate_info_paths(local_info)
         _schema_from_info(local_info)
-        _positive_integer(local_info.get("fps"), "fps")
+        _dataset_fps(local_info.get("fps"))
         _validated_counts(local_info, resolved_source.path)
         _validate_v3_required_features(local_info)
         video_fields = _video_feature_names(local_info)

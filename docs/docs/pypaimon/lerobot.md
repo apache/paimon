@@ -32,7 +32,8 @@ Import a LeRobot Dataset v3 table group, capture frames directly, or train from 
 repository. It derives the schema from `meta/info.json` and writes one row per
 frame. The import creates `<table>__episodes`, `<table>__tasks`, `<table>__info`,
 and optional `<table>__stats` and `<table>__subtasks` companion tables. Task text
-remains in the task table; frames retain `task_index`.
+remains in the task table; frames retain `task_index`. All imported tables use
+Data Evolution with row tracking.
 
 Info and stats use `key STRING, value STRING`: each top-level info property or
 stats feature becomes one row. Each value is JSON-encoded, preserving nested
@@ -125,9 +126,14 @@ Scalars map to scalar types, numeric tensors to `ARRAY` (nested for higher ranks
 and images to `BLOB`. Tensor shapes remain in the feature metadata; images keep
 their compressed bytes. Previously imported `VECTOR` features remain readable.
 
-Video features map to `BLOB`. Each MP4 is copied once per aligned file group and indexed for range
+Video features map to `BLOB`. Each MP4 is copied once per aligned file group for range
 reads. Imports require a bucket-unaware table and check rolling before each Episode. Use
 `VideoFrameCollator` for scans or `PaimonLeRobotDataset` for training.
+
+By default, imports copy the original videos. Set
+`options={"write.lerobot.remux-episodes": "true"}` to split them by Episode without
+re-encoding (requires PyAV 14.2+), retaining decoding dependencies. Each clip is limited
+to 64 MiB and 65,536 packets; unsupported timestamps fail the import.
 
 ## Capture LeRobot frames directly into Paimon
 
@@ -247,9 +253,12 @@ loader = dataset.to_dataloader(
 batches, avoiding a second full-resolution copy during collation.
 
 Without `tag_name`, the latest snapshots are used. Frame lookups use the BTree
-on `index`; payloads remain lazy. Indexed videos prefetch metadata and target GOPs, then fetch
-uncached PyAV reads on demand. Unindexed videos use the TorchCodec/PyAV scan path. Set
-`video_backend` to force either decoder.
+on `index`; payloads remain lazy. Ordinary MP4 sample tables locate target frames and GOPs; other videos use the
+TorchCodec/PyAV scan path. Set
+`video_backend` to force either decoder. With `video_backend="torchcodec"`, supported
+MP4 videos use timestamp seeks verified against their sample table and returned PTS.
+Decoder replicas share read-only timelines; uniform timing is stored compactly.
+Unsupported timelines or mismatched timestamps fall back to TorchCodec exact mode.
 
 With `pypaimon-rust` installed, LeRobot defaults to Rust frame lookup and table reads
 unless native read/planning options are explicitly configured. Set
@@ -262,9 +271,19 @@ Each open decoder uses memory and a file handle, so usage grows with cameras and
 `read.video.decode-parallelism` limits concurrent video decodes across all cameras in each
 Dataset worker (default: 16). Set it to 1 for serial decoding. Parallel decoding
 applies to video windows without `image_transforms` and uses more CPU and memory.
-`read.video.codec-threads` controls FFmpeg threads per PyAV decoder (default: 1),
+To reduce remote requests when sampling small videos, enable whole-video prefetch:
+
+```python
+table = table.copy({"read.video.prefetch-max-bytes": str(32 * 1024 * 1024)})
+```
+
+Default: `0` (disabled). The budget covers cached video bytes per camera per worker;
+when it is full, reads remain range-based. Prefetch may increase bytes read.
+Decoded frames and temporary buffers use additional memory.
+
+`read.video.codec-threads` controls FFmpeg threads per PyAV or indexed TorchCodec decoder (default: 1),
 avoiding nested codec parallelism with multiple workers and concurrent videos.
-Set it to 0 for automatic selection. It does not affect TorchCodec.
+Set it to 0 for automatic selection. TorchCodec exact-mode fallback uses its own defaults.
 
 `read.video.decoders-per-payload` (default: 4) also splits single-video windows across
 independent cached decoders, within those limits. Set it to 1 to disable this splitting;

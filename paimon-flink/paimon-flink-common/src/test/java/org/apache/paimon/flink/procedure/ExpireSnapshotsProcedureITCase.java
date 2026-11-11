@@ -18,20 +18,34 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.ExpireSnapshotsAction;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -203,6 +217,79 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                         + ts6.toString()
                         + "', options => 'snapshot.expire.limit=1')");
         checkSnapshots(snapshotManager, 3, 6);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false, false", "false, true", "true, false", "true, true"})
+    public void testChangelogRetention(boolean useAction, boolean independentRetention)
+            throws Exception {
+        sql(
+                "CREATE TABLE changelog_retention (id INT PRIMARY KEY NOT ENFORCED, v INT)"
+                        + " WITH ('bucket' = '1', 'write-only' = 'true',"
+                        + "'changelog-producer' = 'input', 'snapshot.num-retained.min' = '1',"
+                        + "'snapshot.num-retained.max' = '1'"
+                        + (independentRetention ? ", 'changelog.time-retained' = '7 d'" : "")
+                        + ")");
+        FileStoreTable table = paimonTable("changelog_retention");
+        StreamWriteBuilder builder = table.newStreamWriteBuilder().withCommitUser("test");
+        try (StreamTableWrite write = builder.newWrite();
+                StreamTableCommit commit = builder.newCommit()) {
+            for (int i = 1; i <= 4; i++) {
+                write.write(GenericRow.of(i, i * 10));
+                commit.commit(i, write.prepareCommit(true, i));
+            }
+        }
+        checkSnapshots(table.snapshotManager(), 1, 4);
+        StreamTableScan scan = table.newReadBuilder().newStreamScan();
+        scan.restore(1L);
+        List<Split> firstChangelog = scan.plan().splits();
+        assertThat(readIds(table, firstChangelog)).containsExactly(1);
+        if (useAction) {
+            createAction(
+                            ExpireSnapshotsAction.class,
+                            "expire_snapshots",
+                            "--warehouse",
+                            path,
+                            "--database",
+                            "default",
+                            "--table",
+                            "changelog_retention")
+                    .run();
+        } else {
+            sql("CALL sys.expire_snapshots(`table` => 'default.changelog_retention')");
+        }
+        checkSnapshots(table.snapshotManager(), 4, 4);
+        for (Split split : firstChangelog) {
+            DataSplit dataSplit = (DataSplit) split;
+            for (DataFileMeta file : dataSplit.dataFiles()) {
+                assertThat(table.fileIO().exists(new Path(dataSplit.bucketPath(), file.fileName())))
+                        .isEqualTo(independentRetention);
+            }
+        }
+        if (independentRetention) {
+            assertThat(table.changelogManager().earliestLongLivedChangelogId()).isEqualTo(1);
+            assertThat(table.changelogManager().latestLongLivedChangelogId()).isEqualTo(3);
+            assertThat(readIds(table, firstChangelog)).containsExactly(1);
+            // Re-plan after expiration to verify retained metadata as well as data files.
+            StreamTableScan restored = table.newReadBuilder().newStreamScan();
+            restored.restore(1L);
+            for (int i = 1; i <= 4; i++) {
+                assertThat(readIds(table, restored.plan().splits())).containsExactly(i);
+            }
+        } else {
+            assertThat(table.changelogManager().safelyGetAllChangelogs()).isEmpty();
+        }
+        assertThat(readIds(table, table.newReadBuilder().newScan().plan().splits()))
+                .containsExactlyInAnyOrder(1, 2, 3, 4);
+    }
+
+    private List<Integer> readIds(FileStoreTable table, List<Split> splits) throws IOException {
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                table.newReadBuilder().newRead().createReader(splits)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        return ids;
     }
 
     protected void checkSnapshots(SnapshotManager sm, int earliest, int latest) throws IOException {

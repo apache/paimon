@@ -119,7 +119,14 @@ def test_unguarded_request_omits_absent_guard():
     (1, {'type': 'snapshot', 'snapshotId': 1}),
     ('v1', {'type': 'tag', 'tagName': 'v1'}),
 ])
-def test_table_rollback_transmits_loaded_uuid(table, transport, target, instant):
+def test_table_rollback_transmits_loaded_uuid(table, transport, target, instant, monkeypatch):
+    def unexpected_local_access():
+        pytest.fail('REST rollback must not access local snapshot or tag metadata')
+
+    monkeypatch.setattr(table, 'rollback_helper', unexpected_local_access)
+    monkeypatch.setattr(table, 'tag_manager', unexpected_local_access)
+    monkeypatch.setattr(table, 'snapshot_manager', unexpected_local_access)
+
     table.rollback_to(target)
 
     assert len(transport.requests) == 1

@@ -66,6 +66,24 @@ class BucketFilesTest {
         assertThat(result.deletedIndexFiles()).containsExactly(dataDelete, compactDelete);
     }
 
+    @Test
+    void testKeepsEarliestSnapshotWhenMergingMessages() {
+        BucketFiles bucketFiles =
+                new BucketFiles(mock(DataFilePathFactory.class), mock(FileIO.class));
+        for (long snapshotId : new long[] {9, 5, 8}) {
+            bucketFiles.update(
+                    new CommitMessageImpl(
+                            EMPTY_ROW,
+                            0,
+                            1,
+                            DataIncrement.indexIncrement(
+                                    Collections.singletonList(index("index-" + snapshotId))),
+                            CompactIncrement.emptyIncrement(),
+                            snapshotId));
+        }
+        assertThat(bucketFiles.makeMessage(EMPTY_ROW, 0).checkFromSnapshot()).isEqualTo(5L);
+    }
+
     private static IndexFileMeta index(String name) {
         return new IndexFileMeta(name, "ann", 1, 1, null, null, null);
     }

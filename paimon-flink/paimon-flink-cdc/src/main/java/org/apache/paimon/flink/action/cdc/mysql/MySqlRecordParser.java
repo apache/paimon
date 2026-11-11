@@ -299,20 +299,8 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
     }
 
     private Set<String> extractBase64EncodedFields() {
-        Set<String> fields = new HashSet<>();
-        root.schema()
-                .beforeAndAfterFields()
-                .forEach(
-                        (name, field) -> {
-                            if (DebeziumSchemaUtils.isPlainBinaryType(field.type(), field.name())) {
-                                fields.add(name);
-                            }
-                        });
-        computedColumns.forEach(column -> fields.remove(column.columnName()));
-        for (CdcMetadataConverter converter : metadataConverters) {
-            fields.remove(converter.columnName());
-        }
-        return fields;
+        return DebeziumSchemaUtils.extractBase64EncodedFields(
+                root.schema(), computedColumns, metadataConverters);
     }
 
     protected RichCdcMultiplexRecord createRecord(RowKind rowKind, Map<String, String> data) {
