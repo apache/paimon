@@ -40,15 +40,43 @@ _NATIVE_READ_FILE_FORMATS = frozenset({
 _NATIVE_READ_FILE_SUFFIXES = tuple('.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
 _NATIVE_BLOB_FILE_SUFFIXES = ('.blob', '.video')
 
+# Must stay aligned with Rust StringArray downcast and Python
+# ``_KEYTIME_STRING_TYPES``. Kept local so Native does not import the
+# Python execution backend.
+_NATIVE_KEYTIME_STRING_TYPES = frozenset({"CHAR", "VARCHAR", "STRING"})
+_MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
+
+
+def _atomic_type_base_name(field_type):
+    from pypaimon.schema.data_types import AtomicType
+    if not isinstance(field_type, AtomicType):
+        return None
+    raw = field_type.type
+    return raw.split('(', 1)[0].split(' ', 1)[0].upper()
+
+
+def _field_agg_func_name(field_name, primary_keys, options_map, sequence_fields):
+    # Same precedence as Python ``resolve_agg_func_name`` / Java
+    # ``AggregateMergeFunction.getAggFuncName``, inlined to avoid a
+    # Native → Python execution import.
+    if field_name in sequence_fields:
+        return "last_value"
+    if field_name in primary_keys:
+        return "primary_key"
+    return (
+        options_map.get("fields.{}.aggregate-function".format(field_name))
+        or options_map.get("fields.default-aggregate-function")
+        or "last_non_null_value"
+    )
+
 
 def _native_merge_map_keytime_timestamp_supported(table) -> bool:
     """Whether Native can run ``merge_map_with_keytime`` for this table.
 
     Rust resolves the timestamp column at merge time by downcasting to
     ``StringArray`` and raises ``DataInvalid`` (``requires STRING``,
-    ``source: None``) for any other Arrow type. That matches Python's
-    ``_KEYTIME_STRING_TYPES`` (CHAR / VARCHAR / STRING), so this probe
-    reuses that set rather than inventing a second allow-list.
+    ``source: None``) for any other Arrow type. Only CHAR / VARCHAR /
+    STRING clear that check.
 
     The failure happens while iterating batches after setup, which
     bypasses the usual setup-time fallback. Typed timestamps that
@@ -65,23 +93,15 @@ def _native_merge_map_keytime_timestamp_supported(table) -> bool:
     if options.merge_engine() != MergeEngine.AGGREGATE:
         return True
 
-    from pypaimon.execution.python.read.reader.aggregate.aggregators import (
-        NAME_MERGE_MAP_WITH_KEYTIME,
-        _KEYTIME_STRING_TYPES,
-        _atomic_base_name,
-    )
-    from pypaimon.execution.python.read.reader.aggregation_merge_function import (
-        resolve_agg_func_name,
-    )
     from pypaimon.schema.data_types import MapType, RowType
 
     options_map = options.options.to_map()
     pk_set = set(table.primary_keys)
     sequence_fields = set(options.sequence_field())
     for field in table.fields:
-        if resolve_agg_func_name(
+        if _field_agg_func_name(
                 field.name, pk_set, options_map, sequence_fields
-        ) != NAME_MERGE_MAP_WITH_KEYTIME:
+        ) != _MERGE_MAP_WITH_KEYTIME:
             continue
         field_type = field.type
         if (not isinstance(field_type, MapType)
@@ -101,7 +121,7 @@ def _native_merge_map_keytime_timestamp_supported(table) -> bool:
                 return False
             ts_type = row_type.fields[ts_index].type
         # None => type parse / non-atomic failure; not a supported native type.
-        if _atomic_base_name(ts_type) not in _KEYTIME_STRING_TYPES:
+        if _atomic_type_base_name(ts_type) not in _NATIVE_KEYTIME_STRING_TYPES:
             return False
     return True
 
