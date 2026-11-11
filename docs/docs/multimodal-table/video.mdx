@@ -82,6 +82,16 @@ CREATE TABLE video_frames (
 
 <TabItem value="python" label="PyPaimon">
 
+Use Python 3.10 or newer and a PyPaimon build matching this documentation version,
+including its `.video` format and decoding APIs. To run the complete walkthrough from
+a matching source checkout, install from the repository root before starting Python:
+
+```shell
+python -m pip install -e './paimon-python[torch,video]'
+```
+
+This installs the PyTorch and video extras used by the decoding example below.
+
 ```python
 import pyarrow as pa
 import pypaimon.multimodal as pm
@@ -351,11 +361,8 @@ not extract the selected frame.
 
 ### Decode Frames with PyPaimon
 
-With Python 3.10 or newer, install the PyTorch and video extras:
-
-```shell
-pip install 'pypaimon[torch,video]'
-```
+Use the matching PyPaimon build and PyTorch/video extras installed in the
+[PyPaimon creation example](#create-a-video-table).
 
 The window dataset decodes configured video columns with PyAV or TorchCodec. This example
 requests one front-camera frame per row and stacks the decoded RGB tensors:
