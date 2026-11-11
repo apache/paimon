@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.globalindex;
 
+import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -26,11 +27,14 @@ import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputSerializer;
+import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NullBitmapTransportTypeInfoTest {
@@ -39,6 +43,72 @@ class NullBitmapTransportTypeInfoTest {
         return new NullBitmapTransportTypeInfo(
                         RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()))
                 .createSerializer(new ExecutionConfig());
+    }
+
+    @Test
+    void testRawRowsDecodeWithOriginalThreeFieldArity() throws Exception {
+        TypeSerializer<RowData> serializer = serializer();
+        RowDataSerializer originalSerializer =
+                new RowDataSerializer(
+                        LogicalTypeConversion.toLogicalType(
+                                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT())));
+        for (Integer value : new Integer[] {null, 7}) {
+            DataOutputSerializer encoded = new DataOutputSerializer(64);
+            originalSerializer.serialize(GenericRowData.of(2, value, 1L << 33), encoded);
+            RowData decoded =
+                    serializer.deserialize(new DataInputDeserializer(encoded.getCopyOfBuffer()));
+            assertThat(decoded.getArity()).isEqualTo(3);
+            assertThat(decoded.getInt(0)).isEqualTo(2);
+            assertThat(decoded.isNullAt(1)).isEqualTo(value == null);
+            if (value != null) {
+                assertThat(decoded.getInt(1)).isEqualTo(7);
+            }
+            assertThat(decoded.getLong(2)).isEqualTo(1L << 33);
+
+            DataOutputSerializer copied = new DataOutputSerializer(64);
+            serializer.copy(new DataInputDeserializer(encoded.getCopyOfBuffer()), copied);
+            assertThat(copied.getCopyOfBuffer()).isEqualTo(encoded.getCopyOfBuffer());
+            assertThat(
+                            serializer
+                                    .deserialize(
+                                            new DataInputDeserializer(copied.getCopyOfBuffer()))
+                                    .getArity())
+                    .isEqualTo(3);
+        }
+    }
+
+    @Test
+    void testRawThreeFieldRowsSerializeWithoutTransportPadding() throws Exception {
+        TypeSerializer<RowData> serializer = serializer();
+        RowDataSerializer originalSerializer =
+                new RowDataSerializer(
+                        LogicalTypeConversion.toLogicalType(
+                                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT())));
+        for (Integer value : new Integer[] {null, 7}) {
+            RowData row = GenericRowData.of(2, value, 1L << 33);
+            DataOutputSerializer encoded = new DataOutputSerializer(64);
+            serializer.serialize(row, encoded);
+            DataOutputSerializer original = new DataOutputSerializer(64);
+            originalSerializer.serialize(row, original);
+            assertThat(encoded.getCopyOfBuffer()).isEqualTo(original.getCopyOfBuffer());
+        }
+    }
+
+    @Test
+    void testRawThreeFieldRowsCopyWithoutTransportPadding() {
+        TypeSerializer<RowData> serializer = serializer();
+        for (Integer value : new Integer[] {null, 7}) {
+            GenericRowData row = GenericRowData.of(2, value, 1L << 33);
+            RowData copied = serializer.copy(row);
+            row.setField(2, 999L);
+            assertThat(copied.getArity()).isEqualTo(3);
+            assertThat(copied.getInt(0)).isEqualTo(2);
+            assertThat(copied.isNullAt(1)).isEqualTo(value == null);
+            if (value != null) {
+                assertThat(copied.getInt(1)).isEqualTo(7);
+            }
+            assertThat(copied.getLong(2)).isEqualTo(1L << 33);
+        }
     }
 
     @Test

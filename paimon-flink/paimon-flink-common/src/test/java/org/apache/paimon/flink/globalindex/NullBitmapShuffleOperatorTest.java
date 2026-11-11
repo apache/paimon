@@ -23,6 +23,7 @@ import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.shuffle.RangeShuffle;
@@ -83,7 +84,7 @@ class NullBitmapShuffleOperatorTest {
             List<Tuple2<InternalRow, RowData>> expanded = harness.extractOutputValues();
             assertThat(expanded).hasSize(5);
             for (Tuple2<InternalRow, RowData> row : expanded) {
-                assertThat(row.f1.isNullAt(3)).isTrue();
+                assertThat(row.f1.getArity()).isEqualTo(3);
                 assertThat(row.f0.getLong(2)).isEqualTo(row.f1.getLong(2));
             }
             List<Tuple2<InternalRow, RowData>> baseline = new ArrayList<>();
@@ -95,6 +96,45 @@ class NullBitmapShuffleOperatorTest {
             assertThat(actual)
                     .extracting(row -> row.getLong(5))
                     .containsExactly(1L, 3L, 5L, 9L, 2L);
+        }
+    }
+
+    @Test
+    void testBitmapExpansionEmitsThreeFieldRows() throws Exception {
+        try (OneInputStreamOperatorTestHarness<
+                        Tuple2<InternalRow, RowData>, Tuple2<InternalRow, RowData>>
+                harness = new OneInputStreamOperatorTestHarness<>(new NullBitmapExpandOperator())) {
+            harness.open();
+            harness.processElement(new StreamRecord<>(compressed(9, 1, 1L << 33)));
+            List<Tuple2<InternalRow, RowData>> expanded = harness.extractOutputValues();
+            assertThat(expanded).hasSize(3);
+            assertThat(expanded)
+                    .extracting(row -> row.f1.getLong(2))
+                    .containsExactly(1L, 9L, 1L << 33);
+            for (Tuple2<InternalRow, RowData> row : expanded) {
+                assertThat(row.f1.getArity()).isEqualTo(3);
+                assertThat(row.f1.getInt(0)).isZero();
+                assertThat(row.f1.isNullAt(1)).isTrue();
+                assertThat(row.f0.getLong(2)).isEqualTo(row.f1.getLong(2));
+            }
+        }
+    }
+
+    @Test
+    void testExpansionAcceptsRawThreeFieldRows() throws Exception {
+        try (OneInputStreamOperatorTestHarness<
+                        Tuple2<InternalRow, RowData>, Tuple2<InternalRow, RowData>>
+                harness = new OneInputStreamOperatorTestHarness<>(new NullBitmapExpandOperator())) {
+            harness.open();
+            harness.processElement(new StreamRecord<>(assigned(0, 2, null, 5).f1));
+            harness.processElement(new StreamRecord<>(assigned(0, 2, 7, 6).f1));
+            List<Tuple2<InternalRow, RowData>> expanded = harness.extractOutputValues();
+            assertThat(expanded).hasSize(2);
+            assertThat(expanded).extracting(row -> row.f1.getArity()).containsOnly(3);
+            assertThat(expanded).extracting(row -> row.f1.getLong(2)).containsExactly(5L, 6L);
+            assertThat(expanded).extracting(row -> row.f1.getInt(0)).containsOnly(2);
+            assertThat(expanded.get(0).f1.isNullAt(1)).isTrue();
+            assertThat(expanded.get(1).f1.getInt(1)).isEqualTo(7);
         }
     }
 
@@ -117,8 +157,7 @@ class NullBitmapShuffleOperatorTest {
                         DataTypes.BIGINT(),
                         DataTypes.INT(),
                         DataTypes.INT(),
-                        DataTypes.BIGINT(),
-                        DataTypes.BYTES());
+                        DataTypes.BIGINT());
         SortOperator sorter =
                 new SortOperator(
                         KEY_TYPE,
@@ -140,15 +179,20 @@ class NullBitmapShuffleOperatorTest {
                         new StreamRecord<>(new JoinedRow(row.f0, new FlinkRowWrapper(row.f1))));
             }
             sorter.endInput();
-            return harness.extractOutputValues();
+            List<InternalRow> sorted = harness.extractOutputValues();
+            InternalRowSerializer serializer = new InternalRowSerializer(longType);
+            for (InternalRow row : sorted) {
+                assertThat(row.getFieldCount()).isEqualTo(6);
+                assertThat(serializer.toBinaryRow(row).getSizeInBytes()).isEqualTo(56);
+            }
+            return sorted;
         }
     }
 
     @Test
     void testHookRunsAfterAssignmentAndBeforeExchange() {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        RowType valueType =
-                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT(), DataTypes.BYTES());
+        RowType valueType = KEY_TYPE;
         DataStream<Tuple2<InternalRow, RowData>> input =
                 env.fromData(
                         java.util.Collections.singletonList(assigned(0, 0, null, 0).f1),
@@ -337,8 +381,7 @@ class NullBitmapShuffleOperatorTest {
     @Test
     void testOriginalRowsUseCompactSerializerOnPreAssignmentBatchEdge() {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        RowType valueType =
-                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT(), DataTypes.BYTES());
+        RowType valueType = KEY_TYPE;
         DataStream<RowData> input =
                 env.fromData(
                         java.util.Collections.singletonList(assigned(0, 1, 7, 1).f1.f1),
@@ -397,7 +440,7 @@ class NullBitmapShuffleOperatorTest {
             }
             List<Tuple2<Integer, Tuple2<InternalRow, RowData>>> output =
                     harness.extractOutputValues();
-            assertThat(output.stream().filter(row -> !row.f1.f1.isNullAt(3)).count()).isOne();
+            assertThat(output.stream().filter(row -> row.f1.f1.getArity() == 4).count()).isOne();
             assertThat(decodeDestinations(output)).hasSize((int) id);
             // Disabled nulls pass through immediately while the new dense window is observed.
             int previousSize = output.size();
@@ -516,13 +559,12 @@ class NullBitmapShuffleOperatorTest {
                         snapshot.restoreSerializer().duplicate());
         for (RowData row :
                 new RowData[] {
-                    GenericRowData.of(1, null, 99L, null),
+                    GenericRowData.of(1, null, 99L),
                     GenericRowData.of(
                             1,
                             org.apache.flink.table.data.StringData.fromString(
                                     "a variable length value longer than the inline binary slot"),
-                            100L,
-                            null),
+                            100L),
                     GenericRowData.of(1, null, 101L, new byte[] {1, 2, 3})
                 }) {
             DataOutputSerializer encoded = new DataOutputSerializer(128);
@@ -532,17 +574,21 @@ class NullBitmapShuffleOperatorTest {
             assertThat(copied.getCopyOfBuffer()).isEqualTo(encoded.getCopyOfBuffer());
             RowData decoded =
                     restored.deserialize(new DataInputDeserializer(copied.getCopyOfBuffer()));
-            assertThat(decoded.getArity()).isEqualTo(4);
+            assertThat(decoded.getArity()).isEqualTo(row.getArity());
             assertThat(decoded.getLong(2)).isEqualTo(row.getLong(2));
             assertThat(decoded.isNullAt(1)).isEqualTo(row.isNullAt(1));
             if (!row.isNullAt(1)) {
                 assertThat(decoded.getString(1)).isEqualTo(row.getString(1));
             }
-            assertThat(decoded.isNullAt(3)).isEqualTo(row.isNullAt(3));
-            if (!row.isNullAt(3)) {
+            if (row.getArity() == 4) {
                 assertThat(decoded.getBinary(3)).isEqualTo(row.getBinary(3));
             }
-            assertThat(restored.copy(decoded).getLong(2)).isEqualTo(row.getLong(2));
+            RowData copiedRow = restored.copy(decoded);
+            assertThat(copiedRow.getArity()).isEqualTo(row.getArity());
+            assertThat(copiedRow.getLong(2)).isEqualTo(row.getLong(2));
+            if (row.getArity() == 4) {
+                assertThat(copiedRow.getBinary(3)).isEqualTo(row.getBinary(3));
+            }
         }
     }
 
@@ -550,9 +596,7 @@ class NullBitmapShuffleOperatorTest {
             int range, int task, Integer key, long rowId) {
         return Tuple2.of(
                 range,
-                Tuple2.of(
-                        GenericRow.of(task, key, rowId),
-                        GenericRowData.of(task, key, rowId, null)));
+                Tuple2.of(GenericRow.of(task, key, rowId), GenericRowData.of(task, key, rowId)));
     }
 
     private static Map<Long, Integer> decodeDestinations(
@@ -560,7 +604,7 @@ class NullBitmapShuffleOperatorTest {
         Map<Long, Integer> destinations = new HashMap<>();
         for (Tuple2<Integer, Tuple2<InternalRow, RowData>> assigned : output) {
             RowData row = assigned.f1.f1;
-            if (row.isNullAt(3)) {
+            if (row.getArity() == 3) {
                 assertThat(destinations.put(row.getLong(2), assigned.f0)).isNull();
             } else {
                 RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();

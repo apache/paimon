@@ -28,6 +28,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SortedIndexOptionsTest {
 
     @Test
+    void testNullBitmapShuffleIsOptIn() {
+        Options options = new Options();
+        assertThat(options.get(SortedIndexOptions.SORTED_INDEX_NULL_BITMAP_SHUFFLE_ENABLED))
+                .isFalse();
+        options.setString("sorted-index.null-bitmap-shuffle.enabled", "true");
+        assertThat(options.get(SortedIndexOptions.SORTED_INDEX_NULL_BITMAP_SHUFFLE_ENABLED))
+                .isTrue();
+    }
+
+    @Test
     void testDefaultRecordsPerFile() {
         assertThat(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE.defaultValue())
                 .isEqualTo(25_000_000L);

@@ -190,11 +190,7 @@ public class SortedIndexTopoBuilder {
             GlobalIndexKeyExtractor keyExtractor = indexWriter.keyExtractor();
             RowType sortReadType =
                     normalizedReadType(
-                            dataReadType,
-                            buildTaskIdField,
-                            indexColumn,
-                            keyExtractor.keyType(),
-                            keyExtractor.isIdentity() && sourceReadType.getFieldCount() == 1);
+                            dataReadType, buildTaskIdField, indexColumn, keyExtractor.keyType());
             int taskIdPos = sortReadType.getFieldIndex(buildTaskIdField);
             int indexFieldPos = sortReadType.getFieldIndex(indexColumn);
             int rowIdPos = sortReadType.getFieldIndex(SpecialFields.ROW_ID.name());
@@ -363,6 +359,9 @@ public class SortedIndexTopoBuilder {
                         indexFieldPos,
                         coreOptions,
                         readType,
+                        indexWriter
+                                .indexOptions()
+                                .get(SortedIndexOptions.SORTED_INDEX_NULL_BITMAP_SHUFFLE_ENABLED),
                         parallelism);
 
         return sortedStream
@@ -389,6 +388,7 @@ public class SortedIndexTopoBuilder {
             int indexFieldPos,
             CoreOptions coreOptions,
             RowType readType,
+            boolean compressNulls,
             int parallelism) {
         if (!identity) {
             // Only co-location by build task is required here. Using keyBy in batch mode makes
@@ -432,7 +432,7 @@ public class SortedIndexTopoBuilder {
                         .build();
         return new OrderSorter(env, rowData, coreOptions, readType, sortInfo)
                 .sort(
-                        readType.getFieldCount() == 4
+                        compressNulls
                                 ? new NullBitmapShuffleOperator(
                                         readType.project(
                                                 createSortColumns(
@@ -440,7 +440,7 @@ public class SortedIndexTopoBuilder {
                                                         readType.getFieldNames()
                                                                 .get(indexFieldPos))))
                                 : null,
-                        readType.getFieldCount() == 4 ? new NullBitmapExpandOperator() : null)
+                        compressNulls ? new NullBitmapExpandOperator() : null)
                 .map(FlinkRowWrapper::new, InternalTypeInfo.fromRowType(readType))
                 .setParallelism(parallelism);
     }
@@ -485,24 +485,13 @@ public class SortedIndexTopoBuilder {
     }
 
     private static RowType normalizedReadType(
-            RowType readType,
-            String buildTaskIdField,
-            String indexColumn,
-            DataType keyType,
-            boolean compressNulls) {
+            RowType readType, String buildTaskIdField, String indexColumn, DataType keyType) {
         List<DataField> fields = new ArrayList<>();
         fields.add(
                 new DataField(BUILD_TASK_ID_FIELD_ID, buildTaskIdField, DataTypes.INT().notNull()));
         DataField sourceField = readType.getField(indexColumn);
         fields.add(new DataField(sourceField.id(), sourceField.name(), keyType));
         fields.add(readType.getField(SpecialFields.ROW_ID.name()));
-        if (compressNulls) {
-            String payloadField = "_SORTED_INDEX_NULL_BITMAP";
-            while (readType.containsField(payloadField) || payloadField.equals(buildTaskIdField)) {
-                payloadField = "_" + payloadField;
-            }
-            fields.add(new DataField(-2, payloadField, DataTypes.BYTES()));
-        }
         return new RowType(readType.isNullable(), fields);
     }
 
@@ -589,10 +578,7 @@ public class SortedIndexTopoBuilder {
                                 output.collect(
                                         new StreamRecord<>(
                                                 GenericRow.of(
-                                                        buildTask.taskId,
-                                                        sourceValue,
-                                                        rowId,
-                                                        null)));
+                                                        buildTask.taskId, sourceValue, rowId)));
                                 continue;
                             }
                             boolean[] emitted = new boolean[1];

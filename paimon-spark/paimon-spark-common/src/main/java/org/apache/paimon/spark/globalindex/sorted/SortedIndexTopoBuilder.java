@@ -216,21 +216,28 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             if (!buildTasks.isEmpty()) {
                 int partitionNum =
                         calculateParallelism(buildTasks, recordsPerRange, maxParallelism);
+                boolean compressNulls =
+                        extraFields.isEmpty()
+                                && indexOptions.get(
+                                        SortedIndexOptions
+                                                .SORTED_INDEX_NULL_BITMAP_SHUFFLE_ENABLED);
                 Dataset<Row> partitioned =
                         combineAndSortBuildTaskInputs(
                                 taskInputs,
                                 partitionNum,
                                 taskIdField,
                                 indexField.name(),
-                                extraFields.isEmpty());
+                                compressNulls);
                 Map<Long, SortedBuildTask> buildTasksById = new HashMap<>();
                 for (SortedBuildTask task : buildTasks) {
                     buildTasksById.put(task.taskId, task);
                 }
+                JavaRDD<Row> sortedRows = partitioned.javaRDD();
+                if (compressNulls) {
+                    sortedRows = sortedRows.mapPartitions(NullBitmapShuffle::expandRows);
+                }
                 JavaRDD<byte[]> written =
-                        partitioned
-                                .javaRDD()
-                                .mapPartitions(NullBitmapShuffle::expandRows)
+                        sortedRows
                                 .map(row -> (InternalRow) (new SparkRow(normalizedReadType, row)))
                                 .mapPartitions(
                                         (FlatMapFunction<Iterator<InternalRow>, byte[]>)

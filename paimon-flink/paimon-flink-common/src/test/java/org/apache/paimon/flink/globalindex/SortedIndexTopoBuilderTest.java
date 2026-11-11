@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.globalindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
@@ -27,21 +28,31 @@ import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder.SortedBuildTas
 import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.NullBitmapBuffer;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.globalindex.sorted.SortedSingleColumnIndexWriter;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
+import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.api.dag.Transformation;
+import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
@@ -49,6 +60,8 @@ import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.streaming.api.transformations.StreamExchangeMode;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.junit.jupiter.api.Test;
 
 import java.io.Closeable;
@@ -60,17 +73,19 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
+import static org.apache.paimon.globalindex.sorted.SortedIndexOptions.SORTED_INDEX_NULL_BITMAP_SHUFFLE_ENABLED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 /** Tests for {@link SortedIndexTopoBuilder}. */
 public class SortedIndexTopoBuilderTest {
 
     @Test
-    public void testNormalizedNullPayloadRoundTripsWithoutNameCollision() throws Exception {
+    public void testNormalizedLogicalTypeHasNoBitmapPayloadField() throws Exception {
         String column = "_SORTED_INDEX_NULL_BITMAP";
         RowType source =
                 SpecialFields.rowTypeWithRowId(
@@ -82,36 +97,17 @@ public class SortedIndexTopoBuilderTest {
                         RowType.class,
                         String.class,
                         String.class,
-                        org.apache.paimon.types.DataType.class,
-                        boolean.class);
+                        org.apache.paimon.types.DataType.class);
         normalize.setAccessible(true);
-        RowType type =
-                (RowType) normalize.invoke(null, source, "task", column, DataTypes.INT(), true);
+        RowType type = (RowType) normalize.invoke(null, source, "task", column, DataTypes.INT());
         assertThat(type.getFieldNames())
-                .containsExactly(
-                        "task", column, SpecialFields.ROW_ID.name(), "__SORTED_INDEX_NULL_BITMAP");
-        assertThat(type.getTypeAt(3)).isEqualTo(DataTypes.BYTES());
-        NullBitmapBuffer buffer = new NullBitmapBuffer();
-        buffer.add(5);
-        buffer.add(1L << 33);
-        byte[] payload = buffer.drain();
+                .containsExactly("task", column, SpecialFields.ROW_ID.name());
         BinaryRow row =
                 new org.apache.paimon.data.serializer.InternalRowSerializer(type)
-                        .toBinaryRow(GenericRow.of(2, null, 5L, payload));
-        assertThat(row.getBinary(3)).isEqualTo(payload);
+                        .toBinaryRow(GenericRow.of(2, null, 5L));
+        assertThat(row.getFieldCount()).isEqualTo(3);
         assertThat(row.getInt(0)).isEqualTo(2);
         assertThat(row.getLong(2)).isEqualTo(5L);
-        assertThat(
-                        ((RowType)
-                                        normalize.invoke(
-                                                null,
-                                                source,
-                                                "task",
-                                                column,
-                                                DataTypes.INT(),
-                                                false))
-                                .getFieldCount())
-                .isEqualTo(3);
     }
 
     @Test
@@ -159,13 +155,143 @@ public class SortedIndexTopoBuilderTest {
             assertThat(rows).hasSize(NullBitmapBuffer.MAX_ROWS * 2 + 2);
             for (int i = 0; i < rows.size(); i++) {
                 InternalRow row = rows.get(i);
-                assertThat(row.getFieldCount()).isEqualTo(4);
+                assertThat(row.getFieldCount()).isEqualTo(3);
                 assertThat(row.getInt(0)).isEqualTo(3);
                 assertThat(row.getLong(2)).isEqualTo((1L << 33) + i);
                 assertThat(row.isNullAt(1)).isEqualTo(allNull || i != 1);
-                assertThat(row.isNullAt(3)).isTrue();
             }
         }
+    }
+
+    @Test
+    public void testDefaultTopologyUsesOriginalThreeFieldRowsAndSerializer() throws Exception {
+        checkDisabledTopology(new Options());
+    }
+
+    @Test
+    public void testDisabledTopologyUsesOriginalThreeFieldRowsAndSerializer() throws Exception {
+        Options options = new Options();
+        options.set(SORTED_INDEX_NULL_BITMAP_SHUFFLE_ENABLED, false);
+        checkDisabledTopology(options);
+    }
+
+    private void checkDisabledTopology(Options options) throws Exception {
+        Transformation<?> root = buildScalarTopology(options);
+        assertThat(findTransformation(root, "TRANSFORM ASSIGNED RANGES")).isNull();
+        assertThat(findTransformation(root, "TRANSFORM EXCHANGED ROWS")).isNull();
+        assertThat(
+                        findTransformation(root, "Read Data")
+                                .getOutputType()
+                                .createSerializer(new ExecutionConfig().getSerializerConfig())
+                                .createInstance())
+                .isInstanceOfSatisfying(
+                        InternalRow.class, row -> assertThat(row.getFieldCount()).isEqualTo(3));
+        Transformation<?> assignment = findTransformation(root, "ASSIGN RANGE INDEX");
+        assertThat(assignment).isNotNull();
+        TupleTypeInfo<?> preAssignmentType =
+                (TupleTypeInfo<?>) assignment.getInputs().get(1).getOutputType();
+        TypeInformation<?> valueType = preAssignmentType.getTypeAt(1);
+        assertThat(valueType).isNotInstanceOf(NullBitmapTransportTypeInfo.class);
+        TypeSerializer<?> serializer =
+                valueType.createSerializer(new ExecutionConfig().getSerializerConfig());
+        assertThat(serializer).isInstanceOf(RowDataSerializer.class);
+        assertThat(((RowData) serializer.createInstance()).getArity()).isEqualTo(3);
+    }
+
+    @Test
+    public void testEnabledTopologyKeepsThreeFieldSourceAndSixFieldLocalSort() throws Exception {
+        Options options = new Options();
+        options.set(SORTED_INDEX_NULL_BITMAP_SHUFFLE_ENABLED, true);
+        Transformation<?> root = buildScalarTopology(options);
+        assertThat(findTransformation(root, "TRANSFORM ASSIGNED RANGES")).isNotNull();
+        assertThat(findTransformation(root, "TRANSFORM EXCHANGED ROWS")).isNotNull();
+        InternalRow sourceRow =
+                (InternalRow)
+                        findTransformation(root, "Read Data")
+                                .getOutputType()
+                                .createSerializer(new ExecutionConfig().getSerializerConfig())
+                                .createInstance();
+        assertThat(sourceRow.getFieldCount()).isEqualTo(3);
+        BinaryRow sortRow =
+                (BinaryRow)
+                        findTransformation(root, "LOCAL SORT")
+                                .getOutputType()
+                                .createSerializer(new ExecutionConfig().getSerializerConfig())
+                                .createInstance();
+        assertThat(sortRow.getFieldCount()).isEqualTo(6);
+        assertThat(sortRow.getFixedLengthPartSize()).isEqualTo(56);
+    }
+
+    private Transformation<?> buildScalarTopology(Options options) throws Exception {
+        RowType rowType =
+                RowType.of(new org.apache.paimon.types.DataField(0, "id", DataTypes.INT()));
+        FileStoreTable table = mock(FileStoreTable.class, withSettings().serializable());
+        ReadBuilder readBuilder = mock(ReadBuilder.class, withSettings().serializable());
+        when(table.rowType()).thenReturn(rowType);
+        when(table.coreOptions()).thenReturn(new CoreOptions(new Options()));
+        when(table.partitionKeys()).thenReturn(Collections.emptyList());
+        when(table.newReadBuilder()).thenReturn(readBuilder);
+        when(readBuilder.withReadType(SpecialFields.rowTypeWithRowId(rowType)))
+                .thenReturn(readBuilder);
+        DataFileMeta file =
+                DataFileMeta.forAppend(
+                        "data.parquet",
+                        1024,
+                        10,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        9,
+                        0,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        0L,
+                        null);
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Collections.singletonList(file))
+                        .rawConvertible(false)
+                        .build();
+        SortedGlobalIndexScanner scanner = mock(SortedGlobalIndexScanner.class);
+        when(scanner.withIndexFields(Collections.singletonList("id"))).thenReturn(scanner);
+        when(scanner.incrementalScan())
+                .thenReturn(
+                        Optional.of(
+                                new ScanResult<>(
+                                        1L,
+                                        RowRangeIndex.create(
+                                                Collections.singletonList(new Range(0, 9))),
+                                        Collections.singletonList(split),
+                                        Collections.emptyList())));
+        return SortedIndexTopoBuilder.buildIndexStream(
+                        StreamExecutionEnvironment.getExecutionEnvironment(),
+                        () -> scanner,
+                        table,
+                        Collections.singletonList(Collections.singletonList("id")),
+                        "btree",
+                        null,
+                        options)
+                .get()
+                .getTransformation();
+    }
+
+    private static Transformation<?> findTransformation(Transformation<?> root, String name) {
+        if (root.getName().equals(name)) {
+            return root;
+        }
+        for (Transformation<?> input : root.getInputs()) {
+            Transformation<?> match = findTransformation(input, name);
+            if (match != null) {
+                return match;
+            }
+        }
+        return null;
     }
 
     @Test

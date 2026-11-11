@@ -36,8 +36,6 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.binary.BinarySegmentUtils;
-import org.apache.flink.table.data.utils.JoinedRowData;
-import org.apache.flink.table.data.utils.ProjectedRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.util.InstantiationUtil;
 
@@ -119,8 +117,6 @@ final class NullBitmapTransportTypeInfo extends TypeInformation<RowData> {
         private final RowType originalType;
         private final RowDataSerializer rawSerializer;
         private final RowDataSerializer bitmapSerializer;
-        private static final RowData ABSENT_PAYLOAD = new GenericRowData(1);
-        private transient ProjectedRowData rawProjection;
 
         Serializer(RowType originalType) {
             this.originalType = originalType;
@@ -144,24 +140,19 @@ final class NullBitmapTransportTypeInfo extends TypeInformation<RowData> {
 
         @Override
         public RowData createInstance() {
-            return new GenericRowData(4);
+            return new GenericRowData(3);
         }
 
         @Override
         public RowData copy(RowData row) {
-            return bitmapSerializer.copy(row);
+            return row.getArity() == 4 ? bitmapSerializer.copy(row) : rawSerializer.copy(row);
         }
 
         @Override
         public void serialize(RowData row, DataOutputView target) throws IOException {
-            if (rawProjection == null) {
-                rawProjection = ProjectedRowData.from(new int[] {0, 1, 2});
-            }
-            boolean bitmap = !row.isNullAt(3);
+            boolean bitmap = row.getArity() == 4;
             BinaryRowData binary =
-                    bitmap
-                            ? bitmapSerializer.toBinaryRow(row)
-                            : rawSerializer.toBinaryRow(rawProjection.replaceRow(row));
+                    bitmap ? bitmapSerializer.toBinaryRow(row) : rawSerializer.toBinaryRow(row);
             int length = binary.getSizeInBytes();
             // Binary rows have a positive length; its sign distinguishes the optional payload.
             target.writeInt(bitmap ? -length : length);
@@ -177,10 +168,7 @@ final class NullBitmapTransportTypeInfo extends TypeInformation<RowData> {
             source.readFully(bytes);
             BinaryRowData binary = new BinaryRowData(bitmap ? 4 : 3);
             binary.pointTo(MemorySegmentFactory.wrap(bytes), 0, length);
-            if (bitmap) {
-                return binary;
-            }
-            return new JoinedRowData(binary.getRowKind(), binary, ABSENT_PAYLOAD);
+            return binary;
         }
 
         @Override

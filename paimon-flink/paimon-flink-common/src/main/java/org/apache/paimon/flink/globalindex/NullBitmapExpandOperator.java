@@ -41,7 +41,7 @@ class NullBitmapExpandOperator extends TableStreamOperator<Tuple2<InternalRow, R
     public void processElement(StreamRecord<Tuple2<InternalRow, RowData>> element)
             throws IOException {
         RowData row = element.getValue().f1;
-        if (row.isNullAt(3)) {
+        if (row.getArity() == 3) {
             output.collect(element);
             return;
         }
@@ -53,7 +53,7 @@ class NullBitmapExpandOperator extends TableStreamOperator<Tuple2<InternalRow, R
                     new StreamRecord<>(
                             Tuple2.of(
                                     GenericRow.of(taskId, null, rowId),
-                                    GenericRowData.of(taskId, null, rowId, null))));
+                                    GenericRowData.of(taskId, null, rowId))));
         }
     }
 }
