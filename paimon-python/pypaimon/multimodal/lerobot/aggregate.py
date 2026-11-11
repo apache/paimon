@@ -18,6 +18,7 @@
 
 import copy
 import json
+from decimal import Decimal
 from contextlib import ExitStack, contextmanager
 
 import numpy as np
@@ -25,6 +26,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from pypaimon import Schema as PaimonSchema
+from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.multimodal.arrow_utils import strict_arrow_table
 from pypaimon.multimodal.lerobot.loader import (
     _commit_messages, _prepare_dataset, _video_fps,
@@ -65,8 +67,12 @@ _REBUILT_INFO = {
     "data_files_size_in_mb", "video_files_size_in_mb", "features",
 }
 _DATASET_INDEX_COLUMN = "dataset_index"
-_EPISODE_JSON_GROUPS = ("meta", "data", "videos", "stats")
-_EPISODE_EXTRA_JSON_GROUP_DESCRIPTION = "pypaimon.lerobot.episode-json-group"
+_EPISODE_VARIANT_GROUPS = ("meta", "data", "videos", "stats")
+_EPISODE_EXTRA_VARIANT_GROUP_DESCRIPTION = "pypaimon.lerobot.episode-variant-group"
+_VARIANT_TYPE = pa.struct([
+    pa.field("value", pa.binary(), nullable=False),
+    pa.field("metadata", pa.binary(), nullable=False),
+])
 _SOURCE_TASKS_TYPE = pa.list_(pa.struct([
     pa.field("task_index", pa.int64(), nullable=False),
     pa.field("task", pa.string(), nullable=False),
@@ -157,17 +163,30 @@ def _json_native_arrow_type(data_type):
     return False
 
 
-def _episode_json_group(original, group):
+def _variant_value(value):
+    def preserve_large_integers(item):
+        if isinstance(item, int) and not isinstance(item, bool) \
+                and not -(1 << 63) <= item < (1 << 63):
+            return Decimal(item)
+        if isinstance(item, dict):
+            return {key: preserve_large_integers(child) for key, child in item.items()}
+        if isinstance(item, list):
+            return [preserve_large_integers(child) for child in item]
+        return item
+
+    variant = GenericVariant.from_python(preserve_large_integers(_json_value(value)))
+    return {"value": variant.value(), "metadata": variant.metadata()}
+
+
+def _episode_variant_group(original, group):
     prefix = group + "/"
-    return json.dumps(
-        _json_value({key[len(prefix):]: value
-                     for key, value in original.items()
-                     if key.startswith(prefix)}),
-        ensure_ascii=False, separators=(",", ":"))
+    return _variant_value({key[len(prefix):]: value
+                           for key, value in original.items()
+                           if key.startswith(prefix)})
 
 
-def _episode_json_groups(schema):
-    groups = dict.fromkeys(_EPISODE_JSON_GROUPS)
+def _episode_variant_groups(schema):
+    groups = dict.fromkeys(_EPISODE_VARIANT_GROUPS)
     for name in schema.names:
         if "/" in name:
             group, key = name.split("/", 1)
@@ -177,9 +196,9 @@ def _episode_json_groups(schema):
     return tuple(groups)
 
 
-def _validate_episode_json(table, source_index):
+def _validate_episode_variant(table, source_index):
     fields = [field for field in table.schema if "/" in field.name]
-    groups = _episode_json_groups(table.schema)
+    groups = _episode_variant_groups(table.schema)
     for field in fields:
         if not _json_native_arrow_type(field.type):
             raise ValueError(
@@ -190,7 +209,7 @@ def _validate_episode_json(table, source_index):
     for row_index, original in enumerate(table.select(names).to_pylist()):
         for group in groups:
             try:
-                _episode_json_group(original, group)
+                _episode_variant_group(original, group)
             except (TypeError, ValueError, OverflowError) as error:
                 raise ValueError(
                     "LeRobot source %d Episode row %d has invalid JSON-native "
@@ -343,12 +362,12 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
     info["features"] = features
     metadata = dict(first["metadata"])
     metadata["frame_schema"] = frame_schema
-    # Keep ungrouped fields typed and turn each slash prefix into one JSON column.
+    # Keep ungrouped fields typed and turn each slash prefix into one VARIANT column.
     groups = tuple(dict.fromkeys(group for plan in plans
-                                 for group in _episode_json_groups(
+                                 for group in _episode_variant_groups(
                                      plan["metadata"]["episodes_schema"])))
     if _DATASET_INDEX_COLUMN in groups:
-        raise ValueError("LeRobot Episode JSON group uses reserved column dataset_index.")
+        raise ValueError("LeRobot Episode VARIANT group uses reserved column dataset_index.")
     reserved_episode_fields = {_DATASET_INDEX_COLUMN, *groups}
     for ordinal, plan in enumerate(plans):
         conflicts = reserved_episode_fields.intersection(
@@ -359,13 +378,13 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
     schemas = []
     for plan in plans:
         source_schema = plan["metadata"]["episodes_schema"]
-        source_groups = _episode_json_groups(source_schema)
+        source_groups = _episode_variant_groups(source_schema)
         schemas.append(pa.schema(
             [field for field in source_schema if "/" not in field.name]
-            + [pa.field(group, pa.string(), nullable=False,
+            + [pa.field(group, _VARIANT_TYPE, nullable=False,
                         metadata={b"description":
-                                  _EPISODE_EXTRA_JSON_GROUP_DESCRIPTION.encode("utf-8")})
-               for group in source_groups if group not in _EPISODE_JSON_GROUPS]))
+                                  _EPISODE_EXTRA_VARIANT_GROUP_DESCRIPTION.encode("utf-8")})
+               for group in source_groups if group not in _EPISODE_VARIANT_GROUPS]))
     metadata["episodes_schema"] = _merge_schemas(schemas, schema_evolution, _EPISODE_CONTROL_COLUMNS)
     frame_offset = episode_offset = 0
     for ordinal, plan in enumerate(plans):
@@ -380,7 +399,7 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
                 _video_fps(other, other["features"][name], name)
             for table in _validated_episode_tables(
                     plan["metadata"], plan["videos"], check_episode_fps=mixed_fps):
-                _validate_episode_json(table, ordinal)
+                _validate_episode_variant(table, ordinal)
         except ValueError as error:
             raise ValueError("LeRobot source %d: %s" % (ordinal, error)) from error
         plan["frame_offset"] = frame_offset
@@ -396,10 +415,10 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
     metadata["subtasks_table"] = _vocabulary(plans, "subtasks", existing_sources)
     for field in (
             pa.field(_DATASET_INDEX_COLUMN, pa.int64(), nullable=False),
-            pa.field("meta", pa.string(), nullable=False),
-            pa.field("data", pa.string(), nullable=False),
-            pa.field("videos", pa.string(), nullable=False),
-            pa.field("stats", pa.string(), nullable=False)):
+            pa.field("meta", _VARIANT_TYPE, nullable=False),
+            pa.field("data", _VARIANT_TYPE, nullable=False),
+            pa.field("videos", _VARIANT_TYPE, nullable=False),
+            pa.field("stats", _VARIANT_TYPE, nullable=False)):
         metadata["episodes_schema"] = metadata["episodes_schema"].append(field)
     episode_names = metadata["episodes_schema"].names
     if len(episode_names) != len(set(episode_names)):
@@ -504,19 +523,19 @@ def _transform_frames(plan, batch, episode):
 def _merged_episodes(plans, schema):
     extra_groups = tuple(dict.fromkeys(
         group for plan in plans
-        for group in _episode_json_groups(plan["metadata"]["episodes_schema"])
-        if group not in _EPISODE_JSON_GROUPS))
+        for group in _episode_variant_groups(plan["metadata"]["episodes_schema"])
+        if group not in _EPISODE_VARIANT_GROUPS))
     for plan in plans:
         for table in _source_episode_tables(plan["metadata"]):
-            source_groups = set(_episode_json_groups(table.schema))
+            source_groups = set(_episode_variant_groups(table.schema))
             records = []
             for original in table.to_pylist():
                 row = {name: original[name] for name in schema.names
                        if name in original}
                 for group in ("meta", "data", "videos"):
-                    row[group] = _episode_json_group(original, group)
+                    row[group] = _episode_variant_group(original, group)
                 for group in extra_groups:
-                    row[group] = (_episode_json_group(original, group)
+                    row[group] = (_episode_variant_group(original, group)
                                   if group in source_groups
                                   else None)
                 stats = {}
@@ -535,8 +554,7 @@ def _merged_episodes(plans, schema):
                             metric: None for metric in stats["subtask_index"]}
                 for name, values in plan["control_stats"][episode].items():
                     stats[name] = values
-                row["stats"] = json.dumps(
-                    _json_value(stats), ensure_ascii=False, separators=(",", ":"))
+                row["stats"] = _variant_value(stats)
                 records.append(row)
             yield pa.Table.from_pylist(records, schema=schema)
 
@@ -632,20 +650,20 @@ def _import_sources(connection, table_name, sources, batch_size, options,
         else:
             table, tables, source_rows, ranges = existing
             existing_episode_schema = _target_schema(tables["episodes"])
-            existing_groups = set(_EPISODE_JSON_GROUPS)
+            existing_groups = set(_EPISODE_VARIANT_GROUPS)
             existing_groups.update(
                 field.name for field in existing_episode_schema
                 if (field.metadata or {}).get(b"description") ==
-                _EPISODE_EXTRA_JSON_GROUP_DESCRIPTION.encode("utf-8"))
+                _EPISODE_EXTRA_VARIANT_GROUP_DESCRIPTION.encode("utf-8"))
             incoming_groups = set(group for plan in plans
-                                  for group in _episode_json_groups(
+                                  for group in _episode_variant_groups(
                                       plan["metadata"]["episodes_schema"]))
             conflicts = sorted(
                 name for name in set(existing_episode_schema.names)
                 & set(metadata["episodes_schema"].names)
                 if (name in existing_groups) != (name in incoming_groups))
             if conflicts:
-                raise ValueError("LeRobot append Episode JSON groups conflict with "
+                raise ValueError("LeRobot append Episode VARIANT groups conflict with "
                                  "plain columns: %s." % conflicts)
             first_info = ranges[0][0]
             old_features = {}

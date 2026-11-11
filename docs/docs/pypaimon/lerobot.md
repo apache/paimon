@@ -87,16 +87,18 @@ forced to `BIGINT`.
 | `dataset_to_index` | Source integer type | Exclusive end of that frame range. |
 | `length` | Source integer type | Number of frames; equals `dataset_to_index - dataset_from_index`. |
 | `tasks` | Source task-label list | Task texts used by the Episode, rather than frame task IDs. |
-| `meta`, `data`, `videos`, `stats` | JSON `STRING` columns | Grouped source fields describing metadata locations, data shards, per-camera video locations/timestamps, and per-Episode feature statistics. Empty groups are `{}`. |
-| Other source fields | Source type, or a JSON `STRING` for a `/` prefix group | Custom Episode metadata, such as quality labels or camera calibration. |
+| `meta`, `data`, `videos`, `stats` | `VARIANT` columns | Grouped source fields describing metadata locations, data shards, per-camera video locations/timestamps, and per-Episode feature statistics. Empty groups are `{}`. |
+| Other source fields | Source type, or a `VARIANT` for a `/` prefix group | Custom Episode metadata, such as quality labels or camera calibration. |
 
 For list imports, a field such as `data/chunk_index` becomes the
 `"chunk_index"` key inside `_episodes.data`. A field such as
 `videos/observation.images.front/from_timestamp` becomes the
 `"observation.images.front/from_timestamp"` key inside `_episodes.videos`.
 Likewise, `camera_intrinsics/head_left` becomes the `"head_left"` key in a
-`camera_intrinsics` JSON column. Episode `stats` is grouped by feature and then
+`camera_intrinsics` VARIANT column. Episode `stats` is grouped by feature and then
 statistic, for example `{"action":{"mean":[0.1,0.2]}}`.
+In Python, decode a scanned VARIANT value with
+`GenericVariant.from_arrow_struct(value).to_python()`.
 
 These data/video locations describe the original LeRobot files. Paimon reads
 the imported media through the frame table's BLOB values.
@@ -157,7 +159,7 @@ For a new import with a single source string and no `dataset_name` or non-empty
 still creates the same three tables. Its Dataset row has `index=0` and
 `name=null`, but frames and Episodes do not gain a source `dataset_index`.
 Episode fields such as `data/chunk_index` and `stats/action/mean` retain their
-original names and types instead of being grouped into JSON columns.
+original names and types instead of being grouped into VARIANT columns.
 
 To use the source-indexed schema above, or to append more sources later, pass
 `source=["/data/source_a"]`. Supplying `dataset_name` or non-empty
@@ -210,7 +212,7 @@ sources. [Dataset fields](#dataset-fields) describes the retained source metadat
 
 Grouped Episode fields must use JSON-native Arrow types: null, boolean, integer,
 floating point, string, list, or struct, including nested combinations.
-Binary, temporal, decimal, map, and extension types in these JSON groups are
+Binary, temporal, decimal, map, and extension types in these source groups are
 rejected before any target table is created. Episode fields without `/` retain
 their original names and Paimon-supported Arrow types as columns in `_episodes`;
 unsupported types are rejected before table creation.
@@ -229,7 +231,7 @@ require an import option.
 
 `schema_evolution=True` is the default. The importer plans the union of source
 columns before creating `_frames`, `_episodes`, and any declared extra
-`_datasets` columns. Episode fields with `/` are grouped by prefix into JSON:
+`_datasets` columns. Episode fields with `/` are grouped by prefix into VARIANT:
 `camera_intrinsics/head_left` becomes the `head_left` key in
 `_episodes.camera_intrinsics`. Other Episode fields retain their Arrow types.
 For appends, it compares the incoming columns with the existing table group and
@@ -237,6 +239,8 @@ adds new nullable columns. Existing rows read as null in those columns; incoming
 rows receive nulls for omitted optional columns. Existing optional columns are
 made nullable when necessary. All three component schemas are checked before
 catalog changes, and existing field IDs are preserved.
+Existing table groups with JSON `STRING` Episode columns must be re-imported to
+use the new VARIANT schema; append does not change those column types in place.
 Missing columns receive typed nulls. Optional columns become nullable; source
 indices, timestamps, task indices, and required Episode controls remain required.
 Common columns must have identical types, and common frame features must retain

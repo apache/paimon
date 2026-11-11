@@ -27,7 +27,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from pypaimon import Schema as PaimonSchema
 from pypaimon.catalog.catalog_exception import TableNotExistException
+from pypaimon.data.generic_variant import GenericVariant
 import pypaimon.multimodal as pm
 from pypaimon.multimodal.lerobot import aggregate
 from pypaimon.multimodal.lerobot.aggregate import _batch_stats, _transform_frames
@@ -35,6 +37,10 @@ from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 
 
 pytestmark = pytest.mark.skipif(sys.version_info < (3, 10), reason="LeRobot import requires Python 3.10+")
+
+
+def variant_value(value):
+    return None if value is None else GenericVariant.from_arrow_struct(value).to_python()
 
 
 def source(root, tasks=("pick", "place"), subtasks=("reach", "grasp"), video=False, value=0, fps=10, frames=5):
@@ -232,7 +238,7 @@ def test_append_rejects_episode_group_plain_column_collision(setup, group_first)
     conn.load_from_lerobot("robot", [sources[0]])
     before = episode_rows(conn, "robot_episodes")["camera_intrinsics"].to_pylist()
 
-    with pytest.raises(ValueError, match="JSON groups conflict with plain columns"):
+    with pytest.raises(ValueError, match="VARIANT groups conflict with plain columns"):
         conn.append_to_lerobot("robot", sources[1])
 
     assert episode_rows(conn, "robot_episodes")["camera_intrinsics"].to_pylist() == before
@@ -250,7 +256,7 @@ def test_append_preserves_episode_group_kind(setup):
     conn.load_from_lerobot("robot", [sources[0]])
     conn.append_to_lerobot("robot", sources[1])
     actual = episode_rows(conn, "robot_episodes")["camera_intrinsics"].to_pylist()
-    assert [json.loads(value) for value in actual] == [
+    assert [variant_value(value) for value in actual] == [
         {"head_left": [0.]}, {"head_left": [1.]},
         {"head_left": [1.]}, {"head_left": [2.]},
     ]
@@ -262,9 +268,9 @@ def test_append_episode_task_stats_use_group_vocabulary(setup):
     conn.append_to_lerobot("robot", sources[1])
 
     episodes = episode_rows(conn, "robot_episodes").to_pylist()
-    task_means = [json.loads(row["stats"])["task_index"]["mean"][0]
+    task_means = [variant_value(row["stats"])["task_index"]["mean"][0]
                   for row in episodes]
-    subtask_means = [json.loads(row["stats"])["subtask_index"]["mean"][0]
+    subtask_means = [variant_value(row["stats"])["subtask_index"]["mean"][0]
                      for row in episodes]
     assert task_means == [0, 1, 1, 2]
     assert subtask_means == pytest.approx([0.5, 1 / 3, 1.5, 4 / 3])
@@ -465,7 +471,7 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     assert episodes["dataset_from_index"].to_pylist() == [0, 2, 0, 2]
     assert episodes["dataset_to_index"].to_pylist() == [2, 5, 2, 5]
     assert not any(c.startswith("stats/") for c in episodes.column_names)
-    episode_stats = [json.loads(value) for value in episodes["stats"].to_pylist()]
+    episode_stats = [variant_value(value) for value in episodes["stats"].to_pylist()]
     assert [item["index"]["mean"] for item in episode_stats] == [
         [0.5], [3.0], [5.5], [8.0]]
     assert all("q50" not in item["index"] for item in episode_stats)
@@ -500,7 +506,7 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     assert selected[0]["episode_index"].item() == 2
 
 
-def test_merge_keeps_source_specific_episode_statistics_in_json(setup):
+def test_merge_keeps_source_specific_episode_statistics_in_variant(setup):
     conn, sources = setup
     for index, uri in enumerate(sources):
         path = Path(uri[7:]) / "meta/episodes/chunk-000/file-000.parquet"
@@ -513,21 +519,41 @@ def test_merge_keeps_source_specific_episode_statistics_in_json(setup):
 
     conn.load_from_lerobot("merged", sources)
     episodes = episode_rows(conn, "merged_episodes")
-    assert episodes.schema.field("stats").type == pa.string()
-    assert all(episodes.schema.field(name).type == pa.string()
+    assert episodes.schema.field("stats").type == aggregate._VARIANT_TYPE
+    assert next(field for field in PaimonSchema.from_pyarrow_schema(episodes.schema).fields
+                if field.name == "stats").type.type == "VARIANT"
+    assert all(episodes.schema.field(name).type == aggregate._VARIANT_TYPE
                for name in ("meta", "data", "videos", "stats"))
     assert not any(name.startswith(("meta/", "data/", "videos/", "stats/"))
                    for name in episodes.column_names)
     for row in episodes.to_pylist():
-        stats = json.loads(row["stats"])
+        stats = variant_value(row["stats"])
         assert stats["source_%d" % row["dataset_index"]]["mean"] == [
             row["dataset_index"] + 0.5]
         assert "q50" not in stats["index"]
-        assert json.loads(row["meta"]) == {"episodes/chunk_index": row["dataset_index"]}
-        assert json.loads(row["data"]) == {
+        assert variant_value(row["meta"]) == {"episodes/chunk_index": row["dataset_index"]}
+        assert variant_value(row["data"]) == {
             "chunk_index": 0, "file_index": 0,
             "vendor_%d" % row["dataset_index"]: "source"}
-        assert json.loads(row["videos"]) == {}
+        assert variant_value(row["videos"]) == {}
+    from pypaimon.multimodal.lerobot.dataset import _merged_source_stats
+    merged_stats = _merged_source_stats(
+        rows(conn, "merged_datasets").to_pylist(),
+        conn.get_table("merged_episodes").raw_table)
+    np.testing.assert_allclose(merged_stats["index"]["mean"], [4.5])
+
+
+def test_episode_variant_preserves_uint64(setup):
+    conn, sources = setup
+    path = Path(sources[0][7:]) / "meta/episodes/chunk-000/file-000.parquet"
+    table = pq.read_table(path).append_column(
+        "meta/large_id", pa.array([2**64 - 1, None], type=pa.uint64()))
+    pq.write_table(table, path)
+
+    conn.load_from_lerobot("merged", [sources[0]])
+    episodes = episode_rows(conn, "merged_episodes").to_pylist()
+    assert variant_value(episodes[0]["meta"])["large_id"] == Decimal(2**64 - 1)
+    assert variant_value(episodes[1]["meta"])["large_id"] is None
 
 
 @pytest.mark.parametrize("name,values", [
@@ -906,7 +932,7 @@ def test_video_sources_with_identical_paths(tmp_path, import_parallelism):
     episodes = episode_rows(conn, "merged_episodes")
     assert not any(name.startswith("videos/") for name in episodes.column_names)
     for episode in episodes.to_pylist():
-        video = json.loads(episode["videos"])
+        video = variant_value(episode["videos"])
         assert set(video) == {"camera/" + suffix for suffix in (
             "chunk_index", "file_index", "from_timestamp", "to_timestamp")}
     for source_index, uri in enumerate(sources):
@@ -1182,7 +1208,7 @@ def test_merge_nullable_subtask_import(setup, tmp_path, import_parallelism, all_
     assert not batch["subtask_index_is_valid"][1].item()
     if all_null:
         assert "subtask_index" not in metadata(conn, "stats")
-        assert all(all(metric is None for metric in json.loads(value)
+        assert all(all(metric is None for metric in variant_value(value)
                        ["subtask_index"].values()) for value in
                    rows(conn, "merged_episodes")["stats"].to_pylist())
     if not all_null:
@@ -1292,7 +1318,7 @@ def test_reconstructed_subtask_stats_use_output_schema(setup, import_parallelism
         pq.write_table(episodes.cast(schema), path)
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism)
     episodes = episode_rows(conn, "merged_episodes")
-    stats = [json.loads(value) for value in episodes["stats"].to_pylist()]
+    stats = [variant_value(value) for value in episodes["stats"].to_pylist()]
     assert [value.get("subtask_index", {}).get("mean") for value in stats[::2]] == (
         [None, None] if empty_episode else [[0.0], [1.0]])
     assert not any(name.startswith("stats/") for name in episodes.column_names)
@@ -1684,7 +1710,7 @@ def test_merge_source_specific_episode_extensions(setup, import_parallelism, rev
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
     data = episode_rows(conn, "merged_episodes")
     assert data.schema.field("vendor_note").nullable
-    assert data.schema.field("camera_intrinsics").type == pa.string()
+    assert data.schema.field("camera_intrinsics").type == aggregate._VARIANT_TYPE
     assert data.schema.field("camera_intrinsics").nullable
     for ordinal, uri in enumerate(sources):
         source_index = original.index(uri)
@@ -1695,7 +1721,7 @@ def test_merge_source_specific_episode_extensions(setup, import_parallelism, rev
             [1, 2] if source_index == 0 else [3, 4])
         assert values["shared_note"].to_pylist() == (
             ["shared", "note"] if source_index == 0 else [None, "note"])
-        assert [None if value is None else json.loads(value)
+        assert [None if value is None else variant_value(value)
                 for value in values["camera_intrinsics"].to_pylist()] == (
                     [None, None] if source_index == 0 else [
                         {"head_left": [1.] * 8}, {"head_left": [2.] * 8}])
@@ -2108,8 +2134,8 @@ def test_schema_evolution_unions_three_tables(setup, import_parallelism, reverse
             [1., 2., 3., 4., 5.] if first else [None] * 5)
         assert data["pressure"].slice(ordinal * 5, 5).to_pylist() == (
             [None] * 5 if first else [6., 7., 8., 9., 10.])
-        assert json.loads(episodes[ordinal * 2]["meta"]).get("note") == ("a" if first else None)
-        assert json.loads(episodes[ordinal * 2]["meta"]).get("score") == (None if first else 0.5)
+        assert variant_value(episodes[ordinal * 2]["meta"]).get("note") == ("a" if first else None)
+        assert variant_value(episodes[ordinal * 2]["meta"]).get("score") == (None if first else 0.5)
         assert datasets[ordinal]["notes"] == (None if first else "# Notes")
         assert datasets[ordinal]["config"] == ([("model", '{"name":"model"}')] if first else None)
     assert metadata(conn, "stats")["temperature"]["count"] == [5]

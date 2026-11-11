@@ -37,6 +37,7 @@ from types import SimpleNamespace
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.multimodal.lerobot.aggregate import (
     _CONTROLS, _REBUILT_INFO, _merge_stats,
 )
@@ -1229,7 +1230,9 @@ def _merged_source_stats(sources, episodes_table):
     columns = _target_schema(episodes_table).names
     if "stats" in columns:
         stats_rows = _read_arrow(episodes_table, ["stats"])["stats"].to_pylist()
-        decoded_rows = [json.loads(raw) for raw in stats_rows if raw]
+        decoded_rows = [GenericVariant.from_arrow_struct(raw).to_python()
+                        if isinstance(raw, dict) else json.loads(raw)
+                        for raw in stats_rows if raw]
         for name in _CONTROLS:
             parts = [row[name] for row in decoded_rows if name in row
                      and row[name].get("count") is not None]
