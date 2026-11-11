@@ -694,22 +694,28 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             snapshotId,
                             fileMeta));
         }
-        dataSplitToDvManifestEntries(dataSplit, rawFiles, snapshotId, dvFileEntries);
+        dataSplitToDvManifestEntries(dataSplit, snapshotId, null, dvFileEntries);
     }
 
     private void dataSplitToDvManifestEntries(
             DataSplit dataSplit,
-            List<RawFile> rawFiles,
             long snapshotId,
+            @Nullable Set<String> publishedFiles,
             List<IcebergManifestEntry> dvFileEntries) {
         if (!needAddDvToIceberg || !dataSplit.deletionFiles().isPresent()) {
             return;
         }
-        for (int i = 0; i < rawFiles.size(); i++) {
+        DataFilePathFactory dataFilePathFactory =
+                fileStorePathFactory.createDataFilePathFactory(
+                        dataSplit.partition(), dataSplit.bucket());
+        for (int i = 0; i < dataSplit.dataFiles().size(); i++) {
+            String dataFilePath =
+                    dataFilePathFactory.toPath(dataSplit.dataFiles().get(i)).toString();
+            if (publishedFiles != null && !publishedFiles.contains(dataFilePath)) {
+                continue;
+            }
             DeletionFile deletionFile = dataSplit.deletionFiles().get().get(i);
             if (deletionFile != null) {
-                RawFile rawFile = rawFiles.get(i);
-
                 // Iceberg will check the cardinality between deserialized dv and iceberg deletion
                 // file, so if deletionFile.cardinality() is null, we should stop synchronizing all
                 // dvs.
@@ -717,7 +723,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         deletionFile.cardinality() != null,
                         "cardinality in DeletionFile is null, stop generating dv for iceberg. "
                                 + "dataFile path is {}, deletionFile is {}",
-                        rawFile.path(),
+                        dataFilePath,
                         deletionFile);
 
                 // We can not get the file size of the complete DV index file from the DeletionFile,
@@ -730,7 +736,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                 dataSplit.partition(),
                                 deletionFile.cardinality(),
                                 -1,
-                                rawFile.path(),
+                                dataFilePath,
                                 deletionFile.offset(),
                                 deletionFile.length());
 
@@ -1081,20 +1087,18 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                         .create()
                                         .readDeltaManifests(snapshot)
                                         .isEmpty());
-        List<DataSplit> snapshotSplits =
-                fullSnapshot
-                        ? table.newSnapshotReader().withSnapshot(snapshotId).read().dataSplits()
-                                .stream()
-                                .filter(DataSplit::rawConvertible)
-                                .collect(Collectors.toList())
-                        : Collections.emptyList();
         Map<String, BinaryRow> removedFiles = new LinkedHashMap<>();
         Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles = new LinkedHashMap<>();
-        boolean isAddOnly =
-                fullSnapshot
-                        ? collectSnapshotFileChanges(
-                                snapshotSplits, baseDataManifestFileMetas, removedFiles, addedFiles)
-                        : fileChangesCollector.collect(removedFiles, addedFiles);
+        Set<String> snapshotPublishedFiles = Collections.emptySet();
+        boolean isAddOnly;
+        if (fullSnapshot) {
+            snapshotPublishedFiles =
+                    collectSnapshotFileChanges(
+                            snapshotId, baseDataManifestFileMetas, removedFiles, addedFiles);
+            isAddOnly = removedFiles.isEmpty();
+        } else {
+            isAddOnly = fileChangesCollector.collect(removedFiles, addedFiles);
+        }
         Set<BinaryRow> modifiedPartitionsSet = new LinkedHashSet<>(removedFiles.values());
         addedFiles.values().stream().map(Pair::getLeft).forEach(modifiedPartitionsSet::add);
         List<BinaryRow> modifiedPartitions = new ArrayList<>(modifiedPartitionsSet);
@@ -1131,9 +1135,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         if (needAddDvToIceberg) {
             if (fullSnapshot) {
                 List<IcebergManifestEntry> dvEntries = new ArrayList<>();
-                for (DataSplit split : snapshotSplits) {
+                for (DataSplit split :
+                        table.newSnapshotReader().withSnapshot(snapshotId).read().dataSplits()) {
                     dataSplitToDvManifestEntries(
-                            split, split.convertToRawFiles().get(), snapshotId, dvEntries);
+                            split, snapshotId, snapshotPublishedFiles, dvEntries);
                 }
                 if (!dvEntries.isEmpty()) {
                     newDVManifestFileMetas.addAll(
@@ -1398,29 +1403,45 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 addedFiles);
     }
 
-    private boolean collectSnapshotFileChanges(
-            List<DataSplit> splits,
+    private Set<String> collectSnapshotFileChanges(
+            long snapshotId,
             List<IcebergManifestFileMeta> baseManifestFileMetas,
             Map<String, BinaryRow> removedFiles,
             Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles) {
-        for (DataSplit split : splits) {
-            List<RawFile> rawFiles = split.convertToRawFiles().get();
-            for (int i = 0; i < rawFiles.size(); i++) {
-                addedFiles.put(
-                        rawFiles.get(i).path(),
-                        Pair.of(split.partition(), split.dataFiles().get(i)));
+        Set<String> liveFiles = new HashSet<>();
+        DataFilePathFactories factories = new DataFilePathFactories(fileStorePathFactory);
+        // Read live manifest entries directly: a split requiring a merge still contains live files.
+        for (ManifestEntry entry :
+                table.store()
+                        .newScan()
+                        .withKind(ScanMode.ALL)
+                        .withSnapshot(snapshotId)
+                        .plan()
+                        .files()) {
+            String path = factories.get(entry.partition(), entry.bucket()).toPath(entry).toString();
+            liveFiles.add(path);
+            if (shouldAddFileToIceberg(entry.file())) {
+                addedFiles.put(path, Pair.of(entry.partition(), entry.file()));
             }
         }
+        Set<String> publishedFiles = new HashSet<>();
         // The previous Paimon manifests may be missing, so compare against the Iceberg manifests.
         for (IcebergManifestFileMeta meta : baseManifestFileMetas) {
             for (IcebergManifestEntry entry :
                     manifestFile.read(new Path(meta.manifestPath()).getName())) {
-                if (entry.isLive() && addedFiles.remove(entry.file().filePath()) == null) {
-                    removedFiles.put(entry.file().filePath(), entry.file().partition());
+                if (entry.isLive()) {
+                    String path = entry.file().filePath();
+                    addedFiles.remove(path);
+                    if (liveFiles.contains(path)) {
+                        publishedFiles.add(path);
+                    } else {
+                        removedFiles.put(path, entry.file().partition());
+                    }
                 }
             }
         }
-        return removedFiles.isEmpty();
+        publishedFiles.addAll(addedFiles.keySet());
+        return publishedFiles;
     }
 
     private boolean shouldAddFileToIceberg(DataFileMeta meta) {

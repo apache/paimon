@@ -45,6 +45,8 @@ public interface CommitCallback extends AutoCloseable {
     /**
      * Called after manifest lists are replaced without a delta describing the file changes.
      * Implementations must derive the new state from the committed snapshot.
+     *
+     * <p>May also be replayed when recovering an already-committed replacement.
      */
     default void onManifestReplacement(Snapshot snapshot) {}
 

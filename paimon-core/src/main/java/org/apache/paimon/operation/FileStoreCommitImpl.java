@@ -149,6 +149,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
 
+    private static final String MANIFEST_REPLACEMENT_SNAPSHOT_ID =
+            "manifest-replacement.snapshot-id";
+
     private final SnapshotCommit snapshotCommit;
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
@@ -1688,8 +1691,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             return false;
         }
         // Like regular commits, run post-commit callbacks after releasing the commit lock.
-        commitCallbacks.forEach(callback -> callback.onManifestReplacement(snapshot));
+        notifyManifestReplacement(snapshot);
         return true;
+    }
+
+    /** Identifies the replacement itself, ignoring properties inherited by later snapshots. */
+    static boolean isManifestReplacement(Snapshot snapshot) {
+        Map<String, String> properties = snapshot.properties();
+        return properties != null
+                && Long.toString(snapshot.id())
+                        .equals(properties.get(MANIFEST_REPLACEMENT_SNAPSHOT_ID));
+    }
+
+    /** Also used to replay callbacks after recovering an already-committed replacement. */
+    void notifyManifestReplacement(Snapshot snapshot) {
+        commitCallbacks.forEach(callback -> callback.onManifestReplacement(snapshot));
     }
 
     @Nullable
@@ -1726,6 +1742,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (head == null || !head.equals(latest)) {
             return null;
         }
+        Map<String, String> replacementProperties =
+                properties == null ? new HashMap<>() : new HashMap<>(properties);
+        replacementProperties.put(MANIFEST_REPLACEMENT_SNAPSHOT_ID, Long.toString(latest.id() + 1));
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1747,8 +1766,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         latest.watermark(),
                         latest.statistics(),
-                        // if empty properties, just set to null
-                        properties == null || properties.isEmpty() ? null : properties,
+                        replacementProperties,
                         nextRowId,
                         null);
 

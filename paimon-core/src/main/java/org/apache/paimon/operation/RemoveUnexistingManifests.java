@@ -60,6 +60,9 @@ public class RemoveUnexistingManifests {
     /**
      * Drop missing manifest files from the latest snapshot and commit a replacement snapshot.
      *
+     * <p>If the latest snapshot is already a manifest replacement, replay its post-commit callbacks
+     * to recover from an earlier callback failure.
+     *
      * @return {@code true} if a repair snapshot was committed
      */
     public boolean execute() {
@@ -93,6 +96,13 @@ public class RemoveUnexistingManifests {
         }
 
         if (!brokenManifestFile) {
+            // A previous attempt may have committed the repair before its callbacks failed.
+            if (FileStoreCommitImpl.isManifestReplacement(latest)) {
+                try (FileStoreCommitImpl fileStoreCommit =
+                        (FileStoreCommitImpl) table.store().newCommit(latest.commitUser(), table)) {
+                    fileStoreCommit.notifyManifestReplacement(latest);
+                }
+            }
             return false;
         }
 
