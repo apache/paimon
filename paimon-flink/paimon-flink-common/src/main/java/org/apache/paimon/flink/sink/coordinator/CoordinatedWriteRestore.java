@@ -72,14 +72,16 @@ public class CoordinatedWriteRestore implements WriteRestore {
             int bucket,
             boolean scanDynamicBucketIndex,
             boolean scanDeleteVectorsIndex,
-            boolean scanVectorIndexPayloads) {
+            boolean scanVectorIndexPayloads,
+            boolean scanDataFileMetas) {
         ScanCoordinationRequest coordinationRequest =
                 new ScanCoordinationRequest(
                         serializeBinaryRow(partition),
                         bucket,
                         scanDynamicBucketIndex,
                         scanDeleteVectorsIndex,
-                        scanVectorIndexPayloads);
+                        scanVectorIndexPayloads,
+                        scanDataFileMetas);
         try {
             byte[] requestContent = serializeObject(coordinationRequest);
             Integer nextPageToken = null;

@@ -28,16 +28,49 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Optional;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /** Tests for {@link FileSystemWriteRestore}. */
 class FileSystemWriteRestoreTest {
+
+    @Test
+    void testRestoreIndexesWithoutScanningDataFileMetas() {
+        Snapshot snapshot = mock(Snapshot.class);
+        SnapshotManager snapshotManager = mock(SnapshotManager.class);
+        when(snapshotManager.latestSnapshotFromFileSystem()).thenReturn(snapshot);
+        FileStoreScan scan = mock(FileStoreScan.class);
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        IndexFileMeta hash = new IndexFileMeta("HASH", "hash", 1, 3, null, null, null);
+        IndexFileMeta dv = new IndexFileMeta(DELETION_VECTORS_INDEX, "dv", 1, 1, null, null, null);
+        IndexFileMeta ann = new IndexFileMeta("test-vector-ann", "ann", 1, 1, null, null, null);
+        when(handler.scanHashIndex(snapshot, EMPTY_ROW, 0)).thenReturn(Optional.of(hash));
+        when(handler.scan(snapshot, DELETION_VECTORS_INDEX, EMPTY_ROW, 0))
+                .thenReturn(Collections.singletonList(dv));
+        when(handler.scanSourceIndexes(snapshot, EMPTY_ROW, 0))
+                .thenReturn(Collections.singletonList(ann));
+
+        FileSystemWriteRestore restore =
+                new FileSystemWriteRestore(
+                        new CoreOptions(new HashMap<>()), snapshotManager, scan, handler);
+        RestoreFiles restored = restore.restoreFiles(EMPTY_ROW, 0, true, true, true, false);
+
+        assertThat(restored.snapshot()).isSameAs(snapshot);
+        assertThat(restored.dataFiles()).isEmpty();
+        assertThat(restored.totalBuckets()).isNull();
+        assertThat(restored.dynamicBucketIndex()).isSameAs(hash);
+        assertThat(restored.deleteVectorsIndex()).containsExactly(dv);
+        assertThat(restored.sourceIndexPayloads()).containsExactly(ann);
+        verifyNoInteractions(scan);
+    }
 
     @Test
     void testRestoreFromPinnedSnapshotForPostponeBucket() {
@@ -67,7 +100,7 @@ class FileSystemWriteRestoreTest {
                         indexFileHandler,
                         5L);
 
-        RestoreFiles restored = restore.restoreFiles(EMPTY_ROW, 0, false, false, true);
+        RestoreFiles restored = restore.restoreFiles(EMPTY_ROW, 0, false, false, true, true);
 
         assertThat(restored.snapshot()).isSameAs(pinned);
         assertThat(restored.sourceIndexPayloads()).containsExactly(ann);
@@ -98,7 +131,7 @@ class FileSystemWriteRestoreTest {
                 new FileSystemWriteRestore(
                         new CoreOptions(new HashMap<>()), snapshotManager, scan, indexFileHandler);
 
-        RestoreFiles restored = restore.restoreFiles(EMPTY_ROW, 0, false, false, true);
+        RestoreFiles restored = restore.restoreFiles(EMPTY_ROW, 0, false, false, true, true);
 
         assertThat(restored.sourceIndexPayloads()).containsExactly(ann);
     }
