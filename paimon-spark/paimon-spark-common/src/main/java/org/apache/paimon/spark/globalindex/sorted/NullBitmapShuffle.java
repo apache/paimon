@@ -28,6 +28,7 @@ import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.rdd.RDD;
 import org.apache.spark.rdd.ShuffledRDD;
+import org.apache.spark.serializer.JavaSerializer;
 import org.apache.spark.shuffle.sort.SortShuffleManager;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
@@ -186,12 +187,23 @@ final class NullBitmapShuffle {
                                         };
                                     });
         }
+        ShuffledRDD<Row, Object, Object> shuffled =
+                new ShuffledRDD<>(
+                        transport.rdd(),
+                        partitioner,
+                        ClassTag$.MODULE$.apply(Row.class),
+                        ClassTag$.MODULE$.apply(Object.class),
+                        ClassTag$.MODULE$.apply(Object.class));
+        // External rows and bitmap batches must not depend on application Kryo registrations.
+        shuffled.setSerializer(new JavaSerializer(input.sparkSession().sparkContext().getConf()));
         // Restore original rows before local sorting so file rotation and query layout are
         // unchanged.
         return input.sparkSession()
                 .createDataFrame(
-                        transport
-                                .partitionBy(partitioner)
+                        JavaPairRDD.fromRDD(
+                                        shuffled,
+                                        ClassTag$.MODULE$.apply(Row.class),
+                                        ClassTag$.MODULE$.apply(Object.class))
                                 .keys()
                                 .mapPartitions(NullBitmapShuffle::expandRows),
                         input.schema())
