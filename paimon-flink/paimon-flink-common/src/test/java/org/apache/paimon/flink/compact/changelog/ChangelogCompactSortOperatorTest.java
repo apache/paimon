@@ -107,6 +107,11 @@ public class ChangelogCompactSortOperatorTest {
                         CompactIncrement.emptyIncrement());
         testHarness.processElement(new StreamRecord<>(new Committable(1, onlyChangelogBucket1)));
 
+        CompactIncrement dataCompaction =
+                new CompactIncrement(
+                        Collections.singletonList(createDataFileMeta(1, 0)),
+                        Collections.singletonList(createDataFileMeta(2, 0)),
+                        Collections.emptyList());
         CommitMessageImpl mixed =
                 new CommitMessageImpl(
                         binaryRow.apply(0),
@@ -116,7 +121,8 @@ public class ChangelogCompactSortOperatorTest {
                                 Arrays.asList(files.get(10), files.get(9)),
                                 Collections.emptyList(),
                                 Arrays.asList(files.get(6), files.get(5))),
-                        CompactIncrement.emptyIncrement());
+                        dataCompaction,
+                        37L);
         testHarness.processElement(new StreamRecord<>(new Committable(1, mixed)));
 
         testHarness.prepareSnapshotPreBarrier(1);
@@ -141,7 +147,8 @@ public class ChangelogCompactSortOperatorTest {
                                         Arrays.asList(files.get(10), files.get(9)),
                                         Collections.emptyList(),
                                         Collections.emptyList()),
-                                CompactIncrement.emptyIncrement()));
+                                dataCompaction,
+                                37L));
         assertThat(actual.get(2))
                 .isEqualTo(
                         new CommitMessageImpl(

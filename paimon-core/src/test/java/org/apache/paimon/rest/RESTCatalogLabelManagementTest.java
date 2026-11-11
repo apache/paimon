@@ -35,7 +35,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -47,6 +46,7 @@ import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER;
 import static org.apache.paimon.rest.RESTCatalogOptions.URI;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 import static org.assertj.core.api.Assertions.tuple;
 
 /** Exercises label management through a configured REST catalog and its HTTP client. */
@@ -97,24 +97,32 @@ class RESTCatalogLabelManagementTest {
 
     @Test
     void testUpsertReadAndDeleteUseCatalogConfiguration() throws Exception {
-        String entityName = "sales db.model/v1";
+        String entityName = "`sales db`.`model/v1`";
         String key = "domain/华";
-        String path = BASE_PATH + "/MODEL_VERSION/sales+db.model%2Fv1/domain%2F%E5%8D%8E";
 
         for (String value : Arrays.asList("sales", "")) {
             enqueue(200, "");
             labels.upsertLabel("MODEL_VERSION", entityName, key, value);
-            RecordedRequest request = takeRequest("POST", path);
+            RecordedRequest request = takeRequest("POST", BASE_PATH + "/upsert");
             assertThat(RESTApi.fromJson(request.getBody().readUtf8(), Map.class))
-                    .isEqualTo(Collections.singletonMap("value", value));
+                    .containsOnly(
+                            entry("entityType", "MODEL_VERSION"),
+                            entry("entityName", entityName),
+                            entry("key", key),
+                            entry("value", value));
         }
 
         enqueue(
                 200,
-                "{\"entityType\":\"MODEL_VERSION\",\"entityName\":\"sales db.model/v1\","
+                "{\"entityType\":\"MODEL_VERSION\",\"entityName\":\"`sales db`.`model/v1`\","
                         + "\"key\":\"domain/华\",\"value\":\"\"}");
         Label label = labels.getLabel("MODEL_VERSION", entityName, key);
-        takeRequest("GET", path);
+        RecordedRequest get = takeRequest("POST", BASE_PATH + "/get");
+        assertThat(RESTApi.fromJson(get.getBody().readUtf8(), Map.class))
+                .containsOnly(
+                        entry("entityType", "MODEL_VERSION"),
+                        entry("entityName", entityName),
+                        entry("key", key));
         assertThat(label.getEntityType()).isEqualTo("MODEL_VERSION");
         assertThat(label.getEntityName()).isEqualTo(entityName);
         assertThat(label.getKey()).isEqualTo(key);
@@ -123,7 +131,12 @@ class RESTCatalogLabelManagementTest {
         for (int i = 0; i < 2; i++) {
             enqueue(200, "");
             labels.deleteLabel("MODEL_VERSION", entityName, key);
-            assertThat(takeRequest("DELETE", path).getBodySize()).isZero();
+            RecordedRequest delete = takeRequest("POST", BASE_PATH + "/delete");
+            assertThat(RESTApi.fromJson(delete.getBody().readUtf8(), Map.class))
+                    .containsOnly(
+                            entry("entityType", "MODEL_VERSION"),
+                            entry("entityName", entityName),
+                            entry("key", key));
         }
         assertThat(server.getRequestCount()).isEqualTo(6);
     }
@@ -138,7 +151,9 @@ class RESTCatalogLabelManagementTest {
                         Label::getEntityType, Label::getEntityName, Label::getKey, Label::getValue)
                 .containsExactly(tuple("TABLE", "sales.orders", "domain", "sales"));
         assertThat(page.getNextPageToken()).isEqualTo("next +/%?&");
-        RecordedRequest request = takeRequest("GET", BASE_PATH + "/TABLE/sales.orders");
+        RecordedRequest request = takeRequest("GET", BASE_PATH);
+        assertThat(request.getRequestUrl().queryParameter("entityType")).isEqualTo("TABLE");
+        assertThat(request.getRequestUrl().queryParameter("entityName")).isEqualTo("sales.orders");
         assertThat(request.getRequestUrl().queryParameter("maxResults")).isEqualTo("1000");
         assertThat(request.getRequestUrl().queryParameter("pageToken")).isEqualTo("start +/%");
     }
@@ -150,9 +165,11 @@ class RESTCatalogLabelManagementTest {
 
         List<Label> all = labels.listLabels("TABLE", "sales.orders");
         assertThat(all).extracting(Label::getKey).containsExactly("domain", "owner");
-        assertThat(takeRequest("GET", BASE_PATH + "/TABLE/sales.orders").getRequestUrl().query())
-                .isNull();
-        RecordedRequest second = takeRequest("GET", BASE_PATH + "/TABLE/sales.orders");
+        RecordedRequest first = takeRequest("GET", BASE_PATH);
+        assertThat(first.getRequestUrl().queryParameterNames())
+                .containsExactlyInAnyOrder("entityType", "entityName");
+        RecordedRequest second = takeRequest("GET", BASE_PATH);
+        assertThat(second.getRequestUrl().queryParameter("entityName")).isEqualTo("sales.orders");
         assertThat(second.getRequestUrl().queryParameter("pageToken")).isEqualTo("next +/%?&");
         assertThat(second.getRequestUrl().queryParameter("maxResults")).isNull();
         assertThat(server.getRequestCount()).isEqualTo(3);
@@ -164,11 +181,13 @@ class RESTCatalogLabelManagementTest {
         PagedList<Label> page = labels.listLabelsPaged("COLUMN", "sales.orders.id", 1, "last");
         assertThat(page.getElements()).isEmpty();
         assertThat(page.getNextPageToken()).isNull();
-        takeRequest("GET", BASE_PATH + "/COLUMN/sales.orders.id");
+        assertThat(takeRequest("GET", BASE_PATH).getRequestUrl().queryParameter("entityName"))
+                .isEqualTo("sales.orders.id");
 
         enqueue(200, "{\"labels\":[]}");
         assertThat(labels.listLabels("TABLE", "sales.empty")).isEmpty();
-        takeRequest("GET", BASE_PATH + "/TABLE/sales.empty");
+        assertThat(takeRequest("GET", BASE_PATH).getRequestUrl().queryParameter("entityName"))
+                .isEqualTo("sales.empty");
         assertThat(server.getRequestCount()).isEqualTo(3);
     }
 

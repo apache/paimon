@@ -25,6 +25,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -39,6 +41,8 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -139,6 +143,37 @@ class FormatTableMosaicReadTest {
     }
 
     @Test
+    void testMosaicSplitOverridesTableFormat() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("a", DataTypes.STRING())
+                        .field("dt", DataTypes.STRING())
+                        .build();
+        FormatTable table =
+                buildFormatTable(rowType, Collections.singletonList("dt"), new HashMap<>());
+        writeAll(
+                table,
+                Collections.singletonList(
+                        GenericRow.of(
+                                BinaryString.fromString("value"), BinaryString.fromString("p"))));
+        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+        FormatTable readerTable = table.copy(Collections.singletonMap("file.format", "parquet"));
+        List<String> values = new ArrayList<>();
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader =
+                    readerTable.newReadBuilder().newRead().createReader(split)) {
+                reader.forEachRemaining(
+                        row ->
+                                values.add(
+                                        row.getString(0).toString()
+                                                + "/"
+                                                + row.getString(1).toString()));
+            }
+        }
+        assertThat(values).containsExactly("value/p");
+    }
+
+    @Test
     void testInvalidCompressionPropagatedFromWriter() {
         RowType rowType = RowType.builder().field("a", DataTypes.STRING()).build();
         Map<String, String> options = new HashMap<>();
@@ -153,6 +188,53 @@ class FormatTableMosaicReadTest {
                                                 GenericRow.of(BinaryString.fromString("a1")))))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("Mosaic format only supports zstd");
+    }
+
+    @Test
+    void testFilterOnDataColumnAfterPartitionColumn() throws Exception {
+        RowType rowType = partitionFirstRowType();
+        FormatTable table = writePartitionFirstTable(rowType, "a,b");
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        assertThat(readAll(table, rowType, builder.equal(1, 1)))
+                .extracting(row -> row.getInt(1))
+                .contains(1);
+        assertThat(readAll(table, rowType, builder.equal(2, 101)))
+                .extracting(row -> row.getInt(2))
+                .contains(101);
+        assertThat(readAll(table, rowType, builder.greaterOrEqual(1, 105))).isEmpty();
+    }
+
+    @Test
+    void testFilterOnColumnWithoutStatsAfterPartitionColumn() throws Exception {
+        RowType rowType = partitionFirstRowType();
+        FormatTable table = writePartitionFirstTable(rowType, "b");
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        assertThat(readAll(table, rowType, builder.equal(1, 1)))
+                .extracting(row -> row.getInt(1))
+                .contains(1);
+    }
+
+    private static RowType partitionFirstRowType() {
+        return RowType.builder()
+                .field("dt", DataTypes.STRING())
+                .field("a", DataTypes.INT())
+                .field("b", DataTypes.INT())
+                .build();
+    }
+
+    private FormatTable writePartitionFirstTable(RowType rowType, String statsColumns)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(MosaicFileFormat.STATS_COLUMNS.key(), statsColumns);
+        FormatTable table = buildFormatTable(rowType, Collections.singletonList("dt"), options);
+        List<InternalRow> rows = new ArrayList<>();
+        for (int i = 1; i <= 10; i++) {
+            rows.add(GenericRow.of(BinaryString.fromString("p"), i, 100 + i));
+        }
+        writeAll(table, rows);
+        return table;
     }
 
     private FormatTable buildFormatTable(
@@ -187,7 +269,15 @@ class FormatTableMosaicReadTest {
     }
 
     private static List<InternalRow> readAll(FormatTable table, RowType rowType) throws Exception {
+        return readAll(table, rowType, null);
+    }
+
+    private static List<InternalRow> readAll(
+            FormatTable table, RowType rowType, @Nullable Predicate filter) throws Exception {
         ReadBuilder readBuilder = table.newReadBuilder();
+        if (filter != null) {
+            readBuilder.withFilter(filter);
+        }
         List<Split> splits = readBuilder.newScan().plan().splits();
         assertThat(splits).isNotEmpty();
 

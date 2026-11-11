@@ -82,7 +82,9 @@ public class PkVectorAnnSegmentFile extends IndexFile {
         }
         checkArgument(totalRowCount > 0, "An ANN segment must reference at least one source row.");
 
-        GlobalIndexer indexer = GlobalIndexer.create(indexType, vectorField, indexOptions);
+        GlobalIndexer indexer =
+                GlobalIndexer.create(
+                        indexType, Collections.singletonList(vectorField), indexOptions);
         checkArgument(
                 indexer instanceof VectorGlobalIndexer,
                 "Index algorithm %s does not implement VectorGlobalIndexer.",

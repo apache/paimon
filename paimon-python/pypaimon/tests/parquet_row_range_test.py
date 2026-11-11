@@ -27,10 +27,7 @@ import pyarrow.fs as pafs
 import pyarrow.parquet as pq
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.reader.format_pyarrow_reader import (
-    FormatPyArrowReader,
-    _DecodedRowGroupCache,
-)
+from pypaimon.execution.python.read.reader.format_pyarrow_reader import (FormatPyArrowReader, _DecodedRowGroupCache)
 from pypaimon.schema.data_types import AtomicType, DataField
 
 
@@ -105,10 +102,7 @@ def _rows(schema, count):
 class ToRunsTest(unittest.TestCase):
 
     def test_runs_are_sorted_deduplicated_and_empty_safe(self):
-        from pypaimon.read.reader.format_pyarrow_reader import (
-            _normalize_runs,
-            _to_runs,
-        )
+        from pypaimon.execution.python.read.reader.format_pyarrow_reader import (_normalize_runs, _to_runs)
 
         self.assertEqual(_to_runs([]), [])
         self.assertEqual(_to_runs([1, 2, 3]), [(1, 3)])
@@ -129,9 +123,7 @@ class ToRunsTest(unittest.TestCase):
 class RowIdRangeCursorTest(unittest.TestCase):
 
     def test_generates_offsets_across_batches_and_ranges(self):
-        from pypaimon.read.reader.data_file_batch_reader import (
-            _RowIdRangeCursor,
-        )
+        from pypaimon.execution.python.read.reader.data_file_batch_reader import (_RowIdRangeCursor)
 
         cursor = _RowIdRangeCursor([(10, 12), (100, 102)])
         self.assertEqual(cursor.take(2), [10, 11])
@@ -259,9 +251,7 @@ class ParquetRowRangeTest(unittest.TestCase):
         self.assertEqual(values, [None] * 6)
 
     def test_skips_per_row_python_range_filter(self):
-        from pypaimon.read.reader.row_range_filter_record_reader import (
-            RowIdFilterRecordBatchReader,
-        )
+        from pypaimon.execution.python.read.reader.row_range_filter_record_reader import (RowIdFilterRecordBatchReader)
 
         with mock.patch.object(
                 RowIdFilterRecordBatchReader,

@@ -45,6 +45,27 @@ public class BlockIteratorTest {
         innerTest(false);
     }
 
+    @Test
+    void testSeekToVirtualPrefixBoundaries() throws IOException {
+        BlockIterator iterator = BlockReader.create(writeBlock(true), COMPARATOR).iterator();
+        iterator.seekTo(
+                key -> {
+                    int comparison = Integer.compare(key.readInt(0) / 10, 3);
+                    return comparison == 0 ? 1 : comparison;
+                });
+        Assertions.assertEquals(30, iterator.next().getKey().readInt(0));
+        iterator.seekTo(
+                key -> {
+                    int comparison = Integer.compare(key.readInt(0) / 10, 3);
+                    return comparison == 0 ? -1 : comparison;
+                });
+        Assertions.assertEquals(40, iterator.next().getKey().readInt(0));
+        iterator.seekTo(key -> -1);
+        Assertions.assertFalse(iterator.hasNext());
+        iterator.seekTo(key -> 1);
+        Assertions.assertEquals(0, iterator.next().getKey().readInt(0));
+    }
+
     public void innerTest(boolean aligned) throws IOException {
         MemorySlice data = writeBlock(aligned);
         BlockReader reader = BlockReader.create(data, COMPARATOR);

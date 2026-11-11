@@ -176,11 +176,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                             // multi-column throw from GlobalIndexerFactory#create, which happens
                             // before any indexer side effect.
                             try {
-                                GlobalIndexer.create(
-                                        indexType,
-                                        indexFields.get(0),
-                                        indexFields.subList(1, indexFields.size()),
-                                        userOptions);
+                                GlobalIndexer.create(indexType, indexFields, userOptions);
                             } catch (UnsupportedOperationException e) {
                                 throw new IllegalArgumentException(
                                         String.format(

@@ -218,6 +218,7 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
         for (int i = 0; i < partitionOptions.size(); i++) {
             Map<String, String> options = partitionOptions.get(i);
             checkArgument(options != null, "Partition options must not contain null maps.");
+            FormatTablePartitionOptions.fileFormatOverride(options);
             checkArgument(
                     options.entrySet().stream()
                             .noneMatch(entry -> entry.getKey() == null || entry.getValue() == null),

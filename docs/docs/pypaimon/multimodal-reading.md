@@ -1,6 +1,6 @@
 ---
 title: "Multimodal Reads and Row IDs"
-description: "Filter and project multimodal rows, fetch BLOB payloads, and carry row IDs between processing stages."
+description: "Filter and project multimodal rows, export Lance datasets, fetch BLOB payloads, and carry row IDs between processing stages."
 ---
 
 <!--
@@ -24,7 +24,7 @@ under the License.
 
 # Multimodal Reads and Row IDs
 
-Filter and project multimodal rows, fetch BLOB payloads, and carry row IDs between processing stages. The examples use the `docs` table from [Multimodal Tables](./multimodal-tables). Examples with `frames` require a frame table with the named grouping, ordering, and payload columns.
+Filter and project multimodal rows, export Lance datasets, fetch BLOB payloads, and carry row IDs between processing stages. The examples use the `docs` table from [Multimodal Tables](./multimodal-tables). Examples with `frames` require a frame table with the named grouping, ordering, and payload columns.
 
 ## Scan
 
@@ -49,6 +49,105 @@ with docs.scan().where("category = 'lake'").to_arrow_batch_reader() as reader:
     for batch in reader:
         consume(batch)
 ```
+
+### Export to Lance
+
+`scan().export_lance()` writes the scan's logical rows to an independent Lance
+dataset directory and returns a `lance.LanceDataset`. It honors `where()`,
+`select()`, `limit()`, and the snapshot or tag selected by `scan()`.
+PyPaimon supports Lance as an export destination only. It does not read or write
+Paimon data or vector files using `file.format=lance` or
+`vector.file.format=lance`. Java's Lance file format support remains available.
+Before accessing an existing table through PyPaimon, rewrite any Lance data or
+vector files into a format supported by PyPaimon.
+Export requires Python 3.10 or later and `pylance>=13,<14` to preserve null Blob
+values across batches.
+Install the optional Lance dependency:
+
+```shell
+pip install 'pypaimon[lance]'
+```
+
+The output uses Lance data storage version 2.1 to preserve nested null values.
+
+This example uses the explicit schema from [Multimodal Tables](./multimodal-tables#create)
+and assumes a retained tag named `train-v1` already exists; see [Manage Tags](./manage-tags).
+
+```python
+import lance
+
+exported = (
+    docs.scan(tag_name="train-v1")
+    .where("category = 'lake'")
+    .select(["id", "embedding", "image"])
+    .limit(1000)
+    .export_lance("/tmp/train.lance")
+)
+
+# Reopen the result directly with Lance, independently of the Paimon table.
+reopened = lance.dataset("/tmp/train.lance")
+assert reopened.count_rows() == exported.count_rows()
+```
+
+Use `docs.scan(snapshot_id=42)` instead of `tag_name` to export an existing
+snapshot by ID. The two arguments are mutually exclusive. Without either,
+the export resolves the latest snapshot once and reads that version throughout.
+Snapshot and tag reads use their historical schema. Latest reads preserve the
+table's logical schema, including schema-only changes without a new data commit.
+Resolving a snapshot does not retain its source files: use a retained tag for
+long exports. The export does not create a retention tag automatically.
+
+The method accepts these keyword arguments:
+
+| Argument | Default | Behavior |
+| --- | --- | --- |
+| `mode` | `"create"` | Create a new dataset; use `"overwrite"` to replace an existing target. Append is not supported. |
+| `blob_mode` | `"materialize"` | Copy actual BLOB bytes into the target. Reference export is not supported. |
+| `storage_options` | `None` | Storage options for the Lance target. Source Paimon credentials are not inherited. Pass the target options again when reopening it with Lance. |
+| `blob_parallelism` | `64` | Maximum concurrent BLOB body reads per fetch. |
+
+BLOB data is supported in output columns of type `BLOB`, `ARRAY<BLOB>`, or
+`MAP<K, BLOB>`. Top-level BLOB fields become native Lance Blob columns: Arrow
+`large_binary` with field metadata `lance-encoding:blob=true`. The default
+`blob_mode="materialize"` copies the Paimon payloads into the independent target,
+where Lance can read them lazily. BLOB values inside ARRAY/MAP columns remain
+ordinary `large_binary` payloads. Nulls and empty bytes are preserved in both
+representations. Other BLOB nesting, such as BLOBs inside ROW fields or nested
+arrays, is not supported; project those columns out before exporting. Vectors
+retain their fixed-size list type.
+
+Lance scans such as `to_table()` return descriptors for native Blob columns.
+Use `take_blobs()` to obtain file handles supporting lazy `seek()` and `read()`.
+Check descriptor nullness first: `take_blobs()` returns an empty handle for a
+null value, so the handle alone does not distinguish null from empty bytes.
+
+```python
+first = reopened.head(1, columns=["image"])
+if first.num_rows:
+    descriptor = first["image"][0].as_py()
+    if descriptor is None:
+        prefix = None
+    else:
+        with reopened.take_blobs("image", indices=[0])[0] as image:
+            image.seek(0)
+            prefix = image.read(64)  # b"" for an empty, non-null payload
+```
+
+For Lance compatibility, every MAP is exported as Arrow
+`list<struct<key: K, value: V>>`, including MAPs nested in ordinary scalar
+structures. Entry order, null maps, empty maps, and null values are preserved.
+For `MAP<K, BLOB>`, the `value` field is materialized `large_binary`.
+
+The export streams batches instead of collecting the whole result; batch memory
+still depends on payload sizes and has no fixed byte cap. Unresolvable BLOB
+references fail the export instead of copying internal Paimon descriptors into
+the target.
+
+The first version rejects selected video-frame fields or descriptors and VARIANT columns;
+project these fields out before exporting. Paimon indexes and snapshot history
+are not transferred. Build any required indexes on the Lance dataset after export.
+With `blob-as-descriptor=true`, BLOB authorization masks that compute from BLOB
+inputs are unsupported; direct field-reference masks remain supported.
 
 ### As-of joins
 
@@ -75,6 +174,10 @@ aligned = join_asof(
 for batch in aligned.to_arrow_batch_reader(batch_size=128):
     train(batch)
 ```
+
+Set `parallelism=4` in `to_arrow_batch_reader()` to plan and read sources concurrently
+(default: 1). Output order is preserved; per-table reader concurrency still applies.
+Custom catalog and authorization callbacks must be thread-safe.
 
 `direction` is `backward`, `forward`, or `nearest`; tolerance is inclusive and
 zero permits only exact matches. Nearest ties use the earlier time. For duplicate
@@ -256,6 +359,25 @@ The stride controls anchor spacing, not the spacing inside a window:
 | `pad` | Keep scheduled anchors and repeat the nearest endpoint for missing positions. |
 | `error` | Fail construction if any scheduled anchor has an incomplete window. |
 
+`anchor_row_ids` optionally selects scheduled anchors by Paimon `_ROW_ID`
+without filtering their readable context. It preserves the original stride
+and group/order sequence; duplicates do not repeat samples. Boundary handling
+then applies to selected anchors only. IDs must come from the same fixed
+snapshot and belong to the context query. The query's filters and limit still
+define context boundaries, so restrict it to complete episodes when their
+original history, future and stride must be preserved. See
+[task-local context and anchor selection](pytorch#task-local-context-and-anchor-selection)
+for a metadata-only selection example and distributed ownership guidance.
+
+On data-evolution tables, search queries also expose
+`to_contiguous_window_dataset()`: hits automatically select anchors while a
+separate scan on the same snapshot preserves their history and future context.
+See [search hits as training samples and window anchors](pytorch#search-hits-as-training-samples-and-window-anchors).
+
+The Dataset plans and authorizes all requested columns once, reads only the
+index columns at construction, and reuses the resulting split metadata for
+lazy payload reads across projections and workers.
+
 `pad_values={"action": [0.0, 0.0]}` overrides endpoint repetition for that
 column. Supply values in the same raw representation as a table cell. Padding
 happens before column transforms, so normalization also affects constant padding.
@@ -268,6 +390,9 @@ Both `fps` and `tolerance_s` are only accepted with `delta_timestamps`.
 Offsets must align to the regular frame grid within the tolerance; this API
 does not search actual timestamps or interpolate missing frames. Do not combine
 `delta_timestamps`, `frame_offsets`, and `window_size`.
+
+To align separate streams by recorded timestamps, use the `join_asof`,
+`interpolate`, or `join_window` APIs described in [As-of joins](#as-of-joins).
 
 `column_transforms` receive one padded Python list per projected column. This is
 where applications define tensor dtype and shape or decode BLOB bytes. Even
@@ -315,9 +440,28 @@ window. These calls preserve their single `is_pad` mask and previous shapes.
 `anchor_columns` and `tail` require `window_size`; do not combine `tail` and
 `boundary`. New applications should use field offsets and per-column masks.
 
-Columns configured by `video-frame-field` are rejected: a window read would drop
-the `frame_index` and other metadata carried by their `VideoFrameDescriptor`
-values. Read those columns with `to_torch()` instead.
+Columns configured by `video-frame-field` keep their descriptors until all rows
+for an item or batch have been selected. The Dataset groups descriptors by
+physical video, decodes each requested frame once, and restores the window
+order. Install `pypaimon[torch,video]` for PyAV, or install TorchCodec
+separately. Use `video_backend="pyav"` or `"torchcodec"` to require one
+backend, or omit it to select an available one:
+
+```python
+video_windows = frames.scan().to_contiguous_window_dataset(
+    columns=["state", "video", "action"],
+    frame_offsets={"video": [-1, 0], "action": list(range(16))},
+    group_key="episode_index",
+    order_key="frame_index",
+    boundary="pad",
+    column_transforms={"video": torch.stack},
+    video_backend="pyav",
+)
+```
+
+Without a video column transform, each window contains a list of `CHW` tensors.
+The `torch.stack` transform above produces `TCHW`; DataLoader adds the batch
+dimension. Decoder sessions and range caches are process-local and bounded.
 
 ### Distributed BLOB processing with Ray
 
@@ -401,26 +545,47 @@ row_ids = candidates["_ROW_ID"].tolist()
 
 When a row-id manifest is persisted beyond a short-lived latest-snapshot
 workflow, record the source snapshot or tag and pass it back to the read API.
-`scan`, `search`, `search_vectors`, `search_hybrid`, and `take_row_ids` accept
+`scan`, `search`, `search_vectors`, `search_hybrid`, `take_row_ids`, and `take_batch` accept
 `snapshot_id` or `tag_name`. These two options are mutually exclusive.
 
 Use `take_row_ids` to fetch rows selected by an earlier scan, vector search,
-full-text search, hybrid search, sampler, or split manifest. Results are not
-guaranteed to follow the input row-id order. Include `_ROW_ID` and reorder on
-the client if order matters.
+full-text search, hybrid search, or split manifest when only membership matters.
+It is a filtering query: input duplicates do not repeat rows, missing or deleted
+IDs are omitted, and result order is unspecified. For example,
+`take_row_ids([2, 0, 2])` can return row IDs `[0, 2]`.
+
+Use `take_batch` for training samplers, sampling with replacement, or any read
+that must align one-for-one with the supplied IDs:
+
+| API | Input identifiers | Order and duplicates | Missing rows |
+| --- | --- | --- | --- |
+| `take_row_ids(ids)` | Paimon `_ROW_ID` | Membership only; no order guarantee or repetition | Omitted |
+| `take_batch(ids, columns=...)` | Paimon `_ROW_ID` | Preserved exactly | Raises `KeyError` |
+| Map-style Torch Dataset `__getitems__(indices)` | Positions in that Dataset | Preserved exactly | Out-of-range positions raise `IndexError` |
 
 ```python
-payload = (
-    docs.take_row_ids(row_ids, snapshot_id=source_snapshot_id)
-    .select(["id", "content", "image"])
-    .with_row_id()
-    .to_arrow()
-    .to_pylist()
+batch = docs.take_batch(
+    row_ids,
+    columns=["id", "content", "image", "_ROW_ID"],
+    snapshot_id=source_snapshot_id,
 )
-
-payload_by_row_id = {row["_ROW_ID"]: row for row in payload}
-ordered_payload = [payload_by_row_id[row_id] for row_id in row_ids]
+assert batch["_ROW_ID"].to_pylist() == row_ids
+ordered_payload = batch.to_pylist()
 ```
+
+`take_batch` executes immediately and returns a `pyarrow.Table`. It requires
+row tracking. For existing row IDs `[2, 0, 2]`, it returns three rows in exactly
+that order. Empty input returns an empty table with the projected schema.
+`columns` defaults to all table columns; request `_ROW_ID` explicitly to include
+it. BLOB columns follow the table's read options, including
+`blob-as-descriptor`. A deleted, unavailable, or filtered-out ID fails the whole
+batch instead of silently reducing its size.
+
+For `scan().to_torch(streaming=False)`, let DataLoader pass sampler batches to
+the Dataset's `__getitems__`. These inputs are Dataset positions, so position
+`2` need not refer to Paimon row ID `2`. Both lazy and materialized map-style
+Datasets preserve sampler order and repeated positions; an empty batch returns
+an empty list.
 
 This pattern keeps broad candidate generation cheap: first search or filter to
 produce a compact row-id manifest, then fetch only the columns needed by the
@@ -441,24 +606,19 @@ manifest = (
 )
 
 # Stage 2: expensive reranking payload, fetched only for candidates.
-rerank_payload = (
-    docs.take_row_ids(
-        manifest["_ROW_ID"].tolist(),
-        snapshot_id=source_snapshot_id,
-    )
-    .select(["id", "content", "image"])
-    .with_row_id()
-    .to_list()
-)
+rerank_payload = docs.take_batch(
+    manifest["_ROW_ID"].tolist(),
+    columns=["id", "content", "image", "_ROW_ID"],
+    snapshot_id=source_snapshot_id,
+).to_pylist()
 
-payload_by_row_id = {row["_ROW_ID"]: row for row in rerank_payload}
 rerank_inputs = [
     {
-        "row_id": row_id,
+        "row_id": row["_ROW_ID"],
         "candidate_rank": rank,
-        "doc": payload_by_row_id[row_id],
+        "doc": row,
     }
-    for rank, row_id in enumerate(manifest["_ROW_ID"])
+    for rank, row in enumerate(rerank_payload)
 ]
 ```
 
@@ -469,12 +629,11 @@ they need:
 
 ```python
 def run_inference_worker(docs, row_id_batch, source_snapshot_id):
-    rows = (
-        docs.take_row_ids(row_id_batch, snapshot_id=source_snapshot_id)
-        .select(["id", "content"])
-        .with_row_id()
-        .to_list()
-    )
+    rows = docs.take_batch(
+        row_id_batch,
+        columns=["id", "content", "_ROW_ID"],
+        snapshot_id=source_snapshot_id,
+    ).to_pylist()
 
     outputs = []
     for row in rows:
@@ -496,7 +655,7 @@ Best practices:
   manifests.
 - Use business keys or application columns when writing inference or training
   outputs back to a table.
-- Reorder `take_row_ids` results client-side when input order matters.
+- Use `take_batch` when input order, repeated samples, or exact batch size matters.
 
 ### BLOB URI affinity
 

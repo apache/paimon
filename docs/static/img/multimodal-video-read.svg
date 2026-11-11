@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="786" viewBox="0 0 900 786" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">From a logical row to decoded video pixels</title>
+<desc id="desc">Paimon resolves a selected row through the video pack span index into a descriptor containing the complete video byte range, frame ordinal, and optional MP4 moov range. A PyPaimon worker opens only that video range and derives an in-memory frame index from MP4 sample tables. In this illustrative sequence, it decodes from keyframe 32 through target frame 37 and returns RGB pixels or a tensor. Decoder sessions and range caches are reused within each worker. Unsupported layouts use decoder scanning.</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#526277"/>
+  </marker>
+</defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+  <rect x="1" y="1" width="898" height="784" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+  <text x="28" y="44" font-size="27" font-weight="700">From a logical row to decoded video pixels</text>
+  <text x="28" y="76" font-size="17" fill="#526277">A frame descriptor is a reference. A decoder turns it into pixels.</text>
+
+  <text x="28" y="119" font-size="20" font-weight="700" fill="#2463b4">Paimon: select rows and resolve descriptors</text>
+  <rect x="28" y="138" width="250" height="128" rx="8" fill="#eaf2ff" stroke="#d7dfeb"/>
+  <text x="44" y="168" font-size="19" font-weight="700" fill="#2463b4">1. Select a logical row</text>
+  <text x="44" y="198" font-size="16">episode_id = 42</text>
+  <text x="44" y="223" font-size="16">frame_index = 37</text>
+  <text x="44" y="248" font-size="15" fill="#526277">Align column files by row ID.</text>
+
+  <path d="M283 202 H313" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="320" y="138" width="250" height="128" rx="8" fill="#eaf2ff" stroke="#d7dfeb"/>
+  <text x="336" y="168" font-size="19" font-weight="700" fill="#2463b4">2. Resolve a video span</text>
+  <text x="336" y="198" font-size="16">Selected row position</text>
+  <text x="336" y="223" font-size="16">→ video A, frame ordinal 37</text>
+  <text x="336" y="248" font-size="15" fill="#526277">Read the pack footer and index.</text>
+
+  <path d="M575 202 H605" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="612" y="138" width="260" height="128" rx="8" fill="#eaf2ff" stroke="#d7dfeb"/>
+  <text x="628" y="168" font-size="19" font-weight="700" fill="#2463b4">3. Return a descriptor</text>
+  <text x="628" y="198" font-size="16">Pack URI + offset + length</text>
+  <text x="628" y="223" font-size="16">Frame ordinal + moov range</text>
+  <text x="628" y="248" font-size="15" fill="#526277">No image pixels decoded yet.</text>
+
+  <path d="M742 270 V290 H14 V437 H38" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="28" y="330" font-size="20" font-weight="700" fill="#14766b">PyPaimon worker: open the video, locate frames, decode</text>
+  <rect x="28" y="360" width="844" height="350" rx="10" fill="#f8fbfa" stroke="#d7dfeb"/>
+  <rect x="46" y="378" width="358" height="118" rx="8" fill="#e7f5f1" stroke="#d7dfeb"/>
+  <text x="62" y="407" font-size="19" font-weight="700" fill="#14766b">4. Open a bounded stream</text>
+  <text x="62" y="437" font-size="16">Expose only video A's byte range.</text>
+  <text x="62" y="462" font-size="16">Seek and read through table FileIO.</text>
+  <text x="62" y="484" font-size="14" fill="#526277">Other videos in the pack stay outside the stream.</text>
+
+  <path d="M412 437 H456" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="466" y="378" width="388" height="118" rx="8" fill="#e7f5f1" stroke="#d7dfeb"/>
+  <text x="482" y="407" font-size="19" font-weight="700" fill="#14766b">5. Read MP4 sample tables</text>
+  <text x="482" y="437" font-size="16">moov → timing, samples, keyframes</text>
+  <text x="482" y="462" font-size="16">Build the frame index in worker memory.</text>
+  <text x="482" y="484" font-size="14" fill="#526277">No separate persisted keyframe index.</text>
+
+  <path d="M660 502 V522" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="62" y="550" font-size="19" font-weight="700" fill="#14766b">6. Decode from a preceding keyframe to the target</text>
+  <rect x="62" y="570" width="120" height="62" rx="6" fill="#fff1d6" stroke="#d4a34a"/>
+  <text x="122" y="595" text-anchor="middle" font-size="16" font-weight="700">Keyframe 32</text>
+  <text x="122" y="619" text-anchor="middle" font-size="14" fill="#526277">decode starts</text>
+  <rect x="194" y="570" width="120" height="62" rx="6" fill="#edf1f5" stroke="#d7dfeb"/>
+  <text x="254" y="608" text-anchor="middle" font-size="18">33</text>
+  <rect x="326" y="570" width="120" height="62" rx="6" fill="#edf1f5" stroke="#d7dfeb"/>
+  <text x="386" y="608" text-anchor="middle" font-size="18">34</text>
+  <rect x="458" y="570" width="120" height="62" rx="6" fill="#edf1f5" stroke="#d7dfeb"/>
+  <text x="518" y="608" text-anchor="middle" font-size="18">35</text>
+  <rect x="590" y="570" width="120" height="62" rx="6" fill="#edf1f5" stroke="#d7dfeb"/>
+  <text x="650" y="608" text-anchor="middle" font-size="18">36</text>
+  <rect x="722" y="570" width="116" height="62" rx="6" fill="#d4eee5" stroke="#14766b" stroke-width="2"/>
+  <text x="780" y="595" text-anchor="middle" font-size="16" font-weight="700" fill="#14766b">Target 37</text>
+  <text x="780" y="619" text-anchor="middle" font-size="14" fill="#14766b">RGB / tensor</text>
+  <path d="M122 646 H780" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="62" y="686" font-size="16" fill="#526277">Reuse decoder sessions and range caches for nearby requests in the same worker.</text>
+
+  <text x="28" y="742" font-size="16" fill="#526277">Illustrative frame order; the codec handles reference frames and reordering.</text>
+  <text x="28" y="767" font-size="16" fill="#526277">Unsupported container layouts fall back to decoder scanning.</text>
+</g>
+</svg>

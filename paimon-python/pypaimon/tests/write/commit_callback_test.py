@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.write.backend_dispatch import python_commit
 import os
 import shutil
 import tempfile
@@ -67,7 +68,7 @@ class CommitCallbackTest(unittest.TestCase):
         return self.catalog.get_table(f'default.{table_name}')
 
     def _lose_commit_response_once(self, table_commit):
-        real_commit = table_commit.file_store_commit.snapshot_commit.commit
+        real_commit = python_commit(table_commit).file_store_commit.snapshot_commit.commit
         attempts = []
 
         def commit_then_lose_response(
@@ -77,9 +78,9 @@ class CommitCallbackTest(unittest.TestCase):
                 base_snapshot_uuid, snapshot, statistics))
             raise TimeoutError('lost snapshot commit response')
 
-        table_commit.file_store_commit.snapshot_commit.commit = (
+        python_commit(table_commit).file_store_commit.snapshot_commit.commit = (
             commit_then_lose_response)
-        table_commit.file_store_commit._commit_retry_wait = lambda _: None
+        python_commit(table_commit).file_store_commit._commit_retry_wait = lambda _: None
         return attempts
 
     def test_callback_invoked_on_commit(self):
@@ -135,6 +136,7 @@ class CommitCallbackTest(unittest.TestCase):
     def test_callback_invoked_after_lost_commit_response(self):
         table = self._create_table(
             'test_callback_response_loss',
+            partition_keys=['dt'],
             options={
                 'row-tracking.enabled': 'true',
                 'data-evolution.enabled': 'true',
@@ -150,7 +152,7 @@ class CommitCallbackTest(unittest.TestCase):
         table_write.write_arrow(pa.Table.from_pydict({
             'id': [1, 2],
             'name': ['a', 'b'],
-            'dt': ['p1', 'p1'],
+            'dt': ['a/b', 'a%b'],
         }, schema=self.pa_schema))
         messages = table_write.prepare_commit()
         expected_paths = sorted(
@@ -171,6 +173,9 @@ class CommitCallbackTest(unittest.TestCase):
             for entry in callback.contexts[0].commit_entries
             if entry.kind == 0
         ))
+        self.assertTrue(all(table.file_io.exists(path) for path in expected_paths))
+        self.assertTrue(any('/dt=a%2Fb/' in path for path in expected_paths))
+        self.assertTrue(any('/dt=a%25b/' in path for path in expected_paths))
         table_write.close()
         table_commit.close()
 
@@ -192,7 +197,7 @@ class CommitCallbackTest(unittest.TestCase):
         callback = RecordingCallback()
         table_commit.add_commit_callback(callback)
         attempts = self._lose_commit_response_once(table_commit)
-        table_commit.file_store_commit.truncate_table(
+        python_commit(table_commit).file_store_commit.truncate_table(
             BATCH_COMMIT_IDENTIFIER)
 
         self.assertEqual([2], attempts)

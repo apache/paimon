@@ -25,10 +25,13 @@ from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest
                                       CreateBranchRequest, CreateDatabaseRequest,
                                       CreateFunctionRequest, CreatePartitionsRequest,
                                       CreateTableRequest, CreateTagRequest,
-                                      ForwardBranchRequest,
-                                      RenameBranchRequest, RenameTableRequest,
+                                      DropPolicyRequest, ForwardBranchRequest,
+                                      GrantPermissionRequest, PolicyRequest,
+                                      RenameTableRequest,
+                                      RevokePermissionRequest,
                                       RollbackTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
+                                       ErrorResponse,
                                        GetDatabaseResponse, GetFunctionResponse,
                                        GetTableResponse,
                                        GetTableTokenResponse, GetTagResponse,
@@ -37,6 +40,8 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        ListFunctionDetailsResponse,
                                        ListFunctionsGloballyResponse,
                                        ListFunctionsResponse,
+                                       ListPermissionsResponse,
+                                       ListPoliciesResponse,
                                        CreatePartitionsResponse,
                                        ListPartitionsResponse,
                                        ListTablesResponse, ListTagsResponse,
@@ -47,12 +52,22 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        AuthTableQueryResponse)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
+from pypaimon.api.model import CreateModelRequest, GetModelResponse, ListModelsResponse
 from pypaimon.api.resource_paths import ResourcePaths
+from pypaimon.api.rest_exception import NoSuchResourceException
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.api.typedef import T
+from pypaimon.common import user_agent
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
+from pypaimon.management.data_policy import DataPolicy
+from pypaimon.management.list_permissions_request import \
+    ListPermissionsRequest
+from pypaimon.management.list_policies_request import ListPoliciesRequest
+from pypaimon.management.permission_assignment import PermissionAssignment
+from pypaimon.management.permission_resource import PermissionResource
+from pypaimon.management.policy_type import PolicyType
 from pypaimon.schema.schema import Schema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
@@ -67,6 +82,7 @@ class RESTApi:
     TABLE_NAME_PATTERN = "tableNamePattern"
     TABLE_TYPE = "tableType"
     FUNCTION_NAME_PATTERN = "functionNamePattern"
+    MODEL_NAME_PATTERN = "modelNamePattern"
     PARTITION_NAME_PATTERN = "partitionNamePattern"
     TAG_NAME_PREFIX = "tagNamePrefix"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
@@ -85,7 +101,7 @@ class RESTApi:
             raise ValueError("URI cannot be empty")
 
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.client = HttpClient(uri)
+        self.client = HttpClient(uri, user_agent.rest_user_agent(options))
         auth_provider = AuthProviderFactory.create_auth_provider(options)
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
 
@@ -95,7 +111,7 @@ class RESTApi:
                 raise ValueError("Warehouse name cannot be empty")
 
             query_params = {
-                CatalogOptions.WAREHOUSE.key(): RESTUtil.encode_string(warehouse)
+                CatalogOptions.WAREHOUSE.key(): warehouse
             }
 
             config_response = self.client.get_with_params(
@@ -105,6 +121,7 @@ class RESTApi:
                 RESTAuthFunction(base_headers, auth_provider),
             )
             options = config_response.merge(options)
+            self.client.set_user_agent(user_agent.rest_user_agent(options))
             base_headers.update(
                 RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
             )
@@ -123,11 +140,11 @@ class RESTApi:
         if max_results is not None and max_results > 0:
             query_params[RESTApi.MAX_RESULTS] = str(max_results)
 
-        if page_token is not None and page_token.strip():
+        if page_token is not None:
             query_params[RESTApi.PAGE_TOKEN] = page_token
 
         for key, value in name_patterns.items():
-            if key and value and key.strip() and value.strip():
+            if key and value:
                 query_params[key] = value
 
         return query_params
@@ -152,7 +169,7 @@ class RESTApi:
 
             page_token = response.next_page_token
 
-            if not page_token or not response.data:
+            if not page_token:
                 break
 
         return results
@@ -298,6 +315,16 @@ class RESTApi:
             self.rest_auth_function,
         )
 
+    def get_table_by_id(self, table_id: str) -> GetTableResponse:
+        if not table_id or not table_id.strip():
+            raise ValueError("Table id cannot be empty")
+
+        return self.client.get(
+            self.resource_paths.table_by_id(table_id),
+            GetTableResponse,
+            self.rest_auth_function,
+        )
+
     def drop_table(self, identifier: Identifier) -> GetTableResponse:
         database_name, table_name = self.__validate_identifier(identifier)
 
@@ -390,7 +417,7 @@ class RESTApi:
         )
         return response.is_success()
 
-    def rollback_to(self, identifier, instant, from_snapshot=None):
+    def rollback_to(self, identifier, instant, from_snapshot=None, *, table_uuid=None):
         """Rollback table to the given instant.
 
         Args:
@@ -398,13 +425,15 @@ class RESTApi:
             instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
             from_snapshot: Optional snapshot ID. Success only occurs when the
                 latest snapshot is this snapshot.
+            table_uuid: Expected table or branch UUID from the loaded table view.
 
         Raises:
             NoSuchResourceException: If the table, snapshot or tag does not exist.
             ForbiddenException: If no permission to access this table.
         """
-        database_name, table_name = self.__validate_identifier(identifier)
-        request = RollbackTableRequest(instant=instant, from_snapshot=from_snapshot)
+        database_name, table_name = self._validate_resource_path(identifier)
+        request = RollbackTableRequest(
+            instant=instant, from_snapshot=from_snapshot, table_id=table_uuid)
         self.client.post(
             self.resource_paths.rollback_table(database_name, table_name),
             request,
@@ -420,7 +449,7 @@ class RESTApi:
         Returns:
             TableSnapshot instance or None if snapshot not found.
         """
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier)
         response = self.client.get(
             self.resource_paths.table_snapshot(database_name, table_name),
             GetTableSnapshotResponse,
@@ -479,7 +508,7 @@ class RESTApi:
             snapshot_id: Optional[int] = None,
             time_retained: Optional[str] = None,
     ) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier)
         request = CreateTagRequest(
             tag_name=tag_name,
             snapshot_id=snapshot_id,
@@ -492,7 +521,7 @@ class RESTApi:
         )
 
     def get_tag(self, identifier: Identifier, tag_name: str) -> GetTagResponse:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier, tag_name)
         return self.client.get(
             self.resource_paths.tag(database_name, table_name, tag_name),
             GetTagResponse,
@@ -506,7 +535,7 @@ class RESTApi:
             page_token: Optional[str] = None,
             tag_name_prefix: Optional[str] = None,
     ) -> PagedList[str]:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier)
         response = self.client.get_with_params(
             self.resource_paths.tags(database_name, table_name),
             self.__build_paged_query_params(
@@ -517,24 +546,39 @@ class RESTApi:
             ListTagsResponse,
             self.rest_auth_function,
         )
-        tags = response.data() or []
-        return PagedList(tags, response.get_next_page_token())
+        tags = response.data()
+        return PagedList([], None) if tags is None else PagedList(tags, response.get_next_page_token())
 
     def delete_tag(self, identifier: Identifier, tag_name: str) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier, tag_name)
         self.client.delete(
             self.resource_paths.tag(database_name, table_name, tag_name),
             self.rest_auth_function,
         )
 
     # Branch CRUD wrappers — mirror Java RESTApi branch methods.
+    @staticmethod
+    def _validate_resource_path(identifier, resource_name=None):
+        database_name, table_name = RESTApi.__validate_identifier(identifier)
+        components = [(database_name, 'Database name'), (table_name, 'Table name')]
+        if resource_name is not None:
+            components.append((resource_name, 'Resource name'))
+        for value, label in components:
+            RESTApi._validate_resource_path_component(value, label)
+        return database_name, table_name
+
+    @staticmethod
+    def _validate_resource_path_component(value, label):
+        if not value or not value.strip() or value in ('.', '..'):
+            raise ValueError('{} must be a non-empty resource path component'.format(label))
+
     def create_branch(
             self,
             identifier: Identifier,
             branch_name: str,
             tag_name: Optional[str] = None,
     ) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier)
         if not branch_name or not branch_name.strip():
             raise ValueError("Branch name cannot be empty")
         request = CreateBranchRequest(branch=branch_name, from_tag=tag_name)
@@ -545,30 +589,14 @@ class RESTApi:
         )
 
     def drop_branch(self, identifier: Identifier, branch_name: str) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier, branch_name)
         self.client.delete(
             self.resource_paths.branch(database_name, table_name, branch_name),
             self.rest_auth_function,
         )
 
-    def rename_branch(
-            self,
-            identifier: Identifier,
-            from_branch: str,
-            to_branch: str,
-    ) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
-        if not to_branch or not to_branch.strip():
-            raise ValueError("Target branch name cannot be empty")
-        request = RenameBranchRequest(to_branch=to_branch)
-        self.client.post(
-            self.resource_paths.rename_branch(database_name, table_name, from_branch),
-            request,
-            self.rest_auth_function,
-        )
-
     def fast_forward(self, identifier: Identifier, branch_name: str) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier, branch_name)
         self.client.post(
             self.resource_paths.forward_branch(database_name, table_name, branch_name),
             ForwardBranchRequest(),
@@ -576,7 +604,7 @@ class RESTApi:
         )
 
     def list_branches(self, identifier: Identifier) -> List[str]:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_resource_path(identifier)
         response = self.client.get(
             self.resource_paths.branches(database_name, table_name),
             ListBranchesResponse,
@@ -718,6 +746,45 @@ class RESTApi:
             self.rest_auth_function,
         )
 
+    def list_models(self, database_name: str) -> List[GetModelResponse]:
+        self._validate_resource_path_component(database_name, "Database name")
+        return self.__list_data_from_page_api(
+            lambda query_params: self.client.get_with_params(
+                self.resource_paths.models(database_name),
+                query_params,
+                ListModelsResponse,
+                self.rest_auth_function,
+            )
+        )
+
+    def get_model(self, identifier: Identifier) -> GetModelResponse:
+        database_name, model_name = self._validate_resource_path(identifier)
+        return self.client.get(
+            self.resource_paths.model(database_name, model_name),
+            GetModelResponse,
+            self.rest_auth_function,
+        )
+
+    def create_model(
+            self, identifier: Identifier, request: CreateModelRequest
+    ) -> GetModelResponse:
+        database_name, model_name = self._validate_resource_path(identifier)
+        if request.name != model_name:
+            raise ValueError("Model request name must match the identifier")
+        return self.client.post_with_response_type(
+            self.resource_paths.models(database_name),
+            request,
+            GetModelResponse,
+            self.rest_auth_function,
+        )
+
+    def drop_model(self, identifier: Identifier) -> None:
+        database_name, model_name = self._validate_resource_path(identifier)
+        self.client.delete(
+            self.resource_paths.model(database_name, model_name),
+            self.rest_auth_function,
+        )
+
     def auth_table_query(self, identifier: Identifier, select: Optional[List[str]]) -> AuthTableQueryResponse:
         database_name, table_name = self.__validate_identifier(identifier)
         request = AuthTableQueryRequest(select=select)
@@ -727,6 +794,83 @@ class RESTApi:
             AuthTableQueryResponse,
             self.rest_auth_function,
         )
+
+    def list_permissions(self, request: ListPermissionsRequest) -> ListPermissionsResponse:
+        query_params = {}
+        RESTApi._put_query_parameter(query_params, "resourceType", request.get_resource_type().name)
+        RESTApi._put_query_parameter(query_params, "database", request.get_database())
+        RESTApi._put_query_parameter(query_params, "table", request.get_table())
+        RESTApi._put_query_parameter(query_params, "function", request.get_function())
+        RESTApi._put_query_parameter(query_params, "view", request.get_view())
+        RESTApi._put_query_parameter(query_params, "principal", request.get_principal())
+        RESTApi._put_query_parameter(query_params, "access", request.get_access())
+        if request.get_max_results() is not None:
+            query_params[RESTApi.MAX_RESULTS] = str(request.get_max_results())
+        RESTApi._put_query_parameter(query_params, RESTApi.PAGE_TOKEN, request.get_page_token())
+        return self.client.get_with_params(
+            self.resource_paths.permissions(),
+            query_params,
+            ListPermissionsResponse,
+            self.rest_auth_function,
+        )
+
+    def grant_permission(self, assignment: PermissionAssignment) -> None:
+        self.client.post(
+            self.resource_paths.grant_permission(),
+            GrantPermissionRequest(assignment),
+            self.rest_auth_function,
+        )
+
+    def revoke_permission(self, resource: PermissionResource, access: str, principal: str) -> None:
+        self.client.post(
+            self.resource_paths.revoke_permission(),
+            RevokePermissionRequest(resource, access, principal),
+            self.rest_auth_function,
+        )
+
+    def list_policies(self, request: ListPoliciesRequest) -> ListPoliciesResponse:
+        query_params = {}
+        if request.get_type() is not None:
+            RESTApi._put_query_parameter(query_params, "type", request.get_type().name)
+        RESTApi._put_query_parameter(query_params, "principal", request.get_principal())
+        RESTApi._put_query_parameter(query_params, "column", request.get_column())
+        if request.get_max_results() is not None:
+            query_params[RESTApi.MAX_RESULTS] = str(request.get_max_results())
+        RESTApi._put_query_parameter(query_params, RESTApi.PAGE_TOKEN, request.get_page_token())
+        return self.client.get_with_params(
+            self.resource_paths.policies(request.get_resource()),
+            query_params,
+            ListPoliciesResponse,
+            self.rest_auth_function,
+        )
+
+    def create_policy(self, policy: DataPolicy) -> None:
+        self.client.post(
+            self.resource_paths.policies(policy.get_resource()),
+            PolicyRequest.from_policy(policy),
+            self.rest_auth_function,
+        )
+
+    def drop_policy(self, resource: PermissionResource, policy_type: PolicyType, principal: str,
+                    column: Optional[str], ignore_if_not_exists: bool) -> None:
+        if resource is None:
+            raise ValueError("resource cannot be null")
+        resource.validate_policy_attachment()
+        try:
+            self.client.post(
+                self.resource_paths.drop_policy(resource),
+                DropPolicyRequest(policy_type, principal, column),
+                self.rest_auth_function,
+            )
+        except NoSuchResourceException as e:
+            if not ignore_if_not_exists or e.resource_type != ErrorResponse.RESOURCE_TYPE_POLICY:
+                raise
+
+    @staticmethod
+    def _put_query_parameter(query_params: Dict[str, str], name: str, value: Optional[str]):
+        # Java isNotEmpty: unlike __build_paged_query_params, a whitespace value is sent.
+        if value:
+            query_params[name] = value
 
     @staticmethod
     def __validate_identifier(identifier: Identifier):
@@ -741,7 +885,8 @@ class RESTApi:
         if not table_name or not table_name.strip():
             raise ValueError("Table name cannot be None")
 
-        return database_name.strip(), table_name.strip()
+        # Validation must not rename a resource, including a branch suffix.
+        return database_name, table_name
 
 
 from pypaimon.catalog.catalog_exception import IllegalArgumentError

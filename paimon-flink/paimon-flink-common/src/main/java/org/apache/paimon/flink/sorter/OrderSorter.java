@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.flink.shuffle.RangeShuffle;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
@@ -50,6 +51,13 @@ public class OrderSorter extends TableSorter {
 
     @Override
     public DataStream<RowData> sort() {
+        return sort(null, null);
+    }
+
+    /** Sorts with optional transport transformations before and after the range exchange. */
+    public DataStream<RowData> sort(
+            RangeShuffle.AssignedRangeOperator<InternalRow> partitionLocalOperator,
+            RangeShuffle.ExchangedRowOperator<InternalRow> exchangeOutputOperator) {
         final RowType valueRowType = rowType;
         final int[] keyProjectionMap = valueRowType.projectIndexes(orderColNames);
         final RowType keyRowType =
@@ -79,6 +87,8 @@ public class OrderSorter extends TableSorter {
                     }
                 },
                 row -> row,
-                tableSortInfo);
+                tableSortInfo,
+                partitionLocalOperator,
+                exchangeOutputOperator);
     }
 }

@@ -26,9 +26,11 @@ import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.Model;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.catalog.TableQueryAuthResult;
@@ -44,6 +46,7 @@ import org.apache.paimon.management.LabelManagement;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.management.SemanticViewManagement;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -54,6 +57,7 @@ import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
+import org.apache.paimon.rest.requests.CreateModelRequest;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -100,6 +104,7 @@ import static org.apache.paimon.CoreOptions.BRANCH;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotLakeStreamTable;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
@@ -108,6 +113,7 @@ import static org.apache.paimon.catalog.CatalogUtils.validateCatalogManagedForma
 import static org.apache.paimon.catalog.CatalogUtils.validateCatalogManagedPartitionOptions;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog {
@@ -403,6 +409,21 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public Lock createLock(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Options tableOptions) {
+        return new RESTCatalogLockFactory()
+                .createLock(
+                        CatalogLockContext.fromOptions(context.options()),
+                        identifier,
+                        tableUuid,
+                        commitUser,
+                        tableOptions);
+    }
+
+    @Override
     public Optional<TableSnapshot> loadSnapshot(Identifier identifier)
             throws TableNotExistException {
         try {
@@ -540,10 +561,14 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
+    public void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException {
         try {
-            api.rollbackTo(identifier, instant, fromSnapshot);
+            api.rollbackTo(identifier, tableUuid, instant, fromSnapshot);
         } catch (NoSuchResourceException e) {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new IllegalArgumentException(
@@ -664,6 +689,16 @@ public class RESTCatalog implements Catalog {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
         try {
+            checkNotLakeStreamTable(getTable(fromTable), fromTable, "renameTable");
+        } catch (TableNotExistException e) {
+            // mirror the NoSuchResourceException branch below so that adding this pre-check
+            // does not change the not-exists contract
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(fromTable);
+            }
+            return;
+        }
+        try {
             api.renameTable(fromTable, toTable);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
@@ -692,6 +727,10 @@ public class RESTCatalog implements Catalog {
                 } else if (StringUtils.equals(
                         e.resourceType(), ErrorResponse.RESOURCE_TYPE_COLUMN)) {
                     throw new ColumnNotExistException(identifier, e.resourceName());
+                } else {
+                    // rethrow other typed 404s, for example a DATABASE dropped
+                    // concurrently; swallowing would report success for a failed ALTER
+                    throw e;
                 }
             }
         } catch (AlreadyExistsException e) {
@@ -720,6 +759,16 @@ public class RESTCatalog implements Catalog {
         // client-side here: a round-tripped schema of an internal table may carry the synthetic
         // path option, and the server remains the authority for replace semantics.
         validateCatalogManagedPartitionOptions(newSchema.options());
+        try {
+            checkNotLakeStreamTable(getTable(identifier), identifier, "replaceTable");
+        } catch (TableNotExistException e) {
+            // mirror the NoSuchResourceException branch below so that adding this pre-check
+            // does not change the not-exists contract
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(identifier);
+            }
+            return;
+        }
         try {
             api.replaceTable(identifier, newSchema);
         } catch (NoSuchResourceException e) {
@@ -1089,6 +1138,76 @@ public class RESTCatalog implements Catalog {
     public boolean supportsPartitionModification() {
         // Paimon tables use commit-based partition maintenance.
         return false;
+    }
+
+    @Override
+    public List<Model> listModels(String databaseName) throws DatabaseNotExistException {
+        try {
+            return api.listModels(databaseName).stream()
+                    .map(response -> response.toModel(databaseName))
+                    .collect(Collectors.toList());
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName, e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support models", e);
+        }
+    }
+
+    @Override
+    public Model getModel(Identifier identifier)
+            throws ModelNotExistException, DatabaseNotExistException {
+        try {
+            return api.getModel(identifier).toModel(identifier.getDatabaseName());
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_DATABASE)) {
+                throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
+            }
+            throw new ModelNotExistException(identifier, e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support models", e);
+        }
+    }
+
+    @Override
+    public Model createModel(Identifier identifier, Model model, boolean ignoreIfExists)
+            throws ModelAlreadyExistException, DatabaseNotExistException, ModelNotExistException {
+        checkArgument(
+                identifier.getFullName().equals(model.fullName()),
+                "Model identifier must match the model metadata");
+        try {
+            return api.createModel(identifier, new CreateModelRequest(model))
+                    .toModel(identifier.getDatabaseName());
+        } catch (AlreadyExistsException e) {
+            if (ignoreIfExists) {
+                return getModel(identifier);
+            }
+            throw new ModelAlreadyExistException(identifier, e);
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support models", e);
+        }
+    }
+
+    @Override
+    public void dropModel(Identifier identifier, boolean ignoreIfNotExists)
+            throws ModelNotExistException, DatabaseNotExistException {
+        try {
+            api.dropModel(identifier);
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_DATABASE)) {
+                throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
+            }
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_MODEL)) {
+                if (ignoreIfNotExists) {
+                    return;
+                }
+                throw new ModelNotExistException(identifier, e);
+            }
+            throw e;
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException("REST Catalog does not support models", e);
+        }
     }
 
     @Override

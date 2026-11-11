@@ -18,9 +18,15 @@
 
 import json
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
+from types import SimpleNamespace
+
+from pypaimon import Schema
+from pypaimon.api.api_response import AuthTableQueryResponse
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.catalog.table_query_auth import (
     TableQueryAuthResult,
@@ -28,7 +34,14 @@ from pypaimon.catalog.table_query_auth import (
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import QueryAuthSplit
+from pypaimon.read.scan_stats import ScanStats
+from pypaimon.read.table_scan import TableScan
+from pypaimon.tests import native_plan_rest_test
+
+
+rest_catalog = native_plan_rest_test.rest_catalog
 
 
 class _FakeField:
@@ -60,23 +73,17 @@ class _FakeSplit:
         return 100
 
 
-class _FakePlan:
-    def __init__(self, splits, snapshot_id=None):
-        self._splits = splits
-        self.snapshot_id = snapshot_id
-
-    def splits(self):
-        return self._splits
-
-
 class _FakeTable:
     def __init__(self, identifier=None):
         self.identifier = identifier or Identifier("db", "table")
+        self.options = SimpleNamespace(
+            native_plan_enabled=lambda: False, native_read_enabled=lambda: False, query_auth_enabled=False)
 
 
-class _FakeScan:
+class _FakeScan(TableScan):
     def __init__(self, plan, identifier=None, auth_result=None):
         self._plan = plan
+        self._query_auth_fn = None
         self.table = _FakeTable(identifier)
         self.file_scanner = _FakeFileScanner(plan)
         self._auth_result = auth_result
@@ -84,7 +91,7 @@ class _FakeScan:
     def plan(self):
         return self._plan
 
-    def _TableScan__auth_query(self):
+    def _TableScan__auth_query(self, all_columns=False):
         return self._auth_result
 
 
@@ -123,7 +130,7 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
 
     def test_no_auth_returns_original_plan(self):
         result = TableQueryAuthResult(None, None)
-        plan = _FakePlan([_FakeSplit()])
+        plan = Plan([_FakeSplit()])
         converted = result.convert_plan(plan)
         self.assertIs(converted, plan)
 
@@ -133,7 +140,7 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
 
     def test_empty_filter_and_masking_returns_original(self):
         result = TableQueryAuthResult([], {})
-        plan = _FakePlan([_FakeSplit()])
+        plan = Plan([_FakeSplit()])
         converted = result.convert_plan(plan)
         self.assertIs(converted, plan)
 
@@ -149,58 +156,69 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
         result = TableQueryAuthResult(None, {"col": '{"name":"NULL"}'})
         self.assertTrue(result.has_restrictions)
 
-    def test_blank_filter_entries_are_skipped(self):
-        result = TableQueryAuthResult(["", None], None)
-        self.assertFalse(result.filter)
+    def test_blank_filter_entry_is_rejected(self):
+        # Skipping it would read every row.
+        for rules in (["", _simple_filter_json()], [None]):
+            with self.assertRaisesRegex(ValueError, "Row filter cannot be empty"):
+                TableQueryAuthResult(rules, None)
 
-    def test_mixed_blank_and_valid_filter_entries(self):
-        valid = _simple_filter_json()
-        result = TableQueryAuthResult(["", valid], None)
-        self.assertEqual(len(result.filter), 1)
-        self.assertEqual(result.filter[0], valid)
+    def test_blank_column_masking_transform_is_rejected(self):
+        # Skipping it would return the column unmasked.
+        with self.assertRaisesRegex(ValueError, "Column masking on 'col' cannot be empty"):
+            TableQueryAuthResult(None, {"col": "", "col3": '{"name":"NULL"}'})
 
-    def test_blank_filter_no_extra_fields(self):
-        result = TableQueryAuthResult([""], None)
-        extra = result.get_extra_fields(
-            [_FakeField("a")], [_FakeField("a"), _FakeField("b")])
-        self.assertEqual(extra, [])
+    def test_blank_column_masking_target_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Column masking target cannot be empty"):
+            TableQueryAuthResult(None, {"": '{"name":"NULL"}'})
 
-    def test_blank_filter_no_row_filter(self):
-        result = TableQueryAuthResult(["", None], None)
-        self.assertIsNone(result.extract_row_filter())
+    def test_malformed_filter_is_rejected(self):
+        for rules in ({}, "", 0, False, {"a": "b"}):
+            with self.assertRaisesRegex(ValueError, "Row filter must be a list"):
+                TableQueryAuthResult(rules, None)
 
-    def test_blank_column_masking_values_stripped(self):
-        result = TableQueryAuthResult(None, {"col": "", "col3": '{"name":"NULL"}'})
-        self.assertEqual(list(result.column_masking.keys()), ["col3"])
-
-    def test_blank_column_masking_keys_stripped(self):
-        result = TableQueryAuthResult(None, {"": '{"name":"NULL"}'})
-        self.assertEqual(result.column_masking, {})
-
-    def test_blank_masking_returns_original_plan(self):
-        result = TableQueryAuthResult(None, {"col": ""})
-        plan = _FakePlan([_FakeSplit()])
-        converted = result.convert_plan(plan)
-        self.assertIs(converted, plan)
+    def test_malformed_column_masking_is_rejected(self):
+        for masking in ([], "", 0, False, ['{"name":"NULL"}']):
+            with self.assertRaisesRegex(ValueError, "Column masking must be a map"):
+                TableQueryAuthResult(None, masking)
 
     def test_wraps_splits_with_filter(self):
         result = TableQueryAuthResult([_simple_filter_json()], None)
-        plan = _FakePlan([_FakeSplit("s1"), _FakeSplit("s2")])
+        stats = ScanStats(entries_after_stats=2)
+        plan = Plan([_FakeSplit("s1"), _FakeSplit("s2")], _scan_stats=stats)
         converted = result.convert_plan(plan)
+        self.assertIs(converted.stats(), stats)
         self.assertEqual(len(converted.splits()), 2)
         for qs in converted.splits():
             self.assertIsInstance(qs, QueryAuthSplit)
 
+    def test_auth_wrapping_preserves_lazy_native_statistics(self):
+        result = TableQueryAuthResult([_simple_filter_json()], None)
+        handle = object()
+        plan = Plan([_FakeSplit("s1")], snapshot_id=7, _native_stats=handle)
+        counters = ScanStats.empty_native()
+        counters.entries_total = 10
+        counters.planning_counters['manifest_entries_read'] = 10
+        with patch.object(ScanStats, 'from_native', return_value=counters) as convert:
+            wrapped = result.convert_plan(plan)
+            convert.assert_not_called()
+            self.assertEqual(wrapped.snapshot_id, 7)
+            self.assertIsInstance(wrapped.splits()[0], QueryAuthSplit)
+            self.assertIs(wrapped.stats(), counters)
+            self.assertIs(wrapped.stats(), counters)
+            self.assertEqual(counters.planning_counters['manifest_entries_read'], 10)
+            self.assertEqual(counters.planning_counters['final_splits'], 1)
+            convert.assert_called_once_with(handle)
+
     def test_wraps_splits_with_masking(self):
         result = TableQueryAuthResult(None, {"col": '{"name":"NULL"}'})
-        plan = _FakePlan([_FakeSplit()])
+        plan = Plan([_FakeSplit()])
         converted = result.convert_plan(plan)
         self.assertEqual(len(converted.splits()), 1)
         self.assertIsInstance(converted.splits()[0], QueryAuthSplit)
 
     def test_inner_split_preserved(self):
         result = TableQueryAuthResult([_simple_filter_json()], None)
-        plan = _FakePlan([_FakeSplit("original")])
+        plan = Plan([_FakeSplit("original")])
         converted = result.convert_plan(plan)
         self.assertEqual(converted.splits()[0].split.name, "original")
 
@@ -235,6 +253,21 @@ class TestTableQueryAuthResultExtractRowFilter(unittest.TestCase):
         batch = pa.RecordBatch.from_pydict({"dept": ["eng", "sales", "eng"]})
         mask = fn(batch)
         self.assertEqual(mask.to_pylist(), [False, False, False])
+
+    def test_filter_entries_short_circuit_in_server_order(self):
+        first = _simple_filter_json('dept', 'eng')
+        second = json.dumps({
+            'kind': 'LEAF', 'function': 'EQUAL', 'literals': ['a'],
+            'transform': {'name': 'SUBSTRING', 'inputs': [
+                {'name': 's', 'type': 'STRING'}, {'name': 'position', 'type': 'BIGINT'}, 1]},
+        })
+        batch = pa.RecordBatch.from_pydict({
+            'dept': ['eng', 'sales'], 's': ['abc', 'xyz'], 'position': [1, 2147483648]})
+        result = TableQueryAuthResult([first, second], None).extract_row_filter()
+        self.assertEqual(result(batch).to_pylist(), [True, False])
+        # Reversing the response's order executes the throwing transform first.
+        with self.assertRaises(ValueError):
+            TableQueryAuthResult([second, first], None).extract_row_filter()(batch)
 
 
 class TestTableQueryAuthResultExtraFields(unittest.TestCase):
@@ -358,49 +391,49 @@ class TestQueryAuthSplitAttributeDelegation(unittest.TestCase):
         self.assertEqual(restored.row_count, 100)
 
 
-class TestPlanForWrite(unittest.TestCase):
+class TestPlanAllFiles(unittest.TestCase):
 
     def test_no_restriction_returns_plan_unchanged(self):
         from pypaimon.read.table_scan import TableScan
 
-        plain_plan = _FakePlan([_FakeSplit()], snapshot_id=5)
+        plain_plan = Plan([_FakeSplit()], snapshot_id=5)
         scan = _FakeScan(plain_plan, auth_result=None)
-        result = TableScan.plan_for_write(scan)
+        result = TableScan.plan_all(scan)
         self.assertIs(result, plain_plan)
 
     def test_row_filter_restriction_raises(self):
         from pypaimon.read.table_scan import TableScan
 
         auth = TableQueryAuthResult([_simple_filter_json()], None)
-        plan = _FakePlan([_FakeSplit()], snapshot_id=5)
+        plan = Plan([_FakeSplit()], snapshot_id=5)
         scan = _FakeScan(plan, auth_result=auth)
         with self.assertRaises(TableNoPermissionException):
-            TableScan.plan_for_write(scan)
+            TableScan.plan_all(scan)
 
     def test_column_masking_restriction_raises(self):
         from pypaimon.read.table_scan import TableScan
 
         auth = TableQueryAuthResult(None, {"col": '{"name":"NULL"}'})
-        plan = _FakePlan([_FakeSplit()], snapshot_id=5)
+        plan = Plan([_FakeSplit()], snapshot_id=5)
         scan = _FakeScan(plan, auth_result=auth)
         with self.assertRaises(TableNoPermissionException):
-            TableScan.plan_for_write(scan)
+            TableScan.plan_all(scan)
 
     def test_empty_table_with_auth_still_raises(self):
         from pypaimon.read.table_scan import TableScan
 
         auth = TableQueryAuthResult([_simple_filter_json()], None)
-        empty_plan = _FakePlan([], snapshot_id=5)
+        empty_plan = Plan([], snapshot_id=5)
         scan = _FakeScan(empty_plan, auth_result=auth)
         with self.assertRaises(TableNoPermissionException):
-            TableScan.plan_for_write(scan)
+            TableScan.plan_all(scan)
 
     def test_no_restrictions_allows_write(self):
         from pypaimon.read.table_scan import TableScan
 
-        plan = _FakePlan([_FakeSplit()], snapshot_id=5)
+        plan = Plan([_FakeSplit()], snapshot_id=5)
         scan = _FakeScan(plan, auth_result=None)
-        result = TableScan.plan_for_write(scan)
+        result = TableScan.plan_all(scan)
         self.assertIs(result, plan)
 
 
@@ -420,10 +453,11 @@ class TestResolveAuthResult(unittest.TestCase):
         fn = lambda select: TableQueryAuthResult([], {})
         self.assertIsNone(resolve_auth_result(fn, None))
 
-    def test_blank_filter_stripped_returns_none(self):
+    def test_blank_filter_fails_resolution(self):
         from pypaimon.read.query_auth_split import resolve_auth_result
         fn = lambda select: TableQueryAuthResult(["", None], None)
-        self.assertIsNone(resolve_auth_result(fn, None))
+        with self.assertRaisesRegex(ValueError, "Row filter cannot be empty"):
+            resolve_auth_result(fn, None)
 
     def test_with_filter_returns_result(self):
         from pypaimon.read.query_auth_split import resolve_auth_result
@@ -453,6 +487,58 @@ class TestCoreOptionsQueryAuth(unittest.TestCase):
     def test_disabled_when_false(self):
         opts = CoreOptions(Options({"query-auth.enabled": False}))
         self.assertFalse(opts.query_auth_enabled)
+
+
+@pytest.mark.parametrize("copy_method", ["copy", "copy_without_time_travel"])
+@pytest.mark.parametrize("enabled", ["true", True, "on"])
+def test_query_auth_cannot_be_disabled_dynamically(rest_catalog, copy_method, enabled):
+    catalog, server = rest_catalog
+    schema = pa.schema([("dept", pa.string()), ("secret", pa.string())])
+    catalog.create_table("default.auth", Schema.from_pyarrow_schema(
+        schema, options={"query-auth.enabled": enabled}), False)
+    table = catalog.get_table("default.auth")
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    commit = builder.new_commit()
+    try:
+        writer.write_arrow(pa.Table.from_pydict({
+            "dept": ["eng", "other"], "secret": ["secret1", "secret2"],
+        }, schema=schema))
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse(
+        filter=[_simple_filter_json()], column_masking={"secret": '{"name":"NULL"}'})
+
+    copy = getattr(table, copy_method)
+    for value in ("false", "FaLsE", False, None, "", "invalid", "0", 0, "off", "no"):
+        with pytest.raises(ValueError) as error:
+            copy({"query-auth.enabled": value})
+        assert str(error.value) == "Option 'query-auth.enabled' is not allowed to be disabled dynamically"
+
+    for options in [{}] + [{"query-auth.enabled": value} for value in ("true", "TrUe", True, " on ", 1)]:
+        copied = copy(options)
+        read = copied.new_read_builder()
+        result = read.new_read().to_arrow(read.new_scan().plan().splits())
+        assert result.to_pydict() == {"dept": ["eng"], "secret": [None]}
+        with pytest.raises(ValueError, match="Search is not supported on a query-auth table"):
+            copied.new_vector_search_builder().new_vector_search_scan()
+    assert table.table_schema.options["query-auth.enabled"] == enabled
+
+
+@pytest.mark.parametrize("copy_method", ["copy", "copy_without_time_travel"])
+@pytest.mark.parametrize("options", [{}, {"query-auth.enabled": "false"}])
+def test_query_auth_can_be_enabled_dynamically(rest_catalog, copy_method, options):
+    catalog, _ = rest_catalog
+    catalog.create_table("default.plain", Schema.from_pyarrow_schema(
+        pa.schema([("secret", pa.string())]), options=options), False)
+    table = catalog.get_table("default.plain")
+    for value, enabled in (("false", False), (False, False), (None, False),
+                           ("true", True), ("TrUe", True), (True, True), ("on", True)):
+        copied = getattr(table, copy_method)({"query-auth.enabled": value})
+        assert copied.options.query_auth_enabled == enabled
+    assert not table.options.query_auth_enabled
 
 
 if __name__ == "__main__":

@@ -15,21 +15,36 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import gc
+import io
 import os
+import pickle
+import signal
+import threading
+import time
 import types
 import unittest
 import uuid
+import warnings
+import weakref
 from unittest import mock
 
 import pyarrow.fs as pafs
 
+from pyarrow import PythonFile
 from pyarrow.fs import PyFileSystem
+from pypaimon.catalog.rest.rest_token import RESTToken
+from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem import jindo_file_system_handler as jindo_module
+from pypaimon.filesystem import oss_user_agent
+from pypaimon.filesystem import pyarrow_file_io as pyarrow_file_io_module
 from pypaimon.filesystem.jindo_file_system_handler import (
     JindoFileSystemHandler,
     JindoInputFile,
+    JindoOutputFile,
     JINDO_AVAILABLE,
 )
 
@@ -66,24 +81,292 @@ class _RecordingInputStream:
         self.closed = True
 
 
+_PREAD_MAX_SIZE = 4 * 1024 * 1024
+
+
+class _RecordingPreadStream(_RecordingInputStream):
+    def __init__(self, position=0):
+        super().__init__(position)
+        self.preads = []
+
+    def pread(self, size, offset):
+        self.preads.append((size, offset))
+        return b"x" * size
+
+
 class JindoInputFileTest(unittest.TestCase):
 
     def test_known_size_avoids_backend_seek_from_end(self):
         stream = _RecordingInputStream()
-        input_file = JindoInputFile(stream, file_size=100)
+        input_file = JindoInputFile(stream, file_size=100, owner=object())
 
         self.assertEqual(95, input_file.seek(-5, os.SEEK_END))
         self.assertEqual([(95, os.SEEK_SET)], stream.seeks)
 
     def test_known_size_bounds_unlimited_read(self):
         stream = _RecordingInputStream(position=40)
-        input_file = JindoInputFile(stream, file_size=100)
+        input_file = JindoInputFile(stream, file_size=100, owner=object())
 
         self.assertEqual(b"x" * 60, input_file.read())
         self.assertEqual([60], stream.reads)
 
+    def test_read_after_seek_fetches_exact_range_with_pread(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=10000, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.seek(1000)
+        self.assertEqual(b"x" * 12, input_file.read(12))
+
+        self.assertEqual([(12, 1000)], stream.preads)
+        self.assertEqual([], stream.reads)
+        self.assertEqual([], stream.seeks)
+        self.assertEqual(1012, input_file.tell())
+
+    def test_read_continuing_after_pread_switches_to_stream(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=10000, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.seek(1000)
+        input_file.read(12)
+        input_file.read(20)
+        input_file.read(30)
+
+        self.assertEqual([(12, 1000)], stream.preads)
+        self.assertEqual([(1012, os.SEEK_SET)], stream.seeks)
+        self.assertEqual([20, 30], stream.reads)
+        self.assertEqual(1062, input_file.tell())
+
+    def test_sequential_reads_from_start_keep_stream_read(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=10000, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.read(10)
+        input_file.seek(10)
+        input_file.read(10)
+
+        self.assertEqual([], stream.preads)
+        self.assertEqual([], stream.seeks)
+        self.assertEqual([10, 10], stream.reads)
+
+    def test_short_forward_skip_keeps_stream(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=10 * 1024 * 1024, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.read(10)
+        input_file.seek(10 + 8192)
+        input_file.read(4)
+
+        self.assertEqual([], stream.preads)
+        self.assertEqual([(8202, os.SEEK_SET)], stream.seeks)
+        self.assertEqual([10, 4], stream.reads)
+
+    def test_long_or_backward_jump_uses_pread(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=10 * 1024 * 1024, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.read(10)
+        input_file.seek(2 * 1024 * 1024)
+        input_file.read(4)
+        input_file.seek(100)
+        input_file.read(4)
+
+        self.assertEqual([(4, 2 * 1024 * 1024), (4, 100)], stream.preads)
+        self.assertEqual([10], stream.reads)
+
+    def test_read_is_clamped_to_known_size(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=100, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.seek(95)
+        self.assertEqual(b"x" * 5, input_file.read(10))
+        self.assertEqual(b"", input_file.read(10))
+        self.assertEqual([(5, 95)], stream.preads)
+
+    def test_seek_from_current_position(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=100, owner=object(), pread_max_size=_PREAD_MAX_SIZE)
+        self.addCleanup(input_file.close)
+
+        input_file.read(10)
+        self.assertEqual(30, input_file.seek(20, os.SEEK_CUR))
+        self.assertEqual(30, input_file.tell())
+
+    def test_read_above_pread_max_size_keeps_stream(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(
+            stream, file_size=10000, owner=object(), pread_max_size=1000)
+        self.addCleanup(input_file.close)
+
+        input_file.seek(5000)
+        input_file.read(2000)
+
+        self.assertEqual([], stream.preads)
+        self.assertEqual([(5000, os.SEEK_SET)], stream.seeks)
+        self.assertEqual([2000], stream.reads)
+
+    def test_default_keeps_original_stream_behavior(self):
+        stream = _RecordingPreadStream()
+        input_file = JindoInputFile(stream, file_size=10000, owner=object())
+        self.addCleanup(input_file.close)
+
+        input_file.seek(5000)
+        self.assertEqual([(5000, os.SEEK_SET)], stream.seeks)
+        input_file.read(12)
+
+        self.assertEqual([], stream.preads)
+        self.assertEqual([12], stream.reads)
+        self.assertEqual(5012, input_file.tell())
+
+    def test_pyarrow_read_at_reaches_pread(self):
+        # PythonFile.read_at calls seek + read on the wrapped file.
+        stream = _RecordingPreadStream()
+        python_file = PythonFile(
+            JindoInputFile(stream, file_size=10000, owner=object(), pread_max_size=_PREAD_MAX_SIZE), mode="r")
+
+        self.assertEqual(b"x" * 10, python_file.read_at(10, 500))
+        self.assertEqual([(10, 500)], stream.preads)
+        self.assertEqual([], stream.reads)
+
+
+class JindoStreamStatsTest(unittest.TestCase):
+
+    def setUp(self):
+        stats = jindo_module._StreamStats
+        for name in ("open", "milestone"):
+            self.addCleanup(setattr, stats, name, getattr(stats, name))
+        stats.open, stats.milestone = 0, 2
+
+    def test_logs_only_when_open_streams_pass_a_power_of_two(self):
+        with self.assertLogs(jindo_module.__name__, level="INFO") as logs:
+            files = [JindoInputFile(_RecordingInputStream(), owner=object()) for _ in range(3)]
+            # The output stream is the one that passes 4.
+            files.append(JindoOutputFile(_RecordingInputStream(), owner=object()))
+        self.assertEqual(["2 streams of JindoFileSystemHandler are open",
+                          "4 streams of JindoFileSystemHandler are open"],
+                         [r.getMessage().split(";")[0] for r in logs.records])
+
+        files.pop().close()
+        self.assertEqual(3, jindo_module._StreamStats.open)
+        files.pop(0).close()
+        # Dropping an unclosed stream closes it, so it no longer counts as open.
+        files.pop(0)
+        gc.collect()
+        self.assertEqual(1, jindo_module._StreamStats.open)
+        files[0].close()
+        files[0].close()
+        self.assertEqual(0, jindo_module._StreamStats.open)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "needs os.fork")
+    def test_forked_child_counts_streams_while_a_parent_thread_holds_the_lock(self):
+        held, release = threading.Event(), threading.Event()
+
+        def hold():
+            with jindo_module._StreamStats._lock:
+                held.set()
+                release.wait()
+
+        thread = threading.Thread(target=hold)
+        thread.start()
+        held.wait()
+        try:
+            with warnings.catch_warnings():
+                # Python 3.12+ warns about forking with other threads alive, which this test does on purpose.
+                warnings.simplefilter("ignore", DeprecationWarning)
+                pid = os.fork()
+            if pid == 0:
+                code = 1
+                try:
+                    signal.alarm(10)
+                    JindoInputFile(_RecordingInputStream(), owner=object()).close()
+                    code = 0 if jindo_module._StreamStats.open == 0 else 2
+                finally:
+                    os._exit(code)
+            status = os.waitpid(pid, 0)[1]
+        finally:
+            release.set()
+            thread.join()
+        self.assertFalse(os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGALRM,
+                         "the forked child blocked on a lock held by a parent thread")
+        self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, status)
+
 
 class JindoConfigTest(unittest.TestCase):
+
+    def test_input_file_seek_returns_position(self):
+        class JindoStream:
+
+            def __init__(self):
+                self._stream = io.BytesIO(b"video")
+
+            def seek(self, offset, whence=io.SEEK_SET):
+                self._stream.seek(offset, whence)
+
+            def tell(self):
+                return self._stream.tell()
+
+        stream = JindoInputFile(JindoStream(), owner=object())
+        self.assertEqual(5, stream.seek(0, io.SEEK_END))
+
+    def test_pickle_reconnects_without_native_client_lock_or_cache(self):
+        options = Options({
+            "fs.oss.impl": "jindo", "fs.oss.endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+            "fs.oss.accessKeyId": "test-ak", "fs.oss.accessKeySecret": "test-sk",
+            "fs.oss.securityToken": "test-token", "fs.jindocache.client.metrics.enable": True,
+        })
+        # A native client is not serializable even after the handler lock is
+        # removed. Give this stand-in its own lock to enforce reconstruction.
+        clients = [types.SimpleNamespace(lock=threading.Lock()) for _ in range(2)]
+        connect = mock.Mock(side_effect=clients)
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jfs", types.SimpleNamespace(connect=connect)), \
+             mock.patch.object(jindo_module, "jutil", types.SimpleNamespace(Config=_RecordingConfig)):
+            original = JindoFileSystemHandler("oss://bucket/", options)
+            original.register_file_size("object", 123)
+            # Exercise PyArrow's enclosing filesystem serialization as well.
+            encoded = pickle.dumps(PyFileSystem(original))
+            with original._known_file_sizes_lock:
+                restored = pickle.loads(encoded).handler
+            self.assertIs(original._jindo_fs, clients[0])
+            self.assertIs(restored._jindo_fs, clients[1])
+            self.assertEqual(restored.root_path, original.root_path)
+            self.assertEqual(restored.properties.to_map(), options.to_map())
+            self.assertIsNot(restored._known_file_sizes_lock, original._known_file_sizes_lock)
+            self.assertIsNone(restored._known_file_size("oss://bucket/object"))
+            restored.register_file_size("object", 456)
+            self.assertEqual(restored._known_file_size("oss://bucket/object"), 456)
+            self.assertEqual(original._known_file_size("oss://bucket/object"), 123)
+        self.assertEqual(connect.call_count, 2)
+        for call in connect.call_args_list:
+            self.assertEqual(call[0][:2], ("oss://bucket/", "root"))
+            self.assertEqual(call[0][2].values["fs.oss.securityToken"], "test-token")
+            self.assertEqual(call[0][2].values["fs.jindocache.client.metrics.enable"], "true")
+
+    def test_cpp_options_are_not_forwarded_to_jindo(self):
+        options = Options({'fs.oss.impl': 'cpp', 'fs.oss.python.impl': 'jindo',
+                           'fs.oss.cpp.library.path': '/test/libbridge.so',
+                           'fs.oss.cpp.max.concurrent.requests': '4',
+                           'fs.oss.endpoint': 'oss-cn-test.example.com'})
+        with mock.patch.object(jindo_module, 'JINDO_AVAILABLE', True), \
+                mock.patch.object(jindo_module, 'jutil', types.SimpleNamespace(Config=_RecordingConfig)):
+            config = jindo_module.build_jindo_config(options)
+        for key in options.to_map():
+            if key != 'fs.oss.endpoint':
+                self.assertNotIn(key, config.values)
+        self.assertEqual(config.values['fs.oss.endpoint'], 'oss-cn-test.example.com')
+
+    def test_pread_max_size_is_not_forwarded_to_jindo(self):
+        options = Options({'fs.oss.jindo.pread-max-size': '1mb',
+                           'fs.oss.endpoint': 'oss-cn-test.example.com'})
+        with mock.patch.object(jindo_module, 'JINDO_AVAILABLE', True), \
+                mock.patch.object(jindo_module, 'jutil', types.SimpleNamespace(Config=_RecordingConfig)):
+            config = jindo_module.build_jindo_config(options)
+        self.assertNotIn('fs.oss.jindo.pread-max-size', config.values)
 
     def test_forwards_native_options_to_connect(self):
         created_config = _RecordingConfig()
@@ -141,7 +424,10 @@ class JindoConfigTest(unittest.TestCase):
         self.assertEqual(config.values["logger.dir"], "/tmp/jindo-log")
         self.assertEqual(config.values["logger.verbose"], "3")
         self.assertEqual(config.values["logger.console.log.enable"], "false")
-        self.assertEqual(config.values["fs.oss.user.agent.features"], "pypaimon")
+        self.assertEqual(
+            config.values["fs.oss.user.agent.features"], oss_user_agent.identity())
+        self.assertNotIn("fs.oss.user.agent.module", config.values)
+        self.assertNotIn("fs.oss.user.agent.extended", config.values)
         self.assertNotIn(OssOptions.OSS_IMPL.key(), config.values)
         self.assertNotIn("fs.oss.unset.option", config.values)
         self.assertNotIn("metastore", config.values)
@@ -171,6 +457,55 @@ class JindoConfigTest(unittest.TestCase):
         self.assertEqual(config.values["logger.verbose"], "3")
         self.assertNotIn("fs.oss.provider.endpoint", config.values)
         self.assertNotIn("fs.oss.provider.format", config.values)
+
+    def test_user_agent_keeps_user_values_and_appends_access_tracking(self):
+        fake_jutil = types.SimpleNamespace(Config=_RecordingConfig)
+        options = Options({
+            "fs.oss.user.agent.module": "MyModule/1.0",
+            "fs.oss.user.agent.features": "Flink",
+            "fs.oss.user.agent.extended": "user/ext",
+            "dlf.access-tracking.extended-info": "acs/xxx k/v",
+        })
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil), \
+             mock.patch.object(oss_user_agent, "identity", return_value="pypaimon/2.2.dev0"):
+            config = jindo_module.build_jindo_config(options)
+
+        self.assertEqual(config.values["fs.oss.user.agent.module"], "MyModule/1.0")
+        self.assertEqual(
+            config.values["fs.oss.user.agent.features"], "pypaimon/2.2.dev0 Flink")
+        self.assertEqual(
+            config.values["fs.oss.user.agent.extended"], "user/ext acs/xxx k/v")
+        self.assertNotIn("dlf.access-tracking.extended-info", config.values)
+
+    def test_user_agent_from_common_keys(self):
+        fake_jutil = types.SimpleNamespace(Config=_RecordingConfig)
+        options = Options({
+            "user-agent.module": "MyApp/1.0",
+            "user-agent.features": "Flink",
+            "user-agent.extended": "vvr",
+            "dlf.access-tracking.extended-info": "uid/123",
+        })
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil), \
+             mock.patch.object(oss_user_agent, "identity", return_value="pypaimon/2.2.dev0"):
+            config = jindo_module.build_jindo_config(options)
+
+        self.assertEqual(config.values["fs.oss.user.agent.module"], "MyApp/1.0")
+        self.assertEqual(config.values["fs.oss.user.agent.features"], "pypaimon/2.2.dev0 Flink")
+        self.assertEqual(config.values["fs.oss.user.agent.extended"], "vvr uid/123")
+
+    def test_user_agent_extended_from_access_tracking_only(self):
+        fake_jutil = types.SimpleNamespace(Config=_RecordingConfig)
+        options = Options({"dlf.access-tracking.extended-info": "acs/xxx"})
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil):
+            config = jindo_module.build_jindo_config(options)
+
+        self.assertEqual(config.values["fs.oss.user.agent.extended"], "acs/xxx")
 
     def test_forwards_native_options_to_jindo_oss_filesystem(self):
         created_config = _RecordingConfig()
@@ -206,6 +541,259 @@ class JindoConfigTest(unittest.TestCase):
             created_config.values["fs.oss.dlf-cache.server.address"],
             "http://cache-server:18101")
         self.assertEqual(created_config.values["logger.verbose"], "3")
+
+
+class _EvictionRecordingFileSystem:
+    """Fake ``jfs.connect`` result: owns the native store, records teardown."""
+
+    def __init__(self, events):
+        self.events = events
+
+    def open(self, path, mode):
+        return _EvictionRecordingNativeStream(self, self.events)
+
+    def __del__(self):
+        self.events.append('fs-destroyed')
+
+
+class _EvictionRecordingNativeStream:
+    """Fake pyjindo stream: non-owning reference to the native store."""
+
+    def __init__(self, fake_fs, events):
+        # Weak on purpose: the native stream must not keep the store alive.
+        self._fs = weakref.ref(fake_fs)
+        self._events = events
+        self.closed = False
+
+    def read(self, size=None):
+        if self._fs() is None:
+            raise RuntimeError('use-after-free: read after store teardown')
+        return b'x' * (size or 1)
+
+    def pread(self, size, offset):
+        return self.read(size)
+
+    def write(self, data):
+        if self._fs() is None:
+            raise RuntimeError('use-after-free: write after store teardown')
+        return len(data)
+
+    def seek(self, position, whence=0):
+        return position
+
+    def tell(self):
+        return 0
+
+    def close(self):
+        if self.closed:
+            return
+        if self._fs() is None:
+            # Emulates the native use-after-free the keep-alive prevents.
+            self._events.append('stream-closed-after-store-destroyed')
+            return
+        self.closed = True
+        self._events.append('stream-closed')
+
+    def __del__(self):
+        # pyjindo closes its native streams when they are released.
+        if not self.closed:
+            self.close()
+
+
+class JindoKeepAliveTest(unittest.TestCase):
+    """Streams keep the native store alive across a FileIO cache eviction and close
+    before the store is released, without relying on attribute dealloc order."""
+
+    @staticmethod
+    def _handler_with_recording_fs(events):
+        options = Options({
+            "fs.oss.impl": "jindo",
+            "fs.oss.endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+            "fs.oss.accessKeyId": "test-ak",
+            "fs.oss.accessKeySecret": "test-sk",
+        })
+        fake_fs = _EvictionRecordingFileSystem(events)
+        fake_jfs = types.SimpleNamespace(connect=lambda *a, **kw: fake_fs)
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(jindo_module, "jfs", fake_jfs), \
+                mock.patch.object(jindo_module, "jutil",
+                                  types.SimpleNamespace(Config=_RecordingConfig)):
+            handler = JindoFileSystemHandler("oss://bucket/", options)
+        return handler, weakref.ref(fake_fs), weakref.ref(handler)
+
+    def test_handler_passes_pread_max_size_to_input_files(self):
+        options = Options({
+            "fs.oss.impl": "jindo",
+            "fs.oss.endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+            "fs.oss.jindo.pread-max-size": "1kb",
+        })
+        fake_jfs = types.SimpleNamespace(
+            connect=lambda *a, **kw: _EvictionRecordingFileSystem([]))
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(jindo_module, "jfs", fake_jfs), \
+                mock.patch.object(jindo_module, "jutil",
+                                  types.SimpleNamespace(Config=_RecordingConfig)):
+            handler = JindoFileSystemHandler("oss://bucket/", options)
+        with mock.patch.object(jindo_module, "JindoInputFile",
+                               wraps=JindoInputFile) as input_file_class:
+            handler.open_input_file('object').close()
+            handler.open_input_stream('object').close()
+        for call in input_file_class.call_args_list:
+            self.assertEqual(1024, call.kwargs['pread_max_size'])
+        self.assertEqual(2, input_file_class.call_count)
+
+    def test_evicted_filesystem_outlives_open_stream(self):
+        events = []
+        handler, fs_ref, handler_ref = self._handler_with_recording_fs(events)
+        input_file = handler.open_input_file('object')
+
+        # A FileIO cache eviction drops the handler chain: the handler (and its
+        # credentials) must die, the native store must not.
+        del handler
+        gc.collect()
+        self.assertIsNone(
+            handler_ref(), 'eviction must not pin the handler')
+        self.assertIsNotNone(
+            fs_ref(), 'eviction freed the native store while the stream was open')
+
+        # The stream keeps reading after eviction.
+        self.assertEqual(b'x', input_file.read(1))
+
+        # Closing releases the keep-alive: the still-referenced closed file
+        # no longer pins the store, and the stream closes before teardown.
+        input_file.close()
+        self.assertEqual(['stream-closed', 'fs-destroyed'], events)
+        self.assertIsNone(fs_ref())
+        del input_file
+        gc.collect()
+        # No double close on finalization.
+        self.assertEqual(['stream-closed', 'fs-destroyed'], events)
+
+    def test_evicted_filesystem_outlives_open_output_stream(self):
+        events = []
+        handler, fs_ref, handler_ref = self._handler_with_recording_fs(events)
+        output_file = handler.open_output_stream('object', None)
+
+        del handler
+        gc.collect()
+        self.assertIsNone(handler_ref())
+        self.assertIsNotNone(fs_ref())
+
+        self.assertEqual(4, output_file.write(b'data'))
+        output_file.close()
+        self.assertEqual(['stream-closed', 'fs-destroyed'], events)
+        self.assertIsNone(fs_ref())
+
+    def test_finalizer_closes_stream_before_store_teardown(self):
+        # Attribute release order is a CPython implementation detail: if a
+        # future refactor assigns _owner before _stream in __init__, the
+        # owner would be released first on dealloc. The finalizer must still
+        # close the stream while the owner pins the store.
+        events = []
+        fs = _EvictionRecordingFileSystem(events)
+        fs_ref = weakref.ref(fs)
+        stream = _EvictionRecordingNativeStream(fs, events)
+
+        class _ReversedInitInputFile(JindoInputFile):
+            def __init__(self, jindo_stream, owner):
+                self._owner = owner
+                self._stream = jindo_stream
+                self._file_size = None
+                self._closed = False
+
+        input_file = _ReversedInitInputFile(stream, owner=fs)
+        del fs, stream
+        gc.collect()
+        self.assertIsNotNone(fs_ref())
+
+        # Drop without closing: the finalizer must close the stream first...
+        del input_file
+        gc.collect()
+        self.assertIsNone(fs_ref())
+        # ...and the store must be destroyed only afterwards.
+        self.assertEqual(
+            ['stream-closed', 'fs-destroyed'], events,
+            'native stream must be closed before the store is destroyed')
+
+    def test_owner_argument_is_required(self):
+        with self.assertRaises(TypeError):
+            JindoInputFile(_RecordingInputStream())
+        with self.assertRaises(TypeError):
+            JindoOutputFile(_RecordingInputStream())
+
+
+class JindoTokenRefreshTest(unittest.TestCase):
+    """RESTTokenFileIO over the Jindo backend across a data token refresh."""
+
+    def setUp(self):
+        RESTTokenFileIO._FILE_IO_CACHE.clear()
+        self.addCleanup(RESTTokenFileIO._FILE_IO_CACHE.clear)
+
+    @staticmethod
+    def _token(security_token, expire_at_millis):
+        return RESTToken({
+            OssOptions.OSS_ENDPOINT.key(): "oss-cn-hangzhou.aliyuncs.com",
+            OssOptions.OSS_ACCESS_KEY_ID.key(): "STS.test-ak",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "test-sk",
+            OssOptions.OSS_SECURITY_TOKEN.key(): security_token,
+        }, expire_at_millis)
+
+    def test_token_refresh_keeps_previous_jindo_handler(self):
+        events = []
+        connected = []
+
+        def connect(*args, **kwargs):
+            fs = _EvictionRecordingFileSystem(events)
+            connected.append(weakref.ref(fs))
+            return fs
+
+        table_path = "oss://bucket/db.db/t"
+        expire_at_millis = int(time.time() * 1000) + 7_200_000
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(pyarrow_file_io_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(jindo_module, "jfs", types.SimpleNamespace(connect=connect)), \
+                mock.patch.object(jindo_module, "jutil",
+                                  types.SimpleNamespace(Config=_RecordingConfig)), \
+                mock.patch.object(RESTTokenFileIO, "try_to_refresh_token"):
+            readers = [RESTTokenFileIO(Identifier.create("db", "t"), table_path,
+                                       Options({OssOptions.OSS_IMPL.key(): "jindo"}))
+                       for _ in range(2)]
+            for reader in readers:
+                reader.token = self._token("sts-1", expire_at_millis)
+            stream = readers[0].new_input_stream(table_path + "/bucket-0/data.blob")
+            handler_ref = weakref.ref(readers[0].filesystem.handler)
+            self.assertIs(readers[0].file_io(), readers[1].file_io())
+            self.assertEqual(1, len(connected))
+
+            for reader in readers:
+                reader.token = self._token("sts-2", expire_at_millis + 1)
+            self.assertIs(readers[0].file_io(), readers[1].file_io())
+            gc.collect()
+
+            self.assertEqual(2, len(connected))
+            self.assertIsNotNone(handler_ref(), "token refresh released the previous handler")
+            self.assertEqual(b"x", stream.read(1))
+            stream.close()
+            self.assertEqual(["stream-closed"], events)
+
+    def test_data_token_overrides_pread_max_size(self):
+        table_path = "oss://bucket/db.db/t"
+        token = self._token("sts-1", int(time.time() * 1000) + 7_200_000)
+        token.token["fs.oss.jindo.pread-max-size"] = "2mb"
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(pyarrow_file_io_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(jindo_module, "jfs", types.SimpleNamespace(
+                    connect=lambda *a, **kw: _EvictionRecordingFileSystem([]))), \
+                mock.patch.object(jindo_module, "jutil",
+                                  types.SimpleNamespace(Config=_RecordingConfig)), \
+                mock.patch.object(RESTTokenFileIO, "try_to_refresh_token"):
+            reader = RESTTokenFileIO(
+                Identifier.create("db", "t"), table_path,
+                Options({OssOptions.OSS_IMPL.key(): "jindo",
+                         "fs.oss.jindo.pread-max-size": "1mb"}))
+            reader.token = token
+            reader.file_io()
+            self.assertEqual(2 * 1024 * 1024, reader.filesystem.handler._pread_max_size)
 
 
 class JindoFileSystemTest(unittest.TestCase):

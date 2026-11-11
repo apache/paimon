@@ -102,6 +102,7 @@ The query returns the row with `id` 2 and `name` `Bob`. Inspect what you created
 
 ```shell
 paimon table get demo.people
+paimon table list-snapshots demo.people --limit 20
 paimon table snapshot demo.people
 paimon table explain demo.people --where "id = 2"
 ```
@@ -112,6 +113,7 @@ paimon table explain demo.people --where "id = 2"
 <span id="table-explain"></span>
 <span id="table-get"></span>
 <span id="table-snapshot"></span>
+<span id="table-list-snapshots"></span>
 <span id="table-create"></span>
 <span id="table-import"></span>
 <span id="import-from-csv"></span>

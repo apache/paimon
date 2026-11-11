@@ -22,6 +22,7 @@ import org.apache.paimon.format.parquet.ParquetInputFile;
 import org.apache.paimon.format.parquet.ParquetInputStream;
 import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.VectoredReadable;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.hadoop.fs.Path;
@@ -375,6 +376,39 @@ public class ParquetFileReader implements Closeable {
             total += getRowRanges(i).rowCount();
         }
         return total;
+    }
+
+    /**
+     * Rows of the row groups left by the statistics, dictionary and bloom filters which the column
+     * indexes of the requested columns can not exclude, as sorted file row positions. Returns null
+     * when the row positions are unknown. No data page is read, only the metadata of the file and,
+     * when those filters are enabled, the dictionaries and bloom filters of the row groups.
+     */
+    @Nullable
+    public List<Range> candidateRowRanges() {
+        boolean pageFiltering =
+                options.useColumnIndexFilter()
+                        && (FilterCompat.isFilteringRequired(options.getRecordFilter())
+                                || selection != null);
+        List<Range> ranges = new ArrayList<>();
+        for (int i = 0, n = blocks.size(); i < n; ++i) {
+            BlockMetaData block = blocks.get(i);
+            long offset = block.getRowIndexOffset();
+            if (offset < 0) {
+                return null;
+            }
+            if (block.getRowCount() == 0) {
+                continue;
+            }
+            if (!pageFiltering) {
+                ranges.add(new Range(offset, offset + block.getRowCount() - 1));
+                continue;
+            }
+            for (RowRanges.Range range : getRowRanges(i).getRanges()) {
+                ranges.add(new Range(offset + range.from, offset + range.to));
+            }
+        }
+        return ranges;
     }
 
     /**

@@ -345,10 +345,8 @@ public class SchemasTable implements ReadonlyTable {
 
         if (optionalMaxSchemaId != null) {
             if (optionalMaxSchemaId < lowerBoundSchemaId) {
-                throw new RuntimeException(
-                        String.format(
-                                "schema id: %s should not lower than min schema id: %s",
-                                optionalMaxSchemaId, lowerBoundSchemaId));
+                // schema ids lie in [0, latest], so the range matches none of them
+                return Collections.emptyList();
             }
             upperBoundSchematId =
                     optionalMaxSchemaId > upperBoundSchematId
@@ -358,10 +356,8 @@ public class SchemasTable implements ReadonlyTable {
 
         if (optionalMinSchemaId != null) {
             if (optionalMinSchemaId > upperBoundSchematId) {
-                throw new RuntimeException(
-                        String.format(
-                                "schema id: %s should not greater than max schema id: %s",
-                                optionalMinSchemaId, upperBoundSchematId));
+                // schema ids lie in [0, latest], so the range matches none of them
+                return Collections.emptyList();
             }
             lowerBoundSchemaId =
                     optionalMinSchemaId > lowerBoundSchemaId

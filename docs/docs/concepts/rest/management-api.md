@@ -55,10 +55,10 @@ All management endpoints use the opaque `prefix` returned by the REST Catalog co
 is not a catalog name in a payload and is independent of local engine catalog aliases.
 
 ```
-GET    /v1/{prefix}/labels/{entityType}/{entityName}
-GET    /v1/{prefix}/labels/{entityType}/{entityName}/{key}
-POST   /v1/{prefix}/labels/{entityType}/{entityName}/{key}
-DELETE /v1/{prefix}/labels/{entityType}/{entityName}/{key}
+GET  /v1/{prefix}/labels?entityType=...&entityName=...
+POST /v1/{prefix}/labels/get
+POST /v1/{prefix}/labels/upsert
+POST /v1/{prefix}/labels/delete
 
 GET  /v1/{prefix}/permissions
 POST /v1/{prefix}/permissions/grant
@@ -87,8 +87,14 @@ Paimon's table snapshot `tags`; a label does not itself grant access or enforce 
 `entityName` is the server's canonical name within the configured catalog prefix. For example, a
 server may identify a table as `sales.orders` and a column as `sales.orders.order_id`. The server
 must define unambiguous names, including how to quote or escape identifier components. The client
-passes names unchanged and never splits them on dots. Path parameters use REST Catalog URL
-encoding as individual UTF-8 segments; JSON responses contain the original unencoded strings.
+passes names unchanged and never splits them on dots.
+
+Entity names and label keys never appear in the URL path. Canonical names routinely contain
+characters such as backticks, dots, percent signs, slashes, or non-ASCII text, and API gateways in
+front of a REST server may reject or rewrite such characters in a path before the request is
+signed or routed. Listing therefore names the entity in query parameters, and the operations on a
+single binding carry the entity type, entity name, and key in the JSON body. Query parameters use
+standard URL query encoding; JSON carries the original strings.
 
 ### Java catalog access
 
@@ -111,21 +117,23 @@ The standalone `RESTApi` client also exposes these operations; see
 
 ### Set a label
 
-`POST /v1/{prefix}/labels/{entityType}/{entityName}/{key}` atomically creates or replaces
-the binding identified by the path. For example, set the `domain` label on `sales.orders`:
+`POST /v1/{prefix}/labels/upsert` atomically creates or replaces the binding identified by the
+body. For example, set the `domain` label on `sales.orders`:
 
 ```http
-POST /v1/{prefix}/labels/TABLE/sales.orders/domain
+POST /v1/{prefix}/labels/upsert
 Content-Type: application/json
 ```
 
 ```json
 {
+  "entityType": "TABLE",
+  "entityName": "sales.orders",
+  "key": "domain",
   "value": "sales"
 }
 ```
 
-The request body contains only the value; it does not repeat the identity from the path.
 The entity must already exist. Repeating the same request leaves the same label value, and
 updating one key leaves other keys unchanged. Identity fields must be non-blank; keys are case
 sensitive. The value must be a string; an empty string is allowed and null is rejected.
@@ -134,12 +142,12 @@ operation.
 
 ### Read and delete labels
 
-`GET .../labels/{entityType}/{entityName}/{key}` returns the complete binding with
-`entityType`, `entityName`, `key`, and `value`. A missing entity or key returns 404.
-For a missing key, the error identifies
+`POST .../labels/get` with `{"entityType", "entityName", "key"}` returns the complete binding with
+`entityType`, `entityName`, `key`, and `value`. It does not change state and is safe to retry.
+A missing entity or key returns 404. For a missing key, the error identifies
 `resourceType=LABEL` and `resourceName={key}`.
 
-`GET .../labels/{entityType}/{entityName}` lists direct bindings:
+`GET .../labels?entityType={entityType}&entityName={entityName}` lists direct bindings:
 
 ```json
 {
@@ -155,9 +163,9 @@ to request subsequent pages. The last page omits `nextPageToken`. As with other 
 listings, an empty page terminates pagination and must not carry a continuation token. An existing
 entity with no labels returns `{"labels":[]}`; a missing entity returns 404.
 
-`DELETE .../labels/{entityType}/{entityName}/{key}` removes only that binding. It returns HTTP 200
-with no body even if the key is already absent, provided the entity exists. A missing entity
-still returns 404.
+`POST .../labels/delete` with `{"entityType", "entityName", "key"}` removes only that binding.
+It returns HTTP 200 with no body even if the key is already absent, provided the entity exists.
+A missing entity still returns 404.
 
 ## Privileges and policies are independent
 
@@ -542,9 +550,42 @@ ALTER TABLE paimon.sales.orders
 SET TBLPROPERTIES ('query-auth.enabled' = 'true');
 ```
 
-`create_policy` accepts the canonical `principal` and a serialized Paimon `Predicate`. The JSON
-below is the same representation accepted in one `AuthTableQueryResponse.filter` entry. Named
-arguments are recommended because row-filter and column-mask definitions use different fields:
+`create_policy` accepts the canonical `principal` and exactly one of `filter_sql` or
+`predicate_json` for a row filter. Use `filter_sql` to write a SQL condition against the target
+table's columns:
+
+```sql
+CALL paimon.sys.create_policy(
+  database => 'sales',
+  table => 'orders',
+  policy_type => 'ROW_FILTER',
+  principal => 'group:analysts',
+  filter_sql => 'region = \'APAC\''
+);
+```
+
+Spark resolves column names and types against the target table and converts the entire condition
+to a serialized Paimon `Predicate` before sending the existing REST request. Supported conditions
+include comparisons, `IN`, `AND`/`OR`, `NOT`, and `IS NULL`/`IS NOT NULL`. Conditions must be Boolean
+and deterministic, and cannot contain subqueries or session-dependent expressions such as
+`current_date()` or `current_user()`. Constant expressions are evaluated when the policy is
+created. Any condition that cannot be fully converted is rejected; no part is silently omitted.
+The exact expression support follows the predicate converters for the Spark version in use.
+`filter_sql` is only available for `ROW_FILTER` policies.
+
+`LOWER` and `UPPER` on non-constant expressions are not supported because their locale and
+collation semantics cannot be preserved in a stored policy. Constant calls, such as
+`region = lower('APAC')`, are evaluated by Spark when the policy is created and remain supported.
+
+SQL filters adapt signed-zero comparisons and truncate high-precision timestamp columns to
+Spark's microsecond precision. Comparisons on nested timestamp fields with precision above 6
+are not supported. Timestamp value comparisons require Spark 3.4 or later with
+`spark.paimon.legacy-timestamp-mapping.enabled=false`; timestamp null checks remain supported
+with legacy mapping. Direct `predicate_json` input uses native Paimon Predicate comparison semantics.
+
+Alternatively, supply `predicate_json` directly. The JSON below is the same representation
+accepted in one `AuthTableQueryResponse.filter` entry. Named arguments are recommended because
+row-filter and column-mask definitions use different fields:
 
 ```sql
 CALL paimon.sys.create_policy(
@@ -661,6 +702,41 @@ CALL paimon.sys.drop_policy(
   if_exists => true
 );
 ```
+
+## Flink SQL procedures
+
+Flink 1.19 and later can call the same three permission procedures on a REST catalog. Arguments,
+identity rules, and output columns match the Spark procedures above. A filesystem catalog fails
+with `Catalog does not support permission management.`
+
+```sql
+CALL sys.grant_permission(
+  resource_type => 'TABLE',
+  `database` => 'sales',
+  `table` => 'orders',
+  access => 'SELECT',
+  principal => 'user:alice'
+);
+
+CALL sys.list_permissions(
+  resource_type => 'TABLE',
+  `database` => 'sales',
+  `table` => 'orders'
+);
+
+CALL sys.revoke_permission(
+  resource_type => 'TABLE',
+  `database` => 'sales',
+  `table` => 'orders',
+  access => 'SELECT',
+  principal => 'user:alice'
+);
+```
+
+Column ranges are a JSON array of exact column names, for example
+`column_names => '["order_id", "region"]'`. `list_permissions` returns those names as
+`ARRAY<STRING>`. Argument details and positional calls are in
+[Flink permission procedures](../../flink/procedures/permissions).
 
 Creating, dropping, or inspecting permissions and policies requires the server to
 authorize the caller for `GRANT` on the relevant resource. Authentication, principal

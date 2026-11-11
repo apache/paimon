@@ -24,6 +24,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.vfs.VFSCatalogIdentifier;
 import org.apache.paimon.vfs.VFSDatabaseIdentifier;
 import org.apache.paimon.vfs.VFSIdentifier;
@@ -58,7 +59,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
     private VFSOperations vfsOperations;
     private Configuration conf;
 
-    private static final String USER_AGENT = "HadoopPVFS";
+    private static final String USER_AGENT_FEATURE = "HadoopPVFS";
     private static final long DEFAULT_BLOCK_SIZE = 128 * 1024 * 1024L;
 
     @Override
@@ -96,8 +97,13 @@ public class PaimonVirtualFileSystem extends FileSystem {
             options.set(RESTCatalogOptions.URI, endpoint);
         }
 
-        // Set user agent
-        options.set(RESTCatalogOptions.HTTP_USER_AGENT, USER_AGENT);
+        // PVFS leads the features of Paimon's unified User-Agent.
+        String features = options.get(CatalogOptions.USER_AGENT_FEATURES);
+        options.set(
+                CatalogOptions.USER_AGENT_FEATURES,
+                StringUtils.isNullOrWhitespaceOnly(features)
+                        ? USER_AGENT_FEATURE
+                        : USER_AGENT_FEATURE + " " + features.trim());
 
         vfsOperations = new VFSOperations(options);
     }

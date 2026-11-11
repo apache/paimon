@@ -65,7 +65,7 @@ PyPI package is built from the approved commit with the final version.
 ## Release model
 
 The combined Paimon and PyPaimon release uses one shared version number. The
-Maven project version and `paimon-python/setup.py` version must be equal.
+Maven project version and `paimon-python/pypaimon/_version.py` version must be equal.
 
 | Deliverable | Candidate | Published location |
 | --- | --- | --- |

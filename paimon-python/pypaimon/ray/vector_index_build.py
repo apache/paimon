@@ -1,0 +1,75 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+"""Ray shard construction with one driver-side global-index commit."""
+
+from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS
+from pypaimon.ray.search_execution import execution_options
+
+
+def validate_build_options(builder, concurrency, ray_remote_args):
+    if builder._index_type not in VINDEX_IDENTIFIERS:
+        raise ValueError("Ray index building supports only native vector indexes.")
+    concurrency, options = execution_options(concurrency, ray_remote_args)
+    # Retrying a write task can race with a lost worker writing the same file.
+    # A failed build can instead be rerun after its uncommitted outputs close.
+    if options.get("max_retries", 0) != 0 or options.get("retry_exceptions", False):
+        raise ValueError("Ray index building requires max_retries=0 and retry_exceptions=False.")
+    options.update(max_retries=0, retry_exceptions=False)
+    if builder._core_options.global_index_row_count_per_shard() <= 0:
+        raise ValueError("Option 'global-index.row-count-per-shard' must be greater than 0.")
+    return concurrency, options
+
+
+def build_native_vector_index(table, plan, concurrency, remote_args):
+    """Schedule immutable Core tasks; all publication remains with the caller."""
+    import ray
+
+    shards = plan.shards()
+    if not shards:
+        return []
+    context = ray.put(table)
+    remote = ray.remote(_build_native_shard).options(**remote_args)
+    pending, results = {}, {}
+    next_shard = 0
+    try:
+        while pending or next_shard < len(shards):
+            while len(pending) < concurrency and next_shard < len(shards):
+                ref = remote.remote(context, shards[next_shard])
+                pending[ref] = next_shard
+                next_shard += 1
+            ready, _ = ray.wait(list(pending), num_returns=1)
+            ref = ready[0]
+            ordinal = pending[ref]
+            results[ordinal] = ray.get(ref)
+            del pending[ref]
+        return [message for ordinal in range(len(shards)) for message in results[ordinal]]
+    except BaseException:
+        # A worker may have completed even when result delivery failed. Wait
+        # for dispatched tasks, but retain every output: its commit ownership
+        # is unknown and another attempt may already hold the messages.
+        for ref in pending:
+            try:
+                ray.get(ref)
+            except BaseException:
+                pass
+        raise
+
+
+def _build_native_shard(table, shard):
+    from pypaimon.globalindex.index_dispatch import build_native_vector_index_shard
+    return build_native_vector_index_shard(table, shard)

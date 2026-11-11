@@ -25,13 +25,12 @@ from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.scanner.data_evolution_split_generator import \
-    DataEvolutionSplitGenerator
-from pypaimon.read.scanner.data_evolution_stats import \
-    DataEvolutionGroupStatsFilter
+from pypaimon.execution.python.read.scanner.data_evolution_split_generator import (DataEvolutionSplitGenerator)
+from pypaimon.execution.python.read.scanner.data_evolution_stats import (DataEvolutionGroupStatsFilter)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 
 
 def _empty_stats():
@@ -398,6 +397,11 @@ class DataEvolutionGroupStatsPlanningTest(unittest.TestCase):
         class _Table:
             table_path = '/tmp/table'
             options = _Options()
+
+            def path_factory(self):
+                return FileStorePathFactory(
+                    self.table_path, [], '__DEFAULT_PARTITION__', 'parquet',
+                    'data-', 'changelog-', False, False, 'zstd')
 
         predicate = PredicateBuilder(fields).equal('id', 5)
         group_filter = DataEvolutionGroupStatsFilter(

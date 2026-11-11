@@ -43,6 +43,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -80,11 +81,12 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotLakeStreamTable;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
-import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
-import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
+import static org.apache.paimon.jdbc.JdbcCatalogOptions.LOCK_ENABLED;
+import static org.apache.paimon.jdbc.JdbcCatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.jdbc.JdbcUtils.deleteProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.execute;
 import static org.apache.paimon.jdbc.JdbcUtils.insertProperties;
@@ -606,14 +608,16 @@ public class JdbcCatalog extends AbstractCatalog {
                         // concurrent createView / renameView / createTable targeting the same
                         // identifier (tables and views are stored in separate JDBC tables
                         // without a shared uniqueness constraint).
+                        Table table;
                         try {
-                            getTable(fromTable);
+                            table = getTable(fromTable);
                         } catch (TableNotExistException e) {
                             if (ignoreIfNotExists) {
                                 return null;
                             }
                             throw new TableNotExistException(fromTable);
                         }
+                        checkNotLakeStreamTable(table, fromTable, "renameTable");
 
                         requireDatabaseExistsForWrite(toTable);
 
@@ -759,6 +763,20 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
+    public Optional<CatalogLockFactory> lockFactory() {
+        if (!lockEnabled()) {
+            return Optional.empty();
+        }
+        String type = options.get(LOCK_TYPE);
+        return type == null ? defaultLockFactory() : Optional.of(CatalogLockFactory.discover(type));
+    }
+
+    @Override
+    protected boolean lockEnabled() {
+        return options.getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
+    }
+
+    @Override
     public Optional<CatalogLockFactory> defaultLockFactory() {
         return Optional.of(new JdbcCatalogLockFactory());
     }
@@ -775,17 +793,8 @@ public class JdbcCatalog extends AbstractCatalog {
         // check-then-act.
         java.util.concurrent.locks.Lock localLock = LOCAL_LOCKS.get(lockKey(identifier));
         localLock.lock();
-        try {
-            if (!lockEnabled()) {
-                return callable.call();
-            }
-            JdbcCatalogLock lock =
-                    new JdbcCatalogLock(
-                            connections,
-                            catalogKey,
-                            checkMaxSleep(options.toMap()),
-                            acquireTimeout(options.toMap()));
-            return Lock.fromCatalog(lock, identifier).runWithLock(callable);
+        try (Lock lock = createLock(identifier, null, null, new Options())) {
+            return lock.runWithLock(callable);
         } finally {
             localLock.unlock();
         }

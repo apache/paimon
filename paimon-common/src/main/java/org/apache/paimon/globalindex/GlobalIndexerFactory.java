@@ -39,28 +39,10 @@ public interface GlobalIndexerFactory {
      * match; the default keeps all files when no safe pruning is available.
      */
     default List<GlobalIndexIOMeta> selectFiles(
-            DataField indexField,
-            List<DataField> extraFields,
-            Predicate predicate,
-            List<GlobalIndexIOMeta> files) {
+            List<DataField> indexFields, Predicate predicate, List<GlobalIndexIOMeta> files) {
         return files;
     }
 
-    GlobalIndexer create(DataField indexField, Options options);
-
-    /**
-     * Creates an indexer over a primary column plus optional extra columns. {@code indexField} is
-     * the primary column; {@code extraFields} holds the remaining columns and is empty for a
-     * single-column index.
-     */
-    default GlobalIndexer create(
-            DataField indexField, List<DataField> extraFields, Options options) {
-        if (extraFields != null && !extraFields.isEmpty()) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "Index type '%s' does not support multi-column index, got extra columns: %s",
-                            identifier(), extraFields));
-        }
-        return create(indexField, options);
-    }
+    /** Creates an indexer over a non-empty list of columns in index order. */
+    GlobalIndexer create(List<DataField> indexFields, Options options);
 }

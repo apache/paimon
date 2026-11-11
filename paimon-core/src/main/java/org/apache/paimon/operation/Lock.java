@@ -19,28 +19,87 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.utils.ExceptionUtils;
+
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.util.concurrent.Callable;
 
-/**
- * An interface that allows file store to use global lock to some transaction-related things.
- *
- * @since 0.4.0
- */
+/** A table lock covering an operation and its publication. */
 @Public
 public interface Lock extends AutoCloseable {
 
-    /** Run with lock. */
-    <T> T runWithLock(Callable<T> callable) throws Exception;
+    /**
+     * Acquire a scope to release on the acquiring thread. Clean up partial acquisition on failure.
+     */
+    AutoCloseable acquire() throws Exception;
+
+    /**
+     * Run an operation under the lock. Acquisition failures are distinguished from operation
+     * failures; interruption stops acquisition. Releasing a scope must not replace the operation's
+     * result or exception.
+     */
+    default <T> T runWithLock(Callable<T> callable) throws Exception {
+        AutoCloseable scope;
+        try {
+            scope = acquire();
+        } catch (Exception e) {
+            if (ExceptionUtils.findThrowable(e, InterruptedException.class).isPresent()) {
+                Thread.currentThread().interrupt();
+                throw e;
+            }
+            throw new AcquisitionException(e);
+        }
+
+        Throwable failure = null;
+        try {
+            return callable.call();
+        } catch (Exception | Error e) {
+            failure = e;
+            throw e;
+        } finally {
+            release(scope, failure);
+        }
+    }
+
+    /** Release a scope without losing the outcome of its operation or partial acquisition. */
+    static void release(AutoCloseable scope, @Nullable Throwable failure) {
+        try {
+            scope.close();
+        } catch (Exception e) {
+            if (ExceptionUtils.findThrowable(e, InterruptedException.class).isPresent()) {
+                Thread.currentThread().interrupt();
+            }
+            if (failure != null && failure != e) {
+                failure.addSuppressed(e);
+            }
+            LoggerFactory.getLogger(Lock.class).warn("Failed to release table lock.", e);
+        }
+    }
+
+    /** Fail before publication when a held lease has expired or renewal has failed. */
+    default void ensureValid() {}
 
     static Lock empty() {
         return new EmptyLock();
     }
 
-    /** An empty lock. */
+    /** Distinguishes failure to acquire a scope from failure of its operation or publication. */
+    class AcquisitionException extends Exception {
+        private AcquisitionException(Exception cause) {
+            super("Failed to acquire table lock.", cause);
+        }
+    }
+
+    /** An operation with no external lock configured. */
     class EmptyLock implements Lock {
+        @Override
+        public AutoCloseable acquire() {
+            return () -> {};
+        }
+
         @Override
         public <T> T runWithLock(Callable<T> callable) throws Exception {
             return callable.call();
@@ -50,33 +109,59 @@ public interface Lock extends AutoCloseable {
         public void close() {}
     }
 
-    static Lock fromCatalog(CatalogLock lock, Identifier tablePath) {
-        if (lock == null) {
-            return new EmptyLock();
-        }
-        return new CatalogLockImpl(lock, tablePath);
+    /** Reuse the current scope for nested publication on the same thread. */
+    static Lock reentrant(Lock lock) {
+        return lock instanceof EmptyLock || lock instanceof ReentrantLock
+                ? lock
+                : new ReentrantLock(lock);
     }
 
-    /** A {@link Lock} to wrap {@link CatalogLock}. */
-    class CatalogLockImpl implements Lock {
+    /** Keeps the outer operation's scope until preparation and publication both finish. */
+    class ReentrantLock implements Lock {
+        private final Lock delegate;
+        private final ThreadLocal<Boolean> held = ThreadLocal.withInitial(() -> false);
 
-        private final CatalogLock catalogLock;
-        private final Identifier tablePath;
+        private ReentrantLock(Lock delegate) {
+            this.delegate = delegate;
+        }
 
-        private CatalogLockImpl(CatalogLock catalogLock, Identifier tablePath) {
-            this.catalogLock = catalogLock;
-            this.tablePath = tablePath;
+        @Override
+        public AutoCloseable acquire() throws Exception {
+            if (held.get()) {
+                delegate.ensureValid();
+                return () -> {};
+            }
+            AutoCloseable scope = delegate.acquire();
+            try {
+                delegate.ensureValid();
+                held.set(true);
+                return () -> {
+                    held.remove();
+                    scope.close();
+                };
+            } catch (Exception | Error e) {
+                release(scope, e);
+                throw e;
+            }
         }
 
         @Override
         public <T> T runWithLock(Callable<T> callable) throws Exception {
-            return catalogLock.runWithLock(
-                    tablePath.getDatabaseName(), tablePath.getObjectName(), callable);
+            if (held.get()) {
+                delegate.ensureValid();
+                return callable.call();
+            }
+            return Lock.super.runWithLock(callable);
+        }
+
+        @Override
+        public void ensureValid() {
+            delegate.ensureValid();
         }
 
         @Override
         public void close() throws Exception {
-            this.catalogLock.close();
+            delegate.close();
         }
     }
 }

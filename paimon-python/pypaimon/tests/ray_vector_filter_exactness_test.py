@@ -15,14 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
 
 pytest.importorskip("ray")
 
+from pypaimon.ray.search_execution import RaySearchTaskExecutor
+from pypaimon.tests.search_execution_test_helpers import task_parts
+
 from pypaimon.read.table_read import TableRead
-from pypaimon.table.source.vector_search_read import AbstractVectorSearchReadImpl
+from pypaimon.execution.python.read.search.vector_search_read import AbstractVectorSearchReadImpl
 from pypaimon.tests import ray_vector_search_test as ray_fixtures
 from pypaimon.tests import vector_filter_exactness_test as fixtures
 from pypaimon.tests.vector_filter_exactness_test import query, scalar_index
@@ -38,23 +42,147 @@ def test_ray_applies_exact_row_filter_before_worker_top_k(table, ray_cluster, ba
     scalar_index(table)
     table.raw_table = table.raw_table.copy({
         "vector-index.search-mode": mode, "global-index.filter.refine-from-data": str(refine).lower()})
-    original = AbstractVectorSearchReadImpl._matching_candidate_rows
-    arrow_read = TableRead._new_arrow_batch_reader
+    from pypaimon.execution.python.read.search import global_index_live_row_filter
+
+    original_map = RaySearchTaskExecutor.map
     calls = []
 
-    def no_vectors(read, *args, **kwargs):
-        assert "embedding" not in [field.name for field in read.read_type]
-        return arrow_read(read, *args, **kwargs)
+    def record(executor, tasks, ordered=False):
+        worker, context, items = task_parts(tasks)
 
-    def verify(reader, candidates, snapshot):
-        calls.append(list(candidates))
-        assert snapshot is not None
-        with patch.object(TableRead, "_new_arrow_batch_reader", no_vectors):
-            return original(reader, candidates, snapshot)
+        def checked(context, split, scalar_filter=None):
+            # These patches run in the actual Ray worker, not on the driver.
+            original = AbstractVectorSearchReadImpl._matching_candidate_rows
+            arrow_read = TableRead._new_arrow_batch_reader
+            observed = []
 
-    with patch.object(AbstractVectorSearchReadImpl, "_matching_candidate_rows", verify):
+            def no_vectors(read, *args, **kwargs):
+                assert "embedding" not in [field.name for field in read.read_type]
+                return arrow_read(read, *args, **kwargs)
+
+            def verify(reader, candidates, snapshot):
+                observed.append(list(candidates))
+                assert snapshot is not None
+                assert all(split.row_range_start <= row_id <= split.row_range_end for row_id in candidates)
+                from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+                    DataEvolutionGlobalIndexScanner)
+                with patch.object(TableRead, "_new_arrow_batch_reader", no_vectors), \
+                        patch.object(DataEvolutionGlobalIndexScanner, "create",
+                                     wraps=DataEvolutionGlobalIndexScanner.create) as scan:
+                    result = original(reader, candidates, snapshot)
+                    scan.assert_not_called()
+                    return result
+
+            with patch.object(AbstractVectorSearchReadImpl, "_matching_candidate_rows", verify):
+                result = worker(context, split, scalar_filter)
+            return result, observed
+
+        mapped = original_map(executor, [replace(task, operation=checked) for task in tasks],
+                              ordered=ordered)
+        for ordinal, (result, observed) in mapped:
+            calls.extend(observed)
+            yield ordinal, result
+
+    with patch.object(RaySearchTaskExecutor, "map", record), \
+            patch.object(AbstractVectorSearchReadImpl, "_pre_filters",
+                         side_effect=AssertionError("driver must not build filters")), \
+            patch.object(global_index_live_row_filter, "live_rows",
+                         side_effect=AssertionError("driver must not read deletion vectors")):
         result = query(table, "name LIKE '%zeta%'", batch).to_arrow(execution="ray", concurrency=2)
     actual = [value.to_pylist() for value in result] if batch else result.to_pylist()
     expected = [{"id": 1}] if refine else []
     assert actual == ([expected, expected] if batch else expected)
+    # The whole batch shares a single verification read in its index task.
     assert calls == ([[0, 1, 2]] if refine else [])
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("kind", ["btree", "bitmap"])
+def test_worker_filters_overlapping_scalar_shards_at_planned_snapshot(tmp_path, ray_cluster, batch, kind):
+    import pyarrow as pa
+    import pypaimon.multimodal as pm
+
+    pytest.importorskip("paimon_vindex")
+    schema = pa.schema([("id", pa.int64()), ("name", pa.string()),
+                        ("embedding", pa.list_(pa.float32(), 2))])
+    table = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
+        "vectors", schema=schema, options={
+            "file.format": "parquet", "vector.file.format": "parquet",
+            "deletion-vectors.enabled": "true",
+            "global-index.filter.refine-from-data": "true"})
+    for start in range(0, 12, 3):
+        row_ids = list(range(start, start + 3))
+        table.add(pa.table({"id": row_ids, "name": ["keep" if i % 2 == 0 else "drop" for i in row_ids],
+                            "embedding": [[float(i), 1.] for i in row_ids]}, schema=schema))
+    table.raw_table.create_global_index("embedding", "ivf-flat", options={
+        "global-index.row-count-per-shard": "3", "ivf-flat.nlist": "1"})
+    # Scalar and vector shard boundaries intentionally differ.
+    table.raw_table.copy({"deletion-vectors.enabled": "false"}).create_global_index(
+        "name", kind, options={"global-index.row-count-per-shard": "5"})
+    table.delete("id = 2")
+    search = table.search_vectors([[0., 1.]] * 2, pre_filter="name LIKE '%keep%'") if batch else table.search(
+        [0., 1.], pre_filter="name LIKE '%keep%'")
+    search = search.select(["id"]).limit(3)
+    expected = [{"id": 0}, {"id": 4}, {"id": 6}]
+    expected = [expected, expected] if batch else expected
+    assert search.to_list() == expected
+    original_map = RaySearchTaskExecutor.map
+    dispatched = []
+
+    def commit_before_workers(executor, tasks, ordered=False):
+        if not dispatched:
+            table.delete("id = 0")
+            dispatched.append(True)
+        return original_map(executor, tasks, ordered=ordered)
+
+    with patch.object(RaySearchTaskExecutor, "map", commit_before_workers), \
+            patch.object(AbstractVectorSearchReadImpl, "_pre_filters",
+                         side_effect=AssertionError("driver filter")):
+        result = search.to_list(execution="ray", concurrency=2)
+    assert result == expected
+    assert dispatched == [True]
+    assert search.to_list(execution="ray", concurrency=2) == search.to_list()
+    assert search.to_list() != expected
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("mode", ["exact", "candidate", "unavailable"])
+@pytest.mark.python_plan
+def test_shared_scalar_index_is_evaluated_once_on_ray(table, tmp_path, ray_cluster, batch, mode):
+    import os
+    from pathlib import Path
+
+    import pyarrow as pa
+    from pypaimon.execution.python.read.search import distributed_vector_search
+
+    schema = pa.schema([("id", pa.int64()), ("name", pa.string()),
+                        ("embedding", pa.list_(pa.float32(), 2))])
+    table.add(pa.table({"id": [3, 4, 5], "name": ["delta zeta", "epsilon", "zeta"],
+                        "embedding": [[0.5, 1.], [3., 1.], [4., 1.]]}, schema=schema))
+    table.raw_table.create_global_index("embedding", "ivf-flat", options={
+        "ivf-flat.nlist": "1", "ivf-flat.distance.metric": "l2"})
+    scalar_index(table, "bitmap" if mode == "exact" else "btree")
+    options = {"global-index.filter.refine-from-data": "true"}
+    if mode == "unavailable":
+        options["btree-index.fallback-scan-max-size"] = "0 b"
+    table.raw_table = table.raw_table.copy(options)
+    marker = str(tmp_path / "scalar-evaluations")
+    original = distributed_vector_search._prepare_scalar_filter
+
+    def record(context, split):
+        with open(marker, "a") as output:
+            output.write(str(os.getpid()) + "\n")
+        return original(context, split)
+
+    with patch.object(distributed_vector_search, "_prepare_scalar_filter", record), \
+            patch.object(AbstractVectorSearchReadImpl, "_scalar_index_result",
+                         side_effect=AssertionError("driver scalar evaluation")):
+        # Each task requires the whole two-CPU cluster. Pending searches must
+        # not occupy resources while waiting for their shared filter dependency.
+        result = query(table, "name LIKE '%zeta%'", batch).to_list(
+            execution="ray", concurrency=2, ray_remote_args={"num_cpus": 2})
+    expected = [{"id": 3}]
+    assert result == ([expected, expected] if batch else expected)
+    worker_pids = Path(marker).read_text().splitlines()
+    assert len(worker_pids) == 1
+    assert int(worker_pids[0]) != os.getpid()

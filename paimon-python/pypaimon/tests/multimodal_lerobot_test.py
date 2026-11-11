@@ -42,19 +42,24 @@ from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 import pypaimon.multimodal as pmm
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.source_utils import _SourceFileIO
 from pypaimon.multimodal.connection import MultimodalConnection
 from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.dataset import (
     _PaimonLeRobotMetadata,
     _PyAVVideoDecoder,
+    _RangeBackedVideo,
     _arrow_rows,
     _decode_video_frames,
     _decode_video_rows,
     _decode_video_windows,
+    _episode_ranges,
+    _episode_tasks,
     _image_tensor,
     _index_names,
     _open_video_decoder,
+    _reader_metadata,
     _selected_episodes,
     _stack_visual_windows,
     _torch_row,
@@ -63,10 +68,11 @@ from pypaimon.multimodal.lerobot.api import _create_target_table
 from pypaimon.multimodal.lerobot.metadata import (
     _append_arrow_tables,
     _companion_identifier,
+    _dataset_fps,
+    _integer,
     _load_dataset_metadata,
     _managed_table_options,
     _metadata_table,
-    _restore_pandas_metadata,
     _subtask_indices,
     _validated_episode_tables,
 )
@@ -83,6 +89,7 @@ from pypaimon.multimodal.lerobot.schema import (
     _validate_v3_required_features,
 )
 from pypaimon.multimodal.lerobot.source import (
+    _pandas_index_column,
     _LeRobotSource,
     _RemoteLeRobotDataset,
     _import_lerobot_dataset,
@@ -91,6 +98,7 @@ from pypaimon.multimodal.lerobot.source import (
     _validate_info_paths,
 )
 from pypaimon.multimodal.table import _target_schema
+from pypaimon.tests.video_frame_index_utils import FrameIndex
 
 try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -107,6 +115,16 @@ class _ManualDatasetReader(pmm.PaimonDatasetReader):
 
     def read_indices(self, indices, columns):
         raise NotImplementedError
+
+
+class _NullableLabelReader(pmm.PaimonDatasetReader):
+
+    def read_indices(self, indices, columns):
+        return pa.Table.from_pylist([
+            {"index": i, "episode_index": 0, "frame_index": i,
+             "timestamp": i / 10.0, "task_index": 0,
+             "subtask_index": None if i % 16 == 15 else 0}
+            for i in indices], schema=self.schema).select(columns)
 
 
 class _PickleDatasetReader(_ManualDatasetReader):
@@ -128,7 +146,22 @@ def _replaced_contract(field, old, new):
 
 
 def _catalog_rows(connection, name):
-    table = connection.catalog.get_table(connection._identifier(name))
+    try:
+        table = connection.catalog.get_table(connection._identifier(name))
+    except TableNotExistException:
+        prefix, suffix = name.rsplit("_", 1)
+        if suffix not in ("info", "stats", "tasks", "subtasks"):
+            raise
+        sources = _catalog_rows(connection, prefix + "_datasets")
+        if not sources:
+            return []
+        source = sources[0]
+        if suffix in ("tasks", "subtasks"):
+            return source[suffix] or []
+        value = source[suffix]
+        return ([] if value is None else [
+            {"key": key, "value": json.dumps(item)}
+            for key, item in json.loads(value).items()])
     builder = table.new_read_builder()
     plan = builder.new_scan().plan()
     return builder.new_read().to_arrow(plan.splits()).to_pylist()
@@ -148,7 +181,131 @@ def _catalog_metadata(connection, name):
     }
 
 
+def _increment_image(value):
+    return value + 1
+
+
+def _configure_uint8_transform_worker(unused_worker_id):
+    from torch.utils.data import get_worker_info
+    dataset = get_worker_info().dataset
+    dataset.return_uint8 = True
+    dataset.image_transforms = _increment_image
+
+
 class LeRobotValidationTest(unittest.TestCase):
+
+    def test_dataset_fps_accepts_integral_numbers(self):
+        for value in (30, 30.0, np.int64(30), np.float32(30), np.float64(30), np.longdouble(30)):
+            with self.subTest(value=value):
+                self.assertEqual(30, _dataset_fps(value))
+                self.assertIsInstance(_dataset_fps(value), int)
+        for value in (True, np.bool_(True), "30", None, 0, -1, 0.0, -30.0,
+                      29.97, float("nan"), float("inf"), -float("inf")):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    _dataset_fps(value)
+        with self.assertRaises(ValueError):
+            _integer(30.0, "episode_index")
+
+    def test_dataset_fps_preserves_extended_precision(self):
+        if np.finfo(np.longdouble).eps >= np.finfo(float).eps:
+            self.skipTest("longdouble has no additional precision on this platform")
+        value = np.longdouble("30.000000000000001")
+        self.assertNotEqual(value, 30)
+        self.assertEqual(float(value), 30.0)
+        with self.assertRaises(ValueError):
+            _dataset_fps(value)
+
+    def test_arrow_task_columns_without_pandas_metadata(self):
+        for component in ("task", "subtask"):
+            for text_type in (pa.string(), pa.large_string()):
+                schema = pa.schema([(component, text_type), (component + "_index", pa.int64())])
+                self.assertEqual(component, _pandas_index_column(schema, component))
+            for fields in (
+                    [(component + "_index", pa.int64())],
+                    [(component + "_index", pa.int64()), ("description", pa.string())],
+                    [(component + "_index", pa.int64()), (component, pa.int64())]):
+                with self.subTest(component=component, fields=fields):
+                    with self.assertRaises(ValueError):
+                        _pandas_index_column(pa.schema(fields), component)
+            schema = pa.schema([(component + "_index", pa.int64()), (component, pa.string())])
+            with self.assertRaises(ValueError):
+                _pandas_index_column(schema.with_metadata({b"pandas": b"invalid"}), component)
+
+    def test_episode_validation_projects_batched_hf_metadata(self):
+        try:
+            from datasets import Dataset
+        except ImportError:
+            self.skipTest("datasets is not installed")
+        from pypaimon.multimodal.lerobot.dataset import (
+            _episode_ranges, _episode_tasks,
+        )
+
+        rows = [{
+            "episode_index": index,
+            "dataset_from_index": index * 2,
+            "dataset_to_index": index * 2 + 2,
+            "length": 2,
+            "tasks": ["place", "pick"],
+            "stats/camera/mean": [0.5] * 32,
+        } for index in range(2050)]
+        episodes = Dataset.from_list(rows)
+        expected = [(index * 2, index * 2 + 2) for index in range(2050)]
+        with patch.object(
+                Dataset, "__getitem__",
+                side_effect=AssertionError("Do not format individual rows")):
+            self.assertEqual(expected, _episode_ranges(
+                {"episodes": episodes}, 4100, 2050))
+            self.assertEqual((("pick", "place"),) * 2050,
+                             _episode_tasks({"episodes": episodes}))
+        self.assertIn("stats/camera/mean", episodes.column_names)
+        self.assertEqual(rows[0], episodes[0])
+        self.assertEqual((None,) * 2050, _episode_tasks({
+            "episodes": episodes.remove_columns("tasks"),
+        }))
+        formatted = episodes.select(range(2)).with_format(
+            "numpy",
+            columns=["episode_index", "dataset_from_index",
+                     "dataset_to_index", "length"],
+        )
+        self.assertNotIn("tasks", formatted[0])
+        self.assertEqual([(0, 2), (2, 4)], _episode_ranges(
+            {"episodes": formatted}, 4, 2))
+        self.assertEqual((None, None), _episode_tasks(
+            {"episodes": formatted}))
+        visible = formatted.with_format(
+            "numpy", columns=formatted.format["columns"],
+            output_all_columns=True)
+        self.assertEqual((("pick", "place"),) * 2, _episode_tasks(
+            {"episodes": visible}))
+        # Preserve a selected Dataset's logical row order and range validation.
+        with self.assertRaisesRegex(ValueError, "episode_index=1"):
+            _episode_ranges({"episodes": episodes.select([1, 0])}, 4, 2)
+        with self.assertRaisesRegex(ValueError, "integer controls"):
+            _episode_ranges({"episodes": episodes.remove_columns("length")},
+                            4100, 2050)
+
+    def test_episode_validation_preserves_metadata_representations(self):
+        from pypaimon.multimodal.lerobot.dataset import (
+            _episode_ranges, _episode_tasks,
+        )
+        import pandas as pd
+
+        rows = [{
+            "episode_index": 0, "dataset_from_index": 0,
+            "dataset_to_index": 2, "length": 2, "tasks": "pick",
+        }, {
+            "episode_index": 1, "dataset_from_index": 2,
+            "dataset_to_index": 3, "length": 1, "tasks": None,
+        }]
+        for episodes in (rows, pd.DataFrame(rows)):
+            with self.subTest(type=type(episodes).__name__):
+                metadata = {"episodes": episodes}
+                self.assertEqual([(0, 2), (2, 3)],
+                                 _episode_ranges(metadata, 3, 2))
+                self.assertEqual((("pick",), None), _episode_tasks(metadata))
+                with self.assertRaisesRegex(ValueError, "expected 4"):
+                    _episode_ranges(metadata, 4, 2)
 
     def test_episode_metadata_pickle_stays_small_and_usable(self):
         try:
@@ -251,12 +408,41 @@ class LeRobotValidationTest(unittest.TestCase):
             0: {"camera_%d" % index: index for index in range(9)},
         }
         with patch(
-                "pypaimon.multimodal.lerobot.dataset.ThreadPoolExecutor",
+                "pypaimon.multimodal.video.ThreadPoolExecutor",
                 side_effect=executor):
             _decode_video_rows(
                 [rows], [Collator(index) for index in range(9)])
 
         self.assertEqual([8], worker_counts)
+
+    def test_video_row_fallback_preserves_torch_mode(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.video import _VideoDecodePool
+
+        class Collator:
+            video_column = "camera"
+            output_column = "frame"
+
+            def __call__(self, rows):
+                mode = (torch.is_grad_enabled(),
+                        torch.is_inference_mode_enabled())
+                return [dict(row, frame=mode) for row in rows]
+
+        pool = _VideoDecodePool()
+        try:
+            for context, expected in (
+                    (torch.enable_grad(), (True, False)),
+                    (torch.no_grad(), (False, False)),
+                    (torch.inference_mode(), (False, True))):
+                with self.subTest(expected=expected), context:
+                    rows = {0: {"camera": 1}}
+                    _decode_video_rows([rows], [Collator()], decode_pool=pool)
+                    self.assertEqual(expected, rows[0]["frame"])
+        finally:
+            pool.close()
 
     @unittest.skipUnless(
         av is not None and importlib.util.find_spec("torch") is not None,
@@ -386,47 +572,323 @@ class LeRobotValidationTest(unittest.TestCase):
             finally:
                 decoder.close()
 
+    def test_range_backed_video_bounds_prefetch_and_cache(self):
+        payload = bytes(range(256))
+        calls = []
+
+        def read_ranges(ranges):
+            self.assertLessEqual(sum(length for _, length in ranges), 16)
+            calls.append(list(ranges))
+            return [payload[offset:offset + length] for offset, length in ranges]
+
+        with patch.object(_RangeBackedVideo, '_MAX_CACHE_BYTES', 16):
+            reader = _RangeBackedVideo(len(payload), read_ranges)
+            reader.prefetch([(0, 8), (64, 8), (128, 8), (192, 8)])
+            self.assertEqual([[(0, 8), (64, 8)]], calls)
+            for offset in (192, 0, 128, 64, 192):
+                reader.prefetch([(offset, 48)])
+                reader.seek(offset)
+                self.assertEqual(payload[offset:offset + 32], reader.read(32))
+                self.assertLessEqual(sum(end - start for start, end, _ in reader._segments), 16)
+            reader.seek(0)
+            self.assertEqual(payload, reader.read())
+            reader.close()
+            self.assertEqual([], reader._segments)
+
+    def test_range_backed_video_fetches_only_missing_bytes(self):
+        payload = bytes(range(32))
+        calls = []
+
+        def read_ranges(ranges):
+            calls.append(list(ranges))
+            return [
+                payload[offset:offset + length]
+                for offset, length in ranges
+            ]
+
+        reader = _RangeBackedVideo(len(payload), read_ranges)
+        reader.prefetch([(0, 4), (12, 4)])
+        self.assertEqual([[(0, 4), (12, 4)]], calls)
+
+        calls.clear()
+        reader.seek(2)
+        self.assertEqual(payload[2:4], reader.read(2))
+        self.assertEqual([], calls)
+
+        reader.seek(6)
+        self.assertEqual(payload[6:14], reader.read(8))
+        self.assertEqual([[(6, 6)]], calls)
+
+        calls.clear()
+        reader.seek(18)
+        output = bytearray(4)
+        self.assertEqual(4, reader.readinto(output))
+        self.assertEqual(payload[18:22], bytes(output))
+        self.assertEqual([[(18, 4)]], calls)
+
+        self.assertEqual(len(payload) - 3, reader.seek(-3, io.SEEK_END))
+        self.assertEqual(payload[-3:], reader.read())
+        with self.assertRaisesRegex(ValueError, "Negative seek"):
+            reader.seek(-1)
+        reader.close()
+
     @unittest.skipUnless(
         av is not None and importlib.util.find_spec("torch") is not None,
         "PyAV and Torch are required for video decoding",
     )
-    def test_pyav_decoder_seeks_before_b_frames(self):
+    @patch.object(_RangeBackedVideo, '_MAX_CACHE_BYTES', 1024)
+    def test_indexed_pyav_decoder_handles_b_frames_and_fragmented_video(self):
+        cases = (
+            ("mpeg4", None, None),
+            (
+                "libx264",
+                {"movflags": "frag_keyframe+empty_moov+default_base_moof"},
+                None,
+            ),
+            (
+                "libx265",
+                None,
+                {"x265-params":
+                 "keyint=12:min-keyint=12:scenecut=0:log-level=error"},
+            ),
+        )
+        for codec, container_options, stream_options in cases:
+            with self.subTest(codec=codec):
+                output = io.BytesIO()
+                with av.open(
+                        output,
+                        mode="w",
+                        format="mp4",
+                        options=container_options) as container:
+                    stream = container.add_stream(codec, rate=30)
+                    stream.width = 16
+                    stream.height = 16
+                    stream.pix_fmt = "yuv420p"
+                    stream.gop_size = 12
+                    stream.codec_context.max_b_frames = 2
+                    if stream_options is not None:
+                        stream.options = stream_options
+                    for index in range(60):
+                        image = np.full(
+                            (16, 16, 3), index + 24, dtype=np.uint8)
+                        frame = av.VideoFrame.from_ndarray(
+                            image, format="rgb24")
+                        frame.pts = index
+                        frame.time_base = Fraction(1, 30)
+                        for packet in stream.encode(frame):
+                            container.mux(packet)
+                    for packet in stream.encode():
+                        container.mux(packet)
+
+                payload = output.getvalue()
+                index = None if container_options else FrameIndex.inspect(
+                    io.BytesIO(payload), len(payload))
+                with av.open(io.BytesIO(payload)) as container:
+                    expected = np.stack([
+                        np.array(frame.to_ndarray(format="rgb24"), copy=True)
+                        for frame in container.decode(video=0)
+                    ])
+
+                source = io.BytesIO(payload)
+                source.video_length = len(payload)
+                range_calls = []
+
+                def read_ranges(ranges):
+                    self.assertLessEqual(
+                        sum(length for _, length in ranges),
+                        _RangeBackedVideo._MAX_CACHE_BYTES)
+                    range_calls.append(list(ranges))
+                    return [
+                        payload[offset:offset + length]
+                        for offset, length in ranges
+                    ]
+
+                source.video_read_ranges = read_ranges
+                decoder = _PyAVVideoDecoder(source, index)
+                try:
+                    indices = list(range(len(expected)))
+                    if codec == "mpeg4":
+                        plan = ({0: indices}, [])
+                        with patch.object(
+                                decoder, "_indexed_plan", return_value=plan):
+                            actual = decoder.get_frames_at(
+                                indices=indices
+                            ).data.permute(0, 2, 3, 1).numpy()
+                        self.assertGreater(len(range_calls), 1)
+                    else:
+                        actual = decoder.get_frames_at(
+                            indices=indices
+                        ).data.permute(0, 2, 3, 1).numpy()
+                    np.testing.assert_array_equal(expected, actual)
+                    if codec == "libx264":
+                        decoder[0]
+                        actual = decoder.get_frames_at(
+                            indices=list(range(16))
+                        ).data.permute(0, 2, 3, 1).numpy()
+                        np.testing.assert_array_equal(expected[:16], actual)
+                finally:
+                    decoder.close()
+
+    @unittest.skipUnless(
+        av is not None and importlib.util.find_spec("torch") is not None,
+        "PyAV and Torch are required for video decoding",
+    )
+    def test_indexed_pyav_decoder_reuses_session_across_batches(self):
         output = io.BytesIO()
         with av.open(output, mode="w", format="mp4") as container:
-            stream = container.add_stream("mpeg4", rate=30)
-            stream.width = 16
-            stream.height = 16
+            stream = container.add_stream("libx264", rate=30)
+            stream.width = stream.height = 32
             stream.pix_fmt = "yuv420p"
-            stream.gop_size = 12
-            stream.codec_context.max_b_frames = 2
-            for index in range(70):
-                image = np.full(
-                    (16, 16, 3), index + 24, dtype=np.uint8)
-                frame = av.VideoFrame.from_ndarray(image, format="rgb24")
-                frame.pts = index
-                frame.time_base = Fraction(1, 30)
+            stream.options = {"x264-params":
+                              "keyint=12:min-keyint=12:scenecut=0:bframes=2:threads=1"}
+            for ordinal in range(48):
+                frame = av.VideoFrame.from_ndarray(
+                    np.full((32, 32, 3), ordinal * 4, dtype=np.uint8),
+                    format="rgb24")
                 for packet in stream.encode(frame):
                     container.mux(packet)
             for packet in stream.encode():
                 container.mux(packet)
-
         payload = output.getvalue()
+        index = FrameIndex.inspect(io.BytesIO(payload), len(payload))
         with av.open(io.BytesIO(payload)) as container:
-            expected = [
-                np.array(frame.to_ndarray(format="rgb24"), copy=True)
-                for frame in container.decode(video=0)
-            ]
+            expected = [frame.to_ndarray(format="rgb24")
+                        for frame in container.decode(video=0)]
 
-        decoder = _PyAVVideoDecoder(io.BytesIO(payload))
+        source = io.BytesIO(payload)
+        decoder = _PyAVVideoDecoder(source, index, thread_count=1)
+        inputs = []
+        original_open = av.open
+
+        def open_container(value):
+            inputs.append(value)
+            return original_open(value)
+
         try:
-            for index in (69, 20, 35, 1, 68):
-                actual = decoder[index].permute(1, 2, 0).numpy()
-                np.testing.assert_array_equal(expected[index], actual)
+            with patch.object(av, "open", side_effect=open_container):
+                for indices in ([31, 0, 12, 31], [45, 2, 17, 45], [0, 47, 1]):
+                    actual = decoder.get_frames_at(indices=indices).data
+                    np.testing.assert_array_equal(
+                        np.stack([expected[i] for i in indices]),
+                        actual.permute(0, 2, 3, 1).numpy())
+            self.assertEqual(1, len(inputs))
+            self.assertFalse(inputs[0].closed)
+            self.assertEqual([], inputs[0]._segments)
+        finally:
+            decoder.close()
+        self.assertTrue(inputs[0].closed)
+        self.assertEqual([], inputs[0]._segments)
+        self.assertIsNone(decoder._stream)
+        self.assertFalse(source.closed)
+
+    @unittest.skipUnless(av is not None, "PyAV is required")
+    def test_indexed_pyav_decoder_closes_failed_session_before_retry(self):
+        source = io.BytesIO(b"0123456789abcdef")
+        index = FrameIndex([(0, 4)], [(0, 0, 4)])
+        decoder = _PyAVVideoDecoder(source, index)
+        inputs = []
+        containers = []
+
+        def open_container(value):
+            inputs.append(value)
+            container = Mock()
+            container.streams.video = [SimpleNamespace(thread_count=0)]
+            containers.append(container)
+            return container
+
+        with patch.object(av, "open", side_effect=open_container), patch.object(
+                decoder, "_decode_indexed_group", side_effect=ValueError("decode failed")) as decode:
+            with self.assertRaisesRegex(ValueError, "decode failed"):
+                decoder._decode_indexed([0])
+            self.assertTrue(inputs[0].closed)
+            containers[0].close.assert_called_once_with()
+
+            def read_group(container, stream, anchor, targets, decoded):
+                decoded[0] = b"frame"
+
+            decode.side_effect = read_group
+            self.assertEqual({0: b"frame"}, decoder._decode_indexed([0]))
+            self.assertEqual(2, len(inputs))
+            self.assertFalse(inputs[1].closed)
+        decoder.close()
+        decoder.close()
+        self.assertTrue(inputs[1].closed)
+        containers[1].close.assert_called_once_with()
+
+    @unittest.skipUnless(av is not None, "PyAV is required")
+    def test_indexed_plan_prefetches_requested_gops_with_bounded_lookahead(self):
+        source = io.BytesIO(b"")
+        source.video_length = 1000000
+        index = FrameIndex(
+            [(900000, 100000)],
+            [(0, 0, 100000), (10, 10, 300000),
+             (20, 20, 500000), (30, 30, 700000)])
+        decoder = _PyAVVideoDecoder(source, index)
+        try:
+            self.assertEqual(({1: [12]}, [(300000, 232768)]),
+                             decoder._indexed_plan([12]))
+            self.assertEqual(({1: [19], 2: [20]}, [(300000, 432768)]),
+                             decoder._indexed_plan([19, 20]))
+            self.assertEqual(({0: [0], 3: [39]}, [(100000, 232768), (700000, 300000)]),
+                             decoder._indexed_plan([0, 39]))
         finally:
             decoder.close()
 
+    @unittest.skipUnless(av is not None, "PyAV is required")
+    def test_indexed_gop_boundary_avoids_extra_range_read(self):
+        output = io.BytesIO()
+        with av.open(output, mode="w", format="mp4") as container:
+            stream = container.add_stream("libx264", rate=30)
+            stream.width, stream.height = 160, 120
+            stream.pix_fmt = "yuv420p"
+            stream.options = {"x264-params":
+                              "keyint=12:min-keyint=12:scenecut=0:bframes=2:threads=1"}
+            rng = np.random.RandomState(12)
+            for ordinal in range(60):
+                frame = av.VideoFrame.from_ndarray(
+                    rng.randint(0, 256, (120, 160, 3), dtype=np.uint8),
+                    format="rgb24")
+                frame.pts, frame.time_base = ordinal, Fraction(1, 30)
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+        payload = output.getvalue()
+        index = FrameIndex.inspect(io.BytesIO(payload), len(payload))
+        with av.open(io.BytesIO(payload)) as container:
+            expected = [frame.to_ndarray(format="rgb24")
+                        for frame in container.decode(video=0)]
+        for target in (23, 35):
+            counts = []
+            for lookahead in (False, True):
+                source = io.BytesIO(payload)
+                source.video_length = len(payload)
+                calls = []
+
+                def read_ranges(ranges):
+                    calls.extend(ranges)
+                    return [payload[start:start + size] for start, size in ranges]
+
+                source.video_read_ranges = read_ranges
+                decoder = _PyAVVideoDecoder(source, index)
+                if not lookahead:
+                    anchor = next(i for i, entry in enumerate(index.keyframes)
+                                  if entry[0] <= target < index.keyframes[i + 1][0])
+                    start = index.keyframes[anchor][2]
+                    end = index.keyframes[anchor + 1][2]
+                    decoder._indexed_plan = lambda indices: (
+                        {anchor: indices}, [(start, end - start)])
+                try:
+                    actual = decoder.get_frames_at(indices=[target]).data
+                    np.testing.assert_array_equal(
+                        expected[target], actual[0].permute(1, 2, 0).numpy())
+                    counts.append(len(calls))
+                finally:
+                    decoder.close()
+            self.assertLess(counts[1], counts[0])
+
     def test_default_video_backend_falls_back_on_os_error(self):
-        stream = Mock()
+        stream = Mock(spec=["seek"])
         decoder = object()
         with patch(
                 "pypaimon.multimodal.lerobot.dataset."
@@ -444,6 +906,305 @@ class LeRobotValidationTest(unittest.TestCase):
                 side_effect=OSError("unavailable")):
             with self.assertRaises(OSError):
                 _open_video_decoder(stream, backend="torchcodec")
+
+    def test_indexed_default_backend_falls_back_to_torchcodec(self):
+        stream = Mock()
+        stream.video_keyframe_index = FrameIndex(
+            [], [(0, 0, 0)])
+        decoder = object()
+        module = "pypaimon.multimodal.lerobot.dataset."
+        with patch(
+                module + "_PyAVVideoDecoder",
+                side_effect=ImportError("no av")) as pyav, patch(
+                module + "_open_torchcodec_decoder",
+                return_value=decoder) as torchcodec:
+            self.assertIs(decoder, _open_video_decoder(stream))
+            stream.seek.assert_called_once_with(0)
+            pyav.assert_called_once_with(
+                stream, stream.video_keyframe_index)
+            torchcodec.assert_called_once_with(stream)
+
+        stream.reset_mock()
+        with patch(
+                module + "_PyAVVideoDecoder",
+                side_effect=ImportError("no av")), patch(
+                module + "_open_torchcodec_decoder") as torchcodec:
+            with self.assertRaisesRegex(ImportError, "no av"):
+                _open_video_decoder(stream, backend="pyav")
+            torchcodec.assert_not_called()
+
+    def test_indexed_default_backend_falls_back_after_lazy_failure(self):
+        if av is None:
+            self.skipTest("PyAV is required for its real exception types")
+        try:
+            av.open(io.BytesIO(b"invalid video"))
+        except av.error.InvalidDataError as error:
+            invalid_data_error = error
+        else:
+            self.fail("Invalid video did not raise InvalidDataError")
+
+        stream = Mock()
+        stream.video_keyframe_index = FrameIndex(
+            [], [(0, 0, 0)])
+        pyav_decoder = Mock()
+        pyav_decoder.get_frames_at.side_effect = invalid_data_error
+        torchcodec_decoder = Mock()
+        expected = object()
+        torchcodec_decoder.get_frames_at.return_value = expected
+        module = "pypaimon.multimodal.lerobot.dataset."
+
+        with patch(
+                module + "_PyAVVideoDecoder",
+                return_value=pyav_decoder), patch(
+                module + "_open_torchcodec_decoder",
+                return_value=torchcodec_decoder) as torchcodec:
+            decoder = _open_video_decoder(stream)
+            self.assertIs(expected, decoder.get_frames_at(indices=[3]))
+            pyav_decoder.close.assert_called_once_with()
+            stream.seek.assert_called_once_with(0)
+            torchcodec.assert_called_once_with(stream)
+            decoder.close()
+            torchcodec_decoder.close.assert_called_once_with()
+
+        stream.reset_mock()
+        with patch(
+                module + "_PyAVVideoDecoder",
+                return_value=pyav_decoder), patch(
+                module + "_open_torchcodec_decoder") as torchcodec:
+            decoder = _open_video_decoder(stream, backend="pyav")
+            with self.assertRaises(av.error.InvalidDataError):
+                decoder.get_frames_at(indices=[3])
+            stream.seek.assert_not_called()
+            torchcodec.assert_not_called()
+
+    def test_indexed_default_backend_falls_back_on_ffmpeg_error(self):
+        if av is None:
+            self.skipTest("PyAV is required for its real exception types")
+        stream = Mock()
+        stream.video_keyframe_index = FrameIndex(
+            [], [(0, 0, 0)])
+        pyav_decoder = Mock()
+        pyav_decoder.get_frames_at.side_effect = av.error.FFmpegError(
+            1, "cannot open", "video")
+        torchcodec_decoder = Mock()
+        expected = object()
+        torchcodec_decoder.get_frames_at.return_value = expected
+        module = "pypaimon.multimodal.lerobot.dataset."
+
+        with patch(
+                module + "_PyAVVideoDecoder",
+                return_value=pyav_decoder), patch(
+                module + "_open_torchcodec_decoder",
+                return_value=torchcodec_decoder):
+            decoder = _open_video_decoder(stream)
+            self.assertIs(expected, decoder.get_frames_at(indices=[3]))
+            stream.seek.assert_called_once_with(0)
+
+    def test_table_option_limits_video_decoders(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        info = {
+            "codebase_version": "v3.0", "fps": 10,
+            "total_frames": 1, "total_episodes": 1, "total_tasks": 1,
+            "features": {
+                "index": {"dtype": "int64", "shape": [1]},
+                "episode_index": {"dtype": "int64", "shape": [1]},
+                "frame_index": {"dtype": "int64", "shape": [1]},
+                "timestamp": {"dtype": "float32", "shape": [1]},
+                "task_index": {"dtype": "int64", "shape": [1]},
+                "camera": {"dtype": "video", "shape": [2, 2, 3],
+                           "names": ["height", "width", "channels"]},
+                "camera_b": {"dtype": "video", "shape": [2, 2, 3],
+                             "names": ["height", "width", "channels"]},
+            },
+        }
+        metadata = _reader_metadata({
+            "repo_id": "test/video-cache-option", "info": info,
+            "episodes": [{"episode_index": 0, "dataset_from_index": 0,
+                          "dataset_to_index": 1, "length": 1,
+                          "tasks": ["pick"]}],
+            "tasks": ["pick"],
+        })
+        module = "pypaimon.multimodal.lerobot.dataset."
+        option = "read.video.max-open-decoders"
+
+        for configured, expected in ((None, 16), ("2", 2)):
+            with self.subTest(configured=configured):
+                options = {} if configured is None else {
+                    option: configured, "read.video.codec-threads": configured,
+                    "read.video.prefetch-max-bytes": configured}
+                frames = SimpleNamespace(
+                    options=CoreOptions(Options(options)))
+                rows = SimpleNamespace(
+                    _table=frames, num_rows=1, file_io=LocalFileIO(),
+                    close=lambda: None)
+                with patch(module + "_load_dataset", return_value=(frames, metadata)), \
+                        patch(module + "_target_schema",
+                              return_value=_schema_from_info(info)), \
+                        patch(module + "_PaimonTableFrameReader",
+                              return_value=rows):
+                    dataset = pmm.PaimonLeRobotDataset(Mock())
+                try:
+                    self.assertEqual([expected, expected], [
+                        c.max_open_videos for c in dataset.reader._video_collators])
+                    self.assertEqual([0 if configured is None else 2] * 2, [
+                        c.prefetch_max_bytes for c in dataset.reader._video_collators])
+                    self.assertEqual([1 if configured is None else 2] * 2, [
+                        c.decoder_factory.keywords["codec_threads"]
+                        for c in dataset.reader._video_collators])
+                finally:
+                    dataset.reader.close()
+
+        for configured in ("0", "bad", True, 1.5):
+            with self.subTest(configured=configured):
+                frames = SimpleNamespace(
+                    options=CoreOptions(Options({option: configured})))
+                rows = SimpleNamespace(
+                    _table=frames, num_rows=1, file_io=LocalFileIO(),
+                    close=lambda: None)
+                with patch(module + "_load_dataset", return_value=(frames, metadata)), \
+                        patch(module + "_target_schema",
+                              return_value=_schema_from_info(info)), \
+                        patch(module + "_PaimonTableFrameReader",
+                              return_value=rows):
+                    with self.assertRaisesRegex(ValueError, option):
+                        pmm.PaimonLeRobotDataset(Mock())
+
+    def test_nullable_windows_share_one_storage_across_workers(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        metadata = {
+            "info": {
+                "codebase_version": "v3.0", "fps": 10,
+                "total_frames": 128, "total_episodes": 1, "total_tasks": 1,
+                "features": {
+                    key: {"dtype": dtype, "shape": [1]}
+                    for key, dtype in (("index", "int64"), ("episode_index", "int64"),
+                                       ("frame_index", "int64"), ("timestamp", "float32"),
+                                       ("task_index", "int64"), ("subtask_index", "int64"))
+                },
+            },
+            "tasks": ["pick"], "subtasks": ["reach"],
+            "episodes": [{"episode_index": 0, "dataset_from_index": 0,
+                          "dataset_to_index": 128, "length": 128, "tasks": ["pick"]}],
+        }
+        reader = _NullableLabelReader(
+            metadata, delta_timestamps={"subtask_index": [i / 10.0 for i in range(-1, 31)]})
+        dataset = pmm.PaimonLeRobotDataset(reader)
+        try:
+            samples = dataset.get_items([0, 0])
+            samples[0]["subtask_index"][0].fill_(-100)
+            self.assertEqual(0, samples[0]["subtask_index"][1].item())
+            self.assertEqual(0, samples[1]["subtask_index"][0].item())
+            loader = dataset.to_dataloader(
+                batch_size=64, num_workers=1, multiprocessing_context="spawn")
+            for batch in loader:
+                labels = batch["subtask_index"]
+                mask = batch["subtask_index_is_valid"]
+                self.assertTrue(labels.is_shared())
+                self.assertTrue(mask.is_shared())
+                self.assertEqual((64, 32), tuple(labels.shape))
+                self.assertEqual(labels.shape, mask.shape)
+                self.assertEqual(torch.int64, labels.dtype)
+                self.assertEqual(torch.bool, mask.dtype)
+                for offset, index in enumerate(batch["index"].tolist()):
+                    for column, delta in enumerate(range(-1, 31)):
+                        position = min(127, max(0, index + delta))
+                        expected = position % 16 != 15
+                        self.assertEqual(expected, mask[offset, column].item())
+                        self.assertEqual(0 if expected else -1, labels[offset, column].item())
+                before = labels.clone()
+                labels[0, 0] = -100
+                self.assertTrue(torch.equal(before.flatten()[1:], labels.flatten()[1:]))
+        finally:
+            dataset.close()
+
+    def test_nullable_batch_contract_is_stable(self):
+        import pytest
+        torch = pytest.importorskip("torch")
+        from pypaimon.multimodal.lerobot.dataset import _collate_lerobot_batch
+
+        for labels, expected, validity in (
+                ([torch.tensor(0), None], [0, -1], [True, False]),
+                ([torch.tensor(0), torch.tensor(1)], [0, 1], [True, True]),
+                ([None, None], [-1, -1], [False, False]),
+                ([[None, torch.tensor(1)], torch.tensor([2, 3])],
+                 [[-1, 1], [2, 3]], [[False, True], [True, True]])):
+            batch = _collate_lerobot_batch([{"subtask_index": label} for label in labels], {})
+            self.assertEqual(expected, batch["subtask_index"].tolist())
+            self.assertEqual(validity, batch["subtask_index_is_valid"].tolist())
+            self.assertEqual(torch.int64, batch["subtask_index"].dtype)
+            self.assertEqual(torch.bool, batch["subtask_index_is_valid"].dtype)
+
+    def test_nullable_label_storage_preserves_mixed_shapes(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.lerobot.dataset import _pack_nullable_labels
+
+        scalar = torch.tensor(3)
+        rows = [{"subtask_index": [scalar, scalar, None]},
+                {"subtask_index": torch.tensor([4, 5, 6])},
+                {"subtask_index": scalar}, {"subtask_index": None}]
+        _pack_nullable_labels(rows)
+        first = rows[0]["subtask_index"]
+        self.assertIsNone(first[2])
+        self.assertIsNone(rows[3]["subtask_index"])
+        tensors = first[:2] + [rows[1]["subtask_index"], rows[2]["subtask_index"]]
+        self.assertEqual(1, len({value.untyped_storage().data_ptr() for value in tensors}))
+        first[0].fill_(-100)
+        self.assertEqual(3, first[1].item())
+        self.assertEqual(3, rows[2]["subtask_index"].item())
+        self.assertEqual([4, 5, 6], rows[1]["subtask_index"].tolist())
+        self.assertEqual(3, scalar.item())
+        valid = [{"subtask_index": scalar}]
+        _pack_nullable_labels(valid)
+        self.assertIs(scalar, valid[0]["subtask_index"])
+        empty = [{"subtask_index": [None, None]}]
+        _pack_nullable_labels(empty)
+        self.assertEqual([None, None], empty[0]["subtask_index"])
+
+    def test_custom_reader_empty_subtask_vocabulary(self):
+        try:
+            import torch  # noqa: F401
+        except ImportError as error:
+            self.skipTest(str(error))
+        metadata = {
+            "info": {
+                "codebase_version": "v3.0", "fps": 10,
+                "total_frames": 1, "total_episodes": 1, "total_tasks": 1,
+                "features": {
+                    key: {"dtype": dtype, "shape": [1]}
+                    for key, dtype in (("index", "int64"), ("episode_index", "int64"),
+                                       ("frame_index", "int64"), ("timestamp", "float32"),
+                                       ("task_index", "int64"), ("subtask_index", "int64"))
+                },
+            },
+            "tasks": ["pick"], "subtasks": [],
+            "episodes": [{"episode_index": 0, "dataset_from_index": 0,
+                          "dataset_to_index": 1, "length": 1, "tasks": ["pick"]}],
+        }
+
+        class Reader(pmm.PaimonDatasetReader):
+            label = None
+
+            def read_indices(self, indices, columns):
+                return pa.Table.from_pylist([
+                    {"index": 0, "episode_index": 0, "frame_index": 0,
+                     "timestamp": 0.0, "task_index": 0, "subtask_index": self.label}
+                    for unused in indices], schema=self.schema).select(columns)
+
+        reader = Reader(metadata)
+        self.assertIsNone(reader[0]["subtask"])
+        batch = next(iter(pmm.PaimonLeRobotDataset(reader).to_dataloader(
+            batch_size=1, num_workers=0)))
+        self.assertEqual([None], batch["subtask"])
+        reader.label = 0
+        with self.assertRaises(ValueError):
+            reader[0]
 
     def test_video_batches_include_delta_frames_and_preserve_backends(self):
         try:
@@ -473,6 +1234,11 @@ class LeRobotValidationTest(unittest.TestCase):
         }
 
         class Reader(pmm.PaimonDatasetReader):
+            # This test checks batching and backend cache reuse with one decoder.
+            # Replica splitting is covered in video_decode_parallelism_test.py.
+            _table = SimpleNamespace(options=CoreOptions(Options({
+                "read.video.decoders-per-payload": "1",
+            })))
 
             def read_indices(self, indices, columns):
                 return pa.Table.from_pylist([{
@@ -480,7 +1246,8 @@ class LeRobotValidationTest(unittest.TestCase):
                     "frame_index": index, "timestamp": index / 10,
                     "task_index": 0,
                     "camera": pmm.VideoFrameDescriptor(
-                        "file:///shared.video", 0, 5, index + 3).serialize(),
+                        "file:///shared.video", 0, 5, index + 3
+                    ).serialize(),
                 } for index in indices], schema=self.schema).select(columns)
 
         for backend, batch in (("torchcodec", True), (None, True),
@@ -597,7 +1364,8 @@ class LeRobotValidationTest(unittest.TestCase):
             ) as decode_batch:
                 result = collator([{
                     "video": pmm.VideoFrameDescriptor(
-                        "file:///episode.mp4", 0, len(payload), index).serialize(),
+                        "file:///episode.mp4", 0, len(payload), index
+                    ).serialize(),
                 } for index in indices])
                 decode_batch.assert_called_once_with(indices=[1, 5, 9, 9])
             actual = torch.stack([row["frame"] for row in result])
@@ -606,6 +1374,35 @@ class LeRobotValidationTest(unittest.TestCase):
             torch.testing.assert_close(actual, expected, rtol=0, atol=0)
         finally:
             collator.close()
+
+    def test_custom_episode_transform_keeps_cross_column_inputs(self):
+        try:
+            from datasets import Dataset
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        episodes = Dataset.from_dict({
+            "episode_index": [0, 1],
+            "dataset_from_index": [0, 1],
+            "dataset_to_index": [1, 3],
+            "length": [0, 0],
+            "stats": [1, 2],
+        })
+
+        def transform(batch):
+            return dict(batch, length=batch["stats"], tasks=[
+                ["pick" if index == 0 else "place"]
+                for index in batch["episode_index"]
+            ])
+
+        for source in (episodes, episodes.add_column(
+                "tasks", [["old"], ["old"]])):
+            with self.subTest(physical_tasks="tasks" in source.column_names):
+                metadata = {"episodes": source.with_transform(transform)}
+                self.assertEqual([(0, 1), (1, 3)],
+                                 _episode_ranges(metadata, 3, 2))
+                self.assertEqual((("pick",), ("place",)),
+                                 _episode_tasks(metadata))
 
     def test_dataset_requires_supported_python(self):
         with patch(
@@ -699,7 +1496,12 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual(_schema_from_info(info), dataset.reader.schema)
         self.assertIsNone(dataset.reader.absolute_to_relative_idx)
         self.assertTrue(repr(dataset).startswith("PaimonLeRobotDataset("))
-        sample, _ = dataset.__getitems__([1, 2])
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset._torch_row",
+                wraps=_torch_row) as convert:
+            sample, _ = dataset.__getitems__([1, 2])
+        self.assertEqual(3, convert.call_count)
+        self.assertEqual({"action"}, set(convert.call_args_list[-1][0][0]))
 
         self.assertEqual([((0, 1, 2), tuple(info["features"]))],
                          reader.calls)
@@ -709,12 +1511,44 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual([1.0], dataset.meta.stats["action"]["mean"].tolist())
         self.assertEqual(0, dataset.meta.get_task_index("pick"))
         self.assertEqual("pick", sample["task"])
+        try:
+            from datasets import Dataset
+        except ImportError:
+            pass
+        else:
+            formatted_metadata = dict(metadata)
+            formatted_metadata["episodes"] = Dataset.from_list(
+                metadata["episodes"]).with_format(
+                    "numpy", columns=["episode_index", "dataset_from_index",
+                                      "dataset_to_index", "length"])
+            formatted_reader = Reader(formatted_metadata)
+            self.assertEqual("pick", formatted_reader[1]["task"])
+            formatted_reader.close()
         torch.testing.assert_close(
             sample["observation.state"], torch.tensor([1.0, 2.0]))
         torch.testing.assert_close(
             sample["action"], torch.tensor([0.0, 1.0, 2.0]))
         self.assertEqual([False, False, False],
                          sample["action_is_pad"].tolist())
+        batch = next(iter(dataset.to_dataloader(
+            batch_size=2, shuffle=False, num_workers=0)))
+        self.assertEqual([0, 1], batch["index"].tolist())
+        self.assertEqual([2, 3], list(batch["action"].shape))
+        control_reader = Reader(
+            metadata,
+            delta_timestamps={"timestamp": [-0.1, 0.0, 0.1]},
+        )
+        torch.testing.assert_close(
+            control_reader[1]["timestamp"], torch.tensor([0.0, 0.1, 0.2]))
+        control_reader.close()
+        rows[0]["episode_index"] = 1
+        try:
+            with self.assertRaisesRegex(ValueError, "episode_index"):
+                dataset[1]
+        finally:
+            rows[0]["episode_index"] = 0
+        with self.assertRaisesRegex(ValueError, "manages collate_fn"):
+            dataset.to_dataloader(batch_size=2, collate_fn=lambda rows: rows)
         dataset.return_uint8 = True
         self.assertTrue(reader.return_uint8)
         with self.assertRaisesRegex(TypeError, "return_uint8"):
@@ -811,6 +1645,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     for name, dtype in (
                         ("index", "int64"), ("episode_index", "int64"),
                         ("frame_index", "int64"), ("task_index", "int64"),
+                        ("subtask_index", "int64"),
                         ("timestamp", "float32"),
                     )
                 },
@@ -822,6 +1657,10 @@ class LeRobotValidationTest(unittest.TestCase):
             pq.write_table(pa.Table.from_pandas(pd.DataFrame(
                 {"task_index": [0]}, index=pd.Index(["pick"], name="task"),
             )), source / "meta" / "tasks.parquet")
+            subtasks = pa.Table.from_pandas(pd.DataFrame(
+                {"subtask_index": [0]}, index=pd.Index(["reach"], name="instruction"),
+            ))
+            pq.write_table(subtasks, source / "meta" / "subtasks.parquet")
             pq.write_table(pa.table({
                 "episode_index": [0], "dataset_from_index": [0],
                 "dataset_to_index": [1], "tasks": [["pick"]], "length": [1],
@@ -829,7 +1668,7 @@ class LeRobotValidationTest(unittest.TestCase):
             }), source / "meta" / "episodes" / "file.parquet")
             frames = pa.table({
                 "index": [0], "episode_index": [0], "frame_index": [0],
-                "task_index": [0], "timestamp": pa.array([0], pa.float32()),
+                "task_index": [0], "subtask_index": [0], "timestamp": pa.array([0], pa.float32()),
             })
             pq.write_table(frames, source / "data" / "file.parquet")
             connection = pmm.connect(options={"warehouse": str(root / "wh")})
@@ -839,26 +1678,35 @@ class LeRobotValidationTest(unittest.TestCase):
                     return_value=_RemoteLeRobotFileIO(source, remote)):
                 self.assertIsNone(connection.load_from_lerobot("robot", remote))
 
-            self.assertEqual(info, _catalog_metadata(connection, "robot__info"))
-            self.assertEqual(stats, _catalog_metadata(connection, "robot__stats"))
-            table = connection.get_table("robot")
+            for suffix in ("_frames", "_episodes", "_datasets"):
+                with self.subTest(table="robot" + suffix):
+                    component = connection.get_table("robot" + suffix)
+                    schema = component.raw_table.table_schema
+                    self.assertEqual("true", schema.options["data-evolution.enabled"])
+                    self.assertEqual("true", schema.options["row-tracking.enabled"])
+                    self.assertEqual("-1", schema.options.get("bucket", "-1"))
+                    self.assertFalse(schema.primary_keys)
+                    self.assertGreater(component.scan().to_arrow().num_rows, 0)
+            self.assertEqual([{"subtask_index": 0, "subtask": "reach"}],
+                             _catalog_rows(connection, "robot_subtasks"))
+            self.assertEqual(info, _catalog_metadata(connection, "robot_info"))
+            self.assertEqual(stats, _catalog_metadata(connection, "robot_stats"))
+            table = connection.get_table("robot_frames")
             self.assertEqual([], table.raw_table.tag_manager().list_tags())
             table.add(frames)
-            snapshots = connection.create_lerobot_tag("robot", "training")
-            self.assertEqual({
-                "frames": 3, "info": 1, "stats": 1, "episodes": 1, "tasks": 1,
-            }, snapshots)
+            snapshots = connection.create_lerobot_tag("robot_frames", "training")
+            self.assertEqual({"frames": 3, "episodes": 1, "datasets": 1}, snapshots)
             table.add(frames)
             self.assertEqual(2, table.scan(tag_name="training").to_arrow().num_rows)
             self.assertEqual(3, table.scan().to_arrow().num_rows)
             for component, snapshot_id in snapshots.items():
-                name = "robot" if component == "frames" else "robot__" + component
+                name = "robot_frames" if component == "frames" else "robot_" + component
                 self.assertEqual(snapshot_id, connection.catalog.get_tag(
                     connection._identifier(name), "training").snapshot.id)
 
             with patch.object(connection.catalog, "create_tag") as create_tag:
                 with self.assertRaisesRegex(ValueError, "already points"):
-                    connection.create_lerobot_tag("robot", "training")
+                    connection.create_lerobot_tag("robot_frames", "training")
             create_tag.assert_not_called()
 
             create_tag = connection.catalog.create_tag
@@ -873,16 +1721,16 @@ class LeRobotValidationTest(unittest.TestCase):
             with patch.object(connection.catalog, "create_tag",
                               side_effect=fail_second_component):
                 with self.assertRaisesRegex(RuntimeError, "tag failed"):
-                    connection.create_lerobot_tag("robot", "retry")
+                    connection.create_lerobot_tag("robot_frames", "retry")
             self.assertFalse(table.raw_table.tag_manager().tag_exists("retry"))
             self.assertEqual(4, connection.create_lerobot_tag(
-                "robot", "retry")["frames"])
+                "robot_frames", "retry")["frames"])
             self.assertEqual(3, table.scan(tag_name="retry").to_arrow().num_rows)
 
-            connection.catalog.drop_table(connection._identifier("robot__tasks"))
+            connection.catalog.drop_table(connection._identifier("robot_datasets"))
             with patch.object(connection.catalog, "create_tag") as create_tag:
                 with self.assertRaises(TableNotExistException):
-                    connection.create_lerobot_tag("robot", "incomplete")
+                    connection.create_lerobot_tag("robot_frames", "incomplete")
             create_tag.assert_not_called()
 
             (source / "meta" / "stats.json").unlink()
@@ -891,9 +1739,9 @@ class LeRobotValidationTest(unittest.TestCase):
                     return_value=_RemoteLeRobotFileIO(source, remote)):
                 connection.load_from_lerobot("no_stats", remote, tag_name="ready")
             with self.assertRaises(TableNotExistException):
-                connection.get_table("no_stats__stats")
-            self.assertEqual({"frames": 2, "info": 1, "episodes": 1, "tasks": 1},
-                             connection.create_lerobot_tag("no_stats", "training"))
+                connection.get_table("no_stats_stats")
+            self.assertEqual({"frames": 2, "episodes": 1, "datasets": 1},
+                             connection.create_lerobot_tag("no_stats_frames", "training"))
 
     def test_self_contained_import_rejects_table_branches(self):
         with self.assertRaisesRegex(ValueError, "does not support"):
@@ -901,11 +1749,11 @@ class LeRobotValidationTest(unittest.TestCase):
 
     def test_companion_identifier_preserves_quoted_components(self):
         name = _companion_identifier(
-            "`db.name`.`robot.data`", "__tasks")
+            "`db.name`.`robot.data`", "_tasks")
         identifier = Identifier.from_string(name)
 
         self.assertEqual("db.name", identifier.get_database_name())
-        self.assertEqual("robot.data__tasks", identifier.get_table_name())
+        self.assertEqual("robot.data_tasks", identifier.get_table_name())
 
     def test_image_tensor_preserves_declared_channels(self):
         try:
@@ -1240,6 +2088,10 @@ class LeRobotValidationTest(unittest.TestCase):
                             item[key], expected.expand(3, 3, 2, 2).float()))
                 result[0][keys[0]].zero_()
                 self.assertEqual(1, result[0][keys[1]][-1, 0, 0, 0].item())
+                batch = reader._get_batch([0, 1], share_memory=False)
+                for key in keys:
+                    self.assertEqual(
+                        [2, 3, 3, 2, 2], list(batch[key].shape))
 
     def test_video_windows_decode_directly_and_fall_back(self):
         try:
@@ -1282,6 +2134,22 @@ class LeRobotValidationTest(unittest.TestCase):
                 self.assertTrue(torch.equal(batch, frames))
                 decoder.get_frames_at.assert_called_once_with(indices=[0, 1])
 
+            decoder.get_frames_at.reset_mock()
+            decoder.get_frames_at.return_value = SimpleNamespace(data=frames)
+            result = _decode_video_windows(
+                plans, rows, [collator], feature, False,
+                return_batch=True, share_memory=True)[key]
+            expected = torch.stack([
+                frames[[1, 0, 0]], frames[[1, 0, 0]]
+            ]).float().div(255)
+            self.assertTrue(result.is_shared())
+            self.assertTrue(torch.equal(result, expected))
+            result[0, 1].zero_()
+            self.assertTrue(torch.equal(result[0, 2], expected[0, 2]))
+            self.assertTrue(torch.equal(result[1], expected[1]))
+            self.assertTrue(torch.equal(frames, batch))
+            decoder.get_frames_at.assert_called_once_with(indices=[0, 1])
+
             for indices in ([0, 1], [1, 0, 0]):
                 decoder.get_frames_at.reset_mock()
                 decoder.get_frames_at.return_value = SimpleNamespace(data=frames)
@@ -1311,6 +2179,18 @@ class LeRobotValidationTest(unittest.TestCase):
             result[2].zero_()
             self.assertTrue(torch.equal(result[1], batch))
             self.assertTrue(torch.equal(batch, frames))
+
+            fixed = [{"windows": {key: window}}
+                     for window in ([1, 0], [2, 3], [0, 1], [3, 2])]
+            result = _decode_video_windows(
+                fixed, separate, [collator], feature, True,
+                return_batch=True, share_memory=True)[key]
+            expected = torch.stack([
+                batch[[1, 0]], batch[[0, 1]],
+                batch[[0, 1]], batch[[1, 0]],
+            ])
+            self.assertTrue(result.is_shared())
+            self.assertTrue(torch.equal(result, expected))
 
             open_decoder.reset_mock()
             mixed = dict(rows)
@@ -1380,8 +2260,8 @@ class LeRobotValidationTest(unittest.TestCase):
                 return_value=loaded), patch(
                 "pypaimon.multimodal.lerobot.dataset._target_schema",
                 return_value=pa.schema([])), patch(
-                "pypaimon.multimodal.lerobot.dataset.sys.version_info",
-                (3, 10)):
+                "pypaimon.multimodal.lerobot.dataset.sys",
+                SimpleNamespace(version_info=(3, 10), modules=sys.modules)):
             for invalid in (0, 1, None, "true"):
                 with self.subTest(return_uint8=invalid):
                     with self.assertRaisesRegex(
@@ -1630,6 +2510,13 @@ class LeRobotValidationTest(unittest.TestCase):
             _validate_frame_controls(
                 batch, 30, 0, 0, 0, [0], range(2))
 
+        nullable = batch.set_column(
+            batch.schema.get_field_index("subtask_index"),
+            "subtask_index", pa.array([None], type=pa.int64()))
+        self.assertEqual(
+            {0}, _validate_frame_controls(
+                nullable, 30, 0, 0, 0, [0], range(2)))
+
     def test_metadata_writer_closes_after_commit_creation_failure(self):
         table = Mock()
         builder = table.new_batch_write_builder.return_value
@@ -1693,9 +2580,9 @@ class LeRobotValidationTest(unittest.TestCase):
             schema.names,
         )
         self.assertEqual(pa.int32(), schema.field("scalar").type)
-        self.assertEqual(pa.list_(pa.float32(), 3), schema.field("vector").type)
+        self.assertEqual(pa.list_(pa.float32()), schema.field("vector").type)
         self.assertEqual(
-            pa.list_(pa.list_(pa.float64(), 3)),
+            pa.list_(pa.list_(pa.float64())),
             schema.field("tensor").type,
         )
         self.assertEqual(pa.large_binary(), schema.field("image").type)
@@ -1714,6 +2601,20 @@ class LeRobotValidationTest(unittest.TestCase):
             pa.large_binary(),
             _schema_from_info(info).field("camera").type,
         )
+
+    def test_tensor_schema_uses_arrays_and_preserves_shape(self):
+        for shape in ([3], [2, 3], [2, 1, 3]):
+            with self.subTest(shape=shape):
+                field = _schema_from_info({"features": {
+                    "state": {"dtype": "float32", "shape": shape}
+                }}).field("state")
+                expected = pa.float32()
+                for unused_size in shape:
+                    expected = pa.list_(expected)
+                self.assertEqual(expected, field.type)
+                self.assertIn(
+                    "shape=" + json.dumps(shape, separators=(",", ":")),
+                    field.metadata[b"description"].decode("utf-8"))
 
     def test_existing_schema_preserves_lerobot_feature_contract(self):
         source = _schema_from_info({
@@ -1759,7 +2660,7 @@ class LeRobotValidationTest(unittest.TestCase):
             ),
             "array": pa.field(
                 "vector",
-                pa.list_(pa.float32()),
+                pa.list_(pa.float64()),
                 nullable=False,
                 metadata=source.field("vector").metadata,
             ),
@@ -1879,7 +2780,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     connection.load_from_lerobot("empty_frames", source)
             import_lerobot.assert_not_called()
             with self.assertRaises(TableNotExistException):
-                connection.get_table("empty_frames")
+                connection.get_table("empty_frames_frames")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -2024,7 +2925,7 @@ class LeRobotValidationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "non-empty"):
                 connection.load_from_lerobot("frames", source)
             with self.assertRaises(TableNotExistException):
-                connection.get_table("frames")
+                connection.get_table("frames_frames")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -2181,7 +3082,7 @@ class LeRobotValidationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "fps must be positive"):
                 connection.load_from_lerobot("frames", source)
             with self.assertRaises(TableNotExistException):
-                connection.get_table("frames")
+                connection.get_table("frames_frames")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -2413,7 +3314,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     "frames", temp_dir, batch_size=1)
 
             self.assertIsNone(result)
-            table = connection.get_table("frames")
+            table = connection.get_table("frames_frames")
             self.assertEqual(
                 {"camera_a", "camera_b"},
                 table.raw_table.options.video_frame_fields(),
@@ -2423,7 +3324,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 for field in table.raw_table.fields
             }
             self.assertEqual(
-                "VECTOR<FLOAT, 3> NOT NULL",
+                "ARRAY<FLOAT> NOT NULL",
                 field_types["observation.state"],
             )
             rows = table.scan().select([
@@ -2483,10 +3384,16 @@ class LeRobotValidationTest(unittest.TestCase):
                 path for path in source_file_io.opened_paths
                 if path.endswith(".mp4")
             ]
-            self.assertEqual(3, len(opened_videos))
+            self.assertEqual(
+                {
+                    remote + "/videos/" + relative
+                    for relative in payloads
+                },
+                set(opened_videos),
+            )
             self.assertEqual(1, source_file_io.close_count)
             _, remote_bodies = connection.get_table(
-                "remote_frames").scan().select([
+                "remote_frames_frames").scan().select([
                     "index", "camera_a", "camera_b"
                 ]).read_blobs()
             self.assertEqual(bodies, remote_bodies)
@@ -2519,7 +3426,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     options={"target-file-row-num": "1"},
                 )
             raw_table = connection.get_table(
-                "shared_video_frames").raw_table
+                "shared_video_frames_frames").raw_table
             files = {
                 file.file_name: file
                 for split in raw_table.new_read_builder().new_scan().plan().splits()
@@ -2533,13 +3440,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     and ".vector." not in file.file_name
                 ),
             )
-            self.assertEqual(
-                [2, 3],
-                sorted(
-                    file.row_count for file in files
-                    if ".vector." in file.file_name
-                ),
-            )
+            self.assertFalse(any(".vector." in file.file_name for file in files))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -2557,7 +3458,27 @@ class LeRobotValidationTest(unittest.TestCase):
     def test_imported_video_payload_supports_training_reads(self):
         self._assert_imported_video_payload_can_be_decoded(True)
 
-    def _assert_imported_video_payload_can_be_decoded(self, training_reads):
+    @unittest.skipUnless(av is not None, "PyAV is required for MP4 decoding")
+    def test_remuxed_episode_payload_can_be_decoded(self):
+        self._assert_imported_video_payload_can_be_decoded(False, remux=True)
+
+    @unittest.skipUnless(
+        av is not None
+        and sys.version_info >= (3, 10)
+        and importlib.util.find_spec("datasets") is not None
+        and importlib.util.find_spec("torch") is not None,
+        "Video training reads require Python 3.10+, PyAV, datasets, and Torch",
+    )
+    def test_remuxed_episode_payload_supports_training_reads(self):
+        self._assert_imported_video_payload_can_be_decoded(True, remux=True)
+
+    @unittest.skipUnless(av is not None, "PyAV is required for MP4 decoding")
+    def test_remux_local_source_does_not_use_destination_file_io(self):
+        self._assert_imported_video_payload_can_be_decoded(
+            False, remux=True, remote_destination=True)
+
+    def _assert_imported_video_payload_can_be_decoded(
+            self, training_reads, remux=False, remote_destination=False):
         import pandas as pd
 
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_mp4_"))
@@ -2589,12 +3510,12 @@ class LeRobotValidationTest(unittest.TestCase):
                     "action": {"dtype": "float32", "shape": [1]},
                     "camera": {
                         "dtype": "video",
-                        "shape": [16, 16, 3],
+                        "shape": [128, 128, 3],
                         "video_info": {"video.fps": 10.0},
                     },
                     "camera_b": {
                         "dtype": "video",
-                        "shape": [16, 16, 3],
+                        "shape": [128, 128, 3],
                         "video_info": {"video.fps": 10.0},
                     },
                 },
@@ -2610,12 +3531,12 @@ class LeRobotValidationTest(unittest.TestCase):
                     "tasks": ["pick"],
                     "videos/camera/chunk_index": 0,
                     "videos/camera/file_index": 0,
-                    "videos/camera/from_timestamp": 0.5,
-                    "videos/camera/to_timestamp": 0.7,
+                    "videos/camera/from_timestamp": 5.5,
+                    "videos/camera/to_timestamp": 5.7,
                     "videos/camera_b/chunk_index": 0,
                     "videos/camera_b/file_index": 0,
-                    "videos/camera_b/from_timestamp": 0.5,
-                    "videos/camera_b/to_timestamp": 0.7,
+                    "videos/camera_b/from_timestamp": 5.5,
+                    "videos/camera_b/to_timestamp": 5.7,
                 },
                 {
                     "episode_index": 1,
@@ -2627,16 +3548,17 @@ class LeRobotValidationTest(unittest.TestCase):
                     "tasks": ["pick"],
                     "videos/camera/chunk_index": 0,
                     "videos/camera/file_index": 0,
-                    "videos/camera/from_timestamp": 0.1,
-                    "videos/camera/to_timestamp": 0.4,
+                    "videos/camera/from_timestamp": 6.1,
+                    "videos/camera/to_timestamp": 6.4,
                     "videos/camera_b/chunk_index": 0,
                     "videos/camera_b/file_index": 0,
-                    "videos/camera_b/from_timestamp": 0.1,
-                    "videos/camera_b/to_timestamp": 0.4,
+                    "videos/camera_b/from_timestamp": 6.1,
+                    "videos/camera_b/to_timestamp": 6.4,
                 },
             ]
-            physical_frame_values = [24, 56, 88, 120, 168, 216]
-            expected_frame_values = [168, 216, 56, 88, 120]
+            target_frame_values = {
+                55: 168, 56: 216, 61: 56, 62: 88, 63: 120,
+            }
 
             info_dir = temp_dir / "meta"
             info_dir.mkdir()
@@ -2655,13 +3577,21 @@ class LeRobotValidationTest(unittest.TestCase):
             video_path.parent.mkdir(parents=True)
             with av.open(str(video_path), mode="w") as container:
                 stream = container.add_stream("mpeg4", rate=10)
-                stream.width = 16
-                stream.height = 16
+                stream.width = 128
+                stream.height = 128
                 stream.pix_fmt = "yuv420p"
                 stream.time_base = Fraction(1, 10)
-                for pts, value in zip(
-                        [0, 1, 2, 3, 5, 6], physical_frame_values):
-                    image = np.full((16, 16, 3), value, dtype=np.uint8)
+                stream.gop_size = 12
+                stream.codec_context.max_b_frames = 2
+                for pts in range(120):
+                    value = target_frame_values.get(pts)
+                    if value is None:
+                        noise = np.random.RandomState(pts).randint(
+                            0, 256, size=(128, 128, 3))
+                        image = noise.astype(np.uint8)
+                    else:
+                        image = np.full(
+                            (128, 128, 3), value, dtype=np.uint8)
                     frame = av.VideoFrame.from_ndarray(image, format="rgb24")
                     frame.pts = pts
                     frame.time_base = Fraction(1, 10)
@@ -2669,6 +3599,14 @@ class LeRobotValidationTest(unittest.TestCase):
                         container.mux(packet)
                 for packet in stream.encode():
                     container.mux(packet)
+            # MPEG4 is lossy: compare imported frames with the source video's
+            # decoded pixels rather than its uncompressed input images.
+            with av.open(str(video_path)) as container:
+                expected_frame_values = [
+                    float(frame.to_ndarray(format="rgb24").mean())
+                    for index, frame in enumerate(container.decode(video=0))
+                    if index in target_frame_values
+                ]
             camera_b_path = (
                 temp_dir / "videos/camera_b/chunk-000/file-000.mp4")
             camera_b_path.parent.mkdir(parents=True)
@@ -2702,7 +3640,23 @@ class LeRobotValidationTest(unittest.TestCase):
 
             connection = pmm.connect(options={
                 "warehouse": str(temp_dir / "warehouse"),
+                "file-io.read-coalesce.max-gap": "0 b",
             })
+            from pypaimon.multimodal.lerobot.loader import _prepare_dataset
+
+            def prepare(table, *args, **kwargs):
+                if not remote_destination:
+                    return _prepare_dataset(table, *args, **kwargs)
+                open_destination = table.file_io.new_input_stream
+
+                def open_file(path):
+                    if str(path).endswith(".mp4"):
+                        raise IOError("Destination FileIO cannot open local source videos")
+                    return open_destination(path)
+
+                with patch.object(table.file_io, "new_input_stream", side_effect=open_file):
+                    return _prepare_dataset(table, *args, **kwargs)
+
             with patch(
                     "pypaimon.multimodal.lerobot.api."
                     "_import_lerobot_dataset",
@@ -2711,22 +3665,34 @@ class LeRobotValidationTest(unittest.TestCase):
                     "pypaimon.multimodal.lerobot.api."
                     "_open_resolved_dataset",
                     return_value=Dataset(),
+            ), patch(
+                    "pypaimon.multimodal.lerobot.loader._prepare_dataset",
+                    side_effect=prepare,
             ):
                 connection.load_from_lerobot(
-                    "frames", temp_dir, batch_size=1)
+                    "frames", temp_dir, batch_size=1,
+                    options={"write.lerobot.remux-episodes": str(remux).lower()})
 
-            table = connection.get_table("frames")
+            table = connection.get_table("frames_frames")
             rows = table.scan().select([
-                "index", "camera"
+                "index", "camera", "camera_b"
             ]).to_arrow().sort_by("index").to_pylist()
             descriptors = [
                 pmm.VideoFrameDescriptor.deserialize(row["camera"])
                 for row in rows
             ]
-            self.assertEqual(
-                [4, 5, 1, 2, 3],
-                [descriptor.frame_index for descriptor in descriptors],
-            )
+            camera_b_descriptors = [
+                pmm.VideoFrameDescriptor.deserialize(row["camera_b"])
+                for row in rows
+            ]
+            if not remux:
+                self.assertEqual(
+                    [55, 56, 61, 62, 63],
+                    [descriptor.frame_index for descriptor in descriptors],
+                )
+            else:
+                self.assertEqual(2, len(set(
+                    d.payload_descriptor for d in descriptors)))
 
             class Decoder:
 
@@ -2753,19 +3719,20 @@ class LeRobotValidationTest(unittest.TestCase):
             )
             try:
                 decoded_rows = collator(rows)
-                self.assertEqual(1, len(collator._decoders))
+                self.assertEqual(2 if remux else 1, len(collator._decoders))
             finally:
                 collator.close()
             np.testing.assert_allclose(
                 [row["decoded"][0] for row in decoded_rows],
                 expected_frame_values,
-                atol=5,
-            )
-            np.testing.assert_allclose(
-                [row["decoded"][1] for row in decoded_rows],
-                [0.5, 0.6, 0.1, 0.2, 0.3],
                 atol=1e-6,
             )
+            if not remux:
+                np.testing.assert_allclose(
+                    [row["decoded"][1] for row in decoded_rows],
+                    [5.5, 5.6, 6.1, 6.2, 6.3],
+                    atol=1e-6,
+                )
             if not training_reads:
                 return
 
@@ -2774,27 +3741,69 @@ class LeRobotValidationTest(unittest.TestCase):
                 delta_timestamps={"camera": [0.0, 0.1]},
             )
             try:
-                last, first = dataset.__getitems__([4, 0])
+                transferred = []
+                file_io = table.raw_table.file_io
+                read_ranges = file_io.read_ranges_coalesced
+                read_file_range = file_io.read_file_range
+                selected = [descriptors[2], camera_b_descriptors[2]]
+                tracked = []
+                for descriptor in selected:
+                    tracked.append((
+                        descriptor.uri,
+                        descriptor.offset,
+                        descriptor.offset + descriptor.length,
+                    ))
+
+                def track(path, offset, length):
+                    end = offset + length
+                    if any(
+                            path == tracked_path
+                            and offset < tracked_end and end > tracked_begin
+                            for tracked_path, tracked_begin, tracked_end
+                            in tracked):
+                        transferred.append(length)
+
+                def track_ranges(ranges, parallelism):
+                    for path, offset, length in ranges:
+                        track(path, offset, length)
+                    return read_ranges(ranges, parallelism)
+
+                def track_file_range(path, offset, length):
+                    track(path, offset, length)
+                    return read_file_range(path, offset, length)
+
+                with patch.object(
+                        file_io,
+                        "read_ranges_coalesced",
+                        side_effect=track_ranges), patch.object(
+                            file_io,
+                            "read_file_range",
+                            side_effect=track_file_range):
+                    middle, = dataset.__getitems__([2])
                 self.assertEqual(
-                    [2, 3, 16, 16], list(last["camera"].shape))
+                    [2, 3, 128, 128], list(middle["camera"].shape))
                 self.assertEqual(
-                    [2, 3, 16, 16], list(first["camera"].shape))
-                self.assertEqual(
-                    [3, 16, 16], list(first["camera_b"].shape))
-                self.assertEqual("torch.float32", str(last["camera"].dtype))
+                    [3, 128, 128], list(middle["camera_b"].shape))
+                self.assertEqual("torch.float32", str(middle["camera"].dtype))
                 np.testing.assert_allclose(
                     [
-                        float(last["camera"][0].mean()) * 255,
-                        float(first["camera"][0].mean()) * 255,
-                        float(first["camera"][1].mean()) * 255,
+                        float(middle["camera"][0].mean()) * 255,
+                        float(middle["camera"][1].mean()) * 255,
                     ],
-                    [120, 168, 216],
-                    atol=5,
+                    expected_frame_values[2:4],
+                    atol=1e-4,
                 )
                 self.assertEqual(
-                    [False, True], last["camera_is_pad"].tolist())
+                    [False, False], middle["camera_is_pad"].tolist())
                 self.assertEqual(
                     1, len(dataset._video_collators[0]._decoders))
+                self.assertGreater(sum(transferred), 0)
+                # A short remuxed clip may be read in full. Compare with the
+                # original video rather than requiring sparse IO within it.
+                read_limit = (video_path.stat().st_size * len(selected)
+                              if remux else
+                              sum(d.length for d in selected))
+                self.assertLess(sum(transferred), read_limit)
 
                 from torch.utils.data import DataLoader
                 worker_indices = []
@@ -2805,6 +3814,16 @@ class LeRobotValidationTest(unittest.TestCase):
                         num_workers=2,
                         multiprocessing_context="spawn"):
                     worker_indices.extend(batch["index"].tolist())
+                self.assertEqual(list(range(5)), worker_indices)
+
+                worker_indices = []
+                for batch in dataset.to_dataloader(
+                        batch_size=2,
+                        shuffle=False,
+                        num_workers=2,
+                        multiprocessing_context="spawn"):
+                    worker_indices.extend(batch["index"].tolist())
+                    self.assertTrue(batch["camera"].is_shared())
                 self.assertEqual(list(range(5)), worker_indices)
             finally:
                 dataset.close()
@@ -2819,9 +3838,9 @@ class LeRobotValidationTest(unittest.TestCase):
                 np.testing.assert_allclose(
                     [0.0, 1.0], item["action"].tolist())
                 self.assertEqual(
-                    [3, 16, 16], list(item["camera"].shape))
+                    [3, 128, 128], list(item["camera"].shape))
                 self.assertEqual(
-                    [3, 16, 16], list(item["camera_b"].shape))
+                    [3, 128, 128], list(item["camera_b"].shape))
             finally:
                 action_dataset.close()
         finally:
@@ -3039,7 +4058,7 @@ class _FailingCloseDataset:
 
 @unittest.skipUnless(
     sys.version_info >= (3, 10) and LeRobotDataset is not None,
-    "LeRobot 0.4.x requires Python 3.10+ and the lerobot extra",
+    "LeRobot requires Python 3.10+ and the lerobot extra",
 )
 class LeRobotImportTest(unittest.TestCase):
 
@@ -3122,14 +4141,104 @@ class LeRobotImportTest(unittest.TestCase):
             dataset.save_episode()
         dataset.finalize()
 
+    def test_hub_metadata_accepts_installed_lerobot_info(self):
+        from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+        from pypaimon.multimodal.lerobot.source import _load_hub_info
+
+        metadata = LeRobotDatasetMetadata(
+            repo_id="pypaimon/local-image-test", root=self.image_source)
+        with patch("lerobot.datasets.lerobot_dataset.LeRobotDatasetMetadata",
+                   return_value=metadata):
+            info = _load_hub_info(_LeRobotSource(
+                path="pypaimon/local-image-test", root=None,
+                repo_id="pypaimon/local-image-test"))
+        self.assertIsInstance(info, dict)
+        self.assertEqual(info["total_frames"], 5)
+        self.assertEqual(info["total_episodes"], 2)
+        self.assertEqual(info["features"]["observation.state"]["dtype"], "float32")
+
+    def test_custom_reader_accepts_installed_lerobot_metadata(self):
+        from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+
+        metadata = LeRobotDatasetMetadata(
+            repo_id="pypaimon/local-image-test", root=self.image_source)
+        reader = _ManualDatasetReader(metadata)
+        try:
+            self.assertEqual(reader.meta.info["total_frames"], 5)
+            self.assertEqual(reader.meta.info["total_episodes"], 2)
+            self.assertEqual(
+                reader.meta.features["observation.state"]["shape"], (3,))
+        finally:
+            reader.close()
+
+    def test_import_accepts_integral_float_fps(self):
+        source = self.temp_dir / "float-fps-source"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        info["fps"] = float(info["fps"])
+        info_path.write_text(json.dumps(info))
+
+        for name, location in (("local_fps", source), ("uri_fps", source.as_uri())):
+            with self.subTest(source=name):
+                self.connection.load_from_lerobot(name, location)
+                self.assertEqual(info, _catalog_metadata(self.connection, name + "_info"))
+                data = self.connection.get_table(name + "_frames").scan().to_arrow()
+                self.assertEqual(info["total_frames"], data.num_rows)
+                dataset = pmm.PaimonLeRobotDataset(self.connection.get_table(name + "_frames"))
+                self.assertEqual(info["fps"], dataset.meta.fps)
+                self.assertEqual(0, dataset[0]["frame_index"].item())
+
+    def test_local_import_preserves_extended_info(self):
+        source = self.temp_dir / "extended-source"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        info["vendor_extension"] = {"labels": ["pick"], "enabled": True}
+        info_path.write_text(json.dumps(info))
+
+        self.connection.load_from_lerobot("extended_info", source)
+
+        self.assertEqual(
+            info, _catalog_metadata(self.connection, "extended_info_info"))
+
+    def test_hub_import_preserves_extended_info(self):
+        from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+
+        source = self.temp_dir / "hub-source"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        info["vendor_extension"] = {"labels": ["pick"], "enabled": True}
+        info_path.write_text(json.dumps(info))
+        repo_id = "pypaimon/hub-image-test"
+        metadata = LeRobotDatasetMetadata(repo_id=repo_id, root=source)
+        dataset = LeRobotDataset(repo_id=repo_id, root=source)
+        with patch("lerobot.datasets.lerobot_dataset.LeRobotDatasetMetadata",
+                   return_value=metadata), patch(
+                       "pypaimon.multimodal.lerobot.source._open_dataset",
+                       return_value=dataset):
+            self.connection.load_from_lerobot("hub_info", repo_id)
+
+        self.assertEqual(
+            info, _catalog_metadata(self.connection, "hub_info_info"))
+
     def test_table_dataset_pickle_preserves_episode_metadata_and_reads(self):
         import torch
 
         self.connection.load_from_lerobot("worker_pickle", self.image_source)
-        table = self.connection.get_table("worker_pickle")
-        dataset = pmm.PaimonLeRobotDataset(table, return_uint8=True)
+        snapshots = self.connection.create_lerobot_tag(
+            "worker_pickle_frames", "training")
+        table = self.connection.get_table("worker_pickle_frames").copy({
+            "read.video.max-open-decoders": "2"})
+        dataset = pmm.PaimonLeRobotDataset(
+            table, tag_name="training", return_uint8=True)
         restored = pickle.loads(pickle.dumps(dataset))
 
+        for reader in (dataset.reader, restored.reader):
+            self.assertEqual(snapshots["frames"], reader._snapshot_id)
+            self.assertEqual(
+                2, reader._read_table.options.read_video_max_open_decoders())
         self.assertEqual(dataset.meta.episodes[:], restored.meta.episodes[:])
         self.assertEqual(
             dataset.meta.episodes._fingerprint,
@@ -3145,23 +4254,41 @@ class LeRobotImportTest(unittest.TestCase):
                 else:
                     self.assertEqual(original[key], reread[key])
 
-    def test_import_infers_schema_and_preserves_episodes(self):
-        import pandas as pd
+    def test_training_reads_previously_imported_vector_features(self):
+        import torch
 
+        with patch("pypaimon.multimodal.lerobot.api._schema_from_info",
+                   side_effect=lambda info: _schema_from_info(info, legacy_vectors=True)):
+            self.connection.load_from_lerobot(
+                "legacy_vectors", self.image_source, batch_size=2)
+        table = self.connection.get_table("legacy_vectors_frames")
+        self.assertEqual("VECTOR<FLOAT, 3> NOT NULL", str(next(
+            field.type for field in table.raw_table.fields
+            if field.name == "observation.state")))
+        dataset = pmm.PaimonLeRobotDataset(table)
+        try:
+            row = dataset[0]
+            self.assertEqual((3,), tuple(row["observation.state"].shape))
+            self.assertEqual((2, 2), tuple(row["observation.matrix"].shape))
+            self.assertTrue(torch.equal(row["action"], torch.tensor([0.0, 0.0])))
+        finally:
+            dataset.close()
+
+    def test_import_infers_schema_and_preserves_episodes(self):
         result = self.connection.load_from_lerobot(
             "robot_data", self.image_source, batch_size=2)
 
         self.assertIsNone(result)
 
-        table = self.connection.get_table("robot_data")
+        table = self.connection.get_table("robot_data_frames")
         schema = table.raw_table.fields
         types = {field.name: str(field.type) for field in schema}
-        self.assertEqual("VECTOR<FLOAT, 3> NOT NULL", types["observation.state"])
+        self.assertEqual("ARRAY<FLOAT> NOT NULL", types["observation.state"])
         self.assertEqual(
-            "ARRAY<VECTOR<FLOAT, 2>> NOT NULL",
+            "ARRAY<ARRAY<FLOAT>> NOT NULL",
             types["observation.matrix"],
         )
-        self.assertEqual("VECTOR<FLOAT, 2> NOT NULL", types["action"])
+        self.assertEqual("ARRAY<FLOAT> NOT NULL", types["action"])
         self.assertEqual("FLOAT NOT NULL", types["timestamp"])
         self.assertEqual("BIGINT NOT NULL", types["episode_index"])
         self.assertEqual("BLOB NOT NULL", types["observation.image"])
@@ -3191,31 +4318,31 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual(1.0, rows[4]["reward"])
         self.assertEqual(
             json.loads((self.image_source / "meta" / "info.json").read_text()),
-            _catalog_metadata(self.connection, "robot_data__info"),
+            _catalog_metadata(self.connection, "robot_data_info"),
         )
         self.assertEqual(
             json.loads((self.image_source / "meta" / "stats.json").read_text()),
-            _catalog_metadata(self.connection, "robot_data__stats"),
+            _catalog_metadata(self.connection, "robot_data_stats"),
         )
-        for name in ("robot_data__info", "robot_data__stats"):
-            fields = self.connection.catalog.get_table(
-                self.connection._identifier(name)).fields
-            self.assertEqual({"key": "STRING", "value": "STRING"}, {
-                field.name: str(field.type) for field in fields
-            })
+        dataset_rows = _catalog_rows(self.connection, "robot_data_datasets")
+        self.assertEqual(1, len(dataset_rows))
+        self.assertEqual(
+            json.loads((self.image_source / "meta" / "info.json").read_text()),
+            json.loads(dataset_rows[0]["info"]),
+        )
         self.assertEqual([], table.raw_table.tag_manager().list_tags())
 
-        episodes = _catalog_rows(self.connection, "robot_data__episodes")
+        episodes = _catalog_rows(self.connection, "robot_data_episodes")
         episode_fields = {
             field.name for field in self.connection.catalog.get_table(
                 self.connection._identifier(
-                    "robot_data__episodes")).fields
+                    "robot_data_episodes")).fields
         }
         source_episode_schema = pq.read_schema(next(
             (self.image_source / "meta" / "episodes").rglob("*.parquet")))
         self.assertTrue(_target_schema(
             self.connection.catalog.get_table(self.connection._identifier(
-                "robot_data__episodes"))
+                "robot_data_episodes"))
         ).equals(source_episode_schema, check_metadata=False))
         self.assertEqual([(0, 0, 2), (1, 2, 5)], [
             (row["episode_index"], row["dataset_from_index"],
@@ -3227,30 +4354,11 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertTrue(any(
             name.startswith("stats/") for name in episode_fields))
 
-        tasks = _catalog_rows(self.connection, "robot_data__tasks")
-        task_fields = {
-            field.name for field in self.connection.catalog.get_table(
-                self.connection._identifier("robot_data__tasks")).fields
-        }
-        self.assertTrue(_target_schema(
-            self.connection.catalog.get_table(self.connection._identifier(
-                "robot_data__tasks"))
-        ).equals(
-            pq.read_schema(self.image_source / "meta" / "tasks.parquet"),
-            check_metadata=False,
-        ))
-        task_name = "task" if "task" in task_fields else "__index_level_0__"
+        tasks = _catalog_rows(self.connection, "robot_data_tasks")
         self.assertEqual([(0, "pick"), (1, "place")], [
-            (row["task_index"], row[task_name]) for row in tasks
+            (row["task_index"], row["task"]) for row in tasks
         ])
-        tasks_table, tasks_arrow = _catalog_arrow(
-            self.connection, "robot_data__tasks")
-        pd.testing.assert_frame_equal(
-            pq.read_table(
-                self.image_source / "meta" / "tasks.parquet").to_pandas(),
-            _restore_pandas_metadata(
-                tasks_table, tasks_arrow).to_pandas(),
-        )
+        self.assertEqual(tasks, dataset_rows[0]["tasks"])
         self.assertEqual(
             2,
             table.raw_table.snapshot_manager().get_latest_snapshot().id,
@@ -3305,13 +4413,75 @@ class LeRobotImportTest(unittest.TestCase):
 
         self.connection.load_from_lerobot("sharded_episodes", source)
         table = self.connection.catalog.get_table(
-            self.connection._identifier("sharded_episodes__episodes"))
+            self.connection._identifier("sharded_episodes_episodes"))
         files = {
             file.file_name
             for split in table.new_read_builder().new_scan().plan().splits()
             for file in split.files
         }
         self.assertEqual(1, len(files))
+
+    def test_import_arrow_tasks_and_subtasks(self):
+        source = self.temp_dir / "arrow_tasks"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        info["features"]["subtask_index"] = {"dtype": "int64", "shape": [1], "names": None}
+        info_path.write_text(json.dumps(info))
+        for path in (source / "data").rglob("*.parquet"):
+            data = pq.read_table(path)
+            pq.write_table(data.append_column(
+                "subtask_index", pa.array([0] * data.num_rows, type=pa.int64())), path)
+        task_path = source / "meta" / "tasks.parquet"
+        tasks = pq.read_table(task_path).to_pandas()
+        expected_tasks = tasks.index.tolist()
+        pq.write_table(pa.table({"task_index": tasks["task_index"].tolist(),
+                                "task": expected_tasks}), task_path)
+        pq.write_table(pa.table({"subtask_index": [0], "subtask": ["reach"]}),
+                       source / "meta" / "subtasks.parquet")
+
+        for name, location in (("local_tasks", source), ("uri_tasks", source.as_uri())):
+            with self.subTest(source=name):
+                self.connection.load_from_lerobot(name, location, tag_name="train")
+                dataset = pmm.PaimonLeRobotDataset(
+                    self.connection.get_table(name + "_frames"), tag_name="train")
+                self.assertEqual(expected_tasks, dataset.meta.tasks.index.tolist())
+                self.assertEqual(["reach"], dataset.meta.subtasks.index.tolist())
+                row = dataset[0]
+                self.assertEqual(expected_tasks[int(row["task_index"])], row["task"])
+                self.assertEqual("reach", row["subtask"])
+                self.assertEqual(info["total_frames"], len(dataset))
+
+    def test_import_empty_subtask_vocabulary(self):
+        import pandas as pd
+
+        source = self.temp_dir / "empty_subtasks"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta/info.json"
+        info = json.loads(info_path.read_text())
+        info["features"]["subtask_index"] = {
+            "dtype": "int64", "shape": [1], "names": None}
+        info_path.write_text(json.dumps(info))
+        for path in (source / "data").rglob("*.parquet"):
+            data = pq.read_table(path)
+            pq.write_table(data.append_column(
+                "subtask_index", pa.nulls(data.num_rows, type=pa.int64())), path)
+        vocabulary = pa.Table.from_pandas(pd.DataFrame(
+            {"subtask_index": [0]},
+            index=pd.Index(["reach"], name="instruction"))).slice(0, 0)
+        pq.write_table(vocabulary, source / "meta/subtasks.parquet")
+        self.connection.load_from_lerobot("empty_subtasks", source, tag_name="train")
+        self.assertEqual([], _catalog_rows(self.connection, "empty_subtasks_subtasks"))
+        self.assertEqual(1, self.connection.catalog.get_tag(
+            self.connection._identifier("empty_subtasks_datasets"), "train").snapshot.id)
+        dataset = pmm.PaimonLeRobotDataset(
+            self.connection.get_table("empty_subtasks_frames"), tag_name="train")
+        self.assertIsNone(dataset[0]["subtask"])
+        self.assertIsNone(dataset[0]["subtask_index"])
+        batch = next(iter(dataset.to_dataloader(batch_size=5, num_workers=0)))
+        self.assertEqual([None] * 5, batch["subtask"])
+        self.assertEqual([-1] * 5, batch["subtask_index"].tolist())
+        self.assertFalse(batch["subtask_index_is_valid"].any())
 
     def test_import_publishes_optional_subtasks(self):
         import pandas as pd
@@ -3335,6 +4505,8 @@ class LeRobotImportTest(unittest.TestCase):
                 for index in range(data.num_rows)
             ]
             next_subtask += data.num_rows
+            if next_subtask == 5:
+                values[-1] = None
             pq.write_table(data.append_column(
                 "subtask_index",
                 pa.array(values, type=pa.int64()),
@@ -3348,37 +4520,64 @@ class LeRobotImportTest(unittest.TestCase):
         result = self.connection.load_from_lerobot(
             "with_subtasks", source, tag_name="training")
 
-        frames = self.connection.get_table("with_subtasks")
+        frames = self.connection.get_table("with_subtasks_frames")
         self.assertNotIn("subtask", [
             field.name for field in frames.raw_table.fields
         ])
-        self.assertEqual([0, 1, 0, 1, 0], frames.scan().select([
+        self.assertEqual([0, 1, 0, 1, None], frames.scan().select([
             "index", "subtask_index"
         ]).to_arrow().sort_by("index").column("subtask_index").to_pylist())
-        subtasks_table = self.connection.catalog.get_table(
-            self.connection._identifier("with_subtasks__subtasks"))
-        self.assertTrue(_target_schema(subtasks_table).equals(
-            subtasks.schema, check_metadata=False))
         self.assertEqual(
-            subtasks.to_pylist(),
-            _catalog_rows(self.connection, "with_subtasks__subtasks"),
-        )
-        _, subtasks_arrow = _catalog_arrow(
-            self.connection, "with_subtasks__subtasks")
-        pd.testing.assert_frame_equal(
-            subtasks.to_pandas(),
-            _restore_pandas_metadata(
-                subtasks_table, subtasks_arrow).to_pandas(),
+            [{"subtask_index": 0, "subtask": "reach"},
+             {"subtask_index": 1, "subtask": "grasp"}],
+            _catalog_rows(self.connection, "with_subtasks_subtasks"),
         )
         self.assertIsNone(result)
         dataset = pmm.PaimonLeRobotDataset(frames, tag_name="training")
         self.assertEqual(["reach", "grasp"], list(
             dataset.meta.subtasks.index))
         self.assertEqual("reach", dataset[0]["subtask"])
+        self.assertIsNone(dataset[4]["subtask_index"])
+        self.assertIsNone(dataset[4]["subtask"])
+        self.assertEqual(["grasp", None], [
+            row["subtask"] for row in dataset.__getitems__([3, 4])
+        ])
+        batch = next(iter(dataset.to_dataloader(
+            batch_size=5, shuffle=False, num_workers=0)))
+        self.assertEqual([0, 1, 2, 3, 4], batch["index"].tolist())
+        self.assertEqual([0, 1, 0, 1, -1], batch["subtask_index"].tolist())
+        self.assertEqual([True, True, True, True, False],
+                         batch["subtask_index_is_valid"].tolist())
+        self.assertEqual(["reach", "grasp", "reach", "grasp", None],
+                         batch["subtask"])
+        windowed = pmm.PaimonLeRobotDataset(
+            frames, tag_name="training",
+            delta_timestamps={"subtask_index": [-0.1, 0.0]})
+        self.assertEqual([1, None], [
+            None if value is None else int(value)
+            for value in windowed[4]["subtask_index"]
+        ])
+        padded = pmm.PaimonLeRobotDataset(
+            frames, tag_name="training",
+            delta_timestamps={"subtask_index": [-0.1, 0.0, 0.2]})
+        samples = padded.__getitems__([2, 2])
+        self.assertEqual([True, False, False],
+                         samples[0]["subtask_index_is_pad"].tolist())
+        for sample in samples:
+            self.assertEqual([0, 0, None], [
+                None if value is None else int(value)
+                for value in sample["subtask_index"]
+            ])
+        samples[0]["subtask_index"][0].fill_(-100)
+        self.assertEqual(0, int(samples[0]["subtask_index"][1]))
+        self.assertEqual([0, 0, None], [
+            None if value is None else int(value)
+            for value in samples[1]["subtask_index"]
+        ])
         self.assertEqual(
             1,
             self.connection.catalog.get_tag(
-                self.connection._identifier("with_subtasks__subtasks"),
+                self.connection._identifier("with_subtasks_datasets"),
                 "training",
             ).snapshot.id,
         )
@@ -3392,11 +4591,9 @@ class LeRobotImportTest(unittest.TestCase):
 
         table_names = self.connection.catalog.list_tables("db.name")
         self.assertEqual([
-            "robot",
-            "robot__episodes",
-            "robot__info",
-            "robot__stats",
-            "robot__tasks",
+            "robot_datasets",
+            "robot_episodes",
+            "robot_frames",
         ], sorted(table_names))
 
     def test_import_reuses_validated_episode_metadata(self):
@@ -3424,7 +4621,7 @@ class LeRobotImportTest(unittest.TestCase):
             self.connection.load_from_lerobot("stable_episodes", source)
 
         published = _catalog_rows(
-            self.connection, "stable_episodes__episodes")
+            self.connection, "stable_episodes_episodes")
         self.assertEqual(["pick"], published[0]["tasks"])
 
     def test_frame_controls_must_match_published_episode_metadata(self):
@@ -3455,9 +4652,9 @@ class LeRobotImportTest(unittest.TestCase):
                 with self.assertRaisesRegex(
                         ValueError, "has %s" % column):
                     self.connection.load_from_lerobot(table_name, source)
-                self.connection.get_table(table_name)
+                self.connection.get_table(table_name + "_frames")
                 self.assertEqual([], _catalog_rows(
-                    self.connection, table_name + "__info"))
+                    self.connection, table_name + "_info"))
 
     def test_task_text_remains_in_published_task_mapping(self):
         source = self.temp_dir / "reordered_tasks"
@@ -3467,7 +4664,7 @@ class LeRobotImportTest(unittest.TestCase):
         pq.write_table(tasks.take(pa.array([1, 0])), path)
 
         self.connection.load_from_lerobot("reordered_tasks", source)
-        table = self.connection.get_table("reordered_tasks")
+        table = self.connection.get_table("reordered_tasks_frames")
         self.assertNotIn("task", [
             field.name for field in table.raw_table.fields
         ])
@@ -3475,7 +4672,7 @@ class LeRobotImportTest(unittest.TestCase):
             "index", "task_index"
         ]).to_arrow().sort_by("index").to_pylist()
         task_rows = _catalog_rows(
-            self.connection, "reordered_tasks__tasks")
+            self.connection, "reordered_tasks_tasks")
         task_name = (
             "task" if "task" in task_rows[0] else "__index_level_0__")
         published = {
@@ -3504,9 +4701,9 @@ class LeRobotImportTest(unittest.TestCase):
                 ValueError, "declares task indices"):
             self.connection.load_from_lerobot(
                 "extra_episode_task", source)
-        self.connection.get_table("extra_episode_task")
+        self.connection.get_table("extra_episode_task_frames")
         self.assertEqual([], _catalog_rows(
-            self.connection, "extra_episode_task__info"))
+            self.connection, "extra_episode_task_info"))
 
     def test_nonempty_dataset_cannot_publish_without_tasks(self):
         source = self.temp_dir / "missing_tasks"
@@ -3531,9 +4728,9 @@ class LeRobotImportTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "task_index"):
             self.connection.load_from_lerobot("missing_tasks", source)
-        self.connection.get_table("missing_tasks")
+        self.connection.get_table("missing_tasks_frames")
         self.assertEqual([], _catalog_rows(
-            self.connection, "missing_tasks__info"))
+            self.connection, "missing_tasks_info"))
 
     def test_paimon_dataset_reads_lazy_batches_with_lerobot_metadata(self):
         import torch
@@ -3543,7 +4740,7 @@ class LeRobotImportTest(unittest.TestCase):
             "training_data", self.image_source, batch_size=2,
             tag_name="training")
         self.assertIsNone(result)
-        table = self.connection.get_table("training_data")
+        table = self.connection.get_table("training_data_frames")
         dataset = pmm.PaimonLeRobotDataset(
             table,
             tag_name="training",
@@ -3570,7 +4767,7 @@ class LeRobotImportTest(unittest.TestCase):
             for name in episodes.column_names))
         self.assertFalse(hasattr(dataset, "index_mapping"))
         frame_indexes = _catalog_rows(
-            self.connection, "training_data$table_indexes")
+            self.connection, "training_data_frames$table_indexes")
         self.assertEqual(
             {"btree", "index"},
             {frame_indexes[0]["index_type"],
@@ -3592,10 +4789,7 @@ class LeRobotImportTest(unittest.TestCase):
                 "pypaimon.multimodal.blob_read.fetch_blob_bodies",
                 wraps=fetch_blob_bodies) as fetch:
             last, first = dataset.__getitems__([4, 0])
-            scanner = dataset._frame_locator._scanner
-            dataset._frame_locator.locate([2])
         self.assertEqual(0, len(scan_calls))
-        self.assertIs(scanner, dataset._frame_locator._scanner)
         self.assertEqual(1, read.call_count)
         self.assertEqual([0, 1, 3, 4], read.call_args.args[0])
         self.assertEqual(1, fetch.call_count)
@@ -3616,15 +4810,13 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual([True, False, False],
                          first["action_is_pad"].tolist())
 
-        restored_locator = pickle.loads(pickle.dumps(
-            dataset._frame_locator))
-        with patch.object(TableScan, "plan", new=counted_plan):
-            restored_splits, restored_needs_filter = \
-                restored_locator.locate([2])
-        self.assertEqual(0, len(scan_calls))
-        self.assertTrue(restored_splits)
-        self.assertFalse(restored_needs_filter)
-        restored_locator.close()
+        restored_reader = pickle.loads(pickle.dumps(dataset.reader))
+        try:
+            # Both execution backends preserve indexed lookup after transport.
+            self.assertEqual(
+                [2], restored_reader.read_indices([2], ["index"])["index"].to_pylist())
+        finally:
+            restored_reader.close()
 
         worker_indices = []
         for batch in DataLoader(
@@ -3635,6 +4827,24 @@ class LeRobotImportTest(unittest.TestCase):
                 multiprocessing_context="spawn"):
             worker_indices.extend(batch["index"].tolist())
         self.assertEqual(list(range(5)), worker_indices)
+
+        worker_batches = list(dataset.to_dataloader(
+            batch_size=2,
+            shuffle=False,
+            num_workers=1,
+            multiprocessing_context="spawn",
+            worker_init_fn=_configure_uint8_transform_worker,
+        ))
+        self.assertEqual("torch.uint8", str(
+            worker_batches[0]["observation.image"].dtype))
+        self.assertEqual(
+            1.0,
+            float(worker_batches[0]["observation.image"][0].float().mean()),
+        )
+        self.assertEqual(
+            101.0,
+            float(worker_batches[-1]["observation.image"][-1].float().mean()),
+        )
 
         uint8_dataset = pmm.PaimonLeRobotDataset(
             table,
@@ -3689,8 +4899,13 @@ class LeRobotImportTest(unittest.TestCase):
     def test_paimon_dataset_rejects_unavailable_frame_index(self):
         self.connection.load_from_lerobot(
             "missing_frame_index", self.image_source)
+        # Exercise the Python locator's failures explicitly; Native lookup
+        # does not open this scanner or invoke its internal hooks.
         dataset = pmm.PaimonLeRobotDataset(
-            self.connection.get_table("missing_frame_index"))
+            self.connection.get_table("missing_frame_index_frames").copy({
+                "read.native.enabled": "false",
+                "scan.native-plan.enabled": "false",
+            }))
 
         with patch.object(
                 dataset._frame_locator, "_index_scanner",
@@ -3718,7 +4933,7 @@ class LeRobotImportTest(unittest.TestCase):
     def test_paimon_dataset_rejects_query_authorization(self):
         self.connection.load_from_lerobot(
             "authorized_frames", self.image_source)
-        table = self.connection.get_table("authorized_frames")
+        table = self.connection.get_table("authorized_frames_frames")
         auth_results = [
             TableQueryAuthResult([json.dumps({
                 "kind": "LEAF",
@@ -3762,7 +4977,7 @@ class LeRobotImportTest(unittest.TestCase):
             )
 
         self.assertIsNone(result)
-        table = self.connection.get_table("oss_images")
+        table = self.connection.get_table("oss_images_frames")
         rows = table.scan().select([
             "episode_index", "frame_index", "index", "task_index"
         ]).to_arrow().sort_by("index").to_pylist()
@@ -3799,10 +5014,10 @@ class LeRobotImportTest(unittest.TestCase):
                 "custom_task_index", source)
 
         rows = _catalog_rows(
-            self.connection, "custom_task_index__tasks")
+            self.connection, "custom_task_index_tasks")
         self.assertEqual(
             [(0, "pick"), (1, "place")],
-            [(row["task_index"], row["instruction"]) for row in rows],
+            [(row["task_index"], row["task"]) for row in rows],
         )
 
     def test_empty_oss_source_does_not_require_episode_directory(self):
@@ -3836,7 +5051,7 @@ class LeRobotImportTest(unittest.TestCase):
                 "tag_fallback", self.image_source, tag_name="training")
 
         tag = "training"
-        table = self.connection.get_table("tag_fallback")
+        table = self.connection.get_table("tag_fallback_frames")
         self.assertIsNone(result)
         self.assertEqual(
             table.raw_table.snapshot_manager().get_latest_snapshot().id,
@@ -3864,7 +5079,7 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertTrue(lost[0])
         self.assertIsNone(result)
         self.assertEqual(2, self.connection.catalog.get_tag(
-            self.connection._identifier("tag_response_loss"),
+            self.connection._identifier("tag_response_loss_frames"),
             "training").snapshot.id)
 
     def test_tag_failure_leaves_imported_data(self):
@@ -3876,22 +5091,22 @@ class LeRobotImportTest(unittest.TestCase):
                     "failed_publish", self.image_source, tag_name="training")
 
         self.assertEqual(5, self.connection.get_table(
-            "failed_publish").scan().to_arrow().num_rows)
+            "failed_publish_frames").scan().to_arrow().num_rows)
         self.assertEqual("v3.0", _catalog_metadata(
-            self.connection, "failed_publish__info")["codebase_version"])
+            self.connection, "failed_publish_info")["codebase_version"])
 
     def test_existing_companion_is_rejected(self):
         self.connection.load_from_lerobot(
             "other_group", self.image_source)
-        stale = self.connection._identifier("stale__tasks")
+        stale = self.connection._identifier("stale_datasets")
         self.connection.catalog.rename_table(
-            self.connection._identifier("other_group__tasks"), stale)
+            self.connection._identifier("other_group_datasets"), stale)
 
         with self.assertRaisesRegex(ValueError, "already exists"):
             self.connection.load_from_lerobot(
                 "stale", self.image_source)
 
-        self.connection.get_table("stale")
+        self.connection.get_table("stale_frames")
         self.connection.catalog.get_table(stale)
 
     def test_invalid_target_options_do_not_leave_table(self):
@@ -3903,7 +5118,7 @@ class LeRobotImportTest(unittest.TestCase):
             )
         with self.assertRaises(TableNotExistException):
             self.connection.catalog.get_table(
-                self.connection._identifier("invalid_options"))
+                self.connection._identifier("invalid_options_frames"))
 
         result = self.connection.load_from_lerobot(
             "invalid_options", self.image_source)
@@ -3925,7 +5140,7 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.load_from_lerobot(
                     "failed_open", self.image_source)
 
-        self.connection.get_table("failed_open")
+        self.connection.get_table("failed_open_frames")
 
     def test_dataset_close_failure_does_not_override_success(self):
         from pypaimon.multimodal.lerobot import api
@@ -3946,7 +5161,7 @@ class LeRobotImportTest(unittest.TestCase):
 
         self.assertIsNone(result)
         self.assertEqual("v3.0", _catalog_metadata(
-            self.connection, "close_failure__info")["codebase_version"])
+            self.connection, "close_failure_info")["codebase_version"])
 
     def test_source_close_failure_does_not_override_success(self):
         source = "oss://source-bucket/robot-images"
@@ -3963,12 +5178,12 @@ class LeRobotImportTest(unittest.TestCase):
 
         self.assertIsNone(result)
         self.assertEqual("v3.0", _catalog_metadata(
-            self.connection, "source_close_failure__info")["codebase_version"])
+            self.connection, "source_close_failure_info")["codebase_version"])
 
     def test_existing_target_is_rejected(self):
         info = json.loads((self.image_source / "meta" / "info.json").read_text())
         schema = _schema_from_info(info)
-        table = self.connection.create_table("existing", schema=schema)
+        table = self.connection.create_table("existing_frames", schema=schema)
 
         with self.assertRaisesRegex(ValueError, "already exists"):
             self.connection.load_from_lerobot(
@@ -4012,7 +5227,7 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual(
             5,
             self.connection.get_table(
-                "concurrent").scan().to_arrow().num_rows,
+                "concurrent_frames").scan().to_arrow().num_rows,
         )
 
     def test_concurrent_append_rejects_initial_import(self):
@@ -4053,9 +5268,9 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.load_from_lerobot(
                     "concurrent_append", self.image_source)
 
-        self.connection.get_table("concurrent_append")
+        self.connection.get_table("concurrent_append_frames")
         self.assertEqual([], _catalog_rows(
-            self.connection, "concurrent_append__info"))
+            self.connection, "concurrent_append_info"))
 
 
 if __name__ == "__main__":

@@ -46,6 +46,7 @@ public class ResourcePaths {
     protected static final String ROLLBACK = "rollback";
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
+    protected static final String MODELS = "models";
     protected static final String FUNCTION_DETAILS = "function-details";
     protected static final String PERMISSIONS = "permissions";
     protected static final String POLICIES = "policies";
@@ -68,21 +69,26 @@ public class ResourcePaths {
         this.prefix = encodeString(prefix);
     }
 
-    /** Labels attached to one entity, whose canonical name is encoded as a single segment. */
+    /** Label listing; the entity is named in the query, never in the path. */
     @Experimental
-    public String labels(String entityType, String entityName) {
-        checkArgument(
-                entityType != null && !entityType.trim().isEmpty(), "entityType must not be blank");
-        checkArgument(
-                entityName != null && !entityName.trim().isEmpty(), "entityName must not be blank");
-        return SLASH.join(
-                V1, prefix, LABELS, encodePathSegment(entityType), encodePathSegment(entityName));
+    public String labels() {
+        return SLASH.join(V1, prefix, LABELS);
+    }
+
+    /** Single-binding label actions name the entity and key in the request body. */
+    @Experimental
+    public String getLabel() {
+        return SLASH.join(labels(), "get");
     }
 
     @Experimental
-    public String label(String entityType, String entityName, String key) {
-        checkArgument(key != null && !key.trim().isEmpty(), "key must not be blank");
-        return SLASH.join(labels(entityType, entityName), encodePathSegment(key));
+    public String upsertLabel() {
+        return SLASH.join(labels(), "upsert");
+    }
+
+    @Experimental
+    public String deleteLabel() {
+        return SLASH.join(labels(), "delete");
     }
 
     private static String encodePathSegment(String value) {
@@ -144,6 +150,22 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName));
     }
 
+    public String models(String databaseName) {
+        checkModelPathSegment(databaseName, "databaseName");
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), MODELS);
+    }
+
+    public String model(String databaseName, String modelName) {
+        checkModelPathSegment(modelName, "modelName");
+        return SLASH.join(models(databaseName), encodeString(modelName));
+    }
+
+    private static void checkModelPathSegment(String value, String name) {
+        checkArgument(value != null && !value.trim().isEmpty(), "%s must not be blank", name);
+        checkArgument(
+                !".".equals(value) && !"..".equals(value), "%s must not be a dot segment", name);
+    }
+
     public String tables(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES);
     }
@@ -194,6 +216,10 @@ public class ResourcePaths {
                 TABLES,
                 encodeString(objectName),
                 "commit");
+    }
+
+    public String commitLock(String databaseName, String objectName) {
+        return table(databaseName, objectName) + "/commit-lock";
     }
 
     public String rollbackTable(String databaseName, String objectName) {

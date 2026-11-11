@@ -18,11 +18,16 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.ListUnexistingFilesTest;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -33,6 +38,95 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link RemoveUnexistingFilesAction}. */
 public class RemoveUnexistingFilesActionITCase extends ActionITCaseBase {
+
+    @Test
+    public void testPartitionArgument() throws Exception {
+        int[] numDeletes = prepareTableMissingFilesInEveryPartition();
+
+        // only repair pt=0
+        createAction(
+                        RemoveUnexistingFilesAction.class,
+                        "remove_unexisting_files",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        "mydb",
+                        "--table",
+                        "t",
+                        "--partition",
+                        "pt=0")
+                .withParallelism(2)
+                .run();
+
+        // the missing files of pt=1 are still in the manifest
+        assertThat(countUnexistingFiles()).containsExactly(0, numDeletes[1]);
+    }
+
+    @Test
+    public void testPartitionArgumentMatchingNothing() throws Exception {
+        int[] numDeletes = prepareTableMissingFilesInEveryPartition();
+
+        createAction(
+                        RemoveUnexistingFilesAction.class,
+                        "remove_unexisting_files",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        "mydb",
+                        "--table",
+                        "t",
+                        "--partition",
+                        "pt=99")
+                .withParallelism(2)
+                .run();
+
+        assertThat(countUnexistingFiles()).containsExactly(numDeletes);
+    }
+
+    private int[] prepareTableMissingFilesInEveryPartition() throws Exception {
+        int[] numDeletes = new int[2];
+        FileStoreTable table =
+                ListUnexistingFilesTest.prepareRandomlyDeletedTable(
+                        warehouse, "mydb", "t", -1, 10, numDeletes, false);
+        LocalFileIO fileIO = LocalFileIO.create();
+        for (int i = 0; i < numDeletes.length; i++) {
+            if (numDeletes[i] == 0) {
+                FileStatus[] files =
+                        fileIO.listStatus(new Path(table.location(), "pt=" + i + "/bucket-0"));
+                fileIO.deleteQuietly(files[0].getPath());
+                numDeletes[i] = 1;
+            }
+        }
+        return numDeletes;
+    }
+
+    /** Counts the unexisting files per partition with a dry run over the whole table. */
+    private int[] countUnexistingFiles() throws Exception {
+        RemoveUnexistingFilesAction action =
+                createAction(
+                                RemoveUnexistingFilesAction.class,
+                                "remove_unexisting_files",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                "mydb",
+                                "--table",
+                                "t",
+                                "--dry_run",
+                                "true")
+                        .withParallelism(2);
+        int[] actual = new int[2];
+        Pattern pattern = Pattern.compile("pt=(\\d+?)/");
+        try (CloseableIterator<String> it = action.buildDataStream().executeAndCollect()) {
+            while (it.hasNext()) {
+                Matcher matcher = pattern.matcher(it.next());
+                if (matcher.find()) {
+                    actual[Integer.parseInt(matcher.group(1))]++;
+                }
+            }
+        }
+        return actual;
+    }
 
     @ParameterizedTest
     @ValueSource(ints = {-1, 3})

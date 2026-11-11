@@ -15,9 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pypaimon.api.auth.factory import AuthProviderFactory
 from pypaimon.api.token_loader import (
@@ -31,6 +34,24 @@ from pypaimon.common.options.config import CatalogOptions
 
 
 class DLFLocalFileTokenLoaderTest(unittest.TestCase):
+
+    def test_expiration_at_millis_is_internal_only(self):
+        token = DLFToken(
+            access_key_id="access-key-id",
+            access_key_secret="access-key-secret",
+            security_token="security-token",
+            expiration="2099-12-01T12:00:00Z",
+        )
+
+        token_json = JSON.to_json(token)
+        self.assertNotIn("ExpirationAt", json.loads(token_json))
+
+        loaded_token = JSON.from_json(
+            '{"AccessKeyId":"ak","AccessKeySecret":"sk",'
+            '"SecurityToken":"sts","ExpirationAt":123}',
+            DLFToken,
+        )
+        self.assertIsNone(loaded_token.expiration_at_millis)
 
     def test_load_token_from_configured_path(self):
         token = DLFToken(
@@ -73,6 +94,54 @@ class DLFLocalFileTokenLoaderTest(unittest.TestCase):
             self.assertIsInstance(provider.token_loader, DLFLocalFileTokenLoader)
             self.assertEqual("access-key-id", provider.get_token().access_key_id)
 
+    def test_auth_provider_uses_token_path_from_environment(self):
+        first_token = DLFToken("first-ak", "first-sk", "first-sts", "2000-01-01T00:00:00Z")
+        fresh_token = DLFToken("fresh-ak", "fresh-sk", "fresh-sts", "2099-01-01T00:00:00Z")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_path = Path(temp_dir) / "token.json"
+            token_path.write_text(JSON.to_json(first_token), encoding="utf-8")
+            options = Options({
+                CatalogOptions.URI.key(): "https://cn-hangzhou-vpc.dlf.aliyuncs.com",
+                CatalogOptions.TOKEN_PROVIDER.key(): "dlf",
+            })
+            with patch.dict(os.environ, {"DLF_TOKEN_PATH": str(token_path)}):
+                provider = AuthProviderFactory.create_auth_provider(options)
+
+            self.assertIsInstance(provider.token_loader, DLFLocalFileTokenLoader)
+            self.assertEqual(str(token_path), provider.token_loader.description())
+            self.assertIsNone(options.get(CatalogOptions.DLF_TOKEN_PATH))
+            self.assertEqual("first-ak", provider.get_token().access_key_id)
+            token_path.write_text(JSON.to_json(fresh_token), encoding="utf-8")
+            self.assertEqual("fresh-ak", provider.get_token().access_key_id)
+
+    def test_explicit_credentials_take_precedence_over_environment(self):
+        with patch.dict(os.environ, {"DLF_TOKEN_PATH": "unused-token.json"}):
+            options = Options({
+                CatalogOptions.URI.key(): "https://cn-hangzhou-vpc.dlf.aliyuncs.com",
+                CatalogOptions.TOKEN_PROVIDER.key(): "dlf",
+                CatalogOptions.DLF_ACCESS_KEY_ID.key(): "explicit-ak",
+                CatalogOptions.DLF_ACCESS_KEY_SECRET.key(): "explicit-sk",
+                CatalogOptions.DLF_ACCESS_SECURITY_TOKEN.key(): "explicit-sts",
+            })
+            provider = AuthProviderFactory.create_auth_provider(options)
+            self.assertIsNone(provider.token_loader)
+            self.assertEqual("explicit-ak", provider.get_token().access_key_id)
+            self.assertEqual("explicit-sts", provider.get_token().security_token)
+
+            for key in (CatalogOptions.DLF_ACCESS_KEY_ID,
+                        CatalogOptions.DLF_ACCESS_KEY_SECRET,
+                        CatalogOptions.DLF_ACCESS_SECURITY_TOKEN):
+                with self.subTest(key=key.key()):
+                    self.assertIsNone(DLFTokenLoaderFactory.create_token_loader(
+                        Options({key.key(): "explicit-value"})))
+
+    def test_missing_or_empty_environment_does_not_select_a_loader(self):
+        for environment in ({}, {"DLF_TOKEN_PATH": ""}):
+            with self.subTest(environment=environment), patch.dict(os.environ, environment, clear=True):
+                self.assertIsNone(DLFTokenLoaderFactory.create_token_loader(Options({})))
+
+    @patch.dict(os.environ, {"DLF_TOKEN_PATH": "unused-token.json"})
     def test_token_loader_takes_precedence_over_static_credentials(self):
         file_token = DLFToken("file-ak", "file-sk", "file-sts")
 
@@ -101,6 +170,7 @@ class DLFLocalFileTokenLoaderTest(unittest.TestCase):
 
                     self.assertEqual("file-ak", provider.get_token().access_key_id)
 
+    @patch.dict(os.environ, {"DLF_TOKEN_PATH": "unused-token.json"})
     def test_unknown_token_loader_does_not_fallback_to_static_credentials(self):
         options = Options({
             CatalogOptions.URI.key():

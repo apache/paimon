@@ -31,18 +31,16 @@ import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.sink.CommitterOperatorFactory;
 import org.apache.paimon.flink.sink.NoopCommittableStateManager;
 import org.apache.paimon.flink.sink.StoreCommitter;
+import org.apache.paimon.flink.sorter.OrderSorter;
 import org.apache.paimon.flink.sorter.SortOperator;
 import org.apache.paimon.flink.sorter.TableSortInfo;
-import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
-import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScanResult;
-import org.apache.paimon.globalindex.SortedGlobalIndexer;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
@@ -64,7 +62,9 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.flink.api.common.functions.Partitioner;
 import org.apache.flink.api.java.functions.KeySelector;
@@ -109,11 +109,12 @@ public class SortedIndexTopoBuilder {
         return SUPPORTED_INDEX_TYPES.contains(indexType);
     }
 
+    /** Builds independent indexes, each defined by its ordered columns. */
     public static boolean buildIndex(
             StreamExecutionEnvironment env,
             Supplier<SortedGlobalIndexScanner> indexScannerSupplier,
             FileStoreTable table,
-            List<String> indexColumns,
+            List<List<String>> definitions,
             String indexType,
             PartitionPredicate partitionPredicate,
             Options userOptions)
@@ -123,7 +124,7 @@ public class SortedIndexTopoBuilder {
                         env,
                         indexScannerSupplier,
                         table,
-                        indexColumns,
+                        definitions,
                         indexType,
                         partitionPredicate,
                         userOptions);
@@ -145,15 +146,19 @@ public class SortedIndexTopoBuilder {
             StreamExecutionEnvironment env,
             Supplier<SortedGlobalIndexScanner> indexScannerSupplier,
             FileStoreTable table,
-            List<String> indexColumns,
+            List<List<String>> definitions,
             String indexType,
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
         List<DataStream<Committable>> allStreams = new ArrayList<>();
-        for (String indexColumn : indexColumns) {
+        for (List<String> indexColumns : definitions) {
+            if (indexColumns.isEmpty()) {
+                throw new IllegalArgumentException("At least one index column is required.");
+            }
+            String indexColumn = indexColumns.get(0);
             SortedGlobalIndexScanner indexScanner =
-                    indexScannerSupplier.get().withIndexField(indexColumn);
+                    indexScannerSupplier.get().withIndexFields(indexColumns);
             if (partitionPredicate != null) {
                 indexScanner = indexScanner.withPartitionPredicate(partitionPredicate);
             }
@@ -174,21 +179,15 @@ public class SortedIndexTopoBuilder {
                 continue;
             }
 
-            // 2. Select necessary columns (index field + ROW_ID)
-            List<String> selectedColumns = new ArrayList<>();
-            selectedColumns.add(indexColumn);
-
-            RowType dataReadType =
-                    SpecialFields.rowTypeWithRowId(table.rowType().project(selectedColumns));
+            // 2. Select the ordered index fields and ROW_ID.
+            RowType sourceReadType = table.rowType().project(indexColumns);
+            RowType dataReadType = SpecialFields.rowTypeWithRowId(sourceReadType);
             String buildTaskIdField = buildTaskIdFieldName(dataReadType);
-            GlobalIndexer indexer =
-                    GlobalIndexer.create(
-                            indexType, table.rowType().getField(indexColumn), userOptions);
-            if (!(indexer instanceof SortedGlobalIndexer)) {
-                throw new IllegalArgumentException(
-                        "Index algorithm " + indexType + " does not expose sorted index keys.");
-            }
-            GlobalIndexKeyExtractor keyExtractor = ((SortedGlobalIndexer) indexer).keyExtractor();
+            SortedGlobalIndexWriter indexWriter =
+                    new SortedGlobalIndexWriter(table, indexType, userOptions)
+                            .withIndexFields(indexColumns);
+            Options indexOptions = indexWriter.indexOptions();
+            GlobalIndexKeyExtractor keyExtractor = indexWriter.keyExtractor();
             RowType sortReadType =
                     normalizedReadType(
                             dataReadType, buildTaskIdField, indexColumn, keyExtractor.keyType());
@@ -196,13 +195,12 @@ public class SortedIndexTopoBuilder {
             int indexFieldPos = sortReadType.getFieldIndex(indexColumn);
             int rowIdPos = sortReadType.getFieldIndex(SpecialFields.ROW_ID.name());
             DataType indexFieldType = sortReadType.getTypeAt(indexFieldPos);
-            DataType sourceFieldType = table.rowType().getField(indexColumn).type();
 
             // 3. Calculate maximum parallelism bound
             long recordsPerRange =
-                    userOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE);
+                    indexOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE);
             int maxParallelism =
-                    userOptions.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
+                    indexOptions.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
 
             // 4. Build one topology for all contiguous row ranges
             CoreOptions coreOptions = table.coreOptions();
@@ -216,7 +214,7 @@ public class SortedIndexTopoBuilder {
                 BinaryRow partition = partitionEntry.getKey();
                 byte[] partitionBytes = binaryRowSerializer.serializeToBytes(partition);
                 Map<Range, List<Split>> ranges =
-                        keyExtractor.isIdentity()
+                        keyExtractor.isIdentity() && sourceReadType.getFieldCount() == 1
                                 ? partitionEntry.getValue()
                                 : shardSplitsByRowRange(partitionEntry.getValue(), recordsPerRange);
                 for (Map.Entry<Range, List<Split>> entry : ranges.entrySet()) {
@@ -244,15 +242,14 @@ public class SortedIndexTopoBuilder {
                             buildTasks,
                             splitTasks,
                             readBuilder,
-                            new SortedGlobalIndexWriter(table, indexType, userOptions)
-                                    .withIndexField(indexColumn),
+                            indexWriter,
                             scanResult.scanSnapshotId(),
                             partitionFieldSize,
                             taskIdPos,
                             indexFieldPos,
                             rowIdPos,
                             indexFieldType,
-                            sourceFieldType,
+                            sourceReadType,
                             keyExtractor,
                             coreOptions,
                             sortReadType,
@@ -302,7 +299,7 @@ public class SortedIndexTopoBuilder {
     public static void buildIndexAndExecute(
             StreamExecutionEnvironment env,
             FileStoreTable table,
-            String indexColumn,
+            List<List<String>> definitions,
             String indexType,
             PartitionPredicate partitionPredicate,
             Options userOptions)
@@ -311,7 +308,7 @@ public class SortedIndexTopoBuilder {
                 env,
                 () -> new SortedGlobalIndexScanner(table, indexType, userOptions),
                 table,
-                Collections.singletonList(indexColumn),
+                definitions,
                 indexType,
                 partitionPredicate,
                 userOptions)) {
@@ -331,7 +328,7 @@ public class SortedIndexTopoBuilder {
             int indexFieldPos,
             int rowIdPos,
             DataType indexFieldType,
-            DataType sourceFieldType,
+            RowType sourceReadType,
             GlobalIndexKeyExtractor keyExtractor,
             CoreOptions coreOptions,
             RowType readType,
@@ -350,18 +347,21 @@ public class SortedIndexTopoBuilder {
                         .transform(
                                 "Read Data",
                                 InternalTypeInfo.fromRowType(readType),
-                                new ReadDataOperator(readBuilder, keyExtractor, sourceFieldType))
+                                new ReadDataOperator(readBuilder, keyExtractor, sourceReadType))
                         .setParallelism(parallelism);
 
         DataStream<InternalRow> sortedStream =
                 sortRows(
                         env,
                         rowDataStream,
-                        keyExtractor.isIdentity(),
+                        keyExtractor.isIdentity() && sourceReadType.getFieldCount() == 1,
                         taskIdPos,
                         indexFieldPos,
                         coreOptions,
                         readType,
+                        indexWriter
+                                .indexOptions()
+                                .get(SortedIndexOptions.SORTED_INDEX_NULL_BITMAP_SHUFFLE_ENABLED),
                         parallelism);
 
         return sortedStream
@@ -388,6 +388,7 @@ public class SortedIndexTopoBuilder {
             int indexFieldPos,
             CoreOptions coreOptions,
             RowType readType,
+            boolean compressNulls,
             int parallelism) {
         if (!identity) {
             // Only co-location by build task is required here. Using keyBy in batch mode makes
@@ -429,8 +430,17 @@ public class SortedIndexTopoBuilder {
                         .setGlobalSampleSize(parallelism * 1000)
                         .setRangeNumber(parallelism * 10)
                         .build();
-        return TableSorter.getSorter(env, rowData, coreOptions, readType, sortInfo)
-                .sort()
+        return new OrderSorter(env, rowData, coreOptions, readType, sortInfo)
+                .sort(
+                        compressNulls
+                                ? new NullBitmapShuffleOperator(
+                                        readType.project(
+                                                createSortColumns(
+                                                        readType.getFieldNames().get(taskIdPos),
+                                                        readType.getFieldNames()
+                                                                .get(indexFieldPos))))
+                                : null,
+                        compressNulls ? new NullBitmapExpandOperator() : null)
                 .map(FlinkRowWrapper::new, InternalTypeInfo.fromRowType(readType))
                 .setParallelism(parallelism);
     }
@@ -512,25 +522,34 @@ public class SortedIndexTopoBuilder {
 
         private final ReadBuilder readBuilder;
         private final GlobalIndexKeyExtractor keyExtractor;
-        private final DataType sourceFieldType;
+        private final RowType sourceReadType;
 
         private transient TableRead tableRead;
         private transient InternalRow.FieldGetter sourceFieldGetter;
+        private transient InternalRow.FieldGetter[] compositeGetters;
 
         public ReadDataOperator(
                 ReadBuilder readBuilder,
                 GlobalIndexKeyExtractor keyExtractor,
-                DataType sourceFieldType) {
+                RowType sourceReadType) {
             this.readBuilder = readBuilder;
             this.keyExtractor = keyExtractor;
-            this.sourceFieldType = sourceFieldType;
+            this.sourceReadType = sourceReadType;
         }
 
         @Override
         public void open() throws Exception {
             super.open();
             this.tableRead = readBuilder.newRead();
-            this.sourceFieldGetter = InternalRow.createFieldGetter(sourceFieldType, 0);
+            if (sourceReadType.getFieldCount() > 1) {
+                compositeGetters = new InternalRow.FieldGetter[sourceReadType.getFieldCount()];
+                for (int i = 0; i < compositeGetters.length; i++) {
+                    compositeGetters[i] =
+                            InternalRow.createFieldGetter(sourceReadType.getTypeAt(i), i);
+                }
+            } else {
+                sourceFieldGetter = InternalRow.createFieldGetter(sourceReadType.getTypeAt(0), 0);
+            }
         }
 
         @Override
@@ -542,10 +561,29 @@ public class SortedIndexTopoBuilder {
                     try {
                         InternalRow row;
                         while ((row = batch.next()) != null) {
-                            long rowId = row.getLong(1);
+                            long rowId = row.getLong(sourceReadType.getFieldCount());
+                            Object sourceValue;
+                            if (compositeGetters == null) {
+                                sourceValue = sourceFieldGetter.getFieldOrNull(row);
+                            } else {
+                                GenericRow tuple = new GenericRow(compositeGetters.length);
+                                for (int i = 0; i < compositeGetters.length; i++) {
+                                    tuple.setField(i, compositeGetters[i].getFieldOrNull(row));
+                                }
+                                sourceValue = InternalRowUtils.copy(tuple, sourceReadType);
+                            }
+                            if (keyExtractor.isIdentity() && sourceReadType.getFieldCount() == 1) {
+                                // Sampling must see every original row before transport
+                                // compression.
+                                output.collect(
+                                        new StreamRecord<>(
+                                                GenericRow.of(
+                                                        buildTask.taskId, sourceValue, rowId)));
+                                continue;
+                            }
                             boolean[] emitted = new boolean[1];
                             keyExtractor.extract(
-                                    sourceFieldGetter.getFieldOrNull(row),
+                                    sourceValue,
                                     key -> {
                                         emitted[0] = true;
                                         output.collect(
@@ -637,8 +675,16 @@ public class SortedIndexTopoBuilder {
                 currentWriter = writer.createTaskWriter(currentTask.rowRange);
             }
 
-            long localRowId = row.getLong(rowIdPos) - currentTask.rowRange.from;
-            currentWriter.write(indexFieldGetter.getFieldOrNull(row), localRowId);
+            if (row.getFieldCount() > 3 && !row.isNullAt(3)) {
+                RoaringNavigableMap64 nullRows = new RoaringNavigableMap64();
+                nullRows.deserialize(row.getBinary(3));
+                for (long rowId : nullRows) {
+                    currentWriter.write(null, rowId - currentTask.rowRange.from);
+                }
+            } else {
+                long localRowId = row.getLong(rowIdPos) - currentTask.rowRange.from;
+                currentWriter.write(indexFieldGetter.getFieldOrNull(row), localRowId);
+            }
         }
 
         @Override

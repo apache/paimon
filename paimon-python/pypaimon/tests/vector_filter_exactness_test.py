@@ -22,13 +22,15 @@ import pytest
 
 import pypaimon.multimodal as pm
 from pypaimon.common.predicate import Predicate
-from pypaimon.globalindex.data_evolution_global_index_scanner import _PaddingGlobalIndexReader
-from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluator
+from pypaimon.execution.python.globalindex.global_index_evaluator import GlobalIndexEvaluator
 from pypaimon.globalindex.global_index_reader import FieldRef, _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
-from pypaimon.globalindex.union_global_index_reader import UnionGlobalIndexReader
-from pypaimon.table.source.vector_search_read import AbstractVectorSearchReadImpl, DataEvolutionVectorRead
+from pypaimon.execution.python.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
+from pypaimon.execution.python.globalindex.union_global_index_reader import UnionGlobalIndexReader
+from pypaimon.execution.python.read.search.vector_search_read import (
+    AbstractVectorSearchReadImpl,
+    DataEvolutionVectorRead,
+)
 from pypaimon.tests.vector_search_filter_test import _StubTable, _field
 from pypaimon.tests.global_index_evaluator_test import StubGlobalIndexReader, _make_fields
 from pypaimon.utils.range import Range
@@ -40,7 +42,7 @@ def table(tmp_path):
     schema = pa.schema([("id", pa.int64()), ("name", pa.string()), ("embedding", pa.list_(pa.float32(), 2))])
     table = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
         "vectors", schema=schema, options={"file.format": "parquet", "vector.file.format": "parquet",
-                                           "read.batch-size": "1"})
+                                           "read.batch-size": "1", "deletion-vectors.enabled": "true"})
     table.add(pa.table({"id": [0, 1, 2], "name": ["alpha", "beta zeta", "gamma"],
                         "embedding": [[0., 1.], [1., 1.], [2., 1.]]}, schema=schema))
     table.raw_table.create_global_index(
@@ -62,40 +64,67 @@ def query(table, predicate, batch=False):
 @pytest.mark.parametrize("batch", [False, True])
 @pytest.mark.parametrize("mode", ["full", "fast"])
 @pytest.mark.parametrize("refine", [False, True])
-def test_btree_candidates_are_verified_before_top_k(table, caplog, pattern, batch, mode, refine):
+def test_btree_string_filters_follow_java_exactness_before_top_k(table, caplog, pattern, batch, mode, refine):
     scalar_index(table)
     table.raw_table = table.raw_table.copy({
         "vector-index.search-mode": mode, "global-index.filter.refine-from-data": str(refine).lower()})
     result = query(table, "name LIKE '%s'" % pattern, batch).to_list()
-    expected = [{"id": 1}] if refine else []
+    candidate_only = pattern == "%zeta%"
+    expected = [{"id": 1}] if refine or not candidate_only else []
     assert result == ([expected, expected] if batch else expected)
-    assert ("global-index.filter.refine-from-data=true" in caplog.text) == (not refine)
+    assert ("global-index.filter.refine-from-data=true" in caplog.text) == (candidate_only and not refine)
 
 
 @pytest.mark.parametrize("kind, predicate", [
     ("btree", "name = 'beta zeta'"), ("btree", "name >= 'beta' AND name < 'gamma'"),
-    ("btree", "name LIKE 'beta zeta'"), ("bitmap", "name LIKE '%zeta%'"),
+    ("btree", "name LIKE 'beta zeta'"), ("btree", "name LIKE 'beta%'"), ("bitmap", "name = 'beta zeta'"),
+    ("bitmap", "name LIKE 'beta%'"),
 ])
-def test_exact_indexes_do_not_read_filter_columns(table, kind, predicate):
+@pytest.mark.parametrize("refine", [False, True])
+def test_exact_indexes_do_not_read_filter_columns(table, kind, predicate, refine):
     scalar_index(table, kind)
-    table.raw_table = table.raw_table.copy({"global-index.filter.refine-from-data": "true"})
+    table.raw_table = table.raw_table.copy({"global-index.filter.refine-from-data": str(refine).lower()})
     with patch.object(AbstractVectorSearchReadImpl, "_matching_candidate_rows",
                       side_effect=AssertionError("exact index recheck")):
         assert query(table, predicate).to_list() == [{"id": 1}]
 
 
+@pytest.mark.parametrize("method, literal", [("contains", "zeta"), ("endswith", "zeta"), ("like", "%zeta%")])
 @pytest.mark.parametrize("batch", [False, True])
 @pytest.mark.parametrize("mode", ["full", "fast"])
 @pytest.mark.parametrize("refine", [False, True])
-def test_mixed_btree_and_bitmap_preserve_exact_matches(table, batch, mode, refine):
+def test_bitmap_string_filters_obey_search_refinement(table, method, literal, batch, mode, refine):
+    scalar_index(table, "bitmap")
+    table.raw_table = table.raw_table.copy({
+        "vector-index.search-mode": mode, "global-index.filter.refine-from-data": str(refine).lower()})
+    pb = table.raw_table.new_read_builder().new_predicate_builder()
+    predicate = getattr(pb, method)("name", literal)
+    if batch:
+        search = (table.raw_table.new_batch_vector_search_builder().with_vector_column("embedding")
+                  .with_query_vectors([[0., 1.], [0., 1.]]).with_filter(predicate).with_limit(1))
+        result = [list(value.results()) for value in search.execute_batch_local()]
+    else:
+        search = (table.raw_table.new_vector_search_builder().with_vector_column("embedding")
+                  .with_query_vector([0., 1.]).with_filter(predicate).with_limit(1))
+        result = list(search.execute_local().results())
+    expected = [1] if refine else []
+    assert result == ([expected, expected] if batch else expected)
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("mode", ["full", "fast"])
+@pytest.mark.parametrize("refine", [False, True])
+def test_mixed_btree_and_bitmap_obey_search_refinement(table, batch, mode, refine):
     scalar_index(table, "btree")
     scalar_index(table, "bitmap")
     table.raw_table = table.raw_table.copy({
         "vector-index.search-mode": mode, "global-index.filter.refine-from-data": str(refine).lower()})
+    verify = AbstractVectorSearchReadImpl._matching_candidate_rows
     with patch.object(AbstractVectorSearchReadImpl, "_matching_candidate_rows",
-                      side_effect=AssertionError("exact index recheck")):
+                      autospec=True, side_effect=verify) as read:
         result = query(table, "name LIKE '%zeta%'", batch).to_list()
-    expected = [{"id": 1}]
+        assert read.call_count == (1 if refine else 0)
+    expected = [{"id": 1}] if refine else []
     assert result == ([expected, expected] if batch else expected)
 
 
@@ -151,8 +180,6 @@ def test_exactness_follows_predicate_tree_and_reader_wrappers(method):
     assert candidate.and_(GlobalIndexResult.create_empty()).is_exact()
     reader = UnionGlobalIndexReader([OffsetGlobalIndexReader(StubGlobalIndexReader(candidate), 10, 13)])
     assert not reader.visit_equal(FieldRef(0, "a", "INT"), 1).result().is_exact()
-    padded = _PaddingGlobalIndexReader(StubGlobalIndexReader(exact), GlobalIndexResult.from_range(Range(5, 6)))
-    assert not padded.visit_equal(FieldRef(0, "a", "INT"), 1).result().is_exact()
 
     class PartialReader(StubGlobalIndexReader):
         def visit_greater_than(self, field_ref, literal):

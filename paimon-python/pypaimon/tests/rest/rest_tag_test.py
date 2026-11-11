@@ -45,6 +45,30 @@ class RESTCatalogTagCRUDTest(RESTBaseTest):
         self.assertIsInstance(response, GetTagResponse)
         self.assertEqual(response.tag_name, "t1")
         self.assertIsInstance(response.snapshot, Snapshot)
+        self.assertIn("t1", self.rest_catalog.get_table(identifier).list_tags())
+
+    def test_rest_reads_file_tag_after_snapshot_expires(self):
+        identifier = self._identifier()
+        table = self.rest_catalog.get_table(identifier)
+        table.create_tag("t1", snapshot_id=1, time_retained="1d")
+        table.file_io.delete(table.snapshot_manager().get_snapshot_path(1))
+
+        self.assertEqual(self.rest_catalog.list_tags_paged(identifier).elements, ["t1"])
+        response = self.rest_catalog.get_tag(identifier, "t1")
+        self.assertEqual(response.snapshot.id, 1)
+        self.assertIsNotNone(response.tag_create_time)
+        self.assertEqual(response.tag_time_retained, "PT24H")
+
+    def test_tag_endpoints_use_the_requested_branch(self):
+        identifier = self._identifier()
+        self.rest_catalog.create_tag(identifier, "base")
+        self.rest_catalog.create_branch(identifier, "dev", tag_name="base")
+        branch = Identifier.create(identifier.get_database_name(), identifier.get_table_name(), branch="dev")
+        self.rest_catalog.create_tag(branch, "dev_tag", snapshot_id=1)
+
+        self.assertEqual(self.rest_catalog.list_tags_paged(identifier).elements, ["base"])
+        self.assertEqual(self.rest_catalog.list_tags_paged(branch).elements, ["dev_tag"])
+        self.assertEqual(self.rest_catalog.get_tag(branch, "dev_tag").snapshot.id, 1)
 
     def test_list_tags_paged_basic(self):
         identifier = self._identifier()
@@ -83,7 +107,7 @@ class RESTCatalogTagCRUDTest(RESTBaseTest):
         identifier = self._identifier()
         self.rest_catalog.create_tag(identifier, "t1", time_retained="1d")
         response = self.rest_catalog.get_tag(identifier, "t1")
-        self.assertEqual(response.tag_time_retained, "1d")
+        self.assertEqual(response.tag_time_retained, "PT24H")
 
     def test_create_tag_already_exists_raises(self):
         identifier = self._identifier()
@@ -121,6 +145,25 @@ class RESTCatalogTagCRUDTest(RESTBaseTest):
         identifier = self._identifier()
         with self.assertRaises(TagNotExistException):
             self.rest_catalog.delete_tag(identifier, "absent")
+
+    def test_rename_tag_not_supported(self):
+        identifier = self._identifier()
+        self.rest_catalog.create_tag(identifier, "t1")
+        with self.assertRaises(NotImplementedError) as cm:
+            self.rest_catalog.rename_tag(identifier, "t1", "t2")
+        self.assertIn("rename_tag", str(cm.exception))
+        # The old name still resolves.
+        response = self.rest_catalog.get_tag(identifier, "t1")
+        self.assertEqual(response.tag_name, "t1")
+
+    def test_replace_tag_not_supported(self):
+        identifier = self._identifier()
+        self.rest_catalog.create_tag(identifier, "t1", snapshot_id=1)
+        with self.assertRaises(NotImplementedError) as cm:
+            self.rest_catalog.replace_tag(identifier, "t1", snapshot_id=1)
+        self.assertIn("replace_tag", str(cm.exception))
+        response = self.rest_catalog.get_tag(identifier, "t1")
+        self.assertEqual(response.snapshot.id, 1)
 
 
 # Note: the previous ``FilesystemCatalogTagInheritsNotImplementedTest`` class

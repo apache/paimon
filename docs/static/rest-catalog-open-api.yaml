@@ -28,6 +28,111 @@ servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
 paths:
+  /v1/{prefix}/databases/{database}/models:
+    get:
+      tags: [model]
+      summary: List models in a database
+      operationId: listModels
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - name: database
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+        - {name: pageToken, in: query, required: false, schema: {type: string}}
+      responses:
+        "200":
+          description: Model metadata in the database
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListModelsResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "501": {description: Models are not supported}
+    post:
+      tags: [model]
+      summary: Create a model
+      operationId: createModel
+      description: >-
+        Registers provider-neutral model metadata. Credentials and task-specific
+        prompts must not be stored in the model.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - name: database
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateModelRequest'
+      responses:
+        "200":
+          description: Persisted model metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetModelResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "409":
+          $ref: '#/components/responses/ModelAlreadyExistErrorResponse'
+        "501": {description: Models are not supported}
+  /v1/{prefix}/databases/{database}/models/{model}:
+    get:
+      tags: [model]
+      summary: Get a model
+      operationId: getModel
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - name: database
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+        - name: model
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+      responses:
+        "200":
+          description: Model metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetModelResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseOrModelNotExistErrorResponse'
+        "501": {description: Models are not supported}
+    delete:
+      tags: [model]
+      summary: Drop a model
+      operationId: dropModel
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - name: database
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+        - name: model
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ModelPathSegment'
+      responses:
+        "200": {description: Model dropped}
+        "404":
+          $ref: '#/components/responses/DatabaseOrModelNotExistErrorResponse'
+        "501": {description: Models are not supported}
   /v1/config:
     get:
       tags:
@@ -595,6 +700,12 @@ paths:
           required: true
           schema:
             type: string
+      description: >-
+        Validate the table incarnation, branch and expected head atomically with publication.
+        Every writer must honor an active commit lease, including writers that do not request
+        one. snapshot.commitUser must exactly match the commitUser that owns the active lease.
+        Clear the lease only when a new snapshot is successfully published; rejected requests
+        and idempotent replays of an existing snapshot must not clear a newer lease.
       requestBody:
         content:
           application/json:
@@ -611,6 +722,113 @@ paths:
           $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/commit-lock:
+    post:
+      tags:
+        - table
+      summary: Acquire a table commit lease
+      operationId: acquireCommitLock
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      description: >-
+        Requires the server-side table property rest.commit.lock-enabled=true and the same
+        permission as committing snapshots. Clients opt into acquisition separately using
+        rest.commit.acquire-lock=true; that client option does not enable the table capability.
+        Ownership is the exact commitUser: authorized callers that send the same commitUser
+        share the lease, so each logical writer must use a unique commitUser. Contention
+        returns HTTP 200 with acquired=false. A grant includes the authoritative snapshot head.
+        Renewal never revives an expired lease. Publication retains snapshot CAS validation
+        and atomically releases the lease on a new successful commit. A rejected publication
+        does not release the lease. A replay of an already-published snapshot must not release
+        a newer lease. The lease duration is fixed for each scope. There is no unlock RPC.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitLockRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitLockResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/commit-lock/renew:
+    post:
+      tags:
+        - table
+      summary: Renew a table commit lease
+      operationId: renewCommitLock
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      description: >-
+        Requires the same permission as committing snapshots. Validate the table incarnation,
+        branch and exact commitUser against the unexpired lease.
+        Return acquired=false when ownership is lost or the lease has expired; renewal must
+        never acquire a new lease or revive an expired one. Keep leaseMillis fixed within
+        the scope. Each successful new snapshot publication ends its lease.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitLockRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitLockResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
@@ -700,6 +918,130 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/replace:
+    post:
+      tags:
+        - table
+      summary: Replace table
+      operationId: replaceTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceTableRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/schemas:
+    get:
+      tags:
+        - table
+      summary: List schemas
+      operationId: listSchemas
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSchemasResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/schemas/{version}:
+    get:
+      tags:
+        - table
+      summary: Get schema
+      operationId: getSchema
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetSchemaResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          description: Not Found - the table or the schema version does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/token:
@@ -986,7 +1328,8 @@ paths:
       summary: Create partitions
       description: >
         Creates partitions with optional position-aligned options. The server validates and stores
-        the partitions, options, and statistics atomically.
+        the partitions, options, and statistics atomically within each request batch. Multiple
+        batches and filesystem writes are not one transaction.
       operationId: createPartitions
       parameters:
         - name: prefix
@@ -1317,49 +1660,6 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/BranchNotExistErrorResponse'
-        "500":
-          $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/rename:
-    post:
-      tags:
-        - branch
-      summary: rename branch
-      operationId: renameBranch
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: table
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: branch
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RenameBranchRequest'
-      responses:
-        "200":
-          description: Success, no content
-        "401":
-          $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "404":
-          $ref: '#/components/responses/BranchNotExistErrorResponse'
-        "409":
-          description: Branch already exists
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward:
@@ -2504,6 +2804,34 @@ components:
             resourceType: DATABASE
             resourceName: db
             code: 404
+    DatabaseOrModelNotExistErrorResponse:
+      description: >-
+        The database or model does not exist. resourceType is required and must
+        be DATABASE when the database is absent or MODEL when the model is absent.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - type: object
+                required: [ resourceType ]
+                properties:
+                  resourceType:
+                    type: string
+                    enum: [ "DATABASE", "MODEL" ]
+          examples:
+            databaseNotFound:
+              value:
+                message: The given database does not exist
+                resourceType: DATABASE
+                resourceName: db
+                code: 404
+            modelNotFound:
+              value:
+                message: The given model does not exist
+                resourceType: MODEL
+                resourceName: model
+                code: 404
     TableNotExistErrorResponse:
       description:
         Not Found - TableNotExistException, the table does not exist
@@ -2654,6 +2982,17 @@ components:
             resourceType: FUNCTION
             resourceName: function
             code: 409
+    ModelAlreadyExistErrorResponse:
+      description: Conflict - The model already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: The given model already exists
+            resourceType: MODEL
+            resourceName: model
+            code: 409
     ServerErrorResponse:
       description:
         Used for server 5xx errors.
@@ -2776,7 +3115,25 @@ components:
           description: Whether partitionStatistics replace the stored values rather than add to them; required whenever partitionStatistics is present, and absent otherwise. Replacing overwrites recordCount, fileSizeInBytes, fileCount and lastFileCreationTime; adding sums the three counts and keeps the later lastFileCreationTime, since two timestamps do not add. A field reported as unknown leaves the stored one alone either way, and totalBuckets is never combined. A client that reports only the files it just wrote adds; one that reports a whole partition, such as an overwrite or a directory rescan, replaces. An additive report is rejected for a Format Table partition that already has a custom path; registering a new custom path together with its first statistics is allowed.
           type: [ boolean, "null" ]
         partitionOptions:
-          description: Optional options aligned with partitionSpecs by position. The list must have the same length as partitionSpecs; use an empty object when a partition has no options. A custom location is stored under the path key. Omitting path keeps the stored location; a path outside the table location registers a custom location for a new partition and must equal the stored path for an existing one; the partition's own default directory under the table location returns the partition there, dropping the stored path without deleting data. Returning a partition to its default directory requires replaceStatistics=true and a partitionStatistics entry with the same spec, applied in the same request. Any other path under the table location is invalid, so a provider that does not implement this rejects the request instead of storing it.
+          description: >-
+            Optional options aligned with partitionSpecs by position. The list must have the same
+            length as partitionSpecs; use an empty object when a partition has no options.
+            A custom location is stored under the path key. Omitting path keeps the stored location;
+            a path outside the table location registers a custom location for a new partition and
+            must equal the stored path for an existing one; the partition's own default directory
+            under the table location returns the partition there, dropping the stored path without
+            deleting data. Returning a partition to its default directory requires
+            replaceStatistics=true and a partitionStatistics entry with the same spec, applied in
+            the same request. Any other path under the table location is invalid, so a provider
+            that does not implement this rejects the request instead of storing it.
+            For Format Tables, file.format overrides the table format (default parquet). Supported
+            values are orc, parquet, csv, text, json and mosaic, case-insensitive; empty or unsupported
+            values are rejected. An explicit format updates existing partitions even with
+            ignoreIfExists=true, preserving other options; omitting it preserves the stored override.
+            An additive statistics request with an explicit format differing from the existing
+            partition's effective format is rejected. Replacement statistics allow the format and
+            statistics to change together, atomically within the request batch. Mixed-format
+            partitions require compatible servers, readers and writers.
           type: [ array, "null" ]
           items:
             type: object
@@ -2858,7 +3215,7 @@ components:
           type: string
         resourceType:
           type: [ string, "null" ]
-          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "DEFINITION", "UNKNOWN", null ]
+          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "MODEL", "DEFINITION", "UNKNOWN", null ]
         resourceName:
           type: [ string, "null" ]
         code:
@@ -3480,6 +3837,39 @@ components:
           $ref: '#/components/schemas/Identifier'
         destination:
           $ref: '#/components/schemas/Identifier'
+    CommitLockRequest:
+      type: object
+      required: [tableId, commitUser]
+      properties:
+        tableId:
+          type: string
+          description: Stable resolved table or branch UUID; a recreated table cannot inherit a lease.
+        commitUser:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Exact commitUser that will appear in the submitted snapshot.
+    CommitLockResponse:
+      type: object
+      required: [acquired, expiresAtMillis, leaseMillis]
+      properties:
+        acquired:
+          type: boolean
+        commitUser:
+          type: [string, "null"]
+        expiresAtMillis:
+          type: integer
+          format: int64
+          description: Server database clock expiration; zero when acquired is false.
+        leaseMillis:
+          type: integer
+          format: int64
+          description: Lease duration in milliseconds, fixed within a scope; zero when acquired is false.
+        snapshot:
+          anyOf:
+            - $ref: '#/components/schemas/Snapshot'
+            - type: "null"
+          description: Authoritative head at grant time; null for an empty table.
     CommitTableRequest:
       type: object
       properties:
@@ -3495,12 +3885,24 @@ components:
             $ref: '#/components/schemas/PartitionStatistics'
     RollbackTableRequest:
       type: object
+      description: >-
+        tableId identifies the expected table incarnation; omit it only when its UUID is unavailable.
+        Automatic conflict rollback supplies fromSnapshot and targets its predecessor. Rollback
+        executes independently of commit leases and does not carry writer identity or a snapshot
+        UUID. The server must validate the table incarnation and expected snapshot ID atomically
+        with rollback, before partition changes or file cleanup. For automatic conflict rollback,
+        it should also check that the current head is still a COMPACT snapshot, since snapshot IDs
+        can be reused after rollback. Manual rollback may omit fromSnapshot.
       properties:
         instant:
           $ref: '#/components/schemas/Instant'
         fromSnapshot:
           type: [ integer, "null" ]
           format: int64
+          description: Expected latest snapshot ID, required for automatic conflict rollback.
+        tableId:
+          type: [ string, "null" ]
+          description: Expected table or branch UUID.
     RollbackSchemaRequest:
       type: object
       required:
@@ -3509,6 +3911,58 @@ components:
         schemaId:
           type: integer
           format: int64
+    ReplaceTableRequest:
+      type: object
+      properties:
+        schema:
+          $ref: '#/components/schemas/Schema'
+    TableSchema:
+      type: object
+      properties:
+        version:
+          type: integer
+          format: int32
+        id:
+          type: integer
+          format: int64
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        highestFieldId:
+          type: integer
+          format: int32
+        partitionKeys:
+          type: array
+          items:
+            type: string
+        primaryKeys:
+          type: array
+          items:
+            type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
+        comment:
+          type: string
+        timeMillis:
+          type: integer
+          format: int64
+    ListSchemasResponse:
+      type: object
+      properties:
+        schemas:
+          type: array
+          items:
+            $ref: '#/components/schemas/TableSchema'
+        nextPageToken:
+          type: [ string, "null" ]
+    GetSchemaResponse:
+      type: object
+      properties:
+        schema:
+          $ref: '#/components/schemas/TableSchema'
     Instant:
       anyOf:
         - $ref: '#/components/schemas/SnapshotInstant'
@@ -3645,7 +4099,7 @@ components:
           items:
             $ref: '#/components/schemas/Snapshot'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     AuthTableQueryRequest:
       type: object
       properties:
@@ -3699,7 +4153,7 @@ components:
           items:
             type: string
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     GetDatabaseResponse:
       type: object
       properties:
@@ -3734,7 +4188,7 @@ components:
             type: string
             description: table name of the table.
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListTableDetailsResponse:
       type: object
       properties:
@@ -3743,7 +4197,7 @@ components:
           items:
             $ref: '#/components/schemas/GetTableResponse'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListTablesGloballyResponse:
       type: object
       properties:
@@ -3752,7 +4206,7 @@ components:
           items:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ConfigResponse:
       type: object
       properties:
@@ -3772,7 +4226,7 @@ components:
           items:
             $ref: '#/components/schemas/Partition'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     CreateBranchRequest:
       type: object
       properties:
@@ -3780,11 +4234,6 @@ components:
           type: string
         fromTag:
           type: [ string, "null" ]
-    RenameBranchRequest:
-      type: object
-      properties:
-        toBranch:
-          type: string
     ForwardBranchRequest:
       type: object
       properties:
@@ -3835,7 +4284,7 @@ components:
           items:
             type: string
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     TagInfo:
       type: object
       properties:
@@ -3879,7 +4328,7 @@ components:
             type: string
             description: view name of the view.
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListViewDetailsResponse:
       type: object
       properties:
@@ -3888,7 +4337,7 @@ components:
           items:
             $ref: '#/components/schemas/GetViewResponse'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListFunctionsGloballyResponse:
       type: object
       properties:
@@ -3897,7 +4346,7 @@ components:
           items:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListViewsGloballyResponse:
       type: object
       properties:
@@ -3906,7 +4355,7 @@ components:
           items:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListFunctionsResponse:
       type: object
       properties:
@@ -3915,7 +4364,7 @@ components:
           items:
             type: string
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListFunctionDetailsResponse:
       type: object
       properties:
@@ -3924,7 +4373,7 @@ components:
           items:
             $ref: '#/components/schemas/GetFunctionResponse'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     GetFunctionResponse:
       type: object
       properties:
@@ -3964,6 +4413,92 @@ components:
           format: int64
         updatedBy:
           type: string
+    ModelPathSegment:
+      type: string
+      minLength: 1
+      pattern: '^(?!\.{1,2}$).+'
+      description: A non-empty path segment other than `.` or `..`.
+    ModelField:
+      type: object
+      additionalProperties: false
+      required: [name, dataType]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        dataType:
+          type: string
+          minLength: 1
+        modality:
+          type: string
+          minLength: 1
+    ProviderModelDefinition:
+      type: object
+      additionalProperties: false
+      required: [type, provider, providerModel, inputs]
+      properties:
+        type:
+          type: string
+          enum: [provider]
+        provider:
+          type: string
+          minLength: 1
+        providerModel:
+          type: string
+          minLength: 1
+        inputs:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ModelField'
+        outputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelField'
+        options:
+          type: object
+          additionalProperties:
+            type: string
+    ModelDefinition:
+      oneOf:
+        - $ref: '#/components/schemas/ProviderModelDefinition'
+      discriminator:
+        propertyName: type
+        mapping:
+          provider: '#/components/schemas/ProviderModelDefinition'
+    CreateModelRequest:
+      type: object
+      additionalProperties: false
+      required: [name, definition]
+      properties:
+        name:
+          $ref: '#/components/schemas/ModelPathSegment'
+        comment:
+          type: string
+          minLength: 1
+        definition:
+          $ref: '#/components/schemas/ModelDefinition'
+    GetModelResponse:
+      type: object
+      additionalProperties: false
+      required: [name, definition]
+      properties:
+        name:
+          $ref: '#/components/schemas/ModelPathSegment'
+        comment:
+          type: string
+          minLength: 1
+        definition:
+          $ref: '#/components/schemas/ModelDefinition'
+    ListModelsResponse:
+      type: object
+      properties:
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/GetModelResponse'
+        nextPageToken:
+          type: [ string, "null" ]
     ConsumerInfo:
       type: object
       properties:
@@ -3982,7 +4517,7 @@ components:
           items:
             $ref: '#/components/schemas/ConsumerInfo'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
           description: Token for the next page of results
     ResetConsumerRequest:
       type: object

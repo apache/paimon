@@ -39,16 +39,17 @@ public class TestVectorGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public GlobalIndexer create(DataField field, Options options) {
-        return new TestVectorGlobalIndexer(field.type(), options);
-    }
-
-    @Override
-    public GlobalIndexer create(
-            DataField indexField, List<DataField> extraFields, Options options) {
-        if (extraFields == null || extraFields.isEmpty()) {
-            return create(indexField, options);
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        String metric = options.getString(IDENTIFIER + ".metric", null);
+        // Existing test fixtures may explicitly select their metric with the test-only option.
+        if (metric != null && options.get(TestVectorGlobalIndexer.OPT_METRIC) == null) {
+            options = new Options(options.toMap());
+            options.setString(TestVectorGlobalIndexer.OPT_METRIC, metric);
         }
-        return new TestMultiFieldVectorGlobalIndexer(indexField, extraFields, options);
+        if (indexFields.size() == 1) {
+            return new TestVectorGlobalIndexer(indexFields.get(0).type(), options);
+        }
+        return new TestMultiFieldVectorGlobalIndexer(
+                indexFields.get(0), indexFields.subList(1, indexFields.size()), options);
     }
 }

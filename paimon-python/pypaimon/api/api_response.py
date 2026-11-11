@@ -23,6 +23,8 @@ from pypaimon.api.api_request import RESTRequest
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import T, json_field, optional_json_field
 from pypaimon.common.options import Options
+from pypaimon.management.data_policy import DataPolicy
+from pypaimon.management.permission_assignment import PermissionAssignment
 from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
 from pypaimon.snapshot.snapshot import Snapshot
@@ -47,12 +49,14 @@ class ErrorResponse(RESTResponse):
     RESOURCE_TYPE_TABLE = "TABLE"
     RESOURCE_TYPE_VIEW = "VIEW"
     RESOURCE_TYPE_FUNCTION = "FUNCTION"
+    RESOURCE_TYPE_MODEL = "MODEL"
     RESOURCE_TYPE_COLUMN = "COLUMN"
     RESOURCE_TYPE_SNAPSHOT = "SNAPSHOT"
     RESOURCE_TYPE_TAG = "TAG"
     RESOURCE_TYPE_BRANCH = "BRANCH"
     RESOURCE_TYPE_DEFINITION = "DEFINITION"
     RESOURCE_TYPE_DIALECT = "DIALECT"
+    RESOURCE_TYPE_POLICY = "POLICY"
 
     resource_type: Optional[str] = json_field("resourceType", default=None)
     resource_name: Optional[str] = json_field("resourceName", default=None)
@@ -244,6 +248,7 @@ class GetTableResponse(AuditRESTResponse):
 
     # Field constants for JSON serialization
     FIELD_ID = "id"
+    FIELD_DATABASE = "database"
     FIELD_NAME = "name"
     FIELD_PATH = "path"
     FIELD_IS_EXTERNAL = "isExternal"
@@ -251,6 +256,8 @@ class GetTableResponse(AuditRESTResponse):
     FIELD_SCHEMA = "schema"
 
     id: Optional[str] = json_field(FIELD_ID, default=None)
+    # Omitted when None: native readers compare it with the table's database
+    database: Optional[str] = optional_json_field(FIELD_DATABASE, "non_null")
     name: Optional[str] = json_field(FIELD_NAME, default=None)
     path: Optional[str] = json_field(FIELD_PATH, default=None)
     is_external: Optional[bool] = json_field(FIELD_IS_EXTERNAL, default=None)
@@ -270,9 +277,11 @@ class GetTableResponse(AuditRESTResponse):
             created_by: Optional[str] = None,
             updated_at: Optional[int] = None,
             updated_by: Optional[str] = None,
+            database: Optional[str] = None,
     ):
         super().__init__(owner, created_at, created_by, updated_at, updated_by)
         self.id = id
+        self.database = database
         self.name = name
         self.path = path
         self.is_external = is_external
@@ -281,6 +290,9 @@ class GetTableResponse(AuditRESTResponse):
 
     def get_id(self) -> str:
         return self.id
+
+    def get_database(self) -> Optional[str]:
+        return self.database
 
     def get_name(self) -> str:
         return self.name
@@ -628,3 +640,71 @@ class AuthTableQueryRequest(RESTRequest):
 class AuthTableQueryResponse(RESTResponse):
     filter: Optional[List[str]] = json_field("filter", default=None)
     column_masking: Optional[Dict[str, str]] = json_field("columnMasking", default=None)
+
+
+class ListPermissionsResponse(PagedResponse[PermissionAssignment]):
+
+    FIELD_PERMISSIONS = "permissions"
+
+    def __init__(self, permissions: Optional[List[PermissionAssignment]],
+                 next_page_token: Optional[str] = None):
+        self._permissions = permissions
+        self._next_page_token = next_page_token
+
+    def get_permissions(self) -> Optional[List[PermissionAssignment]]:
+        return self._permissions
+
+    def data(self) -> Optional[List[PermissionAssignment]]:
+        return self._permissions
+
+    def get_next_page_token(self) -> Optional[str]:
+        return self._next_page_token
+
+    def to_dict(self) -> dict:
+        result = {self.FIELD_PERMISSIONS: None if self._permissions is None else [
+            None if permission is None else permission.to_dict()
+            for permission in self._permissions]}
+        if self._next_page_token is not None:
+            result[PagedResponse.FIELD_NEXT_PAGE_TOKEN] = self._next_page_token
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ListPermissionsResponse":
+        permissions = data.get(cls.FIELD_PERMISSIONS)
+        return cls(
+            None if permissions is None else [
+                None if permission is None else PermissionAssignment.from_dict(permission)
+                for permission in permissions],
+            data.get(PagedResponse.FIELD_NEXT_PAGE_TOKEN))
+
+
+class ListPoliciesResponse(PagedResponse[DataPolicy]):
+    FIELD_POLICIES = "policies"
+
+    def __init__(self, policies: Optional[List[DataPolicy]], next_page_token: Optional[str] = None):
+        self._policies = policies
+        self._next_page_token = next_page_token
+
+    def get_policies(self) -> Optional[List[DataPolicy]]:
+        return self._policies
+
+    def data(self) -> Optional[List[DataPolicy]]:
+        return self._policies
+
+    def get_next_page_token(self) -> Optional[str]:
+        return self._next_page_token
+
+    def to_dict(self) -> dict:
+        result = {self.FIELD_POLICIES: None if self._policies is None else [
+            None if policy is None else policy.to_dict() for policy in self._policies]}
+        if self._next_page_token is not None:
+            result[PagedResponse.FIELD_NEXT_PAGE_TOKEN] = self._next_page_token
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ListPoliciesResponse":
+        policies = data.get(cls.FIELD_POLICIES)
+        return cls(
+            None if policies is None else [
+                None if policy is None else DataPolicy.from_dict(policy) for policy in policies],
+            data.get(PagedResponse.FIELD_NEXT_PAGE_TOKEN))

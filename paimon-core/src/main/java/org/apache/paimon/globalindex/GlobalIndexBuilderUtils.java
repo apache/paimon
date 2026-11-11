@@ -607,21 +607,9 @@ public class GlobalIndexBuilderUtils {
     }
 
     public static GlobalIndexWriter createIndexWriter(
-            FileStoreTable table, String indexType, DataField indexField, Options options)
+            FileStoreTable table, String indexType, List<DataField> indexFields, Options options)
             throws IOException {
-        GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, indexField, options);
-        return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
-    }
-
-    public static GlobalIndexWriter createIndexWriter(
-            FileStoreTable table,
-            String indexType,
-            DataField indexField,
-            List<DataField> extraFields,
-            Options options)
-            throws IOException {
-        GlobalIndexer globalIndexer =
-                GlobalIndexer.create(indexType, indexField, extraFields, options);
+        GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, indexFields, options);
         return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
     }
 

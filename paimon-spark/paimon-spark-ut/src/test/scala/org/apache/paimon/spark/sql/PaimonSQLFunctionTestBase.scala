@@ -229,4 +229,61 @@ abstract class PaimonSQLFunctionTestBase extends PaimonSparkTestWithRestCatalogB
     }
     assert(e.getMessage.contains("does not support creating SQL table functions"))
   }
+
+  private def assertCollatedTypeRejected(funcName: String, createSql: String): Unit = {
+    withUserDefinedFunction(funcName -> false) {
+      val e = intercept[Exception](sql(createSql))
+      assert(e.getMessage.contains("does not support collated string types"), e.getMessage)
+      val names = sql("SHOW USER FUNCTIONS").collect().map(_.getString(0).toLowerCase)
+      assert(!names.exists(_.contains(funcName)), names.mkString(", "))
+    }
+  }
+
+  test("Paimon SQL Function: collated parameter type is not supported yet") {
+    Seq(
+      "STRING COLLATE UTF8_LCASE",
+      "ARRAY<STRING COLLATE UTF8_LCASE>",
+      "MAP<STRING, STRING COLLATE UTF8_LCASE>",
+      "MAP<STRING COLLATE UTF8_LCASE, STRING>",
+      "STRUCT<s: STRING COLLATE UTF8_LCASE>"
+    ).foreach {
+      paramType =>
+        assertCollatedTypeRejected(
+          "lcase_param",
+          s"CREATE FUNCTION lcase_param(p $paramType) RETURNS BOOLEAN RETURN p IS NULL")
+    }
+  }
+
+  test("Paimon SQL Function: collated return type is not supported yet") {
+    assertCollatedTypeRejected(
+      "lcase_ret",
+      "CREATE FUNCTION lcase_ret() RETURNS STRING COLLATE UTF8_LCASE RETURN 'a'")
+  }
+
+  test("Paimon SQL Function: inferred collated return type is not supported yet") {
+    assume(gteqSpark4_1)
+    assertCollatedTypeRejected(
+      "lcase_inferred",
+      "CREATE FUNCTION lcase_inferred() RETURN 'a' COLLATE UTF8_LCASE")
+  }
+
+  test("Paimon SQL Function: explicit UTF8_BINARY collation is accepted") {
+    withUserDefinedFunction("binary_eq" -> false) {
+      sql(
+        "CREATE FUNCTION binary_eq(p STRING COLLATE UTF8_BINARY) " +
+          "RETURNS BOOLEAN RETURN p = 'A'")
+      checkAnswer(sql("SELECT binary_eq('a'), binary_eq('A')"), Row(false, true))
+    }
+  }
+
+  test("Paimon SQL Function: rejected CREATE OR REPLACE keeps the existing function") {
+    withUserDefinedFunction("lcase_keep" -> false) {
+      sql("CREATE FUNCTION lcase_keep(p STRING) RETURNS BOOLEAN RETURN p = 'A'")
+      val e = intercept[Exception](
+        sql("CREATE OR REPLACE FUNCTION lcase_keep(p STRING COLLATE UTF8_LCASE) " +
+          "RETURNS BOOLEAN RETURN p = 'a'"))
+      assert(e.getMessage.contains("does not support collated string types"), e.getMessage)
+      checkAnswer(sql("SELECT lcase_keep('a'), lcase_keep('A')"), Row(false, true))
+    }
+  }
 }

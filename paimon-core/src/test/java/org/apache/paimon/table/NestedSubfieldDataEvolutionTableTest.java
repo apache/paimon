@@ -151,6 +151,54 @@ public class NestedSubfieldDataEvolutionTableTest extends DataEvolutionTestBase 
     }
 
     @Test
+    public void testUpdateSubFieldOfRowWithDefault() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "nest",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "a", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "b", DataTypes.STRING())),
+                                null,
+                                "{42, z}")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            write.write(GenericRow.of(1, GenericRow.of(10, BinaryString.fromString("x"))));
+            write.write(GenericRow.of(2, GenericRow.of(20, BinaryString.fromString("y"))));
+            commit(builder, write.prepareCommit());
+        }
+
+        RowType partialType = table.rowType().projectByPaths(Collections.singletonList("nest.a"));
+        try (BatchTableWrite write = builder.newWrite().withWriteType(partialType)) {
+            write.write(GenericRow.of(GenericRow.of(100)));
+            // a null nest takes the default {42, z} projected to nest.a
+            write.write(GenericRow.of((Object) null));
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, 0L);
+            commit(builder, messages);
+        }
+
+        List<InternalRow> rows = read(table);
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(1);
+        InternalRow nest = rows.get(0).getRow(1, 2);
+        assertThat(nest.getInt(0)).isEqualTo(100);
+        assertThat(nest.getString(1).toString()).isEqualTo("x");
+        assertThat(rows.get(1).getInt(0)).isEqualTo(2);
+        nest = rows.get(1).getRow(1, 2);
+        assertThat(nest.isNullAt(0)).isFalse();
+        assertThat(nest.getInt(0)).isEqualTo(42);
+        assertThat(nest.getString(1).toString()).isEqualTo("y");
+    }
+
+    @Test
     public void testDisabledOptionAllowsTopLevelColumnContainingDot() throws Exception {
         Schema disabledSchema =
                 Schema.newBuilder()

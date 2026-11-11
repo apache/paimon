@@ -32,6 +32,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.TableTestBase;
@@ -119,24 +120,68 @@ public class SchemasTableTest extends TableTestBase {
         assertThat(result).isEmpty();
     }
 
+    @Test
+    public void testReadSchemasWithOutOfRangeFilterReturnsEmpty() throws Exception {
+        // commit a second schema so the latest schema id is 1
+        catalog.alterTable(identifier("T"), SchemaChange.setOption("k", "v"), false);
+        assertThat(read(schemasTable)).hasSize(2);
+
+        PredicateBuilder builder = new PredicateBuilder(schemasTable.rowType());
+        int schemaIdIdx = schemasTable.rowType().getFieldNames().indexOf("schema_id");
+
+        List<Predicate> outOfRange = new ArrayList<>();
+        // lower bound above the latest schema id
+        outOfRange.add(builder.greaterThan(schemaIdIdx, 99L));
+        // upper bound below the first schema id
+        outOfRange.add(builder.lessThan(schemaIdIdx, -1L));
+        // lower bound above the upper bound, both within [0, latest]
+        outOfRange.add(
+                PredicateBuilder.and(
+                        builder.greaterThan(schemaIdIdx, 0L), builder.lessThan(schemaIdIdx, 1L)));
+
+        for (Predicate predicate : outOfRange) {
+            assertThat(readWithFilter(predicate)).isEmpty();
+        }
+
+        // the bounds of [0, latest] still return their schema
+        assertThat(readWithFilter(builder.lessOrEqual(schemaIdIdx, 0L)))
+                .containsExactly(toExpectedRow(schemaManager.schema(0L)));
+        assertThat(readWithFilter(builder.greaterOrEqual(schemaIdIdx, 1L)))
+                .containsExactly(toExpectedRow(schemaManager.schema(1L)));
+    }
+
+    private List<InternalRow> readWithFilter(Predicate predicate) throws Exception {
+        ReadBuilder readBuilder = schemasTable.newReadBuilder().withFilter(predicate);
+        List<InternalRow> result = new ArrayList<>();
+        InternalRowSerializer serializer = new InternalRowSerializer(schemasTable.rowType());
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(row -> result.add(serializer.copy(row)));
+        return result;
+    }
+
     private List<InternalRow> getExpectedResult() {
         List<TableSchema> tableSchemas = schemaManager.listAll();
 
         List<InternalRow> expectedRow = new ArrayList<>();
         for (TableSchema schema : tableSchemas) {
-            expectedRow.add(
-                    GenericRow.of(
-                            schema.id(),
-                            BinaryString.fromString(toFlatJson(schema.fields())),
-                            BinaryString.fromString(toFlatJson(schema.partitionKeys())),
-                            BinaryString.fromString(toFlatJson(schema.primaryKeys())),
-                            BinaryString.fromString(toFlatJson(schema.options())),
-                            BinaryString.fromString(schema.comment()),
-                            Timestamp.fromLocalDateTime(
-                                    LocalDateTime.ofInstant(
-                                            Instant.ofEpochMilli(schema.timeMillis()),
-                                            ZoneId.systemDefault()))));
+            expectedRow.add(toExpectedRow(schema));
         }
         return expectedRow;
+    }
+
+    private static InternalRow toExpectedRow(TableSchema schema) {
+        return GenericRow.of(
+                schema.id(),
+                BinaryString.fromString(toFlatJson(schema.fields())),
+                BinaryString.fromString(toFlatJson(schema.partitionKeys())),
+                BinaryString.fromString(toFlatJson(schema.primaryKeys())),
+                BinaryString.fromString(toFlatJson(schema.options())),
+                BinaryString.fromString(schema.comment()),
+                Timestamp.fromLocalDateTime(
+                        LocalDateTime.ofInstant(
+                                Instant.ofEpochMilli(schema.timeMillis()),
+                                ZoneId.systemDefault())));
     }
 }

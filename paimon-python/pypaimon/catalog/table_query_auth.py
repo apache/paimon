@@ -17,17 +17,15 @@
 ################################################################################
 
 import json
+from dataclasses import replace
 from typing import Callable, Dict, List, Optional
 
 import pyarrow as pa
-import pyarrow.compute as pc
 
 from pypaimon.common.predicate_json_parser import (
     _collect_all_field_refs_from_transform,
     extract_referenced_fields,
-    parse_predicate_to_batch_filter,
 )
-from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.schema.data_types import DataField
 from pypaimon.table.special_fields import SpecialFields
@@ -100,11 +98,30 @@ def reject_search_under_query_auth(table) -> None:
 class TableQueryAuthResult:
 
     def __init__(self, filter: Optional[List[str]], column_masking: Optional[Dict[str, str]]):
-        self.filter = [f for f in filter if f] if filter else filter
-        self.column_masking = (
-            {k: v for k, v in column_masking.items() if k and v}
-            if column_masking else column_masking
-        )
+        # A blank rule is a malformed response, not the absence of one: skipping it would read
+        # every row or return the column unmasked, so refuse the read as Java does.
+        if filter is not None and not isinstance(filter, list):
+            raise ValueError(
+                "Row filter must be a list, not {}; refusing to read.".format(
+                    type(filter).__name__))
+        if column_masking is not None and not isinstance(column_masking, dict):
+            raise ValueError(
+                "Column masking must be a map, not {}; refusing to read.".format(
+                    type(column_masking).__name__))
+        for rule in filter or []:
+            if not rule:
+                raise ValueError(
+                    "Row filter cannot be empty; refusing to read rather than returning "
+                    "every row.")
+        for column, transform in (column_masking or {}).items():
+            if not column:
+                raise ValueError("Column masking target cannot be empty; refusing to read.")
+            if not transform:
+                raise ValueError(
+                    "Column masking on '{}' cannot be empty; refusing to read rather than "
+                    "returning the column unmasked.".format(column))
+        self.filter = filter
+        self.column_masking = column_masking
 
     @property
     def has_restrictions(self):
@@ -114,21 +131,20 @@ class TableQueryAuthResult:
         if not self.has_restrictions:
             return plan
         auth_splits = [QueryAuthSplit(split, self) for split in plan.splits()]
-        return Plan(auth_splits, snapshot_id=plan.snapshot_id)
+        return replace(plan, _splits=auth_splits)
 
     def extract_row_filter(self) -> Optional[Callable[[pa.RecordBatch], pa.Array]]:
         if not self.filter:
             return None
-        filters = [parse_predicate_to_batch_filter(json_str) for json_str in self.filter]
-        if len(filters) == 1:
-            return filters[0]
+        from pypaimon.common.arrow_predicate import parse_predicate_to_batch_filter
 
-        def combined(batch: pa.RecordBatch) -> pa.Array:
-            result = filters[0](batch)
-            for f in filters[1:]:
-                result = pc.and_(result, f(batch))
-            return result
-        return combined
+        if len(self.filter) == 1:
+            return parse_predicate_to_batch_filter(self.filter[0])
+        # Java PredicateBuilder.and evaluates entries in their original order.
+        return parse_predicate_to_batch_filter(json.dumps({
+            'kind': 'COMPOUND', 'function': 'AND',
+            'children': [json.loads(rule) for rule in self.filter],
+        }))
 
     def parsed_column_masking(self) -> Dict[str, dict]:
         if not self.column_masking:

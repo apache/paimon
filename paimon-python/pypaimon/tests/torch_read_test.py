@@ -44,8 +44,8 @@ from pypaimon.read.datasource.torch_dataset import (
     TorchShuffledBatchIterDataset,
     TorchShuffledIterDataset,
     _resolve_distributed_context,
-    _shuffle_record_batches,
 )
+from pypaimon.read.datasource.torch_dataset import _shuffle_record_batches
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.utils.range import Range
@@ -57,10 +57,20 @@ def _collect_spawned_worker_splits(dataset, output):
     output.put(dataset._worker_splits(None))
 
 
+class _EmptyTableRead:
+    read_type = []
+
+    def __init__(self, limit=None):
+        self.limit = limit
+
+    def _output_arrow_schema(self):
+        return pa.schema([])
+
+
 class TorchDistributedShardingTest(unittest.TestCase):
     @staticmethod
     def _table_read(limit=None):
-        return SimpleNamespace(limit=limit, read_type=[])
+        return _EmptyTableRead(limit)
 
     @staticmethod
     def _worker(worker_id, num_workers):
@@ -388,6 +398,8 @@ class TorchDistributedShardingTest(unittest.TestCase):
                     "-m",
                     "torch.distributed.run",
                     "--standalone",
+                    # Bootstrap locally without resolving the host's FQDN.
+                    "--local-addr=127.0.0.1",
                     "--nproc-per-node=2",
                     script,
                     output_dir,
@@ -444,7 +456,7 @@ class TorchBatchShuffleTest(unittest.TestCase):
             iter(source), buffer_size, random.Random(17))))
 
         legacy = TorchShuffledIterDataset(
-            SimpleNamespace(read_type=[], limit=None), [], seed=17, buffer_size=buffer_size)
+            _EmptyTableRead(), [], seed=17, buffer_size=buffer_size)
         expected = list(legacy._iter_buffer_shuffled_rows(iter(rows), 0))
         self.assertEqual(actual.schema, table.schema)
         self.assertEqual(actual.to_pylist(), expected)
@@ -496,7 +508,7 @@ class TorchBatchShuffleTest(unittest.TestCase):
             return batch
 
         dataset = TorchShuffledBatchIterDataset(
-            SimpleNamespace(read_type=[], limit=None), list(range(8)),
+            _EmptyTableRead(), list(range(8)),
             buffer_size=3, max_buffer_input_splits=2, batch_size=2,
             batch_format="torch", to_tensor_fn=convert)
         with patch.object(TorchBatchIterDataset, "_arrow_batches_for_splits", read):
@@ -551,6 +563,110 @@ class TorchReadTest(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
+    def test_nested_projection_uses_output_names_and_duplicate_values(self):
+        schema = pa.schema([
+            ('id', pa.int32()), ('payload', pa.struct([('value', pa.int32()), ('unused', pa.string())]))])
+        self.catalog.create_table('default.torch_canonical_read_type', Schema.from_pyarrow_schema(
+            schema, options={'file.format': 'parquet'}), False)
+        table = self.catalog.get_table('default.torch_canonical_read_type')
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pylist([
+                {'id': 1, 'payload': {'value': 10, 'unused': 'x'}},
+                {'id': 2, 'payload': None}], schema=schema))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+        builder = table.new_read_builder().with_projection(['payload.value', 'id', 'id'])
+        read, splits = builder.new_read(), builder.new_scan().plan().splits()
+        self.assertEqual([field.name for field in read.read_type], ['payload', 'id'])
+        expected = [{'payload_value': 10, 'id': 1, 'id__0': 1},
+                    {'payload_value': None, 'id': 2, 'id__0': 2}]
+        for streaming in (False, True):
+            with self.subTest(streaming=streaming):
+                dataset = read.to_torch(splits, streaming=streaming)
+                self.assertEqual(sorted(list(dataset), key=lambda row: row['id']), expected)
+        dataset = read.to_torch(splits, streaming=True, batch_format='pyarrow')
+        actual = pa.Table.from_batches(list(dataset)).sort_by('id')
+        self.assertEqual(actual.to_pylist(), expected)
+
+    @parameterized.expand(['append', 'pk'])
+    def test_torch_streaming_named_paths(self, mode):
+        table, values = self._create_named_projection_table('default.named_paths_' + mode, mode)
+        projections = [
+            ({'user_id': 'id'}, [0]),
+            ({'city': 'profile.city'}, [1]),
+            ({'source': "attributes['source']"}, [2]),
+            ({'city': 'profile.city', 'source': "attributes['source']", 'user_id': 'id',
+              'city_again': 'profile.city', 'id_again': 'id',
+              'source_again': "attributes['source']"}, [1, 2, 0, 1, 0, 2]),
+        ]
+        for projection, positions in projections:
+            builder = table.new_read_builder().with_projection(projection)
+            read, splits = builder.new_read(), builder.new_scan().plan().splits()
+            if mode == 'append':
+                self.assertGreater(len(splits), 1)
+            expected = [dict(zip(projection, (row[i] for i in positions))) for row in values]
+            for options in [{}, {'prefetch_concurrency': 2},
+                            {'shuffle': True, 'seed': 17, 'buffer_size': 2, 'max_buffer_input_splits': 1},
+                            {'shuffle': True, 'seed': 17, 'buffer_size': 2, 'max_buffer_input_splits': 3}]:
+                with self.subTest(projection=projection, options=options):
+                    dataset = read.to_torch(splits, streaming=True, batch_format='row', **options)
+                    actual = list(DataLoader(dataset, batch_size=None, num_workers=0))
+                    self.assertEqual(sorted(actual, key=repr), sorted(expected, key=repr))
+                    self.assertTrue(all(list(row) == list(projection) for row in actual))
+
+    @parameterized.expand(['append', 'pk'])
+    def test_torch_streaming_named_paths_filter_limit_and_empty_input(self, mode):
+        table, _ = self._create_named_projection_table('default.named_filter_' + mode, mode)
+        predicate = table.new_read_builder().new_predicate_builder().greater_than('v', 20)
+        for limit in [0, 1, 3, None]:
+            with self.subTest(limit=limit):
+                builder = table.new_read_builder().with_projection({
+                    'v': 'id', 'city': 'profile.city', 'source': "attributes['source']",
+                }).with_filter(predicate)
+                if limit is not None:
+                    builder.with_limit(limit)
+                read, splits = builder.new_read(), builder.new_scan().plan().splits()
+                actual = list(read.to_torch(splits, streaming=True, batch_format='row'))
+                expected = [{'v': 3, 'city': None, 'source': None},
+                            {'v': 4, 'city': 'Shenzhen', 'source': None},
+                            {'v': 5, 'city': 'Beijing', 'source': None}]
+                self.assertEqual(len(actual), len(expected) if limit is None else limit)
+                if limit is None or limit == 3:
+                    self.assertCountEqual(actual, expected)
+                else:
+                    self.assertTrue(all(row in expected for row in actual))
+                self.assertEqual(list(read.to_torch([], streaming=True, batch_format='row')), [])
+
+    def test_torch_streaming_named_map_keeps_authorization_boundary(self):
+        table, _ = self._create_named_projection_table('default.named_map_auth', 'append')
+        auth = TableQueryAuthResult(filter=None, column_masking={'attributes': '{"name":"NULL"}'})
+        with patch.object(table.catalog_environment, 'table_query_auth', return_value=lambda select: auth):
+            builder = table.new_read_builder().with_projection({'source': "attributes['source']"})
+            read, splits = builder.new_read(), builder.new_scan().plan().splits()
+            dataset = read.to_torch(splits, streaming=True, batch_format='row')
+            with self.assertRaisesRegex(NotImplementedError, 'with query authorization'):
+                list(dataset)
+
+    def test_torch_streaming_row_limit_with_prefetch_and_shuffle(self):
+        table, _ = self._create_named_projection_table('default.row_limit', 'append')
+        builder = table.new_read_builder().with_projection({'identifier': 'id'})
+        splits = builder.new_scan().plan().splits()
+        self.assertGreater(len(splits), 1)
+        for limit in [0, 1, 3, 5]:
+            builder.with_limit(limit)
+            read = builder.new_read()
+            expected = read.to_arrow(splits, parallelism=1).to_pylist()
+            for options in [{'prefetch_concurrency': 2},
+                            {'shuffle': True, 'buffer_size': 1, 'max_buffer_input_splits': 1},
+                            {'shuffle': True, 'buffer_size': 1, 'max_buffer_input_splits': 3}]:
+                with self.subTest(limit=limit, options=options):
+                    dataset = read.to_torch(splits, streaming=True, **options)
+                    self.assertCountEqual(list(dataset), expected)
+
     @parameterized.expand([True, False])
     def test_torch_read(self, is_streaming: bool = False):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'])
@@ -598,6 +714,39 @@ class TorchReadTest(unittest.TestCase):
             self.assertIsInstance(dataset._data, pa.Table)
 
         print(f"✓ Test passed: Successfully read {len(all_user_ids)} rows with correct data")
+
+    @parameterized.expand([("materialized", False), ("lazy", True)])
+    def test_map_style_batch_sampling_preserves_order_and_replacement(self, name, lazy):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            options={
+                'data-evolution.enabled': str(lazy).lower(),
+                'row-tracking.enabled': str(lazy).lower(),
+            },
+        )
+        identifier = 'default.test_torch_sampling_' + name
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        self._write_test_table(table)
+        builder = table.new_read_builder().with_projection(['user_id', 'behavior'])
+        read, splits = builder.new_read(), builder.new_scan().plan().splits()
+        expected = read.to_arrow(splits).to_pylist()
+        dataset = read.to_torch(splits, streaming=False)
+        self.assertEqual([], dataset.__getitems__([]))
+
+        batches = [[2, 0, 2], [len(dataset) - 1, 0, len(dataset) - 1]]
+        actual_batches = list(DataLoader(dataset, batch_sampler=batches))
+        self.assertEqual(len(batches), len(actual_batches))
+        for indices, actual in zip(batches, actual_batches):
+            self.assertEqual(
+                [expected[index]['user_id'] for index in indices],
+                actual['user_id'].tolist(),
+            )
+            self.assertEqual(
+                [expected[index]['behavior'] for index in indices], actual['behavior'])
+        with self.assertRaises(IndexError):
+            dataset.__getitems__([0, len(dataset)])
 
     def test_non_streaming_row_tracking_reads_batches_lazily(self):
         schema = Schema.from_pyarrow_schema(
@@ -1044,7 +1193,7 @@ class TorchReadTest(unittest.TestCase):
     def test_non_binding_limit_uses_merged_row_counts(self):
         from pypaimon.read.datasource.torch_dataset import TorchIterDataset
 
-        table_read = SimpleNamespace(limit=8, read_type=[])
+        table_read = _EmptyTableRead(limit=8)
         splits = [
             SimpleNamespace(row_count=10, merged_row_count=lambda: 4),
             SimpleNamespace(row_count=10, merged_row_count=lambda: 4),
@@ -1896,7 +2045,9 @@ class TorchReadTest(unittest.TestCase):
 
         schema = pa.schema([('id', pa.int64()), ('vector', pa.list_(pa.float32(), 2))])
         table = pm.connect(options={'warehouse': self.warehouse}).create_table(
-            'batch_shuffle_vectors', schema=schema, options={'file.format': 'parquet'})
+            'batch_shuffle_vectors', schema=schema, options={
+                'file.format': 'parquet', 'vector.file.format': 'parquet',
+                'deletion-vectors.enabled': 'true'})
         table.add(pa.table({'id': list(range(8)), 'vector': [[i, i + 1] for i in range(8)]}, schema=schema))
         snapshot = table.raw_table.snapshot_manager().get_latest_snapshot().id
         table.delete('id = 2')
@@ -2089,6 +2240,44 @@ class TorchReadTest(unittest.TestCase):
                 shuffle=True,
                 max_buffer_input_splits=0,
             )
+
+    def _create_named_projection_table(self, identifier, mode):
+        schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False), ('v', pa.int64()),
+            ('profile', pa.struct([('city', pa.string())])),
+            ('attributes', pa.map_(pa.string(), pa.string())),
+        ])
+        self.catalog.create_table(identifier, Schema.from_pyarrow_schema(
+            schema, primary_keys=['id'] if mode == 'pk' else None,
+            partition_keys=['id'] if mode == 'append' else [],
+            options={'bucket': '1' if mode == 'pk' else '-1', 'read.native.enabled': 'false',
+                     'scan.native-plan.enabled': 'false', 'write.native.enabled': 'false'}), False)
+        table = self.catalog.get_table(identifier)
+        rows = [
+            {'id': 1, 'v': 10, 'profile': {'city': 'Hangzhou'},
+             'attributes': [('source', 'web'), ('source', 'mobile')]},
+            {'id': 2, 'v': 20, 'profile': None,
+             'attributes': [('source', None), ('source', 'later')]},
+            {'id': 3, 'v': 30, 'profile': {'city': None}, 'attributes': [('other', 'value')]},
+            {'id': 4, 'v': 40, 'profile': {'city': 'Shenzhen'}, 'attributes': None},
+            {'id': 5, 'v': 50, 'profile': {'city': 'Beijing'}, 'attributes': []},
+        ]
+        expected = [(1, 'Hangzhou', 'web'), (2, None, None), (3, None, None),
+                    (4, 'Shenzhen', None), (5, 'Beijing', None)]
+        writes = [rows]
+        if mode == 'pk':
+            writes.append([dict(rows[0], profile={'city': 'Suzhou'}, attributes=[('source', 'api')])])
+            expected[0] = (1, 'Suzhou', 'api')
+        for values in writes:
+            builder = table.new_batch_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(pa.Table.from_pylist(values, schema=schema))
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+        return table, expected
 
     def _create_shuffle_append_table(
         self,

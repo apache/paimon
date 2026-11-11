@@ -17,8 +17,10 @@
 
 from typing import Callable, Dict, List, Optional
 
+from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.simple_stats_evolution import SimpleStatsEvolution
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import AtomicType, DataField
 
 
 class SimpleStatsEvolutions:
@@ -46,6 +48,51 @@ class SimpleStatsEvolutions:
 
         self.evolutions[data_schema_id] = evolution
         return evolution
+
+    def filter_unsafe_filter(self, data_schema_id: int,
+                             predicate: Optional[Predicate]) -> Optional[Predicate]:
+        """Keep evolution-safe conjuncts, like Java's filterUnsafeFilter.
+
+        Integer narrowing can wrap and precision changes can truncate values.
+        Comparing current literals to those files' original bounds is unsafe.
+        An OR must stay intact: dropping one of its branches could lose rows.
+        """
+        if predicate is None or data_schema_id == self.table_schema_id:
+            return predicate
+        source_fields = {field.id: field for field in self.schema_fields(data_schema_id)}
+
+        def safe(part):
+            if part.method in ('and', 'or'):
+                return all(safe(child) for child in part.literals)
+            if part.index is None or not 0 <= part.index < len(self.table_fields):
+                return False
+            target = self.table_fields[part.index]
+            source = source_fields.get(target.id)
+            if source is None:
+                # Missing fields remain NULL in evolved stats.
+                return True
+            source_type, target_type = source.type, target.type
+            if isinstance(source_type, AtomicType) and isinstance(target_type, AtomicType):
+                if source_type.type == target_type.type:
+                    return True
+                widths = {'TINYINT': 8, 'SMALLINT': 16, 'INT': 32, 'BIGINT': 64}
+                source_width = widths.get(source_type.type)
+                target_width = widths.get(target_type.type)
+                if source_width and target_width and source_width < target_width:
+                    # Java also rejects literals that cannot be represented in
+                    # the old type. Stats values need no conversion in Python.
+                    bound = 1 << (source_width - 1)
+                    return all(value is not None and -bound <= value < bound
+                               for value in (part.literals or []))
+                return False
+            return source_type == target_type
+
+        def conjuncts(part):
+            if part.method == 'and':
+                return [child for item in part.literals for child in conjuncts(item)]
+            return [part]
+
+        return PredicateBuilder.and_predicates([part for part in conjuncts(predicate) if safe(part)])
 
     @staticmethod
     def _create_index_cast_mapping(table_fields: List[DataField],

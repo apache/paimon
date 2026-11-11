@@ -17,6 +17,7 @@
 """LeRobot frame conversion and batch writing."""
 
 import io
+import logging
 import math
 import numbers
 from array import array
@@ -54,6 +55,7 @@ _NUMERIC_DTYPES = {
 }
 _BOOLEAN_DTYPES = {"bool", "boolean"}
 _VIDEO_TIMESTAMP_TOLERANCE = 1e-4
+_LOGGER = logging.getLogger(__name__)
 
 
 def _strict_lerobot_table(data, target_schema, source, batch_index):
@@ -75,34 +77,79 @@ def _write_dataset(
         batch_size,
         metadata,
         video_fields=()):
-    target_schema = _target_schema(table.raw_table)
-    write_builder = table.raw_table.new_batch_write_builder()
+    table_commit = table.raw_table.new_batch_write_builder().new_commit()
+    try:
+        messages = _prepare_dataset(
+            table.raw_table, dataset, info, source, source_schema, batch_size,
+            metadata, video_fields)
+        return _commit_messages(table_commit, messages)
+    finally:
+        table_commit.close()
+
+
+def _commit_messages(table_commit, messages):
+    snapshot_recorder = _SnapshotRecorder()
+    table_commit.add_commit_callback(snapshot_recorder)
+    table_commit.commit(messages)
+    if snapshot_recorder.snapshot_id is None:
+        raise RuntimeError(
+            "LeRobot append committed without reporting a snapshot id.")
+    return snapshot_recorder.snapshot_id
+
+
+def _abort_messages(table, messages):
+    if not messages:
+        return
+    commit = table.new_batch_write_builder().new_commit()
+    try:
+        commit.abort(messages)
+    finally:
+        commit.close()
+
+
+def _prepare_dataset(
+        table, dataset, info, source, source_schema, batch_size, metadata,
+        video_fields=(), episode_indices=None, transform=None):
+    from pypaimon.common.options import CoreOptions
+    remux_videos = table.options.options.get(CoreOptions.WRITE_LEROBOT_REMUX_EPISODES)
+    if video_fields and remux_videos:
+        from pypaimon.multimodal.video_remux import _require_remux_av
+        _require_remux_av()
+    target_schema = _target_schema(table)
+    write_builder = table.new_batch_write_builder()
     table_write = None
-    table_commit = None
-    commit_started = False
+    prepared = False
+    messages = None
     batch_count = 0
     row_count = 0
     episodes = metadata["episodes"]
     current_episode = None
     expected_tasks = set()
     observed_tasks = set()
-    snapshot_recorder = _SnapshotRecorder()
     video_sources = {}
+    source_factory = None
 
     try:
         table_write = write_builder.new_write()
         reader_factory = getattr(
             dataset, "video_uri_reader_factory", None)
+        if video_fields and remux_videos:
+            from pypaimon.common.uri_reader import UriReaderFactory
+            from pypaimon.multimodal.video_remux import _EpisodeVideoSources
+            if reader_factory is None:
+                source_factory = UriReaderFactory({})
+                reader_factory = source_factory
+            video_sources = _EpisodeVideoSources(reader_factory)
+            reader_factory = video_sources
         if video_fields and reader_factory is not None:
             table_write.with_blob_uri_reader_factory(reader_factory)
-        table_commit = write_builder.new_commit()
-        table_commit.add_commit_callback(snapshot_recorder)
         for source_episode, episode_index, episode_begin, task_indices, \
                 begin, end in _episode_batches(
                     info,
                     batch_size,
                     episodes,
                     video_fields,
+                    episode_indices,
                 ):
             if episode_index != current_episode:
                 if current_episode is not None:
@@ -114,6 +161,8 @@ def _write_dataset(
                 if video_fields:
                     table_write.roll_before_group_if_needed(
                         int(source_episode["length"]))
+                    if remux_videos:
+                        video_sources.next_episode()
             batch = _read_batch(
                 dataset,
                 info,
@@ -133,6 +182,13 @@ def _write_dataset(
                 metadata["subtask_indices"],
             )
             observed_tasks.update(seen_tasks)
+            if transform is not None:
+                batch = transform(batch, episode_index)
+                batch = pa.Table.from_arrays([
+                    batch[field.name] if field.name in batch.column_names
+                    else pa.nulls(batch.num_rows, type=field.type)
+                    for field in target_schema
+                ], schema=target_schema)
             batch = _strict_lerobot_table(
                 batch,
                 target_schema,
@@ -147,43 +203,52 @@ def _write_dataset(
             _validate_episode_tasks(
                 current_episode, expected_tasks, observed_tasks)
 
-        expected_rows = int(info.get("total_frames", len(dataset)))
+        expected_rows = (int(info["total_frames"]) if episode_indices is None
+                         else sum(episodes[i]["length"] for i in episode_indices))
         if row_count != expected_rows:
             raise ValueError(
                 "LeRobot metadata reports %d frames but import produced %d."
                 % (expected_rows, row_count))
         messages = table_write.prepare_commit()
-        commit_started = True
-        table_commit.commit(messages)
-        if snapshot_recorder.snapshot_id is None:
-            raise RuntimeError(
-                "LeRobot append committed without reporting a snapshot id.")
-        return snapshot_recorder.snapshot_id
+        prepared = True
+        return messages
     except BaseException:
-        if table_write is not None and not commit_started:
+        if table_write is not None and not prepared:
             table_write.abort()
         raise
     finally:
         try:
             if table_write is not None:
-                table_write.close()
+                try:
+                    table_write.close()
+                except BaseException:
+                    # prepare_commit handed off these files; writer.abort() no
+                    # longer owns them, and no caller has received the messages.
+                    if messages is not None:
+                        try:
+                            _abort_messages(table, messages)
+                        except Exception:
+                            _LOGGER.exception("Failed to abort prepared LeRobot files.")
+                    raise
         finally:
-            if table_commit is not None:
-                table_commit.close()
+            if source_factory is not None:
+                source_factory.close()
 
 
-def _episode_batches(info, batch_size, episodes, video_fields=()):
+def _episode_batches(
+        info, batch_size, episodes, video_fields=(), episode_indices=None):
     episode_count = int(info.get("total_episodes", 0))
     total_frames = int(info["total_frames"])
     expected_begin = 0
-    for ordinal in range(episode_count):
+    ordinals = range(episode_count) if episode_indices is None else episode_indices
+    for ordinal in ordinals:
         episode = episodes.iloc[ordinal] if hasattr(episodes, "iloc") \
             else episodes[ordinal]
         episode_index = int(_python_scalar(episode["episode_index"]))
         begin = int(_python_scalar(episode["dataset_from_index"]))
         end = int(_python_scalar(episode["dataset_to_index"]))
         length = int(_python_scalar(episode["length"]))
-        if episode_index != ordinal or begin != expected_begin \
+        if episode_index != ordinal or (episode_indices is None and begin != expected_begin) \
                 or end <= begin or length != end - begin:
             raise ValueError(
                 "LeRobot episode %d has an invalid index, range, or length."
@@ -203,7 +268,7 @@ def _episode_batches(info, batch_size, episodes, video_fields=()):
             )
             begin = batch_end
         expected_begin = end
-    if expected_begin != total_frames:
+    if episode_indices is None and expected_begin != total_frames:
         raise ValueError(
             "LeRobot episode ranges cover %d frames but metadata reports %d."
             % (expected_begin, total_frames))
@@ -274,6 +339,8 @@ def _validate_frame_controls(
                    sorted(allowed_tasks)))
         seen_tasks.add(task_index)
         if subtask_indices is not None:
+            if values["subtask_index"][offset] is None:
+                continue
             subtask_index = _control_integer(
                 values["subtask_index"][offset], "subtask_index", index)
             if subtask_index not in subtask_indices:
@@ -412,6 +479,16 @@ def _video_frame_descriptors(
         source = (uri, length, _video_sample_timestamps(dataset, uri))
         cache[source_key] = source
     uri, length, sample_timestamps = source
+    from pypaimon.multimodal.video_remux import _EpisodeVideoSources
+    if isinstance(cache, _EpisodeVideoSources):
+        ordinals = [
+            _video_frame_ordinal(sample_timestamps, timestamp, from_timestamp,
+                                 timestamp_type, name)
+            for unused_frame_index, timestamp in video_rows
+        ]
+        return cache.descriptors(
+            uri, from_timestamp, to_timestamp,
+            [sample_timestamps[ordinal] for ordinal in ordinals])
     return [
         VideoFrameDescriptor(
             uri,

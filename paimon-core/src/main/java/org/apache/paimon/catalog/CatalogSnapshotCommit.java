@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.partition.PartitionStatistics;
 
 import javax.annotation.Nullable;
@@ -26,20 +27,22 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 /** A {@link SnapshotCommit} using {@link Catalog} to commit. */
-public class CatalogSnapshotCommit implements SnapshotCommit {
+public class CatalogSnapshotCommit extends SnapshotCommit {
 
     private final Catalog catalog;
     private final Identifier identifier;
     @Nullable private final String uuid;
 
-    public CatalogSnapshotCommit(Catalog catalog, Identifier identifier, @Nullable String uuid) {
+    public CatalogSnapshotCommit(
+            Catalog catalog, Identifier identifier, @Nullable String uuid, Lock lock) {
+        super(lock);
         this.catalog = catalog;
         this.identifier = identifier;
         this.uuid = uuid;
     }
 
     @Override
-    public boolean commit(
+    protected boolean commitImpl(
             @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             String branch,
@@ -51,7 +54,7 @@ public class CatalogSnapshotCommit implements SnapshotCommit {
     }
 
     @Override
-    public void close() throws Exception {
+    protected void closeImpl() throws Exception {
         catalog.close();
     }
 }

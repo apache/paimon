@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import os
 import shutil
 import tempfile
@@ -27,6 +28,10 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.cli.cli import main
+from pypaimon.common.json_util import JSON
+from pypaimon.schema.data_types import DataField
+from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class CliTableTest(unittest.TestCase):
@@ -90,6 +95,60 @@ class CliTableTest(unittest.TestCase):
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
         table_commit.close()
+
+    @staticmethod
+    def _snapshot(snapshot_id, **overrides):
+        values = dict(version=3, id=snapshot_id, schema_id=0,
+                      base_manifest_list='base-{}'.format(snapshot_id),
+                      delta_manifest_list='delta-{}'.format(snapshot_id),
+                      total_record_count=3, delta_record_count=3,
+                      commit_user='user-{}'.format(snapshot_id), commit_identifier=100,
+                      commit_kind='APPEND', time_millis=1700000000123, uuid=None)
+        values.update(overrides)
+        return Snapshot(**values)
+
+    def _create_snapshot_table(self, snapshots=None, primary_keys=None, options=None, suffix='snapshots'):
+        """Create isolated metadata in the shared catalog without manifest or data files."""
+        identifier = 'test_db.{}_{}'.format(self._testMethodName, suffix)
+        fields = [DataField.from_dict({'id': 0, 'name': 'id', 'type': 'INT NOT NULL'})]
+        self.catalog.create_table(identifier, Schema(fields=fields, primary_keys=primary_keys, options=options), False)
+        table = self.catalog.get_table(identifier)
+        manager = table.snapshot_manager()
+        if snapshots is None:
+            # Deliberately unordered, non-contiguous IDs distinguish numeric ordering
+            # from lexical ordering. Referenced manifests/data files do not exist.
+            snapshots = [
+                self._snapshot(10, schema_id=2, total_record_count=9007199254740993,
+                               next_row_id=9007199254740993, properties={'job': 'test'},
+                               writer_version='test-writer', watermark=0),
+                self._snapshot(2, schema_id=1, commit_kind='COMPACT', delta_record_count=0,
+                               changelog_record_count=0, changelog_manifest_list='changelog-2'),
+                self._snapshot(1, total_record_count=0, delta_record_count=0),
+            ]
+        if snapshots:
+            table.file_io.mkdirs(manager.snapshot_dir)
+            for snapshot in snapshots:
+                table.file_io.try_to_write_atomic(manager.get_snapshot_path(snapshot.id), JSON.to_json(snapshot))
+            table.file_io.try_to_write_atomic(manager.latest_file, str(max(s.id for s in snapshots)))
+        return identifier, table
+
+    def _run_table_command(self, *argv, config=None):
+        """Run a table command and capture stdout, stderr and the exit code."""
+        out, err = StringIO(), StringIO()
+        code = 0
+        with patch('sys.argv', ['paimon', '-c', config or self.config_file, 'table'] + list(argv)):
+            with patch('sys.stdout', out), patch('sys.stderr', err):
+                try:
+                    main()
+                except SystemExit as e:
+                    code = e.code
+        return out.getvalue(), err.getvalue(), code
+
+    def _run_table_command_success(self, *argv):
+        out, err, code = self._run_table_command(*argv)
+        self.assertEqual(0, code, err)
+        self.assertEqual('', err)
+        return out
 
     def test_cli_table_read_basic(self):
         """Test basic table read via CLI."""
@@ -214,30 +273,186 @@ class CliTableTest(unittest.TestCase):
     def test_cli_table_snapshot_basic(self):
         """Test basic table snapshot via CLI."""
         # Simulate CLI command: paimon -c <config> table snapshot test_db.users
-        with patch('sys.argv', ['paimon', '-c', self.config_file, 'table', 'snapshot', 'test_db.users']):
-            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-                try:
-                    main()
-                except SystemExit:
-                    pass
-                
-                output = mock_stdout.getvalue()
-                
-                # Verify output is valid JSON
-                import json
-                snapshot_json = json.loads(output)
-                
-                # Verify snapshot structure
-                self.assertIn('id', snapshot_json)
-                self.assertIn('schemaId', snapshot_json)
-                self.assertIn('commitKind', snapshot_json)
-                self.assertIn('timeMillis', snapshot_json)
-                self.assertIn('totalRecordCount', snapshot_json)
-                self.assertIn('deltaRecordCount', snapshot_json)
-                
-                # Verify snapshot has valid data
-                self.assertGreater(snapshot_json['id'], 0)
-                self.assertGreater(snapshot_json['totalRecordCount'], 0)
+        manager = self.catalog.get_table('test_db.users').snapshot_manager()
+        # A second lookup could observe a different concurrent commit.
+        with patch.object(SnapshotManager, 'get_latest_snapshot', wraps=manager.get_latest_snapshot) as latest:
+            output = self._run_table_command_success('snapshot', 'test_db.users')
+        latest.assert_called_once_with()
+        
+        # Verify output is valid JSON
+        snapshot_json = json.loads(output)
+        
+        # Verify snapshot structure
+        self.assertIn('id', snapshot_json)
+        self.assertIn('schemaId', snapshot_json)
+        self.assertIn('commitKind', snapshot_json)
+        self.assertIn('timeMillis', snapshot_json)
+        self.assertIn('totalRecordCount', snapshot_json)
+        self.assertIn('deltaRecordCount', snapshot_json)
+        
+        # Verify snapshot has valid data
+        self.assertGreater(snapshot_json['id'], 0)
+        self.assertGreater(snapshot_json['totalRecordCount'], 0)
+
+    def test_cli_table_list_snapshots_json(self):
+        identifier, _ = self._create_snapshot_table()
+        snapshots = json.loads(self._run_table_command_success('list-snapshots', identifier, '-f', 'json'))
+        self.assertEqual([1, 2, 10], [s['id'] for s in snapshots])
+        self.assertEqual([0, 1, 2], [s['schemaId'] for s in snapshots])
+        self.assertEqual(0, snapshots[0]['totalRecordCount'])
+        self.assertNotIn('changelogRecordCount', snapshots[0])
+        self.assertEqual(0, snapshots[1]['changelogRecordCount'])
+        self.assertEqual('COMPACT', snapshots[1]['commitKind'])
+        self.assertEqual('changelog-2', snapshots[1]['changelogManifestList'])
+        self.assertEqual(9007199254740993, snapshots[2]['totalRecordCount'])
+        self.assertIsInstance(snapshots[2]['totalRecordCount'], int)
+        self.assertEqual({'job': 'test'}, snapshots[2]['properties'])
+        self.assertEqual(1700000000123, snapshots[2]['timeMillis'])
+
+    def test_cli_table_list_snapshots_format_table(self):
+        identifier, _ = self._create_snapshot_table()
+        out = self._run_table_command_success('list-snapshots', identifier)
+        for text in ('Schema', 'Commit', 'Total', 'Delta', 'Changelog',
+                     'user-2', 'COMPACT', '2023-11-14T22:13:20.123Z', '9007199254740993'):
+            self.assertIn(text, out)
+        rows = out.strip().splitlines()[1:]
+        self.assertEqual(['1', '2', '10'], [row.split()[0] for row in rows])
+        self.assertEqual(['0', '0', '-'], rows[0].split()[-3:])
+        self.assertEqual(['3', '0', '0'], rows[1].split()[-3:])
+
+    def test_cli_table_list_snapshots_limit(self):
+        identifier, _ = self._create_snapshot_table()
+        original = SnapshotManager.get_snapshot_by_id
+        
+        def bounded_read(manager, snapshot_id):
+            self.assertIn(snapshot_id, (1, 2), 'read beyond the requested limit')
+            return original(manager, snapshot_id)
+        
+        with patch.object(SnapshotManager, 'get_snapshot_by_id', autospec=True, side_effect=bounded_read):
+            snapshots = json.loads(self._run_table_command_success(
+                'list-snapshots', identifier, '-l', '2', '-f', 'json'))
+        self.assertEqual([1, 2], [s['id'] for s in snapshots])
+
+    def test_cli_table_list_snapshots_skips_expired(self):
+        identifier, _ = self._create_snapshot_table()
+        original = SnapshotManager.get_snapshot_by_id
+        
+        def disappearing_read(manager, snapshot_id):
+            if snapshot_id == 1:
+                return None  # Expired before the existence check.
+            if snapshot_id == 2:
+                raise FileNotFoundError('expired during read')
+            return original(manager, snapshot_id)
+        
+        with patch.object(SnapshotManager, 'get_snapshot_by_id', autospec=True, side_effect=disappearing_read):
+            snapshots = json.loads(self._run_table_command_success(
+                'list-snapshots', identifier, '--limit', '1', '-f', 'json'))
+        self.assertEqual([10], [s['id'] for s in snapshots])
+
+    def test_cli_table_snapshot_by_id(self):
+        identifier, _ = self._create_snapshot_table()
+        with patch.object(SnapshotManager, 'get_latest_snapshot', side_effect=AssertionError('latest lookup')):
+            snapshot = json.loads(self._run_table_command_success(
+                'snapshot', identifier, '--snapshot-id', '2', '--format', 'json'))
+        self.assertEqual(2, snapshot['id'])
+        self.assertEqual(1, snapshot['schemaId'])
+        self.assertEqual(3, snapshot['totalRecordCount'])
+        self.assertEqual(0, snapshot['deltaRecordCount'])
+        self.assertEqual('base-2', snapshot['baseManifestList'])
+        self.assertEqual('delta-2', snapshot['deltaManifestList'])
+
+    def test_cli_table_snapshot_format_table(self):
+        identifier, _ = self._create_snapshot_table()
+        out = self._run_table_command_success('snapshot', identifier, '-f', 'table')
+        for text in ('schemaId', 'baseManifestList', 'base-10', 'deltaManifestList', 'delta-10',
+                     'nextRowId', '9007199254740993', 'properties', '{"job": "test"}',
+                     'writerVersion', 'test-writer', '2023-11-14T22:13:20.123Z'):
+            self.assertIn(text, out)
+        self.assertNotIn('changelogManifestList', out)
+
+    def test_cli_table_snapshots_empty(self):
+        identifier, _ = self._create_snapshot_table(snapshots=[])
+        self.assertEqual([], json.loads(self._run_table_command_success('list-snapshots', identifier, '-f', 'json')))
+        self.assertIn('No snapshots', self._run_table_command_success('list-snapshots', identifier))
+        out, err, code = self._run_table_command('snapshot', identifier)
+        self.assertEqual(('', 1), (out, code))
+        self.assertIn('No snapshot', err)
+
+    def test_cli_table_snapshot_missing_id(self):
+        identifier, _ = self._create_snapshot_table()
+        with patch.object(SnapshotManager, 'get_latest_snapshot', side_effect=AssertionError('latest lookup')):
+            out, err, code = self._run_table_command('snapshot', identifier, '--snapshot-id', '9')
+        self.assertEqual(('', 1), (out, code))
+        self.assertIn('9', err)
+        self.assertIn(identifier, err)
+
+    def test_cli_table_snapshot_invalid_numbers(self):
+        for command, option in (('list-snapshots', '--limit'), ('snapshot', '--snapshot-id')):
+            for value in ('0', '-1', 'bad'):
+                with self.subTest(command=command, value=value):
+                    out, err, code = self._run_table_command(command, 'test_db.users', option, value)
+                    self.assertEqual(('', 2), (out, code))
+                    self.assertIn(option, err)
+
+    def test_cli_table_snapshot_invalid_identifiers(self):
+        for command in ('snapshot', 'list-snapshots'):
+            for table in ('db', '.t', 'db.', 'db.t.extra'):
+                with self.subTest(command=command, table=table):
+                    out, err, code = self._run_table_command(command, table)
+                    self.assertEqual(('', 1), (out, code))
+                    self.assertIn('Invalid table identifier', err)
+
+    def test_cli_table_snapshot_invalid_table(self):
+        for command in ('snapshot', 'list-snapshots'):
+            for table in ('test_db.missing_snapshot_table', 'test_db.users$snapshots'):
+                with self.subTest(command=command, table=table):
+                    out, err, code = self._run_table_command(command, table)
+                    self.assertEqual(('', 1), (out, code))
+                    self.assertIn(table, err)
+
+    def test_cli_table_snapshot_config_failure(self):
+        for command in ('snapshot', 'list-snapshots'):
+            with self.subTest(command=command):
+                out, err, code = self._run_table_command(
+                    command, 'test_db.users', config=os.path.join(self.tempdir, 'missing.yaml'))
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn('missing.yaml', err)
+
+    def test_cli_table_snapshot_corrupt_metadata(self):
+        identifier, table = self._create_snapshot_table()
+        with open(table.snapshot_manager().get_snapshot_path(2), 'w') as f:
+            f.write('{invalid json')
+        for args in (('snapshot', identifier, '--snapshot-id', '2'), ('list-snapshots', identifier, '-f', 'json')):
+            with self.subTest(args=args):
+                out, err, code = self._run_table_command(*args)
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn('snapshot', err.lower())
+
+    def test_cli_table_snapshot_permission_error(self):
+        with patch.object(SnapshotManager, 'get_snapshot_by_id', side_effect=PermissionError('access denied')):
+            for args in (('snapshot', 'test_db.users', '--snapshot-id', '2'),
+                         ('list-snapshots', 'test_db.users', '-f', 'json')):
+                with self.subTest(args=args):
+                    out, err, code = self._run_table_command(*args)
+                    self.assertEqual(('', 1), (out, code))
+                    self.assertIn('access denied', err)
+
+    def test_cli_table_snapshots_table_modes(self):
+        for name, primary_keys, options in (
+                ('append', [], {'bucket': '-1'}),
+                ('pk', ['id'], {'bucket': '1'}),
+                ('evolution', [], {'bucket': '-1', 'row-tracking.enabled': 'true',
+                                   'data-evolution.enabled': 'true'})):
+            with self.subTest(mode=name):
+                identifier, _ = self._create_snapshot_table(
+                    snapshots=[self._snapshot(1, next_row_id=3 if name == 'evolution' else None)],
+                    primary_keys=primary_keys, options=options, suffix=name)
+                snapshot = json.loads(self._run_table_command_success('snapshot', identifier, '--snapshot-id', '1'))
+                self.assertEqual(1, snapshot['id'])
+                if name == 'evolution':
+                    self.assertEqual(3, snapshot['nextRowId'])
+                listed = json.loads(self._run_table_command_success('list-snapshots', identifier, '-f', 'json'))
+                self.assertEqual([1], [s['id'] for s in listed])
 
     def test_cli_table_create_with_json_schema(self):
         """Test table create with JSON schema file."""

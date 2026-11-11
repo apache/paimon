@@ -76,6 +76,11 @@ _STRUCTURE_MATCH_INDEX_BUDGET = 8 * 1024 * 1024
 _ROOT_INSERT_SPLICE_PAYLOAD_BUDGET = 8 * 1024 * 1024
 # Bound per-row Python and NumPy temporaries for tiny payloads.
 _ROOT_INSERT_SPLICE_MAX_BATCH_ROWS = 64 * 1024
+_FAST_CHILD_SIZES = np.asarray([
+    _PRIMITIVE_FIXED_SIZES.get(type_info, 0)
+    if type_info not in (_DECIMAL4, _DECIMAL8, _DECIMAL16) else 0
+    for type_info in range(64)
+], dtype=np.uint8)
 
 
 @functools.lru_cache(maxsize=256)
@@ -1579,6 +1584,141 @@ def _rowwise_replace_chunk(
         chunk, values, data, data_start, rebuilt_rows)
 
 
+def _flat_object_unsigneds(value, start, count, width):
+    """Read an object header array without creating Python ints per field."""
+    if width in (1, 2, 4):
+        return np.frombuffer(
+            value, dtype=np.dtype('<u%d' % width), count=count,
+            offset=start)
+    raw = np.frombuffer(
+        value, dtype=np.uint8, count=count * 3,
+        offset=start).reshape(count, 3)
+    return (raw[:, 0].astype(np.uint32)
+            | (raw[:, 1].astype(np.uint32) << 8)
+            | (raw[:, 2].astype(np.uint32) << 16))
+
+
+def _flat_object_layout(value):
+    """Validate a root object and read its offsets as a NumPy array."""
+    limit = len(value)
+    _require_range(0, 2, limit)
+    type_info = (value[0] >> 2) & 0x3F
+    size_width = _U32_SIZE if ((type_info >> 4) & 0x1) else 1
+    _require_range(1, size_width, limit)
+    size = _read_unsigned(value, 1, size_width)
+    id_width = ((type_info >> 2) & 0x3) + 1
+    offset_width = (type_info & 0x3) + 1
+    id_start = 1 + size_width
+    offset_start = id_start + size * id_width
+    data_start = offset_start + (size + 1) * offset_width
+    _require_range(0, data_start, limit)
+    offsets = _flat_object_unsigneds(
+        value, offset_start, size + 1, offset_width)
+    end_offset = int(offsets[-1])
+    if size:
+        ordered = np.sort(offsets)
+        if (int(ordered[0]) != 0 or int(ordered[-1]) != end_offset
+                or np.any(np.diff(ordered) == 0)):
+            _malformed("invalid object offsets")
+    else:
+        if end_offset != 0:
+            _malformed("invalid object offsets")
+        ordered = offsets
+    _require_range(data_start, end_offset, limit)
+    return size, id_width, id_start, offset_start, data_start, offsets, ordered
+
+
+def _flat_object_get_chunk(chunk, values, parsed):
+    """Look up wide, top-level object fields together instead of per path."""
+    if (len(parsed) < 2
+            or any(len(path) != 1 or path[0][0] != 'key'
+                   for _, path, _ in parsed)):
+        return None
+
+    valid_rows = _valid_row_indices(chunk, values, chunk.field(1))
+    if not len(valid_rows):
+        return [pa.nulls(len(chunk), type=data_type)
+                for _, _, data_type in parsed]
+    first_value = values.view(int(valid_rows[0]))
+    if not first_value or (first_value[0] & 0x3) != _OBJECT:
+        return None
+    first_size = _checked_object_layout(
+        first_value, 0, len(first_value))[0]
+    # Keep the vectorized reader for narrow objects or a few requested keys.
+    if first_size * len(parsed) < 1024:
+        return None
+    # For multi-row float batches, the existing reader vectorizes across rows.
+    # Its per-path cost wins over per-row lookup on modest object widths.
+    if (len(valid_rows) >= _SLOW_PATH_ROWS
+            and all(pa.types.is_float32(data_type)
+                    or pa.types.is_float64(data_type)
+                    for _, _, data_type in parsed)
+            and (first_size < 256 or first_size * len(parsed) < 4096)):
+        return None
+
+    metadata = _BinaryValues(chunk.field(1))
+    decoded = [[None] * len(chunk) for _ in parsed]
+    # Object field IDs may differ across rows, so the key includes the actual
+    # encoded layout as well as the metadata dictionary and requested IDs.
+    slot_cache = LRUCache(maxsize=64)
+    for row in valid_rows:
+        row = int(row)
+        value = values.view(row)
+        if not value or (value[0] & 0x3) != _OBJECT:
+            return None
+        row_metadata = bytes(metadata.view(row))
+        key_ids = _cached_metadata_key_ids(row_metadata)
+        targets = {}
+        for index, (_, path, _) in enumerate(parsed):
+            key_id = key_ids.get(path[0][1])
+            if key_id is not None:
+                targets.setdefault(key_id, []).append(index)
+
+        (size, id_width, id_start, offset_start, data_start,
+         offsets, ordered_offsets) = _flat_object_layout(value)
+        if data_start + int(offsets[-1]) != len(value):
+            _malformed("trailing bytes after root value")
+        layout = (row_metadata, bytes(value[id_start:offset_start]),
+                  id_width, tuple(sorted(targets)))
+        slots = slot_cache.get(layout)
+        if slots is None:
+            field_ids = _flat_object_unsigneds(
+                value, id_start, size, id_width)
+            if len(np.unique(field_ids)) != size:
+                _malformed("duplicate object field id")
+            slots = {int(key_id): slot
+                     for slot, key_id in enumerate(field_ids)
+                     if int(key_id) in targets}
+            slot_cache[layout] = slots
+        if not targets:
+            continue
+        if not slots:
+            continue
+        selected_offsets = offsets[np.fromiter(
+            slots.values(), dtype=np.int64, count=len(slots))]
+        next_indices = np.searchsorted(
+            ordered_offsets, selected_offsets, side='right')
+        for (key_id, _), offset, next_index in zip(
+                slots.items(), selected_offsets, next_indices):
+            child_pos = data_start + int(offset)
+            child_end = data_start + int(ordered_offsets[next_index])
+            if _checked_value_size(value, child_pos, child_end) != (
+                    child_end - child_pos):
+                _malformed("child size does not match container offsets")
+            for index in targets[key_id]:
+                data_type = parsed[index][2]
+                if (pa.types.is_float32(data_type)
+                        or pa.types.is_float64(data_type)):
+                    decoded[index][row] = _decode_floating(
+                        value, child_pos, data_type)
+                else:
+                    decoded[index][row] = _decode_exact(
+                        value, row_metadata, child_pos, data_type)
+
+    return [pa.array(result, type=data_type)
+            for result, (_, _, data_type) in zip(decoded, parsed)]
+
+
 def _variant_get(column, paths: Mapping[str, pa.DataType]):
     parsed = []
     for path, target_type in paths.items():
@@ -1594,12 +1734,14 @@ def _variant_get(column, paths: Mapping[str, pa.DataType]):
     result_chunks = {path: [] for path in paths}
     for chunk in chunks:
         values = _BinaryValues(chunk.field(0))
-        results = _vectorized_get_chunk(
-            chunk,
-            values,
-            parsed_paths,
-            [target_type for _, _, target_type in parsed],
-        )
+        results = _flat_object_get_chunk(chunk, values, parsed)
+        if results is None:
+            results = _vectorized_get_chunk(
+                chunk,
+                values,
+                parsed_paths,
+                [target_type for _, _, target_type in parsed],
+            )
         if results is not None:
             for (path, _, _), result in zip(parsed, results):
                 result_chunks[path].append(result)
@@ -1644,6 +1786,108 @@ def variant_get(column, path, data_type=None):
     if data_type is None:
         raise TypeError("VARIANT data_type must be a PyArrow data type")
     return _variant_get(column, {path: data_type})[path]
+
+
+@_with_metadata_cache
+def variant_to_pylist(column, fields: Sequence[str]):
+    """Decode selected top-level VARIANT object fields to Python values.
+
+    Values use their natural Python types, even when a field has different
+    types in different rows. A missing field is omitted from its row's dict;
+    a VARIANT null is present with value None, and a SQL null row returns None.
+    Field names are literal names, not VARIANT path expressions.
+    """
+    if isinstance(fields, (str, bytes)):
+        raise TypeError("VARIANT fields must be a sequence of field names")
+    try:
+        names = tuple(dict.fromkeys(fields))
+    except (TypeError, ValueError):
+        raise TypeError(
+            "VARIANT fields must be a sequence of field names") from None
+    if any(not isinstance(name, str) for name in names):
+        raise TypeError("VARIANT field names must be strings")
+
+    chunks, _, _ = _variant_chunks(column)
+    result = []
+    slot_cache = LRUCache(maxsize=64)
+    for chunk in chunks:
+        values = _BinaryValues(chunk.field(0))
+        metadata = _BinaryValues(chunk.field(1))
+        valid = set(map(int, _valid_row_indices(
+            chunk, values, chunk.field(1))))
+        for row in range(len(chunk)):
+            if row not in valid:
+                result.append(None)
+                continue
+            value = bytes(values.view(row))
+            row_metadata = bytes(metadata.view(row))
+            if not value or (value[0] & 0x3) != _OBJECT:
+                raise TypeError("VARIANT root must be an object")
+            variant = GenericVariant(value, row_metadata)
+            key_ids = _cached_metadata_key_ids(row_metadata)
+            targets = {key_ids[name]: name for name in names
+                       if name in key_ids}
+            (size, id_width, id_start, offset_start, data_start,
+             offsets, ordered_offsets) = _flat_object_layout(value)
+            if data_start + int(offsets[-1]) != len(value):
+                _malformed("trailing bytes after root value")
+            layout = (row_metadata, value[id_start:offset_start],
+                      id_width, tuple(sorted(targets)))
+            selected_slots = slot_cache.get(layout)
+            if selected_slots is None:
+                field_ids = _flat_object_unsigneds(
+                    value, id_start, size, id_width)
+                if len(np.unique(field_ids)) != size:
+                    _malformed("duplicate object field id")
+                selected_slots = tuple(
+                    (slot, targets[int(key_id)])
+                    for slot, key_id in enumerate(field_ids)
+                    if int(key_id) in targets)
+                slot_cache[layout] = selected_slots
+            if not targets:
+                result.append({})
+                continue
+            slots = np.fromiter(
+                (slot for slot, _ in selected_slots),
+                dtype=np.int64, count=len(selected_slots))
+            starts = offsets[slots]
+            if np.any(starts >= offsets[-1]):
+                _malformed("invalid object offset")
+            next_indices = np.searchsorted(
+                ordered_offsets, starts, side='right')
+            ends = ordered_offsets[next_indices]
+            # Encoded offsets may be uint8/uint16. Adding data_start before
+            # widening can wrap or raise for otherwise valid objects.
+            absolute_starts = starts.astype(np.intp, copy=False) + data_start
+            headers = np.frombuffer(value, dtype=np.uint8)[absolute_starts]
+            basic_types = headers & 0x3
+            type_infos = headers >> 2
+            fixed_sizes = _FAST_CHILD_SIZES[type_infos]
+            is_short_string = basic_types == _SHORT_STR
+            is_fast = (is_short_string
+                       | ((basic_types == _PRIMITIVE) & (fixed_sizes != 0)))
+            expected_sizes = np.where(
+                is_short_string, type_infos + 1, fixed_sizes)
+            if np.any(is_fast & (ends - starts != expected_sizes)):
+                _malformed("child size does not match container offsets")
+            selected = {}
+            for index, ((_, name), offset, end) in enumerate(zip(
+                    selected_slots, starts, ends)):
+                child_pos = data_start + int(offset)
+                if not is_fast[index]:
+                    child_end = data_start + int(end)
+                    if basic_types[index] in (_OBJECT, _ARRAY):
+                        _validate_value_field_ids(
+                            value, child_pos, child_end, len(key_ids))
+                    elif _checked_value_size(
+                            value, child_pos, child_end) != (
+                                child_end - child_pos):
+                        _malformed(
+                            "child size does not match container offsets")
+                selected[name] = variant._to_python_impl(
+                    value, row_metadata, child_pos)
+            result.append(selected)
+    return result
 
 
 def _paths_overlap(first: _Path, second: _Path) -> bool:

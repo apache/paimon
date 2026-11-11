@@ -707,6 +707,7 @@ public class FormatTableScanTest {
 
             Map<String, String> options = new HashMap<>();
             options.put(SOURCE_SPLIT_TARGET_SIZE.key(), "100b");
+            options.put(FILE_FORMAT.key(), format);
 
             FormatTable formatTable =
                     createFormatTableWithOptions(

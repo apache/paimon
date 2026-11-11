@@ -48,7 +48,7 @@ catalog_options = {
 catalog = CatalogFactory.create(catalog_options)
 ```
 
-For an S3 warehouse, pass S3 authentication options with the filesystem catalog options:
+For an S3 warehouse, install `pypaimon[s3]` and pass S3 authentication options with the filesystem catalog options:
 
 ```python
 from pypaimon import CatalogFactory
@@ -162,6 +162,12 @@ catalog_options = {
 catalog = CatalogFactory.create(catalog_options)
 ```
 
+For DLF authentication (`token.provider='dlf'`), PyPaimon can discover a JSON token
+file through the `DLF_TOKEN_PATH` environment variable. Explicit token loaders,
+token paths, and inline AK/STS credentials take precedence over this environment
+variable. The discovered file uses the existing local-file loader, including
+credential refresh according to its `Expiration` field.
+
 </TabItem>
 
 </Tabs>
@@ -169,6 +175,17 @@ catalog = CatalogFactory.create(catalog_options)
 PyPaimon supports filesystem, JDBC, and REST catalogs. See [Catalog](../concepts/catalog).
 
 Use this catalog for the database and table operations below.
+
+## OSS and custom S3 checksums
+
+OSS rejects PyArrow 22+ optional checksum trailers (checksums sent after the data).
+For PyArrow-backed OSS and explicit S3 endpoints (including AWS), PyPaimon sets
+`AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED` to disable optional checksums.
+This also affects later AWS clients in the process. Explicit environment values take
+precedence; required checksums and older PyArrow versions are unchanged.
+
+Set `fs.s3.checksum-compatibility.auto-configure=false` on all relevant catalogs before
+creating clients to disable this setup. Existing process settings are not cleared.
 
 ## Create Database
 
@@ -253,6 +270,9 @@ catalog.create_table(
 
 # Get Table
 table = catalog.get_table('database_name.table_name')
+
+# Get Table by id (REST catalog only)
+table = catalog.get_table_by_id('table_id')
 ```
 
 ## Alter Table

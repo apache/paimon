@@ -23,18 +23,17 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MapStorageLayout;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.TableType;
+import org.apache.paimon.bucket.BucketFunction;
 import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexerFactory;
 import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
-import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
-import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
-import org.apache.paimon.globalindex.fmindex.FMGlobalIndexerFactory;
+import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
+import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
@@ -57,9 +56,12 @@ import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.GeneratedColumn;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SetUtils;
 import org.apache.paimon.utils.StringUtils;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -104,6 +106,8 @@ import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.format.FileFormat.vectorFileFormat;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOption;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOptionCandidate;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupSortOrderOption;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.parseSequenceGroupSortOrders;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.sequenceGroupOrderingFields;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.sequenceGroupProtectedFields;
 import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
@@ -136,6 +140,8 @@ public class SchemaValidation {
 
     private static final int MAX_ICEBERG_TIMESTAMP_PRECISION = 6;
 
+    private static final int MIN_ICEBERG_VARIANT_FORMAT_VERSION = 3;
+
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
             Arrays.asList(
                     MapType.class,
@@ -167,11 +173,14 @@ public class SchemaValidation {
     public static void validateTableSchema(TableSchema schema, Set<String> dynamicOptionKeys) {
         CoreOptions options = new CoreOptions(schema.options());
 
+        validateGeneratedColumns(schema, options);
+
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
         validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
         // reject here rather than only at create time, so ALTER cannot turn the option on for a
         // table type that ignores it
         validateQueryAuthTableType(options.type(), options.queryAuthEnabled());
+        validateCsvSkipEmptyLines(options);
 
         if (options.primaryKeyNullable() && schema.primaryKeys().isEmpty()) {
             throw new IllegalArgumentException(
@@ -189,6 +198,8 @@ public class SchemaValidation {
         validateSequenceField(schema, options);
 
         validateSequenceGroupOrderingFields(schema, options);
+
+        validateSequenceGroupSortOrder(schema, options);
 
         validateMergeFunction(schema);
 
@@ -250,10 +261,10 @@ public class SchemaValidation {
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         RowType tableRowType = new RowType(schema.fields());
-        validateGeospatialTypes(schema, options, tableRowType);
-        validateVariantTypes(schema, options);
+        validateIcebergGeospatialTypes(tableRowType, options);
         validateIcebergTimestampPrecisions(tableRowType, options);
         validateIcebergTimePrecisions(tableRowType, options);
+        validateIcebergPublishableTypes(tableRowType, options);
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
@@ -396,10 +407,7 @@ public class SchemaValidation {
                 fieldNamesSpecifiedAsVector.isEmpty(),
                 "Some of the columns specified as vector-field are unknown.");
 
-        validatePrimaryKeyIndexColumns(options);
-        validatePrimaryKeySortedIndexes(schema, options);
-        validatePrimaryKeyVectorIndex(schema, options);
-        validatePrimaryKeyFullTextIndex(schema, options);
+        options.primaryKeyIndexBuildParallelism();
 
         validateMergeFunctionFactory(schema);
 
@@ -410,6 +418,24 @@ public class SchemaValidation {
 
         validateRowTracking(schema, options);
 
+        List<String> geospatialClusteringColumns =
+                schema.fields().stream()
+                        .filter(field -> options.clusteringColumns().contains(field.name()))
+                        .filter(
+                                field ->
+                                        containsType(
+                                                field.type(),
+                                                type ->
+                                                        type.isAnyOf(
+                                                                DataTypeRoot.GEOMETRY,
+                                                                DataTypeRoot.GEOGRAPHY)))
+                        .map(DataField::name)
+                        .collect(Collectors.toList());
+        checkArgument(
+                geospatialClusteringColumns.isEmpty(),
+                "Geometry and geography columns cannot be clustering columns: %s.",
+                geospatialClusteringColumns);
+
         validateIncrementalClustering(schema, options);
 
         validateChainTable(schema, options);
@@ -419,6 +445,21 @@ public class SchemaValidation {
         validatePkClusteringOverride(options);
 
         validateManifestSort(schema, options);
+    }
+
+    /**
+     * Skipping empty lines drops rows at read time, while the data files of a table still record
+     * the number of rows that were written. Readers that answer COUNT(*) from that metadata would
+     * then disagree with a normal scan, so the option is only allowed for format tables, whose
+     * splits do not report row counts.
+     */
+    private static void validateCsvSkipEmptyLines(CoreOptions options) {
+        checkArgument(
+                options.type() == TableType.FORMAT_TABLE
+                        || !options.toConfiguration().get(CsvOptions.SKIP_EMPTY_LINES),
+                "%s is only supported for format tables, but the table type is %s.",
+                CsvOptions.SKIP_EMPTY_LINES.key(),
+                options.type());
     }
 
     /**
@@ -491,125 +532,6 @@ public class SchemaValidation {
                 }
             }
         }
-    }
-
-    /**
-     * Only the Parquet format can store {@code VARIANT}, so every format the table may write data
-     * files with has to be parquet: the main format, each per-level override and the changelog
-     * format. Checking here reports the column and the option at DDL time, rather than the bare
-     * "unsupported type" a non-parquet writer raises on the first row.
-     */
-    private static void validateVariantTypes(TableSchema schema, CoreOptions options) {
-        List<String> variantColumns =
-                schema.fields().stream()
-                        .filter(
-                                field ->
-                                        containsType(
-                                                field.type(),
-                                                type -> type.is(DataTypeRoot.VARIANT)))
-                        .map(DataField::name)
-                        .collect(Collectors.toList());
-        if (variantColumns.isEmpty()) {
-            return;
-        }
-
-        checkArgument(
-                CoreOptions.FILE_FORMAT_PARQUET.equals(options.formatType()),
-                "Variant columns %s require '%s'='parquet', but was '%s'.",
-                variantColumns,
-                CoreOptions.FILE_FORMAT.key(),
-                options.formatType());
-        options.fileFormatPerLevel()
-                .forEach(
-                        (level, format) ->
-                                checkArgument(
-                                        CoreOptions.FILE_FORMAT_PARQUET.equals(format),
-                                        "Variant columns %s require parquet at every level, but '%s' contains '%s:%s'.",
-                                        variantColumns,
-                                        CoreOptions.FILE_FORMAT_PER_LEVEL.key(),
-                                        level,
-                                        format));
-        checkArgument(
-                options.changelogFileFormat() == null
-                        || CoreOptions.FILE_FORMAT_PARQUET.equals(options.changelogFileFormat()),
-                "Variant columns %s require '%s' to be parquet, but was '%s'.",
-                variantColumns,
-                CoreOptions.CHANGELOG_FILE_FORMAT.key(),
-                options.changelogFileFormat());
-    }
-
-    private static void validateGeospatialTypes(
-            TableSchema schema, CoreOptions options, RowType rowType) {
-        boolean hasGeospatial =
-                containsType(
-                        rowType,
-                        type -> type.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY));
-        if (!hasGeospatial) {
-            return;
-        }
-
-        checkArgument(
-                CoreOptions.FILE_FORMAT_PARQUET.equals(options.formatType()),
-                "Geometry and geography columns require '%s'='parquet', but was '%s'.",
-                CoreOptions.FILE_FORMAT.key(),
-                options.formatType());
-        options.fileFormatPerLevel()
-                .forEach(
-                        (level, format) ->
-                                checkArgument(
-                                        CoreOptions.FILE_FORMAT_PARQUET.equals(format),
-                                        "Geometry and geography columns require parquet at every level, but '%s' contains '%s:%s'.",
-                                        CoreOptions.FILE_FORMAT_PER_LEVEL.key(),
-                                        level,
-                                        format));
-        checkArgument(
-                options.changelogFileFormat() == null
-                        || CoreOptions.FILE_FORMAT_PARQUET.equals(options.changelogFileFormat()),
-                "Geometry and geography columns require '%s' to be parquet, but was '%s'.",
-                CoreOptions.CHANGELOG_FILE_FORMAT.key(),
-                options.changelogFileFormat());
-        validateIcebergGeospatialTypes(rowType, options);
-
-        List<String> geospatialClusteringColumns =
-                schema.fields().stream()
-                        .filter(field -> options.clusteringColumns().contains(field.name()))
-                        .filter(
-                                field ->
-                                        containsType(
-                                                field.type(),
-                                                type ->
-                                                        type.isAnyOf(
-                                                                DataTypeRoot.GEOMETRY,
-                                                                DataTypeRoot.GEOGRAPHY)))
-                        .map(DataField::name)
-                        .collect(Collectors.toList());
-        checkArgument(
-                geospatialClusteringColumns.isEmpty(),
-                "Geometry and geography columns cannot be clustering columns: %s.",
-                geospatialClusteringColumns);
-
-        Set<String> geospatialFields =
-                schema.fields().stream()
-                        .filter(
-                                field ->
-                                        field.type()
-                                                .isAnyOf(
-                                                        DataTypeRoot.GEOMETRY,
-                                                        DataTypeRoot.GEOGRAPHY))
-                        .map(DataField::name)
-                        .collect(Collectors.toSet());
-        Set<String> geospatialBucketKeys = new HashSet<>(schema.bucketKeys());
-        geospatialBucketKeys.retainAll(geospatialFields);
-        checkArgument(
-                geospatialBucketKeys.isEmpty(),
-                "Geometry and geography columns cannot be bucket keys: %s.",
-                geospatialBucketKeys);
-        Set<String> geospatialSequenceFields = new HashSet<>(options.sequenceField());
-        geospatialSequenceFields.retainAll(geospatialFields);
-        checkArgument(
-                geospatialSequenceFields.isEmpty(),
-                "Geometry and geography columns cannot be sequence fields: %s.",
-                geospatialSequenceFields);
     }
 
     /**
@@ -687,7 +609,49 @@ public class SchemaValidation {
             validateIcebergGeospatialTypes(schema.logicalRowType(), options);
             validateIcebergTimestampPrecisions(schema.logicalRowType(), options);
             validateIcebergTimePrecisions(schema.logicalRowType(), options);
+            validateIcebergPublishableTypes(schema.logicalRowType(), options);
         }
+    }
+
+    /**
+     * Refuses the types the mirror cannot publish: the conversion that would catch them only runs
+     * once the snapshot is durable.
+     */
+    public static void validateIcebergPublishableTypes(DataType dataType, CoreOptions options) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        checkArgument(
+                !containsType(dataType, SchemaValidation::isUnpublishableType),
+                "Columns of type %s or %s cannot be published as Iceberg metadata. The schema "
+                        + "history counts too, so dropping such a column does not make an existing "
+                        + "table publishable; disable '%s' instead.",
+                DataTypeRoot.BLOB,
+                DataTypeRoot.VECTOR,
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+        checkArgument(
+                options.toConfiguration().get(IcebergOptions.FORMAT_VERSION)
+                                >= MIN_ICEBERG_VARIANT_FORMAT_VERSION
+                        || !containsType(dataType, type -> type.is(DataTypeRoot.VARIANT)),
+                "Columns of type %s require Iceberg format version %s. Set '%s' = '%s', or remove "
+                        + "them.",
+                DataTypeRoot.VARIANT,
+                MIN_ICEBERG_VARIANT_FORMAT_VERSION,
+                IcebergOptions.FORMAT_VERSION.key(),
+                MIN_ICEBERG_VARIANT_FORMAT_VERSION);
+        checkArgument(
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                                != IcebergOptions.StorageType.REST_CATALOG
+                        || !containsType(dataType, type -> type.is(DataTypeRoot.VARIANT)),
+                "Variant columns do not support '%s'='%s' because the bundled Iceberg REST client "
+                        + "cannot parse the Iceberg variant type.",
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.REST_CATALOG);
+    }
+
+    private static boolean isUnpublishableType(DataType dataType) {
+        return dataType.isAnyOf(DataTypeRoot.BLOB, DataTypeRoot.VECTOR);
     }
 
     /** Validate geospatial types in a schema that will be published as Iceberg metadata. */
@@ -897,8 +861,13 @@ public class SchemaValidation {
                                 // PAIMON-6471: dot paths into a ROW field's members
                                 // (e.g. fields.row.inner.aggregate-function) are silently
                                 // dropped today and produce wrong results. This check
-                                // rejects them.
-                                if (segments.length > 3 && fields.length == 1) {
+                                // rejects them, except for the top-level sequence-group.sort-order
+                                // option, whose suffix itself contains a dot.
+                                boolean sequenceGroupSortOrder =
+                                        segments.length == 4 && isSequenceGroupSortOrderOption(k);
+                                if (segments.length > 3
+                                        && fields.length == 1
+                                        && !sequenceGroupSortOrder) {
                                     String parent = fields[0];
                                     schema.fields().stream()
                                             .filter(f -> f.name().equals(parent))
@@ -913,6 +882,17 @@ public class SchemaValidation {
                                 }
                             }
                         });
+    }
+
+    private static void validateSequenceGroupSortOrder(TableSchema schema, CoreOptions options) {
+        if (options.toMap().keySet().stream()
+                .anyMatch(optionKey -> isSequenceGroupSortOrderOption(optionKey))) {
+            checkArgument(
+                    !schema.primaryKeys().isEmpty()
+                            && options.mergeEngine() == MergeEngine.PARTIAL_UPDATE,
+                    "Sequence group sort-order options are only supported by primary-key tables with the partial-update merge engine.");
+            parseSequenceGroupSortOrders(options.toConfiguration());
+        }
     }
 
     private static void validateMergeFunction(TableSchema schema) {
@@ -1262,244 +1242,6 @@ public class SchemaValidation {
         }
     }
 
-    private static void validatePrimaryKeyVectorIndex(TableSchema schema, CoreOptions options) {
-        if (!options.primaryKeyVectorIndexEnabled()) {
-            return;
-        }
-
-        List<String> indexColumns = options.primaryKeyVectorIndexColumns();
-        checkArgument(
-                new HashSet<>(indexColumns).size() == indexColumns.size(),
-                "pk-vector.index.columns must not contain duplicate columns, but is %s.",
-                indexColumns);
-        checkArgument(
-                indexColumns.size() == 1,
-                "pk-vector.index.columns must contain exactly one column in the first release, but is %s.",
-                indexColumns);
-        String indexColumn = indexColumns.get(0);
-        String indexType = options.primaryKeyVectorIndexType(indexColumn);
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(indexColumn),
-                "pk-vector.index.columns must contain a non-empty column.");
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(indexType),
-                "fields.%s.pk-vector.index.type must be configured when a primary-key vector index is defined.",
-                indexColumn);
-        checkArgument(
-                !schema.primaryKeys().isEmpty(),
-                "Primary-key vector index requires a primary-key table.");
-        checkArgument(
-                options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
-                "Primary-key vector index requires deletion-vectors.enabled = true.");
-        checkArgument(
-                !options.deletionVectorsEnabled() || !options.deletionVectorsMergeOnRead(),
-                "Primary-key vector index with merge-engine = %s requires deletion-vectors.merge-on-read = false.",
-                options.mergeEngine());
-        checkArgument(
-                options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
-                "Primary-key vector index requires fixed or postpone bucket mode "
-                        + "(bucket > 0 or bucket = -2), but bucket is %s.",
-                options.bucket());
-        checkArgument(
-                !options.pkClusteringOverride(),
-                "Primary-key vector index does not support pk-clustering-override.");
-        options.primaryKeyVectorIndexOptions(indexColumn);
-
-        DataField vectorField =
-                schema.fields().stream()
-                        .filter(field -> field.name().equals(indexColumn))
-                        .findFirst()
-                        .orElse(null);
-        checkArgument(
-                vectorField != null && vectorField.type().getTypeRoot() == VECTOR,
-                "pk-vector.index.columns entry '%s' must reference a VECTOR column.",
-                indexColumn);
-        checkArgument(
-                ((VectorType) vectorField.type()).getElementType().getTypeRoot()
-                        == DataTypeRoot.FLOAT,
-                "pk-vector.index.columns entry '%s' must use FLOAT elements.",
-                indexColumn);
-        checkArgument(
-                Arrays.asList("l2", "cosine", "inner_product")
-                        .contains(options.primaryKeyVectorDistanceMetric(indexColumn)),
-                "fields.%s.pk-vector.distance.metric must be one of l2, cosine, inner_product, but is %s.",
-                indexColumn,
-                options.primaryKeyVectorDistanceMetric(indexColumn));
-    }
-
-    private static void validatePrimaryKeyFullTextIndex(TableSchema schema, CoreOptions options) {
-        if (!options.primaryKeyFullTextIndexEnabled()) {
-            return;
-        }
-
-        List<String> indexColumns = options.primaryKeyFullTextIndexColumns();
-        checkArgument(
-                indexColumns.size() == 1,
-                "%s must contain exactly one column in the first release, but is %s.",
-                CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(),
-                indexColumns);
-        String indexColumn = indexColumns.get(0);
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(indexColumn),
-                "%s must contain a non-empty column.",
-                CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key());
-        checkArgument(
-                !schema.primaryKeys().isEmpty(),
-                "Primary-key full-text index requires a primary-key table.");
-        checkArgument(
-                options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
-                "Primary-key full-text index requires deletion-vectors.enabled = true.");
-        checkArgument(
-                !options.deletionVectorsEnabled() || !options.deletionVectorsMergeOnRead(),
-                "Primary-key full-text index requires deletion-vectors.merge-on-read = false.");
-        checkArgument(
-                options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
-                "Primary-key full-text index requires fixed or postpone bucket mode "
-                        + "(bucket > 0 or bucket = -2), but bucket is %s.",
-                options.bucket());
-        checkArgument(
-                !options.pkClusteringOverride(),
-                "Primary-key full-text index does not support pk-clustering-override.");
-        checkArgument(
-                schema.nameToFieldMap().containsKey(indexColumn),
-                "%s entry '%s' must reference an existing column.",
-                CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(),
-                indexColumn);
-        DataTypeRoot typeRoot = schema.nameToFieldMap().get(indexColumn).type().getTypeRoot();
-        checkArgument(
-                typeRoot == DataTypeRoot.CHAR || typeRoot == DataTypeRoot.VARCHAR,
-                "%s entry '%s' must reference a CHAR/VARCHAR/STRING column.",
-                CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(),
-                indexColumn);
-        options.primaryKeyFullTextIndexOptions(indexColumn);
-    }
-
-    private static void validatePrimaryKeyIndexColumns(CoreOptions options) {
-        List<String> vectorColumns = options.primaryKeyVectorIndexColumns();
-        List<String> btreeColumns = options.primaryKeyBTreeIndexColumns();
-        List<String> bitmapColumns = options.primaryKeyBitmapIndexColumns();
-        List<String> multiValueColumns = options.primaryKeyMultiValueIndexColumns();
-        List<String> fullTextColumns = options.primaryKeyFullTextIndexColumns();
-        List<String> fmColumns = options.primaryKeyFMIndexColumns();
-        validateNoDuplicatePrimaryKeyIndexColumns(
-                vectorColumns, CoreOptions.PK_VECTOR_INDEX_COLUMNS.key());
-        validateNoDuplicatePrimaryKeyIndexColumns(
-                btreeColumns, CoreOptions.PK_BTREE_INDEX_COLUMNS.key());
-        validateNoDuplicatePrimaryKeyIndexColumns(
-                bitmapColumns, CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
-        validateNoDuplicatePrimaryKeyIndexColumns(
-                multiValueColumns, CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key());
-        validateNoDuplicatePrimaryKeyIndexColumns(
-                fullTextColumns, CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key());
-        validateNoDuplicatePrimaryKeyIndexColumns(fmColumns, CoreOptions.PK_FM_INDEX_COLUMNS.key());
-
-        Set<String> indexedColumns = new HashSet<>();
-        validateUniquePrimaryKeyIndexColumns(indexedColumns, vectorColumns);
-        validateUniquePrimaryKeyIndexColumns(indexedColumns, btreeColumns);
-        validateUniquePrimaryKeyIndexColumns(indexedColumns, bitmapColumns);
-        validateUniquePrimaryKeyIndexColumns(indexedColumns, multiValueColumns);
-        validateUniquePrimaryKeyIndexColumns(indexedColumns, fullTextColumns);
-        validateUniquePrimaryKeyIndexColumns(indexedColumns, fmColumns);
-    }
-
-    private static void validateNoDuplicatePrimaryKeyIndexColumns(
-            List<String> columns, String optionKey) {
-        checkArgument(
-                new HashSet<>(columns).size() == columns.size(),
-                "%s must not contain duplicate columns, but is %s.",
-                optionKey,
-                columns);
-    }
-
-    private static void validateUniquePrimaryKeyIndexColumns(
-            Set<String> indexedColumns, List<String> columns) {
-        for (String column : columns) {
-            checkArgument(
-                    indexedColumns.add(column),
-                    "Column '%s' can own at most one primary-key index.",
-                    column);
-        }
-    }
-
-    private static void validatePrimaryKeySortedIndexes(TableSchema schema, CoreOptions options) {
-        if (options.primaryKeyBTreeIndexColumns().isEmpty()
-                && options.primaryKeyBitmapIndexColumns().isEmpty()
-                && options.primaryKeyMultiValueIndexColumns().isEmpty()
-                && options.primaryKeyFMIndexColumns().isEmpty()) {
-            return;
-        }
-
-        checkArgument(
-                options.deletionVectorsEnabled(),
-                "Primary-key BTree, Bitmap, Multivalue, and FM indexes require deletion-vectors.enabled = true.");
-        checkArgument(
-                !schema.primaryKeys().isEmpty(),
-                "Primary-key BTree, Bitmap, Multivalue, and FM indexes require a primary-key table.");
-        checkArgument(
-                options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
-                "Primary-key BTree, Bitmap, Multivalue, and FM indexes require fixed or postpone bucket mode "
-                        + "(bucket > 0 or bucket = -2), but bucket is %s.",
-                options.bucket());
-        checkArgument(
-                !options.deletionVectorsMergeOnRead(),
-                "Primary-key BTree, Bitmap, Multivalue, and FM indexes require deletion-vectors.merge-on-read = false.");
-        checkArgument(
-                !options.pkClusteringOverride(),
-                "Primary-key BTree, Bitmap, Multivalue, and FM indexes do not support pk-clustering-override.");
-
-        validatePrimaryKeySortedIndexColumns(
-                schema,
-                options.primaryKeyBTreeIndexColumns(),
-                CoreOptions.PK_BTREE_INDEX_COLUMNS.key());
-        validatePrimaryKeySortedIndexColumns(
-                schema,
-                options.primaryKeyBitmapIndexColumns(),
-                CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
-        validatePrimaryKeySortedIndexColumns(
-                schema,
-                options.primaryKeyMultiValueIndexColumns(),
-                CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key());
-        validatePrimaryKeySortedIndexColumns(
-                schema, options.primaryKeyFMIndexColumns(), CoreOptions.PK_FM_INDEX_COLUMNS.key());
-
-        Map<String, DataField> fields = schema.nameToFieldMap();
-        for (String column : options.primaryKeyBTreeIndexColumns()) {
-            GlobalIndexer.create(
-                    BTreeGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
-                    options.primaryKeyBTreeIndexOptions(column));
-        }
-        for (String column : options.primaryKeyBitmapIndexColumns()) {
-            GlobalIndexer.create(
-                    BitmapGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
-                    options.primaryKeyBitmapIndexOptions(column));
-        }
-        for (String column : options.primaryKeyMultiValueIndexColumns()) {
-            GlobalIndexer.create(
-                    MultiValueGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
-                    options.primaryKeyMultiValueIndexOptions(column));
-        }
-        for (String column : options.primaryKeyFMIndexColumns()) {
-            GlobalIndexer.create(
-                    FMGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
-                    options.primaryKeyFMIndexOptions(column));
-        }
-    }
-
-    private static void validatePrimaryKeySortedIndexColumns(
-            TableSchema schema, List<String> columns, String optionKey) {
-        for (String column : columns) {
-            checkArgument(
-                    schema.fieldNames().contains(column),
-                    "%s entry '%s' must reference an existing column.",
-                    optionKey,
-                    column);
-        }
-    }
-
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {
         List<String> sequenceField = options.sequenceField();
         if (!sequenceField.isEmpty()) {
@@ -1538,10 +1280,33 @@ public class SchemaValidation {
                                 schema.primaryKeys(), schema.partitionKeys()));
             }
         }
+
+        Set<String> geospatialSequenceFields =
+                schema.fields().stream()
+                        .filter(field -> sequenceField.contains(field.name()))
+                        .filter(
+                                field ->
+                                        field.type()
+                                                .isAnyOf(
+                                                        DataTypeRoot.GEOMETRY,
+                                                        DataTypeRoot.GEOGRAPHY))
+                        .map(DataField::name)
+                        .collect(Collectors.toSet());
+        checkArgument(
+                geospatialSequenceFields.isEmpty(),
+                "Geometry and geography columns cannot be sequence fields: %s.",
+                geospatialSequenceFields);
     }
 
     private static void validateBucket(TableSchema schema, CoreOptions options) {
         int bucket = options.bucket();
+        if (options.bucketFunctionProvider().isPresent()) {
+            checkArgument(
+                    bucket > 0,
+                    "A custom bucket-function.provider requires a fixed positive bucket count.");
+            // Validate provider discovery and bucket-key compatibility before creating the table.
+            BucketFunction.create(options, schema.logicalBucketKeyType());
+        }
         if (bucket == -1) {
             if (options.toMap().get(BUCKET_KEY.key()) != null) {
                 throw new IllegalArgumentException(
@@ -1585,6 +1350,22 @@ public class SchemaValidation {
                 }
             }
         }
+
+        Set<String> geospatialBucketKeys =
+                schema.fields().stream()
+                        .filter(field -> schema.bucketKeys().contains(field.name()))
+                        .filter(
+                                field ->
+                                        field.type()
+                                                .isAnyOf(
+                                                        DataTypeRoot.GEOMETRY,
+                                                        DataTypeRoot.GEOGRAPHY))
+                        .map(DataField::name)
+                        .collect(Collectors.toSet());
+        checkArgument(
+                geospatialBucketKeys.isEmpty(),
+                "Geometry and geography columns cannot be bucket keys: %s.",
+                geospatialBucketKeys);
     }
 
     private static boolean isPostponeBucketTable(TableSchema schema, int bucket) {
@@ -1613,6 +1394,146 @@ public class SchemaValidation {
                         FieldAggregatorFactory.class,
                         aggFuncName);
             }
+        }
+    }
+
+    /**
+     * Rejects type-incompatible aggregation functions (e.g. 'collect' on a non-array column) when
+     * the schema is committed. Only called on the schema commit path, not when loading tables.
+     */
+    public static void validateAggregationFunctionTypes(TableSchema schema) {
+        if (schema.primaryKeys().isEmpty()) {
+            return;
+        }
+        CoreOptions options = new CoreOptions(schema.options());
+        switch (options.mergeEngine()) {
+            case DEDUPLICATE:
+            case FIRST_ROW:
+                return;
+            default:
+        }
+
+        RowType rowType = schema.logicalRowType();
+        List<String> primaryKeys = schema.primaryKeys();
+        List<String> sequenceFields = options.sequenceField();
+        List<String> orderingFields = new ArrayList<>();
+        List<String> protectedFields = new ArrayList<>();
+        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
+            if (isSequenceGroupOption(entry.getKey())) {
+                orderingFields.addAll(sequenceGroupOrderingFields(entry.getKey()));
+                protectedFields.addAll(sequenceGroupProtectedFields(entry.getValue()));
+            }
+        }
+
+        for (int i = 0; i < rowType.getFieldNames().size(); i++) {
+            String fieldName = rowType.getFieldNames().get(i);
+            String aggFuncName =
+                    resolveAggFuncName(
+                            options,
+                            fieldName,
+                            primaryKeys,
+                            sequenceFields,
+                            orderingFields,
+                            protectedFields);
+            if (aggFuncName == null) {
+                continue;
+            }
+            FieldAggregatorFactory.create(
+                    rowType.getFieldTypes().get(i), fieldName, aggFuncName, options);
+        }
+    }
+
+    /** Mirrors how each merge engine resolves the aggregation function of a field. */
+    @Nullable
+    private static String resolveAggFuncName(
+            CoreOptions options,
+            String fieldName,
+            List<String> primaryKeys,
+            List<String> sequenceFields,
+            List<String> orderingFields,
+            List<String> protectedFields) {
+        if (options.mergeEngine() == MergeEngine.AGGREGATE) {
+            return AggregateMergeFunction.getAggFuncName(
+                    fieldName, options, primaryKeys, sequenceFields);
+        }
+
+        // partial-update only excludes sequence-group ordering fields from aggregation; a
+        // sequence.field column can still be configured with an aggregate function.
+        return PartialUpdateMergeFunction.getAggFuncName(
+                fieldName, options, primaryKeys, orderingFields, protectedFields);
+    }
+
+    /** Rejects changes which invalidate stored generated values or their dependencies. */
+    public static void validateGeneratedColumnEvolution(TableSchema previous, TableSchema next) {
+        for (DataField field : previous.fields()) {
+            if (field.generationExpression() == null) {
+                continue;
+            }
+            DataField target = next.idToFieldMap().get(field.id());
+            checkArgument(
+                    target != null
+                            && field.name().equals(target.name())
+                            && field.type().equals(target.type())
+                            && field.generationExpression().equals(target.generationExpression()),
+                    "Cannot change generated column '%s'.",
+                    field.name());
+            GeneratedColumn expression = GeneratedColumn.create(previous.logicalRowType(), field);
+            for (String sourceName : expression.sourceNames()) {
+                DataField source = previous.logicalRowType().getField(sourceName);
+                DataField newSource = next.idToFieldMap().get(source.id());
+                checkArgument(
+                        newSource != null
+                                && source.name().equals(newSource.name())
+                                && source.type().equals(newSource.type()),
+                        "Cannot rename, drop or change the type of column '%s' referenced by generated column '%s'.",
+                        source.name(),
+                        field.name());
+            }
+        }
+        for (DataField field : next.fields()) {
+            if (field.generationExpression() != null) {
+                DataField old = previous.idToFieldMap().get(field.id());
+                checkArgument(
+                        old != null && old.generationExpression() != null,
+                        "Generated columns can only be defined when creating a table.");
+            }
+        }
+    }
+
+    private static void validateGeneratedColumns(TableSchema schema, CoreOptions options) {
+        RowType rowType = schema.logicalRowType();
+        for (DataField field : schema.fields()) {
+            validateNoNestedGeneratedColumns(field.type());
+            if (field.generationExpression() == null) {
+                continue;
+            }
+            checkArgument(
+                    field.defaultValue() == null,
+                    "Generated column '%s' cannot have a default value.",
+                    field.name());
+            checkArgument(
+                    !options.rowkindField().filter(field.name()::equals).isPresent(),
+                    "Generated column '%s' cannot be used as rowkind.field.",
+                    field.name());
+            GeneratedColumn.create(rowType, field);
+        }
+    }
+
+    private static void validateNoNestedGeneratedColumns(DataType type) {
+        if (type instanceof RowType) {
+            for (DataField nested : ((RowType) type).getFields()) {
+                checkArgument(
+                        nested.generationExpression() == null,
+                        "Generated columns must be top-level columns.");
+                validateNoNestedGeneratedColumns(nested.type());
+            }
+        } else if (type instanceof ArrayType) {
+            validateNoNestedGeneratedColumns(((ArrayType) type).getElementType());
+        } else if (type instanceof MultisetType) {
+            validateNoNestedGeneratedColumns(((MultisetType) type).getElementType());
+        } else if (type instanceof MapType) {
+            validateNoNestedGeneratedColumns(((MapType) type).getKeyType());
+            validateNoNestedGeneratedColumns(((MapType) type).getValueType());
         }
     }
 

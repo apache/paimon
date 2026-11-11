@@ -36,22 +36,22 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
-  /v1/{prefix}/labels/{entityType}/{entityName}:
+  /v1/{prefix}/labels:
     parameters:
       - $ref: '#/components/parameters/Prefix'
-      - $ref: '#/components/parameters/LabelEntityType'
-      - $ref: '#/components/parameters/LabelEntityName'
     get:
       tags: [label]
       summary: List labels attached directly to one entity
       operationId: listLabels
       description: |
-        Returns direct bindings for the exact entity in stable pagination order. Labels are
-        distinct from table snapshot tags. An existing entity with no labels returns an empty
-        list; a missing entity returns 404. Following catalog pagination, an empty page
-        terminates listing and must not carry a continuation token. Omit nextPageToken on
-        the last page.
+        Returns direct bindings for the exact entity named by the entityType and entityName query
+        parameters, in stable pagination order. Labels are distinct from table snapshot tags. An
+        existing entity with no labels returns an empty list; a missing entity returns 404.
+        Following catalog pagination, an empty page terminates listing and must not carry a
+        continuation token. Omit nextPageToken on the last page.
       parameters:
+        - $ref: '#/components/parameters/LabelEntityTypeQuery'
+        - $ref: '#/components/parameters/LabelEntityNameQuery'
         - $ref: '#/components/parameters/PageToken'
         - $ref: '#/components/parameters/MaxResults'
       responses:
@@ -75,55 +75,28 @@ paths:
           $ref: '#/components/responses/ServerError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
-  /v1/{prefix}/labels/{entityType}/{entityName}/{key}:
+  /v1/{prefix}/labels/get:
     parameters:
       - $ref: '#/components/parameters/Prefix'
-      - $ref: '#/components/parameters/LabelEntityType'
-      - $ref: '#/components/parameters/LabelEntityName'
-      - $ref: '#/components/parameters/LabelKey'
     post:
       tags: [label]
-      summary: Create or replace one label binding
-      operationId: upsertLabel
+      summary: Get one label binding
+      operationId: getLabel
       description: |
-        Atomically creates a binding or replaces the value identified by
-        (prefix, entityType, entityName, key) in the path. The body contains only value.
-        The entity must already exist. Other keys are unchanged. Repeating the same request
-        leaves the same label value. This operation does not create the target entity or a
-        separate label definition.
+        Returns the direct binding identified by (prefix, entityType, entityName, key) in the
+        body. This operation is read-only and safe to retry. A missing entity or key returns 404.
+        For a missing key, ErrorResponse.resourceType is LABEL and resourceName is the key; for a
+        missing entity they identify the entity instead.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpsertLabelRequest'
+              $ref: '#/components/schemas/GetLabelRequest'
             example:
-              value: sales
-      responses:
-        '200':
-          description: Label binding created or replaced; no response body.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
-    get:
-      tags: [label]
-      summary: Get one label binding
-      operationId: getLabel
-      description: |
-        Returns one direct binding. A missing entity or key returns 404. For a missing key,
-        ErrorResponse.resourceType is LABEL and resourceName is the key; for a missing entity
-        they identify the entity instead.
+              entityType: TABLE
+              entityName: sales.orders
+              key: domain
       responses:
         '200':
           description: The requested label binding.
@@ -145,13 +118,66 @@ paths:
           $ref: '#/components/responses/ServerError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
-    delete:
+  /v1/{prefix}/labels/upsert:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
+    post:
+      tags: [label]
+      summary: Create or replace one label binding
+      operationId: upsertLabel
+      description: |
+        Atomically creates a binding or replaces the value identified by
+        (prefix, entityType, entityName, key) in the body. The entity must already exist. Other
+        keys are unchanged. Repeating the same request leaves the same label value. This operation
+        does not create the target entity or a separate label definition.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertLabelRequest'
+            example:
+              entityType: TABLE
+              entityName: sales.orders
+              key: domain
+              value: sales
+      responses:
+        '200':
+          description: Label binding created or replaced; no response body.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/{prefix}/labels/delete:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
+    post:
       tags: [label]
       summary: Idempotently delete one label binding
       operationId: deleteLabel
       description: |
-        Deletes only the binding identified by the path. An already absent key succeeds
-        when the entity exists. A 404 identifies a missing entity, not an absent label.
+        Deletes only the binding identified by the body. An already absent key succeeds when the
+        entity exists. A 404 identifies a missing entity, not an absent label.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteLabelRequest'
+            example:
+              entityType: TABLE
+              entityName: sales.orders
+              key: domain
       responses:
         '200':
           description: Label binding is absent; no response body.
@@ -416,24 +442,18 @@ components:
       schema:
         type: string
         minLength: 1
-    LabelEntityType:
+    LabelEntityTypeQuery:
       name: entityType
-      in: path
+      in: query
       required: true
       schema:
         $ref: '#/components/schemas/LabelEntityType'
-    LabelEntityName:
+    LabelEntityNameQuery:
       name: entityName
-      in: path
+      in: query
       required: true
       schema:
         $ref: '#/components/schemas/LabelEntityName'
-    LabelKey:
-      name: key
-      in: path
-      required: true
-      schema:
-        $ref: '#/components/schemas/LabelKey'
     ResourceTypeQuery:
       name: resourceType
       in: query
@@ -591,31 +611,57 @@ components:
         sales.orders for a table and sales.orders.order_id for a column. Clients treat the name
         as opaque: do not split it on dots or append a local engine catalog alias. Servers must
         define unambiguous names, including quoting or escaping where necessary.
-        In a path, encode the complete name as one UTF-8 segment using REST Catalog URL
-        encoding (spaces as +, literal + as %2B, slash as %2F); decode exactly once. Encode
-        dot-only segments . and .. as %2E and %2E%2E. JSON responses carry the original unencoded
-        name. All operations resolve the entity through the path.
+        The name travels as a query parameter or a JSON string, never as a URL path segment, so
+        that gateways which reject or rewrite characters such as backticks, percent signs, or
+        slashes in paths pass every name unchanged.
       examples: [sales.orders]
     LabelKey:
       type: string
       minLength: 1
       pattern: '\S'
       description: |
-        Non-blank, case-sensitive label key. Encode it as a single path segment using the same
-        encoding as entityName. Preserve the original string in JSON responses.
+        Non-blank, case-sensitive label key. Like entityName it travels only in JSON, never in a
+        URL path. Preserve the original string in JSON responses.
       examples: [domain]
+    GetLabelRequest:
+      type: object
+      required: [entityType, entityName, key]
+      properties:
+        entityType:
+          $ref: '#/components/schemas/LabelEntityType'
+        entityName:
+          $ref: '#/components/schemas/LabelEntityName'
+        key:
+          $ref: '#/components/schemas/LabelKey'
+      description: Identity of the label binding to read.
     UpsertLabelRequest:
       type: object
-      required: [value]
+      required: [entityType, entityName, key, value]
       properties:
+        entityType:
+          $ref: '#/components/schemas/LabelEntityType'
+        entityName:
+          $ref: '#/components/schemas/LabelEntityName'
+        key:
+          $ref: '#/components/schemas/LabelKey'
         value:
           type: string
           description: Complete replacement value. An empty string is valid; null is not.
       description: |
-        Value for the label binding identified by the request path. The body does not repeat
-        entityType, entityName, or key. Entity existence checks, authorization, and atomic
-        upsert are server responsibilities. Labels do not themselves grant access or enforce
-        a data policy.
+        Identity and value of the label binding to create or replace. Entity existence checks,
+        authorization, and atomic upsert are server responsibilities. Labels do not themselves
+        grant access or enforce a data policy.
+    DeleteLabelRequest:
+      type: object
+      required: [entityType, entityName, key]
+      properties:
+        entityType:
+          $ref: '#/components/schemas/LabelEntityType'
+        entityName:
+          $ref: '#/components/schemas/LabelEntityName'
+        key:
+          $ref: '#/components/schemas/LabelKey'
+      description: Identity of the label binding to delete.
     GetLabelResponse:
       type: object
       required: [entityType, entityName, key, value]

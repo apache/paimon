@@ -21,6 +21,9 @@ package org.apache.paimon.globalindex;
 /** A global indexer whose normalized keys must be sorted before they are written. */
 public interface SortedGlobalIndexer extends GlobalIndexer {
 
-    /** Defines how source-column values are normalized into the keys consumed by the writer. */
+    /**
+     * Defines how source values or projected tuples are normalized into the keys consumed by the
+     * writer.
+     */
     GlobalIndexKeyExtractor keyExtractor();
 }

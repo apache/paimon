@@ -24,9 +24,9 @@ import pytest
 import pypaimon.multimodal as pm
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.table.source.full_text_scan import FullTextScanPlan
+from pypaimon.table.source.search_types import FullTextScanPlan
 from pypaimon.table.source.full_text_search_split import RawFullTextSearchSplit
-from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
+from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
 from pypaimon.utils.range import Range
 
 SCHEMA = pa.schema([
@@ -40,7 +40,7 @@ def table(tmp_path):
     return pm.connect(options={"warehouse": str(tmp_path)}).create_table(
         "vectors", schema=SCHEMA,
         options={"file.format": "parquet", "vector.file.format": "parquet",
-                 "vector-index.search-mode": "full"})
+                 "vector-index.search-mode": "full", "deletion-vectors.enabled": "true"})
 
 
 def search(table, kind="vector", **options):
@@ -147,7 +147,7 @@ def test_time_travel_survives_concurrent_writes_and_retained_tag_snapshot(table,
         table.update("id = 1", {"category": "blocked"})
         if selector in ("tag", "version"):
             table.raw_table.replace_tag("training")
-            assert not execution._table.options.native_plan_enabled(default=True)
+            assert execution._table._read_snapshot.id == source.id
         # Read-option copies must retain the captured snapshot too.
         execution._table = execution._table.copy({"read.batch-size": "2"})
         return lookup(execution, result)

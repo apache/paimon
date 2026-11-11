@@ -51,7 +51,15 @@ trait WriteHelper extends Logging {
   def postDriverMetrics(commitMetrics: Array[CustomTaskMetric]): Unit = {
     val spark = PaimonSparkSession.active
     val executionId = spark.sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
+    if (executionId == null) {
+      logDebug("Skipping driver metrics because there is no SQL execution ID")
+      return
+    }
     val executionMetrics = Compatibility.getExecutionMetrics(spark, executionId.toLong).distinct
+    if (executionMetrics.isEmpty) {
+      logDebug(s"Skipping driver metrics because execution $executionId has no SQL metrics")
+      return
+    }
     val metricUpdates = executionMetrics.flatMap {
       m =>
         commitMetrics.find(

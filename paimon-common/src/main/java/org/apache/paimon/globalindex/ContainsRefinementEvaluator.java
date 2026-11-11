@@ -131,7 +131,8 @@ final class ContainsRefinementEvaluator {
                                             Optional.of(
                                                     new GlobalIndexEvaluator.Evaluation(
                                                             GlobalIndexResult.createEmpty(),
-                                                            emptyResultFields)));
+                                                            emptyResultFields,
+                                                            null)));
                                 }
                             }
                             List<ContainsGroup> groupedContains = new ArrayList<>(groups.values());
@@ -169,7 +170,8 @@ final class ContainsRefinementEvaluator {
                                                                                 .Evaluation(
                                                                                 GlobalIndexResult
                                                                                         .createEmpty(),
-                                                                                emptyResultFields)));
+                                                                                emptyResultFields,
+                                                                                null)));
                                                     }
                                                 }
 
@@ -269,7 +271,8 @@ final class ContainsRefinementEvaluator {
                                         value ->
                                                 new GlobalIndexEvaluator.Evaluation(
                                                         value,
-                                                        Collections.singleton(group.fieldId))));
+                                                        Collections.singleton(group.fieldId),
+                                                        null)));
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> intersectReaderResults(

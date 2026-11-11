@@ -25,16 +25,18 @@ import org.apache.paimon.spark.execution.{CreatePaimonV1FunctionCommand, Describ
 import org.apache.paimon.spark.util.OptionUtils
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.FunctionIdentifier
-import org.apache.spark.sql.catalyst.analysis.{UnresolvedException, UnresolvedFunction}
+import org.apache.spark.sql.catalyst.{FunctionIdentifier, InternalRow}
+import org.apache.spark.sql.catalyst.analysis.{UnresolvedException, UnresolvedFunction, UnresolvedGenerator}
 import org.apache.spark.sql.catalyst.catalog.CatalogFunction
-import org.apache.spark.sql.catalyst.expressions.{Expression, Unevaluable}
+import org.apache.spark.sql.catalyst.expressions.{Expression, Generator, SubqueryExpression, Unevaluable}
+import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateFunction, DescribeFunction, DropFunction, LogicalPlan, SubqueryAlias, UnresolvedWith}
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.catalyst.trees.TreePattern.{TreePattern, UNRESOLVED_FUNCTION}
+import org.apache.spark.sql.catalyst.trees.TreePattern.{GENERATOR, PLAN_EXPRESSION, TreePattern, UNRESOLVED_FUNCTION}
 import org.apache.spark.sql.connector.catalog.CatalogManager
+import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
-import org.apache.spark.sql.types.DataType
+import org.apache.spark.sql.types.{DataType, StructType}
 
 case class RewritePaimonFunctionCommands(spark: SparkSession) extends Rule[LogicalPlan] {
 
@@ -123,28 +125,95 @@ case class RewritePaimonFunctionCommands(spark: SparkSession) extends Rule[Logic
           u,
           alias => transformPaimonV1Function(alias).asInstanceOf[SubqueryAlias])
       case l: LogicalPlan =>
-        l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
+        l.transformExpressionsWithPruning(
+          _.containsAnyPattern(UNRESOLVED_FUNCTION, GENERATOR, PLAN_EXPRESSION)) {
+          case subquery: SubqueryExpression =>
+            // Spark's recursive subquery analyzer does not rerun this parser rewrite.
+            subquery.withNewPlan(transformPaimonV1Function(subquery.plan))
           case u: UnresolvedFunction =>
-            lookup.CatalogAndFunctionIdentifier.unapply(u.nameParts) match {
-              case Some((v1FunctionCatalog: SupportV1Function, funcIdent, false))
-                  // For Paimon built-in functions, Spark will resolve them by itself.
-                  if !lookup.isPaimonBuiltInFunction(funcIdent) =>
-                // If the function is already registered, avoid redundant lookup in the catalog to reduce overhead.
-                if (v1FunctionCatalog.v1FunctionRegistered(funcIdent)) {
-                  UnResolvedPaimonV1Function(funcIdent, u, None)
-                } else {
-                  val function = v1FunctionCatalog.getFunction(funcIdent)
-                  if (PaimonFunctionLookup.isPaimonV1Function(function)) {
-                    UnResolvedPaimonV1Function(funcIdent, u, Some(function))
-                  } else {
-                    u
-                  }
-                }
-              case _ => u
-            }
+            lookupFunction(u.nameParts)
+              .map {
+                case (funcIdent, function) => UnResolvedPaimonV1Function(funcIdent, u, function)
+              }
+              .getOrElse(u)
+          case u @ UnresolvedGenerator(name, arguments) =>
+            // Spark parses a two-part generator name as database.function. Qualify it before
+            // catalog lookup so a database with the same name as a catalog is not reinterpreted.
+            val nameParts = name.database
+              .map(
+                database =>
+                  Seq(
+                    name.catalog.getOrElse(catalogManager.currentCatalog.name()),
+                    database,
+                    name.funcName))
+              .getOrElse(name.nameParts)
+            lookupFunction(nameParts)
+              .map {
+                case (funcIdent, function) =>
+                  UnResolvedPaimonV1Generator(funcIdent, arguments, function)
+              }
+              .getOrElse(u)
         }
     }
   }
+
+  private def lookupFunction(
+      nameParts: Seq[String]): Option[(FunctionIdentifier, Option[PaimonFunction])] = {
+    lookup.CatalogAndFunctionIdentifier.unapply(nameParts) match {
+      case Some((v1FunctionCatalog: SupportV1Function, funcIdent, false))
+          // Spark resolves built-in functions itself.
+          if !lookup.isPaimonBuiltInFunction(funcIdent) =>
+        // Avoid redundant catalog lookups for functions already loaded into the registry.
+        if (v1FunctionCatalog.v1FunctionRegistered(funcIdent)) {
+          Some((funcIdent, None))
+        } else {
+          val function = v1FunctionCatalog.getFunction(funcIdent)
+          if (PaimonFunctionLookup.isPaimonV1Function(function)) {
+            Some((funcIdent, Some(function)))
+          } else {
+            None
+          }
+        }
+      case _ => None
+    }
+  }
+}
+
+/** Keeps a REST catalog generator unresolved until Spark resolves its arguments. */
+case class UnResolvedPaimonV1Generator(
+    funcIdent: FunctionIdentifier,
+    arguments: Seq[Expression],
+    func: Option[PaimonFunction])
+  extends Generator {
+
+  override def children: Seq[Expression] = arguments
+
+  override def elementSchema: StructType = throw new UnresolvedException("elementSchema")
+  override def dataType: DataType = throw new UnresolvedException("dataType")
+  override def foldable: Boolean = throw new UnresolvedException("foldable")
+  override def nullable: Boolean = throw new UnresolvedException("nullable")
+  override lazy val resolved = false
+
+  override def prettyName: String = funcIdent.unquotedString
+
+  def resolve(function: Expression): Generator = function match {
+    case generator: Generator => generator
+    case other =>
+      throw QueryCompilationErrors.generatorNotExpectedError(
+        funcIdent,
+        other.getClass.getCanonicalName)
+  }
+
+  // Nothing is compatible with both Scala 2.12's TraversableOnce and 2.13's IterableOnce.
+  override def eval(input: InternalRow): Nothing =
+    throw QueryExecutionErrors.cannotEvaluateExpressionError(this)
+
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
+    throw QueryExecutionErrors.cannotGenerateCodeForExpressionError(this)
+
+  override protected def withNewChildrenInternal(
+      newChildren: IndexedSeq[Expression]): UnResolvedPaimonV1Generator =
+    copy(arguments = newChildren)
 }
 
 /** An unresolved Paimon V1 function to let Spark resolve the necessary variables. */

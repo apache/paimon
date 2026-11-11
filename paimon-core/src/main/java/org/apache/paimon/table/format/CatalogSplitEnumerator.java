@@ -43,6 +43,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -89,7 +90,8 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
     List<Split> enumeratePartitions(@Nullable PartitionPredicate partitionFilter)
             throws IOException {
         CatalogPartitionListing listing = findCatalogPartitions(partitionFilter);
-        return enumeratePartitions(filterPartitions(listing.partitionPaths, partitionFilter));
+        return enumeratePartitions(
+                filterPartitions(listing.partitionPaths, partitionFilter), listing.formats);
     }
 
     @Override
@@ -101,11 +103,13 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
         List<Pair<LinkedHashMap<String, String>, Path>> selected =
                 filterPartitions(listing.partitionPaths, partitionFilter);
         List<PartitionEntry> entries = toPartitionEntries(listing.partitions, partitionFilter);
-        return new ScanPlan(enumeratePartitions(selected), rowCount(entries));
+        return new ScanPlan(enumeratePartitions(selected, listing.formats), rowCount(entries));
     }
 
     private List<Split> enumeratePartitions(
-            List<Pair<LinkedHashMap<String, String>, Path>> partitions) throws IOException {
+            List<Pair<LinkedHashMap<String, String>, Path>> partitions,
+            Map<Map<String, String>, String> formats)
+            throws IOException {
         List<Split> splits = new ArrayList<>();
         if (partitions.isEmpty()) {
             return splits;
@@ -140,7 +144,8 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
                                 fileIOResolver.fileIO(useCatalogContextFileIO),
                                 pair.getValue(),
                                 partitionRow,
-                                useCatalogContextFileIO);
+                                useCatalogContextFileIO,
+                                formats.get(pair.getKey()));
                     } catch (FileNotFoundException e) {
                         warnMissingPartition(pair.getKey(), pair.getValue());
                         return Collections.emptyList();
@@ -179,7 +184,23 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
         }
         List<Pair<LinkedHashMap<String, String>, Path>> partitionPaths =
                 toSpecsAndPaths(partitions, coreOptions.formatTablePartitionOnlyValueInPath());
-        return new CatalogPartitionListing(partitions, partitionPaths);
+        Map<Map<String, String>, String> formats = new HashMap<>();
+        for (Partition partition : partitions) {
+            Map<String, String> spec =
+                    normalizeSpec(
+                            partition.spec(), coreOptions.formatTablePartitionOnlyValueInPath());
+            String format =
+                    FormatTablePartitionOptions.fileFormat(table.options(), partition.options());
+            String previous = formats.putIfAbsent(spec, format);
+            if (previous != null && !previous.equals(format)) {
+                throw new IllegalStateException(
+                        "Catalog returned conflicting file formats for partition "
+                                + spec
+                                + " of Format Table "
+                                + table.fullName());
+            }
+        }
+        return new CatalogPartitionListing(partitions, partitionPaths, formats);
     }
 
     @Override
@@ -197,12 +218,15 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
 
         private final List<Partition> partitions;
         private final List<Pair<LinkedHashMap<String, String>, Path>> partitionPaths;
+        private final Map<Map<String, String>, String> formats;
 
         private CatalogPartitionListing(
                 List<Partition> partitions,
-                List<Pair<LinkedHashMap<String, String>, Path>> partitionPaths) {
+                List<Pair<LinkedHashMap<String, String>, Path>> partitionPaths,
+                Map<Map<String, String>, String> formats) {
             this.partitions = partitions;
             this.partitionPaths = partitionPaths;
+            this.formats = formats;
         }
     }
 

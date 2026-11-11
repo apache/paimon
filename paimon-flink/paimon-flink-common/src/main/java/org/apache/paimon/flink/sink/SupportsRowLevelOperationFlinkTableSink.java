@@ -86,6 +86,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
         FlinkTableSink copied = new FlinkTableSink(tableIdentifier, table, context);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
+        copied.rowLevelUpdate = rowLevelUpdate;
         copied.deletePredicate = deletePredicate;
         copied.dataEvolutionDeleteSnapshotId = dataEvolutionDeleteSnapshotId;
         return copied;
@@ -94,6 +95,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     @Override
     public RowLevelUpdateInfo applyRowLevelUpdate(
             List<Column> updatedColumns, @Nullable RowLevelModificationScanContext context) {
+        rowLevelUpdate = true;
         // Since only UPDATE_AFTER type messages can be received at present,
         // AppendOnlyFileStoreTable cannot correctly handle old data, so they are marked as
         // unsupported. Similarly, it is not allowed to update the primary key column when updating

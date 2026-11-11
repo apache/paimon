@@ -55,6 +55,12 @@ public interface KeySerializer {
 
     Comparator<Object> createComparator();
 
+    /** Compares serialized keys using the same ordering as {@link #createComparator()}. */
+    default Comparator<MemorySlice> createSliceComparator() {
+        Comparator<Object> comparator = createComparator();
+        return (left, right) -> comparator.compare(deserialize(left), deserialize(right));
+    }
+
     static KeySerializer create(DataType type) {
         return type.accept(
                 new DataTypeDefaultVisitor<KeySerializer>() {

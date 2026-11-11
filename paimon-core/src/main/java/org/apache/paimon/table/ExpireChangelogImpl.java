@@ -21,6 +21,8 @@ package org.apache.paimon.table;
 import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.options.ExpireConfig;
@@ -149,6 +151,12 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         return expireUntil(earliestChangelogId, maxExclusive);
     }
 
+    /**
+     * Expire changelogs in {@code [earliestId, endExclusiveId)}.
+     *
+     * @return number of changelogs successfully deleted. A missing changelog, one skipped after a
+     *     file-skipper failure, or one whose file remains after a failed deletion, is not counted.
+     */
     public int expireUntil(long earliestId, long endExclusiveId) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Changelog expire range is [{}, {})", earliestId, endExclusiveId);
@@ -169,6 +177,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         }
         skippingSnapshots.add(snapshotManager.earliestSnapshot());
         Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
+        int deleted = 0;
         for (long id = earliestId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete changelog files from changelog #{}", id);
@@ -193,34 +202,53 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
 
             changelogDeletion.cleanDeletedDataFiles(changelog, skipper);
             changelogDeletion.cleanUnusedManifests(changelog, manifestSkippSet);
-            changelogManager.fileIO().deleteQuietly(changelogManager.longLivedChangelogPath(id));
+            if (deleteChangelogFile(
+                    changelogManager.fileIO(), changelogManager.longLivedChangelogPath(id))) {
+                deleted++;
+            }
         }
 
         changelogDeletion.cleanEmptyDirectories();
         writeEarliestHintFile(endExclusiveId);
-        return (int) (endExclusiveId - earliestId);
+        return deleted;
     }
 
-    /** expire all separated changelogs, only used by ExpireChangelogsProcedure. */
+    /**
+     * Expire all separated changelogs.
+     *
+     * <p>The return type stays {@code void} so callers compiled against {@code ()V}, including the
+     * Flink procedure, remain compatible. Use {@link #expireAllDeletedCount()} when the deleted
+     * count is needed.
+     */
     public void expireAll() {
+        expireAllDeletedCount();
+    }
+
+    /**
+     * Expire all separated changelogs.
+     *
+     * @return number of changelogs successfully deleted. A missing changelog, one skipped after a
+     *     file-skipper failure, or one whose file remains after a failed deletion, is not counted.
+     */
+    public int expireAllDeletedCount() {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
             // no snapshot, nothing to expire
-            return;
+            return 0;
         }
 
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
         if (earliestSnapshotId == null) {
-            return;
+            return 0;
         }
 
         Long latestChangelogId = changelogManager.latestLongLivedChangelogId();
         if (latestChangelogId == null) {
-            return;
+            return 0;
         }
         Long earliestChangelogId = changelogManager.earliestLongLivedChangelogId();
         if (earliestChangelogId == null) {
-            return;
+            return 0;
         }
 
         LOG.info(
@@ -240,6 +268,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         skippingSnapshots.add(snapshotManager.snapshot(earliestSnapshotId));
 
         Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
+        int deleted = 0;
         for (long id = earliestChangelogId; id <= latestChangelogId; id++) {
 
             LOG.info("Ready to delete changelog files from changelog #{}", id);
@@ -264,7 +293,10 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
 
             changelogDeletion.cleanDeletedDataFiles(changelog, skipper);
             changelogDeletion.cleanUnusedManifests(changelog, manifestSkippSet);
-            changelogManager.fileIO().deleteQuietly(changelogManager.longLivedChangelogPath(id));
+            if (deleteChangelogFile(
+                    changelogManager.fileIO(), changelogManager.longLivedChangelogPath(id))) {
+                deleted++;
+            }
         }
 
         // try delete changelog hint file
@@ -276,6 +308,21 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         }
 
         changelogDeletion.cleanEmptyDirectories();
+        return deleted;
+    }
+
+    /**
+     * Delete a changelog file and report whether it is actually gone. {@link FileIO#deleteQuietly}
+     * swallows I/O failures, so a file that is still present is not a successful removal.
+     */
+    static boolean deleteChangelogFile(FileIO fileIO, Path path) {
+        fileIO.deleteQuietly(path);
+        try {
+            return !fileIO.exists(path);
+        } catch (IOException e) {
+            LOG.warn("Failed to check whether changelog file {} still exists.", path, e);
+            return false;
+        }
     }
 
     private void writeEarliestHintFile(long earliest) {

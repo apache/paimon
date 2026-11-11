@@ -24,6 +24,7 @@ if sys.version_info[:2] < (3, 7):
     from pypaimon.data.decimal import Decimal
     from pypaimon.data.variant_path import (
         variant_get,
+        variant_to_pylist,
         variant_replace,
         variant_set,
     )
@@ -32,6 +33,7 @@ __all__ = [
     'Timestamp',
     'Decimal',
     'variant_get',
+    'variant_to_pylist',
     'variant_replace',
     'variant_set',
 ]
@@ -40,6 +42,7 @@ _MODULE_BY_EXPORT = {
     'Timestamp': 'pypaimon.data.timestamp',
     'Decimal': 'pypaimon.data.decimal',
     'variant_get': 'pypaimon.data.variant_path',
+    'variant_to_pylist': 'pypaimon.data.variant_path',
     'variant_replace': 'pypaimon.data.variant_path',
     'variant_set': 'pypaimon.data.variant_path',
 }

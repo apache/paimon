@@ -250,7 +250,8 @@ const sidebars = {
         "items": [
           "flink/sql-write",
           "flink/sql-query",
-          "flink/sql-lookup"
+          "flink/sql-lookup",
+          "flink/lake-stream"
         ]
       },
       {
@@ -415,16 +416,7 @@ const sidebars = {
           "pypaimon/merge-into",
           "pypaimon/video",
           "pypaimon/dataset-ingestion",
-          "pypaimon/lerobot",
-          {
-            "type": "category",
-            "label": "Examples & Benchmarks",
-            "collapsed": true,
-            "items": [
-              "pypaimon/robomind-agilex",
-              "pypaimon/robomind-act-benchmark"
-            ]
-          }
+          "pypaimon/lerobot"
         ]
       },
       {

@@ -200,6 +200,9 @@ public class OrcSimpleStatsExtractor implements SimpleStatsExtractor {
             case FLOAT:
                 assertStatsClass(field, stats, DoubleColumnStatistics.class);
                 DoubleColumnStatistics floatStats = (DoubleColumnStatistics) stats;
+                if (orcFloatingPointBoundsUnusable(floatStats)) {
+                    return new SimpleColStats(null, null, nullCount);
+                }
                 return new SimpleColStats(
                         (float) floatStats.getMinimum(),
                         (float) floatStats.getMaximum(),
@@ -207,6 +210,9 @@ public class OrcSimpleStatsExtractor implements SimpleStatsExtractor {
             case DOUBLE:
                 assertStatsClass(field, stats, DoubleColumnStatistics.class);
                 DoubleColumnStatistics doubleStats = (DoubleColumnStatistics) stats;
+                if (orcFloatingPointBoundsUnusable(doubleStats)) {
+                    return new SimpleColStats(null, null, nullCount);
+                }
                 return new SimpleColStats(
                         doubleStats.getMinimum(), doubleStats.getMaximum(), nullCount);
             case DATE:
@@ -238,6 +244,29 @@ public class OrcSimpleStatsExtractor implements SimpleStatsExtractor {
             default:
                 return new SimpleColStats(null, null, nullCount);
         }
+    }
+
+    /**
+     * ORC updates double min/max with primitive {@code <} / {@code >}. NaN never replaces a finite
+     * bound, {@code -0.0} never replaces {@code +0.0} as a minimum, and {@code +0.0} never replaces
+     * {@code -0.0} as a maximum. Any of those can make a predicate skip a file that still contains
+     * a matching row. A missing bound is not used for skipping.
+     */
+    private static boolean orcFloatingPointBoundsUnusable(DoubleColumnStatistics stats) {
+        double minimum = stats.getMinimum();
+        double maximum = stats.getMaximum();
+        if (Double.isNaN(minimum) || Double.isNaN(maximum) || Double.isNaN(stats.getSum())) {
+            return true;
+        }
+        return isPositiveZero(minimum) || isNegativeZero(maximum);
+    }
+
+    private static boolean isPositiveZero(double value) {
+        return Double.doubleToRawLongBits(value) == Double.doubleToRawLongBits(0.0d);
+    }
+
+    private static boolean isNegativeZero(double value) {
+        return Double.doubleToRawLongBits(value) == Double.doubleToRawLongBits(-0.0d);
     }
 
     private void assertStatsClass(

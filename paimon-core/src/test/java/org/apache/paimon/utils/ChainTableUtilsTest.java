@@ -774,6 +774,7 @@ public class ChainTableUtilsTest {
                         1L);
 
         assertThat(splits).hasSize(2);
+        assertThat(splits).allSatisfy(split -> assertThat(split.bucket()).isZero());
 
         List<Set<String>> groups =
                 splits.stream().map(ChainTableUtilsTest::fileNames).collect(Collectors.toList());
@@ -875,7 +876,7 @@ public class ChainTableUtilsTest {
         return DataSplit.builder()
                 .withPartition(partition)
                 .withBucket(bucket)
-                .withBucketPath("bucket_" + bucket)
+                .withBucketPath("bucket-" + bucket)
                 .withTotalBuckets(1)
                 .withDataFiles(files)
                 .build();

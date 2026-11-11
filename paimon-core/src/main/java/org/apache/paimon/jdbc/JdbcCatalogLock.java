@@ -18,66 +18,206 @@
 
 package org.apache.paimon.jdbc;
 
-import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.TimeUtils;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
-import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Map;
-import java.util.concurrent.Callable;
+import java.util.UUID;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 
-import static org.apache.paimon.options.CatalogOptions.LOCK_ACQUIRE_TIMEOUT;
-import static org.apache.paimon.options.CatalogOptions.LOCK_CHECK_MAX_SLEEP;
+import static org.apache.paimon.jdbc.JdbcCatalogOptions.LOCK_ACQUIRE_TIMEOUT;
+import static org.apache.paimon.jdbc.JdbcCatalogOptions.LOCK_CHECK_MAX_SLEEP;
 
 /** Jdbc catalog lock. */
-public class JdbcCatalogLock implements CatalogLock {
+public class JdbcCatalogLock implements Lock {
+    @Nullable private final ScheduledExecutorService renewer;
+    private final LongSupplier nanoTime;
+    private final ThreadLocal<Lease> currentLease = new ThreadLocal<>();
     private final JdbcClientPool connections;
     private final long checkMaxSleep;
     private final long acquireTimeout;
     private final String catalogKey;
+    private final Identifier identifier;
 
     public JdbcCatalogLock(
             JdbcClientPool connections,
             String catalogKey,
+            Identifier identifier,
             long checkMaxSleep,
             long acquireTimeout) {
+        this(
+                connections,
+                catalogKey,
+                identifier,
+                checkMaxSleep,
+                acquireTimeout,
+                null,
+                System::nanoTime);
+    }
+
+    JdbcCatalogLock(
+            JdbcClientPool connections,
+            String catalogKey,
+            Identifier identifier,
+            long checkMaxSleep,
+            long acquireTimeout,
+            @Nullable ScheduledExecutorService renewer,
+            LongSupplier nanoTime) {
+        this.renewer = renewer;
+        this.nanoTime = nanoTime;
         this.connections = connections;
         this.checkMaxSleep = checkMaxSleep;
         this.acquireTimeout = acquireTimeout;
         this.catalogKey = catalogKey;
+        this.identifier = identifier;
     }
 
     @Override
-    public <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception {
-        String lockUniqueName = String.format("%s.%s.%s", catalogKey, database, table);
-        lock(lockUniqueName);
-        try {
-            return callable.call();
-        } finally {
-            JdbcUtils.release(connections, lockUniqueName);
+    public AutoCloseable acquire() throws Exception {
+        String lockUniqueName =
+                String.format(
+                        "%s.%s.%s",
+                        catalogKey, identifier.getDatabaseName(), identifier.getObjectName());
+        String owner = UUID.randomUUID().toString();
+        long startedAt = nanoTime.getAsLong();
+        AbstractDistributedLockDialect dialect =
+                (AbstractDistributedLockDialect)
+                        DistributedLockDialectFactory.create(connections.getProtocol());
+        long nextSleep = 50;
+        while (true) {
+            long requestedAt = nanoTime.getAsLong();
+            if (dialect.acquireOwned(connections, lockUniqueName, owner, acquireTimeout)) {
+                Lease lease = null;
+                try {
+                    lease = new Lease(dialect, lockUniqueName, owner, requestedAt);
+                    currentLease.set(lease);
+                    lease.ensureValid();
+                    Lease acquired = lease;
+                    return () -> release(acquired, dialect, lockUniqueName, owner);
+                } catch (Exception | Error e) {
+                    Lease partial = lease;
+                    Lock.release(() -> release(partial, dialect, lockUniqueName, owner), e);
+                    throw e;
+                }
+            }
+            long elapsed = TimeUnit.NANOSECONDS.toMillis(nanoTime.getAsLong() - startedAt);
+            if (elapsed >= acquireTimeout) {
+                throw new IllegalStateException(
+                        "Acquire lock failed with time: " + Duration.ofMillis(elapsed));
+            }
+            nextSleep = Math.min(nextSleep * 2, checkMaxSleep);
+            Thread.sleep(Math.min(nextSleep, acquireTimeout - elapsed));
         }
     }
 
-    private void lock(String lockUniqueName) throws SQLException, InterruptedException {
-        boolean lock = JdbcUtils.acquire(connections, lockUniqueName, acquireTimeout);
-        long nextSleep = 50;
-        long startRetry = System.currentTimeMillis();
-        while (!lock) {
-            nextSleep *= 2;
-            if (nextSleep > checkMaxSleep) {
-                nextSleep = checkMaxSleep;
+    private void release(
+            @Nullable Lease lease,
+            AbstractDistributedLockDialect dialect,
+            String lockUniqueName,
+            String owner)
+            throws Exception {
+        currentLease.remove();
+        try {
+            if (lease != null) {
+                lease.close();
             }
-            Thread.sleep(nextSleep);
-            lock = JdbcUtils.acquire(connections, lockUniqueName, acquireTimeout);
-            if (System.currentTimeMillis() - startRetry > acquireTimeout) {
-                break;
+        } finally {
+            // The former holder must never delete a lease acquired after its expiry.
+            dialect.releaseOwned(connections, lockUniqueName, owner);
+        }
+    }
+
+    @Override
+    public void ensureValid() {
+        Lease lease = currentLease.get();
+        if (lease == null) {
+            throw new IllegalStateException("No JDBC lock is held by this thread.");
+        }
+        lease.renew();
+        lease.ensureValid();
+    }
+
+    private static ScheduledThreadPoolExecutor createRenewer() {
+        ScheduledThreadPoolExecutor executor =
+                new ScheduledThreadPoolExecutor(1, new ExecutorThreadFactory("jdbc-lock-renew"));
+        executor.setRemoveOnCancelPolicy(true);
+        return executor;
+    }
+
+    private class Lease implements AutoCloseable {
+        private final AtomicBoolean closed = new AtomicBoolean();
+        private final ScheduledFuture<?> renewal;
+        private final ScheduledExecutorService executor;
+        private final AbstractDistributedLockDialect dialect;
+        private final String lockId;
+        private final String owner;
+        private final AtomicLong renewedAt;
+        private volatile Exception failure;
+
+        private Lease(
+                AbstractDistributedLockDialect dialect,
+                String lockId,
+                String owner,
+                long requestedAt) {
+            this.dialect = dialect;
+            this.lockId = lockId;
+            this.owner = owner;
+            this.renewedAt = new AtomicLong(requestedAt);
+            // Blocking database calls must not consume another scope's renewal worker.
+            this.executor = renewer == null ? createRenewer() : renewer;
+            long interval = Math.max(1, acquireTimeout / 3);
+            this.renewal =
+                    executor.scheduleWithFixedDelay(
+                            this::renew, interval, interval, TimeUnit.MILLISECONDS);
+        }
+
+        private void renew() {
+            if (closed.get() || failure != null) {
+                return;
+            }
+            try {
+                ensureValid();
+                long requestedAt = nanoTime.getAsLong();
+                if (dialect.renewOwned(connections, lockId, owner)) {
+                    renewedAt.accumulateAndGet(requestedAt, Math::max);
+                } else {
+                    failure = new IllegalStateException("JDBC lock ownership was lost.");
+                }
+            } catch (Exception e) {
+                failure = e;
             }
         }
-        long retryDuration = System.currentTimeMillis() - startRetry;
-        if (!lock) {
-            throw new RuntimeException(
-                    "Acquire lock failed with time: " + Duration.ofMillis(retryDuration));
+
+        private void ensureValid() {
+            if (TimeUnit.NANOSECONDS.toMillis(nanoTime.getAsLong() - renewedAt.get())
+                            >= acquireTimeout
+                    && failure == null) {
+                failure = new IllegalStateException("JDBC lock expired locally.");
+            }
+            if (closed.get() || failure != null) {
+                throw new IllegalStateException("The JDBC lock is no longer usable.", failure);
+            }
+        }
+
+        @Override
+        public void close() {
+            closed.set(true);
+            renewal.cancel(true);
+            if (renewer == null) {
+                executor.shutdownNow();
+            }
         }
     }
 

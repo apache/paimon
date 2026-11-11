@@ -111,14 +111,14 @@ under the License.
         <javax.annotation-api.version>1.3.2</javax.annotation-api.version>
         <flink.forkCount>1C</flink.forkCount>
         <flink.reuseForks>true</flink.reuseForks>
-        <testcontainers.version>1.19.1</testcontainers.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
         <iceberg.version>1.6.1</iceberg.version>
         <parquet.version>1.16.0</parquet.version>
         <orc.version>1.9.8</orc.version>
         <protobuf-java.version>3.19.6</protobuf-java.version>
         <roaringbitmap.version>1.2.1</roaringbitmap.version>
         <arrow.version>15.0.0</arrow.version>
-        <paimon.full-text-index.version>0.1.0</paimon.full-text-index.version>
+        <paimon.full-text-index.version>0.2.0</paimon.full-text-index.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
@@ -128,10 +128,13 @@ under the License.
         <test.flink.connector.kafka.version>3.4.0-1.20</test.flink.connector.kafka.version>
         <test.flink.connector.hive.version>1.20.0</test.flink.connector.hive.version>
         <test.mysql.connector.java.version>8.0.27</test.mysql.connector.java.version>
+        <test.fluss.version>1.0.0</test.fluss.version>
+        <test.curator.version>5.4.0</test.curator.version>
+        <test.zookeeper.version>3.7.1</test.zookeeper.version>
 
         <!-- spark profile properties-->
         <paimon-sparkx-common>paimon-spark3-common_${scala.binary.version}</paimon-sparkx-common>
-        <paimon-spark-common.spark.version>3.5.8</paimon-spark-common.spark.version>
+        <paimon-spark-common.spark.version>3.5.9</paimon-spark-common.spark.version>
         <test.spark.main.version>3.3</test.spark.main.version>
         <test.spark.version>3.3.0</test.spark.version>
 
@@ -411,7 +414,7 @@ under the License.
             <properties>
                 <scala.binary.version>2.12</scala.binary.version>
                 <scala.version>${scala212.version}</scala.version>
-                <paimon-spark-common.spark.version>3.5.8</paimon-spark-common.spark.version>
+                <paimon-spark-common.spark.version>3.5.9</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark3-common_${scala.binary.version}</paimon-sparkx-common>
                 <!-- todo: support the latest spark in paimon e2e test2 -->
                 <test.spark.main.version>3.3</test.spark.main.version>
@@ -437,14 +440,14 @@ under the License.
                 <target.java.version>17</target.java.version>
                 <antlr4.version>4.13.1</antlr4.version>
                 <scala.binary.version>2.13</scala.binary.version>
-                <!-- Spark 4.1.2 is built against Scala 2.13.17; force the same stdlib here so that
+                <!-- Spark 4.1.4 is built against Scala 2.13.17; force the same stdlib here so that
                      `MurmurHash3.caseClassHash$default$2` and related APIs resolve at runtime. -->
                 <scala.version>2.13.17</scala.version>
-                <paimon-spark-common.spark.version>4.1.2</paimon-spark-common.spark.version>
+                <paimon-spark-common.spark.version>4.1.4</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark4-common_2.13</paimon-sparkx-common>
                 <arrow.version>18.1.0</arrow.version>
                 <test.spark.main.version>4.1</test.spark.main.version>
-                <test.spark.version>4.1.2</test.spark.version>
+                <test.spark.version>4.1.4</test.spark.version>
             </properties>
             <activation>
                 <property>
@@ -677,7 +680,7 @@ under the License.
                         <exclude>paimon-common/src/test/resources/fmindex-v1-golden.base64</exclude>
                         <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
                         <exclude>paimon-flink/paimon-flink-common/src/test/resources/compatibility/pending-splits-incremental-v1-chain-v2</exclude>
-                        <exclude>paimon-python/pypaimon/sample/data/**</exclude>
+                        <exclude>paimon-python/pypaimon/tests/resources/calendar_extract_java.jsonl</exclude>
                         <exclude>**/*.proto</exclude>
                         <exclude>**/Cargo*</exclude>
                     </excludes>
@@ -979,6 +982,12 @@ under the License.
                     <groupId>org.codehaus.mojo</groupId>
                     <artifactId>build-helper-maven-plugin</artifactId>
                     <version>1.7</version>
+                </plugin>
+
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>templating-maven-plugin</artifactId>
+                    <version>3.0.0</version>
                 </plugin>
 
                 <plugin>

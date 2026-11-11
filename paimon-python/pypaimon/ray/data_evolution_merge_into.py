@@ -40,7 +40,7 @@ from pypaimon.ray.data_evolution_merge_join import (
     distributed_update_apply,
     distributed_write_collect_msgs,
 )
-from pypaimon.ray.data_evolution_merge_transform import (
+from pypaimon.write.merge_transform import (
     LiteralValue,
     OnSpec,
     SetSpec,
@@ -50,6 +50,7 @@ from pypaimon.ray.data_evolution_merge_transform import (
     WhenNotMatched,
     _NormalizedClause,
 )
+from pypaimon.write.update_validation import _authorize_update
 from pypaimon.ray.partitioning import (
     _default_hash_shuffle_parallelism,
     _estimate_dataset_size_bytes,
@@ -96,6 +97,9 @@ def merge_into(
         target, source, catalog_options,
         list(when_matched), list(when_not_matched), on,
         read_columns,
+    )
+    materialize_matched_before_routing = (
+        _has_upstream_join_or_shuffle(source_ds)
     )
     base_snapshot = table.snapshot_manager().get_latest_snapshot()
     target_empty = _is_target_empty(base_snapshot)
@@ -153,6 +157,7 @@ def merge_into(
         ray_remote_args, concurrency,
         update_num_partitions=update_num_partitions,
         delete_num_partitions=delete_num_partitions,
+        materialize_matched_before_routing=materialize_matched_before_routing,
     )
 
 
@@ -179,6 +184,7 @@ def _prepare(
 
     catalog = CatalogFactory.create(catalog_options)
     table = catalog.get_table(target)
+    _authorize_update(table)
     if not table.options.data_evolution_enabled():
         raise ValueError(
             f"merge_into requires 'data-evolution.enabled' = 'true' on '{target}'."
@@ -209,7 +215,7 @@ def _prepare(
                 c.update,
                 settable_field_names,
                 on_map,
-                allow_callables=is_self_merge,
+                allow_callables=True,
             )
         matched_specs.append(
             _NormalizedClause(
@@ -233,10 +239,7 @@ def _prepare(
         for c in list(when_matched) + list(when_not_matched)
     )
     if has_condition:
-        from pypaimon.ray.merge_condition import (
-            _load_datafusion, extract_target_columns,
-        )
-        _load_datafusion()
+        from pypaimon.write.merge_condition import extract_target_columns
         for c in when_not_matched:
             if c.condition is not None:
                 t_refs = extract_target_columns(c.condition)
@@ -250,6 +253,7 @@ def _prepare(
         spec = _normalize_set_spec(
             c.insert, settable_field_names, on_map,
             allow_target_refs=False,
+            allow_callables=True,
         )
         for tk, sk in on_map.items():
             if tk in settable_field_names and tk not in spec:
@@ -273,8 +277,6 @@ def _prepare(
     if read_columns and not has_callable:
         raise ValueError("read_columns requires a callable SET value.")
     if has_callable:
-        if not read_columns:
-            raise ValueError("Callable SET values require read_columns.")
         for col in read_columns:
             if col not in full_target_field_names:
                 raise ValueError(
@@ -289,6 +291,7 @@ def _prepare(
         source_read_projection = None
         if isinstance(source, str):
             source_table = catalog.get_table(source)
+            _authorize_update(source_table)
             source_read_projection = _resolve_source_projection(
                 matched_specs + not_matched_specs,
                 source_on_cols,
@@ -308,7 +311,7 @@ def _prepare(
     )
 
     if has_condition:
-        from pypaimon.ray.merge_condition import extract_columns
+        from pypaimon.write.merge_condition import extract_columns
         target_names = set(full_target_field_names)
         if is_self_merge:
             target_names |= set(target_on_cols)
@@ -338,7 +341,7 @@ def _prepare(
     if (is_self_merge and matched_specs
             and all(c.condition is not None for c in matched_specs)):
         from pypaimon.common.predicate_builder import PredicateBuilder
-        from pypaimon.ray.merge_condition import (
+        from pypaimon.write.merge_condition import (
             try_parse_self_merge_predicate,
         )
         predicates = [
@@ -391,6 +394,7 @@ def _build_datasets(
     insert_ds = None
     update_cols_union: List[str] = []
     target_empty = _is_target_empty(base_snapshot)
+    native_enabled = table.options.native_write_enabled()
 
     if ctx.is_self_merge:
         if matched_specs and not target_empty:
@@ -406,6 +410,7 @@ def _build_datasets(
                     snapshot_id=base_snapshot_id,
                     scan_predicate=ctx.self_merge_scan_predicate,
                     read_columns=ctx.read_columns,
+                    native_enabled=native_enabled,
                 )
             if any(c.delete for c in matched_specs):
                 delete_ds = build_self_merge_delete_ds(
@@ -417,6 +422,7 @@ def _build_datasets(
                     snapshot_id=base_snapshot_id,
                     scan_predicate=ctx.self_merge_scan_predicate,
                     ray_remote_args=ray_remote_args,
+                    native_enabled=native_enabled,
                 )
         return update_ds, delete_ds, insert_ds, update_cols_union
 
@@ -441,6 +447,7 @@ def _build_datasets(
                 resolve_target_projection=_resolve_target_projection,
                 snapshot_id=base_snapshot_id,
                 ray_remote_args=ray_remote_args,
+                native_enabled=native_enabled,
             )
         if any(c.delete for c in matched_specs):
             delete_ds = build_matched_delete_ds(
@@ -456,6 +463,7 @@ def _build_datasets(
                 resolve_target_projection=_resolve_target_projection,
                 snapshot_id=base_snapshot_id,
                 ray_remote_args=ray_remote_args,
+                native_enabled=native_enabled,
             )
 
     if not_matched_specs:
@@ -472,6 +480,7 @@ def _build_datasets(
             snapshot_id=base_snapshot_id,
             target_empty=target_empty,
             ray_remote_args=ray_remote_args,
+            native_enabled=native_enabled,
         )
 
     return update_ds, delete_ds, insert_ds, update_cols_union
@@ -483,6 +492,7 @@ def _execute_and_commit(
     ray_remote_args, concurrency,
     update_num_partitions=None,
     delete_num_partitions=None,
+    materialize_matched_before_routing=False,
 ):
     collect_action_row_ids = update_ds is not None and delete_ds is not None
     commit_messages: list = []
@@ -529,6 +539,9 @@ def _execute_and_commit(
                             if base_snapshot is not None else None
                         ),
                         collect_row_ids=collect_action_row_ids,
+                        materialize_before_routing=(
+                            materialize_matched_before_routing
+                        ),
                     )
                 )
             commit_messages.extend(update_msgs)
@@ -543,6 +556,9 @@ def _execute_and_commit(
                     if base_snapshot is not None else None
                 ),
                 collect_row_ids=collect_action_row_ids,
+                materialize_before_routing=(
+                    materialize_matched_before_routing
+                ),
             )
             commit_messages.extend(delete_msgs)
 
@@ -560,15 +576,16 @@ def _execute_and_commit(
                 for m in insert_msgs
                 for f in m.new_files
                 if not DataFileMeta.is_blob_file(f.file_name)
+                and not DataFileMeta.is_vector_file(f.file_name)
             )
 
         all_msgs: list = list(commit_messages)
         if all_msgs:
             if self_merge_update and update_msgs:
                 from pypaimon.ray.row_id_conflict_rewriter import (
-                    commit_self_merge_with_compaction_retry,
+                    commit_updates_with_compaction_retry,
                 )
-                commit_self_merge_with_compaction_retry(
+                commit_updates_with_compaction_retry(
                     table,
                     update_msgs,
                     delete_msgs + insert_msgs,
@@ -703,12 +720,16 @@ def _resolve_target_projection(
     target_on: Sequence[str],
     update_cols: Sequence[str],
     target_field_names: Sequence[str],
+    callable_columns: Optional[Sequence[str]] = None,
 ) -> list:
     needed = set(_needed_target_cols(
         clauses, target_on, update_cols, target_field_names,
     ))
+    if any(callable(value) and not isinstance(value, type)
+           for clause in clauses for value in clause.spec.values()):
+        needed.update(target_field_names if callable_columns is None else callable_columns)
     if any(c.condition is not None for c in clauses):
-        from pypaimon.ray.merge_condition import extract_target_columns
+        from pypaimon.write.merge_condition import extract_target_columns
         target_set = set(target_field_names)
         for clause in clauses:
             if clause.condition is not None:
@@ -821,6 +842,35 @@ def _normalize_source(
         "source must be a ray.data.Dataset, a Paimon table identifier string, "
         f"a pyarrow.Table, or a pandas.DataFrame; got {type(source).__name__}."
     )
+
+
+def _has_upstream_join_or_shuffle(dataset) -> bool:
+    """Best-effort check for a lazy source join or shuffle."""
+    try:
+        logical_plan = getattr(dataset, "_logical_plan", None)
+        operator = getattr(logical_plan, "dag", None)
+        pending = [operator] if operator is not None else []
+        visited = set()
+        while pending:
+            operator = pending.pop()
+            if id(operator) in visited:
+                continue
+            visited.add(id(operator))
+            operator_name = type(operator).__name__
+            if operator_name in {
+                "Aggregate", "Join", "RandomShuffle", "Sort",
+            }:
+                return True
+            if operator_name == "Repartition":
+                shuffle = getattr(
+                    operator, "shuffle", getattr(operator, "_shuffle", False)
+                )
+                if shuffle:
+                    return True
+            pending.extend(getattr(operator, "input_dependencies", ()))
+    except Exception:
+        pass
+    return False
 
 
 def _source_schema_or_raise(source_ds):

@@ -23,12 +23,110 @@ import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.FormatDataSplit
+import org.apache.paimon.utils.PartitionPathUtils
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.connector.catalog.TableCapability
 import org.apache.spark.sql.connector.catalog.TableCatalog
 
+import scala.collection.JavaConverters._
+
 class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
+
+  test("PaimonFormatTable: omit file format suffix") {
+    for (compression <- Seq("none", "gzip")) {
+      val tableName = s"format_file_suffix_$compression"
+      val codecSuffix = if (compression == "gzip") ".gz" else ""
+      withTable(tableName) {
+        sql(
+          s"CREATE TABLE $tableName (id INT, v STRING, pt INT) USING csv PARTITIONED BY (pt) " +
+            "TBLPROPERTIES ('metastore.partitioned-table'='true', " +
+            s"'format-table.implementation'='paimon', 'file.compression'='$compression', " +
+            "'target-file-row-num'='1')")
+        sql(s"INSERT INTO $tableName VALUES (0, 'old', 1)")
+        val table =
+          paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+        def fileNames(partition: Int): Set[String] = {
+          table
+            .fileIO()
+            .listStatus(new Path(table.location(), s"pt=$partition"))
+            .filter(file => !PartitionPathUtils.isHiddenName(file.getPath.getName))
+            .map(_.getPath.getName)
+            .toSet
+        }
+        val oldFiles = fileNames(1)
+        assert(oldFiles.size == 1)
+        assert(oldFiles.forall(_.endsWith(".csv" + codecSuffix)))
+
+        sql(
+          s"ALTER TABLE $tableName SET TBLPROPERTIES " +
+            "('format-table.file.suffix.enabled'='false')")
+        sql(s"INSERT INTO $tableName VALUES (1, 'one', 1), (2, 'two', 2), (3, 'three', 1)")
+        val allFiles = fileNames(1) ++ fileNames(2)
+        assert(oldFiles.subsetOf(allFiles))
+        val newFiles = allFiles -- oldFiles
+        assert(newFiles.size == 3)
+        assert(
+          newFiles.forall(_.matches("data-[0-9a-f-]{36}-[0-9]+" +
+            java.util.regex.Pattern.quote(codecSuffix))))
+        val expected = Seq(Row(0, "old", 1), Row(1, "one", 1), Row(2, "two", 2), Row(3, "three", 1))
+        checkAnswer(sql(s"SELECT * FROM $tableName"), expected)
+        checkAnswer(spark.read.schema("id INT, v STRING, pt INT").csv(table.location()), expected)
+      }
+    }
+  }
+
+  test("PaimonFormatTable: partition file formats survive reads statistics and overwrite") {
+    val tableName = "partition_file_formats"
+    withTable(tableName) {
+      sql(s"CREATE TABLE $tableName (id INT, pt STRING) USING parquet PARTITIONED BY (pt) " +
+        "TBLPROPERTIES ('metastore.partitioned-table'='true', 'format-table.implementation'='paimon')")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      spark
+        .sql("SELECT 1 AS id")
+        .write
+        .format("orc")
+        .save(new Path(table.location(), "pt=old").toString)
+      spark.sql("SELECT 2 AS id").write.parquet(new Path(table.location(), "pt=new").toString)
+      val specs = Seq(Map("pt" -> "old").asJava, Map("pt" -> "new").asJava).asJava
+      table
+        .partitionManager()
+        .createPartitions(
+          specs,
+          false,
+          null,
+          false,
+          Seq(Map("file.format" -> "orc").asJava, Map.empty[String, String].asJava).asJava)
+      checkAnswer(sql(s"SELECT id, pt FROM $tableName"), Seq(Row(1, "old"), Row(2, "new")))
+      checkAnswer(sql(s"SELECT id FROM $tableName WHERE pt='old' AND id=1"), Seq(Row(1)))
+      sql(s"ANALYZE TABLE $tableName COMPUTE STATISTICS")
+      assert(
+        table.partitionManager().listPartitionsByNames(specs).asScala.forall(_.recordCount() == 1))
+      sql(s"INSERT INTO $tableName PARTITION (pt='new') VALUES (4)")
+      sql(s"INSERT OVERWRITE $tableName PARTITION (pt='new') VALUES (5)")
+      sql(s"INSERT INTO $tableName PARTITION (pt='created') VALUES (6)")
+      val writtenSpecs = Seq(specs.get(1), Map("pt" -> "created").asJava).asJava
+      val writtenPartitions =
+        table
+          .partitionManager()
+          .listPartitionsByNames(writtenSpecs)
+      assert(writtenPartitions.size() == 2)
+      assert(writtenPartitions.get(0).options().get("file.format") == "parquet")
+      assert(Option(writtenPartitions.get(1).options()).forall(_.isEmpty))
+      sql(s"INSERT OVERWRITE $tableName PARTITION (pt='old') VALUES (3)")
+      checkAnswer(
+        sql(s"SELECT id, pt FROM $tableName"),
+        Seq(Row(3, "old"), Row(5, "new"), Row(6, "created")))
+      assert(
+        table
+          .partitionManager()
+          .listPartitionsByNames(Seq(specs.get(0)).asJava)
+          .get(0)
+          .options()
+          .get("file.format") == "parquet")
+    }
+  }
 
   override protected def beforeEach(): Unit = {
     super.beforeEach()

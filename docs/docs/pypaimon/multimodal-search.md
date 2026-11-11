@@ -50,6 +50,32 @@ docs.create_index("embedding", index_type="ivf-pq")
 docs.create_index("content", index_type="full-text")
 ```
 
+### Build vector indexes with Ray
+
+Pass `execution="ray"` to distribute native vector-index shards across Ray
+workers. BTree, Bitmap and full-text builds still use local execution.
+
+```python
+docs.create_index(
+    "embedding", index_type="ivf-flat",
+    options={"global-index.row-count-per-shard": "1000000"},
+    execution="ray", concurrency=4, ray_remote_args={"num_cpus": 1},
+)
+```
+
+The driver plans uncovered row ranges from one snapshot. Workers build files;
+the driver publishes their index entries in one commit after all shards succeed.
+`concurrency` bounds running shards; `global-index.build.parallelism` controls
+only local thread-based builds. Install the same `pypaimon[ray,vindex]`
+dependencies on every worker and use storage accessible to the entire cluster.
+
+Write tasks require `max_retries=0` and `retry_exceptions=False` (set by default).
+On a task failure, the driver stops submissions, waits for dispatched tasks,
+and removes their uncommitted output files. Rerun the build after the failure;
+already committed index coverage is skipped. Driver/cluster termination can
+still leave orphan files for normal orphan-file maintenance. Retain the source
+snapshot's files until the build and its commit finish.
+
 ## Search
 
 Use `search` for one vector query or one full-text query.
@@ -119,6 +145,18 @@ matches = (
 )
 ```
 
+## Training from Search Results
+
+On data-evolution tables, search queries can call `to_torch()` to train on their
+matching rows, or `to_contiguous_window_dataset()` to use those rows as training
+anchors. Both capture one snapshot for search, post-filtering, and subsequent
+training reads. Window history and future frames come from the full snapshot
+context, optionally restricted with `context_filter`; search filters and top-k
+only select anchors. Batch vector search returns one Dataset per input query.
+
+See [search hits as training samples and window anchors](pytorch#search-hits-as-training-samples-and-window-anchors)
+for examples, ordering, projection, and snapshot retention requirements.
+
 ## Scores and Result Ordering
 
 On data-evolution tables, use `with_score()` to append a `float64` relevance
@@ -173,9 +211,16 @@ data. Historical snapshot and deletion semantics remain the same. Plain
 ## Distributed Vector Search
 
 Use `execution="ray"` to execute vector queries across Ray workers and return
-Arrow results to the driver. This supports single and batch vector queries on
-data-evolution tables; primary-key tables and hybrid queries are not supported
-by this execution mode.
+Arrow results to the driver. Single and batch vector queries are supported on
+data-evolution tables and, with the Python read backend, on primary-key tables.
+Batch queries return one Arrow table per input vector, in input order.
+Full-text and hybrid queries are described below.
+
+For primary-key tables, enable the Python read backend with
+`read.native.enabled=false` and `scan.native-plan.enabled=false`. Search
+parallelism is limited by the number of matching buckets. Refinement and Arrow
+result lookup run on the driver. To fetch projected rows on Ray workers, use
+[`to_ray()`](#return-search-rows-as-a-ray-dataset).
 
 Install the same PyPaimon and index dependencies on the driver and workers:
 
@@ -204,10 +249,17 @@ neighbors = (
 )
 ```
 
-`execution` defaults to `"local"`. `concurrency` is a positive integer limiting
-the number of in-flight Ray tasks, with a default of 4. `ray_remote_args` supplies
-Ray task options, including resources and retry settings; `num_returns` is
-managed by PyPaimon. These two arguments require `execution="ray"`.
+For `to_arrow()`, `execution` defaults to `"local"`. `concurrency` is a positive
+integer limiting the number of in-flight Ray tasks, with a default of 4.
+`ray_remote_args` supplies Ray task options, including resources and retry
+settings. PyPaimon manages `num_returns`. These two arguments require
+`execution="ray"`.
+
+Ray schedules tasks from the selected search backend. With Native reads enabled
+on a supported REST table, Rust performs the query, filtering and ranking on the
+driver and workers. Install the same Native SDK on every node. Selecting Ray
+does not force Python search execution. A failure after execution starts is
+propagated without rerunning the query through another backend.
 
 For single and batch vector queries, `to_pandas()` and `to_list()` accept the
 same `execution`, `concurrency`, and `ray_remote_args` arguments as `to_arrow()`.
@@ -229,8 +281,8 @@ batch_neighbors = (
 )
 ```
 
-Each batch task handles all query vectors for one split: index workers reuse
-an open shard across bounded query blocks, and raw workers stream each data
+For data-evolution tables, each batch task handles all query vectors for one split:
+index workers reuse an open shard across bounded query blocks, and raw workers stream each data
 split once with a separate top-k for each query. For refinement, the driver
 selects each query's global candidates, then workers stream their union once per
 read split, scoring each row only for the queries that selected it. Shared final
@@ -238,8 +290,8 @@ row lookup runs on the driver. The entire batch uses one read snapshot.
 Candidate traffic and result memory grow with the number of query vectors;
 split large query collections into smaller batches when necessary.
 
-The driver fixes one read snapshot and plans the query. Workers search individual
-index shards and, when required by the table's search mode, scan unindexed data.
+For data-evolution tables, the driver fixes one read snapshot and plans the query.
+Workers search individual index shards and, when required by the table's search mode, scan unindexed data.
 They return candidate row IDs and scores. For vector queries with
 refinement enabled, the driver first selects the global candidate set, then
 workers read and score those candidate vectors using the index's persisted
@@ -247,6 +299,19 @@ metric. The driver merges their results and retains the local rules for
 filtering and final row lookup.
 In particular, `pre_filter` filters candidates before ranking; `where()` filters
 the selected rows and can return fewer than the requested number of results.
+
+For indexed searches on data-evolution tables using the Python backend, workers
+evaluate scalar predicates and build live-row filters at the query snapshot.
+Tasks using the same scalar index files
+share one Ray scalar-index evaluation; its result is passed directly to dependent
+tasks without materializing the bitmap on the driver. Candidate verification
+reads only filter columns and row IDs in the task's shard range, without scanning
+the scalar indexes again. The final shard filter is reused across a batch's query
+vectors. This lets expensive verification scale with search concurrency; partially
+overlapping scalar index inputs can still cause repeated index reads.
+The Native backend resolves shared snapshot filters in Rust before distributing
+index and data-reading tasks. Query matrices and other shared task context are
+transported once per task group.
 
 Index search, raw scans, refinement, lookup, and task retries use the same read
 snapshot. The existing `snapshot_id` and `tag_name` arguments to `search()` also
@@ -258,18 +323,85 @@ All workers must be able to access the table's storage. Local filesystem paths
 are suitable for a local Ray cluster; multiple nodes require shared storage.
 Each index task searches one shard, while its native index I/O settings still
 apply. Raw-scan parallelism is limited by the number of planned read splits,
-controlled by the table's `source.split.target-size` option. Refinement also
-uses planned read splits; workers return scores for merging.
-Final row lookup runs on the driver. Candidate traffic grows
+controlled by the table's `source.split.target-size` option. For data-evolution
+tables, refinement also uses planned read splits; workers return scores for merging.
+For Arrow results, final row lookup runs on the driver. Candidate traffic grows
 with the number of index shards and the configured refinement budget, so Ray
 execution is most useful when shard search or raw scanning outweighs scheduling
 and transfer costs. Small queries can be faster locally.
 
-Local and Ray index searches merge shard results incrementally in plan order.
-The concurrency limit bounds running tasks plus completed results waiting for
+For data-evolution tables, local and Ray index searches merge shard results
+incrementally in plan order. The concurrency limit bounds running tasks plus completed results waiting for
 earlier shards, so a slow shard can delay further submissions. Global top-k
 selection still uses all merged candidate scores, whose storage grows with the
 number of unique candidate rows per query.
+
+## Full-text and Hybrid queries on Ray
+
+Full-text and Hybrid queries accept `execution="ray"`, `concurrency`, and
+`ray_remote_args` on `to_arrow`, `to_pandas`, and `to_list`, matching vector queries:
+
+```python
+rows = (docs.search("robot grasp", column="content")
+        .with_score().order_by_score().limit(20)
+        .to_arrow(execution="ray", concurrency=4))
+```
+
+This path supports data-evolution tables and requires `pypaimon[ray,full-text]`
+on every worker (plus `vindex` for native vector routes). Index shards run as
+bounded Ray tasks. Full-text raw fallback runs on one worker with the complete
+uncovered corpus, preserving existing BM25 statistics; that corpus must fit the
+worker's memory. Pre-filters and deletion vectors keep the local ranking semantics.
+
+Hybrid routes share one resolved snapshot, use Ray for their shard work, and
+reuse the existing RRF, MRR, or weighted-score fusion on the driver. Concurrent
+routes share the query's task budget, so `concurrency` bounds the whole query.
+Final Arrow/Pandas row lookup
+remains on the driver. Native resources close on workers; task errors propagate
+and pending read tasks are cancelled.
+
+### Scheduling a search plan
+
+Lower-level vector, batch-vector and full-text readers accept an optional
+`SearchTaskExecutor` in `read_plan()` or `read_batch_plan()`. The reader keeps
+ownership of the complete snapshot-scoped query, including global candidate
+selection and refinement. A scheduler only places the backend's serializable
+tasks and returns their results:
+
+```python
+from pypaimon.ray.search_execution import RaySearchTaskExecutor
+
+builder = (table.new_batch_vector_search_builder()
+           .with_vector_column("embedding")
+           .with_query_vectors([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+           .with_limit(10))
+plan = builder.new_vector_search_scan().scan()
+results = builder.new_batch_vector_search_read().read_batch_plan(
+    plan, executor=RaySearchTaskExecutor(concurrency=4))
+```
+
+Plans contain ordinary snapshot and typed split metadata. A copied, pickled,
+or Python-constructed plan can be passed to a Native reader without choosing
+the Python backend. The Native SDK also accepts snapshot and split objects
+through its plan constructors. For example, to execute an explicitly selected
+set of sources:
+
+```python
+from pypaimon.table.source.search_types import VectorSearchScanPlan
+
+selected = VectorSearchScanPlan(plan.splits()[:1], plan.snapshot())
+results = builder.new_batch_vector_search_read().read_batch_plan(selected)
+```
+
+The supplied splits are authoritative: readers do not add uncovered raw ranges
+or rediscover other search indexes. A Native plan without a captured snapshot
+must have no sources and never selects the latest snapshot. Query vectors, limits and
+filters belong to the reader. Rust Core coordinates global candidate selection
+and refinement; its internal shard protocol is separate from the public source
+plan.
+
+Hybrid builders expose `execute(executor=...)` for the same scheduler.
+PyPaimon's existing `execute_local()` methods retain their local defaults.
 
 ## Search Hybrid
 
@@ -360,9 +492,12 @@ Dictionary vector routes also accept `anns_field`, `data`, and `param` aliases.
 
 Use `search_vectors` for multiple query vectors against one vector column. It
 returns one result set for each input vector, preserving input order.
-Batch results share a lookup of their combined row IDs, so overlapping results
-do not require reading the same row separately for each query. The limit and
-post-filter still apply to each query's result set.
+For Arrow results on data-evolution tables, batch queries can share a lookup
+of their combined row IDs. On primary-key tables using the Python read backend,
+eligible queries that hit the same data file can share reads of the selected
+physical row positions. When each file is selected by at most one query, each
+query uses its own lookup and can read its files in parallel. The limit and
+post-filter apply to each query's result set.
 
 ```python
 batch_neighbors = (
@@ -378,3 +513,32 @@ batch_neighbors = (
     .to_list()
 )
 ```
+
+## Return search rows as a Ray Dataset
+
+Vector queries on data-evolution tables and primary-key tables using the Python
+read backend can return a Ray Dataset with `to_ray()`. The `execution` option
+selects where candidate search runs. It defaults to `"ray"`. Use `"local"` to
+search for candidates on the driver. With either option, Ray workers fetch the
+projected rows when you consume the Dataset.
+
+```python
+ds = (docs.search([0.1, 0.2, 0.3], column="embedding")
+      .select(["id", "content"])
+      .limit(100)
+      .to_ray(execution="ray", concurrency=4, override_num_blocks=4))
+```
+
+Search runs eagerly. Row lookup is lazy and uses the snapshot captured during
+search. Retain that snapshot's files until downstream Dataset actions finish.
+`search_vectors(...).to_ray()` returns one Dataset per input vector, in input
+order. Each Dataset runs its own lazy lookup on the shared snapshot when consumed.
+
+`where()` filters the candidates during lookup without refilling top-k. On
+data-evolution tables, `with_score()` adds scores and `order_by_score()` performs
+a distributed global sort, breaking ties by ascending row ID. Empty results
+retain their output schema, including the score column when requested.
+
+BLOB values are serialized descriptors, as with `scan().to_ray()`. Pass the
+Dataset to `docs.map_with_blobs(...)` to resolve payloads on workers. Projections
+must be nonempty and have unique names.

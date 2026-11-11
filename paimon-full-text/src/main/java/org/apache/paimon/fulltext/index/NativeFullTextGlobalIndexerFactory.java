@@ -23,6 +23,8 @@ import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 
+import java.util.List;
+
 /** Factory for creating native full-text index. */
 public class NativeFullTextGlobalIndexerFactory implements GlobalIndexerFactory {
 
@@ -39,7 +41,11 @@ public class NativeFullTextGlobalIndexerFactory implements GlobalIndexerFactory 
     }
 
     @Override
-    public GlobalIndexer create(DataField field, Options options) {
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        if (indexFields.size() != 1) {
+            throw new UnsupportedOperationException(
+                    "Index type '" + identifier() + "' requires exactly one index field.");
+        }
         return new NativeFullTextGlobalIndexer(
                 new NativeFullTextIndexOptions(
                         options.removePrefix(NativeFullTextIndexOptions.FULL_TEXT_PREFIX).toMap()));

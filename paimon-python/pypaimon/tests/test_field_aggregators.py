@@ -35,8 +35,8 @@ from _datasketches import hll_sketch, update_theta_sketch
 
 from pypaimon.common.options import CoreOptions, Options
 from pypaimon.data import Timestamp, Decimal
-from pypaimon.read.reader.aggregate import create_field_aggregator
-from pypaimon.read.reader.aggregate.aggregators import (
+from pypaimon.execution.python.read.reader.aggregate import (create_field_aggregator)
+from pypaimon.execution.python.read.reader.aggregate.aggregators import (
     FieldBoolAndAgg,
     FieldBoolOrAgg,
     FieldFirstNonNullValueAgg,
@@ -74,6 +74,13 @@ def _make(identifier, sql_type, options: CoreOptions = None):
     return create_field_aggregator(
         AtomicType(sql_type), "field0", identifier, options=options
     )
+
+
+def _fail_on_overflow(function):
+    """Java's fail-on-overflow option. The default is false (wrap)."""
+    return CoreOptions(Options({
+        "fields.field0.{}.fail-on-overflow".format(function): True,
+    }))
 
 
 class FieldPrimaryKeyAggTest(unittest.TestCase):
@@ -193,7 +200,7 @@ class FieldSumAggTest(unittest.TestCase):
         self.assertEqual(agg.retract(None, 5), -5)
 
     def test_byte_overflow(self):
-        agg = _make("sum", "TINYINT")
+        agg = _make("sum", "TINYINT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(127, 1)
@@ -202,7 +209,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.agg(-128, -1)
 
     def test_short_overflow(self):
-        agg = _make("sum", "SMALLINT")
+        agg = _make("sum", "SMALLINT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(32767, 1)
@@ -211,7 +218,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.agg(-32768, -1)
 
     def test_int_overflow(self):
-        agg = _make("sum", "INT")
+        agg = _make("sum", "INT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(2147483647, 1)
@@ -220,7 +227,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.agg(-2147483648, -1)
 
     def test_long_overflow(self):
-        agg = _make("sum", "BIGINT")
+        agg = _make("sum", "BIGINT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(9223372036854775807, 1)
@@ -229,7 +236,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.agg(-9223372036854775808, -1)
 
     def test_byte_retract_overflow(self):
-        agg = _make("sum", "TINYINT")
+        agg = _make("sum", "TINYINT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-128, 1)
@@ -241,7 +248,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.retract(None, -128)
 
     def test_short_retract_overflow(self):
-        agg = _make("sum", "SMALLINT")
+        agg = _make("sum", "SMALLINT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-32768, 1)
@@ -253,7 +260,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.retract(None, -32768)
 
     def test_int_retract_overflow(self):
-        agg = _make("sum", "INT")
+        agg = _make("sum", "INT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-2147483648, 1)
@@ -265,7 +272,7 @@ class FieldSumAggTest(unittest.TestCase):
             agg.retract(None, -2147483648)
 
     def test_long_retract_overflow(self):
-        agg = _make("sum", "BIGINT")
+        agg = _make("sum", "BIGINT", _fail_on_overflow("sum"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-9223372036854775808, 1)
@@ -275,6 +282,22 @@ class FieldSumAggTest(unittest.TestCase):
 
         with self.assertRaises(ArithmeticError):
             agg.retract(None, -9223372036854775808)
+
+    def test_integer_overflow_wraps_by_default(self):
+        cases = (
+            ("TINYINT", 127, 1, -128, -128, -1, 127),
+            ("SMALLINT", 32767, 1, -32768, -32768, -1, 32767),
+            ("INT", 2147483647, 1, -2147483648, -2147483648, -1, 2147483647),
+            ("BIGINT", 9223372036854775807, 1, -9223372036854775808,
+             -9223372036854775808, -1, 9223372036854775807),
+        )
+        for sql_type, high, one, wrapped_high, low, minus_one, wrapped_low in cases:
+            agg = _make("sum", sql_type)
+            self.assertEqual(agg.agg(high, one), wrapped_high)
+            self.assertEqual(agg.agg(low, minus_one), wrapped_low)
+            self.assertEqual(agg.retract(low, one), wrapped_low)
+            self.assertEqual(agg.retract(high, minus_one), wrapped_high)
+            self.assertEqual(agg.retract(None, low), low)
 
     def test_float_sum(self):
         agg = _make("sum", "FLOAT")
@@ -406,7 +429,7 @@ class FieldProductAggTest(unittest.TestCase):
         self.assertIsNone(agg.retract(None, self.to_decimal(5, 12)))
 
     def test_byte_overflow(self):
-        agg = _make("product", "TINYINT")
+        agg = _make("product", "TINYINT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(64, 2)
@@ -415,7 +438,7 @@ class FieldProductAggTest(unittest.TestCase):
             agg.agg(-64, 4)
 
     def test_short_overflow(self):
-        agg = _make("product", "SMALLINT")
+        agg = _make("product", "SMALLINT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(1000, 100)
@@ -424,7 +447,7 @@ class FieldProductAggTest(unittest.TestCase):
             agg.agg(-32768, 2)
 
     def test_int_overflow(self):
-        agg = _make("product", "INT")
+        agg = _make("product", "INT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(100000, 100000)
@@ -433,7 +456,7 @@ class FieldProductAggTest(unittest.TestCase):
             agg.agg(-2147483648, -1)
 
     def test_long_overflow(self):
-        agg = _make("product", "BIGINT")
+        agg = _make("product", "BIGINT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.agg(9223372036854775807, 2)
@@ -442,28 +465,50 @@ class FieldProductAggTest(unittest.TestCase):
             agg.agg(-9223372036854775808, -1)
 
     def test_byte_retract_overflow(self):
-        agg = _make("product", "TINYINT")
+        agg = _make("product", "TINYINT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-128, -1)
 
     def test_short_retract_overflow(self):
-        agg = _make("product", "SMALLINT")
+        agg = _make("product", "SMALLINT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-32768, -1)
 
     def test_int_retract_overflow(self):
-        agg = _make("product", "INT")
+        agg = _make("product", "INT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-2147483648, -1)
 
     def test_long_retract_overflow(self):
-        agg = _make("product", "BIGINT")
+        agg = _make("product", "BIGINT", _fail_on_overflow("product"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-9223372036854775808, -1)
+
+    def test_integer_overflow_wraps_by_default(self):
+        agg = _make("product", "TINYINT")
+        self.assertEqual(agg.agg(64, 2), -128)
+        self.assertEqual(agg.agg(-64, 4), 0)
+        self.assertEqual(agg.retract(-128, -1), -128)
+
+        agg = _make("product", "SMALLINT")
+        self.assertEqual(agg.agg(1000, 100), -31072)
+        self.assertEqual(agg.agg(-32768, 2), 0)
+        self.assertEqual(agg.retract(-32768, -1), -32768)
+
+        agg = _make("product", "INT")
+        self.assertEqual(agg.agg(100000, 100000), 1410065408)
+        self.assertEqual(agg.agg(-2147483648, -1), -2147483648)
+        self.assertEqual(agg.retract(-2147483648, -1), -2147483648)
+        self.assertEqual(agg.retract(-7, 2), -3)
+
+        agg = _make("product", "BIGINT")
+        self.assertEqual(agg.agg(9223372036854775807, 2), -2)
+        self.assertEqual(agg.agg(-9223372036854775808, -1), -9223372036854775808)
+        self.assertEqual(agg.retract(-9223372036854775808, -1), -9223372036854775808)
 
     def test_null_inputs(self):
         agg = _make("product", "INT")
@@ -483,9 +528,14 @@ class FieldProductAggTest(unittest.TestCase):
             agg.agg(3037000499, 3037000499),
             9223372030926249001,
         )
+        self.assertEqual(
+            agg.agg(3037000500, 3037000500),
+            -9223372036709301616,
+        )
 
+        failing = _make("product", "BIGINT", _fail_on_overflow("product"))
         with self.assertRaises(ArithmeticError):
-            agg.agg(3037000500, 3037000500)
+            failing.agg(3037000500, 3037000500)
 
     def test_non_numeric_type_rejected_at_construction(self):
         with self.assertRaises(ValueError) as ctx:
@@ -967,11 +1017,14 @@ class FieldListaggAggTest(unittest.TestCase):
 
 class FieldCollectAggTest(unittest.TestCase):
 
-    def _make(self, distinct, element_type=None):
+    def _make(self, distinct, element_type=None, count_limit=None):
         if element_type is None:
             element_type = AtomicType("INT")
 
-        options = CoreOptions(Options({"fields.field0.distinct": distinct}))
+        raw = {"fields.field0.distinct": distinct}
+        if count_limit is not None:
+            raw["fields.field0.count-limit"] = count_limit
+        options = CoreOptions(Options(raw))
 
         return create_field_aggregator(
             ArrayType(True, element_type),
@@ -1169,6 +1222,186 @@ class FieldCollectAggTest(unittest.TestCase):
             [{1: "A"}, {2: "B", 1: "A"}],
         )
         self.assertEqual(acc, [{1: "C"}])
+
+    def test_field_collect_agg_count_limit_positive(self):
+        agg = self._make(distinct=False, count_limit=2)
+
+        acc = agg.agg(None, [1, 2])
+        self.assertEqual(acc, [1, 2])
+
+        acc = agg.agg(acc, [3, 4])
+        self.assertEqual(acc, [1, 2])
+
+    def test_field_collect_agg_count_limit_negative(self):
+        agg = self._make(distinct=False, count_limit=-2)
+
+        acc = agg.agg(None, [1, 2])
+        self.assertEqual(acc, [1, 2])
+
+        acc = agg.agg(acc, [3, 4])
+        self.assertEqual(acc, [3, 4])
+
+        acc = agg.agg(acc, [5])
+        self.assertEqual(acc, [4, 5])
+
+    def test_field_collect_agg_count_limit_with_distinct(self):
+        # The example from the Java docs.
+        agg = self._make(distinct=True, count_limit=2)
+        self.assertEqual(agg.agg(None, [1, 2, 1, 3]), [1, 2])
+
+        agg = self._make(distinct=True, count_limit=-2)
+        self.assertEqual(agg.agg(None, [1, 2, 1, 3]), [1, 3])
+
+    def test_field_collect_agg_count_limit_with_distinct_across_inputs(self):
+        agg = self._make(distinct=True, count_limit=2)
+
+        acc = agg.agg(None, [1, 1, 2])
+        self.assertEqual(acc, [1, 2])
+
+        acc = agg.agg(acc, [2, 3])
+        self.assertEqual(acc, [1, 2])
+
+        agg = self._make(distinct=True, count_limit=-2)
+
+        acc = agg.agg(None, [1, 1, 2])
+        self.assertEqual(acc, [1, 2])
+
+        acc = agg.agg(acc, [2, 3])
+        self.assertEqual(acc, [2, 3])
+
+    def test_field_collect_agg_count_limit_without_distinct_keeps_duplicates(self):
+        agg = self._make(distinct=False, count_limit=3)
+
+        self.assertEqual(agg.agg(None, [1, 1, 2, 3]), [1, 1, 2])
+
+        agg = self._make(distinct=False, count_limit=-3)
+        self.assertEqual(agg.agg(None, [1, 1, 2, 3]), [1, 2, 3])
+
+    def test_field_collect_agg_count_limit_zero_returns_empty(self):
+        for limit in (0, -0):
+            agg = self._make(distinct=False, count_limit=limit)
+            self.assertEqual(agg.agg(None, [1, 2]), [])
+
+    def _assert_collect_forward_equals_reversed(
+            self, distinct, count_limit, older, newer, expected
+    ):
+        agg = self._make(distinct=distinct, count_limit=count_limit)
+        forward = agg.agg(agg.agg(None, older), newer)
+        reversed_result = agg.agg_reversed(agg.agg_reversed(None, newer), older)
+        self.assertEqual(forward, expected)
+        self.assertEqual(reversed_result, expected)
+
+    def test_field_collect_agg_forward_vs_reversed_reviewer_repro(self):
+        older = [1, 2]
+        newer = [3, 4]
+        self._assert_collect_forward_equals_reversed(
+            False, 2, older, newer, [1, 2]
+        )
+        self._assert_collect_forward_equals_reversed(
+            False, -2, older, newer, [3, 4]
+        )
+
+    def test_field_collect_agg_forward_vs_reversed_java_matrix(self):
+        older = [2, 1, 2]
+        newer = [3, 3, 1]
+        cases = [
+            (False, 3, [2, 1, 2]),
+            (True, 3, [2, 1, 3]),
+            (False, -3, [3, 3, 1]),
+            (True, -3, [2, 3, 1]),
+            (False, 0, []),
+            (True, 0, []),
+        ]
+        for distinct, count_limit, expected in cases:
+            self._assert_collect_forward_equals_reversed(
+                distinct, count_limit, older, newer, expected
+            )
+
+    def test_field_collect_agg_set_dedupe_for_atomic_types(self):
+        for sql_type in (
+                "INT", "STRING", "BOOLEAN", "DECIMAL(10, 2)",
+                "DATE", "VARBINARY(8)", "TIMESTAMP(6)",
+        ):
+            agg = self._make(distinct=True, element_type=AtomicType(sql_type))
+            self.assertTrue(agg._set_dedupe, sql_type)
+
+        agg = self._make(distinct=False)
+        self.assertFalse(agg._set_dedupe)
+
+        agg = self._make(distinct=True, element_type=AtomicType("BLOB"))
+        self.assertFalse(agg._set_dedupe)
+
+    def test_field_collect_agg_set_dedupe_across_inputs(self):
+        agg = self._make(distinct=True)
+        self.assertTrue(agg._set_dedupe)
+
+        acc = agg.agg(None, [1, 2, 2])
+        acc = agg.agg(acc, [2, 3, 3])
+        self.assertEqual(acc, [1, 2, 3])
+
+    def test_field_collect_agg_set_dedupe_with_count_limit(self):
+        agg = self._make(distinct=True, count_limit=2)
+        self.assertTrue(agg._set_dedupe)
+        self.assertEqual(agg.agg(None, [1, 1, 2, 3]), [1, 2])
+
+        agg = self._make(distinct=True, count_limit=-2)
+        self.assertEqual(agg.agg(None, [1, 2, 1, 3]), [1, 3])
+
+        agg = self._make(distinct=True, count_limit=0)
+        self.assertEqual(agg.agg(None, [1, 2]), [])
+
+    def test_field_collect_agg_list_dedupe_for_array_and_map(self):
+        agg = self._make(
+            distinct=True,
+            element_type=ArrayType(True, AtomicType("INT")),
+        )
+        self.assertFalse(agg._set_dedupe)
+        self.assertEqual(agg.agg(None, [[1], [1], [2]]), [[1], [2]])
+
+        acc = agg.agg([[1], [2]], [[2], [3]])
+        self.assertEqual(acc, [[1], [2], [3]])
+
+        agg = self._make(
+            distinct=True,
+            element_type=MapType(True, AtomicType("INT"), AtomicType("STRING")),
+        )
+        self.assertFalse(agg._set_dedupe)
+        self.assertEqual(
+            agg.agg(None, [{1: "A"}, {1: "A"}, {2: "B"}]),
+            [{1: "A"}, {2: "B"}],
+        )
+
+    def test_field_collect_agg_row_same_value_different_field_name(self):
+        fields_a = [DataField(0, "id", AtomicType("INT"))]
+        fields_b = [DataField(0, "other", AtomicType("INT"))]
+        agg = self._make(
+            distinct=True,
+            element_type=RowType(True, fields_a),
+        )
+        self.assertFalse(agg._set_dedupe)
+
+        left = self.row(1, fields=fields_a)
+        right = self.row(1, fields=fields_b)
+        self.assertEqual(agg.agg(None, [left, right]), [left])
+
+    def test_field_collect_agg_float_nan_signed_zero_and_binary(self):
+        agg = self._make(distinct=True, element_type=AtomicType("DOUBLE"))
+        self.assertTrue(agg._set_dedupe)
+
+        nan = float("nan")
+        result = agg.agg(None, [nan, float("nan"), 1.0])
+        self.assertEqual(len(result), 3)
+        self.assertTrue(math.isnan(result[0]))
+        self.assertTrue(math.isnan(result[1]))
+        self.assertEqual(result[2], 1.0)
+
+        self.assertEqual(agg.agg(None, [0.0, -0.0, 1.0]), [0.0, 1.0])
+
+        agg = self._make(distinct=True, element_type=AtomicType("VARBINARY(8)"))
+        self.assertEqual(
+            agg.agg(None, [b"\x01\x02", bytes([1, 2]), b"\x03"]),
+            [b"\x01\x02", b"\x03"],
+        )
 
 
 class FieldNestedUpdateAggTest(unittest.TestCase):
@@ -2339,6 +2572,54 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
             fields = self.DEFAULT_FIELDS
         return GenericRow(list(values), fields)
 
+    def test_timestamp_types(self):
+        cases = [
+            ("TINYINT", -128, 127),
+            ("SMALLINT", -32768, 32767),
+            ("INT", 9, 100),
+            ("BIGINT", -(1 << 63), (1 << 63) - 1),
+            ("BIGINT", (1 << 63) - 2, (1 << 63) - 1),
+            ("DATE", datetime.date(1969, 12, 31), datetime.date(1970, 1, 1)),
+            ("TIME(3)", datetime.time(23, 59, 59, 998000), datetime.time(23, 59, 59, 999000)),
+            ("TIMESTAMP(9)", Timestamp(0, 1), Timestamp(0, 2)),
+            ("TIMESTAMP_LTZ(9)", Timestamp(-1, 999998), Timestamp(-1, 999999)),
+            ("TIMESTAMP(6)", datetime.datetime(2026, 1, 1, microsecond=1),
+             datetime.datetime(2026, 1, 1, microsecond=2)),
+            ("TIMESTAMP_LTZ(6)",
+             datetime.datetime(2026, 1, 1, 8, tzinfo=datetime.timezone(datetime.timedelta(hours=8))),
+             datetime.datetime(2026, 1, 1, 0, 0, 1, tzinfo=datetime.timezone.utc)),
+        ]
+        for type_name, older, newer in cases:
+            for overwrite in (False, True):
+                for named in (False, True):
+                    for dict_row in (False, True):
+                        with self.subTest(type=type_name, overwrite=overwrite, named=named, dict_row=dict_row):
+                            fields = [DataField(0, "v", AtomicType("STRING")),
+                                      DataField(1, "ts", AtomicType(type_name))]
+                            settings = {"fields.field0.overwrite-on-equal-ts": str(overwrite).lower()}
+                            if named:
+                                fields.reverse()
+                                settings["fields.field0.ts-field"] = "ts"
+                            agg = self._make(RowType(True, fields), CoreOptions(Options(settings)))
+
+                            def entry(value, ts):
+                                row = {"v": value, "ts": ts}
+                                if not dict_row:
+                                    row = GenericRow([row[f.name] for f in fields], fields)
+                                return {"k": row}
+
+                            old = entry("old", older)
+                            new = entry("new", newer)
+                            equal = entry("equal", newer)
+                            null_ts = entry("null", None)
+                            self.assertEqual(agg.agg(old, new), new)
+                            self.assertEqual(agg.agg(new, old), new)
+                            self.assertEqual(agg.agg(new, equal), equal if overwrite else new)
+                            self.assertEqual(agg.agg(equal, new), new if overwrite else equal)
+                            self.assertEqual(agg.agg(new, null_ts), new)
+                            self.assertEqual(agg.agg(null_ts, new), new)
+                            self.assertEqual(agg.agg(new, {"k": None}), {})
+
     def test_field_merge_map_with_key_time_dict_row_default_ts(self):
         agg = self._make()
 
@@ -2367,6 +2648,23 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
                 "key2": {"actual_value": "B", "dbsync_ts": "100"}
             },
         )
+
+    def test_overwrite_on_equal_ts(self):
+        for setting in (None, "false", "true"):
+            with self.subTest(setting=setting):
+                settings = {} if setting is None else {
+                    "fields.field0." + CoreOptions.MERGE_MAP_OVERWRITE_ON_EQUAL_TS: setting}
+                agg = self._make(options=CoreOptions(Options(settings)))
+                old = {"k": self.row("old", "100")}
+                new = {"k": self.row("new", "100")}
+                self.assertEqual(agg.agg(old, new), new if setting == "true" else old)
+                self.assertEqual(agg.agg(new, old), old if setting == "true" else new)
+                self.assertEqual(agg.agg(old, {"k": self.row("older", "090")}), old)
+                self.assertEqual(agg.agg(old, {"k": self.row("newer", "110")}),
+                                 {"k": self.row("newer", "110")})
+                self.assertEqual(agg.agg(old, {"k": self.row("no-time", None)}), old)
+                self.assertEqual(agg.agg(old, None), old)
+                self.assertEqual(agg.agg(old, {"k": None}), {})
 
     def test_field_merge_map_with_key_time_agg_using_default_ts(self):
         agg = self._make()
@@ -2668,7 +2966,7 @@ class RegistrationTest(unittest.TestCase):
     ])
 
     def test_all_expected_aggregators_registered(self):
-        from pypaimon.read.reader.aggregate import _FACTORIES
+        from pypaimon.execution.python.read.reader.aggregate import (_FACTORIES)
         registered = set(_FACTORIES.keys())
         missing = self.EXPECTED - registered
         self.assertEqual(missing, set(),
@@ -2680,7 +2978,7 @@ class RegistrationTest(unittest.TestCase):
         # the two can drift. Adding an aggregator without updating the
         # guard would leave it rejected at read time even though it is
         # registered; pin them together here.
-        from pypaimon.read.merge_engine_support import (
+        from pypaimon.execution.python.read.merge_engine_support import (
             _AGGREGATION_SUPPORTED_AGG_FUNCS)
         self.assertEqual(set(_AGGREGATION_SUPPORTED_AGG_FUNCS),
                          set(self.EXPECTED))

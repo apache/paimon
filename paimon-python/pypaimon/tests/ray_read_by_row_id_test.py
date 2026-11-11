@@ -203,6 +203,18 @@ class RayReadByRowIdTest(unittest.TestCase):
             read_by_row_id(target, src, self.catalog_options, projection=["age"],
                            dynamic_options={"deletion-vectors.enabled": "true"})
 
+    def test_rejects_disabling_query_auth_dynamically(self):
+        target = self._create({**self.de_options, "query-auth.enabled": "true"})
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
+        src = pa.table({"_ROW_ID": [0]}, schema=pa.schema([("_ROW_ID", pa.int64())]))
+        for value in ("false", False, None, "invalid"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                        ValueError, "^Option 'query-auth.enabled' is not allowed to be disabled dynamically$"):
+                    read_by_row_id(target, src, self.catalog_options, projection=["age"],
+                                   dynamic_options={"query-auth.enabled": value})
+
     def test_time_travel_via_dynamic_options(self):
         target = self._create()
         self._write(target, pa.Table.from_pydict(
@@ -418,14 +430,33 @@ class RayReadByRowIdTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             read_by_row_id(target, src, self.catalog_options, projection=["age"])
 
-    def test_rejects_deletion_vectors_table(self):
+    def test_reads_deletion_vectors_and_pins_snapshot(self):
         opts = dict(self.de_options, **{"deletion-vectors.enabled": "true"})
         target = self._create(options=opts)
-        self._write(target, pa.Table.from_pydict(
-            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
-        src = pa.table({"_ROW_ID": [0]}, schema=pa.schema([("_ROW_ID", pa.int64())]))
-        with self.assertRaises(ValueError):
-            read_by_row_id(target, src, self.catalog_options, projection=["age"])
+        for ids in ([1, 2, 3], [4, 5, 6]):
+            self._write(target, pa.Table.from_pydict(
+                {"id": ids, "name": ["a"] * 3, "age": ids}, schema=self.pa_schema))
+        table = self.catalog.get_table(target)
+        src = pa.table({"_ROW_ID": [0, 1, 2, 3, 4, 5, 1]})
+        before = read_by_row_id(target, src, self.catalog_options, projection=["id"])
+        wb = table.new_batch_write_builder()
+        commit = wb.new_commit()
+        try:
+            commit.commit(wb.new_update().delete_by_row_id([0, 2, 4]))
+            after = read_by_row_id(target, src, self.catalog_options, projection=["id"])
+            self.assertEqual(set(self._rows_by_id(before)), {1, 2, 3, 4, 5, 6})
+            self.assertEqual(set(self._rows_by_id(after)), {2, 4, 6})
+            deleted = read_by_row_id(
+                target, pa.table({"_ROW_ID": [0, 2, 4]}), self.catalog_options, projection=["id"])
+            self.assertEqual(deleted.take_all(), [])
+            self.assertEqual(deleted.schema().names, ["id", "_ROW_ID"])
+            commit.close()
+            commit = wb.new_commit()
+            commit.commit(wb.new_update().delete_by_row_id([1, 3, 5]))
+            self.assertEqual(read_by_row_id(
+                target, src, self.catalog_options, projection=["id"]).take_all(), [])
+        finally:
+            commit.close()
 
     def test_rejects_missing_row_id_column(self):
         target = self._create()
@@ -511,7 +542,6 @@ class RayReadByRowIdTest(unittest.TestCase):
             target, pa.table({"_ROW_ID": pa.array([], pa.int64())}),
             self.catalog_options, projection=proj)
         self.assertTrue(real_schema.equals(empty.schema().base_schema))
-        self.assertFalse(empty.schema().base_schema.field("_ROW_ID").nullable)
 
     def test_custom_row_id_col(self):
         target = self._create()

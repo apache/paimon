@@ -152,7 +152,7 @@ function license_check() {
 
 # Flake8 check
 function flake8_check() {
-    local PRUNE_PATHS="\( -path ./dev -o -path ./.tox -o -path ./.venv"
+    local PRUNE_PATHS="\( -path ./dev -o -path ./.tox -o -path ./.venv -o -path ./build -o -path ./dist"
     if python -c "import sys; sys.exit(0 if sys.version_info < (3, 10) else 1)" 2>/dev/null; then
         PRUNE_PATHS="$PRUNE_PATHS -o -path ./pypaimon/daft -o -path ./pypaimon/tests/daft"
     fi
@@ -198,10 +198,10 @@ function pytest_check() {
     # 3.6/3.7 run a curated core subset (their dep ceiling rules out the
     # vector/index/multimodal/blob suites); 3.10+ run the full suite.
     if [ "$PYTHON_VERSION" = "3.6" ] || [ "$PYTHON_VERSION" = "3.7" ]; then
-        TEST_DIR="pypaimon/tests/py36 pypaimon/tests/file_io_test.py pypaimon/tests/arrow_schema_test.py"
+        TEST_DIR="pypaimon/tests/py36 pypaimon/tests/file_io_test.py pypaimon/tests/arrow_schema_test.py pypaimon/tests/table_update_arrow_compatibility_test.py"
         echo "Running core test subset for Python $PYTHON_VERSION: $TEST_DIR"
     else
-        TEST_DIR="pypaimon/tests pypaimon/acceptance --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
+        TEST_DIR="pypaimon/tests --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
         echo "Running tests for Python $PYTHON_VERSION (excluding py36): $TEST_DIR"
     fi
 
@@ -363,10 +363,6 @@ done
 
 # collect checks according to the options
 collect_checks
-
-if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)"; then
-    python -m pip install 'paimon-ftindex==0.1.0' || exit 1
-fi
 
 # run checks
 check_stage

@@ -69,7 +69,7 @@ class ResolvingFileIOTest(unittest.TestCase):
         import pyarrow as pa
         import pyarrow.parquet as pq
         from pathlib import Path
-        from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
+        from pypaimon.execution.python.read.reader.format_pyarrow_reader import (FormatPyArrowReader)
         from pypaimon.schema.data_types import AtomicType, DataField
 
         with tempfile.TemporaryDirectory() as directory:
@@ -215,6 +215,33 @@ class ResolvingFileIOReadWriteTest(unittest.TestCase):
         self.assertTrue(len(self.resolving._fileio_cache) > 0)
         self.resolving.close()
         self.assertEqual(len(self.resolving._fileio_cache), 0)
+
+    def test_close_releases_descriptor_source_file_io(self):
+        from unittest.mock import Mock, patch
+
+        source_io = Mock(spec=FileIO)
+        with patch.object(FileIO, 'get', return_value=source_io):
+            self.resolving.uri_reader_factory.create('s3://source-bucket/blob.bin')
+        self.resolving.close()
+        source_io.close.assert_called_once_with()
+
+    def test_close_releases_all_file_ios_and_preserves_first_error(self):
+        from unittest.mock import Mock, patch
+
+        source_io, first_delegate, second_delegate = (Mock(spec=FileIO) for _ in range(3))
+        first_error = OSError('descriptor source close failed')
+        source_io.close.side_effect = first_error
+        first_delegate.close.side_effect = OSError('destination close failed')
+        with patch.object(FileIO, 'get', side_effect=[source_io, first_delegate, second_delegate]):
+            self.resolving.uri_reader_factory.create('s3://source-bucket/blob.bin')
+            self.resolving._get_fileio('file:///tmp/data.bin')
+            self.resolving._get_fileio('hdfs://cluster/data.bin')
+        with self.assertRaises(OSError) as raised:
+            self.resolving.close()
+        self.assertIs(raised.exception, first_error)
+        for file_io in (source_io, first_delegate, second_delegate):
+            file_io.close.assert_called_once_with()
+        self.assertEqual(self.resolving._fileio_cache, {})
 
     def test_cross_path_delegation(self):
         """Different local paths should use the same cached FileIO."""

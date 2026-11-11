@@ -108,7 +108,8 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
 
     private void buildIndex(FileStoreTable table) throws Exception {
         SortedGlobalIndexScanner scanner =
-                new SortedGlobalIndexScanner(table, "multivalue").withIndexField("tags");
+                new SortedGlobalIndexScanner(table, "multivalue")
+                        .withIndexFields(Collections.singletonList("tags"));
         ScanResult<DataSplit> scanResult =
                 scanner.incrementalScan()
                         .orElseThrow(

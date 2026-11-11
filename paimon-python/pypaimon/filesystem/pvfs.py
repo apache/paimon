@@ -34,6 +34,7 @@ from readerwriterlock import rwlock
 from pypaimon.api.api_response import GetTableResponse, GetTableTokenResponse
 from pypaimon.api.client import AlreadyExistsException, NoSuchResourceException
 from pypaimon.api.rest_api import RESTApi
+from pypaimon.common import user_agent
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions, PVFSOptions
 from pypaimon.common.identifier import Identifier
@@ -149,7 +150,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def __init__(self, options: Union[Options, Dict[str, str]] = None, **kwargs):
         if isinstance(options, dict):
             options = Options(options)
-        options.set(CatalogOptions.HTTP_USER_AGENT_HEADER, 'PythonPVFS')
+        user_agent.with_feature(options, 'PythonPVFS')
         self.options = options
         self.warehouse = options.get(CatalogOptions.WAREHOUSE)
         cache_expired_time = (
@@ -906,15 +907,16 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         ``legacy`` backs it with ``ossfs``. ``jindo`` is the default; when
         pyjindosdk is not installed it falls back to ``ossfs`` -- consistent
         with PyArrowFileIO.
+        With ``cpp``, Python I/O uses ``fs.oss.python.impl`` instead.
 
         ``ossfs`` writes every object through OSS ``AppendObject``, which can
         fail with ``PositionNotEqualToLength`` (409) on the OSS data-acceleration
         endpoint for multi-chunk writes; the jindo backend avoids that path.
         """
-        oss_impl = self.options.get(OssOptions.OSS_IMPL)
+        oss_impl = self._python_oss_impl()
         if oss_impl not in ("jindo", "legacy"):
             raise Exception(
-                "Unsupported fs.oss.impl value: '{}'. "
+                "Unsupported fs.oss.impl or fs.oss.python.impl value: '{}'. "
                 "Supported values are 'jindo' and 'legacy'.".format(oss_impl)
             )
         if self._use_jindo_oss_backend():
@@ -922,11 +924,15 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             return create_jindo_oss_filesystem("oss://{}/".format(bucket), options)
         if oss_impl == "jindo":
             logger.warning(
-                "fs.oss.impl is 'jindo' but pyjindosdk is not installed. "
+                "Python OSS backend is 'jindo' but pyjindosdk is not installed. "
                 "Falling back to the ossfs (OSS AppendObject) implementation. "
                 "Install pyjindosdk for native multipart upload: pip install pyjindosdk"
             )
         return PaimonVirtualFileSystem._get_ossfs_filesystem(options)
+
+    def _python_oss_impl(self):
+        impl = self.options.get(OssOptions.OSS_IMPL)
+        return self.options.get(OssOptions.OSS_PYTHON_IMPL) if impl == "cpp" else impl
 
     def _use_jindo_oss_backend(self) -> bool:
         """Whether OSS access uses the native jindo backend rather than ossfs.
@@ -940,7 +946,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         drift apart.
         """
         return (
-            self.options.get(OssOptions.OSS_IMPL) == "jindo"
+            self._python_oss_impl() == "jindo"
             and JINDO_AVAILABLE
             and JINDO_OSSFS_AVAILABLE
         )

@@ -89,7 +89,7 @@ public class DataEvolutionTableCompactSource
                             table,
                             partitions,
                             table.coreOptions().blobCompactionEnabled(),
-                            false,
+                            table.coreOptions().vectorCompactionEnabled(),
                             snapshot);
             taskPlanner = coordinator::plan;
         }

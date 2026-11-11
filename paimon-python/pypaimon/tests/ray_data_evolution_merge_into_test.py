@@ -17,6 +17,7 @@
 ################################################################################
 
 import datetime
+import json
 import os
 import shutil
 import tempfile
@@ -27,9 +28,13 @@ from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pyarrow.compute as pc
+import pytest
 import ray
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.catalog.catalog_exception import TableNoPermissionException
+from pypaimon.tests import native_authorized_update_test as auth_test
+from pypaimon.write.backend_dispatch import python_commit
 from pypaimon.ray import (
     WhenMatched, WhenNotMatched, merge_into, read_paimon,
     source_col, target_col, lit,
@@ -45,6 +50,7 @@ _SKIP_CONDITION = not _HAS_DATAFUSION
 _SKIP_REASON = "pypaimon[datafusion] is required for condition expressions"
 
 _TEST_NUM_PARTITIONS = 2
+rest_catalog = auth_test.rest_catalog
 
 
 class RayDataEvolutionMergeIntoTest(unittest.TestCase):
@@ -68,7 +74,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         cls.catalog = CatalogFactory.create(cls.catalog_options)
         cls.catalog.create_database('default', True)
         if not ray.is_initialized():
-            ray.init(ignore_reinit_error=True, num_cpus=2)
+            # Nested joins and the final shuffle retain actors while scheduling tasks.
+            ray.init(ignore_reinit_error=True, num_cpus=4)
 
     @classmethod
     def tearDownClass(cls):
@@ -122,7 +129,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         read_builder = table.new_read_builder().with_projection(
             list(table.field_names) + [SpecialFields.ROW_ID.name]
         )
-        plan = read_builder.new_scan().plan_for_write()
+        plan = read_builder.new_scan().plan_all()
         old_files = [
             file for split in plan.splits() for file in split.files
         ]
@@ -142,7 +149,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         messages[0].deleted_files.extend(old_files)
 
         commit = write_builder.new_commit()
-        file_store_commit = commit.file_store_commit
+        file_store_commit = python_commit(commit).file_store_commit
         original_try_commit = file_store_commit._try_commit
         file_store_commit._try_commit = (
             lambda commit_kind, *args, **kwargs:
@@ -440,16 +447,12 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertIn('data-evolution.enabled', str(ctx.exception))
 
     def test_no_row_tracking_rejected(self):
-        target = self._create_table(options={'data-evolution.enabled': 'true'})
+        # Data evolution requires row tracking. Schema validation now rejects
+        # this combination at table creation (aligned with Java
+        # SchemaValidation#validateRowTracking), so the table can no longer be
+        # created and merge_into never gets a chance to run.
         with self.assertRaises(ValueError) as ctx:
-            merge_into(
-                target=target,
-                source=self._source(),
-                catalog_options=self.catalog_options,
-                on=['id'],
-                when_matched=[WhenMatched.update('*')],
-                num_partitions=_TEST_NUM_PARTITIONS,
-            )
+            self._create_table(options={'data-evolution.enabled': 'true'})
         self.assertIn('row-tracking.enabled', str(ctx.exception))
 
     def test_source_missing_on_col_raises(self):
@@ -542,14 +545,19 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             schema=self.pa_schema,
         )
 
-        merge_into(
-            target=target,
-            source=source,
-            catalog_options=self.catalog_options,
-            on=['id'],
-            when_matched=[WhenMatched.update('*')],
-            num_partitions=_TEST_NUM_PARTITIONS,
-        )
+        with patch.object(
+                ray.data.Dataset,
+                'materialize',
+                side_effect=AssertionError('plain source must stay streaming'),
+        ):
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
 
         out = self._read_sorted(target)
         self.assertEqual(out['id'], [1, 2, 3])
@@ -572,21 +580,26 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ),
         )
 
-        metrics = merge_into(
-            target=target,
-            source=pa.Table.from_pydict(
-                {
-                    'id': pa.array([2, 3], type=pa.int32()),
-                    'name': ['ignored', 'ignored'],
-                    'age': pa.array([99, 99], type=pa.int32()),
-                },
-                schema=self.pa_schema,
-            ),
-            catalog_options=self.catalog_options,
-            on=['id'],
-            when_matched=[WhenMatched.delete()],
-            num_partitions=_TEST_NUM_PARTITIONS,
-        )
+        with patch.object(
+                ray.data.Dataset,
+                'materialize',
+                side_effect=AssertionError('plain source must stay streaming'),
+        ):
+            metrics = merge_into(
+                target=target,
+                source=pa.Table.from_pydict(
+                    {
+                        'id': pa.array([2, 3], type=pa.int32()),
+                        'name': ['ignored', 'ignored'],
+                        'age': pa.array([99, 99], type=pa.int32()),
+                    },
+                    schema=self.pa_schema,
+                ),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.delete()],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
 
         self.assertEqual(metrics, {
             'num_matched': 2, 'num_inserted': 0, 'num_unchanged': 0,
@@ -595,6 +608,57 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['id'], [1])
         self.assertEqual(out['name'], ['a'])
         self.assertEqual(out['age'], [10])
+
+    def test_joined_source_delete_materializes_before_routing(self):
+        options = dict(self.de_options)
+        options['deletion-vectors.enabled'] = 'true'
+        target = self._create_table(options=options)
+        self._write(target, self._source(ids=(1, 2, 3)))
+
+        source = ray.data.from_arrow(pa.table({
+            'id': pa.array([2, 3], type=pa.int32()),
+        })).join(
+            ray.data.from_arrow(pa.table({
+                'id': pa.array([2, 3], type=pa.int32()),
+                'selected': [True, True],
+            })),
+            join_type='inner',
+            num_partitions=_TEST_NUM_PARTITIONS,
+            on=['id'],
+        )
+        real_materialize = ray.data.Dataset.materialize
+        materialized = []
+
+        def track_materialize(dataset):
+            materialized.append(dataset)
+            return real_materialize(dataset)
+
+        with patch.object(
+                ray.data.Dataset, 'materialize', new=track_materialize,
+        ):
+            metrics = merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.delete()],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(metrics['num_matched'], 2)
+        self.assertEqual(self._read_sorted(target)['id'], [1])
+        self.assertEqual(len(materialized), 1)
+
+    def test_source_shuffle_detection(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+
+        source = ray.data.from_arrow(pa.table({'id': [1, 2]}))
+        detect = merge_module._has_upstream_join_or_shuffle
+
+        self.assertFalse(detect(source))
+        self.assertFalse(detect(source.repartition(2, shuffle=False)))
+        self.assertTrue(detect(source.repartition(2, shuffle=True)))
+        self.assertTrue(detect(source.random_shuffle()))
 
     def test_not_matched_insert_appends_unmatched(self):
         target = self._create_table()
@@ -1094,16 +1158,26 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
 
         updates = matched.map_batches(
             resolve_and_compute, batch_format='pyarrow')
-        metrics = merge_into(
-            target=name,
-            source=updates,
-            catalog_options=self.catalog_options,
-            on=['id'],
-            when_matched=[
-                WhenMatched.update({'feature': source_col('new_feature')})
-            ],
-            num_partitions=num_partitions,
-        )
+        real_materialize = ray.data.Dataset.materialize
+        materialized = []
+
+        def track_materialize(dataset):
+            materialized.append(dataset)
+            return real_materialize(dataset)
+
+        with patch.object(
+                ray.data.Dataset, 'materialize', new=track_materialize,
+        ):
+            metrics = merge_into(
+                target=name,
+                source=updates,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[
+                    WhenMatched.update({'feature': source_col('new_feature')})
+                ],
+                num_partitions=num_partitions,
+            )
 
         table = self.catalog.get_table(name)
         rb = table.new_read_builder()
@@ -1113,6 +1187,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['feature'], [200, 20, 400])
         self.assertEqual(out['payload'], [b'aa', b'bbb', b'cccc'])
         self.assertEqual(metrics['num_matched'], 2)
+        self.assertEqual(len(materialized), 1)
 
     def test_combined_writes_single_snapshot(self):
         target = self._create_table()
@@ -1720,17 +1795,24 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['name'], ['old'])
         self.assertEqual(out['age'], [99])
 
-    def test_callable_value_rejected(self):
+    def test_callable_values_read_qualified_target_and_source(self):
         target = self._create_table()
-        with self.assertRaises(TypeError):
-            merge_into(
-                target=target,
-                source=self._source(),
-                catalog_options=self.catalog_options,
-                on=['id'],
-                when_matched=[WhenMatched.update({'name': lambda r: r})],
-                num_partitions=_TEST_NUM_PARTITIONS,
-            )
+        self._write(target, self._source())
+        merge_into(
+            target=target,
+            source=self._source(),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update({
+                'age': lambda rows: pc.add(rows['t.age'], rows['s.age']),
+                'name': lambda rows: pc.utf8_upper(rows['t.name']),
+            })],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+        expected = self._source().sort_by('id').to_pydict()
+        actual = self._read_sorted(target)
+        self.assertEqual(actual['age'], [age * 2 for age in expected['age']])
+        self.assertEqual(actual['name'], [name.upper() for name in expected['name']])
 
     def test_source_missing_referenced_col(self):
         target = self._create_table()
@@ -2349,13 +2431,18 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ),
         )
 
-        result = merge_into(
-            target=target,
-            source=target,
-            catalog_options=self.catalog_options,
-            on=['_ROW_ID'],
-            when_matched=[WhenMatched.update({'age': lit(99)})],
-        )
+        with patch.object(
+                ray.data.Dataset,
+                'materialize',
+                side_effect=AssertionError('self-merge must stay streaming'),
+        ):
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+            )
 
         self.assertEqual(result['num_matched'], 3)
         out = self._read_sorted(target)
@@ -2435,7 +2522,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self._write(target, self._source(ids=(1, 2)))
         self._write(target, self._source(ids=(3, 4)))
         table = self.catalog.get_table(target)
-        packed_splits = table.new_read_builder().new_scan().plan_for_write().splits()
+        packed_splits = table.new_read_builder().new_scan().plan_all().splits()
         self.assertEqual(len(packed_splits), 1)
 
         with patch.object(
@@ -2456,6 +2543,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(result['num_matched'], 4)
         self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_self_merge_rebases_staged_updates_after_compaction(self):
         from pypaimon.data.generic_variant import GenericVariant
         from pypaimon.data.variant_path import variant_get, variant_replace
@@ -2606,10 +2694,10 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         # Match Spark: replaced staging files are left for orphan cleanup.
         self.assertTrue(all(os.path.exists(path) for path in stale_paths))
 
-    def test_self_merge_compaction_retry_checks_core_rollback(self):
+    def test_self_merge_compaction_retry_preserves_committed_snapshot(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
         from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
-        from pypaimon.write.file_store_commit import FileStoreCommit
+        from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
 
         target = self._create_table()
         self._write(target, self._source(ids=(1, 2)))
@@ -2617,12 +2705,14 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         table = self.catalog.get_table(target)
         real_apply = merge_module.distributed_self_merge_update_apply
         real_rewrite = rewriter_module._rewrite_updates
-        real_commit_init = FileStoreCommit.__init__
-        rollbacks = []
+        tagged_versions = []
 
         def stage_then_compact(*args, **kwargs):
             result = real_apply(*args, **kwargs)
             self._compact_all_data_files(table)
+            snapshot = table.snapshot_manager().get_latest_snapshot()
+            table.create_tag("published", snapshot_id=snapshot.id)
+            tagged_versions.append(snapshot.id)
             return result
 
         rewrite_calls = [0]
@@ -2633,12 +2723,6 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 return None
             return real_rewrite(*args, **kwargs)
 
-        def init_with_rollback(commit, *args, **kwargs):
-            real_commit_init(commit, *args, **kwargs)
-            commit.rollback = Mock()
-            commit.rollback.try_to_rollback.return_value = False
-            rollbacks.append(commit.rollback)
-
         with patch.object(
                 merge_module,
                 'distributed_self_merge_update_apply',
@@ -2647,10 +2731,6 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 rewriter_module,
                 '_rewrite_updates',
                 side_effect=miss_precommit_race,
-        ), patch.object(
-                FileStoreCommit,
-                '__init__',
-                new=init_with_rollback,
         ), patch.object(
                 FileStoreCommit,
                 '_commit_retry_wait',
@@ -2667,12 +2747,11 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
 
+        self.assertEqual(table.tag_manager().get_or_throw("published").id, tagged_versions[0])
+        self.assertIsNotNone(table.snapshot_manager().get_snapshot_by_id(tagged_versions[0]))
         self.assertEqual(result['num_matched'], 4)
         self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
         commit_retry_wait.assert_not_called()
-        self.assertTrue(any(
-            rollback.try_to_rollback.called for rollback in rollbacks
-        ))
         ray_retry_wait.assert_called_once()
         self.assertEqual(ray_retry_wait.call_args[0][1], 0)
         self.assertEqual(rewrite_calls[0], 2)
@@ -2793,7 +2872,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
 
             injected[0] = True
             coordinator_commit_users.append(write_builder.commit_user)
-            file_store_commit = commit.file_store_commit
+            file_store_commit = python_commit(commit).file_store_commit
             real_atomic_commit = file_store_commit.snapshot_commit.commit
             real_duplicate_check = file_store_commit._is_duplicate_commit
 
@@ -2951,7 +3030,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self._write(target, self._source(ids=(1, 2, 3, 4)))
         table = self.catalog.get_table(target)
         real_commit = (
-            rewriter_module.commit_self_merge_with_compaction_retry
+            rewriter_module.commit_updates_with_compaction_retry
         )
         real_rewrite = rewriter_module._rewrite_updates
         rewrite_results = []
@@ -2967,7 +3046,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
 
         with patch.object(
                 rewriter_module,
-                'commit_self_merge_with_compaction_retry',
+                'commit_updates_with_compaction_retry',
                 side_effect=compact_then_commit,
         ), patch.object(
                 rewriter_module,
@@ -3154,7 +3233,6 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
     def test_self_merge_filters_file_group_in_batches(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
         from pypaimon.ray import data_evolution_merge_join as join_module
-        from pypaimon.write.file_store_commit import _abort_commit_messages
 
         options = dict(self.de_options)
         options['read.batch-size'] = '2'
@@ -3230,7 +3308,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ):
                 messages, count, row_ids = (
                     join_module._apply_self_merge_update_group(
-                        context, plan.file_groups[0], True,
+                        context, plan.row_id_plan.for_split(plan.file_groups[0]), True,
                     )
                 )
 
@@ -3238,9 +3316,10 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             self.assertEqual(count, 3)
             self.assertEqual(row_ids, [1, 3, 5])
         finally:
-            _abort_commit_messages(table, messages)
+            # Do not delete staged messages: another commit attempt may use them.
+            pass
 
-    def test_self_merge_update_aborts_other_groups_after_failure(self):
+    def test_self_merge_update_preserves_other_groups_after_failure(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
         from pypaimon.ray.data_evolution_merge_join import (
             distributed_self_merge_update_apply,
@@ -3293,7 +3372,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         after = set()
         for root, _, files in os.walk(self.warehouse):
             after.update(os.path.join(root, name) for name in files)
-        self.assertEqual(before, after)
+        self.assertLess(before, after)
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_self_merge_callable_assignment(self):
@@ -3433,17 +3512,13 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
     def test_self_merge_callable_validation(self):
         target = self._create_table()
 
-        with self.assertRaisesRegex(
-                ValueError, 'Callable SET values require read_columns'):
-            merge_into(
-                target=target,
-                source=target,
-                catalog_options=self.catalog_options,
-                on=['_ROW_ID'],
-                when_matched=[WhenMatched.update({
-                    'age': lambda rows: rows['age'],
-                })],
-            )
+        from pypaimon.ray.data_evolution_merge_into import _prepare
+        _, _, _, _, ctx = _prepare(
+            target, target, self.catalog_options,
+            [WhenMatched.update({'age': lambda rows: rows['t.age']})],
+            [], ['_ROW_ID'],
+        )
+        self.assertEqual(ctx.read_columns, ())
 
         with self.assertRaisesRegex(
                 ValueError, 'read_columns requires a callable SET value'):
@@ -3466,20 +3541,6 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 read_columns=['missing'],
                 when_matched=[WhenMatched.update({
                     'age': lambda rows: rows['missing'],
-                })],
-            )
-
-        source = self._create_table()
-        with self.assertRaisesRegex(
-                TypeError, 'callables are only supported for self-merge'):
-            merge_into(
-                target=target,
-                source=source,
-                catalog_options=self.catalog_options,
-                on=['id'],
-                read_columns=['age'],
-                when_matched=[WhenMatched.update({
-                    'age': lambda rows: rows['age'],
                 })],
             )
 
@@ -4359,6 +4420,93 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['name'], ['a'])
 
 
+@pytest.mark.parametrize('seed', [False, True])
+@pytest.mark.parametrize('policy', ['denied', 'filter', 'mask'])
+def test_insert_only_merge_authorizes_target_before_source(rest_catalog, seed, policy):
+    from pypaimon.ray import data_evolution_merge_into as m
+
+    catalog, server = rest_catalog
+    table = auth_test._table(catalog, seed=seed)
+    source = pa.Table.from_pylist(auth_test._ROWS[1:], schema=auth_test._SCHEMA)
+    assignment = Mock(side_effect=AssertionError('Insert before target authorization'))
+    before = auth_test._files(table)
+    with auth_test._restricted(server, table, policy) as authorize, patch.object(
+            m, '_normalize_source', side_effect=AssertionError('Source read before target authorization')
+    ) as read_source, patch.object(
+            server, '_table_snapshot_handle', side_effect=AssertionError('Unauthorized snapshot read')
+    ) as snapshot:
+        with pytest.raises(TableNoPermissionException) as error:
+            merge_into(
+                target='default.t', source=source, catalog_options=catalog.context.options.to_map(),
+                on=['name' if policy == 'mask' else 'id'],
+                when_not_matched=[WhenNotMatched({'id': source_col('id'), 'value': assignment,
+                                                  'name': source_col('name')})],
+            )
+        assert error.value.identifier == table.identifier
+        authorize.assert_called_once()
+        assert json.loads(authorize.call_args[0][1]).get('select') is None
+        read_source.assert_not_called()
+        snapshot.assert_not_called()
+    assignment.assert_not_called()
+    assert auth_test._files(table) == before
+
+
+@pytest.mark.parametrize('policy', ['filter', 'mask'])
+def test_merge_authorizes_named_source_separately(rest_catalog, policy):
+    from pypaimon.ray import data_evolution_merge_into as m
+
+    catalog, server = rest_catalog
+    table = auth_test._table(catalog)
+    catalog.create_table('default.source', Schema.from_pyarrow_schema(
+        auth_test._SCHEMA, options=table.table_schema.options), False)
+    source = catalog.get_table('default.source')
+    auth_test._append(source, auth_test._ROWS[1:])
+    before = auth_test._files(table)
+    with auth_test._restricted(server, source, policy) as authorize, patch.object(
+            m, '_normalize_source', side_effect=AssertionError('Source read before source authorization')
+    ) as read_source, patch.object(
+            server, '_table_snapshot_handle', side_effect=AssertionError('Unauthorized snapshot read')
+    ) as snapshot:
+        with pytest.raises(TableNoPermissionException) as error:
+            merge_into(
+                target='default.t', source='default.source', catalog_options=catalog.context.options.to_map(),
+                on=['id'], when_not_matched=[WhenNotMatched('*')],
+            )
+        assert error.value.identifier == source.identifier
+        assert [call[0][2] for call in authorize.call_args_list] == [table.identifier, source.identifier]
+        assert all(json.loads(call[0][1]).get('select') is None for call in authorize.call_args_list)
+        read_source.assert_not_called()
+        snapshot.assert_not_called()
+    assert auth_test._files(table) == before
+
+
+@pytest.mark.parametrize('seed', [False, True])
+def test_merge_with_full_source_and_target_grants(rest_catalog, seed):
+    catalog, server = rest_catalog
+    table = auth_test._table(catalog, seed=seed)
+    catalog.create_table('default.source', Schema.from_pyarrow_schema(
+        auth_test._SCHEMA, options=table.table_schema.options), False)
+    source = catalog.get_table('default.source')
+    rows = [dict(id=2, value=22, name='B'), dict(id=4, value=40, name='d')]
+    auth_test._append(source, rows)
+    ray.init(ignore_reinit_error=True, num_cpus=4)
+    try:
+        with patch.object(server, '_table_query_auth_handle', wraps=server._table_query_auth_handle) as authorize:
+            result = merge_into(
+                target='default.t', source='default.source', catalog_options=catalog.context.options.to_map(),
+                on=['id'], when_matched=[WhenMatched.update('*')], when_not_matched=[WhenNotMatched('*')],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+            assert [call[0][2] for call in authorize.call_args_list[:2]] == [table.identifier, source.identifier]
+            assert all(json.loads(call[0][1]).get('select') is None for call in authorize.call_args_list[:2])
+    finally:
+        ray.shutdown()
+    assert result['num_matched'] == (1 if seed else 0)
+    assert result['num_inserted'] == (1 if seed else 2)
+    expected = [auth_test._ROWS[0], rows[0], auth_test._ROWS[2], rows[1]] if seed else rows
+    assert auth_test._rows(table) == expected
+
+
 class TargetProjectionTest(unittest.TestCase):
 
     def _clause(self, spec, condition=None):
@@ -4740,7 +4888,7 @@ class MergeConditionUnitTest(unittest.TestCase):
             try_parse_self_merge_predicate,
         )
         with self.assertLogs(
-                'pypaimon.ray.merge_condition', level='DEBUG') as logs:
+                'pypaimon.write.merge_condition', level='DEBUG') as logs:
             self.assertIsNone(try_parse_self_merge_predicate(
                 't.id =', self._predicate_fields(),
             ))

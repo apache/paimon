@@ -37,8 +37,10 @@ public class GlobalIndexerFactoryUtils {
     private static final Map<String, GlobalIndexerFactory> factories = new HashMap<>();
 
     static {
+        // Not the context classloader: it may not see Paimon, e.g. on a Flink JobMaster RPC thread.
         ServiceLoader<GlobalIndexerFactory> serviceLoader =
-                ServiceLoader.load(GlobalIndexerFactory.class);
+                ServiceLoader.load(
+                        GlobalIndexerFactory.class, GlobalIndexerFactory.class.getClassLoader());
 
         for (GlobalIndexerFactory indexerFactory : serviceLoader) {
             if (factories.put(indexerFactory.identifier(), indexerFactory) != null) {
@@ -50,8 +52,29 @@ public class GlobalIndexerFactoryUtils {
         }
     }
 
+    private static GlobalIndexerFactory find(String type) {
+        GlobalIndexerFactory factory = factories.get(type);
+        if (factory != null) {
+            return factory;
+        }
+
+        ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
+        if (contextClassLoader == null
+                || contextClassLoader == GlobalIndexerFactory.class.getClassLoader()) {
+            return null;
+        }
+        // Keep job-scoped providers local so their classloaders are not retained or shared.
+        for (GlobalIndexerFactory contextFactory :
+                ServiceLoader.load(GlobalIndexerFactory.class, contextClassLoader)) {
+            if (contextFactory.identifier().equals(type)) {
+                return contextFactory;
+            }
+        }
+        return null;
+    }
+
     public static GlobalIndexerFactory load(String type) {
-        GlobalIndexerFactory globalIndexerFactory = factories.get(type);
+        GlobalIndexerFactory globalIndexerFactory = find(type);
         if (globalIndexerFactory == null) {
             throw new RuntimeException("Can't find global index for type: " + type);
         }
@@ -61,13 +84,10 @@ public class GlobalIndexerFactoryUtils {
     /** Keep unrecognized index types for the reader to resolve at execution time. */
     public static List<GlobalIndexIOMeta> selectFiles(
             String type,
-            DataField indexField,
-            List<DataField> extraFields,
+            List<DataField> indexFields,
             Predicate predicate,
             List<GlobalIndexIOMeta> files) {
-        GlobalIndexerFactory factory = factories.get(type);
-        return factory == null
-                ? files
-                : factory.selectFiles(indexField, extraFields, predicate, files);
+        GlobalIndexerFactory factory = find(type);
+        return factory == null ? files : factory.selectFiles(indexFields, predicate, files);
     }
 }

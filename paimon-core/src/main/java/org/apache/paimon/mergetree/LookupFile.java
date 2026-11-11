@@ -198,7 +198,9 @@ public class LookupFile {
         if (partition.getFieldCount() == 0) {
             return String.format("%s-%s", bucket, remoteFileName);
         } else {
-            String partitionString = partToSimpleString(partitionType, partition, "-", 20);
+            String partitionString =
+                    partToSimpleString(partitionType, partition, "-", 20)
+                            .replaceAll("[^a-zA-Z0-9._-]", "_");
             return String.format("%s-%s-%s", partitionString, bucket, remoteFileName);
         }
     }

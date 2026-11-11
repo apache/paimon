@@ -169,13 +169,10 @@ public class LanceFileFormat extends FileFormat {
 
         @Override
         public Void visit(LocalZonedTimestampType localZonedTimestampType) {
-            // lance has a bug here, if the local in GMT-10:00, it failed by reson: called
-            // `Result::unwrap()` on an `Err` value: Schema { message: "Unsupported timestamp type:
-            // timestamp:us:GMT-10:00", location: Location { file:
-            // "rust/lance-core/src/datatypes.rs", line: 326, column: 39 } }
-            // Disable it for now.
-            throw new UnsupportedOperationException(
-                    "Lance file format does not support type LOCAL_ZONED_TIMESTAMP");
+            // Lance cannot parse timestamp time zone ids containing ':' (e.g. GMT-10:00), which
+            // aborts the JVM. This is safe because ArrowFieldTypeConversion always writes
+            // LOCAL_ZONED_TIMESTAMP with the "UTC" time zone.
+            return null;
         }
 
         @Override

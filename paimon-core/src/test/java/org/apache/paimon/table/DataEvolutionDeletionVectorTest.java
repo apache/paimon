@@ -50,7 +50,6 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -77,7 +76,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
-import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -89,6 +87,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassignerTest.reassignerWithBeforeCommit;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.errors.ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -187,6 +186,49 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                                 String.valueOf(historicalSnapshotId)));
         assertThat(readPartitionedRowsWithRowIds(historicalTable))
                 .containsExactly("a|0|0", "a|2|2", "b|4|4", "a|5|5", "a|7|7");
+    }
+
+    @Test
+    public void testRowIdReassignAcrossConcurrentDeletionMaterialization() throws Exception {
+        FileStoreTable table = createPartitionedReassignTable("reassign_materialize_dv", true);
+        writeDedicatedPartitionRows(table, "a", 0, 1, 2);
+        writeDedicatedPartitionRows(table, "b", 3, 4);
+        writeDedicatedPartitionRows(table, "a", 5, 6, 7);
+        writePartialStrings(table, "a", 0, 100, 101, 102);
+        commitDeletionVectors(
+                table,
+                partition(table, "a"),
+                Collections.singletonList(new DvSpec(new Range(0, 2), 1)));
+
+        AtomicBoolean materialized = new AtomicBoolean();
+        DataEvolutionRowIdReassigner.Result result =
+                reassignerWithBeforeCommit(
+                                table,
+                                () -> {
+                                    if (materialized.compareAndSet(false, true)) {
+                                        try {
+                                            materializeDeletionVectors(table);
+                                        } catch (Exception e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    }
+                                })
+                        .reassign("test-reassign-concurrent-materialize");
+
+        assertThat(materialized).isTrue();
+        assertThat(result.reassigned).isTrue();
+        assertThat(result.firstAssignedRowId).isEqualTo(10L);
+        assertThat(result.nextRowId).isEqualTo(16L);
+        // Materialized files retain their new IDs; surviving old files keep the plan's offsets.
+        assertThat(readPartitionedRowsWithRowIds(table))
+                .containsExactly(
+                        "b|3|base-3|3|3",
+                        "b|4|base-4|4|4",
+                        "a|0|updated-100|0|8",
+                        "a|2|updated-102|2|9",
+                        "a|5|base-5|5|13",
+                        "a|6|base-6|6|14",
+                        "a|7|base-7|7|15");
     }
 
     @Test
@@ -1284,15 +1326,6 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 .filter(entry -> entry.partition().equals(partition))
                 .map(ManifestEntry::file)
                 .collect(Collectors.toList());
-    }
-
-    private static DataEvolutionRowIdReassigner reassignerWithBeforeCommit(
-            FileStoreTable table, Runnable beforeCommit) throws Exception {
-        Constructor<DataEvolutionRowIdReassigner> constructor =
-                DataEvolutionRowIdReassigner.class.getDeclaredConstructor(
-                        FileStoreTable.class, PartitionPredicate.class, Runnable.class);
-        constructor.setAccessible(true);
-        return constructor.newInstance(table, null, beforeCommit);
     }
 
     @Override

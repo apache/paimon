@@ -17,25 +17,23 @@
 
 """Distributed native planning must preserve assignment before reader limits."""
 
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
 import tempfile
 import unittest
 from contextlib import ExitStack
+from dataclasses import replace
 from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
-from pypaimon.read.native_plan import (
-    native_method_available,
-    native_version_at_least,
-    native_runtime_available,
-)
+from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.python.read.scan_distribution import java_file_name_shard
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 class _DistributionFixture:
@@ -55,16 +53,23 @@ class _DistributionFixture:
             primary_keys=primary_keys), False)
         return self.catalog.get_table('default.' + name)
 
-    def _write(self, table, rows, schema=None):
+    def _write(self, table, rows, schema=None, level=None):
         builder = table.new_batch_write_builder()
         writer, commit = builder.new_write(), builder.new_commit()
         try:
             writer.write_arrow(pa.Table.from_pylist(
                 rows, schema=self.schema if schema is None else schema))
-            commit.commit(writer.prepare_commit())
+            messages = writer.prepare_commit()
+            if level is not None:
+                # Unique-key L1 files model materialized Java compaction output.
+                for message in messages:
+                    message.new_files = [replace(file, level=level)
+                                         for file in message.new_files]
+            commit.commit(messages)
         finally:
             writer.close()
             commit.close()
+        return messages
 
     @staticmethod
     def _de_options(**extra):
@@ -105,16 +110,24 @@ class _DistributionFixture:
             scan.with_slice(*slice_)
         if row_ranges is not None:
             scan.with_row_ranges(row_ranges)
-        guard = patch.object(scan.file_scanner, 'scan', side_effect=AssertionError(
-            'distributed native plan fell back to Python')) if native else ExitStack()
-        with guard:
+        with ExitStack() as stack:
+            if native:
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError(
+                        'distributed native plan fell back to Python')))
+                if table.is_primary_key_table and not table.options.global_index_enabled():
+                    stack.enter_context(patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner._apply_push_down_limit',
+                        side_effect=AssertionError(
+                            'PK shard LIMIT was applied in Python')))
             plan = scan.plan()
         if native:
             self.assertTrue(all(
                 getattr(split, '_native_split', None) is not None
                 for split in plan.splits()))
             read_guard = patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError(
                     'distributed native read fell back to Python'))
         else:
@@ -149,7 +162,7 @@ class _DistributionFixture:
         vector = BitmapDeletionVector()
         for position in deleted_positions:
             vector.delete(position)
-        entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+        entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
             GenericRow([], []), 0, {first_file.file_name: vector})
         commit = table.new_batch_write_builder().new_commit()
         try:
@@ -162,7 +175,7 @@ class _DistributionFixture:
 
 @pytest.mark.native_plan
 @unittest.skipUnless(native_runtime_available(),
-                     'pypaimon_rust split-planning API required')
+                     'pypaimon-rust not installed')
 class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
 
     def test_append_shards_preserve_partition_file_order_and_cover_once(self):
@@ -244,7 +257,7 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
         self._assert_parity(table, [], 4, shard=(1, 3), limit=0)
 
     @unittest.skipUnless(
-        native_version_at_least(0, 4, 0),
+        native_runtime_available(),
         'pypaimon-rust>=0.4.0 required for native DV scans')
     def test_append_dv_slice_limit_uses_actual_surviving_positions(self):
         for deleted, expected_key in (((2, 3, 4, 5), 6), ((3, 4, 5), 2)):
@@ -279,8 +292,69 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
         self.assertCountEqual(covered, list(latest.values()))
         self.assertEqual(len({row['k'] for row in covered}), len(covered))
 
-    @unittest.skipUnless(native_method_available('TableScan', 'with_row_position_slice'),
-                         'pypaimon_rust row-position selection API required')
+    def test_raw_primary_key_shards_distribute_files_within_one_bucket(self):
+        for engine, dv in (('first-row', False), ('deduplicate', True)):
+            with self.subTest(engine=engine, dv=dv):
+                table = self._create('raw_pk_' + engine, {
+                    'bucket': '1', 'merge-engine': engine,
+                    'deletion-vectors.enabled': str(dv).lower(),
+                    'source.split.target-size': '1b',
+                }, primary_keys=['k'])
+                rows = [{'k': k, 'v': str(k)} for k in range(12)]
+                files = []
+                for row in rows:
+                    files.append(self._write(table, [row], level=1)[0].new_files[0])
+                expected_rows, snapshot_id = rows, 12
+                if dv:
+                    vectors = {}
+                    for key in (3, 7):
+                        vector = BitmapDeletionVector()
+                        vector.delete(0)
+                        vectors[files[key].file_name] = vector
+                    entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
+                        GenericRow([], []), 0, vectors)
+                    commit = table.new_batch_write_builder().new_commit()
+                    try:
+                        commit.commit([CommitMessage(
+                            partition=(), bucket=0, new_files=[], index_adds=[entry])])
+                    finally:
+                        commit.close()
+                    expected_rows = [row for row in rows if row['k'] not in (3, 7)]
+                    snapshot_id = 13
+                _, expected = self._read(table, False)
+                self.assertCountEqual(expected, expected_rows)
+                covered = []
+                owned_files = set()
+                for shard in range(5):
+                    normal, expected = self._read(table, False, shard=(shard, 5))
+                    plan = self._assert_parity(
+                        table, expected, snapshot_id, ordered=False, shard=(shard, 5))
+                    for candidate in (normal, plan):
+                        self.assertTrue(all(split.bucket == 0 for split in candidate.splits()))
+                        self.assertTrue(all(
+                            java_file_name_shard(file.file_name, 5) == shard
+                            for split in candidate.splits() for file in split.files))
+                    files = {file.file_name for split in plan.splits() for file in split.files}
+                    self.assertFalse(owned_files & files)
+                    owned_files.update(files)
+                    covered.extend(expected)
+                    if expected:
+                        _, limited = self._read(table, True, shard=(shard, 5), limit=1)
+                        self.assertEqual(len(limited), 1)
+                        self.assertIn(limited[0], expected)
+                self.assertCountEqual(covered, expected_rows)
+                self.assertEqual(len(owned_files), 12)
+                # Snapshot selection must happen before shard planning.
+                old = table.copy({'scan.snapshot-id': '3'})
+                old_rows = []
+                for shard in range(5):
+                    _, expected = self._read(old, False, shard=(shard, 5))
+                    self._assert_parity(old, expected, 3, ordered=False, shard=(shard, 5))
+                    old_rows.extend(expected)
+                self.assertCountEqual(old_rows, rows[:3])
+
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_data_evolution_slice_positions_skip_row_id_gaps(self):
         schema = self.schema.append(pa.field('p', pa.string()))
         table = self._create('de_gaps', self._de_options(), schema, ['p'])
@@ -294,8 +368,8 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
         self._assert_parity(table, surviving[3:], 4, shard=(1, 2))
         self._assert_parity(table, [], 4, slice_=(10, 12))
 
-    @unittest.skipUnless(native_method_available('TableScan', 'with_row_position_shard'),
-                         'pypaimon_rust row-position selection API required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_data_evolution_sharding_precedes_group_stats_pruning(self):
         table = self._create('de_filter', self._de_options())
         rows = [{'k': k, 'v': str(k)} for k in range(6)]
@@ -306,8 +380,8 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
         self._assert_parity(table, rows[3:], 2, shard=(1, 2), predicate=predicate)
         self._assert_parity(table, rows[3:4], 2, shard=(1, 2), predicate=predicate, limit=1)
 
-    @unittest.skipUnless(native_method_available('TableScan', 'with_row_position_slice'),
-                         'pypaimon_rust row-position selection API required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_data_evolution_slice_intersects_explicit_ranges(self):
         table = self._create('de_intersection', self._de_options())
         rows = [{'k': k, 'v': str(k)} for k in range(6)]
@@ -320,8 +394,8 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
                             shard=(1, 2), row_ranges=[Range(4, 4)])
         self._assert_parity(table, [], 2, shard=(0, 2), row_ranges=[])
 
-    @unittest.skipUnless(native_method_available('TableScan', 'with_row_position_shard'),
-                         'pypaimon_rust row-position selection API required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_data_evolution_shards_count_positions_before_deletions(self):
         options = self._de_options(**{'deletion-vectors.enabled': 'true'})
         table = self._create('de_dv_shards', options)
@@ -339,9 +413,8 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
                             shard=(0, 3))
 
     @unittest.skipUnless(
-        native_method_available('Plan', 'snapshot_id')
-        and native_method_available('TableScan', 'with_row_position_shard'),
-        'pypaimon_rust row-position selection and snapshot metadata required')
+        native_runtime_available(),
+        'pypaimon-rust not installed')
     def test_empty_distributed_plans_keep_snapshot_metadata(self):
         for de in (False, True):
             table = self._create('empty_' + str(de), self._de_options() if de else None)
@@ -350,8 +423,8 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
             self._write(table, [{'k': 1, 'v': 'a'}])
             self._assert_parity(table, [], 1, shard=(2, 3))
 
-    @unittest.skipUnless(native_method_available('TableScan', 'with_row_position_shard'),
-                         'pypaimon_rust row-position selection API required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_data_evolution_updates_and_projection_do_not_multiply_positions(self):
         schema = self.schema.append(pa.field('payload', pa.large_binary()))
         table = self._create('de_projected_updates', self._de_options(), schema)

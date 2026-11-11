@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TableType;
-import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -30,6 +29,7 @@ import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -49,6 +49,7 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.slf4j.Logger;
@@ -74,14 +75,13 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotLakeStreamTable;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
-import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
-import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -122,19 +122,28 @@ public abstract class AbstractCatalog implements Catalog {
         return fileIO;
     }
 
+    @Override
+    public Lock createLock(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Options tableOptions) {
+        return lockFactory()
+                .map(
+                        factory ->
+                                factory.createLock(
+                                        lockContext().orElse(null),
+                                        identifier,
+                                        tableUuid,
+                                        commitUser,
+                                        tableOptions))
+                .map(Lock::reentrant)
+                .orElseGet(Lock::empty);
+    }
+
+    /** Lock factory selected by the catalog's own locking policy. */
     public Optional<CatalogLockFactory> lockFactory() {
-        if (!lockEnabled()) {
-            return Optional.empty();
-        }
-
-        String lock = context.options().get(LOCK_TYPE);
-        if (lock == null) {
-            return defaultLockFactory();
-        }
-
-        return Optional.of(
-                FactoryUtil.discoverFactory(
-                        AbstractCatalog.class.getClassLoader(), CatalogLockFactory.class, lock));
+        return Optional.empty();
     }
 
     public Optional<CatalogLockFactory> defaultLockFactory() {
@@ -146,7 +155,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean lockEnabled() {
-        return context.options().getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
+        return false;
     }
 
     protected boolean allowCustomTablePath() {
@@ -376,18 +385,17 @@ public abstract class AbstractCatalog implements Catalog {
         }
 
         Set<Path> externalPaths = new HashSet<>();
-        if (tableExistsInFileSystem(getTableLocation(identifier), DEFAULT_MAIN_BRANCH)) {
-            Table table = getTable(identifier);
-            if (table instanceof FileStoreTable) {
-                FileStoreTable fileStoreTable = (FileStoreTable) table;
-                List<Path> schemaExternalPaths =
-                        getSchemaExternalPaths(fileStoreTable.schemaManager().listAll());
-                externalPaths.addAll(schemaExternalPaths);
-                List<String> branches = fileStoreTable.branchManager().branches();
-                for (String branch : branches) {
-                    SchemaManager schemaManager =
-                            fileStoreTable.schemaManager().copyWithBranch(branch);
-                    externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
+        Path tablePath = getTableLocation(identifier);
+        if (tableExistsInFileSystem(tablePath, DEFAULT_MAIN_BRANCH)) {
+            TableType tableType = CoreOptions.fromMap(loadTableSchema(identifier).options()).type();
+            if (tableType == TableType.TABLE || tableType == TableType.MATERIALIZED_TABLE) {
+                // Cleanup only needs persisted metadata, even if runtime options are invalid.
+                FileIO tableFileIO = fileIO(tablePath);
+                SchemaManager schemaManager = new FileSystemSchemaManager(tableFileIO, tablePath);
+                externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
+                for (String branch : FileSystemBranchManager.branches(tableFileIO, tablePath)) {
+                    externalPaths.addAll(
+                            getSchemaExternalPaths(schemaManager.copyWithBranch(branch).listAll()));
                 }
             }
         }
@@ -469,14 +477,16 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
 
+        Table table;
         try {
-            getTable(fromTable);
+            table = getTable(fromTable);
         } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
             }
             throw new TableNotExistException(fromTable);
         }
+        checkNotLakeStreamTable(table, fromTable, "renameTable");
 
         try {
             getTable(toTable);
@@ -496,7 +506,8 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotSystemTable(identifier, "alterTable");
 
         try {
-            getTable(identifier);
+            // Validate the resulting schema, rather than the old runtime options.
+            loadTableSchema(identifier);
         } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
@@ -529,6 +540,7 @@ public abstract class AbstractCatalog implements Catalog {
             }
             throw e;
         }
+        checkNotLakeStreamTable(existing, identifier, "replaceTable");
 
         TableType targetTableType = Options.fromMap(newSchema.options()).get(TYPE);
         if (!(existing instanceof FileStoreTable) || !targetTableType.equals(TableType.TABLE)) {
@@ -705,7 +717,11 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
+    public void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException {
         throw new UnsupportedOperationException();
     }

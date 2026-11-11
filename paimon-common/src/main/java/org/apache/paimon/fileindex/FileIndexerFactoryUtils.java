@@ -33,8 +33,10 @@ public class FileIndexerFactoryUtils {
     private static final Map<String, FileIndexerFactory> factories = new HashMap<>();
 
     static {
+        // Not the context classloader: it may not see Paimon, e.g. on a Flink JobMaster RPC thread.
         ServiceLoader<FileIndexerFactory> serviceLoader =
-                ServiceLoader.load(FileIndexerFactory.class);
+                ServiceLoader.load(
+                        FileIndexerFactory.class, FileIndexerFactory.class.getClassLoader());
 
         for (FileIndexerFactory indexerFactory : serviceLoader) {
             if (factories.put(indexerFactory.identifier(), indexerFactory) != null) {
@@ -46,8 +48,33 @@ public class FileIndexerFactoryUtils {
         }
     }
 
+    private static FileIndexerFactory find(String type) {
+        FileIndexerFactory factory = factories.get(type);
+        if (factory != null) {
+            return factory;
+        }
+
+        ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
+        if (contextClassLoader == null
+                || contextClassLoader == FileIndexerFactory.class.getClassLoader()) {
+            return null;
+        }
+        // Keep job-scoped providers local so their classloaders are not retained or shared.
+        for (FileIndexerFactory contextFactory :
+                ServiceLoader.load(FileIndexerFactory.class, contextClassLoader)) {
+            if (contextFactory.identifier().equals(type)) {
+                return contextFactory;
+            }
+        }
+        return null;
+    }
+
+    public static boolean isRegistered(String type) {
+        return find(type) != null;
+    }
+
     public static FileIndexerFactory load(String type) {
-        FileIndexerFactory fileIndexerFactory = factories.get(type);
+        FileIndexerFactory fileIndexerFactory = find(type);
         if (fileIndexerFactory == null) {
             throw new RuntimeException("Can't find file index for type: " + type);
         }

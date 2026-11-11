@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.write.backend_dispatch import python_commit
 import datetime
 import glob
 import os
@@ -24,7 +25,10 @@ import unittest
 from contextlib import contextmanager
 from unittest.mock import Mock, patch
 
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon import CatalogFactory, Schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
+from pypaimon.schema.schema_change import SchemaChange
 import pyarrow as pa
 import pytest
 from parameterized import parameterized
@@ -32,16 +36,20 @@ from parameterized import parameterized
 from pypaimon.build_info import full_version as build_full_version
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.write.table_write import TableWrite
-from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
+from pypaimon.execution.python.write.table_write import PythonTableWrite
+from pypaimon.execution.python.write.row_key_extractor import create_row_key_extractor
+from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
 class TableWriteTest(unittest.TestCase):
     def test_large_string_compatibility_rejects_other_type_changes(self):
         writer = object.__new__(TableWrite)
-        writer.file_store_write = Mock(write_cols=None)
-        writer.table_pyarrow_schema = pa.schema([
+        writer._execution = PythonTableWrite(writer)
+        writer._execution.file_store_write = Mock(write_cols=None)
+        writer._execution.table_pyarrow_schema = pa.schema([
             ('id', pa.int32()),
             ('nested', pa.struct([pa.field('text', pa.string(), nullable=False)])),
         ])
@@ -49,7 +57,7 @@ class TableWriteTest(unittest.TestCase):
             ('id', pa.int32()),
             ('nested', pa.struct([pa.field('text', pa.large_string(), nullable=False)])),
         ])
-        writer._validate_pyarrow_schema(valid)
+        writer._execution._validate_pyarrow_schema(valid)
         invalid = [
             valid.set(0, pa.field('id', pa.int64())),
             pa.schema(list(reversed(list(valid)))),
@@ -61,7 +69,7 @@ class TableWriteTest(unittest.TestCase):
         for schema in invalid:
             with self.subTest(schema=schema):
                 with self.assertRaisesRegex(ValueError, 'consistent'):
-                    writer._validate_pyarrow_schema(schema)
+                    writer._execution._validate_pyarrow_schema(schema)
 
     @parameterized.expand([('append', False, '-1'), ('primary', True, '1'), ('postpone', True, '-2')])
     def test_large_string_input_roundtrip(self, mode, primary_key, bucket):
@@ -102,7 +110,8 @@ class TableWriteTest(unittest.TestCase):
             commit.close()
         actual = self._read_sorted(table, [('id', 'ascending')])
         self.assertEqual(actual.to_pylist(), expected)
-        self.assertEqual(actual.schema.remove_metadata(), arrow_schema(pa.string()))
+        expected_schema = read_arrow_schema(Schema.from_pyarrow_schema(arrow_schema(pa.string())).fields)
+        self.assertEqual(actual.schema.remove_metadata(), expected_schema)
 
     @classmethod
     def setUpClass(cls):
@@ -225,12 +234,16 @@ class TableWriteTest(unittest.TestCase):
         return out
 
     @staticmethod
-    def _mock_table_write(partitions, buckets):
+    def _mock_table_write(partitions, buckets, schema):
         table_write = object.__new__(TableWrite)
-        table_write._validate_pyarrow_schema = Mock()
-        table_write.row_key_extractor = Mock()
-        table_write.file_store_write = Mock()
-        table_write.row_key_extractor.extract_partition_bucket_groups.side_effect = (
+        table_write._execution = PythonTableWrite(table_write)
+        table_write.table = Mock(
+            is_primary_key_table=False, options=CoreOptions(Options({})),
+            fields=Schema.from_pyarrow_schema(schema).fields)
+        table_write._execution.table_pyarrow_schema = schema
+        table_write._execution.row_key_extractor = Mock()
+        table_write._execution.file_store_write = Mock(write_cols=None)
+        table_write._execution.row_key_extractor.extract_partition_bucket_groups.side_effect = (
             lambda data: TableWriteTest._groups_from_rows(
                 partitions, buckets, data.num_rows))
         return table_write
@@ -241,13 +254,13 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b'],
         })
         table_write = self._mock_table_write(
-            [('p1',), ('p1',)], [0, 0])
+            [('p1',), ('p1',)], [0, 0], data.schema)
 
         with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
             table_write.write_arrow_batch(data)
 
         take.assert_not_called()
-        written = table_write.file_store_write.write.call_args[0][2]
+        written = table_write._execution.file_store_write.write.call_args[0][2]
         self.assertIs(data, written)
 
     def test_write_arrow_batch_uses_zero_copy_for_contiguous_groups(self):
@@ -257,12 +270,12 @@ class TableWriteTest(unittest.TestCase):
         })
         table_write = self._mock_table_write(
             [('p1',), ('p1',), ('p2',), ('p2',)],
-            [0, 0, 1, 1])
+            [0, 0, 1, 1], data.schema)
         with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
             table_write.write_arrow_batch(data)
 
         take.assert_not_called()
-        calls = table_write.file_store_write.write.call_args_list
+        calls = table_write._execution.file_store_write.write.call_args_list
         self.assertEqual(2, len(calls))
         self.assertEqual({'id': [0, 1], 'payload': [b'a', b'b']},
                          calls[0][0][2].to_pydict())
@@ -279,13 +292,13 @@ class TableWriteTest(unittest.TestCase):
         })
         table_write = self._mock_table_write(
             [('p1',), ('p2',), ('p1',), ('p2',)],
-            [0, 1, 0, 1])
+            [0, 1, 0, 1], data.schema)
 
         with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
             table_write.write_arrow_batch(data)
 
         self.assertEqual(2, take.call_count)
-        calls = table_write.file_store_write.write.call_args_list
+        calls = table_write._execution.file_store_write.write.call_args_list
         self.assertEqual({'id': [0, 2], 'payload': [b'a', b'c']},
                          calls[0][0][2].to_pydict())
         self.assertEqual({'id': [1, 3], 'payload': [b'b', b'd']},
@@ -301,17 +314,21 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
-        table_write._validate_pyarrow_schema = Mock()
-        table_write.file_store_write = Mock()
-        table_write.row_key_extractor = Mock()
-        table_write.row_key_extractor.extract_partition_bucket_groups.return_value = [
+        table_write._execution = PythonTableWrite(table_write)
+        table_write.table = Mock(
+            is_primary_key_table=False, options=CoreOptions(Options({})),
+            fields=Schema.from_pyarrow_schema(data.schema).fields)
+        table_write._execution.table_pyarrow_schema = data.schema
+        table_write._execution.file_store_write = Mock(write_cols=None)
+        table_write._execution.row_key_extractor = Mock()
+        table_write._execution.row_key_extractor.extract_partition_bucket_groups.return_value = [
             (('p1',), 0, pa.array([0, 2, 3], type=pa.int64())),
             (('p2',), 0, pa.array([1], type=pa.int64())),
         ]
 
         table_write.write_arrow_batch(data)
 
-        calls = table_write.file_store_write.write.call_args_list
+        calls = table_write._execution.file_store_write.write.call_args_list
         self.assertEqual(2, len(calls))
         # Order-sensitive: sequence numbers are assigned in the delivered order.
         self.assertEqual([0, 2, 3], calls[0][0][2].column('id').to_pylist())
@@ -325,10 +342,14 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
-        table_write._validate_pyarrow_schema = Mock()
-        table_write.file_store_write = Mock()
-        table_write.row_key_extractor = Mock()
-        table_write.row_key_extractor.extract_partition_bucket_groups.return_value = [
+        table_write._execution = PythonTableWrite(table_write)
+        table_write.table = Mock(
+            is_primary_key_table=False, options=CoreOptions(Options({})),
+            fields=Schema.from_pyarrow_schema(data.schema).fields)
+        table_write._execution.table_pyarrow_schema = data.schema
+        table_write._execution.file_store_write = Mock(write_cols=None)
+        table_write._execution.row_key_extractor = Mock()
+        table_write._execution.row_key_extractor.extract_partition_bucket_groups.return_value = [
             (('p0',), 0, pa.array([0], type=pa.int64())),
             (('p1',), 0, pa.array([1, 2, 3], type=pa.int64())),
         ]
@@ -337,7 +358,7 @@ class TableWriteTest(unittest.TestCase):
             table_write.write_arrow_batch(data)
 
         take.assert_not_called()
-        calls = table_write.file_store_write.write.call_args_list
+        calls = table_write._execution.file_store_write.write.call_args_list
         self.assertEqual([1, 2, 3], calls[1][0][2].column('id').to_pylist())
 
     def _unaware_partitioned_extractor(self, name, partition_keys):
@@ -345,7 +366,7 @@ class TableWriteTest(unittest.TestCase):
             self.pa_schema, partition_keys=partition_keys,
             options={'bucket': '-1'})
         self.catalog.create_table(name, schema, False)
-        return self.catalog.get_table(name).create_row_key_extractor()
+        return create_row_key_extractor(self.catalog.get_table(name))
 
     def test_extract_partition_bucket_groups_multi_partition(self):
         ex = self._unaware_partitioned_extractor(
@@ -420,7 +441,7 @@ class TableWriteTest(unittest.TestCase):
             'dt': ['p1', 'p2', 'p1', 'p2'],
         }, schema=self.pa_schema)
 
-        with patch('pypaimon.write.row_key_extractor._ARROW_GROUP_BY_SUPPORTED',
+        with patch('pypaimon.execution.python.write.row_key_extractor._ARROW_GROUP_BY_SUPPORTED',
                    False):
             groups = ex.extract_partition_bucket_groups(data)
 
@@ -464,7 +485,7 @@ class TableWriteTest(unittest.TestCase):
         # still allowed on the Python 3.7 lane. The capability probe must treat
         # that as unsupported so writes fall back instead of failing every
         # write_arrow_batch.
-        from pypaimon.write import row_key_extractor as rk
+        from pypaimon.execution.python.write import row_key_extractor as rk
 
         def raise_missing_kernel(self, *args, **kwargs):
             raise pa.ArrowKeyError("No function registered with name: hash_list")
@@ -501,6 +522,28 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(build_full_version(), snapshot.writer_version)
         self.assertEqual(True, snapshot_json.__contains__("writerVersion"))
         self.assertEqual(False, snapshot_json.__contains__("nextRowId"))
+
+    @parameterized.expand([
+        ('incremental-between', '1,2'),
+        ('incremental-between-timestamp', '0,9999999999999'),
+        ('incremental-to-auto-tag', 'end'),
+    ])
+    def test_write_through_incremental_copy_restores_latest_sequence(self, selector, value):
+        name = 'default.write_' + selector.replace('-', '_')
+        schema = pa.schema([pa.field('id', pa.int64(), nullable=False), ('value', pa.int64())])
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(
+            schema, primary_keys=['id'], options={'bucket': '1'}), False)
+        table = self.catalog.get_table(name)
+        for number in range(3):
+            self._commit_arrow(table, pa.Table.from_pydict({'id': [1], 'value': [number]}, schema=schema))
+
+        selected = table.copy({selector: value})
+        self._commit_arrow(selected, pa.Table.from_pydict({'id': [1], 'value': [3]}, schema=schema))
+
+        self.assertEqual([{'id': 1, 'value': 3}], self._read_sorted(table, 'id').to_pylist())
+        splits = table.new_read_builder().new_scan().plan().splits()
+        self.assertEqual(3, max(file.max_sequence_number for split in splits for file in split.files))
+        self.assertEqual(value, selected.table_schema.options[selector])
 
     def test_write_row_append_only_partitioned_table(self):
         from pypaimon.table.row.generic_row import GenericRow
@@ -558,7 +601,7 @@ class TableWriteTest(unittest.TestCase):
             'item_id': [1001, 1002],
             'behavior': ['a', 'b'],
             'dt': ['p1', 'p2'],
-        }, schema=self.pk_pa_schema)
+        }, schema=read_arrow_schema(table.fields))
         sort_keys = [('user_id', 'ascending'), ('dt', 'ascending')]
         self.assertEqual(
             expected.sort_by(sort_keys), self._read_sorted(table, sort_keys))
@@ -588,10 +631,89 @@ class TableWriteTest(unittest.TestCase):
             'item_id': [1001, 1002],
             'behavior': ['a', 'b'],
             'dt': ['p1', 'p2'],
-        }, schema=self.pk_pa_schema)
+        }, schema=read_arrow_schema(table.fields))
         sort_keys = [('user_id', 'ascending'), ('dt', 'ascending')]
         self.assertEqual(
             expected.sort_by(sort_keys), self._read_sorted(table, sort_keys))
+
+    @parameterized.expand([
+        ('table', [], False, 2, 4), ('partition', ['dt'], False, 2, 4),
+        ('overwrite', ['dt'], True, 2, 4), ('fewer_buckets', ['dt'], False, 4, 2),
+    ])
+    @pytest.mark.python_write
+    def test_write_bucket_count(self, name, partition_keys, overwrite, previous, new):
+        identifier = 'default.bucket_count_' + name
+        self.catalog.create_table(identifier, Schema.from_pyarrow_schema(
+            self.postpone_pa_schema, partition_keys=partition_keys,
+            primary_keys=['id'] + partition_keys, options={'bucket': str(previous)}), False)
+        table = self.catalog.get_table(identifier)
+        data = pa.Table.from_pydict({
+            'id': list(range(8)), 'dt': ['p'] * 8, 'value': ['old'] * 8,
+        }, schema=self.postpone_pa_schema)
+        self._commit_arrow(table, data)
+        self.catalog.alter_table(identifier, [SchemaChange.set_option('bucket', str(new))], False)
+        table = self.catalog.get_table(identifier)
+        rows_to_write = [data]
+        if not overwrite and new > previous:
+            buckets = create_row_key_extractor(table).extract_partition_bucket_batch(data.to_batches()[0])[1]
+            # Rows of buckets that have no files yet.
+            new_bucket_rows = data.filter(pa.array([bucket >= previous for bucket in buckets]))
+            self.assertGreater(new_bucket_rows.num_rows, 0)
+            rows_to_write.append(new_bucket_rows)
+        for rows in rows_to_write:
+            builder = table.new_batch_write_builder()
+            if overwrite:
+                builder.overwrite({'dt': 'p'})
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                if overwrite:
+                    writer.write_arrow(rows)
+                    commit.commit(writer.prepare_commit())
+                else:
+                    with self.assertRaises(RuntimeError) as error:
+                        writer.write_arrow(rows)
+                    self.assertEqual(
+                        'Try to write {} with a new bucket num {}, but the previous bucket num is {}. '
+                        'Please switch to batch mode, and perform INSERT OVERWRITE to rescale '
+                        'current data layout first.'.format(
+                            'partition {dt=p}' if partition_keys else 'table', new, previous),
+                        str(error.exception))
+            finally:
+                writer.close()
+                commit.close()
+        if overwrite:
+            self._commit_arrow(table, data)
+        expected = data
+        if partition_keys and not overwrite:
+            # A new partition uses the new bucket count.
+            new_partition = pa.Table.from_pydict({
+                'id': list(range(8)), 'dt': ['q'] * 8, 'value': ['new'] * 8,
+            }, schema=self.postpone_pa_schema)
+            self._commit_arrow(table, new_partition)
+            expected = pa.concat_tables([data, new_partition])
+        sort_keys = [('dt', 'ascending'), ('id', 'ascending')]
+        self.assertEqual(expected.to_pylist(), self._read_sorted(table, sort_keys).to_pylist())
+
+    @pytest.mark.python_write
+    def test_write_bucket_count_with_blob_writer(self):
+        from pypaimon.execution.python.write.file_store_write import FileStoreWrite
+
+        identifier = 'default.bucket_count_blob_writer'
+        self.catalog.create_table(identifier, Schema.from_pyarrow_schema(
+            self.postpone_pa_schema, partition_keys=['dt'], options={'bucket': '2', 'bucket-key': 'id'}), False)
+        data = pa.Table.from_pydict({
+            'id': list(range(8)), 'dt': ['p'] * 8, 'value': ['old'] * 8,
+        }, schema=self.postpone_pa_schema)
+        self._commit_arrow(self.catalog.get_table(identifier), data)
+        self.catalog.alter_table(identifier, [SchemaChange.set_option('bucket', '4')], False)
+        writer = self.catalog.get_table(identifier).new_batch_write_builder().new_write()
+        try:
+            # Writers that do not restore sequence numbers, such as Blob writers, are checked too.
+            with patch.object(FileStoreWrite, '_has_blob_columns', return_value=True):
+                with self.assertRaisesRegex(RuntimeError, 'new bucket num 4, but the previous bucket num is 2'):
+                    writer.write_arrow(data)
+        finally:
+            writer.close()
 
     @pytest.mark.python_write
     def test_multi_prepare_commit_ao(self):
@@ -611,7 +733,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit(0)
+        cm = table_write.prepare_commit(0)
         # write 2
         data2 = {
             'user_id': [5, 6, 7, 8],
@@ -621,7 +743,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit(1)
+        cm.extend(table_write.prepare_commit(1))
         # write 3
         data3 = {
             'user_id': [9, 10],
@@ -631,12 +753,12 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data3, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
-        cm = table_write.prepare_commit(2)
+        cm.extend(table_write.prepare_commit(2))
         # commit
         table_commit.commit(cm, 2)
         table_write.close()
         table_commit.close()
-        self.assertEqual(2, table_write.file_store_write.commit_identifier)
+        self.assertEqual(2, table_write._execution.file_store_write.commit_identifier)
 
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
@@ -737,7 +859,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data1, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit(0)
+        cm = table_write.prepare_commit(0)
         # write 2
         data2 = {
             'user_id': [5, 6, 7, 8],
@@ -747,7 +869,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data2, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit(1)
+        cm.extend(table_write.prepare_commit(1))
         # write 3
         data3 = {
             'user_id': [9, 10],
@@ -757,18 +879,18 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data3, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
-        cm = table_write.prepare_commit(2)
+        cm.extend(table_write.prepare_commit(2))
         # commit
         table_commit.commit(cm, 2)
         table_write.close()
         table_commit.close()
-        self.assertEqual(2, table_write.file_store_write.commit_identifier)
+        self.assertEqual(2, table_write._execution.file_store_write.commit_identifier)
 
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         actual = table_read.to_arrow(splits).sort_by('user_id')
-        self.assertEqual(self.pk_expected, actual)
+        self.assertEqual(self.pk_expected.cast(read_arrow_schema(table.fields)), actual)
 
     def test_postpone_read_write(self):
         table = self._create_postpone_table(
@@ -795,10 +917,11 @@ class TableWriteTest(unittest.TestCase):
             PostponeFixedBucketBatchTableWrite,
             PostponeFixedBucketWriteBuilder,
         )
+        from pypaimon.write.write_dispatch import NativePostponeFixedBucketTableWrite
         self.assertIsInstance(
             write_builder, PostponeFixedBucketWriteBuilder)
         self.assertIsInstance(
-            table_write, PostponeFixedBucketBatchTableWrite)
+            table_write, (PostponeFixedBucketBatchTableWrite, NativePostponeFixedBucketTableWrite))
         table_commit = write_builder.new_commit()
         table_write.write_arrow(expect)
         commit_messages = table_write.prepare_commit()
@@ -821,11 +944,11 @@ class TableWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
-        actual = table_read.to_arrow(splits)
-        self.assertEqual(expect, actual)
+        actual = table_read.to_arrow(splits).sort_by('user_id')
+        self.assertEqual(expect.cast(read_arrow_schema(table.fields)), actual)
 
     def test_postpone_file_store_write_validates_runtime_bucket_count(self):
-        from pypaimon.write.file_store_write import (
+        from pypaimon.execution.python.write.file_store_write import (
             PostponeFixedBucketFileStoreWrite,
         )
 
@@ -848,6 +971,56 @@ class TableWriteTest(unittest.TestCase):
         finally:
             write.abort()
 
+    @pytest.mark.python_write
+    def test_write_fixed_bucket_after_postpone(self):
+        table = self._create_postpone_table(
+            'default.fixed_bucket_after_postpone', self.postpone_pa_schema,
+            partition_keys=['dt'], primary_keys=['id', 'dt'])
+        data = pa.Table.from_pydict({
+            'id': list(range(8)), 'dt': ['p'] * 8, 'value': ['old'] * 8,
+        }, schema=self.postpone_pa_schema)
+        self._commit_arrow(table, data)
+        self.catalog.alter_table(
+            'default.fixed_bucket_after_postpone', [SchemaChange.set_option('bucket', '2')], False)
+        # Postpone files do not count, as in Java.
+        self._commit_arrow(self.catalog.get_table('default.fixed_bucket_after_postpone'), data)
+        self.catalog.alter_table(
+            'default.fixed_bucket_after_postpone', [SchemaChange.set_option('bucket', '4')], False)
+        # Nor do they exempt the fixed bucket files of the same partition.
+        with self.assertRaisesRegex(RuntimeError, 'new bucket num 4, but the previous bucket num is 2'):
+            self._commit_arrow(self.catalog.get_table('default.fixed_bucket_after_postpone'), data)
+
+    @pytest.mark.python_write
+    def test_postpone_checks_restored_bucket_count(self):
+        from pypaimon.execution.python.write.file_store_write import PostponeFixedBucketFileStoreWrite
+
+        table = self._create_postpone_table(
+            'default.postpone_restored_bucket_count', self.postpone_pa_schema,
+            partition_keys=['dt'], primary_keys=['id', 'dt'], options={
+                'postpone.target-size-per-bucket': '1 b',
+                'postpone.batch-write-fixed-bucket.max-parallelism': '2',
+            })
+        data = pa.Table.from_pydict({
+            'id': list(range(8)), 'dt': ['p'] * 8, 'value': ['old'] * 8,
+        }, schema=self.postpone_pa_schema)
+        self._commit_arrow(table, data, fixed_bucket=True)
+        writer = PostponeFixedBucketFileStoreWrite(table, 'test-user')
+        try:
+            with patch.object(writer, '_load_seq_number_stats', wraps=writer._load_seq_number_stats) as restore:
+                for bucket in (3, 0):
+                    with self.assertRaisesRegex(RuntimeError, 'new bucket num 4, but the previous bucket num is 2'):
+                        writer.write(('p',), bucket, data.to_batches()[0], 4)
+                restore.assert_called_once_with(('p',))
+        finally:
+            writer.abort()
+        # Overwrite ignores the existing layout.
+        writer = PostponeFixedBucketFileStoreWrite(table, 'test-user')
+        writer.restore_snapshot_id = 0
+        try:
+            writer.write(('p',), 0, data.to_batches()[0], 4)
+        finally:
+            writer.abort()
+
     def test_postpone_batch_write_builder_keeps_postpone_mode(self):
         table = self._create_postpone_table(
             'default.test_postpone_default_builder',
@@ -862,16 +1035,12 @@ class TableWriteTest(unittest.TestCase):
             'dt': ['p1'],
         }, schema=self.pk_pa_schema)
 
-        self._commit_arrow(table, expected)
-
-        self.assertEqual(
-            1,
-            len(glob.glob(
-                self.warehouse
-                + "/default.db/test_postpone_default_builder/user_id=1/"
-                + "bucket-postpone/*.avro"
-            )),
-        )
+        messages = self._commit_arrow(table, expected)
+        self.assertEqual({-2}, {message.bucket for message in messages})
+        files = [file for message in messages for file in message.new_files]
+        self.assertEqual(1, len(files))
+        self.assertIn('/bucket-postpone/', files[0].file_path)
+        self.assertTrue(table.file_io.exists(files[0].file_path))
         splits = table.new_read_builder().new_scan().plan().splits()
         self.assertTrue(not table.new_read_builder().new_read().to_arrow(splits))
 
@@ -931,7 +1100,7 @@ class TableWriteTest(unittest.TestCase):
         }, schema=pa_schema)
 
         planner = PostponeBucketPlanner(
-            table, known_num_buckets={}, postpone_row_counts={})
+            table, known_num_buckets={})
         stats = planner.input_partition_stats(data)
         self.assertEqual((1000, 32000), stats[()])
         self.assertEqual(2, planner.plan(stats).num_buckets(()))
@@ -952,8 +1121,7 @@ class TableWriteTest(unittest.TestCase):
         }, schema=self.postpone_pa_schema)
         planner = PostponeBucketPlanner(
             table,
-            known_num_buckets={('known',): 2},
-            postpone_row_counts={},
+            known_num_buckets={('known',): 2}
         )
 
         self.assertEqual(
@@ -993,7 +1161,7 @@ class TableWriteTest(unittest.TestCase):
         }, schema=pa_schema)
 
         planner = PostponeBucketPlanner(
-            table, known_num_buckets={}, postpone_row_counts={})
+            table, known_num_buckets={})
         self.assertEqual((1, 176), planner.input_partition_stats(data)[()])
 
     def test_postpone_size_inference_supports_nested_vector(self):
@@ -1014,12 +1182,12 @@ class TableWriteTest(unittest.TestCase):
         }, schema=pa_schema)
 
         planner = PostponeBucketPlanner(
-            table, known_num_buckets={}, postpone_row_counts={})
+            table, known_num_buckets={})
         self.assertEqual((1, 80), planner.input_partition_stats(data)[()])
 
     def test_postpone_default_bucket_function_matches_java(self):
         from pypaimon.write.postpone_bucket import PostponeBucketPlan
-        from pypaimon.write.row_key_extractor import (
+        from pypaimon.execution.python.write.row_key_extractor import (
             PostponeFixedBucketRowKeyExtractor,
         )
 
@@ -1047,7 +1215,7 @@ class TableWriteTest(unittest.TestCase):
             AtomicType,
             DataField,
         )
-        from pypaimon.write.row_key_extractor import RowKeyExtractor
+        from pypaimon.execution.python.write.row_key_extractor import RowKeyExtractor
 
         cases = [
             (
@@ -1125,6 +1293,7 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(1, result.num_rows)
 
     @parameterized.expand([('mod',), ('hive',)])
+    @pytest.mark.python_write
     def test_postpone_rejects_unsupported_bucket_function(
             self, bucket_function):
         pa_schema = pa.schema([
@@ -1239,7 +1408,7 @@ class TableWriteTest(unittest.TestCase):
 
         self.assertEqual(16, self._read_sorted(table, 'id').num_rows)
 
-    def test_postpone_target_row_num_counts_existing_postpone_rows(self):
+    def test_postpone_target_row_num_uses_only_new_input(self):
         from pypaimon.write.postpone_bucket import (
             PostponeBucketPlanner,
         )
@@ -1253,21 +1422,22 @@ class TableWriteTest(unittest.TestCase):
                 'postpone.batch-write-fixed-bucket.max-parallelism': 8,
             },
         )
-        append_planner = PostponeBucketPlanner(
-            table,
-            known_num_buckets={},
-            postpone_row_counts={('p',): 3},
-        )
+        # Old staged rows must not influence the current batch's bucket count.
+        staged = self.pk_expected.set_column(
+            self.pk_expected.schema.get_field_index('dt'), self.pk_expected.schema.field('dt'),
+            pa.array(['p'] * self.pk_expected.num_rows))
+        pending = self._commit_arrow(table, staged)
+        self.assertEqual({-2}, {message.bucket for message in pending})
+        append_planner = PostponeBucketPlanner(table)
         append_plan = append_planner.plan({('p',): (1, 10)})
-        self.assertEqual(2, append_plan.num_buckets(('p',)))
+        self.assertEqual(1, append_plan.num_buckets(('p',)))
 
         overwrite_planner = PostponeBucketPlanner(
             table,
-            known_num_buckets={},
-            postpone_row_counts={('p',): 3},
+            known_num_buckets={}
         )
         overwrite_plan = overwrite_planner.plan(
-            {('p',): (1, 10)}, include_postpone_rows=False
+            {('p',): (1, 10)}
         )
         self.assertEqual(1, overwrite_plan.num_buckets(('p',)))
 
@@ -1384,6 +1554,7 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(
             [2], self._read_sorted(table, 'id').column('id').to_pylist())
 
+    @pytest.mark.python_write
     def test_postpone_batch_fixed_bucket_reuses_existing_bucket_num(self):
         table = self._create_postpone_table(
             'default.test_postpone_reuse',
@@ -1416,8 +1587,8 @@ class TableWriteTest(unittest.TestCase):
             .with_bucket_plan(plan)
             .new_write()
         )
-        self.assertEqual(2, copied_write.row_key_extractor.num_buckets(('p1',)))
-        self.assertEqual(3, copied_write.row_key_extractor.num_buckets(('p2',)))
+        self.assertEqual(2, copied_write._execution.row_key_extractor.num_buckets(('p1',)))
+        self.assertEqual(3, copied_write._execution.row_key_extractor.num_buckets(('p2',)))
         copied_write.close()
 
     def test_postpone_reuses_bucket_num_for_int_date_partition(self):
@@ -1502,7 +1673,7 @@ class TableWriteTest(unittest.TestCase):
             self.assertEqual({2}, {m.total_buckets for m in messages})
             fixed_commit.commit(messages)
 
-        scanner = fixed.new_read_builder().new_scan().file_scanner
+        scanner = PythonTableScan(fixed.new_read_builder().new_scan())._file_scanner()
         manifests, _ = scanner.manifest_scanner()
         entries = scanner.manifest_file_manager.read_entries_parallel(
             manifests, drop_stats=False
@@ -1547,13 +1718,13 @@ class TableWriteTest(unittest.TestCase):
                 'dt': ['p1'],
             }, schema=self.pk_pa_schema))
             messages = write.prepare_commit()
-            real_commit = commit.file_store_commit.snapshot_commit.commit
+            real_commit = python_commit(commit).file_store_commit.snapshot_commit.commit
 
             def capture_statistics(base_snapshot_uuid, snapshot, statistics):
                 captured_statistics.extend(statistics)
                 return real_commit(base_snapshot_uuid, snapshot, statistics)
 
-            commit.file_store_commit.snapshot_commit.commit = capture_statistics
+            python_commit(commit).file_store_commit.snapshot_commit.commit = capture_statistics
             commit.commit(messages)
 
         self.assertEqual(2, captured_statistics[0].total_buckets)
@@ -1620,7 +1791,7 @@ class TableWriteTest(unittest.TestCase):
                     return False
                 raise AssertionError('Bucket conflict should precede another CAS')
 
-            commit_three.file_store_commit.snapshot_commit.commit = (
+            python_commit(commit_three).file_store_commit.snapshot_commit.commit = (
                 fail_cas_after_concurrent_commit)
             with self.assertRaisesRegex(RuntimeError, "Total buckets"):
                 commit_three.commit(messages_three)
@@ -1656,7 +1827,7 @@ class TableWriteTest(unittest.TestCase):
                 for file in message.new_files
             ]
             uncertain_error = TimeoutError('lost commit response')
-            file_store_commit = commit.file_store_commit
+            file_store_commit = python_commit(commit).file_store_commit
             file_store_commit.commit_max_retries = 1
             snapshot_commit = file_store_commit.snapshot_commit
             real_commit = snapshot_commit.commit
@@ -1752,7 +1923,8 @@ class TableWriteTest(unittest.TestCase):
 
         # Verify file name format: {table_prefix}-u-{commit_user}-s-{random_number}-w--{uuid}-0.{format}
         # Expected pattern: data--u-{user}-s-{random}-w--{uuid}-0.{format}
-        expected_pattern = r'^data--u-.+-s-\d+-w-.+-0\.avro$'
+        # Native postpone writes use Parquet; the Python writer may select Avro.
+        expected_pattern = r'^data--u-.+-s-\d+-w-.+-0\.(avro|parquet)$'
 
         for file_name in data_files:
             self.assertRegex(file_name, expected_pattern,
@@ -1886,7 +2058,7 @@ class TableWriteTest(unittest.TestCase):
         actual = table_read.to_arrow(splits)
         sort_keys = [('user_id', 'ascending'), ('dt', 'ascending')]
         self.assertEqual(
-            self.pk_expected.sort_by(sort_keys),
+            self.pk_expected.cast(read_arrow_schema(table.fields)).sort_by(sort_keys),
             actual.sort_by(sort_keys),
         )
 
@@ -1987,13 +2159,13 @@ class TableWriteTest(unittest.TestCase):
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
-        table_write._validate_pyarrow_schema(pa.schema([
+        table_write._execution._validate_pyarrow_schema(pa.schema([
             ('id', pa.int32()),
             ('payload', pa.binary(4)),
         ]))
 
         table_write.with_write_type(['payload'])
-        table_write._validate_pyarrow_schema(pa.schema([
+        table_write._execution._validate_pyarrow_schema(pa.schema([
             ('payload', pa.binary(4)),
         ]))
 

@@ -26,6 +26,8 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -40,7 +42,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -293,26 +294,9 @@ public class DataEvolutionVectorScan implements VectorScan {
 
     @Nullable
     private String configuredVectorIndexType() {
-        String indexType = option("index_type");
-        if (indexType == null) {
-            indexType = option("index-type");
-        }
-        if (indexType == null) {
-            indexType = option("vector.index-type");
-        }
-        if (indexType == null) {
-            indexType = option("fields." + vectorColumn.name() + ".index-type");
-        }
-        return indexType;
-    }
-
-    @Nullable
-    private String option(String key) {
-        String value = options.get(key);
-        if (value == null) {
-            value = table.options().get(key);
-        }
-        return value == null ? null : value.toLowerCase(Locale.ROOT).trim();
+        return VectorIndexOptions.resolve(
+                        new Options(table.options(), options), null, vectorColumn.name(), false)
+                .type();
     }
 
     private static boolean containsField(GlobalIndexMeta meta, int fieldId) {

@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.uri_reader import UriReaderFactory
 
 
 class ResolvingFileIO(FileIO):
@@ -37,6 +38,7 @@ class ResolvingFileIO(FileIO):
         opts_map.pop(CatalogOptions.RESOLVING_FILE_IO_ENABLED.key(), None)
         self._options = Options(opts_map)
         self._fileio_cache: Dict[tuple, FileIO] = {}
+        self.uri_reader_factory = UriReaderFactory(self._options)
 
     def _cache_key(self, path: str) -> tuple:
         uri = urlparse(path)
@@ -128,23 +130,21 @@ class ResolvingFileIO(FileIO):
         return self._get_fileio(path).write_avro(path, data, avro_schema,
                                                  compression, zstd_level, **kwargs)
 
-    def write_lance(self, path: str, data, **kwargs):
-        return self._get_fileio(path).write_lance(path, data, **kwargs)
-
-    def write_blob(self, path: str, data, **kwargs):
-        return self._get_fileio(path).write_blob(path, data, **kwargs)
-
     def write_mosaic(self, path: str, data, **kwargs):
         return self._get_fileio(path).write_mosaic(path, data, **kwargs)
 
-    def write_vortex(self, path: str, data, **kwargs):
-        return self._get_fileio(path).write_vortex(path, data, **kwargs)
-
-    def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
-        return self._get_fileio(path).write_row(path, data, fields,
-                                                zstd_level, **kwargs)
-
     def close(self):
+        first_error = None
+        try:
+            self.uri_reader_factory.close()
+        except Exception as error:
+            first_error = error
         for fileio in self._fileio_cache.values():
-            fileio.close()
+            try:
+                fileio.close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
         self._fileio_cache.clear()
+        if first_error is not None:
+            raise first_error

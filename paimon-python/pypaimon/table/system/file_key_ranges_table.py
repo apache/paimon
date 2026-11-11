@@ -25,11 +25,11 @@ from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
 from pypaimon.table.system.files_table import (
-    _render_key,
+    _data_file_format, _render_key,
     _render_partition,
-    _stringify_path,
+    _metadata_file_path,
 )
-from pypaimon.table.system.system_table import SystemTable
+from pypaimon.table.system.system_table import SystemTable, metadata_snapshot
 
 
 TABLE_TYPE = RowType(False, [
@@ -60,7 +60,7 @@ class FileKeyRangesTable(SystemTable):
         return ["file_path"]
 
     def _build_arrow_table(self) -> pyarrow.Table:
-        snapshot = self.base_table.snapshot_manager().get_latest_snapshot()
+        snapshot = metadata_snapshot(self.base_table)
         if snapshot is None:
             return _empty_table()
 
@@ -70,8 +70,6 @@ class FileKeyRangesTable(SystemTable):
         entries = manifest_file_manager.read_entries_parallel(
             manifest_files, drop_stats=False)
 
-        file_format = self.base_table.options.file_format()
-        path_factory = self.base_table.path_factory()
         rows = {
             "partition": [],
             "bucket": [],
@@ -88,15 +86,10 @@ class FileKeyRangesTable(SystemTable):
 
         for entry in entries:
             meta = entry.file
-            bucket_path = path_factory.bucket_path(
-                tuple(entry.partition.values), int(entry.bucket))
             rows["partition"].append(_render_partition(entry.partition))
             rows["bucket"].append(int(entry.bucket))
-            rows["file_path"].append(_stringify_path(
-                meta.external_path
-                or meta.file_path
-                or "%s/%s" % (bucket_path, meta.file_name)))
-            rows["file_format"].append(file_format)
+            rows["file_path"].append(_metadata_file_path(self.base_table, entry))
+            rows["file_format"].append(_data_file_format(meta.file_name))
             rows["schema_id"].append(int(meta.schema_id))
             rows["level"].append(int(meta.level))
             rows["record_count"].append(int(meta.row_count))

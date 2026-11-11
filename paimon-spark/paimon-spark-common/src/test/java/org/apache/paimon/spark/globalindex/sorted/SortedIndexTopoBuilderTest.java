@@ -73,6 +73,17 @@ public class SortedIndexTopoBuilderTest {
             assertThat(repartition.partitionExpressions().size()).isEqualTo(3);
             assertThat(repartition.child()).isInstanceOf(Union.class);
             assertThat(((Union) repartition.child()).children().size()).isEqualTo(3);
+
+            Dataset<Row> disabled =
+                    SortedIndexTopoBuilder.combineAndSortBuildTaskInputs(
+                            partitionInputs, 3, TASK_ID, INDEX_KEY, false);
+            assertThat(
+                            disabled.queryExecution()
+                                    .optimizedPlan()
+                                    .sameResult(topology.queryExecution().optimizedPlan()))
+                    .isTrue();
+            assertThat(disabled.queryExecution().executedPlan().toString())
+                    .contains("rangepartitioning");
         } finally {
             spark.stop();
             SparkSession.clearActiveSession();

@@ -628,6 +628,30 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
     spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_count")
   }
 
+  test("COPY INTO: rows_loaded count of a file name with a space") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_count_space")
+    spark.sql(s"CREATE TABLE $dbName0.copy_count_space (id INT, name STRING)")
+
+    withCsvDir {
+      dir =>
+        createCsvFile(dir, "my data.csv", "1,Alice\n2,Bob\n3,Charlie\n")
+
+        val rows = spark
+          .sql(s"""COPY INTO $dbName0.copy_count_space
+                  |FROM '${dir.getAbsolutePath}'
+                  |FILE_FORMAT = (TYPE = CSV)
+                  |""".stripMargin)
+          .collect()
+        assert(rows.length == 1)
+        assert(rows(0).getString(0) == "my data.csv")
+        assert(rows(0).getString(1) == "LOADED")
+        assert(rows(0).getLong(2) == 3L)
+        assert(rows(0).getLong(3) == 3L)
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_count_space")
+  }
+
   test("COPY INTO: duplicate column list errors") {
     spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_dup_col")
     spark.sql(s"CREATE TABLE $dbName0.copy_dup_col (id INT, name STRING)")

@@ -31,10 +31,8 @@ from pypaimon.multimodal.table import MultimodalTable, _to_arrow_table
 _DEFAULT_OPTIONS = {
     "row-tracking.enabled": "true",
     "data-evolution.enabled": "true",
-    "deletion-vectors.enabled": "true",
     "blob-as-descriptor": "true",
     "global-index.search-mode": "full",
-    "vector.file.format": "parquet",
 }
 
 _DEFAULT_DATABASE = Catalog.DEFAULT_DATABASE
@@ -142,8 +140,16 @@ class MultimodalConnection:
             batch_size: int = 1024,
             options=None,
             source_options=None,
-            tag_name=None) -> None:
-        """Import LeRobot Dataset v3 into a new Paimon table group."""
+            tag_name=None,
+            parallelism=1,
+            dataset_name=None,
+            extra_dataset_fields=None,
+            schema_evolution=True) -> None:
+        """Import LeRobot v3 sources using table_name as the group prefix.
+
+        Creates <table_name>_frames, <table_name>_episodes, and
+        <table_name>_datasets.
+        """
         from pypaimon.multimodal.lerobot import load_from_lerobot
         load_from_lerobot(
             self,
@@ -153,13 +159,50 @@ class MultimodalConnection:
             options=options,
             source_options=source_options,
             tag_name=tag_name,
+            parallelism=parallelism,
+            dataset_name=dataset_name,
+            extra_dataset_fields=extra_dataset_fields,
+            schema_evolution=schema_evolution,
         )
 
-    def create_lerobot_tag(self, table_name: str, tag_name: str):
-        """Pin all LeRobot components; pause group writes until this returns.
+    def append_to_lerobot(
+            self,
+            table_name: str,
+            source,
+            *,
+            batch_size: int = 1024,
+            source_options=None,
+            tag_name=None,
+            parallelism=1,
+            dataset_name=None,
+            extra_dataset_fields=None,
+            schema_evolution=True) -> None:
+        """Append LeRobot v3 datasets to a source-local three-table group.
 
-        Returns component snapshot IDs. Use the tag only after success and
-        retain it on every component for the lifetime of a training run.
+        Pass multiple sources in one call for Ray-parallel preparation. Only
+        one append call may commit to a given group at a time; its three tables
+        do not share a transaction.
+        """
+        from pypaimon.multimodal.lerobot import load_from_lerobot
+        load_from_lerobot(
+            self, table_name, source, batch_size=batch_size,
+            source_options=source_options, tag_name=tag_name,
+            parallelism=parallelism, dataset_name=dataset_name,
+            extra_dataset_fields=extra_dataset_fields,
+            schema_evolution=schema_evolution,
+            append=True,
+        )
+
+    def recover_lerobot_append(self, table_name: str):
+        """Recover a three-table group after an interrupted append."""
+        from pypaimon.multimodal.lerobot.aggregate import _recover_incomplete_append
+        return _recover_incomplete_append(self, table_name)
+
+    def create_lerobot_tag(self, table_name: str, tag_name: str):
+        """Pin a LeRobot group by prefix or frame table name.
+
+        Pause group writes until this returns. Use the tag only after success
+        and retain it on every component for the lifetime of a training run.
         """
         from pypaimon.multimodal.lerobot.metadata import create_lerobot_tag
         return create_lerobot_tag(self, table_name, tag_name)

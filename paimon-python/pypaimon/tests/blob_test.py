@@ -34,13 +34,15 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.write.format_file_writer import write_blob_file
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.read.reader.concat_batch_reader import BlobFallbackBatchReader
-from pypaimon.read.reader.format_blob_reader import BlobRecordIterator, FormatBlobReader
+from pypaimon.execution.python.read.reader.concat_batch_reader import (BlobFallbackBatchReader)
+from pypaimon.execution.python.read.reader.format_blob_reader import (BlobRecordIterator, FormatBlobReader)
 from pypaimon.schema.data_types import ArrayType, AtomicType, DataField, MapType
 from pypaimon.table.row.blob import (
     Blob,
@@ -194,7 +196,7 @@ class BlobTest(unittest.TestCase):
 
     def test_blob_copy_buffer_size_validation(self):
         """blob.copy-buffer-size must be positive and fit Java's int-sized array."""
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
         from pypaimon.common.options.core_options import CoreOptions
 
         # The internal writer already receives an int-sized value and only rejects non-positive
@@ -379,6 +381,55 @@ class BlobTest(unittest.TestCase):
         self.assertIsInstance(blob, BlobView)
         self.assertFalse(blob.is_resolved())
         self.assertEqual(blob.view_struct, view_struct)
+
+    def test_blob_view_struct_construct_by_field_name(self):
+        from types import SimpleNamespace
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.schema.data_types import AtomicType, DataField, RowType
+
+        fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(7, "picture", AtomicType("BLOB")),
+        ]
+        row_type = RowType(True, fields)
+        fake_table = SimpleNamespace(
+            identifier=Identifier.from_string("test_db.source_table"),
+            fields=fields,
+        )
+
+        expected = BlobViewStruct("test_db.source_table", 7, 42)
+        self.assertEqual(
+            BlobViewStruct.of("test_db.source_table", row_type, "picture", 42),
+            expected,
+        )
+        self.assertEqual(
+            BlobViewStruct.of(fake_table, "picture", 42),
+            expected,
+        )
+        self.assertEqual(
+            Blob.from_view("test_db.source_table", 7, 42),
+            Blob.from_view(expected),
+        )
+        self.assertEqual(
+            Blob.from_view("test_db.source_table", row_type, "picture", 42),
+            Blob.from_view(expected),
+        )
+        self.assertEqual(
+            Blob.from_view(fake_table, "picture", 42),
+            Blob.from_view(expected),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Cannot find blob field missing in upstream table test_db\.source_table\.",
+        ):
+            BlobViewStruct.of(fake_table, "missing", 42)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Field id in upstream table test_db\.source_table is not a BLOB field\.",
+        ):
+            BlobViewStruct.of(fake_table, "id", 42)
 
     def test_blob_fallback_batch_reader_respects_batch_size(self):
         created_readers = []
@@ -774,7 +825,7 @@ class BlobTest(unittest.TestCase):
         )
 
     def test_blob_fallback_batch_reader_materializes_selected_array_values_in_parallel(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         class RecordingFileIO(LocalFileIO):
             def __init__(self, path, options):
@@ -886,7 +937,7 @@ class BlobTest(unittest.TestCase):
         )
 
     def test_blob_fallback_batch_reader_materializes_selected_map_values_in_parallel(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         class RecordingFileIO(LocalFileIO):
             def __init__(self, path, options):
@@ -1597,14 +1648,12 @@ class BlobTest(unittest.TestCase):
             BlobDescriptor("file:///tmp/blob.bin", 0, 10),
         )
 
-    def test_blob_descriptor_fields_ignores_legacy_stored_key(self):
+    def test_blob_descriptor_fields_uses_java_fallback_key(self):
         from pypaimon.common.options.core_options import CoreOptions
 
-        # Python master ignored this key and wrote dedicated .blob files.
-        # A global fallback would break rolling upgrades.
         legacy_only = CoreOptions(
             Options({"blob.stored-descriptor-fields": "legacy_col"}))
-        self.assertEqual(set(), legacy_only.blob_descriptor_fields())
+        self.assertEqual({'legacy_col'}, legacy_only.blob_descriptor_fields())
 
         canonical_wins = CoreOptions(Options({
             "blob-descriptor-field": "canon",
@@ -1618,8 +1667,8 @@ class BlobTest(unittest.TestCase):
         }))
         self.assertEqual(set(), blank_canonical.blob_descriptor_fields())
 
-    def test_dedicated_writer_accepts_exact_v1_descriptor_bytes(self):
-        from pypaimon.write.writer.dedicated_format_writer import (
+    def test_dedicated_writer_accepts_java_descriptor_prefixes(self):
+        from pypaimon.execution.python.write.writer.dedicated_format_writer import (
             DedicatedFormatWriter)
 
         uri = b"file:///tmp/blob.bin"
@@ -1642,19 +1691,16 @@ class BlobTest(unittest.TestCase):
             pa.RecordBatch.from_arrays(
                 [pa.array([v1], type=pa.large_binary())], names=['payload']))
 
-        padded = pa.RecordBatch.from_arrays(
-            [pa.array([v1 + b"x"], type=pa.large_binary())], names=['payload'])
-        with self.assertRaisesRegex(ValueError, "trailing bytes"):
-            writer._validate_inline_stored_fields_input(padded)
-
+        # Java's known-descriptor parser accepts padding and the older
+        # no-magic layout. Do not apply heuristic exact-length detection here.
         v0 = bytes([0]) + v1[1:]
-        with self.assertRaisesRegex(ValueError, r"in \[1, 2\], but found 0"):
+        for value in (v0, v1 + b"x", v2 + b"padding"):
             writer._validate_inline_stored_fields_input(
                 pa.RecordBatch.from_arrays(
-                    [pa.array([v0], type=pa.large_binary())], names=['payload']))
+                    [pa.array([value], type=pa.large_binary())], names=['payload']))
 
         v3 = bytes([3]) + v2[1:]
-        with self.assertRaisesRegex(ValueError, r"in \[1, 2\], but found 3"):
+        with self.assertRaisesRegex(ValueError, "serialized BlobDescriptor"):
             writer._validate_inline_stored_fields_input(
                 pa.RecordBatch.from_arrays(
                     [pa.array([v3], type=pa.large_binary())], names=['payload']))
@@ -1711,7 +1757,7 @@ class BlobTest(unittest.TestCase):
 
         from pypaimon.common.options import Options
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.read.reader.blob_descriptor_convert_reader import BlobInlineConvertReader
+        from pypaimon.execution.python.read.reader.blob_descriptor_convert_reader import (BlobInlineConvertReader)
         from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 
         data = b"convert table blob"
@@ -1781,8 +1827,7 @@ class BlobTest(unittest.TestCase):
 
         from pypaimon.common.options import Options
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.read.reader.blob_descriptor_convert_reader import (
-            BlobInlineConvertReader)
+        from pypaimon.execution.python.read.reader.blob_descriptor_convert_reader import (BlobInlineConvertReader)
         from pypaimon.read.reader.iface.record_batch_reader import (
             RecordBatchReader)
 
@@ -1879,8 +1924,7 @@ class BlobTest(unittest.TestCase):
     def test_deferred_blob_resolve_reader_uses_table_file_io(self):
         from typing import Optional
 
-        from pypaimon.read.reader.deferred_blob_resolve_reader import (
-            DeferredBlobResolveReader)
+        from pypaimon.execution.python.read.reader.deferred_blob_resolve_reader import (DeferredBlobResolveReader)
         from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 
         data = b"deferred table blob"
@@ -2084,7 +2128,7 @@ class BlobTest(unittest.TestCase):
 
         from pypaimon.common.options import Options
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.read.reader.blob_descriptor_convert_reader import BlobInlineConvertReader
+        from pypaimon.execution.python.read.reader.blob_descriptor_convert_reader import (BlobInlineConvertReader)
         from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
         from pypaimon.table.row.blob import BlobData
 
@@ -2159,8 +2203,9 @@ class BlobTest(unittest.TestCase):
     def test_wrap_record_reader_propagates_blob_metadata_for_get_blob(self):
         from pypaimon.common.options import Options
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.read.reader.blob_view_read_support import (
-            wrap_record_reader_with_blob_inline_convert)
+        from pypaimon.execution.python.read.reader.blob_view_read_support import (
+            wrap_record_reader_with_blob_inline_convert,
+        )
         from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
         from pypaimon.read.reader.iface.record_iterator import RecordIterator
         from pypaimon.read.reader.iface.record_reader import RecordReader
@@ -2236,8 +2281,9 @@ class BlobTest(unittest.TestCase):
     def test_wrap_record_reader_preserves_all_row_kinds(self):
         from pypaimon.common.options import Options
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.read.reader.blob_view_read_support import (
-            wrap_record_reader_with_blob_inline_convert)
+        from pypaimon.execution.python.read.reader.blob_view_read_support import (
+            wrap_record_reader_with_blob_inline_convert,
+        )
         from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
         from pypaimon.read.reader.iface.record_iterator import RecordIterator
         from pypaimon.read.reader.iface.record_reader import RecordReader
@@ -2322,12 +2368,13 @@ class BlobTest(unittest.TestCase):
     def test_limit_before_wrap_materializes_only_limited_descriptors(self):
         from pypaimon.common.options import Options
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.read.reader.blob_view_read_support import (
-            wrap_record_reader_with_blob_inline_convert)
+        from pypaimon.execution.python.read.reader.blob_view_read_support import (
+            wrap_record_reader_with_blob_inline_convert,
+        )
         from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
         from pypaimon.read.reader.iface.record_iterator import RecordIterator
         from pypaimon.read.reader.iface.record_reader import RecordReader
-        from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
+        from pypaimon.execution.python.read.reader.limited_record_reader import (LimitedRecordReader)
         from pypaimon.schema.data_types import AtomicType, DataField
         from pypaimon.table.row.offset_row import OffsetRow
 
@@ -2409,8 +2456,7 @@ class BlobTest(unittest.TestCase):
 
     def test_needs_blob_inline_convert_when_blob_as_descriptor(self):
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.read.reader.blob_view_read_support import (
-            needs_blob_inline_convert)
+        from pypaimon.execution.python.read.reader.blob_view_read_support import (needs_blob_inline_convert)
 
         class _Table:
             def __init__(self, options):
@@ -2431,21 +2477,24 @@ class BlobTest(unittest.TestCase):
         self.assertFalse(needs_blob_inline_convert(_Table({
             "blob-as-descriptor": "true",
         })))
-        self.assertFalse(needs_blob_inline_convert(_Table({
+        self.assertTrue(needs_blob_inline_convert(_Table({
             "blob.stored-descriptor-fields": "picture",
         })))
 
     def test_limited_record_reader_keeps_cleared_descriptor_indices(self):
         from pypaimon.common.options import Options
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.read.reader.auth_masking_reader import (
-            BatchToRecordReaderAdapter, RecordReaderToBatchAdapter)
-        from pypaimon.read.reader.blob_view_read_support import (
-            wrap_record_reader_with_blob_inline_convert)
+        from pypaimon.execution.python.read.reader.auth_masking_reader import (
+            BatchToRecordReaderAdapter,
+            RecordReaderToBatchAdapter,
+        )
+        from pypaimon.execution.python.read.reader.blob_view_read_support import (
+            wrap_record_reader_with_blob_inline_convert,
+        )
         from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
         from pypaimon.read.reader.iface.record_iterator import RecordIterator
         from pypaimon.read.reader.iface.record_reader import RecordReader
-        from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
+        from pypaimon.execution.python.read.reader.limited_record_reader import (LimitedRecordReader)
         from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
         from pypaimon.table.row.blob import BlobData
         from pypaimon.table.row.offset_row import OffsetRow
@@ -2528,8 +2577,10 @@ class BlobTest(unittest.TestCase):
             reader.close()
 
     def test_batch_to_record_reader_roundtrip_preserves_get_blob(self):
-        from pypaimon.read.reader.auth_masking_reader import (
-            BatchToRecordReaderAdapter, RecordReaderToBatchAdapter)
+        from pypaimon.execution.python.read.reader.auth_masking_reader import (
+            BatchToRecordReaderAdapter,
+            RecordReaderToBatchAdapter,
+        )
         from pypaimon.read.reader.iface.record_iterator import RecordIterator
         from pypaimon.read.reader.iface.record_reader import RecordReader
         from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
@@ -2585,7 +2636,7 @@ class BlobTest(unittest.TestCase):
             wrapped.close()
 
     def test_blob_view_prescan_limit_skips_when_predicate_present(self):
-        from pypaimon.read.split_read import RawFileSplitRead
+        from pypaimon.execution.python.read.split_read import (RawFileSplitRead)
 
         obj = RawFileSplitRead.__new__(RawFileSplitRead)
         obj.limit = 1
@@ -2602,7 +2653,7 @@ class BlobTest(unittest.TestCase):
 
     def test_merge_blob_view_prescan_empty_projection_uses_batch_reader(self):
         from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
-        from pypaimon.read.split_read import MergeFileSplitRead
+        from pypaimon.execution.python.read.split_read import (MergeFileSplitRead)
         from pypaimon.schema.data_types import AtomicType, DataField
 
         obj = MergeFileSplitRead.__new__(MergeFileSplitRead)
@@ -2619,7 +2670,7 @@ class BlobTest(unittest.TestCase):
     def test_merge_blob_view_prescan_keeps_sequence_field(self):
         from pypaimon.common.options import Options
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.read.split_read import MergeFileSplitRead
+        from pypaimon.execution.python.read.split_read import (MergeFileSplitRead)
         from pypaimon.schema.data_types import AtomicType, DataField
 
         pic = DataField(1, "pic", AtomicType("BLOB"))
@@ -2649,13 +2700,11 @@ class BlobTest(unittest.TestCase):
         self.assertEqual(names, ["pic", "ts"])
 
     def test_refresh_blob_view_lookup_does_not_clobber_descriptor_indices(self):
-        from pypaimon.read.reader.auth_masking_reader import (
-            RecordReaderToBatchAdapter)
+        from pypaimon.execution.python.read.reader.auth_masking_reader import (RecordReaderToBatchAdapter)
         from pypaimon.read.reader.iface.record_iterator import RecordIterator
         from pypaimon.read.reader.iface.record_reader import RecordReader
-        from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
-        from pypaimon.read.reader.outer_projection_record_reader import (
-            OuterProjectionRecordReader)
+        from pypaimon.execution.python.read.reader.limited_record_reader import (LimitedRecordReader)
+        from pypaimon.execution.python.read.reader.outer_projection_record_reader import (OuterProjectionRecordReader)
         from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
         from pypaimon.table.row.offset_row import OffsetRow
 
@@ -2710,8 +2759,7 @@ class BlobTest(unittest.TestCase):
 
         from pypaimon.common.options import Options
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.read.reader.blob_descriptor_convert_reader import (
-            BlobInlineConvertReader)
+        from pypaimon.execution.python.read.reader.blob_descriptor_convert_reader import (BlobInlineConvertReader)
         from pypaimon.read.reader.iface.record_batch_reader import (
             EmptyRecordBatchReader, RecordBatchReader)
 
@@ -2759,7 +2807,7 @@ class BlobTest(unittest.TestCase):
 
         from pypaimon.common.identifier import Identifier
         from pypaimon.common.uri_reader import HttpUriReader, UriReaderFactory
-        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+        from pypaimon.execution.python.read.blob_view_lookup import BlobViewLookup
 
         class TokenFileIO:
             def new_input_stream(self, path):
@@ -2784,8 +2832,7 @@ class BlobTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
         from pypaimon.common.identifier import Identifier
         from pypaimon.common.uri_reader import UriReader
-        from pypaimon.read.reader.blob_descriptor_convert_reader import (
-            BlobInlineConvertReader)
+        from pypaimon.execution.python.read.reader.blob_descriptor_convert_reader import (BlobInlineConvertReader)
 
         view_struct = BlobViewStruct(Identifier.from_string("db.source"), 1, 0)
         descriptor = BlobDescriptor("https://example.com/blob", 0, 4)
@@ -2872,7 +2919,7 @@ class BlobTest(unittest.TestCase):
         from pypaimon.common.identifier import Identifier
         from pypaimon.common.uri_reader import FileUriReader, UriReaderFactory
         from pypaimon.table.row.offset_row import OffsetRow
-        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+        from pypaimon.execution.python.read.blob_view_lookup import BlobViewLookup
 
         shared_uri = "s3://shared/blob"
         data_a = b"AAAA"
@@ -2931,7 +2978,7 @@ class BlobTest(unittest.TestCase):
         from pypaimon.read.table_read import TableRead
         from pypaimon.schema.data_types import AtomicType, DataField
         from pypaimon.table.row.offset_row import OffsetRow
-        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+        from pypaimon.execution.python.read.blob_view_lookup import BlobViewLookup
 
         view_struct = BlobViewStruct(Identifier.from_string("db.source"), 1, 0)
         view_bytes = view_struct.serialize()
@@ -2953,19 +3000,19 @@ class BlobTest(unittest.TestCase):
         reader = SimpleNamespace(blob_view_lookup=lookup)
         row = OffsetRow((view_bytes, view_bytes), 0, 2)
 
-        converted = table_read._serialize_blob_view_row_tuple(row, reader)
+        converted = PythonTableRead(table_read)._serialize_blob_view_row_tuple(row, reader)
 
         self.assertEqual(converted[0], view_bytes)
         self.assertEqual(converted[1], descriptor.serialize())
 
         table_read._blob_view_output_indices = ()
-        skipped = table_read._serialize_blob_view_row_tuple(
+        skipped = PythonTableRead(table_read)._serialize_blob_view_row_tuple(
             row, SimpleNamespace())
         self.assertEqual(skipped, (view_bytes, view_bytes))
 
         table_read._blob_view_output_indices = (1,)
         table_read._blob_as_descriptor = False
-        not_descriptor = table_read._serialize_blob_view_row_tuple(row, reader)
+        not_descriptor = PythonTableRead(table_read)._serialize_blob_view_row_tuple(row, reader)
         self.assertEqual(not_descriptor, (view_bytes, view_bytes))
 
     def test_offset_row_get_blob_v1_resolved_blob_view_field(self):
@@ -3076,11 +3123,13 @@ class BlobTest(unittest.TestCase):
 
         from pypaimon.common.identifier import Identifier
         from pypaimon.common.uri_reader import FileUriReader
-        from pypaimon.read.reader.auth_masking_reader import (
-            BatchToRecordReaderAdapter, RecordReaderToBatchAdapter)
+        from pypaimon.execution.python.read.reader.auth_masking_reader import (
+            BatchToRecordReaderAdapter,
+            RecordReaderToBatchAdapter,
+        )
         from pypaimon.read.reader.iface.record_iterator import RecordIterator
         from pypaimon.read.reader.iface.record_reader import RecordReader
-        from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
+        from pypaimon.execution.python.read.reader.limited_record_reader import (LimitedRecordReader)
         from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
         from pypaimon.table.row.offset_row import OffsetRow
 
@@ -3176,13 +3225,127 @@ class BlobEndToEndTest(unittest.TestCase):
 
     @staticmethod
     def _write_single_blob(path, field, value):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         with open(path, 'wb') as output:
             writer = BlobFormatWriter(output)
             writer.add_element(GenericRow(
                 [BlobData(value)], [field], RowKind.INSERT))
             writer.close()
+
+    def test_blob_index_cache_size_controls_repeated_file_reads(self):
+        from pypaimon.catalog.catalog_context import CatalogContext
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        paths = [os.path.join(self.temp_dir, "cache-{}.blob".format(i)) for i in range(17)]
+        for i, path in enumerate(paths):
+            self._write_single_blob(path, field, bytes([i]))
+        open_stream = file_io.new_input_stream
+        for max_size, expected_reads, expected_entries in [
+            ("1 kb", 34, None),
+            ("1 mb", 0, 17),
+            ("0 b", 34, 0),
+        ]:
+            with self.subTest(max_size=max_size):
+                cache = CatalogContext.create_from_options(
+                    Options({"cache.blob-index.max-size": max_size})).blob_index_cache
+                streams = []
+
+                def counted_open(path):
+                    stream = MagicMock(wraps=open_stream(path))
+                    streams.append(stream)
+                    return stream
+
+                with patch.object(file_io, "new_input_stream", side_effect=counted_open):
+                    results = []
+                    reads = []
+                    for _ in range(2):
+                        streams.clear()
+                        descriptors = []
+                        for path in paths:
+                            reader = FormatBlobReader(
+                                file_io, path, [field.name], [field], None, True,
+                                index_cache=cache)
+                            try:
+                                descriptors.extend(reader.read_arrow_batch().column(0).to_pylist())
+                            finally:
+                                reader.close()
+                        results.append(descriptors)
+                        reads.append(sum(stream.read.call_count for stream in streams))
+                    self.assertEqual(reads, [34, expected_reads])
+                    self.assertEqual(results[0], results[1])
+                    self.assertLessEqual(cache.size_bytes, cache.max_size_bytes)
+                    if expected_entries is not None:
+                        self.assertEqual(len(cache), expected_entries)
+
+    def test_blob_index_cache_skips_oversized_entry(self):
+        from pypaimon.common.blob_index_cache import BlobIndexCache
+        from pypaimon.common.memory_size import MemorySize
+
+        cache = BlobIndexCache(MemorySize.of_kibi_bytes(1))
+        cache.put("small.blob", (1,), (0,))
+        self.assertEqual(((1,), (0,)), cache.get("small.blob"))
+
+        values = tuple(range(100))
+        cache.put("oversized.blob", values, values)
+        self.assertIsNone(cache.get("oversized.blob"))
+        self.assertEqual(((1,), (0,)), cache.get("small.blob"))
+
+    def test_blob_index_cache_accounts_for_many_small_entries(self):
+        from pypaimon.common.blob_index_cache import BlobIndexCache
+        from pypaimon.common.memory_size import MemorySize
+
+        cache = BlobIndexCache(MemorySize.of_mebi_bytes(1))
+        for i in range(10000):
+            cache.put("small-{:05d}.blob".format(i), (1,), (0,))
+
+        self.assertLess(len(cache), 2048)
+        self.assertLessEqual(cache.size_bytes, cache.max_size_bytes)
+        self.assertNotIn("small-00000.blob", cache)
+        self.assertIn("small-09999.blob", cache)
+
+    def test_blob_index_cache_catalog_scope_and_serialization(self):
+        import pickle
+        from pypaimon import CatalogFactory, Schema
+        from pypaimon.catalog.catalog_context import CatalogContext
+
+        self.assertEqual(
+            64 * 1024 * 1024,
+            CatalogContext.create_from_options(
+                Options({})).blob_index_cache.max_size_bytes,
+        )
+        for value in ("-1 mb", "invalid"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                CatalogContext.create_from_options(
+                    Options({"cache.blob-index.max-size": value}))
+
+        options = {"warehouse": self.temp_dir, "cache.blob-index.max-size": "64 kb"}
+        catalog = CatalogFactory.create(options)
+        catalog.create_database("db", True)
+        for name in ("a", "b"):
+            catalog.create_table("db." + name, Schema.from_pyarrow_schema(
+                pa.schema([("value", pa.binary())])), False)
+        first = catalog.get_table("db.a")
+        second = catalog.get_table("db.b")
+        cache = first.catalog_environment.blob_index_cache()
+        self.assertIs(cache, second.catalog_environment.blob_index_cache())
+        self.assertIs(cache, first.copy({"blob-as-descriptor": "true"})
+                      .catalog_environment.blob_index_cache())
+        cache.put("file.blob", (1,), (0,))
+
+        other = CatalogFactory.create(dict(options, **{"cache.blob-index.max-size": "32 kb"}))
+        other_cache = other.get_table("db.a").catalog_environment.blob_index_cache()
+        self.assertIsNot(cache, other_cache)
+        self.assertEqual(other_cache.max_size_bytes, 32 * 1024)
+        self.assertEqual(len(other_cache), 0)
+
+        restored = pickle.loads(pickle.dumps(first.catalog_environment))
+        restored_cache = restored.blob_index_cache()
+        self.assertEqual(restored_cache.max_size_bytes, 64 * 1024)
+        self.assertEqual(len(restored_cache), 0)
+        restored_cache.put("worker.blob", (1,), (0,))
+        self.assertIsNone(cache.get("worker.blob"))
 
     def test_blob_end_to_end(self):
         # Set up file I/O
@@ -3204,7 +3367,7 @@ class BlobEndToEndTest(unittest.TestCase):
         blob_file_path = Path(self.temp_dir) / (blob_field_name + ".blob")
         blob_file_url = _to_url(blob_file_path)
         blob_files[blob_field_name] = blob_file_url
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
         self.assertTrue(file_io.exists(blob_file_url))
 
         # ========== Step 3: Read Data and Check Data ==========
@@ -3252,7 +3415,7 @@ class BlobEndToEndTest(unittest.TestCase):
         table = pa.table([blob_data], schema=schema)
         blob_file_path = Path(self.temp_dir) / (blob_field_name + "_inline.blob")
         blob_file_url = _to_url(blob_file_path)
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         counting_file_io = CountingFileIO(file_io)
         read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
@@ -3295,14 +3458,13 @@ class BlobEndToEndTest(unittest.TestCase):
             reader.close()
 
     def test_blob_readers_reuse_index_by_path(self):
-        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE, _BLOB_INDEX_CACHE_LOCK
+        from pypaimon.execution.python.read.reader.format_blob_reader import (_BLOB_INDEX_CACHE)
 
         field = DataField(0, "blob_field", AtomicType("BLOB"))
         path = os.path.join(self.temp_dir, "cached-index.blob")
         file_io = CountingBlobFileIO(self.temp_dir)
         self._write_single_blob(path, field, b"cached-value")
-        with _BLOB_INDEX_CACHE_LOCK:
-            _BLOB_INDEX_CACHE.clear()
+        _BLOB_INDEX_CACHE.clear()
         results = []
 
         try:
@@ -3334,8 +3496,7 @@ class BlobEndToEndTest(unittest.TestCase):
                 self.assertEqual((path, 4, len(b"cached-value")),
                                  (descriptor.uri, descriptor.offset, descriptor.length))
         finally:
-            with _BLOB_INDEX_CACHE_LOCK:
-                _BLOB_INDEX_CACHE.clear()
+            _BLOB_INDEX_CACHE.clear()
 
     def test_blob_cached_index_keeps_payload_reads(self):
         field = DataField(0, "blob_field", AtomicType("BLOB"))
@@ -3361,7 +3522,7 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertTrue(all(stream.close.call_count == 1 for stream in file_io.streams))
 
     def test_blob_cached_index_reader_isolation(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         field = DataField(0, "blob_field", AtomicType("BLOB"))
         path = os.path.join(self.temp_dir, "cached-selection.blob")
@@ -3401,8 +3562,12 @@ class BlobEndToEndTest(unittest.TestCase):
                              (values[0].to_descriptor().offset, values[0].to_descriptor().length))
             self.assertIsNone(values[1])
             self.assertIs(Blob.PLACE_HOLDER, values[2])
-            with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-                descriptor_reader.read_arrow_batch()
+            descriptor_values = descriptor_reader.read_arrow_batch().column(0).to_pylist()
+            last_descriptor = BlobDescriptor.deserialize(descriptor_values[0])
+            self.assertEqual(path, last_descriptor.uri)
+            self.assertEqual(len(b"last"), last_descriptor.length)
+            self.assertIsNone(descriptor_values[1])
+            self.assertIsNone(descriptor_values[2])
             with self.assertRaises(IndexError):
                 FormatBlobReader(
                     file_io, path, [field.name], [field], None, True,
@@ -3415,7 +3580,7 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertTrue(all(stream._mock_wraps.closed for stream in file_io.streams))
 
     def test_blob_cached_nested_layout_reads(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         for data_type, value in [
             (ArrayType(True, AtomicType("BLOB")), [BlobData(b"a"), None, BlobData(b"bc")]),
@@ -3453,7 +3618,7 @@ class BlobEndToEndTest(unittest.TestCase):
             self.assertTrue(all(stream._mock_wraps.closed for stream in file_io.streams))
 
     def test_blob_index_failures_close_stream(self):
-        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE
+        from pypaimon.execution.python.read.reader.format_blob_reader import (_BLOB_INDEX_CACHE)
 
         field = DataField(0, "blob_field", AtomicType("BLOB"))
         for failure in ('version', 'header', 'index', 'read', 'row_indices'):
@@ -3517,10 +3682,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
     def test_split_read_passes_blob_file_size(self):
         from pypaimon.read.split import DataSplit
-        from pypaimon.read.split_read import (
-            DataEvolutionSplitRead,
-            RawFileSplitRead,
-        )
+        from pypaimon.execution.python.read.split_read import (DataEvolutionSplitRead, RawFileSplitRead)
 
         fields = [
             DataField(0, "id", AtomicType("INT")),
@@ -3559,13 +3721,18 @@ class BlobEndToEndTest(unittest.TestCase):
         evolution_read = DataEvolutionSplitRead(
             table, None, [field], split, False)
 
-        with patch("pypaimon.read.split_read.FormatBlobReader") as reader_cls:
+        from pypaimon.common.blob_index_cache import BlobIndexCache
+        from pypaimon.common.memory_size import MemorySize
+        cache = BlobIndexCache(MemorySize.of_kibi_bytes(32))
+        with patch.object(table.catalog_environment, "blob_index_cache", return_value=cache), \
+                patch("pypaimon.execution.python.read.split_read.FormatBlobReader") as reader_cls:
             def assert_file_size():
                 args, kwargs = reader_cls.call_args
                 arguments = inspect.signature(FormatBlobReader).bind_partial(
                     *args, **kwargs
                 ).arguments
                 self.assertEqual(123, arguments.get("file_size"))
+                self.assertIs(cache, arguments.get("index_cache"))
 
             raw_read.file_reader_supplier(file, False, [field.name], False)
             assert_file_size()
@@ -3582,7 +3749,7 @@ class BlobEndToEndTest(unittest.TestCase):
         table = pa.table([blob_data], schema=schema)
         blob_file_path = Path(self.temp_dir) / "row_indices.blob"
         blob_file_url = _to_url(blob_file_path)
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
         reader = FormatBlobReader(
@@ -3616,7 +3783,7 @@ class BlobEndToEndTest(unittest.TestCase):
         table = pa.table([blob_data], schema=schema)
         blob_file_path = Path(self.temp_dir) / "row_indices_out_of_range.blob"
         blob_file_url = _to_url(blob_file_path)
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
         with self.assertRaises(IndexError) as context:
@@ -3662,7 +3829,7 @@ class BlobEndToEndTest(unittest.TestCase):
             GenericRowSerializer.to_bytes(array_row)
         self.assertIn("AtomicType", str(context.exception))
 
-        # Note: FileIO.write_blob validation for complex types is tested separately below
+        # Note: Python blob codec validation for complex types is tested separately below
 
         # ========== Test MultisetType(nullable=True, element_type=AtomicType("BLOB")) ==========
         multiset_fields = [
@@ -3704,8 +3871,8 @@ class BlobEndToEndTest(unittest.TestCase):
             GenericRowSerializer.to_bytes(map_row)
         self.assertIn("AtomicType", str(context.exception))
 
-        # ========== Test FileIO.write_blob validation for complex types ==========
-        # Test that FileIO.write_blob properly validates and rejects complex types
+        # ========== Test Python blob codec validation for complex types ==========
+        # Test that Python blob codec properly validates and rejects complex types
 
         # Create a table with multiple columns (should fail - blob format requires single column)
         multi_column_schema = pa.schema([
@@ -3722,16 +3889,16 @@ class BlobEndToEndTest(unittest.TestCase):
 
         # Should throw RuntimeError for multiple columns
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(multi_column_url, multi_column_table)
+            write_blob_file(file_io, multi_column_url, multi_column_table)
         self.assertIn("single column", str(context.exception))
 
-        # Test that FileIO.write_blob supports null values and round-trips correctly
+        # Test that Python blob codec supports null values and round-trips correctly
         null_schema = pa.schema([pa.field("blob_with_nulls", pa.large_binary())])
         null_table = pa.table([[b"data", None]], schema=null_schema)
 
         null_file = Path(self.temp_dir) / "null_data.blob"
         null_file_url = _to_url(null_file)
-        file_io.write_blob(null_file_url, null_table)
+        write_blob_file(file_io, null_file_url, null_table)
 
         null_read_fields = [DataField(0, "blob_with_nulls", AtomicType("BLOB"))]
         null_reader = FormatBlobReader(
@@ -3756,7 +3923,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         valid_blob_file = Path(self.temp_dir) / "valid_blob.blob"
         valid_blob_url = _to_url(valid_blob_file)
-        file_io.write_blob(valid_blob_url, valid_table)
+        write_blob_file(file_io, valid_blob_url, valid_table)
 
         # Try to read with complex type field definition - this should fail
         # because FormatBlobReader tries to create PyArrow schema with complex types
@@ -3803,7 +3970,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         header_test_file = Path(self.temp_dir) / "header_test.blob"
         header_test_url = _to_url(header_test_file)
-        file_io.write_blob(header_test_url, valid_table)
+        write_blob_file(file_io, header_test_url, valid_table)
 
         # Read the file and corrupt the header (last 5 bytes: index_length + version)
         with open(header_test_file, 'rb') as f:
@@ -3842,7 +4009,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         full_blob_file = Path(self.temp_dir) / "full_blob.blob"
         full_blob_url = _to_url(full_blob_file)
-        file_io.write_blob(full_blob_url, large_table)
+        write_blob_file(file_io, full_blob_url, large_table)
 
         # Read the full file and truncate it in the middle
         with open(full_blob_file, 'rb') as f:
@@ -3881,7 +4048,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         zero_blob_file = Path(self.temp_dir) / "zero_length.blob"
         zero_blob_url = _to_url(zero_blob_file)
-        file_io.write_blob(zero_blob_url, zero_table)
+        write_blob_file(file_io, zero_blob_url, zero_table)
 
         # Verify file was created
         self.assertTrue(file_io.exists(zero_blob_url))
@@ -3924,7 +4091,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         large_sim_file = Path(self.temp_dir) / "large_simulation.blob"
         large_sim_url = _to_url(large_sim_file)
-        file_io.write_blob(large_sim_url, large_sim_table)
+        write_blob_file(file_io, large_sim_url, large_sim_table)
 
         # Verify large file was written
         large_sim_size = file_io.get_file_size(large_sim_url)
@@ -3997,7 +4164,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         # Should reject multi-field table
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(multi_field_url, multi_field_table)
+            write_blob_file(file_io, multi_field_url, multi_field_table)
         self.assertIn("single column", str(context.exception))
 
         # Test that blob format rejects non-binary field types
@@ -4009,7 +4176,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         # Should reject non-binary field
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(non_binary_url, non_binary_table)
+            write_blob_file(file_io, non_binary_url, non_binary_table)
         # Should fail due to type conversion issues (non-binary field can't be converted to BLOB)
         self.assertTrue(
             "large_binary" in str(context.exception) or
@@ -4024,7 +4191,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         null_file = Path(self.temp_dir) / "with_nulls.blob"
         null_file_url = _to_url(null_file)
-        file_io.write_blob(null_file_url, null_table)
+        write_blob_file(file_io, null_file_url, null_table)
 
         null_read_fields = [DataField(0, "blob_with_null", AtomicType("BLOB"))]
         null_reader = FormatBlobReader(
@@ -4052,7 +4219,7 @@ class BlobEndToEndTest(unittest.TestCase):
         table = pa.table([[raw_bytes]], schema=schema)
 
         # Should be treated as plain bytes instead of descriptor bytes.
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         fields = [DataField(0, "payload", AtomicType("BLOB"))]
         reader = FormatBlobReader(
@@ -4107,7 +4274,7 @@ class BlobEndToEndTest(unittest.TestCase):
         # Write the blob file. The write path adaptively handles descriptor bytes.
         blob_file_path = Path(self.temp_dir) / "descriptor_blob.blob"
         blob_file_url = _to_url(blob_file_path)
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
         # Verify the blob file was created
         self.assertTrue(file_io.exists(blob_file_url))
         file_size = file_io.get_file_size(blob_file_url)
@@ -4162,7 +4329,7 @@ class BlobEndToEndTest(unittest.TestCase):
         reader_content.close()
 
     def test_null_blob_write(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         output = io.BytesIO()
         writer = BlobFormatWriter(output)
@@ -4178,7 +4345,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
     @staticmethod
     def _write_blob_record_with_crc_backend(backend):
-        from pypaimon.write import blob_format_writer
+        from pypaimon.execution.python.write import blob_format_writer
 
         output = io.BytesIO()
         payload = b'blob-crc-payload' * 1024
@@ -4192,7 +4359,7 @@ class BlobEndToEndTest(unittest.TestCase):
         self._assert_record_crc(record)
 
     def test_blob_array_crc_includes_record_length(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         output = io.BytesIO()
         writer = BlobFormatWriter(output)
@@ -4201,7 +4368,7 @@ class BlobEndToEndTest(unittest.TestCase):
         self._assert_record_crc(output.getvalue())
 
     def test_blob_map_crc_includes_record_length(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         output = io.BytesIO()
         writer = BlobFormatWriter(output)
@@ -4225,7 +4392,7 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertEqual(zlib_record, isal_record)
 
     def test_null_blob_read(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "null_blob.blob")
@@ -4258,7 +4425,7 @@ class BlobEndToEndTest(unittest.TestCase):
         reader.close()
 
     def test_null_blob_read_as_descriptor(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "null_desc.blob")
@@ -4293,7 +4460,7 @@ class BlobEndToEndTest(unittest.TestCase):
         reader.close()
 
     def test_placeholder_blob_write_read(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "placeholder_blob.blob")
@@ -4333,12 +4500,13 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertIsNone(next(iterator).values[0])
         self.assertEqual(next(iterator).values[0].to_data(), b"world")
 
-        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-            reader.read_arrow_batch()
+        self.assertEqual(
+            [b"hello", None, None, b"world"],
+            reader.read_arrow_batch().column(0).to_pylist())
         reader.close()
 
     def test_placeholder_blob_read_as_descriptor(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "placeholder_desc.blob")
@@ -4361,12 +4529,15 @@ class BlobEndToEndTest(unittest.TestCase):
             blob_as_descriptor=True
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-            reader.read_arrow_batch()
+        values = reader.read_arrow_batch().column(0).to_pylist()
+        self.assertIsNone(values[0])
+        descriptor = BlobDescriptor.deserialize(values[1])
+        self.assertEqual(blob_file_path, descriptor.uri)
+        self.assertEqual(len(b"world"), descriptor.length)
         reader.close()
 
     def test_array_blob_write_read(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "array_blob.blob")
@@ -4412,7 +4583,7 @@ class BlobEndToEndTest(unittest.TestCase):
         reader.close()
 
     def test_array_blob_parallelism_uses_concurrent_resolver(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "array_blob_parallel.blob")
@@ -4491,7 +4662,7 @@ class BlobEndToEndTest(unittest.TestCase):
         reader.close()
 
     def test_array_blob_serial_read_uses_single_payload_read(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "array_blob_serial.blob")
@@ -4562,7 +4733,7 @@ class BlobEndToEndTest(unittest.TestCase):
             [pa.array([[b"one", None], None, [b"two"]], type=arrow_type)],
             schema=pa.schema([pa.field("blob_array", arrow_type)]),
         )
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         fields = [
             DataField(
@@ -4588,7 +4759,7 @@ class BlobEndToEndTest(unittest.TestCase):
         reader.close()
 
     def test_array_blob_read_as_descriptor(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "array_blob_desc.blob")
@@ -4630,7 +4801,7 @@ class BlobEndToEndTest(unittest.TestCase):
         reader.close()
 
     def test_array_blob_placeholder_write_read(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "array_placeholder.blob")
@@ -4673,8 +4844,9 @@ class BlobEndToEndTest(unittest.TestCase):
         )
         self.assertEqual(next(iterator).values[0][0].to_data(), b"hello")
         self.assertIs(next(iterator).values[0], Blob.ARRAY_PLACE_HOLDER)
-        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-            reader.read_arrow_batch()
+        self.assertEqual(
+            [[b"hello"], None],
+            reader.read_arrow_batch().column(0).to_pylist())
         reader.close()
 
     def test_reject_malformed_array_blob_payloads(self):
@@ -4743,7 +4915,7 @@ class BlobEndToEndTest(unittest.TestCase):
         )
 
     def test_blob_golden_bytes(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         source_file_path = os.path.join(self.temp_dir, "source.bin")
         with open(source_file_path, 'wb') as source_file:
@@ -4769,7 +4941,7 @@ class BlobEndToEndTest(unittest.TestCase):
             )
 
     def test_array_blob_golden_bytes(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         source_file_path = os.path.join(self.temp_dir, "source.bin")
         with open(source_file_path, 'wb') as source_file:
@@ -4808,7 +4980,7 @@ class BlobEndToEndTest(unittest.TestCase):
             )
 
     def test_map_blob_golden_bytes(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         blob_file_path = os.path.join(self.temp_dir, "map_golden.blob")
         fields = [DataField(
@@ -4890,7 +5062,7 @@ class BlobEndToEndTest(unittest.TestCase):
             reader.close()
 
     def test_map_blob_write_read(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "map_blob.blob")
@@ -4956,7 +5128,7 @@ class BlobEndToEndTest(unittest.TestCase):
         selected_reader.close()
 
     def test_map_blob_descriptor_and_parallel_reads(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "map_blob_descriptor.blob")
@@ -5073,7 +5245,7 @@ class BlobEndToEndTest(unittest.TestCase):
         ])
 
     def test_map_blob_consumer_descriptors_and_flush(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         class TrackingOutput:
             def __init__(self, path):
@@ -5120,7 +5292,7 @@ class BlobEndToEndTest(unittest.TestCase):
         writer.close()
 
     def test_map_blob_write_value_from_serialized_descriptor(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         source_uri = "custom://bucket/source.bin"
         source_data = b"prefix-selected-suffix"
@@ -5217,7 +5389,7 @@ class BlobEndToEndTest(unittest.TestCase):
             reader.close()
 
     def test_map_blob_placeholder_and_null_key(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "map_blob_null_key.blob")
@@ -5274,12 +5446,13 @@ class BlobEndToEndTest(unittest.TestCase):
             blob_as_descriptor=False,
             row_indices=[1],
         )
-        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-            placeholder_reader.read_arrow_batch()
+        self.assertEqual(
+            [None],
+            placeholder_reader.read_arrow_batch().column(0).to_pylist())
         placeholder_reader.close()
 
     def test_reject_duplicate_map_blob_key_on_write(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         fields = [DataField(
             0,
@@ -5300,7 +5473,7 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertEqual(output.getvalue(), b"")
 
     def test_reject_duplicate_map_blob_key_payload(self):
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         blob_file_path = os.path.join(self.temp_dir, "map_blob_duplicate.blob")
@@ -5349,8 +5522,8 @@ class BlobEndToEndTest(unittest.TestCase):
                     next(iterator)
 
     def test_map_blob_key_types_and_rejections(self):
-        from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.map_blob_key_serializer import create_map_blob_key_serializer
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
         cases = [
@@ -5798,6 +5971,59 @@ class CapBlobParallelismTest(unittest.TestCase):
 class CoalesceRangesTest(unittest.TestCase):
     """read_ranges_coalesced merges same-file adjacent reads into fewer requests
     (JingsongLi's IO-merging suggestion) while returning identical bytes."""
+
+    def test_single_lane_runs_without_executor(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "data")
+            with open(path, "wb") as stream:
+                stream.write(b"0123456789")
+            file_io = LocalFileIO()
+            # Adjacent requests coalesce to one lane even with parallelism > 1.
+            for parallelism in (1, 8):
+                with self.subTest(parallelism=parallelism), patch(
+                        "concurrent.futures.ThreadPoolExecutor",
+                        side_effect=AssertionError("Unexpected executor")):
+                    ranges = [(path, 4, 2), (path, 2, 2)]
+                    self.assertEqual([b"45", b"23"],
+                                     file_io.read_ranges_coalesced(ranges, parallelism))
+                    views = file_io.read_ranges_coalesced_views(ranges, parallelism)
+                    self.assertEqual([b"45", b"23"], [bytes(view) for view in views])
+                    self.assertTrue(all(isinstance(view, memoryview) for view in views))
+                    with self.assertRaises(FileNotFoundError):
+                        file_io.read_ranges_coalesced(
+                            [(path + "-missing", 0, 1)], parallelism)
+
+    def test_single_lane_close_errors(self):
+        for parallelism in (1, 8):
+            for return_views in (False, True):
+                for fail_read in (False, True):
+                    with self.subTest(parallelism=parallelism,
+                                      return_views=return_views, fail_read=fail_read):
+                        read_error = IOError("read failed")
+                        close_error = IOError("close failed")
+                        stream = MagicMock(spec=["read_at", "close"])
+                        stream.read_at.return_value = b"2345"
+                        if fail_read:
+                            stream.read_at.side_effect = read_error
+                        stream.close.side_effect = close_error
+                        file_io = LocalFileIO()
+                        file_io.new_input_stream = MagicMock(return_value=stream)
+                        file_io.read_file_range = MagicMock()
+                        read = (file_io.read_ranges_coalesced_views if return_views
+                                else file_io.read_ranges_coalesced)
+                        # Both requests merge into one lane, regardless of parallelism.
+                        with patch("concurrent.futures.ThreadPoolExecutor",
+                                   side_effect=AssertionError("Unexpected executor")):
+                            with self.assertRaises(IOError) as raised:
+                                read([("blob", 4, 2), ("blob", 2, 2)], parallelism)
+                        self.assertIs(raised.exception,
+                                      read_error if fail_read else close_error)
+                        stream.read_at.assert_called_once_with(4, 2)
+                        stream.close.assert_called_once_with()
+                        file_io.read_file_range.assert_not_called()
 
     def test_coalesce_ranges_grouping(self):
         from pypaimon.common.file_io import _coalesce_ranges
@@ -6633,6 +6859,44 @@ class OffsetInputStreamTest(unittest.TestCase):
             stream.close()
         finally:
             os.remove(tmp_path)
+
+
+class BlobFromViewBackwardCompatibilityTest(unittest.TestCase):
+    """Test backward compatibility of Blob.from_view keyword argument."""
+
+    def test_from_view_keyword_argument_backward_compatible(self):
+        """Test that existing keyword-argument calls still work."""
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.table.row.blob import Blob, BlobViewStruct
+
+        view_struct = BlobViewStruct(Identifier.from_string("default.test_compat"), 1, 42)
+        blob_view = Blob.from_view(view_struct=view_struct)
+
+        self.assertEqual(blob_view.view_struct.identifier.get_full_name(), "default.test_compat")
+        self.assertEqual(blob_view.view_struct.field_id, 1)
+        self.assertEqual(blob_view.view_struct.row_id, 42)
+
+    def test_from_view_positional_argument_still_works(self):
+        """Test that positional argument form still works."""
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.table.row.blob import Blob, BlobViewStruct
+
+        view_struct = BlobViewStruct(Identifier.from_string("default.test_pos"), 2, 100)
+        blob_view = Blob.from_view(view_struct)
+
+        self.assertEqual(blob_view.view_struct.identifier.get_full_name(), "default.test_pos")
+        self.assertEqual(blob_view.view_struct.field_id, 2)
+        self.assertEqual(blob_view.view_struct.row_id, 100)
+
+    def test_from_view_cannot_mix_keyword_and_positional(self):
+        """Test that mixing keyword and positional is rejected."""
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.table.row.blob import Blob, BlobViewStruct
+
+        view_struct = BlobViewStruct(Identifier.from_string("default.test_mix"), 3, 200)
+        with self.assertRaises(ValueError) as cm:
+            Blob.from_view(view_struct, view_struct=view_struct)
+        self.assertIn("Cannot provide both", str(cm.exception))
 
 
 if __name__ == '__main__':

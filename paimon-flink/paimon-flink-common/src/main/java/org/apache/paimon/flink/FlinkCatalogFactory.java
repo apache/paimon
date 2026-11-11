@@ -23,6 +23,9 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.options.Options;
 
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ReadableConfig;
+
 import java.util.Collections;
 import java.util.Set;
 
@@ -54,16 +57,27 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
                 context.getName(),
                 CatalogContext.create(
                         Options.fromMap(context.getOptions()), new FlinkFileIOLoader()),
-                context.getClassLoader());
+                context.getClassLoader(),
+                context.getConfiguration());
     }
 
     public static FlinkCatalog createCatalog(
             String catalogName, CatalogContext context, ClassLoader classLoader) {
+        return createCatalog(catalogName, context, classLoader, new Configuration());
+    }
+
+    private static FlinkCatalog createCatalog(
+            String catalogName,
+            CatalogContext context,
+            ClassLoader classLoader,
+            ReadableConfig flinkConfiguration) {
         return new FlinkCatalog(
                 CatalogFactory.createCatalog(context, classLoader),
                 catalogName,
                 context.options().get(DEFAULT_DATABASE),
-                context.options());
+                context.options(),
+                flinkConfiguration,
+                classLoader);
     }
 
     public static FlinkCatalog createCatalog(String catalogName, Catalog catalog, Options options) {

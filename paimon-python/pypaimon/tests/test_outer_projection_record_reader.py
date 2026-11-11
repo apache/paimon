@@ -20,8 +20,12 @@ from typing import List, Optional
 
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
-from pypaimon.read.reader.outer_projection_record_reader import (
-    OuterProjectionRecordReader, _extract, _PathSpec, _step_into)
+from pypaimon.execution.python.read.reader.outer_projection_record_reader import (
+    OuterProjectionRecordReader,
+    _extract,
+    _PathSpec,
+    _step_into,
+)
 from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.offset_row import OffsetRow
 
@@ -68,6 +72,16 @@ class StepIntoTest(unittest.TestCase):
     def test_dict_lookup(self):
         self.assertEqual(_step_into({'a': 1, 'b': 2}, 'a'), 1)
         self.assertIsNone(_step_into({'a': 1}, 'missing'))
+
+    def test_map_lookup_preserves_first_match_and_missing_keys(self):
+        for entries in ([('a.b', None), ('a.b', 20), ('', 30)],
+                        [{'key': 'a.b', 'value': None}, {'key': 'a.b', 'value': 20},
+                         {'key': '', 'value': 30}]):
+            with self.subTest(entries=entries):
+                self.assertIsNone(_step_into(entries, 'a.b'))
+                self.assertEqual(_step_into(entries, ''), 30)
+                self.assertIsNone(_step_into(entries, 'missing'))
+        self.assertIsNone(_step_into([], 'missing'))
 
     def test_internal_row_rejected(self):
         # Defensive: we never expect a nested InternalRow in the polars path.
@@ -188,9 +202,22 @@ class OuterProjectionRecordReaderTest(unittest.TestCase):
             OuterProjectionRecordReader(
                 _StaticReader([]), ['id', 'mv'], [['nope', 'v']])
 
-    def test_empty_name_paths_rejected(self):
-        with self.assertRaises(ValueError):
-            OuterProjectionRecordReader(_StaticReader([]), ['id'], [])
+    def test_empty_projection_keeps_rows_and_row_kinds(self):
+        rows = [_row(1), _row(2)]
+        rows[1].set_row_kind_byte(2)
+        inner = _StaticReader(rows)
+        reader = OuterProjectionRecordReader(inner, ['id'], [])
+        batch = reader.read_batch()
+        first = batch.next()
+        self.assertEqual(len(first), 0)
+        self.assertEqual(first.row_kind_byte, rows[0].row_kind_byte)
+        second = batch.next()
+        self.assertEqual(len(second), 0)
+        self.assertEqual(second.row_kind_byte, 2)
+        self.assertIsNone(batch.next())
+        self.assertIsNone(reader.read_batch())
+        reader.close()
+        self.assertTrue(inner.closed)
 
     def test_empty_individual_path_rejected(self):
         with self.assertRaises(ValueError):

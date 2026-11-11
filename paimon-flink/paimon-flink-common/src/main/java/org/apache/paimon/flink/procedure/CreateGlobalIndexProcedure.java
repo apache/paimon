@@ -35,6 +35,7 @@ import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -119,13 +120,10 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
         if (indexColumns.size() > 1) {
             // Fail fast before submitting the job: index types that do not support multi-column
             // throw from GlobalIndexerFactory#create, which happens before any indexer side effect.
-            DataField indexField = rowType.getField(indexColumns.get(0));
-            List<DataField> extraFields =
-                    indexColumns.subList(1, indexColumns.size()).stream()
-                            .map(rowType::getField)
-                            .collect(Collectors.toList());
+            List<DataField> indexFields =
+                    indexColumns.stream().map(rowType::getField).collect(Collectors.toList());
             try {
-                GlobalIndexer.create(indexType, indexField, extraFields, userOptions);
+                GlobalIndexer.create(indexType, indexFields, userOptions);
             } catch (UnsupportedOperationException e) {
                 throw new IllegalArgumentException(
                         String.format(
@@ -138,7 +136,7 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                 SortedIndexTopoBuilder.buildIndexAndExecute(
                         procedureContext.getExecutionEnvironment(),
                         table,
-                        indexColumns.get(0),
+                        Collections.singletonList(indexColumns),
                         indexType,
                         partitionPredicate,
                         userOptions);

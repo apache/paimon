@@ -61,8 +61,7 @@ with other table types or control scan and commit steps directly.
 | Match new data to existing rows | [Upsert and merge](./merge-into), [Ray joins](./ray-joins) |
 | Backfill derived features | [Ray row IDs and backfills](./ray-row-ids) |
 | Retrieve candidates | [Vector and full-text search](./multimodal-search), [row IDs](./multimodal-reading#row-ids) |
-| Import robot data | [HDF5 and ROSBag](./dataset-ingestion), [LeRobot](./lerobot), [RoboMIND AgileX](./robomind-agilex) |
-| Compare training storage | [RoboMIND ACT benchmark](./robomind-act-benchmark) |
+| Import robot data | [HDF5 and ROSBag](./dataset-ingestion), [LeRobot](./lerobot) |
 | Configure storage access | [FUSE](./fuse-support), [PyJindoSDK](./pyjindosdk-support) |
 | Inspect metadata | [System tables](./system-tables), [CLI query and inspect](./cli-query) |
 

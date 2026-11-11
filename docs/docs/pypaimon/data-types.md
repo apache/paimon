@@ -72,6 +72,10 @@ Paimon supports two Parquet storage layouts for VARIANT:
 - **Shredded VARIANT** — typed sub-columns are stored alongside overflow bytes, enabling column-skipping
   inside the Parquet file. Controlled by the `variant.shreddingSchema` table option.
 
+Plain VARIANT also supports `file.format=row`. The ROW format stores the same `value` and
+`metadata` bytes inside compressed row blocks and exposes the same Arrow struct when read.
+ROW does not support Variant shredding or sub-field I/O pruning.
+
 <Tabs groupId="variant-read-write">
 
 <TabItem value="plain-variant" label="Plain VARIANT">
@@ -218,6 +222,37 @@ Supported Paimon type strings for shredded sub-fields: `BOOLEAN`, `TINYINT`, `SM
 
 ## VARIANT Path Updates
 
+### Decode selected VARIANT fields to Python
+
+`variant_to_pylist` decodes only the requested top-level fields, returning
+one Python dict per row (or `None` for SQL NULL):
+
+```python
+from pypaimon.data import variant_to_pylist
+
+rows = variant_to_pylist(result.column('payload'), ['state.x', 'action.y'])
+```
+
+Field names are literal (`state.x` is not a nested path). Missing fields are
+omitted; VARIANT NULL is `None`. Values use natural Python types, even when
+types differ between rows. This does not reduce Parquet I/O.
+
+To project VARIANT fields as named float32 columns:
+
+```python
+read_builder = table.new_read_builder().with_projection({
+    'id': 'id',
+    'x': "try_variant_get(payload, '$.x', 'float')",
+})
+```
+
+This requires `read.native.enabled=true` and a compatible `pypaimon-rust`; it
+does not fall back to Python. `try_variant_get` returns NULL on cast errors,
+while `variant_get` raises. Row iterators, Torch row format, and paths containing
+`;` are unsupported.
+
+### Read and update typed paths
+
 Read existing paths as Arrow arrays, use Arrow compute, and replace them
 without decoding unrelated fields:
 
@@ -270,5 +305,6 @@ creates intermediate objects or extends arrays.
 
 **Limitations:**
 
-- `VARIANT` is only supported with Parquet file format. ORC and Avro are not supported.
+- Plain `VARIANT` supports Parquet and ROW file formats. Shredded `VARIANT` requires Parquet.
+  ORC and Avro are not supported.
 - `VARIANT` cannot be used as a primary key or partition key.

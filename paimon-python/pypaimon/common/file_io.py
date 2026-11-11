@@ -19,6 +19,7 @@ import logging
 import os
 import uuid
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -28,6 +29,36 @@ import pyarrow.fs as pafs
 from pypaimon.common.options import Options
 
 _LOG = logging.getLogger(__name__)
+
+
+def _is_local_path(path):
+    from urllib.parse import urlparse
+
+    uri = urlparse(path)
+    # urlparse treats a Windows drive letter as a URI scheme.
+    return not uri.scheme or uri.scheme == "file" or (
+        os.name == "nt" and len(uri.scheme) == 1 and not uri.netloc)
+
+
+def normalize_naive_datetimes(value):
+    """Recursively attach UTC to naive datetimes, including ones nested inside
+    ROW (dict) and ARRAY/MAP (list/tuple) values.
+
+    fastavro converts a naive datetime using the host timezone, which corrupts
+    the stored instant on a non-UTC host; Paimon timestamps are UTC-based. The
+    Avro ``write_avro`` paths must normalize nested timestamps, not just
+    top-level column values, so a naive datetime inside a struct or list is not
+    written shifted by the host offset.
+    """
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    if isinstance(value, dict):
+        return {key: normalize_naive_datetimes(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(normalize_naive_datetimes(val) for val in value)
+    return value
 
 
 def supports_pread(stream) -> bool:
@@ -404,8 +435,11 @@ class FileIO(ABC):
                 close_error = error
             return read_error, close_error
 
-        with ThreadPoolExecutor(len(lanes)) as pool:
-            outcomes = list(pool.map(_run_lane, lanes))
+        if len(lanes) == 1:
+            outcomes = [_run_lane(lanes[0])]
+        else:
+            with ThreadPoolExecutor(len(lanes)) as pool:
+                outcomes = list(pool.map(_run_lane, lanes))
         read_error = next(
             (error for error, _ in outcomes if error is not None), None)
         close_error = next(
@@ -619,19 +653,6 @@ class FileIO(ABC):
                    compression: str = 'zstd', zstd_level: int = 1, **kwargs):
         raise NotImplementedError("write_avro must be implemented by FileIO subclasses")
 
-    def write_lance(self, path: str, data, **kwargs):
-        raise NotImplementedError("write_lance must be implemented by FileIO subclasses")
-
-    def write_blob(self, path: str, data, **kwargs):
-        """Write Blob format file."""
-        raise NotImplementedError("write_blob must be implemented by FileIO subclasses")
-
-    def write_vortex(self, path: str, data, **kwargs):
-        raise NotImplementedError("write_vortex must be implemented by FileIO subclasses")
-
-    def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
-        raise NotImplementedError("write_row must be implemented by FileIO subclasses")
-
     def close(self):
         pass
 
@@ -639,7 +660,7 @@ class FileIO(ABC):
     def get(path: str, catalog_options: Optional[Options] = None) -> 'FileIO':
         """
         Returns a FileIO instance for accessing the file system identified by the given path.
-        - LocalFileIO for local file system (file:// or no scheme)
+        - LocalFileIO for local file system (file://, no scheme, or Windows drive paths)
         - HdfsNativeFileIO for HDFS/ViewFS (default; pure protocol client, no Hadoop install)
         - OssFileIO for OSS (oss://)
         - PyArrowFileIO for other remote file systems (s3://, gs://, ...),
@@ -658,7 +679,7 @@ class FileIO(ABC):
         uri = urlparse(path)
         scheme = uri.scheme
 
-        if not scheme or scheme == "file":
+        if _is_local_path(path):
             from pypaimon.filesystem.local_file_io import LocalFileIO
             return LocalFileIO(path, catalog_options)
 

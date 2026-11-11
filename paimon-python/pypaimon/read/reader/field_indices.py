@@ -17,7 +17,7 @@
 
 """Helpers for carrying typed field metadata through projection wrappers."""
 
-from typing import Any, Iterable, List, Optional, Sequence, Set
+from typing import Iterable, List, Set
 
 from pypaimon.schema.data_types import DataField, VectorType
 
@@ -41,6 +41,9 @@ def descriptor_field_names_for_table(table) -> Set[str]:
     from pypaimon.common.options.core_options import CoreOptions
 
     names = set(CoreOptions.blob_descriptor_fields(table.options))
+    # Video readers return lazy frame references even in payload mode. Keep
+    # their frame/index locators through row filters and result projection.
+    names |= CoreOptions.video_frame_fields(table.options)
     if CoreOptions.blob_as_descriptor(table.options):
         names |= CoreOptions.blob_view_fields(table.options)
     return names
@@ -53,18 +56,3 @@ def descriptor_field_indices_for_table(table, fields: List[DataField]) -> Set[in
 
 def vector_field_indices(fields: List[DataField]) -> Set[int]:
     return {i for i, f in enumerate(fields) if isinstance(f.type, VectorType)}
-
-
-def project_top_level_field_indices(
-    source_indices: Optional[Iterable[int]],
-    path_specs: Sequence[Any],
-) -> Optional[Set[int]]:
-    """Map top-level field indices through path specs with top_idx/sub_names."""
-    if source_indices is None:
-        return None
-    source = set(source_indices)
-    return {
-        proj_pos
-        for proj_pos, spec in enumerate(path_specs)
-        if not spec.sub_names and spec.top_idx in source
-    }

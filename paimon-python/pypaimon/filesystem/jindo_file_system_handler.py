@@ -44,16 +44,58 @@ except ImportError:
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
+from pypaimon.filesystem import oss_user_agent
 
 
 _JINDO_CONFIG_PREFIXES = ("fs.", "logger.")
-_PYPAIMON_ONLY_JINDO_CONFIG_KEYS = {OssOptions.OSS_IMPL.key()}
+_PYPAIMON_ONLY_JINDO_CONFIG_KEYS = {
+    OssOptions.OSS_IMPL.key(), OssOptions.OSS_PYTHON_IMPL.key(),
+    OssOptions.OSS_JINDO_PREAD_MAX_SIZE.key()}
+_DEFAULT_PREAD_MAX_SIZE = OssOptions.OSS_JINDO_PREAD_MAX_SIZE.default_value().get_bytes()
+# Forward skips up to Jindo's read-ahead buffer stay on the stream, which likely holds them.
+_STREAM_FORWARD_SKIP = 1024 * 1024
 _CASE_SENSITIVE_JINDO_CONFIG_KEYS = {
     OssOptions.OSS_ACCESS_KEY_ID.key().lower(): OssOptions.OSS_ACCESS_KEY_ID.key(),
     OssOptions.OSS_ACCESS_KEY_SECRET.key().lower(): OssOptions.OSS_ACCESS_KEY_SECRET.key(),
     OssOptions.OSS_SECURITY_TOKEN.key().lower(): OssOptions.OSS_SECURITY_TOKEN.key(),
 }
 _KNOWN_FILE_SIZE_CACHE_MAX_ENTRIES = 4096
+
+_LOG = logging.getLogger(__name__)
+
+
+class _StreamStats:
+    """Counts open streams of JindoFileSystemHandler, not those PVFS opens through pyjindo.ossfs."""
+
+    # Reentrant: garbage collection may finalize a stream while this thread holds it.
+    _lock = threading.RLock()
+    _pid = os.getpid()
+    open = 0
+    milestone = 256
+
+    @classmethod
+    def _get_lock(cls):
+        # A parent thread may hold the lock across a fork, so a child takes a new one.
+        if cls._pid != os.getpid():
+            cls._lock, cls._pid = threading.RLock(), os.getpid()
+        return cls._lock
+
+    @classmethod
+    def opened(cls):
+        with cls._get_lock():
+            cls.open += 1
+            count = cls.open
+            report = count >= cls.milestone
+            if report:
+                cls.milestone *= 2
+        if report:
+            _LOG.info("%d streams of JindoFileSystemHandler are open; each holds native buffers until closed",
+                      count)
+
+    @classmethod
+    def closed(cls):
+        with cls._get_lock():
+            cls.open -= 1
 
 
 def _jindo_config_value(value) -> str:
@@ -78,7 +120,7 @@ def build_jindo_config(catalog_options: Options):
         if not supported_prefix or value is None:
             continue
         key = _CASE_SENSITIVE_JINDO_CONFIG_KEYS.get(raw_key.lower(), raw_key)
-        if key in _PYPAIMON_ONLY_JINDO_CONFIG_KEYS:
+        if key in _PYPAIMON_ONLY_JINDO_CONFIG_KEYS or key.startswith("fs.oss.cpp."):
             # This option is handled by PyPaimon.
             continue
         config.set(key, _jindo_config_value(value))
@@ -100,7 +142,14 @@ def build_jindo_config(catalog_options: Options):
         config.set("fs.oss.endpoint", endpoint_clean)
     if region:
         config.set("fs.oss.region", region)
-    config.set("fs.oss.user.agent.features", "pypaimon")
+    # This backend fills the module itself, so pypaimon/<version> leads the features.
+    user_agent_module = oss_user_agent.module(catalog_options)
+    if user_agent_module:
+        config.set(oss_user_agent.USER_AGENT_MODULE, user_agent_module)
+    config.set(oss_user_agent.USER_AGENT_FEATURES, oss_user_agent.features(catalog_options))
+    user_agent_extended = oss_user_agent.extended(catalog_options)
+    if user_agent_extended:
+        config.set(oss_user_agent.USER_AGENT_EXTENDED, user_agent_extended)
     return config
 
 
@@ -122,10 +171,33 @@ def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
 
 
 class JindoInputFile:
-    def __init__(self, jindo_stream, file_size=None):
+    def __init__(self, jindo_stream, file_size=None, *, owner,
+                 pread_max_size=_DEFAULT_PREAD_MAX_SIZE):
         self._stream = jindo_stream
         self._file_size = file_size
+        # The stream does not own its native store: pin the jindo filesystem (not the
+        # handler) so evicting the handler's FileIO from a cache cannot free it.
+        self._owner = owner
         self._closed = False
+        # PyArrow's ReadAt is seek + read: when enabled, small reads after a long or
+        # backward jump use pread to skip the stream's read-ahead.
+        self._pread_max_size = pread_max_size
+        if pread_max_size > 0:
+            self._position = jindo_stream.tell() if hasattr(jindo_stream, 'tell') else 0
+            self._stream_position = self._position
+            self._last_read_end = None
+        _StreamStats.opened()
+
+    def __del__(self):
+        # CPython releases instance attributes in dict layout order, which is
+        # an implementation detail, not a contract. Close the native stream
+        # while ``_owner`` still pins the store so the stream's own release
+        # cannot race the store's teardown (pyjindo's JindoOssFile relies on
+        # the same guarantee via io.IOBase's finalizer).
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @property
     def closed(self):
@@ -136,11 +208,48 @@ class JindoInputFile:
     def read(self, nbytes: int = -1):
         if self.closed:
             raise ValueError("I/O operation on closed file")
+        if self._pread_max_size <= 0:
+            if nbytes is None or nbytes < 0:
+                if self._file_size is None:
+                    return self._stream.read()
+                nbytes = max(0, self._file_size - self.tell())
+            return self._stream.read(nbytes)
         if nbytes is None or nbytes < 0:
             if self._file_size is None:
-                return self._stream.read()
-            nbytes = max(0, self._file_size - self.tell())
-        return self._stream.read(nbytes)
+                self._sync_stream()
+                return self._advance(self._stream.read())
+            nbytes = max(0, self._file_size - self._position)
+        elif self._file_size is not None:
+            nbytes = max(0, min(nbytes, self._file_size - self._position))
+        if nbytes == 0:
+            return b""
+        if self._use_pread(nbytes):
+            data = self._stream.pread(nbytes, self._position)
+            self._position += len(data)
+            self._last_read_end = self._position
+            return data
+        self._sync_stream()
+        return self._advance(self._stream.read(nbytes))
+
+    def _use_pread(self, nbytes):
+        if (self._position == self._stream_position
+                or nbytes > self._pread_max_size
+                or not hasattr(self._stream, 'pread')):
+            return False
+        if self._last_read_end is None:
+            return True
+        return not 0 <= self._position - self._last_read_end <= _STREAM_FORWARD_SKIP
+
+    def _sync_stream(self):
+        if self._stream_position != self._position:
+            self._stream.seek(self._position, os.SEEK_SET)
+            self._stream_position = self._position
+
+    def _advance(self, data):
+        self._position += len(data)
+        self._stream_position = self._position
+        self._last_read_end = self._position
+        return data
 
     def seek(self, position: int, whence: int = 0):
         if self.closed:
@@ -148,12 +257,29 @@ class JindoInputFile:
         if whence == os.SEEK_END and self._file_size is not None:
             position = self._file_size + position
             whence = os.SEEK_SET
-        return self._stream.seek(position, whence)
+        if self._pread_max_size <= 0:
+            self._stream.seek(position, whence)
+            return self._stream.tell()
+        if whence == os.SEEK_CUR:
+            position = self._position + position
+        elif whence == os.SEEK_END:
+            # Size unknown: let the native stream resolve SEEK_END.
+            self._stream.seek(position, whence)
+            self._stream_position = self._stream.tell()
+            position = self._stream_position
+        elif whence != os.SEEK_SET:
+            raise ValueError("Invalid whence: {}".format(whence))
+        if position < 0:
+            raise ValueError("Negative seek position {}".format(position))
+        self._position = position
+        return self._position
 
     def tell(self) -> int:
         if self.closed:
             raise ValueError("I/O operation on closed file")
-        return self._stream.tell()
+        if self._pread_max_size <= 0:
+            return self._stream.tell()
+        return self._position
 
     def read_at(self, nbytes: int, offset: int):
         if self.closed:
@@ -164,6 +290,10 @@ class JindoInputFile:
         if not self._closed:
             self._stream.close()
             self._closed = True
+            # The native stream is closed: a file object that stays
+            # referenced no longer needs to pin the native store.
+            self._owner = None
+            _StreamStats.closed()
 
     def __enter__(self):
         return self
@@ -174,9 +304,21 @@ class JindoInputFile:
 
 
 class JindoOutputFile:
-    def __init__(self, jindo_stream):
+    def __init__(self, jindo_stream, *, owner):
         self._stream = jindo_stream
+        # See JindoInputFile._owner: keep the native store alive while this
+        # stream is open.
+        self._owner = owner
         self._closed = False
+        _StreamStats.opened()
+
+    def __del__(self):
+        # See JindoInputFile.__del__: close while ``_owner`` still pins the
+        # store. For output streams this also flushes pending writes.
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @property
     def closed(self):
@@ -203,6 +345,10 @@ class JindoOutputFile:
         if not self._closed:
             self._stream.close()
             self._closed = True
+            # The native stream is closed: a file object that stays
+            # referenced no longer needs to pin the native store.
+            self._owner = None
+            _StreamStats.closed()
 
     def __enter__(self):
         return self
@@ -222,9 +368,19 @@ class JindoFileSystemHandler(FileSystemHandler):
         self.properties = catalog_options
         self._known_file_sizes = OrderedDict()
         self._known_file_sizes_lock = threading.Lock()
+        self._pread_max_size = catalog_options.get(
+            OssOptions.OSS_JINDO_PREAD_MAX_SIZE).get_bytes()
 
         config = build_jindo_config(catalog_options)
         self._jindo_fs = jfs.connect(self.root_path, "root", config)
+
+    def __getstate__(self):
+        # Native clients and thread locks belong to this process. Transport only
+        # connection configuration; immutable-file size hints can be refilled.
+        return {"root_path": self.root_path, "properties": self.properties}
+
+    def __setstate__(self, state):
+        self.__init__(state["root_path"], state["properties"])
 
     def register_file_size(self, path: str, file_size: int):
         """Register an immutable file's size supplied by Paimon metadata."""
@@ -355,20 +511,22 @@ class JindoFileSystemHandler(FileSystemHandler):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "rb")
         return PythonFile(
-            JindoInputFile(jindo_stream, self._known_file_size(normalized)),
+            JindoInputFile(jindo_stream, self._known_file_size(normalized),
+                           owner=self._jindo_fs, pread_max_size=self._pread_max_size),
             mode="r")
 
     def open_input_file(self, path: str):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "rb")
         return PythonFile(
-            JindoInputFile(jindo_stream, self._known_file_size(normalized)),
+            JindoInputFile(jindo_stream, self._known_file_size(normalized),
+                           owner=self._jindo_fs, pread_max_size=self._pread_max_size),
             mode="r")
 
     def open_output_stream(self, path: str, metadata):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "wb")
-        return PythonFile(JindoOutputFile(jindo_stream), mode="w")
+        return PythonFile(JindoOutputFile(jindo_stream, owner=self._jindo_fs), mode="w")
 
     def open_append_stream(self, path: str, metadata):
         raise IOError("append mode is not supported")

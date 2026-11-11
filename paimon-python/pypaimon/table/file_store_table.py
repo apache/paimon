@@ -28,11 +28,6 @@ from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
-from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
-                                              FixedBucketRowKeyExtractor,
-                                              PostponeBucketRowKeyExtractor,
-                                              RowKeyExtractor,
-                                              UnawareBucketRowKeyExtractor)
 from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 
 
@@ -223,8 +218,8 @@ class FileStoreTable(Table):
         - int: rollback to the snapshot with that ID
         - str: rollback to the tag with that name
 
-        First tries catalog-based rollback (e.g., REST). If catalog rollback
-        is not available, falls back to local file cleanup.
+        Catalogs that provide rollback handle the entire operation. Tables
+        without catalog rollback clean up their filesystem metadata directly.
 
         Args:
             target: Snapshot ID (int) or tag name (str).
@@ -232,35 +227,25 @@ class FileStoreTable(Table):
         Raises:
             ValueError: If the target doesn't exist or type is unsupported.
         """
-        if isinstance(target, int):
-            self._rollback_to_snapshot(target)
-        elif isinstance(target, str):
-            self._rollback_to_tag(target)
-        else:
-            raise ValueError("Unsupported rollback target type: {}".format(type(target)))
-
-    def _rollback_to_snapshot(self, snapshot_id):
-        """Rollback to a snapshot by ID.
-
-        First tries catalog-based rollback. If not available, falls back to
-        local file cleanup. If the snapshot file has been expired, tries to
-        recover from a tag with the same snapshot ID.
-
-        Args:
-            snapshot_id: The snapshot ID to rollback to.
-
-        Raises:
-            ValueError: If the snapshot doesn't exist.
-        """
         from pypaimon.table.instant import Instant
+
+        if not isinstance(target, (int, str)):
+            raise ValueError("Unsupported rollback target type: {}".format(type(target)))
 
         table_rollback = self.catalog_environment.catalog_table_rollback()
         if table_rollback is not None:
-            table_rollback.rollback_to(Instant.snapshot(snapshot_id))
+            instant = Instant.snapshot(target) if isinstance(target, int) else Instant.tag(target)
+            table_rollback.rollback_to(instant)
             return
 
-        snapshot_mgr = self.snapshot_manager()
-        snapshot = snapshot_mgr.get_snapshot_by_id(snapshot_id)
+        if isinstance(target, int):
+            self._rollback_to_snapshot(target)
+        else:
+            tag = self.tag_manager().get_or_throw(target)
+            self._rollback_to_tagged_snapshot(tag.trim_to_snapshot())
+
+    def _rollback_to_snapshot(self, snapshot_id):
+        snapshot = self.snapshot_manager().get_snapshot_by_id(snapshot_id)
         if snapshot is not None:
             self.rollback_helper().clean_larger_than(snapshot)
             return
@@ -268,36 +253,14 @@ class FileStoreTable(Table):
         tag_mgr = self.tag_manager()
         for tag_name in tag_mgr.list_tags():
             tag = tag_mgr.get(tag_name)
-            if tag is not None:
-                tag_snapshot = tag.trim_to_snapshot()
-                if tag_snapshot.id == snapshot_id:
-                    self.rollback_to(tag_name)
-                    return
+            if tag is not None and tag.id == snapshot_id:
+                self._rollback_to_tagged_snapshot(tag.trim_to_snapshot())
+                return
 
         raise ValueError(
             "Rollback snapshot '{}' doesn't exist.".format(snapshot_id))
 
-    def _rollback_to_tag(self, tag_name):
-        """Rollback to a tag by name.
-
-        First tries catalog-based rollback. If not available, falls back to
-        local file cleanup and recreates the snapshot file if needed.
-
-        Args:
-            tag_name: The tag name to rollback to.
-
-        Raises:
-            ValueError: If the tag doesn't exist.
-        """
-        from pypaimon.table.instant import Instant
-
-        table_rollback = self.catalog_environment.catalog_table_rollback()
-        if table_rollback is not None:
-            table_rollback.rollback_to(Instant.tag(tag_name))
-            return
-
-        tag_mgr = self.tag_manager()
-        tagged_snapshot = tag_mgr.get_or_throw(tag_name).trim_to_snapshot()
+    def _rollback_to_tagged_snapshot(self, tagged_snapshot):
         helper = self.rollback_helper()
         helper.clean_larger_than(tagged_snapshot)
         helper.create_snapshot_file_if_needed(tagged_snapshot)
@@ -306,7 +269,7 @@ class FileStoreTable(Table):
         """Create a RollbackHelper instance for this table."""
         from pypaimon.table.rollback_helper import RollbackHelper
         return RollbackHelper(
-            self.snapshot_manager(), self.tag_manager(), self.file_io)
+            self.snapshot_manager(), self.changelog_manager(), self.tag_manager(), self.file_io)
 
     def rollback_to_timestamp(self, timestamp_millis: int) -> None:
         """Rollback table to the latest snapshot with commit time <= the given timestamp.
@@ -461,7 +424,8 @@ class FileStoreTable(Table):
 
     def create_global_index(self, index_column, index_type: str = "btree",
                             partition_filter=None, partitions=None,
-                            options: Optional[dict] = None) -> int:
+                            options: Optional[dict] = None, *, execution="local",
+                            concurrency=None, ray_remote_args=None) -> int:
         from pypaimon.globalindex.create_global_index import \
             create_global_index
         return create_global_index(
@@ -471,6 +435,7 @@ class FileStoreTable(Table):
             partition_filter=partition_filter,
             partitions=partitions,
             options=options,
+            execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args,
         )
 
     def drop_global_index(self, index_column, index_type: str = "btree",
@@ -486,30 +451,6 @@ class FileStoreTable(Table):
             dry_run=dry_run,
         )
 
-    def create_row_key_extractor(
-        self, ignore_existing: bool = False
-    ) -> RowKeyExtractor:
-        bucket_mode = self.bucket_mode()
-        if bucket_mode == BucketMode.HASH_FIXED:
-            return FixedBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.BUCKET_UNAWARE:
-            return UnawareBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.POSTPONE_MODE:
-            return PostponeBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.HASH_DYNAMIC:
-            return DynamicBucketRowKeyExtractor(
-                self.table_schema,
-                table=self,
-                ignore_existing=ignore_existing,
-            )
-        elif bucket_mode == BucketMode.CROSS_PARTITION:
-            raise ValueError(
-                "CROSS_PARTITION primary-key writes require a persistent "
-                "global primary-key index, which PyPaimon does not yet support"
-            )
-        else:
-            raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
-
     def copy(self, options: dict) -> 'FileStoreTable':
         return self._copy(options, resolve_time_travel=True)
 
@@ -520,26 +461,39 @@ class FileStoreTable(Table):
     def _copy_with_snapshot(self, snapshot):
         """Keep one resolved read view, including tag metadata and empty tables."""
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
-        options = {key: None for key in SCAN_KEYS if key in self.table_schema.options}
+        selectors = SCAN_KEYS + CoreOptions.INCREMENTAL_SCAN_KEYS + [
+            CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(),
+            CoreOptions.SCAN_CREATION_TIME_MILLIS.key(),
+        ]
+        options = {key: None for key in selectors if key in self.table_schema.options}
         options[CoreOptions.SCAN_MODE.key()] = "from-snapshot" if snapshot is not None else "default"
         if snapshot is not None:
             options[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(snapshot.id)
-        # Native planning cannot consume retained tag metadata or a pinned empty view.
-        # scan.version can resolve to a tag as well.
-        if snapshot is None or any(option.key() in self.table_schema.options for option in (
-                CoreOptions.SCAN_TAG_NAME, CoreOptions.SCAN_VERSION)):
-            options[CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key()] = "false"
         table = self.copy_without_time_travel(options)
         table._read_snapshot = snapshot
         return table
 
     def _copy(self, options: dict, resolve_time_travel: bool) -> 'FileStoreTable':
+        query_auth_key = CoreOptions.QUERY_AUTH_ENABLED.key()
+        if query_auth_key in options and CoreOptions.from_dict(self.table_schema.options).query_auth_enabled:
+            try:
+                enabled = CoreOptions.from_dict(options).query_auth_enabled
+            except ValueError:
+                enabled = False
+            if not enabled:
+                raise ValueError(f"Option '{query_auth_key}' is not allowed to be disabled dynamically")
+        video_key = CoreOptions.VIDEO_FRAME_FIELD.key()
+        if video_key in options and options[video_key] != self.table_schema.options.get(video_key):
+            raise ValueError("Cannot change immutable option " + video_key)
+        directory_key = CoreOptions.DATA_FILE_PATH_DIRECTORY.key()
+        if directory_key in options and options[directory_key] != self.options.data_file_path_directory():
+            raise ValueError('Cannot change immutable option ' + directory_key)
         if CoreOptions.BUCKET.key() in options and int(options.get(CoreOptions.BUCKET.key())) != self.options.bucket():
             raise ValueError("Cannot change bucket number")
         new_options = CoreOptions.copy(self.options).options.to_map()
         for k, v in options.items():
             if v is None:
-                new_options.pop(k)
+                new_options.pop(k, None)
             else:
                 new_options[k] = v
 
@@ -550,13 +504,8 @@ class FileStoreTable(Table):
 
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         preserve_snapshot = hasattr(self, "_read_snapshot") and not any(
-            key in options for key in SCAN_KEYS + [
-                CoreOptions.SCAN_MODE.key(), CoreOptions.BRANCH.key(),
-                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()])
-        if resolve_time_travel and not preserve_snapshot:
-            time_travel_schema = self._try_time_travel(Options(new_options), set(applied_options))
-            if time_travel_schema is not None:
-                new_table_schema = time_travel_schema
+            key in options for key in SCAN_KEYS + CoreOptions.INCREMENTAL_SCAN_KEYS + [
+                CoreOptions.SCAN_MODE.key(), CoreOptions.BRANCH.key()])
 
         # Re-encode the branch into the identifier when the option changes, so
         # current_branch() and any catalog-routed snapshot commit see the
@@ -575,9 +524,19 @@ class FileStoreTable(Table):
 
         new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
                                    new_table_schema, catalog_env)
+        if resolve_time_travel and not preserve_snapshot:
+            # Resolve snapshots, tags and schemas in the target branch.
+            time_travel_schema = new_table._try_time_travel(Options(new_options), set(applied_options))
+            if time_travel_schema is not None:
+                new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
+                                           time_travel_schema, catalog_env)
+
         new_table._applied_dynamic_options = applied_options
         if preserve_snapshot:
             new_table._read_snapshot = self._read_snapshot
+            # Copies of one pinned view share lazily allocated backend
+            # resources. Copying a Python table must not initialize a backend.
+            new_table._pinned_read_resources = vars(self).setdefault('_pinned_read_resources', {})
         return new_table
 
     def _try_time_travel(self, options: Options, dynamic_option_keys: Set[str]) -> Optional[TableSchema]:
@@ -610,21 +569,20 @@ class FileStoreTable(Table):
             historical_schema: TableSchema, options: Options, dynamic_option_keys: Set[str]) -> dict:
         # Keep scan and runtime options, but restore column declarations to match historical fields.
         historical_options = dict(options.to_map())
-        for key in (
-                CoreOptions.VECTOR_FIELD.key(),
-                CoreOptions.BLOB_FIELD.key(),
-                CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
-                CoreOptions.BLOB_VIEW_FIELD.key(),
-                # Restore the legacy key verbatim, not as a canonical descriptor option:
-                # Python intentionally ignores it when choosing the read layout.
-                'blob.stored-descriptor-fields'):
-            if key in dynamic_option_keys:
+        for keys in (
+                (CoreOptions.VECTOR_FIELD.key(),),
+                (CoreOptions.BLOB_FIELD.key(),),
+                (CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), 'blob.stored-descriptor-fields'),
+                (CoreOptions.BLOB_VIEW_FIELD.key(),),
+                (CoreOptions.VIDEO_FRAME_FIELD.key(),)):
+            if any(key in dynamic_option_keys for key in keys):
                 # Preserve explicit overrides and removals, including those from earlier copies.
                 continue
-            if key in historical_schema.options:
-                historical_options[key] = historical_schema.options[key]
-            else:
-                historical_options.pop(key, None)
+            for key in keys:
+                if key in historical_schema.options:
+                    historical_options[key] = historical_schema.options[key]
+                else:
+                    historical_options.pop(key, None)
         return historical_options
 
     def _create_external_paths(self) -> List[str]:

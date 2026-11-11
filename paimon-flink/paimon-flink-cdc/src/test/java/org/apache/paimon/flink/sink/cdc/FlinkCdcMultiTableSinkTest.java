@@ -20,17 +20,28 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.action.MultiTablesSinkMode;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 
 import org.apache.flink.api.dag.Transformation;
+import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -123,6 +134,125 @@ public class FlinkCdcMultiTableSinkTest {
                 .hasMessageContaining("database name");
     }
 
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"1536 kb"})
+    public void testDatabaseBuilderPropagatesWriterResources(
+            String offHeapMemory, @TempDir java.nio.file.Path tempDir) {
+        Options catalogOptions = new Options();
+        catalogOptions.setString("warehouse", tempDir.toString());
+        Options options = new Options();
+        options.setString("sink.writer-memory", "512 mb");
+        options.setString("sink.writer-managed-memory", "128 mb");
+        if (offHeapMemory != null) {
+            options.setString("sink.writer-offheap-memory", offHeapMemory);
+        }
+        options.setString("sink.committer-memory", "64 mb");
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        new FlinkCdcSyncDatabaseSinkBuilder<TestCdcEvent>()
+                .withInput(
+                        env.fromData(
+                                TestCdcEvent.class,
+                                new TestCdcEvent("t", Collections.emptyList(), 0)))
+                .withParserFactory(TestCdcEventParser::new)
+                .withTableOptions(options)
+                .withDatabase("test_db")
+                .withCatalogLoader(() -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions))
+                .withTypeMapping(TypeMapping.defaultMapping())
+                .withMode(MultiTablesSinkMode.COMBINED)
+                .build();
+        StreamGraph graph = env.getStreamGraph();
+        ResourceProfile writerResources =
+                graph.getSlotSharingGroupResource("CDC MultiplexWriter").get();
+        assertThat(writerResources.getManagedMemory().getMebiBytes()).isEqualTo(128);
+        assertThat(writerResources.getTaskHeapMemory().getMebiBytes()).isEqualTo(512);
+        assertThat(writerResources.getTaskOffHeapMemory().getBytes())
+                .isEqualTo(offHeapMemory == null ? 0 : 1572864);
+        ResourceProfile committerResources =
+                graph.getSlotSharingGroupResource("Multiplex Global Committer").get();
+        assertThat(committerResources.getManagedMemory().getBytes()).isZero();
+        assertThat(committerResources.getTaskHeapMemory().getMebiBytes()).isEqualTo(64);
+        assertThat(committerResources.getTaskOffHeapMemory().getBytes()).isZero();
+    }
+
+    @Test
+    public void testLegacyManagedMemoryConstructorPreservesResources() {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        new FlinkCdcMultiTableSink(
+                        () -> FlinkCatalogFactory.createPaimonCatalog(new Options()),
+                        "test_db",
+                        2.5,
+                        MemorySize.ofMebiBytes(512),
+                        MemorySize.ofMebiBytes(128),
+                        1.0,
+                        null,
+                        "test-user",
+                        false,
+                        null)
+                .sinkFrom(
+                        env.fromData(
+                                CdcMultiplexRecord.class, new CdcMultiplexRecord("", "", null)));
+        ResourceProfile resources =
+                env.getStreamGraph().getSlotSharingGroupResource("CDC MultiplexWriter").get();
+        assertThat(resources.getTaskOffHeapMemory().getBytes()).isZero();
+        assertThat(resources.getManagedMemory().getMebiBytes()).isEqualTo(128);
+        assertThat(resources.getTaskHeapMemory().getMebiBytes()).isEqualTo(512);
+        assertThat(resources.getCpuCores().getValue().doubleValue()).isEqualTo(2.5);
+    }
+
+    @Test
+    public void testOffHeapMemoryWithoutHeapIsRejected() {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        FlinkCdcMultiTableSink sink =
+                new FlinkCdcMultiTableSink(
+                        () -> FlinkCatalogFactory.createPaimonCatalog(new Options()),
+                        "test_db",
+                        1.0,
+                        null,
+                        null,
+                        MemorySize.ofMebiBytes(128),
+                        1.0,
+                        null,
+                        "test-user",
+                        false,
+                        null);
+        assertThatThrownBy(
+                        () ->
+                                sink.sinkFrom(
+                                        env.fromData(
+                                                CdcMultiplexRecord.class,
+                                                new CdcMultiplexRecord("", "", null))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("sink.writer-offheap-memory")
+                .hasMessageContaining("sink.writer-memory");
+    }
+
+    @Test
+    public void testManagedMemoryWithoutHeapIsRejected() {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        FlinkCdcMultiTableSink sink =
+                new FlinkCdcMultiTableSink(
+                        () -> FlinkCatalogFactory.createPaimonCatalog(new Options()),
+                        "test_db",
+                        1.0,
+                        null,
+                        MemorySize.ofMebiBytes(128),
+                        1.0,
+                        null,
+                        "test-user",
+                        false,
+                        null);
+        assertThatThrownBy(
+                        () ->
+                                sink.sinkFrom(
+                                        env.fromData(
+                                                CdcMultiplexRecord.class,
+                                                new CdcMultiplexRecord("", "", null))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("sink.writer-managed-memory")
+                .hasMessageContaining("sink.writer-memory");
+    }
+
     @Test
     public void testDatabaseAwareConstructorRejectsNullDatabase() {
         assertThatThrownBy(
@@ -140,5 +270,112 @@ public class FlinkCdcMultiTableSinkTest {
                                         false,
                                         null))
                 .isInstanceOf(NullPointerException.class);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "64 mb, 128 mb, 67108864, 134217728",
+        "1536 kb, , 1572864, 0",
+        ", 512 kb, 0, 524288"
+    })
+    public void testDatabaseBuilderPropagatesCommitterResources(
+            String offHeap,
+            String managed,
+            long offHeapBytes,
+            long managedBytes,
+            @TempDir java.nio.file.Path tempDir) {
+        Options options = new Options();
+        options.setString("sink.writer-cpu", "2.5");
+        options.setString("sink.writer-memory", "512 mb");
+        options.setString("sink.writer-offheap-memory", "32 mb");
+        options.setString("sink.writer-managed-memory", "16 mb");
+        options.setString("sink.committer-cpu", "0.25");
+        options.setString("sink.committer-memory", "256 mb");
+        if (offHeap != null) {
+            options.setString("sink.committer-offheap-memory", offHeap);
+        }
+        if (managed != null) {
+            options.setString("sink.committer-managed-memory", managed);
+        }
+        StreamGraph graph = databaseGraph(options, tempDir);
+        ResourceProfile writer = graph.getSlotSharingGroupResource("CDC MultiplexWriter").get();
+        assertThat(writer.getCpuCores().getValue().doubleValue()).isEqualTo(2.5);
+        assertThat(writer.getTaskHeapMemory().getMebiBytes()).isEqualTo(512);
+        assertThat(writer.getTaskOffHeapMemory().getMebiBytes()).isEqualTo(32);
+        assertThat(writer.getManagedMemory().getMebiBytes()).isEqualTo(16);
+        ResourceProfile committer =
+                graph.getSlotSharingGroupResource("Multiplex Global Committer").get();
+        assertThat(committer.getCpuCores().getValue().doubleValue()).isEqualTo(0.25);
+        assertThat(committer.getTaskHeapMemory().getMebiBytes()).isEqualTo(256);
+        assertThat(committer.getTaskOffHeapMemory().getBytes()).isEqualTo(offHeapBytes);
+        assertThat(committer.getManagedMemory().getBytes()).isEqualTo(managedBytes);
+        assertThat(graph.getJobGraph().getVerticesSortedTopologicallyFromSources())
+                .filteredOn(vertex -> vertex.getName().startsWith("Multiplex Global Committer"))
+                .singleElement()
+                .satisfies(
+                        vertex ->
+                                assertThat(vertex.getSlotSharingGroup().getResourceProfile())
+                                        .isEqualTo(committer));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"sink.committer-offheap-memory", "sink.committer-managed-memory"})
+    public void testCommitterMemoryRequiresCommitterHeap(
+            String option, @TempDir java.nio.file.Path tempDir) {
+        Options options = new Options();
+        options.setString("sink.writer-memory", "512 mb");
+        options.setString(option, "128 mb");
+        assertThatThrownBy(() -> databaseGraph(options, tempDir))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(option)
+                .hasMessageContaining("sink.committer-memory")
+                .hasMessageNotContaining("sink.writer-");
+    }
+
+    @Test
+    public void testLegacyOffHeapConstructorPreservesCommitterResources() {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        new FlinkCdcMultiTableSink(
+                        () -> FlinkCatalogFactory.createPaimonCatalog(new Options()),
+                        "test_db",
+                        2.5,
+                        MemorySize.ofMebiBytes(512),
+                        MemorySize.ofMebiBytes(16),
+                        MemorySize.ofMebiBytes(32),
+                        0.25,
+                        MemorySize.ofMebiBytes(256),
+                        "test-user",
+                        false,
+                        null)
+                .sinkFrom(
+                        env.fromData(
+                                CdcMultiplexRecord.class, new CdcMultiplexRecord("", "", null)));
+        ResourceProfile resources =
+                env.getStreamGraph()
+                        .getSlotSharingGroupResource("Multiplex Global Committer")
+                        .get();
+        assertThat(resources.getCpuCores().getValue().doubleValue()).isEqualTo(0.25);
+        assertThat(resources.getTaskHeapMemory().getMebiBytes()).isEqualTo(256);
+        assertThat(resources.getTaskOffHeapMemory().getBytes()).isZero();
+        assertThat(resources.getManagedMemory().getBytes()).isZero();
+    }
+
+    private StreamGraph databaseGraph(Options options, java.nio.file.Path tempDir) {
+        Options catalogOptions = new Options();
+        catalogOptions.setString("warehouse", tempDir.toString());
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        new FlinkCdcSyncDatabaseSinkBuilder<TestCdcEvent>()
+                .withInput(
+                        env.fromData(
+                                TestCdcEvent.class,
+                                new TestCdcEvent("t", Collections.emptyList(), 0)))
+                .withParserFactory(TestCdcEventParser::new)
+                .withTableOptions(options)
+                .withDatabase("test_db")
+                .withCatalogLoader(() -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions))
+                .withTypeMapping(TypeMapping.defaultMapping())
+                .withMode(MultiTablesSinkMode.COMBINED)
+                .build();
+        return env.getStreamGraph();
     }
 }

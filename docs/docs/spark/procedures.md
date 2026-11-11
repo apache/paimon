@@ -50,7 +50,7 @@ Choose a group, then use the page contents to jump to a procedure:
 | --- | --- |
 | [Compaction and cleanup](./procedures/maintenance) | Compact files and manifests, rescale buckets, expire history, and repair metadata. |
 | [Tags, branches, and rollback](./procedures/versions) | Create and manage versions, merge branches, or restore table state. |
-| [Migration and copy](./procedures/migration) | Migrate Hive tables or copy Paimon files. |
+| [Migration and copy](./procedures/migration) | Migrate Hive tables, import external files, or copy Paimon files. |
 | [Indexes and row IDs](./procedures/indexes) | Build or drop indexes and reassign row IDs. |
 | [Consumers, views, and functions](./procedures/metadata) | Manage reader progress, partition completion, and catalog objects. |
 
@@ -65,6 +65,7 @@ Choose a group, then use the page contents to jump to a procedure:
 [`materialize_deletion_vectors`](./procedures/maintenance#materialize_deletion_vectors),
 [`rescale`](./procedures/maintenance#rescale),
 [`expire_snapshots`](./procedures/maintenance#expire_snapshots),
+[`expire_changelogs`](./procedures/maintenance#expire_changelogs),
 [`expire_partitions`](./procedures/maintenance#expire_partitions),
 [`remove_orphan_files`](./procedures/maintenance#remove_orphan_files),
 [`remove_orphan_blobs`](./procedures/maintenance#remove_orphan_blobs),
@@ -78,6 +79,7 @@ Choose a group, then use the page contents to jump to a procedure:
 
 [`create_tag`](./procedures/versions#create_tag),
 [`create_tag_from_timestamp`](./procedures/versions#create_tag_from_timestamp),
+[`create_tag_from_watermark`](./procedures/versions#create_tag_from_watermark),
 [`replace_tag`](./procedures/versions#replace_tag),
 [`rename_tag`](./procedures/versions#rename_tag),
 [`delete_tag`](./procedures/versions#delete_tag),
@@ -89,6 +91,7 @@ Choose a group, then use the page contents to jump to a procedure:
 [`fast_forward`](./procedures/versions#fast_forward),
 [`merge_branch`](./procedures/versions#merge_branch),
 [`rollback`](./procedures/versions#rollback),
+[`rollback_to_as_latest`](./procedures/versions#rollback_to_as_latest),
 [`rollback_to_timestamp`](./procedures/versions#rollback_to_timestamp),
 [`rollback_to_watermark`](./procedures/versions#rollback_to_watermark)
 
@@ -96,6 +99,7 @@ Choose a group, then use the page contents to jump to a procedure:
 
 [`migrate_database`](./procedures/migration#migrate_database),
 [`migrate_table`](./procedures/migration#migrate_table),
+[`import_files`](./procedures/migration#import_files),
 [`copy`](./procedures/migration#copy)
 
 ### Indexes and Row IDs

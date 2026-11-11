@@ -37,7 +37,7 @@ public class ChunkedDictionary implements Dictionary {
     private final int size;
     private final int offsetsLength;
     private final int chunksLength;
-    private final int bodyOffset;
+    private final long bodyOffset;
     private final SeekableInputStream in;
     private final KeyFactory factory;
     private final Comparator<Object> comparator;
@@ -46,7 +46,7 @@ public class ChunkedDictionary implements Dictionary {
     private ByteBuffer offsets;
     private ByteBuffer chunks;
 
-    public ChunkedDictionary(SeekableInputStream in, int offset, KeyFactory factory)
+    public ChunkedDictionary(SeekableInputStream in, long offset, KeyFactory factory)
             throws IOException {
         in.seek(offset);
         byte[] headerLengthInBytes = new byte[Integer.BYTES];

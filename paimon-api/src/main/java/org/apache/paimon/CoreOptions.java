@@ -30,6 +30,7 @@ import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
@@ -38,8 +39,11 @@ import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.time.Duration;
@@ -49,6 +53,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -56,7 +61,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -95,6 +99,8 @@ public class CoreOptions implements Serializable {
     public static final String LIST_AGG_DELIMITER = "list-agg-delimiter";
 
     public static final String MERGE_MAP_TS_FIELD = "ts-field";
+
+    public static final String MERGE_MAP_OVERWRITE_ON_EQUAL_TS = "overwrite-on-equal-ts";
 
     public static final String MAP_STORAGE_LAYOUT = "map.storage-layout";
 
@@ -162,6 +168,17 @@ public class CoreOptions implements Serializable {
                     .enumType(BucketFunctionType.class)
                     .defaultValue(BucketFunctionType.DEFAULT)
                     .withDescription("The bucket function for paimon bucket.");
+
+    @Immutable
+    public static final ConfigOption<String> BUCKET_FUNCTION_PROVIDER =
+            key("bucket-function.provider")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Optional identifier of a BucketFunctionFactory discovered from the "
+                                    + "classpath. When configured, the provider is used by both "
+                                    + "writers and bucket predicate pruning and takes precedence "
+                                    + "over bucket-function.type.");
 
     /** Paimon bucket function type. */
     public enum BucketFunctionType implements DescribedEnum {
@@ -267,6 +284,18 @@ public class CoreOptions implements Serializable {
     @ExcludeFromDocumentation("Avoid using deprecated options")
     public static final ConfigOption<String> BRANCH =
             key("branch").stringType().defaultValue("main").withDescription("Specify branch name.");
+
+    public static final ConfigOption<Boolean> LAKE_STREAM_ENABLED =
+            key("lakestream.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable lake-stream mode. When enabled, regular writes are "
+                                    + "routed to the Lakestream Store. The Lakestream Store's tiering "
+                                    + "service asynchronously writes data to Paimon. Reads from the "
+                                    + "original table name access only Paimon, while reads from the "
+                                    + "'$rt'-suffixed table name combine Paimon and Lakestream Store "
+                                    + "data.");
 
     public static final ConfigOption<Boolean> CHAIN_TABLE_ENABLED =
             key("chain-table.enabled")
@@ -433,7 +462,25 @@ public class CoreOptions implements Serializable {
             key("file-index.in-manifest-threshold")
                     .memoryType()
                     .defaultValue(MemorySize.parse("500 B"))
-                    .withDescription("The threshold to store file index bytes in manifest.");
+                    .withDescription(
+                            "The threshold to store file index bytes in manifest. Valid range: 0 to 2,147,483,647 bytes.");
+
+    public static final ConfigOption<Integer> FILE_INDEX_FORMAT_VERSION =
+            key("file-index.format.version")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "File index container version to write (1 or 2). Version 2 supports 64-bit payload positions and lengths.");
+
+    public static final ConfigOption<Boolean> FILE_INDEX_READ_IGNORE_UNKNOWN_TYPE =
+            key("file-index.read.ignore-unknown-type")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to ignore unregistered file index types when reading. "
+                                    + "If true, skip these indexes with a warning and retain all rows "
+                                    + "for them. Other indexes can still filter rows. "
+                                    + "If false, fail when reading an unregistered non-empty index.");
 
     public static final ConfigOption<Boolean> FILE_INDEX_READ_ENABLED =
             key("file-index.read.enabled")
@@ -973,11 +1020,37 @@ public class CoreOptions implements Serializable {
                             "Specify how to initialize the next sequence number for primary key "
                                     + "table writers.");
 
+    public static final ConfigOption<Boolean> REST_COMMIT_LOCK_ENABLED =
+            key("rest.commit.lock-enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable the REST catalog's server-side table commit lease capability. "
+                                    + "Writers acquire a lease only when rest.commit.acquire-lock is enabled.");
+
+    public static final ConfigOption<Boolean> REST_COMMIT_ACQUIRE_LOCK =
+            key("rest.commit.acquire-lock")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether this writer acquires a REST commit lease for each publication "
+                                    + "attempt. Can be set dynamically for a writer and requires "
+                                    + "rest.commit.lock-enabled on the server-side table.");
+
     public static final ConfigOption<Duration> COMMIT_TIMEOUT =
             key("commit.timeout")
                     .durationType()
                     .noDefaultValue()
                     .withDescription("Timeout duration of retry when commit failed.");
+
+    public static final ConfigOption<Boolean> COMMIT_AUTO_ROLLBACK_ENABLED =
+            key("commit.auto-rollback.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Allow Java writers to roll back compaction on write conflicts. "
+                                    + "May delete snapshots and tags. Does not affect explicit rollback "
+                                    + "or Python writers.");
 
     public static final ConfigOption<Integer> COMMIT_MAX_RETRIES =
             key("commit.max-retries")
@@ -1421,6 +1494,17 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(100)
                     .withDescription("The default deleted num of partition expiration.");
+
+    public static final ConfigOption<Boolean> PARTITION_EXPIRATION_RETAIN_LATEST =
+            key("partition.expiration-retain-latest")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to retain the latest partition when all partitions are expired. "
+                                    + "The latest partition is determined by the parsed partition time for values-time "
+                                    + "or the last file creation time for update-time. Retains one partition for the whole table. "
+                                    + "Supported by the built-in expiration strategies on normal tables. "
+                                    + "Explicit partition deletion and truncation are not affected.");
 
     public static final ConfigOption<Integer> PARTITION_EXPIRATION_BATCH_SIZE =
             key("partition.expiration-batch-size")
@@ -2330,6 +2414,17 @@ public class CoreOptions implements Serializable {
                                     + "falls through to the current branch, which can mask data issues. "
                                     + "Set this to true to surface fallback branch errors to the caller instead.");
 
+    public static final ConfigOption<Boolean> SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT =
+            key("scan.fallback-branch.allow-earliest-snapshot")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to allow reading the earliest available snapshot of a fallback or primary branch "
+                                    + "when no snapshot exists at or before the current branch's requested snapshot time. "
+                                    + "This applies to snapshot-ID time travel, including numeric scan.version. "
+                                    + "By default, such reads fail unless the other branch has no snapshots. "
+                                    + "Enabling this option may read data committed after the requested time.");
+
     public static final ConfigOption<String> SCAN_PRIMARY_BRANCH =
             key("scan.primary-branch")
                     .stringType()
@@ -2664,6 +2759,18 @@ public class CoreOptions implements Serializable {
                                     + "selected row count is no more than "
                                     + "data-evolution.row-sidecar.max-selected-rows.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGED_READ_STATS_PUSHDOWN_ENABLED =
+            key("data-evolution.merged-read.stats-pushdown.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to push filters down into a row-id range whose columns are "
+                                    + "merged from several data files. The rows which may match "
+                                    + "are computed from the file statistics and page indexes of "
+                                    + "the files holding the latest values of the filtered "
+                                    + "columns, then every file of the range reads only these "
+                                    + "rows. Only Parquet files are supported.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING =
             key("data-evolution.merge-into.file-pruning")
                     .booleanType()
@@ -2695,6 +2802,15 @@ public class CoreOptions implements Serializable {
                                     + "BLOB or VECTOR file range. Actual output sizes may differ from the target. "
                                     + "Row IDs and logical deletions are preserved, and associated "
                                     + "BLOB and VECTOR files are not rewritten by this option.");
+
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_DISCARD_CONFLICTING_TASKS =
+            key("data-evolution.compaction.discard-conflicting-tasks")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Skip complete data-evolution compaction tasks with row-range conflicts. "
+                                    + "Skipped inputs remain live for later compaction. Applies only to "
+                                    + "data-only compaction messages without row-id validation baselines.");
 
     public static final ConfigOption<Double> DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO =
             key("data-evolution.compaction.large-file-ratio")
@@ -2785,6 +2901,15 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withFallbackKeys(FILE_COMPRESSION.key())
                     .withDescription("Format table file compression.");
+
+    public static final ConfigOption<Boolean> FORMAT_TABLE_FILE_SUFFIX_ENABLED =
+            key("format-table.file.suffix.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to include the file format suffix in data file names written "
+                                    + "by the Paimon implementation of a format table. Compression "
+                                    + "suffixes are unaffected.");
 
     public static final ConfigOption<String> FORMAT_TABLE_COMMIT_HIVE_SYNC_URI =
             ConfigOptions.key("format-table.commit-hive-sync-url")
@@ -3112,6 +3237,13 @@ public class CoreOptions implements Serializable {
                                                     + " Default is the same as TARGET_FILE_SIZE.")
                                     .build());
 
+    public static final ConfigOption<Boolean> VECTOR_COMPACTION_ENABLED =
+            key("vector-compaction.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to compact vector-store files when compacting a data evolution table.");
+
     public static final ConfigOption<Boolean> VECTOR_SEARCH_DISTRIBUTE_ENABLED =
             key("vector-search.distribute.enabled")
                     .booleanType()
@@ -3126,52 +3258,54 @@ public class CoreOptions implements Serializable {
                             "The batch size for lateral vector search. Each batch executes vector "
                                     + "topK search and table lookup for multiple query vectors.");
 
-    public static final ConfigOption<String> PK_VECTOR_INDEX_COLUMNS =
-            key("pk-vector.index.columns")
-                    .stringType()
-                    .noDefaultValue()
+    public static final ConfigOption<Integer> PK_INDEX_BUILD_PARALLELISM =
+            key("pk-index.build.parallelism")
+                    .intType()
+                    .defaultValue(1)
                     .withDescription(
-                            "Comma-separated VECTOR columns indexed by primary-key vector indexes. "
-                                    + "Each column owns one index and must define "
-                                    + "fields.<column>.pk-vector.index.type. Index options and distance "
-                                    + "metric are also field-scoped. The first release supports exactly "
-                                    + "one column.");
+                            "The maximum number of concurrent primary-key index build tasks per "
+                                    + "writer instance, shared by its index columns and buckets. "
+                                    + "Must be greater than zero. Increasing this value may increase "
+                                    + "memory and I/O usage.");
 
-    public static final ConfigOption<String> PK_BTREE_INDEX_COLUMNS =
-            key("pk-btree.index.columns")
+    public static final ConfigOption<String> GLOBAL_INDEX_BTREE_INDEX_COLUMNS =
+            key("global-index.btree.index-columns")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription(
-                            "Comma-separated columns indexed by primary-key BTree indexes.");
+                    .withFallbackKeys("global-index.btree.index-column", "pk-btree.index.columns")
+                    .withDescription("Comma-separated columns to index with BTree indexes.");
 
-    public static final ConfigOption<String> PK_BITMAP_INDEX_COLUMNS =
-            key("pk-bitmap.index.columns")
+    public static final ConfigOption<String> GLOBAL_INDEX_BITMAP_INDEX_COLUMNS =
+            key("global-index.bitmap.index-columns")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription(
-                            "Comma-separated columns indexed by primary-key Bitmap indexes.");
+                    .withFallbackKeys("global-index.bitmap.index-column", "pk-bitmap.index.columns")
+                    .withDescription("Comma-separated columns to index with Bitmap indexes.");
 
-    public static final ConfigOption<String> PK_MULTIVALUE_INDEX_COLUMNS =
-            key("pk-multivalue.index.columns")
+    public static final ConfigOption<String> GLOBAL_INDEX_MULTIVALUE_INDEX_COLUMNS =
+            key("global-index.multivalue.index-columns")
                     .stringType()
                     .noDefaultValue()
+                    .withFallbackKeys(
+                            "global-index.multivalue.index-column", "pk-multivalue.index.columns")
                     .withDescription(
-                            "Comma-separated ARRAY columns indexed by primary-key Multivalue indexes.");
+                            "Comma-separated ARRAY columns to index with Multivalue indexes.");
 
-    public static final ConfigOption<String> PK_FULL_TEXT_INDEX_COLUMNS =
-            key("pk-full-text.index.columns")
+    public static final ConfigOption<String> GLOBAL_INDEX_FULL_TEXT_INDEX_COLUMNS =
+            key("global-index.full-text.index-columns")
                     .stringType()
                     .noDefaultValue()
+                    .withFallbackKeys(
+                            "global-index.full-text.index-column", "pk-full-text.index.columns")
                     .withDescription(
-                            "Comma-separated character columns indexed by primary-key full-text indexes. "
-                                    + "The first release supports exactly one column.");
+                            "Comma-separated character columns to index with full-text indexes.");
 
-    public static final ConfigOption<String> PK_FM_INDEX_COLUMNS =
-            key("pk-fm.index.columns")
+    public static final ConfigOption<String> GLOBAL_INDEX_FM_INDEX_COLUMNS =
+            key("global-index.fm.index-columns")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription(
-                            "Comma-separated character columns indexed by primary-key FM indexes.");
+                    .withFallbackKeys("global-index.fm.index-column", "pk-fm.index.columns")
+                    .withDescription("Comma-separated character columns to index with FM indexes.");
 
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
@@ -3211,6 +3345,10 @@ public class CoreOptions implements Serializable {
 
     public BucketFunctionType bucketFunctionType() {
         return options.get(BUCKET_FUNCTION_TYPE);
+    }
+
+    public Optional<String> bucketFunctionProvider() {
+        return options.getOptional(BUCKET_FUNCTION_PROVIDER);
     }
 
     public Path path() {
@@ -3481,6 +3619,13 @@ public class CoreOptions implements Serializable {
                 key(FIELDS_PREFIX + "." + fieldName + "." + DISTINCT)
                         .booleanType()
                         .defaultValue(false));
+    }
+
+    public int fieldCollectAggCountLimit(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + COUNT_LIMIT)
+                        .intType()
+                        .defaultValue(Integer.MAX_VALUE));
     }
 
     public String fieldListAggDelimiter(String fieldName) {
@@ -3826,17 +3971,6 @@ public class CoreOptions implements Serializable {
         return fields;
     }
 
-    /**
-     * Returns the set of BLOB fields that support partial updates (e.g. via MERGE INTO).
-     *
-     * <p>Currently, only descriptor-based BLOB fields (configured via {@link
-     * #BLOB_DESCRIPTOR_FIELD}) are updatable. Raw-data BLOB fields are not updatable because the
-     * update cost is too high.
-     */
-    public Set<String> updatableBlobFields() {
-        return blobInlineField();
-    }
-
     private Set<String> parseCommaSeparatedSet(ConfigOption<String> option) {
         return options.getOptional(option)
                 .map(
@@ -3898,6 +4032,14 @@ public class CoreOptions implements Serializable {
 
     public SequenceNumberInitMode writeSequenceNumberInitMode() {
         return options.get(WRITE_SEQUENCE_NUMBER_INIT_MODE);
+    }
+
+    public boolean restCommitLockEnabled() {
+        return options.get(REST_COMMIT_LOCK_ENABLED);
+    }
+
+    public boolean restCommitAcquireLock() {
+        return options.get(REST_COMMIT_ACQUIRE_LOCK);
     }
 
     public long commitTimeout() {
@@ -4029,7 +4171,11 @@ public class CoreOptions implements Serializable {
 
     public List<String> changelogRowDeduplicateIgnoreFields() {
         return options.getOptional(CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS)
-                .map(s -> Arrays.asList(s.split(",")))
+                .map(
+                        s ->
+                                Arrays.stream(s.split(","))
+                                        .map(String::trim)
+                                        .collect(Collectors.toList()))
                 .orElse(Collections.emptyList());
     }
 
@@ -4243,6 +4389,10 @@ public class CoreOptions implements Serializable {
 
     public int partitionExpireMaxNum() {
         return options.get(PARTITION_EXPIRATION_MAX_NUM);
+    }
+
+    public boolean partitionExpireRetainLatest() {
+        return options.get(PARTITION_EXPIRATION_RETAIN_LATEST);
     }
 
     public int partitionExpireBatchSize() {
@@ -4532,8 +4682,27 @@ public class CoreOptions implements Serializable {
         return new FileIndexOptions(this);
     }
 
+    public int fileIndexFormatVersion() {
+        int version = options.get(FILE_INDEX_FORMAT_VERSION);
+        if (version != 1 && version != 2) {
+            throw new IllegalArgumentException("file-index.format.version must be 1 or 2");
+        }
+        return version;
+    }
+
     public long fileIndexInManifestThreshold() {
-        return options.get(FILE_INDEX_IN_MANIFEST_THRESHOLD).getBytes();
+        long bytes = options.get(FILE_INDEX_IN_MANIFEST_THRESHOLD).getBytes();
+        checkArgument(
+                bytes >= 0 && bytes <= Integer.MAX_VALUE,
+                "'%s' must be between 0 and %s bytes, but was %s bytes.",
+                FILE_INDEX_IN_MANIFEST_THRESHOLD.key(),
+                Integer.MAX_VALUE,
+                bytes);
+        return bytes;
+    }
+
+    public boolean fileIndexReadIgnoreUnknownType() {
+        return options.get(FILE_INDEX_READ_IGNORE_UNKNOWN_TYPE);
     }
 
     public boolean fileIndexReadEnabled() {
@@ -4598,6 +4767,10 @@ public class CoreOptions implements Serializable {
                 "The option %s must be greater than 0.",
                 DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS.key());
         return maxSelectedRows;
+    }
+
+    public boolean dataEvolutionMergedReadStatsPushdownEnabled() {
+        return options.get(DATA_EVOLUTION_MERGED_READ_STATS_PUSHDOWN_ENABLED);
     }
 
     public double dataEvolutionRowSidecarMaxSelectionRatio() {
@@ -4911,6 +5084,10 @@ public class CoreOptions implements Serializable {
                 .orElse(targetFileSize(false));
     }
 
+    public boolean vectorCompactionEnabled() {
+        return options.get(VECTOR_COMPACTION_ENABLED);
+    }
+
     public boolean vectorSearchDistributeEnabled() {
         return options.get(VECTOR_SEARCH_DISTRIBUTE_ENABLED);
     }
@@ -4919,237 +5096,222 @@ public class CoreOptions implements Serializable {
         return options.get(VECTOR_SEARCH_LATERAL_JOIN_BATCH_SIZE);
     }
 
-    public boolean primaryKeyVectorIndexEnabled() {
-        return options.getOptional(PK_VECTOR_INDEX_COLUMNS).isPresent();
+    public int primaryKeyIndexBuildParallelism() {
+        int parallelism = options.get(PK_INDEX_BUILD_PARALLELISM);
+        checkArgument(
+                parallelism > 0,
+                "%s must be greater than zero, but is %s.",
+                PK_INDEX_BUILD_PARALLELISM.key(),
+                parallelism);
+        return parallelism;
     }
 
-    public boolean primaryKeyFullTextIndexEnabled() {
-        return options.getOptional(PK_FULL_TEXT_INDEX_COLUMNS).isPresent();
+    public boolean fullTextIndexEnabled() {
+        return !fullTextIndexColumns().isEmpty();
     }
 
-    public boolean primaryKeyFMIndexEnabled() {
-        return options.getOptional(PK_FM_INDEX_COLUMNS).isPresent();
+    public boolean fmIndexEnabled() {
+        return !fmIndexColumns().isEmpty();
     }
 
-    public List<String> primaryKeyVectorIndexColumns() {
-        return primaryKeyIndexColumns(PK_VECTOR_INDEX_COLUMNS);
+    public List<String> btreeIndexColumns() {
+        return globalIndexColumns("btree");
     }
 
-    public List<String> primaryKeyBTreeIndexColumns() {
-        return primaryKeyIndexColumns(PK_BTREE_INDEX_COLUMNS);
+    public List<String> bitmapIndexColumns() {
+        return globalIndexColumns("bitmap");
     }
 
-    public List<String> primaryKeyBitmapIndexColumns() {
-        return primaryKeyIndexColumns(PK_BITMAP_INDEX_COLUMNS);
+    public List<String> multiValueIndexColumns() {
+        return globalIndexColumns("multivalue");
     }
 
-    public List<String> primaryKeyMultiValueIndexColumns() {
-        return primaryKeyIndexColumns(PK_MULTIVALUE_INDEX_COLUMNS);
+    public List<String> fullTextIndexColumns() {
+        return globalIndexColumns("full-text");
     }
 
-    public List<String> primaryKeyFullTextIndexColumns() {
-        return primaryKeyIndexColumns(PK_FULL_TEXT_INDEX_COLUMNS);
+    public List<String> fmIndexColumns() {
+        return globalIndexColumns("fm");
     }
 
-    public List<String> primaryKeyFMIndexColumns() {
-        return primaryKeyIndexColumns(PK_FM_INDEX_COLUMNS);
+    public List<String> vectorIndexColumns(String type) {
+        return VectorIndexOptions.columns(options, type);
     }
 
-    private List<String> primaryKeyIndexColumns(ConfigOption<String> option) {
-        String columns = options.get(option);
+    /** Index implementation identifiers declared with {@code global-index.<type>.index-columns}. */
+    public List<String> globalIndexTypes() {
+        String prefix = "global-index.";
+        return options.toMap().keySet().stream()
+                .filter(
+                        k ->
+                                k.startsWith(prefix)
+                                        && k.lastIndexOf('.') >= prefix.length()
+                                        && (k.endsWith(".index-columns")
+                                                || k.endsWith(".index-column")))
+                .map(k -> k.substring(prefix.length(), k.lastIndexOf('.')))
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    public static boolean isVectorIndexType(String type) {
+        return !Arrays.asList("btree", "bitmap", "multivalue", "full-text", "fm").contains(type);
+    }
+
+    public List<String> globalIndexColumns(String type) {
+        String columns = options.get("global-index." + type + ".index-columns");
         if (columns == null) {
-            return Collections.emptyList();
+            columns = options.get("global-index." + type + ".index-column");
         }
-        return Arrays.stream(columns.split(",", -1)).map(String::trim).collect(Collectors.toList());
+        if (columns == null) {
+            columns = options.get("pk-" + type + ".index.columns");
+        }
+        return indexColumns(columns);
     }
 
-    public Options primaryKeyBTreeIndexOptions(String column) {
-        return primaryKeySortedIndexOptions(column, "pk-btree", "btree-index.");
+    private static List<String> indexColumns(@Nullable String columns) {
+        return columns == null
+                ? Collections.emptyList()
+                : Arrays.stream(columns.split(",", -1))
+                        .map(String::trim)
+                        .collect(Collectors.toList());
     }
 
-    public Options primaryKeyBitmapIndexOptions(String column) {
-        return primaryKeySortedIndexOptions(column, "pk-bitmap", "bitmap-index.");
-    }
-
-    public Options primaryKeyMultiValueIndexOptions(String column) {
-        return primaryKeySortedIndexOptions(column, "pk-multivalue", "multivalue-index.");
-    }
-
-    public Options primaryKeyFMIndexOptions(String column) {
-        return primaryKeySortedIndexOptions(column, "pk-fm", "fm-index.");
-    }
-
-    public Options primaryKeyFullTextIndexOptions(String column) {
-        String optionKey = "fields." + column + ".pk-full-text.index.options";
-        TreeMap<String, String> resolved = new TreeMap<>();
-        for (Map.Entry<String, String> entry : toConfiguration().toMap().entrySet()) {
-            if (entry.getKey().startsWith("full-text.")) {
-                resolved.put(entry.getKey(), entry.getValue());
+    public String globalIndexColumnsOptionKey(String type) {
+        for (String suffix : Arrays.asList(".index-columns", ".index-column")) {
+            String key = "global-index." + type + suffix;
+            if (options.get(key) != null) {
+                return key;
             }
         }
-
-        String serialized = options.get(optionKey);
-        if (serialized == null || serialized.trim().isEmpty()) {
-            return new Options(resolved);
-        }
-
-        LinkedHashMap<String, String> parsed;
-        try {
-            parsed = JsonSerdeUtil.parseJsonMap(serialized, String.class);
-        } catch (RuntimeException e) {
-            throw new IllegalArgumentException(
-                    optionKey + " must be a JSON object of option key-value pairs.", e);
-        }
-
-        for (Map.Entry<String, String> entry : parsed.entrySet()) {
-            String key = entry.getKey();
-            String value = entry.getValue();
-            checkArgument(
-                    key != null && !key.trim().isEmpty(),
-                    "%s contains an empty option key.",
-                    optionKey);
-            checkArgument(value != null, "%s value for key %s must not be null.", optionKey, key);
-            String qualifiedKey = key.startsWith("full-text.") ? key : "full-text." + key;
-            String previous = resolved.put(qualifiedKey, value);
-            checkArgument(
-                    previous == null || previous.equals(value),
-                    "%s defines conflicting values for %s.",
-                    optionKey,
-                    qualifiedKey);
-        }
-        return new Options(resolved);
+        String legacy = "pk-" + type + ".index.columns";
+        return options.get(legacy) != null ? legacy : "global-index." + type + ".index-columns";
     }
 
-    private Options primaryKeySortedIndexOptions(
-            String column, String optionFamily, String algorithmPrefix) {
-        Options resolved = new Options(toConfiguration().toMap());
-        resolved.remove("sorted-index.records-per-file");
-        resolved.remove("sorted-index.records-per-range");
-        String optionKey = "fields." + column + "." + optionFamily + ".index.options";
-        String serialized = options.get(optionKey);
-        if (serialized == null || serialized.trim().isEmpty()) {
+    /**
+     * Resolves implementation defaults and field overrides for either table mode.
+     *
+     * <p>The shared field JSON object takes precedence over the legacy JSON object. Short keys are
+     * qualified with the implementation's existing option prefix.
+     */
+    public Options globalIndexOptions(@Nullable String type, String column) {
+        Options resolved = new Options(options.toMap(), options);
+        if (type == null) {
             return resolved;
         }
-
-        LinkedHashMap<String, String> parsed;
-        try {
-            parsed = JsonSerdeUtil.parseJsonMap(serialized, String.class);
-        } catch (RuntimeException e) {
-            throw new IllegalArgumentException(
-                    optionKey + " must be a JSON object of option key-value pairs.", e);
-        }
-
-        for (Map.Entry<String, String> entry : parsed.entrySet()) {
-            String key = entry.getKey();
-            String value = entry.getValue();
-            checkArgument(
-                    key != null && !key.trim().isEmpty(),
-                    "%s contains an empty option key.",
-                    optionKey);
-            checkArgument(value != null, "%s value for key %s must not be null.", optionKey, key);
-            String qualifiedKey =
-                    key.startsWith(algorithmPrefix) || key.startsWith("fields.")
-                            ? key
-                            : algorithmPrefix + key;
-            String previous = resolved.get(qualifiedKey);
-            checkArgument(
-                    previous == null || previous.equals(value),
-                    "%s defines conflicting values for %s.",
-                    optionKey,
-                    qualifiedKey);
-            resolved.setString(qualifiedKey, value);
-        }
-        return resolved;
-    }
-
-    public String primaryKeyVectorIndexColumn() {
-        List<String> columns = primaryKeyVectorIndexColumns();
-        checkArgument(
-                columns.size() == 1,
-                "pk-vector.index.columns must contain exactly one column in the first release, but is %s.",
-                columns);
-        return columns.get(0);
-    }
-
-    @Nullable
-    public String primaryKeyVectorIndexType(String column) {
-        return options.get("fields." + column + ".pk-vector.index.type");
-    }
-
-    @Nullable
-    private String primaryKeyVectorIndexOptionsJson(String column) {
-        return options.get("fields." + column + ".pk-vector.index.options");
-    }
-
-    public Options primaryKeyVectorIndexOptions(String column) {
-        Options resolved = new Options(toConfiguration().toMap());
-        for (Map.Entry<String, String> option :
-                primaryKeyVectorAlgorithmOptions(column).entrySet()) {
-            resolved.setString(option.getKey(), option.getValue());
-        }
-        return resolved;
-    }
-
-    private Map<String, String> primaryKeyVectorAlgorithmOptions(String column) {
-        String indexTypeKey = "fields." + column + ".pk-vector.index.type";
-        String indexOptionsKey = "fields." + column + ".pk-vector.index.options";
-        String algorithm = primaryKeyVectorIndexType(column);
-        checkArgument(
-                algorithm != null && !algorithm.trim().isEmpty(),
-                "%s must be configured before resolving index options.",
-                indexTypeKey);
-        TreeMap<String, String> algorithmOptions = new TreeMap<>();
-        String algorithmPrefix = algorithm + ".";
+        boolean vector = isVectorIndexType(type);
+        String prefix = vector || "full-text".equals(type) ? type + "." : type + "-index.";
         String fieldPrefix = "fields." + column + ".";
-        for (Map.Entry<String, String> entry : toConfiguration().toMap().entrySet()) {
-            if (entry.getKey().startsWith(algorithmPrefix)
-                    || (entry.getKey().startsWith(fieldPrefix)
-                            && !entry.getKey().startsWith(fieldPrefix + "pk-vector."))) {
-                algorithmOptions.put(entry.getKey(), entry.getValue());
-            }
-        }
-        String serialized = primaryKeyVectorIndexOptionsJson(column);
+        String sharedKey = fieldPrefix + "index-options";
+        boolean shared = options.get(sharedKey) != null;
+        String optionKey =
+                shared
+                        ? sharedKey
+                        : fieldPrefix + "pk-" + (vector ? "vector" : type) + ".index.options";
+        String serialized = options.get(optionKey);
         if (serialized != null && !serialized.trim().isEmpty()) {
-            LinkedHashMap<String, String> parsed;
-            try {
-                parsed = JsonSerdeUtil.parseJsonMap(serialized, String.class);
-            } catch (RuntimeException e) {
-                throw new IllegalArgumentException(
-                        indexOptionsKey + " must be a JSON object of option key-value pairs.", e);
-            }
-            for (Map.Entry<String, String> entry : parsed.entrySet()) {
+            for (Map.Entry<String, String> entry :
+                    parseIndexOptions(serialized, optionKey, type).entrySet()) {
                 String key = entry.getKey();
                 String value = entry.getValue();
                 checkArgument(
                         key != null && !key.trim().isEmpty(),
                         "%s contains an empty option key.",
-                        indexOptionsKey);
+                        optionKey);
                 checkArgument(
-                        value != null,
-                        "%s value for key %s must not be null.",
-                        indexOptionsKey,
-                        key);
-                String qualifiedKey =
-                        key.startsWith(algorithmPrefix) || key.startsWith("fields.")
-                                ? key
-                                : algorithmPrefix + key;
-                String previous = algorithmOptions.put(qualifiedKey, value);
+                        value != null, "%s value for key %s must not be null.", optionKey, key);
+                String qualified =
+                        key.startsWith(prefix) || key.startsWith("fields.") ? key : prefix + key;
+                String previous = resolved.get(qualified);
                 checkArgument(
-                        previous == null || previous.equals(value),
+                        shared || previous == null || previous.equals(value),
                         "%s defines conflicting values for %s.",
-                        indexOptionsKey,
-                        qualifiedKey);
+                        optionKey,
+                        qualified);
+                resolved.setString(qualified, value);
+                if (vector && qualified.startsWith(prefix)) {
+                    String shortKey = qualified.substring(prefix.length());
+                    if (shared) {
+                        // Native vector implementations also accept the flat field syntax.
+                        resolved.setString(fieldPrefix + shortKey, value);
+                    }
+                }
             }
         }
-        algorithmOptions.put(algorithmPrefix + "metric", primaryKeyVectorDistanceMetric(column));
-        return algorithmOptions;
+        return resolved;
     }
 
-    public String primaryKeyVectorDistanceMetric(String column) {
-        String metric = options.get("fields." + column + ".pk-vector.distance.metric");
-        return (metric == null ? "inner_product" : metric)
-                .toLowerCase(Locale.ROOT)
-                .replace('-', '_');
+    private static LinkedHashMap<String, String> parseIndexOptions(
+            String serialized, String optionKey, String type) {
+        if (!optionKey.endsWith(".index-options")) {
+            try {
+                return JsonSerdeUtil.parseJsonMap(serialized, String.class);
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException(
+                        optionKey + " must be a JSON object of option key-value pairs.", e);
+            }
+        }
+        try {
+            JsonNode root = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(serialized);
+            checkArgument(
+                    root != null && root.isObject(),
+                    "%s must be a JSON object of option key-value pairs.",
+                    optionKey);
+            LinkedHashMap<String, String> parsed = new LinkedHashMap<>();
+            Iterator<Map.Entry<String, JsonNode>> fields = root.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = fields.next();
+                checkArgument(
+                        !entry.getValue().isNull(),
+                        "%s value for key %s must not be null.",
+                        optionKey,
+                        entry.getKey());
+                if ("full-text".equals(type) && entry.getValue().isArray()) {
+                    List<String> values = new ArrayList<>();
+                    entry.getValue().forEach(value -> values.add(value.asText()));
+                    parsed.put(entry.getKey(), String.join(";", values));
+                } else {
+                    parsed.put(
+                            entry.getKey(),
+                            entry.getValue().isValueNode()
+                                    ? entry.getValue().asText()
+                                    : entry.getValue().toString());
+                }
+            }
+            return parsed;
+        } catch (IOException e) {
+            throw new IllegalArgumentException(
+                    optionKey + " must be a JSON object of option key-value pairs.", e);
+        }
+    }
+
+    public Options btreeIndexOptions(String column) {
+        return sortedIndexOptions(column, "btree");
+    }
+
+    public Options bitmapIndexOptions(String column) {
+        return sortedIndexOptions(column, "bitmap");
+    }
+
+    public Options multiValueIndexOptions(String column) {
+        return sortedIndexOptions(column, "multivalue");
+    }
+
+    public Options fmIndexOptions(String column) {
+        return sortedIndexOptions(column, "fm");
+    }
+
+    public Options fullTextIndexOptions(String column) {
+        Map<String, String> resolved = globalIndexOptions("full-text", column).toMap();
+        resolved.keySet().removeIf(key -> !key.startsWith("full-text."));
+        return new Options(resolved);
+    }
+
+    private Options sortedIndexOptions(String column, String type) {
+        Options resolved = globalIndexOptions(type, column);
+        resolved.remove("sorted-index.records-per-file");
+        resolved.remove("sorted-index.records-per-range");
+        return resolved;
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -5912,6 +6074,17 @@ public class CoreOptions implements Serializable {
                 key(FIELDS_PREFIX + "." + fieldName + "." + MERGE_MAP_TS_FIELD)
                         .stringType()
                         .noDefaultValue());
+    }
+
+    public boolean fieldMergeMapOverwriteOnEqualTs(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + MERGE_MAP_OVERWRITE_ON_EQUAL_TS)
+                        .booleanType()
+                        .defaultValue(false)
+                        .withDescription(
+                                "For merge_map_with_keytime, overwrite the accumulated ROW with "
+                                        + "the input ROW when their timestamps are equal. "
+                                        + "This follows merge order, not wall-clock arrival order."));
     }
 
     public MapStorageLayout mapStorageLayout(String fieldName) {

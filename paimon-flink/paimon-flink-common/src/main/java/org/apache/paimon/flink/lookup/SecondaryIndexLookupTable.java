@@ -101,8 +101,14 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
                 tableState.delete(primaryKeyRow);
             }
         } else {
+            if (!previousFetched) {
+                previous = tableState.get(primaryKeyRow);
+            }
+            // a delete record may carry only the key, so retract the cached row's secondary key
+            if (previous != null) {
+                indexState.retract(secKeyRow.replaceRow(previous), primaryKeyRow);
+            }
             tableState.delete(primaryKeyRow);
-            indexState.retract(secKeyRow.replaceRow(row), primaryKeyRow);
         }
     }
 

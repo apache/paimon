@@ -20,7 +20,6 @@ package org.apache.paimon;
 
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.catalog.TableRollback;
 import org.apache.paimon.data.InternalRow;
@@ -43,12 +42,10 @@ import org.apache.paimon.metastore.VisibilityWaitCallback;
 import org.apache.paimon.operation.ChainTablePartitionExpire;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.NormalPartitionExpire;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.partition.PartitionExpireStrategy;
@@ -290,10 +287,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public FileStoreCommitImpl newCommit(String commitUser, FileStoreTable table) {
         SnapshotManager snapshotManager = snapshotManager();
-        SnapshotCommit snapshotCommit = catalogEnvironment.snapshotCommit(snapshotManager);
-        if (snapshotCommit == null) {
-            snapshotCommit = new RenamingSnapshotCommit(snapshotManager, Lock.empty());
-        }
+        SnapshotCommit snapshotCommit =
+                catalogEnvironment.snapshotCommit(snapshotManager, options, commitUser);
         ConflictDetection.Factory conflictDetectFactory =
                 scanner ->
                         ConflictDetection.create(
@@ -311,7 +306,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                                 snapshotManager,
                                 scanner);
         CommitRollback rollback = null;
-        TableRollback tableRollback = catalogEnvironment.catalogTableRollback();
+        TableRollback tableRollback = catalogEnvironment.catalogTableRollback(options.branch());
         if (tableRollback != null) {
             rollback = new CommitRollback(tableRollback);
         }
@@ -369,20 +364,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public TagManager newTagManager() {
         return new TagManager(fileIO, options.path(), options.branch(), options);
-    }
-
-    @Override
-    public TagDeletion newTagDeletion() {
-        return new TagDeletion(
-                fileIO,
-                pathFactory(),
-                manifestFileFactory().create(),
-                manifestListFactory().create(),
-                newIndexFileHandler(),
-                newStatsFileHandler(),
-                options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum(),
-                options.scanManifestParallelism());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();
@@ -577,11 +558,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public TagAutoManager newTagAutoManager(FileStoreTable table) {
         return TagAutoManager.create(
-                options,
-                snapshotManager(),
-                newTagManager(),
-                newTagDeletion(),
-                createTagCallbacks(table));
+                options, snapshotManager(), newTagManager(), createTagCallbacks(table));
     }
 
     @Override

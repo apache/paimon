@@ -18,9 +18,13 @@
 
 package org.apache.paimon.jdbc;
 
-import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
+
+import javax.annotation.Nullable;
 
 import java.util.Map;
 
@@ -40,12 +44,18 @@ public class JdbcCatalogLockFactory implements CatalogLockFactory {
     }
 
     @Override
-    public CatalogLock createLock(CatalogLockContext context) {
+    public Lock createLock(
+            CatalogLockContext context,
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Options tableOptions) {
         JdbcCatalogLockContext lockContext = (JdbcCatalogLockContext) context;
         Map<String, String> optionsMap = lockContext.options().toMap();
         return new JdbcCatalogLock(
                 lockContext.connections(),
                 lockContext.catalogKey(),
+                identifier,
                 checkMaxSleep(optionsMap),
                 acquireTimeout(optionsMap));
     }

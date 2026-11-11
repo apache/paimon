@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -27,9 +28,10 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 
 from pypaimon.api.client import ExponentialRetry
+from pypaimon.common import user_agent
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
-from pypaimon.common.json_util import JSON, json_field
+from pypaimon.common.json_util import JSON, json_field, json_ignore_field
 
 
 @dataclass
@@ -40,7 +42,7 @@ class DLFToken:
     access_key_secret: str = json_field('AccessKeySecret')
     security_token: Optional[str] = json_field('SecurityToken')
     expiration: Optional[str] = json_field('Expiration')
-    expiration_at_millis: Optional[int] = json_field('ExpirationAt', default=None)
+    expiration_at_millis: Optional[int] = json_ignore_field(default=None)
 
     @staticmethod
     def parse_expiration_to_millis(expiration: str) -> int:
@@ -136,6 +138,7 @@ class HTTPClient:
         self.connect_timeout = connect_timeout
         self.read_timeout = read_timeout
         self.session = requests.Session()
+        self.session.headers['User-Agent'] = user_agent.rest_user_agent()
 
         # Add retry adapter
         retry_interceptor = ExponentialRetry(max_retries=3)
@@ -269,4 +272,10 @@ class DLFTokenLoaderFactory:
         token_path = options.get(CatalogOptions.DLF_TOKEN_PATH)
         if token_path is not None:
             return DLFLocalFileTokenLoader(token_path)
-        return None
+        if any(options.get(key) is not None for key in (
+                CatalogOptions.DLF_ACCESS_KEY_ID,
+                CatalogOptions.DLF_ACCESS_KEY_SECRET,
+                CatalogOptions.DLF_ACCESS_SECURITY_TOKEN)):
+            return None
+        token_path = os.environ.get('DLF_TOKEN_PATH')
+        return DLFLocalFileTokenLoader(token_path) if token_path else None

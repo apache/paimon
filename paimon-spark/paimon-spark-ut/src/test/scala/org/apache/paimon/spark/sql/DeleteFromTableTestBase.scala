@@ -424,6 +424,34 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
       .isEqualTo(3)
   }
 
+  test("test delete producer changelog for full table delete") {
+    // 'delete.force-produce-changelog' = 'true' must force a row-level delete and emit a '-D'
+    // changelog row for every deleted row, even when the DELETE has no WHERE clause. A full-table
+    // DELETE must not be rewritten to the metadata-only truncate fast path, which produces no
+    // changelog and silently drops every delete from a downstream CDC consumer.
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id INT, name STRING, dt STRING, hh STRING)
+         |TBLPROPERTIES ('primary-key' = 'id, dt, hh', 'merge-engine' = 'deduplicate', 'changelog-producer'='input', 'delete.force-produce-changelog'='true')
+         |PARTITIONED BY (dt, hh)
+         |""".stripMargin)
+
+    spark.sql(
+      "INSERT INTO T VALUES " +
+        "(1, 'a', '2023-10-01', '12')," +
+        "(2, 'b', '2023-10-01', '12')," +
+        "(3, 'c', '2023-10-02', '12')," +
+        "(4, 'd', '2023-10-02', '13')," +
+        "(5, 'e', '2023-10-02', '14')," +
+        "(6, 'f', '2023-10-02', '15')")
+
+    // full-table delete: every row must show up as a '-D' changelog entry
+    spark.sql("DELETE FROM T")
+    assertThat(spark.sql("SELECT * FROM T").collectAsList().size()).isEqualTo(0)
+    assertThat(spark.sql("SELECT * FROM `T$audit_log` WHERE rowkind='-D'").collectAsList().size())
+      .isEqualTo(6)
+  }
+
   test("Paimon Delete: delete null partition with specified default partition name") {
     spark.sql(s"""
                  |CREATE TABLE T (a INT, dt STRING)

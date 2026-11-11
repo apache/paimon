@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from collections import Counter
 from typing import List, Optional
 
 from pypaimon.catalog.catalog_exception import (ColumnAlreadyExistException,
@@ -23,10 +24,11 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options import CoreOptions, Options
+from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.schema.column_directive_utils import (
     apply_add_column_directive, apply_directives,
     remove_dropped_directive_options)
-from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
+from pypaimon.schema.data_type_casts import can_execute_cast, supports_cast
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
                                         DataType, MapType, MultisetType, RowType,
                                         is_array_blob_type, is_blob_file_field,
@@ -305,16 +307,113 @@ def _is_unchanged_normalized_key(key, old_value, new_value, old_table_schema) ->
     """Values whose canonical home is outside the options map (or the implicit
     default) are not a change when replayed. Mirrors the Java SchemaManager's
     isUnchangedNormalizedKey."""
-    if old_value is not None or new_value is None:
+    if new_value is None:
+        return False
+    if key == "type":
+        effective_old = CoreOptions.TYPE.default_value() if old_value is None else old_value
+        return new_value.lower() == effective_old.lower()
+    if old_value is not None:
         return False
     if key == "primary-key":
         return _normalize_key_list(new_value) == old_table_schema.primary_keys
     if key == "partition":
         return _normalize_key_list(new_value) == old_table_schema.partition_keys
-    if key == "type":
-        # a table created without an explicit type is of the default type
-        return new_value == CoreOptions.TYPE.default_value()
     return False
+
+
+def _parse_bucket(value: str) -> int:
+    # Match Integer.parseInt's signed 32-bit decimal syntax.
+    if value is None:
+        raise ValueError("null")
+    negative = value.startswith("-")
+    digits = value[1:] if value.startswith(("+", "-")) else value
+    try:
+        if not digits:
+            raise ValueError
+        bucket = 0
+        limit = 2147483648 if negative else 2147483647
+        for c in digits:
+            if not c.isdecimal() or ord(c) > 0xffff:
+                raise ValueError
+            bucket = bucket * 10 + int(c)
+            if bucket > limit:
+                raise ValueError
+        return -bucket if negative else bucket
+    except ValueError:
+        raise ValueError(f'For input string: "{value}"') from None
+
+
+def _option_text(value) -> Optional[str]:
+    # Options may be persisted as native values such as 2, True or enums; compare them as Options reads them.
+    return None if value is None else OptionsUtils.convert_to_string(value)
+
+
+def _option_bool(value) -> bool:
+    # Same interpretation as the runtime; unparsable values are false, like Boolean.parseBoolean.
+    try:
+        return value is not None and OptionsUtils.convert_to_boolean(value)
+    except ValueError:
+        return False
+
+
+def _check_alter_table_option(options: dict, key: str, old_value: Optional[str], new_value: str):
+    # Booleans are read from the raw values, the way PyPaimon reads them.
+    raw_old, raw_new = old_value, new_value
+    old_value, new_value = _option_text(old_value), _option_text(new_value)
+    if key in CoreOptions.IMMUTABLE_OPTIONS:
+        raise NotImplementedError(f"Change '{key}' is not supported yet.")
+
+    if key == "data-evolution.nested-field.enabled":
+        old_enabled = _option_bool(raw_old)
+        new_enabled = _option_bool(raw_new)
+        if old_enabled and not new_enabled:
+            raise NotImplementedError(f"Cannot disable table option '{key}'.")
+
+    if key == "bucket":
+        old_bucket = CoreOptions.BUCKET.default_value() if old_value is None else _parse_bucket(old_value)
+        new_bucket = _parse_bucket(new_value)
+        if old_bucket == -1:
+            raise NotImplementedError("Cannot change bucket when it is -1.")
+        if new_bucket == -1:
+            raise NotImplementedError("Cannot change bucket to -1.")
+
+    if key == "deletion-vectors.enabled":
+        dv_modifiable = _option_bool(options.get("deletion-vectors.modifiable"))
+        if not dv_modifiable:
+            old_dv = _option_bool(raw_old)
+            new_dv = _option_bool(raw_new)
+            if old_dv != new_dv:
+                raise NotImplementedError(
+                    f"Cannot change deletion vectors mode from {str(old_dv).lower()} to {str(new_dv).lower()}. "
+                    "If modifying table deletion-vectors mode without full-compaction, "
+                    "this may result in data duplication. If you are confident, you can set table option "
+                    "'deletion-vectors.modifiable' = 'true' to allow deletion vectors modification.")
+
+    if key in ("ignore-delete", "ignore-update-before"):
+        # The writers read ignore-update-before as the literal "true" only.
+        parse = _option_bool if key == "ignore-delete" else (lambda v: str(v).lower() == "true")
+        old_ignore = parse(raw_old)
+        new_ignore = parse(raw_new)
+        if old_ignore and not new_ignore:
+            raise NotImplementedError(f"Cannot change {key} from true to false.")
+
+    if key == "clustering.columns" and "pk-clustering-override" in options:
+        raise NotImplementedError("Cannot change clustering.columns when pk-clustering-override enabled.")
+
+
+def _check_reset_table_option(options: dict, key: str):
+    if key in CoreOptions.IMMUTABLE_OPTIONS:
+        raise NotImplementedError(f"Change '{key}' is not supported yet.")
+
+    if key == "bucket":
+        raise NotImplementedError(f"Cannot reset {key}.")
+
+    if key in ("deletion-vectors.enabled", "data-evolution.nested-field.enabled",
+               "ignore-delete", "ignore-update-before"):
+        _check_alter_table_option(options, key, options.get(key), "false")
+
+    if key == "clustering.columns" and "pk-clustering-override" in options:
+        raise NotImplementedError(f"Cannot reset {key} when pk-clustering-override enabled.")
 
 
 def _assert_not_updating_partition_keys(
@@ -437,35 +536,241 @@ def _validate_blob_fields(
             )
         )
 
+    if video_fields and primary_keys:
+        raise ValueError(
+            f"'{CoreOptions.VIDEO_FRAME_FIELD.key()}' only supports append-only tables."
+        )
+
+    _validate_sequence_group_ordering_fields(fields, options, core_options, primary_keys)
+
     if blob_field_names:
-        required_options = {
-            CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
-            CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
-        }
-
-        missing_options = []
-        for key, expected_value in required_options.items():
-            if key not in options or options[key] != expected_value:
-                missing_options.append(f"{key}='{expected_value}'")
-
-        if missing_options:
-            raise ValueError(
-                f"Schema contains BLOB, ARRAY<BLOB> or MAP<X, BLOB> type but is "
-                f"missing required options: "
-                f"{', '.join(missing_options)}. "
-                f"Please add these options to the schema."
-            )
-
-        if primary_keys:
-            raise ValueError(
-                "BLOB, ARRAY<BLOB> or MAP<X, BLOB> type is not supported with primary key."
-            )
-
         if blob_field_names.intersection(partition_keys):
             raise ValueError(
                 "The BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column can not be "
                 "part of partition keys."
             )
+
+        if not primary_keys:
+            required_options = {
+                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
+            }
+
+            missing_options = []
+            for key, expected_value in required_options.items():
+                if key not in options or options[key] != expected_value:
+                    missing_options.append(f"{key}='{expected_value}'")
+
+            if missing_options:
+                raise ValueError(
+                    f"Schema contains BLOB, ARRAY<BLOB> or MAP<X, BLOB> type but is "
+                    f"missing required options: "
+                    f"{', '.join(missing_options)}. "
+                    f"Please add these options to the schema."
+                )
+        else:
+            _validate_primary_key_blob_fields(
+                fields,
+                options,
+                core_options,
+                primary_keys,
+                partition_keys,
+                blob_field_names,
+                all_inline_fields,
+            )
+
+
+def _validate_sequence_group_ordering_fields(
+    fields: List[DataField],
+    options: dict,
+    core_options: CoreOptions,
+    primary_keys: List[str],
+):
+    """Mirror Java SchemaValidation#validateSequenceGroupOrderingFields and the
+    primary-key checks in PartialUpdateMergeFunction.Factory."""
+    from pypaimon.common.options.core_options import MergeEngine
+
+    if core_options.merge_engine() != MergeEngine.PARTIAL_UPDATE:
+        return
+
+    field_map = {field.name: field for field in fields}
+    for option_key, option_val in options.items():
+        if not (
+            option_key.startswith("fields.")
+            and option_key.endswith(".sequence-group")
+            and len(option_key) > len("fields..sequence-group")
+        ):
+            continue
+
+        ordering_fields_str = option_key[len("fields."): -len(".sequence-group")]
+        for field_name in ordering_fields_str.split(","):
+            field_name = field_name.strip()
+            field = field_map.get(field_name)
+            if field is not None and _contains_blob_type(field.type):
+                raise ValueError(
+                    f"Field '{field_name}' with type {field.type} cannot be used as a "
+                    f"sequence-group ordering field in option '{option_key}'."
+                )
+            if field_name in primary_keys:
+                raise ValueError(
+                    f"The sequence-group '{option_key}' contains primary key field "
+                    f"'{field_name}', which is not allowed. Primary key columns "
+                    f"cannot be put in sequence-group."
+                )
+
+        for protected_field in str(option_val or "").split(","):
+            protected_field = protected_field.strip()
+            if protected_field and protected_field in primary_keys:
+                raise ValueError(
+                    f"The sequence-group '{option_key}' contains primary key field "
+                    f"'{protected_field}', which is not allowed. Primary key columns "
+                    f"cannot be put in sequence-group."
+                )
+
+
+def _validate_primary_key_blob_fields(
+    fields: List[DataField],
+    options: dict,
+    core_options: CoreOptions,
+    primary_keys: List[str],
+    partition_keys: List[str],
+    blob_field_names: set,
+    all_inline_fields: set,
+):
+    """Mirror Java SchemaValidation#validatePrimaryKeyBlobKeyConfiguration and
+    validatePrimaryKeyBlobConfiguration."""
+    from pypaimon.common.options.core_options import ChangelogProducer, MergeEngine
+    from pypaimon.common.options.options_utils import OptionsUtils
+
+    managed_blob_fields = [
+        field.name
+        for field in fields
+        if field.name in blob_field_names and field.name not in all_inline_fields
+    ]
+    configured_bucket_key = options.get(CoreOptions.BUCKET_KEY.key())
+    if configured_bucket_key and configured_bucket_key.strip():
+        bucket_keys = [
+            key.strip() for key in configured_bucket_key.split(',') if key.strip()
+        ]
+    else:
+        bucket_keys = [pk for pk in primary_keys if pk not in partition_keys]
+
+    if managed_blob_fields:
+        pk_blob_fields = [f for f in managed_blob_fields if f in primary_keys]
+        if pk_blob_fields:
+            raise ValueError(
+                f"Managed BLOB fields cannot be primary keys: {pk_blob_fields}."
+            )
+        bucket_blob_fields = [f for f in managed_blob_fields if f in bucket_keys]
+        if bucket_blob_fields:
+            raise ValueError(
+                f"Managed BLOB fields cannot be bucket keys: {bucket_blob_fields}."
+            )
+        sequence_fields = core_options.sequence_field()
+        sequence_blob_fields = [f for f in managed_blob_fields if f in sequence_fields]
+        if sequence_blob_fields:
+            raise ValueError(
+                f"Managed BLOB fields cannot be sequence fields: {sequence_blob_fields}."
+            )
+
+        if core_options.merge_engine() not in (
+            MergeEngine.DEDUPLICATE,
+            MergeEngine.PARTIAL_UPDATE,
+            MergeEngine.FIRST_ROW,
+        ):
+            raise ValueError(
+                "Primary-key managed BLOB tables only support the deduplicate, "
+                "partial-update or first-row merge engine."
+            )
+        if core_options.changelog_producer() != ChangelogProducer.NONE:
+            raise ValueError(
+                "Primary-key managed BLOB tables only support changelog-producer 'none'."
+            )
+        if core_options.data_file_external_paths() is not None:
+            raise ValueError(
+                f"Primary-key managed BLOB tables do not support "
+                f"'{CoreOptions.DATA_FILE_EXTERNAL_PATHS.key()}'."
+            )
+        if str(options.get('pk-clustering-override', 'false')).lower() == 'true':
+            raise ValueError(
+                "Primary-key managed BLOB tables do not support 'pk-clustering-override'."
+            )
+
+        if (
+            core_options.merge_engine() == MergeEngine.PARTIAL_UPDATE
+            and not core_options.ignore_delete()
+        ):
+            fields_protected_by_sequence_group = set()
+            for key, val in options.items():
+                if (
+                    key.startswith("fields.")
+                    and key.endswith(".sequence-group")
+                    and len(key) > len("fields..sequence-group")
+                ):
+                    for protected_field in str(val or "").split(","):
+                        protected_field = protected_field.strip()
+                        if protected_field:
+                            fields_protected_by_sequence_group.add(protected_field)
+
+            for field in managed_blob_fields:
+                if field not in fields_protected_by_sequence_group:
+                    continue
+                agg_func = options.get(f"fields.{field}.aggregate-function")
+                if agg_func is None:
+                    agg_func = options.get("fields.default-aggregate-function")
+
+                ignore_retract_raw = options.get(f"fields.{field}.ignore-retract")
+                ignore_retract = (
+                    OptionsUtils.convert_to_boolean(ignore_retract_raw)
+                    if ignore_retract_raw is not None
+                    else False
+                )
+                if (
+                    agg_func is not None
+                    and agg_func != "last_value"
+                    and not ignore_retract
+                ):
+                    raise ValueError(
+                        f"Managed BLOB field '{field}' cannot use aggregate function '{agg_func}' "
+                        f"because managed BLOB payloads are not retained in retract messages. "
+                        f"Set 'fields.{field}.ignore-retract' to true to ignore retract messages."
+                    )
+
+    if blob_field_names.intersection(primary_keys):
+        raise ValueError(
+            "The BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column can not be "
+            "part of primary keys."
+        )
+    if blob_field_names.intersection(bucket_keys):
+        raise ValueError(
+            "The BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column can not be "
+            "part of bucket keys."
+        )
+
+
+def _duplicates(names: List[str]) -> List[str]:
+    return sorted(name for name, count in Counter(names).items() if count > 1)
+
+
+def _validate_columns_and_keys(schema: Schema):
+    """Java's Schema checks that column names are unique and that partition
+    and primary keys do not repeat and are columns. A key that is not a column
+    is persisted otherwise, and the table can then no longer be loaded."""
+    names = [field.name for field in schema.fields]
+    if _duplicates(names):
+        raise ValueError(
+            f"Table column {names} must not contain duplicate fields. "
+            f"Found: {_duplicates(names)}")
+    for constraint, included, keys in (
+            ("Partition key", "partition fields", schema.partition_keys),
+            ("Primary key", "primary key constraint", schema.primary_keys)):
+        if _duplicates(keys):
+            raise ValueError(
+                f"{constraint} constraint {keys} must not contain duplicate "
+                f"columns. Found: {_duplicates(keys)}")
+        if not set(keys) <= set(names):
+            raise ValueError(
+                f"Table column {names} should include all {included} {keys}")
 
 
 def _validate_options(options: dict):
@@ -480,6 +785,25 @@ def _validate_options(options: dict):
         raise ValueError(
             f"{CoreOptions.TARGET_FILE_ROW_NUM.key()} "
             f"should be at most {max_value}"
+        )
+
+
+def _validate_row_tracking(options: dict, primary_keys: List[str]):
+    """Mirror the row tracking checks of Java SchemaValidation#validateRowTracking."""
+    core_options = CoreOptions(Options(options or {}))
+    row_tracking_enabled = core_options.row_tracking_enabled()
+    if row_tracking_enabled:
+        if primary_keys:
+            raise ValueError("Cannot define primary-key for row tracking table.")
+        if core_options.bucket() != -1:
+            raise ValueError(
+                f"Cannot define {CoreOptions.BUCKET.key()} for row tracking table, "
+                f"it only support bucket = -1"
+            )
+    if core_options.data_evolution_enabled() and not row_tracking_enabled:
+        raise ValueError(
+            f"Data evolution config must enabled with "
+            f"{CoreOptions.ROW_TRACKING_ENABLED.key()}"
         )
 
 
@@ -661,6 +985,7 @@ class SchemaManager:
                 comment=schema.comment,
             )
 
+            _validate_columns_and_keys(schema)
             table_schema = TableSchema.from_schema(schema_id=0, schema=schema)
             success = self.commit(table_schema)
             if success:
@@ -674,6 +999,7 @@ class SchemaManager:
             new_schema.primary_keys,
             new_schema.partition_keys,
         )
+        _validate_row_tracking(new_schema.options, new_schema.primary_keys)
         schema_path = self._to_schema_path(new_schema.id)
         try:
             result = self.file_io.try_to_write_atomic(schema_path, JSON.to_json(new_schema, indent=2))
@@ -734,6 +1060,7 @@ class SchemaManager:
     def _generate_table_schema(
         self, old_table_schema: TableSchema, changes: List[SchemaChange]
     ) -> TableSchema:
+        old_options = dict(old_table_schema.options)
         new_options = dict(old_table_schema.options)
         new_fields = []
         for field in old_table_schema.fields:
@@ -778,7 +1105,7 @@ class SchemaManager:
                 # compare against the accumulated options so repeated changes to
                 # the same key in one batch apply in order
                 old_value = new_options.get(change.key)
-                unchanged = (old_value == change.value
+                unchanged = (_option_text(old_value) == _option_text(change.value)
                              or _is_unchanged_normalized_key(
                                  change.key, old_value, change.value, old_table_schema))
                 if unchanged:
@@ -787,15 +1114,17 @@ class SchemaManager:
                 # format tables never create Paimon snapshots but can still hold
                 # data -- reject independently of the snapshot check
                 if change.key == "type":
-                    raise ValueError(f"Change '{change.key}' is not supported yet.")
-                if change.key in CoreOptions.IMMUTABLE_OPTIONS and _has_snapshots():
-                    raise ValueError(f"Change '{change.key}' is not supported yet.")
+                    raise NotImplementedError(f"Change '{change.key}' is not supported yet.")
+                if _has_snapshots():
+                    # Like Java, checks compare with the table's options before the batch.
+                    _check_alter_table_option(
+                        old_options, change.key, old_options.get(change.key), change.value)
                 new_options[change.key] = change.value
             elif isinstance(change, RemoveOption):
                 if change.key == "type":
-                    raise ValueError(f"Change '{change.key}' is not supported yet.")
-                if change.key in CoreOptions.IMMUTABLE_OPTIONS and _has_snapshots():
-                    raise ValueError(f"Change '{change.key}' is not supported yet.")
+                    raise NotImplementedError(f"Change '{change.key}' is not supported yet.")
+                if _has_snapshots():
+                    _check_reset_table_option(old_options, change.key)
                 new_options.pop(change.key, None)
             elif isinstance(change, UpdateComment):
                 new_comment = change.comment
@@ -850,6 +1179,9 @@ class SchemaManager:
             options=new_options,
             comment=new_comment
         )
+        # Java's Schema runs the same checks when an alter builds it, which
+        # rejects, for example, renaming a primary key twice in one alter.
+        _validate_columns_and_keys(new_schema)
 
         return TableSchema(
             version=old_table_schema.version,

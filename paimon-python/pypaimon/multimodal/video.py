@@ -19,12 +19,169 @@
 
 import io
 import os
-from collections import OrderedDict
+import weakref
+from collections import OrderedDict, deque
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from fractions import Fraction
 from itertools import chain
 
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+
+
+def _require_video_av():
+    """Check the optional decoder before opening a video source."""
+    try:
+        import av
+    except ImportError as error:
+        raise ImportError(
+            "Automatic video import requires PyAV; install pypaimon[video]."
+        ) from error
+    return av
+
+
+def _raw_video_time_base(fps):
+    from numbers import Real
+
+    if isinstance(fps, bool) or not isinstance(fps, Real):
+        raise ValueError("source_fps must be a positive finite number.")
+    try:
+        rate = Fraction(str(fps))
+        if rate <= 0 or max(rate.numerator, rate.denominator) > 2147483647:
+            raise ValueError()
+    except (ValueError, OverflowError):
+        raise ValueError("source_fps must be a positive finite representable frame rate.")
+    return 1 / rate
+
+
+def _remux_raw_hevc(source, output_path, time_base):
+    """Preserve HEVC packets and assign constant-rate presentation timestamps."""
+    from array import array
+    import shutil
+    import tempfile
+
+    av = _require_video_av()
+    # Snapshot to disk for both passes.
+    with tempfile.TemporaryFile() as raw:
+        shutil.copyfileobj(source, raw, length=1024 * 1024)
+        raw.seek(0)
+        ordinals = array("q")
+        frame_count = 0
+        delay = 0
+        with av.open(raw) as container:
+            if container.format.name != "hevc" or len(container.streams) != 1:
+                raise ValueError("source_fps is only supported for a raw H.265/HEVC stream.")
+            for packet in container.demux(video=0):
+                if packet.size:
+                    # Track packet IDs through B-frame reordering.
+                    packet.pts = len(ordinals)
+                    packet.dts = None
+                    packet.time_base = time_base
+                    ordinals.append(-1)
+                for frame in packet.decode():
+                    identity = frame.pts
+                    if frame.is_corrupt or identity is None or not 0 <= identity < len(ordinals) \
+                            or ordinals[identity] != -1:
+                        raise ValueError("Cannot determine raw HEVC frame order.")
+                    ordinals[identity] = frame_count
+                    delay = max(delay, identity - frame_count)
+                    frame_count += 1
+        if not frame_count or frame_count != len(ordinals):
+            raise ValueError("Raw HEVC must contain one decodable frame per packet.")
+        raw.seek(0)
+        with av.open(raw) as container, av.open(output_path, "w", format="mp4") as output:
+            if hasattr(output, "add_stream_from_template"):
+                stream = output.add_stream_from_template(container.streams.video[0], opaque=True)
+            else:
+                stream = output.add_stream(template=container.streams.video[0])
+            stream.time_base = time_base
+            output.start_encoding()
+            if (time_base / stream.time_base).denominator != 1:
+                raise ValueError("MP4 cannot represent source_fps exactly.")
+            packet_time_bases = {}
+            count = 0
+            for packet in container.demux(video=0):
+                if not packet.size:
+                    continue
+                # Keep PyAV 12's read-only duration; bound the AVRational denominator.
+                duration = packet.duration
+                if duration <= 0:
+                    raise ValueError("Raw HEVC packet has no duration.")
+                if duration not in packet_time_bases:
+                    exact = time_base / duration
+                    bounded = exact.limit_denominator(2147483647)
+                    error = abs(bounded - exact) * duration * (frame_count + delay + 1)
+                    # Every PTS/DTS and duration must round to the same MP4 tick.
+                    if bounded <= 0 or bounded.numerator > 2147483647 or error >= stream.time_base / 2:
+                        raise ValueError("Cannot represent raw HEVC timestamps exactly in MP4.")
+                    packet_time_bases[duration] = bounded
+                packet.pts = ordinals[count] * duration
+                packet.dts = (count - delay) * duration
+                packet.time_base = packet_time_bases[duration]
+                packet.stream = stream
+                output.mux(packet)
+                count += 1
+            if count != frame_count:
+                raise ValueError("Raw HEVC packet count changed during remux.")
+        return frame_count
+
+
+def _inspect_video_frames(source):
+    """Read presentation timestamps without retaining decoded images."""
+    av = _require_video_av()
+    from array import array
+
+    timestamps = array("d")
+    first_time = None
+    previous_time = None
+    with av.open(source) as container:
+        if len(container.streams.video) != 1:
+            raise ValueError("Automatic video import requires one video stream.")
+        for frame in container.decode(container.streams.video[0]):
+            if frame.is_corrupt:
+                raise ValueError("Video contains a corrupt frame.")
+            if frame.pts is None or frame.time_base is None:
+                raise ValueError("Video frame is missing a presentation timestamp.")
+            current_time = frame.pts * frame.time_base
+            if previous_time is not None and current_time <= previous_time:
+                raise ValueError("Video presentation timestamps must be strictly increasing.")
+            if first_time is None:
+                first_time = current_time
+            timestamps.append(float(current_time - first_time))
+            previous_time = current_time
+    if not timestamps:
+        raise ValueError("Video contains no decodable frames.")
+    return timestamps
+
+
+class _VideoDecodePool:
+    """One lazily created decode pool per dataset and worker process."""
+
+    def __init__(self):
+        self._executor = None
+        self._parallelism = 0
+        self._pid = os.getpid()
+
+    def get(self, parallelism):
+        if self._pid != os.getpid():
+            # Never join threads inherited from the parent process.
+            self._executor = None
+            self._pid = os.getpid()
+        if self._executor is not None and self._parallelism != parallelism:
+            self.close()
+        if parallelism > 1 and self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=parallelism)
+        self._parallelism = parallelism
+        return self._executor
+
+    def close(self):
+        executor, self._executor = self._executor, None
+        if executor is not None and self._pid == os.getpid():
+            executor.shutdown(wait=True)
+
+    def __getstate__(self):
+        return {"_executor": None, "_parallelism": 0, "_pid": None}
 
 
 def _encode_images_to_video(
@@ -118,6 +275,60 @@ def _encode_images_to_video(
     return count
 
 
+class _PrefetchedVideo(io.BytesIO):
+    """Buffer a payload while preserving its source metadata and lifetime."""
+
+    def __init__(self, payload, source):
+        self._source = source
+        super().__init__(payload)
+        self.video_prefetch_bytes = len(payload)
+
+    def __getattr__(self, name):
+        return getattr(self._source, name)
+
+    def close(self):
+        if not self.closed:
+            try:
+                self._source.close()
+            finally:
+                super().close()
+
+
+class _VideoMetadataCache(weakref.WeakValueDictionary):
+    """Retain bounded container mappings across decoder eviction."""
+
+    def __init__(self, max_bytes=16 * 1024 * 1024, max_entries=64):
+        super().__init__()
+        self._retained = OrderedDict()
+        self._bytes = 0
+        self._max_bytes = max_bytes
+        self._max_entries = max_entries
+
+    def get(self, key, default=None):
+        if key in self._retained:
+            self._retained.move_to_end(key)
+        return super().get(key, default)
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        previous = self._retained.pop(key, None)
+        if previous is not None:
+            self._bytes -= previous.nbytes
+        size = getattr(value, "nbytes", None)
+        if size is None or size > self._max_bytes:
+            return
+        self._retained[key] = value
+        self._bytes += size
+        while self._bytes > self._max_bytes or len(self._retained) > self._max_entries:
+            _, removed = self._retained.popitem(last=False)
+            self._bytes -= removed.nbytes
+
+    def clear(self):
+        self._retained.clear()
+        self._bytes = 0
+        super().clear()
+
+
 class VideoFrameCollator:
     """Decode frame rows in a DataLoader worker while reusing video sessions.
 
@@ -136,6 +347,11 @@ class VideoFrameCollator:
     dictionaries, and returns a sequence with one frame per row in that order.
     At least one of ``decode_fn`` or ``decode_batch_fn`` must be provided.
 
+    ``prefetch_max_bytes`` opts into whole-payload prefetch for videos fitting
+    the remaining encoded-byte budget across cached decoders (default: disabled).
+    Larger videos or a full budget retain range reads. The budget is per collator
+    and worker; decoder buffers, RGB outputs and temporary copies are additional.
+
     The cache is process-local and keyed by physical video payload identity.
     ``collate_fn`` defaults to PyTorch's ``default_collate`` and may be replaced
     for decoders that already return batched objects.
@@ -149,9 +365,11 @@ class VideoFrameCollator:
             decoder_factory,
             decode_fn=None,
             output_column="frame",
-            max_open_videos=8,
+            max_open_videos=16,
             collate_fn=None,
-            decode_batch_fn=None):
+            decode_batch_fn=None,
+            range_parallelism=4,
+            prefetch_max_bytes=0):
         if not video_column:
             raise ValueError("video_column is required.")
         if not callable(decoder_factory):
@@ -171,6 +389,15 @@ class VideoFrameCollator:
             raise ValueError("max_open_videos must be a positive int.")
         if collate_fn is not None and not callable(collate_fn):
             raise ValueError("collate_fn must be callable or None.")
+        if (isinstance(range_parallelism, bool)
+                or not isinstance(range_parallelism, int)
+                or range_parallelism <= 0):
+            raise ValueError("range_parallelism must be a positive int.")
+
+        if (isinstance(prefetch_max_bytes, bool)
+                or not isinstance(prefetch_max_bytes, int)
+                or prefetch_max_bytes < 0):
+            raise ValueError("prefetch_max_bytes must be a non-negative int.")
 
         raw_table = getattr(table, "raw_table", table)
         file_io = getattr(raw_table, "file_io", None)
@@ -185,7 +412,10 @@ class VideoFrameCollator:
         self.output_column = output_column
         self.max_open_videos = max_open_videos
         self.collate_fn = collate_fn
+        self.range_parallelism = range_parallelism
+        self.prefetch_max_bytes = prefetch_max_bytes
         self._decoders = OrderedDict()
+        self._video_metadata_cache = _VideoMetadataCache()
         self._owner_pid = os.getpid()
 
     def __call__(self, rows):
@@ -200,6 +430,7 @@ class VideoFrameCollator:
     def close(self):
         resources = list(self._decoders.values())
         self._decoders.clear()
+        self._video_metadata_cache = _VideoMetadataCache()
         first_error = None
         for resource in resources:
             try:
@@ -215,8 +446,48 @@ class VideoFrameCollator:
         # stream state opened in the parent process.
         state = self.__dict__.copy()
         state["_decoders"] = OrderedDict()
+        state["_video_metadata_cache"] = None
         state["_owner_pid"] = None
         return state
+
+    @contextmanager
+    def _map_decoders(self, requests, decode, parallelism, executor=None):
+        self._ensure_process_local_cache()
+        limit = min(parallelism, self.max_open_videos, len(requests))
+        if executor is None:
+            yield (decode(self._decoder(*key), value)
+                   for key, value in requests.items())
+            return
+        items = iter(requests.items())
+        pending = deque()
+
+        def submit():
+            try:
+                key, value = next(items)
+            except StopIteration:
+                return
+            # Keep cache mutations ordered; pending decoders remain most recent.
+            decoder = self._decoder(*key)
+            pending.append(executor.submit(decode, decoder, value))
+
+        def results():
+            while pending:
+                future = pending[0]
+                value = future.result()
+                pending.popleft()
+                yield value
+                del value, future
+                submit()
+
+        try:
+            for _ in range(limit):
+                submit()
+            yield results()
+        finally:
+            for future in pending:
+                future.cancel()
+            # A failed or abandoned batch must finish before cache reuse/close.
+            wait(pending)
 
     def _decode_rows(self, rows):
         decoded = [None] * len(rows)
@@ -226,9 +497,8 @@ class VideoFrameCollator:
             if descriptor is None:
                 decoded[position] = output
                 continue
-            grouped.setdefault(descriptor.payload_descriptor, []).append(
-                (descriptor.frame_index, position, output)
-            )
+            payload = descriptor.video_descriptor
+            grouped.setdefault(payload, []).append((descriptor.frame_index, position, output))
 
         for payload, frames in grouped.items():
             decoder = self._decoder(payload)
@@ -284,11 +554,17 @@ class VideoFrameCollator:
             )
         return output, descriptor
 
-    def _decoder(self, descriptor):
-        resource = self._decoders.pop(descriptor, None)
+    def _decoder(self, descriptor, replica=0):
+        cache_key = (descriptor, replica)
+        resource = self._decoders.pop(cache_key, None)
         if resource is not None:
-            self._decoders[descriptor] = resource
+            self._decoders[cache_key] = resource
             return resource[0]
+
+        # Release the oldest decoder's payload before admitting a new one.
+        if len(self._decoders) >= self.max_open_videos:
+            _, evicted = self._decoders.popitem(last=False)
+            self._close_resource(evicted)
 
         # Reuse the table's resolved FileIO. Rebuilding a reader from raw URI
         # options can drop merged REST/DLF storage credentials in workers.
@@ -299,15 +575,45 @@ class VideoFrameCollator:
             descriptor.length,
         ).new_input_stream()
         try:
+            retained = sum(
+                getattr(cached_stream, "video_prefetch_bytes", 0)
+                for _, cached_stream in self._decoders.values())
+            if 0 < descriptor.length <= self.prefetch_max_bytes - retained:
+                payload = bytearray()
+                while len(payload) < descriptor.length:
+                    chunk = stream.read(descriptor.length - len(payload))
+                    if not chunk:
+                        raise IOError("Incomplete video payload during prefetch.")
+                    payload.extend(chunk)
+                del chunk
+                stream = _PrefetchedVideo(payload, stream)
+                del payload
+            # Replica decoders share metadata, while their decode state stays separate.
+            stream.video_metadata_cache = self._video_metadata_cache
+            stream.video_metadata_key = descriptor
+            stream.video_length = descriptor.length
+            stream.video_moov_range = (getattr(descriptor, "moov_offset", 0),
+                                       getattr(descriptor, "moov_length", 0))
+            if callable(getattr(self.file_io, "read_ranges_coalesced", None)):
+                stream.video_read_ranges = lambda ranges: self.file_io.read_ranges_coalesced(
+                    [(descriptor.uri, descriptor.offset + offset, length)
+                     for offset, length in ranges], self.range_parallelism)
+            if getattr(stream, "video_prefetch_bytes", 0):
+                # Indexed readers must use the prefetched payload too, rather
+                # than issuing ranges against FileIO behind the decoder's back.
+                def read_prefetched(ranges):
+                    with stream.getbuffer() as payload:
+                        return [bytes(payload[offset:offset + length])
+                                for offset, length in ranges]
+                stream.video_read_ranges = read_prefetched
+                stream.video_length = descriptor.length
+
             decoder = self.decoder_factory(stream)
         except Exception:
             stream.close()
             raise
         resource = (decoder, stream)
-        self._decoders[descriptor] = resource
-        if len(self._decoders) > self.max_open_videos:
-            _, evicted = self._decoders.popitem(last=False)
-            self._close_resource(evicted)
+        self._decoders[cache_key] = resource
         return decoder
 
     def _collate(self, rows):

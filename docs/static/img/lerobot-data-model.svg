@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 780" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+  <title id="title">LeRobot v3 files and the three Paimon tables</title>
+  <desc id="desc">For list imports, source metadata becomes one Dataset row, Episode Parquet becomes Episode rows, and frame Parquet plus image or video payloads become Frame rows. Dataset indices identify sources, and dataset plus Episode indices relate frames to Episodes. These are logical relationships, not primary or foreign key constraints.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="780" rx="16" fill="#ffffff"/>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+    <text x="28" y="42" font-size="27" font-weight="700">LeRobot files → Paimon table group</text>
+    <text x="28" y="73" font-size="18" fill="#526277">List imports: preserve source-local IDs and add dataset_index.</text>
+    <text x="28" y="112" font-size="19" font-weight="700">LeRobot v3 source files</text>
+    <text x="532" y="112" font-size="19" font-weight="700">Paimon tables · prefix robot_data</text>
+
+    <rect x="28" y="132" width="396" height="152" rx="10" fill="#f5f7fa" stroke="#b6c2d0" stroke-width="1.5"/>
+    <g font-size="18">
+      <text x="46" y="165">meta/info.json</text>
+      <text x="46" y="195">meta/tasks.parquet</text>
+      <text x="46" y="225">meta/subtasks.parquet (optional)</text>
+      <text x="46" y="255">meta/stats.json (optional)</text>
+    </g>
+    <path d="M 438 208 H 512" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="532" y="132" width="440" height="152" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+    <text x="550" y="165" font-size="23" font-weight="700" fill="#2166b1">robot_data_datasets</text>
+    <text x="550" y="195" font-size="18">One row per source</text>
+    <text x="550" y="225" font-size="18">index, name, info</text>
+    <text x="550" y="255" font-size="18">tasks, subtasks, stats</text>
+
+    <path d="M 554 286 V 354" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="574" y="311" font-size="17" fill="#526277">1 source → many Episodes</text>
+    <text x="574" y="336" font-size="17" fill="#526277">dataset_index references source index</text>
+    <rect x="28" y="364" width="396" height="132" rx="10" fill="#f5f7fa" stroke="#b6c2d0" stroke-width="1.5"/>
+    <text x="46" y="399" font-size="18">meta/episodes/**/*.parquet</text>
+    <text x="46" y="431" font-size="18">Episode boundaries and task labels</text>
+    <text x="46" y="463" font-size="18">Source locations and Episode stats</text>
+    <path d="M 438 430 H 512" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="532" y="364" width="440" height="132" rx="10" fill="#e8f5ef" stroke="#10705d" stroke-width="1.5"/>
+    <text x="550" y="397" font-size="23" font-weight="700" fill="#10705d">robot_data_episodes</text>
+    <text x="550" y="427" font-size="18">One row per Episode</text>
+    <text x="550" y="455" font-size="18">dataset_index, episode_index, frame range</text>
+    <text x="550" y="483" font-size="18">length, tasks, metadata / statistics</text>
+
+    <path d="M 554 498 V 566" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="574" y="523" font-size="17" fill="#526277">1 Episode → many frames</text>
+    <text x="574" y="548" font-size="17" fill="#526277">match dataset_index + episode_index</text>
+    <rect x="28" y="576" width="396" height="142" rx="10" fill="#f5f7fa" stroke="#b6c2d0" stroke-width="1.5"/>
+    <text x="46" y="611" font-size="18">data/**/*.parquet</text>
+    <text x="46" y="643" font-size="18">Image payloads or videos/ MP4 shards</text>
+    <text x="46" y="682" font-size="18">Shared video data is copied into Paimon</text>
+    <path d="M 438 647 H 512" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="532" y="576" width="440" height="142" rx="10" fill="#f1eafa" stroke="#7140ad" stroke-width="1.5"/>
+    <text x="550" y="609" font-size="23" font-weight="700" fill="#7140ad">robot_data_frames</text>
+    <text x="550" y="639" font-size="18">One row per frame</text>
+    <text x="550" y="669" font-size="18">dataset_index, indices, timestamp, task IDs</text>
+    <text x="550" y="699" font-size="18">Observations, actions, image / video BLOBs</text>
+    <text x="28" y="754" font-size="17" fill="#526277">Logical relationships only. LeRobot indices are separate from Paimon's internal row IDs.</text>
+  </g>
+</svg>

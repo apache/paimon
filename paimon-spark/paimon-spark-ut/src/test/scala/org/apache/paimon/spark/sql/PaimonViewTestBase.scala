@@ -18,9 +18,15 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.PaimonHiveTestBase
+import org.apache.paimon.spark.{PaimonHiveTestBase, SparkCatalog}
+import org.apache.paimon.spark.catalog.SupportView
+import org.apache.paimon.spark.catalyst.analysis.PaimonViewResolver
+import org.apache.paimon.view.View
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.connector.catalog.Identifier
+
+import java.util.Collections
 
 abstract class PaimonViewTestBase extends PaimonHiveTestBase {
 
@@ -61,6 +67,214 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
             }
           }
         }
+    }
+  }
+
+  test("Paimon View: reject recursive replacement") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("test_db") {
+      sql("CREATE DATABASE test_db")
+      sql("USE test_db")
+      withView("v1", "v2") {
+        sql("CREATE VIEW v1 AS SELECT 1 AS id")
+        val selfReference = intercept[IllegalArgumentException] {
+          sql("CREATE OR REPLACE VIEW v1 AS SELECT * FROM v1")
+        }
+        assert(selfReference.getMessage.contains("Recursive Paimon view reference detected"))
+        assert(
+          selfReference.getMessage.contains("paimon_hive.test_db.v1 -> paimon_hive.test_db.v1"))
+        checkAnswer(sql("SELECT * FROM v1"), Seq(Row(1)))
+
+        sql("CREATE VIEW v2 AS SELECT * FROM v1")
+        val indirectReference = intercept[IllegalArgumentException] {
+          sql("CREATE OR REPLACE VIEW v1 AS SELECT * FROM v2")
+        }
+        assert(
+          indirectReference.getMessage.contains(
+            "paimon_hive.test_db.v1 -> paimon_hive.test_db.v2 -> paimon_hive.test_db.v1"))
+        checkAnswer(sql("SELECT * FROM v1"), Seq(Row(1)))
+      }
+    }
+  }
+
+  test("Paimon View: reject persisted recursive views") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("test_db") {
+      sql("CREATE DATABASE test_db")
+      sql("USE test_db")
+      withView("v1", "v2") {
+        val viewCatalog =
+          spark.sessionState.catalogManager.currentCatalog.asInstanceOf[SupportView]
+        val v1 = Identifier.of(Array("test_db"), "v1")
+        val schema = sql("SELECT 1 AS id").schema
+        sql("CREATE VIEW v1 AS SELECT 1 AS id")
+        sql("CREATE VIEW v2 AS SELECT * FROM v1")
+        Seq(
+          "SELECT * FROM v1",
+          "SELECT * FROM v2",
+          "SELECT 1 AS id WHERE EXISTS (SELECT * FROM v1)",
+          "SELECT (SELECT max(id) FROM v1) AS id"
+        ).foreach {
+          query =>
+            // Simulate a recursive view persisted by an older Paimon version.
+            viewCatalog.dropView(v1, true)
+            viewCatalog.createView(
+              v1,
+              schema,
+              query,
+              null,
+              Collections.emptyMap[String, String](),
+              false)
+            val error = intercept[IllegalArgumentException] {
+              sql("SELECT * FROM v1")
+            }
+            assert(error.getMessage.contains("Recursive Paimon view reference detected"))
+            assert(error.getMessage.contains("paimon_hive.test_db.v1"))
+        }
+        // An invalid legacy definition can still be replaced with a valid one.
+        sql("CREATE OR REPLACE VIEW v1 AS SELECT 2 AS id")
+        checkAnswer(sql("SELECT * FROM v2"), Seq(Row(2)))
+      }
+    }
+  }
+
+  test("Paimon View: reject recursive replacement in subqueries") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("test_db") {
+      sql("CREATE DATABASE test_db")
+      sql("USE test_db")
+      withTable("t") {
+        withView("v1") {
+          sql("CREATE TABLE t (id INT) USING paimon")
+          sql("INSERT INTO t VALUES (1)")
+          sql("CREATE VIEW v1 AS SELECT * FROM t")
+
+          Seq(
+            "SELECT * FROM t WHERE EXISTS (SELECT * FROM v1)",
+            "SELECT * FROM t WHERE id IN (SELECT id FROM v1)",
+            "SELECT (SELECT max(id) FROM v1) AS id FROM t",
+            "WITH c AS (SELECT * FROM v1) SELECT * FROM c"
+          ).foreach {
+            query =>
+              val error = intercept[IllegalArgumentException] {
+                sql(s"CREATE OR REPLACE VIEW v1 AS $query")
+              }
+              assert(error.getMessage.contains("paimon_hive.test_db.v1 -> paimon_hive.test_db.v1"))
+              checkAnswer(sql("SELECT * FROM v1"), Seq(Row(1)))
+          }
+        }
+      }
+    }
+  }
+
+  test("Paimon View: reject recursive replacement with mixed case identifiers") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("test_db") {
+      sql("CREATE DATABASE test_db")
+      sql("USE test_db")
+      withView("v1") {
+        sql("CREATE VIEW v1 AS SELECT 1 AS id")
+        val error = intercept[IllegalArgumentException] {
+          sql("CREATE OR REPLACE VIEW v1 AS SELECT * FROM TEST_DB.V1")
+        }
+        assert(error.getMessage.contains("paimon_hive.test_db.v1 -> paimon_hive.test_db.v1"))
+        checkAnswer(sql("SELECT * FROM v1"), Seq(Row(1)))
+      }
+    }
+  }
+
+  test("Paimon View: allow CTE shadowing and shared view dependencies") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("test_db") {
+      sql("CREATE DATABASE test_db")
+      sql("USE test_db")
+      withView("v1", "v2", "v3", "v4") {
+        sql("CREATE VIEW v1 AS SELECT 1 AS id")
+        sql("CREATE OR REPLACE VIEW v1 AS WITH v1 AS (SELECT 2 AS id) SELECT * FROM v1")
+        checkAnswer(sql("SELECT * FROM v1"), Seq(Row(2)))
+        sql("CREATE VIEW v2 AS SELECT * FROM v1")
+        sql("CREATE VIEW v3 AS SELECT * FROM v1")
+        sql("CREATE VIEW v4 AS SELECT * FROM v2 UNION ALL SELECT * FROM v3")
+        checkAnswer(sql("SELECT * FROM v4"), Seq(Row(2), Row(2)))
+      }
+    }
+  }
+
+  test("Paimon View: reuse validation within a traversal but not across queries") {
+    val catalogName = "paimon_counting_views"
+    withSQLConf(
+      s"spark.sql.catalog.$catalogName" -> classOf[CountingViewSparkCatalog].getName,
+      s"spark.sql.catalog.$catalogName.metastore" -> "hive",
+      s"spark.sql.catalog.$catalogName.uri" -> PaimonHiveTestBase.hiveUri,
+      s"spark.sql.catalog.$catalogName.warehouse" -> tempHiveDBDir.getCanonicalPath
+    ) {
+      sql(s"USE $catalogName")
+      withDatabase("test_db") {
+        sql("CREATE DATABASE test_db")
+        sql("USE test_db")
+        val names = (0 until 8).map(i => s"v$i")
+        withView(names: _*) {
+          sql("CREATE VIEW v0 AS SELECT 1 AS id")
+          names.indices.drop(1).foreach {
+            i => sql(s"CREATE VIEW ${names(i)} AS SELECT * FROM ${names(i - 1)}")
+          }
+          val catalog = spark.sessionState.catalogManager.currentCatalog
+            .asInstanceOf[CountingViewSparkCatalog]
+          val resolver = PaimonViewResolver(spark)
+          def query = spark.sessionState.sqlParser.parsePlan(s"SELECT * FROM ${names.last}")
+
+          catalog.viewLoads = 0
+          resolver(query)
+          // A chain must not trigger another full dependency scan for every expanded view.
+          assert(catalog.viewLoads <= names.size * 2, s"View loads: ${catalog.viewLoads}")
+
+          // Reusing the rule for a new query must detect a newly persisted cycle.
+          val first = Identifier.of(Array("test_db"), names.head)
+          catalog.dropView(first, true)
+          catalog.createView(
+            first,
+            sql("SELECT 1 AS id").schema,
+            s"SELECT * FROM ${names.last}",
+            null,
+            Collections.emptyMap[String, String](),
+            false)
+          val error = intercept[IllegalArgumentException] {
+            resolver(query)
+          }
+          assert(error.getMessage.contains("Recursive Paimon view reference detected"))
+        }
+      }
+    }
+  }
+
+  test("Paimon View: enforce nested depth for shared dependencies") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("test_db") {
+      sql("CREATE DATABASE test_db")
+      sql("USE test_db")
+      withTable("t") {
+        withView("v1", "v2", "v3", "v4") {
+          sql("CREATE TABLE t (id INT) USING paimon")
+          sql("INSERT INTO t VALUES (1)")
+          sql("CREATE VIEW v1 AS SELECT * FROM t")
+          sql("CREATE VIEW v2 AS SELECT * FROM v1")
+          sql("CREATE VIEW v3 AS SELECT * FROM v2")
+          sql("CREATE VIEW v4 AS SELECT * FROM v1 UNION ALL SELECT * FROM v3")
+          withSQLConf("spark.sql.view.maxNestedViewDepth" -> "1") {
+            checkAnswer(sql("SELECT * FROM v1"), Seq(Row(1)))
+          }
+          withSQLConf("spark.sql.view.maxNestedViewDepth" -> "3") {
+            checkAnswer(sql("SELECT * FROM v3"), Seq(Row(1)))
+            val error = intercept[IllegalArgumentException] {
+              sql("SELECT * FROM v4")
+            }
+            assert(error.getMessage.contains("spark.sql.view.maxNestedViewDepth (3)"))
+          }
+          withSQLConf("spark.sql.view.maxNestedViewDepth" -> "4") {
+            checkAnswer(sql("SELECT * FROM v4"), Seq(Row(1), Row(1)))
+          }
+        }
+      }
     }
   }
 
@@ -393,5 +607,14 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
           }
         }
     }
+  }
+}
+
+private[sql] class CountingViewSparkCatalog extends SparkCatalog {
+  var viewLoads: Int = 0
+
+  override def loadView(ident: Identifier): View = {
+    viewLoads += 1
+    super.loadView(ident)
   }
 }

@@ -26,7 +26,7 @@ from pypaimon.globalindex.global_index_reader import (
     _completed_future,
 )
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.globalindex.union_global_index_reader import UnionGlobalIndexReader
+from pypaimon.execution.python.globalindex.union_global_index_reader import UnionGlobalIndexReader
 from pypaimon.utils.range import Range
 
 

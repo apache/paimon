@@ -46,6 +46,7 @@ import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOExceptionSupplier;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.RecordWriter;
@@ -163,6 +164,12 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             boolean ignorePreviousFiles) {
         DataFilePathFactory dataPathFactory =
                 pathFactory.createDataFilePathFactory(partition, bucket);
+        boolean useWriteBuffer = options.useWriteBufferForAppend() || forceBufferSpill;
+        if (blobContext != null
+                && !fieldNamesInBlobFile(writeType, blobContext.blobInlineFields()).isEmpty()) {
+            // Buffer serialization drops source readers needed to copy descriptor-backed BLOBs.
+            useWriteBuffer = false;
+        }
         return new AppendOnlyWriter(
                 fileIO,
                 ioManager,
@@ -182,7 +189,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.commitForceCompact(),
                 dataPathFactory,
                 restoreIncrement,
-                options.useWriteBufferForAppend() || forceBufferSpill,
+                useWriteBuffer,
                 options.writeBufferSpillable() || forceBufferSpill,
                 options.fileCompression(),
                 options.spillCompressOptions(),
@@ -256,9 +263,10 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
 
     @Override
     public void close() throws Exception {
-        super.close();
-        if (blobFetchMetrics != null) {
-            blobFetchMetrics.close();
+        if (blobFetchMetrics == null) {
+            super.close();
+        } else {
+            IOUtils.closeAll(super::close, blobFetchMetrics::close);
         }
     }
 

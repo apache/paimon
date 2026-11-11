@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.schema.{SchemaManager, TableSchema}
 import org.apache.paimon.spark.sources.{PaimonMicroBatchStream, PaimonSourceOffset}
 import org.apache.paimon.table.DataTable
@@ -163,6 +164,99 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
+  test("Paimon Source: expose exact offset ranges for split full snapshots") {
+    withTempDir {
+      checkpointDir =>
+        val TableSnapshotState(_, location, snapshotData, _, _) =
+          prepareTableAndGetLocation(3, hasPk = true)
+        @volatile var ranges = Vector.empty[(Long, String, String)]
+        @volatile var rowCount = 0L
+
+        withStartedQuery(
+          spark.readStream
+            .format("paimon")
+            .option(CoreOptions.CONSUMER_ID.key(), "offset-range-test")
+            .option("scan.mode", "latest-full")
+            .option("read.stream.maxFilesPerTrigger", "1")
+            .load(location)
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], batchId: Long) =>
+                val range = PaimonSparkMicroBatchMetadata.offsetRange(batch, batchId)
+                assert(range.isPresent)
+                assert(!PaimonSparkMicroBatchMetadata.offsetRange(batch, batchId + 1).isPresent)
+                ranges :+= ((batchId, range.get().startOffset, range.get().endOffset))
+                rowCount += batch.count()
+                ()
+            }
+            .start()) {
+          query =>
+            query.processAllAvailable()
+            assert(ranges.size >= 2)
+            assert(rowCount == snapshotData.size)
+            assert(ranges.map(_._1) == ranges.indices.map(_.toLong))
+            assert(ranges.sliding(2).forall(pair => pair.size < 2 || pair.head._3 == pair(1)._2))
+            val firstEnd = PaimonSourceOffset(ranges.head._3)
+            val lastEnd = PaimonSourceOffset(ranges.last._3)
+            assert(firstEnd.scanSnapshot)
+            assert(firstEnd.totalSplits.exists(_ > 1L))
+            assert(firstEnd.index < firstEnd.totalSplits.get - 1L)
+            assert(lastEnd.snapshotCompleted)
+        }
+    }
+  }
+
+  test("Paimon Source: expose the offset range of an empty full snapshot") {
+    withTempDir {
+      checkpointDir =>
+        spark.sql(
+          "CREATE TABLE T (a INT, b STRING) TBLPROPERTIES ('primary-key'='a', 'bucket'='2')")
+        val location = loadTable("T").location().toString
+        spark.sql("INSERT INTO T VALUES (1, 'before')")
+        spark.sql("INSERT OVERWRITE T SELECT * FROM T WHERE false")
+        val emptySnapshotId = loadTable("T").snapshotManager().latestSnapshotId()
+        @volatile var ranges = Vector.empty[(String, String)]
+
+        withStartedQuery(
+          spark.readStream
+            .format("paimon")
+            .option(CoreOptions.CONSUMER_ID.key(), "empty-offset-range-test")
+            .load(location)
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], batchId: Long) =>
+                val range = PaimonSparkMicroBatchMetadata.offsetRange(batch, batchId)
+                assert(range.isPresent)
+                if (batchId == 0) {
+                  assert(!PaimonSparkMicroBatchMetadata.writtenColumnIds(batch).isPresent)
+                  assert(batch.count() == 0L)
+                }
+                assert(!PaimonSparkMicroBatchMetadata.offsetRange(batch, batchId + 1).isPresent)
+                ranges :+= ((range.get().startOffset, range.get().endOffset))
+                ()
+            }
+            .start()) {
+          query =>
+            query.processAllAvailable()
+            assert(ranges.size == 1)
+            val start = PaimonSourceOffset(ranges.head._1)
+            val end = PaimonSourceOffset(ranges.head._2)
+            assert(start.snapshotId == emptySnapshotId)
+            assert(start.scanSnapshot)
+            assert(end.snapshotId == emptySnapshotId + 1L)
+            assert(end.emptySnapshotCompleted)
+
+            spark.sql("INSERT INTO T VALUES (2, 'after')")
+            query.processAllAvailable()
+            assert(ranges.size == 2)
+            assert(ranges(1)._1 == ranges.head._2)
+            assert(PaimonSourceOffset(ranges(1)._2).snapshotId == emptySnapshotId + 1L)
+        }
+    }
+  }
+
   test("Paimon Source: expose written columns for a self-union") {
     withTempDir {
       checkpointDir =>
@@ -218,9 +312,10 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
               .writeStream
               .option("checkpointLocation", checkpointDir.getCanonicalPath)
               .foreachBatch {
-                (batch: Dataset[Row], _: Long) =>
+                (batch: Dataset[Row], batchId: Long) =>
                   val metadataPresent =
                     PaimonSparkMicroBatchMetadata.writtenColumnIds(batch).isPresent
+                  assert(!PaimonSparkMicroBatchMetadata.offsetRange(batch, batchId).isPresent)
                   if (batch.count() > 0) {
                     nonEmptyBatchMetadataPresent = nonEmptyBatchMetadataPresent :+ metadataPresent
                   }
@@ -432,8 +527,8 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
         val ts1 = System.currentTimeMillis()
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
           prepareTableAndGetLocation(3, true)
-        // timestamp that is after this table is created and data is written.
-        val ts2 = System.currentTimeMillis()
+        // Streaming reads include snapshots at the start timestamp, so exclude the last snapshot.
+        val ts2 = loadTable("T").snapshotManager().latestSnapshot().timeMillis() + 1
 
         val query1 = spark.readStream
           .format("paimon")
@@ -994,10 +1089,10 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
   test("Paimon Source: with error options") {
     withTempDir {
       checkpointDir =>
-        val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
+        val TableSnapshotState(_, location, _, _, _) =
           prepareTableAndGetLocation(3, true)
 
-        assertThrows[IllegalArgumentException] {
+        withStartedQuery(
           spark.readStream
             .format("paimon")
             .option("scan.snapshot-id", 3)
@@ -1009,7 +1104,19 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
             .queryName("mem_table")
             .outputMode("append")
             .trigger(Trigger.ProcessingTime(5, TimeUnit.SECONDS))
-            .start()
+            .start()) {
+          query =>
+            val error = intercept[StreamingQueryException] {
+              query.processAllAvailable()
+            }
+            val cause = Iterator
+              .iterate(error: Throwable)(_.getCause)
+              .takeWhile(_ != null)
+              .collectFirst { case cause: IllegalArgumentException => cause }
+              .getOrElse(fail("Expected an IllegalArgumentException in the cause chain", error))
+            assert(cause.getMessage.contains("scan.snapshot-id"))
+            assert(cause.getMessage.contains("scan.timestamp-millis"))
+            assert(cause.getMessage.contains("must be null when you set"))
         }
     }
   }

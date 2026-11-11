@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex.sorted;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
@@ -43,7 +44,6 @@ import org.apache.paimon.utils.Range;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -61,9 +61,9 @@ public class SortedGlobalIndexWriter implements Serializable {
     private final FileStoreTable table;
     private final RowType rowType;
     private final Options options;
-    private final long recordsPerRange;
+    private Options indexOptions;
 
-    private DataField indexField;
+    private List<DataField> indexFields;
     private GlobalIndexKeyExtractor keyExtractor;
 
     public SortedGlobalIndexWriter(Table table, String indexType) {
@@ -75,18 +75,23 @@ public class SortedGlobalIndexWriter implements Serializable {
         this.table = (FileStoreTable) table;
         this.rowType = this.table.rowType();
         this.options = options;
-        this.recordsPerRange =
-                (long) (options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE) * FLOATING);
+        this.indexOptions = options;
     }
 
-    public SortedGlobalIndexWriter withIndexField(String indexField) {
-        checkArgument(
-                rowType.containsField(indexField),
-                "Column '%s' does not exist in table '%s'.",
-                indexField,
-                table.fullName());
-        this.indexField = rowType.getField(indexField);
-        GlobalIndexer indexer = GlobalIndexer.create(indexType, this.indexField, options);
+    public SortedGlobalIndexWriter withIndexFields(List<String> fieldNames) {
+        checkArgument(!fieldNames.isEmpty(), "At least one index column is required.");
+        this.indexFields = new ArrayList<>();
+        for (String name : fieldNames) {
+            checkArgument(
+                    rowType.containsField(name),
+                    "Column '%s' does not exist in table '%s'.",
+                    name,
+                    table.fullName());
+            indexFields.add(rowType.getField(name));
+        }
+        this.indexOptions =
+                new CoreOptions(options).globalIndexOptions(indexType, indexFields.get(0).name());
+        GlobalIndexer indexer = GlobalIndexer.create(indexType, indexFields, indexOptions);
         checkArgument(
                 indexer instanceof SortedGlobalIndexer,
                 "Index algorithm %s does not expose sorted index keys.",
@@ -100,7 +105,12 @@ public class SortedGlobalIndexWriter implements Serializable {
     }
 
     public long recordsPerRange() {
-        return recordsPerRange;
+        return (long)
+                (indexOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE) * FLOATING);
+    }
+
+    public Options indexOptions() {
+        return indexOptions;
     }
 
     public List<CommitMessage> buildForSinglePartition(
@@ -125,13 +135,14 @@ public class SortedGlobalIndexWriter implements Serializable {
     /** Creates a task writer which owns file rotation and source-row coverage semantics. */
     public SortedSingleColumnIndexWriter createTaskWriter(Range rowRange) throws IOException {
         if (keyExtractor.isIdentity()) {
-            return new SortedSingleColumnIndexWriter(recordsPerRange, this::createWriter);
+            return new SortedSingleColumnIndexWriter(recordsPerRange(), this::createWriter);
         }
         return SortedSingleColumnIndexWriter.forSourceRowCount(rowRange.count(), createWriter());
     }
 
     public GlobalIndexSingleColumnWriter createWriter() throws IOException {
-        GlobalIndexWriter indexWriter = createIndexWriter(table, indexType, indexField, options);
+        GlobalIndexWriter indexWriter =
+                createIndexWriter(table, indexType, indexFields, indexOptions);
         if (!(indexWriter instanceof GlobalIndexSingleColumnWriter)) {
             throw new RuntimeException(
                     "Unexpected implementation, the index writer of "
@@ -155,7 +166,7 @@ public class SortedGlobalIndexWriter implements Serializable {
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
-                        Collections.singletonList(indexField),
+                        indexFields,
                         indexType,
                         resultEntries,
                         sourceMeta);

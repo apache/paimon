@@ -23,7 +23,6 @@ shuffle join (unlike ``merge_into(on=["_ROW_ID"])``, which reads and joins the w
 target). Pairs with ``bucket_join``, which produces the row ids.
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 
 import pyarrow as pa
@@ -34,7 +33,7 @@ from pypaimon.ray.data_evolution_merge_into import (
     _require_ray_join,
 )
 from pypaimon.ray.data_evolution_merge_join import distributed_update_apply
-from pypaimon.ray.data_evolution_merge_transform import build_update_schema
+from pypaimon.write.merge_transform import build_update_schema
 from pypaimon.ray.partitioning import (
     _estimate_dataset_num_rows,
     _estimate_dataset_size_bytes,
@@ -42,8 +41,6 @@ from pypaimon.ray.partitioning import (
 from pypaimon.schema.data_types import is_blob_file_field
 
 __all__ = ["update_by_row_id"]
-
-logger = logging.getLogger(__name__)
 
 
 def _blob_col_names(table: "FileStoreTable") -> set:
@@ -68,6 +65,10 @@ def update_by_row_id(
     the target is never fully read and there is no join against it. Requires
     ``ray >= 2.50`` and a target with ``data-evolution.enabled`` + ``row-tracking.enabled``.
 
+    If concurrent compaction changes file boundaries, eligible staged updates are
+    rebased by Ray workers without reevaluating ``source``. The local Python
+    ``data-evolution.row-id-conflict-rewrite.max-size`` limit does not apply.
+
     Returns ``{"num_updated": <rows>}``.
     """
     from pypaimon.catalog.catalog_factory import CatalogFactory
@@ -85,12 +86,6 @@ def update_by_row_id(
     if not table.options.row_tracking_enabled():
         raise ValueError(
             f"update_by_row_id requires 'row-tracking.enabled'='true' on '{target}'.")
-    if table.options.deletion_vectors_enabled():
-        # A DV-deleted row still lives in its data file, so row-id ranges can't tell it
-        # apart without reading the target; refuse rather than update a deleted row.
-        raise ValueError(
-            f"update_by_row_id does not support deletion-vectors-enabled tables yet: "
-            f"'{target}'.")
 
     rid = SpecialFields.ROW_ID.name
     blob_cols = _blob_col_names(table)
@@ -139,9 +134,8 @@ def update_by_row_id(
     update_ds = source_ds.map_batches(_project_cast, batch_format="pyarrow")
 
     base = table.snapshot_manager().get_latest_snapshot()
-    # Without deletion vectors (rejected above), total_record_count is the live row
-    # count, so 0 means the target is empty (never written, or emptied by overwrite).
-    if base is None or base.total_record_count == 0:
+    if base is None or (base.total_record_count == 0
+                        and not table.options.deletion_vectors_enabled()):
         # Every source row id is foreign; don't silently no-op non-empty input.
         if update_ds.limit(1).count() > 0:
             raise ValueError(
@@ -162,25 +156,18 @@ def update_by_row_id(
         raise  # _reraise_inner always raises; keeps msgs/num_updated defined for linters
 
     if msgs:
-        _commit_update_messages(table, msgs)
+        _commit_update_messages(
+            table, msgs, num_partitions=num_partitions, ray_remote_args=ray_remote_args)
     return {"num_updated": num_updated}
 
 
-def _commit_update_messages(table, commit_messages) -> None:
-    messages = list(commit_messages)
-    table_commit = None
+def _commit_update_messages(
+        table, commit_messages, *, num_partitions=None, ray_remote_args=None) -> None:
+    from pypaimon.ray.row_id_conflict_rewriter import commit_updates_with_compaction_retry
+
     try:
-        table_commit = table.new_batch_write_builder().new_commit()
-        table_commit.commit(messages)
+        commit_updates_with_compaction_retry(
+            table, commit_messages, [],
+            num_partitions=num_partitions, ray_remote_args=ray_remote_args)
     except Exception as e:
         _reraise_inner(e)
-    finally:
-        if table_commit is not None:
-            try:
-                table_commit.close()
-            except Exception as close_error:
-                logger.warning(
-                    "Failed to close update_by_row_id commit: %s",
-                    close_error,
-                    exc_info=close_error,
-                )

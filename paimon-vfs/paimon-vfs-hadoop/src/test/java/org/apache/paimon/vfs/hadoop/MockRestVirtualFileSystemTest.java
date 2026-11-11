@@ -20,6 +20,8 @@ package org.apache.paimon.vfs.hadoop;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.HttpClientUtils;
 import org.apache.paimon.rest.RESTCatalog;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogOptions;
@@ -35,14 +37,18 @@ import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.junit.Assert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.Map;
 import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link PaimonVirtualFileSystem} with Mock Rest Server. */
 public class MockRestVirtualFileSystemTest extends VirtualFileSystemTest {
@@ -110,11 +116,42 @@ public class MockRestVirtualFileSystemTest extends VirtualFileSystemTest {
         return new RESTCatalog(CatalogContext.create(options));
     }
 
-    protected void initFs() throws Exception {
+    @Test
+    public void testUserAgent() throws Exception {
+        assertPvfsUserAgent(vfs, "HadoopPVFS");
+
+        Configuration conf = pvfsConf();
+        conf.set("fs.pvfs.user-agent.features", "Flink");
+        PaimonVirtualFileSystem withFeatures = new PaimonVirtualFileSystem();
+        withFeatures.initialize(vfsRoot.toUri(), conf);
+        assertPvfsUserAgent(withFeatures, "HadoopPVFS Flink");
+    }
+
+    private void assertPvfsUserAgent(FileSystem fs, String features) throws IOException {
+        restCatalogServer.clearReceivedHeaders();
+        fs.exists(new Path(vfsRoot, "test_db"));
+
+        Options expected = new Options();
+        expected.set(CatalogOptions.USER_AGENT_FEATURES, features);
+        assertThat(restCatalogServer.getReceivedHeaders())
+                .isNotEmpty()
+                .allSatisfy(
+                        headers ->
+                                assertThat(headers)
+                                        .containsEntry(
+                                                "user-agent", HttpClientUtils.userAgent(expected)));
+    }
+
+    private Configuration pvfsConf() {
         Configuration conf = new Configuration();
         conf.set("fs.pvfs.uri", restCatalogServer.getUrl());
         conf.set("fs.pvfs.token.provider", AuthProviderEnum.BEAR.identifier());
         conf.set("fs.pvfs.token", initToken);
+        return conf;
+    }
+
+    protected void initFs() throws Exception {
+        Configuration conf = pvfsConf();
         this.vfs = new PaimonVirtualFileSystem();
         this.vfsRoot = new Path("pvfs://" + restWarehouse + "/");
         this.vfs.initialize(vfsRoot.toUri(), conf);

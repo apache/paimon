@@ -40,11 +40,11 @@ class BranchManager:
         ignore_if_exists: bool = False
     ) -> None:
         """
-        Create a branch from the current state or from a tag.
+        Create an empty branch or initialize it from a tag.
 
         Args:
             branch_name: Name of the branch to create
-            tag_name: Optional tag name to create branch from, None for current state
+            tag_name: Optional tag name to create branch from, None for an empty branch
             ignore_if_exists: If true, do nothing when branch already exists;
                             if false, throw exception
 
@@ -143,7 +143,8 @@ class BranchManager:
         """
         if not branch or not branch.strip():
             return DEFAULT_MAIN_BRANCH
-        return branch.strip()
+        # Java preserves non-blank names; trimming would alias branch directories.
+        return branch
 
     @staticmethod
     def is_main_branch(branch: str) -> bool:
@@ -175,7 +176,7 @@ class BranchManager:
             )
         if not branch_name or not branch_name.strip():
             raise ValueError("Branch name is blank.")
-        if branch_name.strip().isdigit():
+        if branch_name.isdigit():
             raise ValueError(
                 f"Branch name cannot be pure numeric string but is '{branch_name}'."
             )

@@ -24,8 +24,11 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIOFinder;
@@ -93,7 +96,9 @@ import org.apache.commons.math3.random.RandomDataGenerator;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
@@ -115,6 +120,7 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
@@ -156,6 +162,85 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
 public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
+
+    private static Stream<Arguments> mergeMapTimestampTypes() {
+        Map<DataType, Object> timestamps = new HashMap<>();
+        timestamps.put(DataTypes.STRING(), BinaryString.fromString("100"));
+        timestamps.put(DataTypes.BIGINT(), Long.MAX_VALUE);
+        timestamps.put(DataTypes.TIMESTAMP(9), Timestamp.fromEpochMillis(0, 1));
+        timestamps.put(
+                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9), Timestamp.fromEpochMillis(0, 1));
+        return timestamps.entrySet().stream()
+                .flatMap(
+                        entry ->
+                                Stream.of(
+                                        Arguments.of(
+                                                false, false, entry.getKey(), entry.getValue()),
+                                        Arguments.of(false, true, entry.getKey(), entry.getValue()),
+                                        Arguments.of(true, false, entry.getKey(), entry.getValue()),
+                                        Arguments.of(
+                                                true, true, entry.getKey(), entry.getValue())));
+    }
+
+    @ParameterizedTest
+    @MethodSource("mergeMapTimestampTypes")
+    public void testMergeMapOverwriteOnEqualTs(
+            boolean partialUpdate, boolean overwrite, DataType tsType, Object ts) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.MAP(
+                                    DataTypes.STRING(),
+                                    DataTypes.ROW(
+                                            DataTypes.FIELD(4, "v", DataTypes.STRING()),
+                                            DataTypes.FIELD(5, "ts", tsType))),
+                            DataTypes.BIGINT()
+                        },
+                        new String[] {"pt", "a", "attrs", "seq"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(MERGE_ENGINE, partialUpdate ? PARTIAL_UPDATE : AGGREGATE);
+                            conf.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 3);
+                            conf.set("fields.attrs.aggregate-function", "merge_map_with_keytime");
+                            conf.set(
+                                    "fields.attrs." + CoreOptions.MERGE_MAP_OVERWRITE_ON_EQUAL_TS,
+                                    String.valueOf(overwrite));
+                            if (partialUpdate) {
+                                conf.set("fields.seq.sequence-group", "attrs");
+                            } else {
+                                conf.set("fields.seq.aggregate-function", "max");
+                            }
+                        },
+                        rowType);
+        Function<String, GenericMap> attrs =
+                value ->
+                        new GenericMap(
+                                Collections.singletonMap(
+                                        BinaryString.fromString("k"),
+                                        GenericRow.of(BinaryString.fromString(value), ts)));
+        Function<InternalRow, String> value =
+                row -> row.getMap(2).valueArray().getRow(0, 2).getString(0).toString();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 1, attrs.apply("buffer-old"), 1L));
+            write.write(GenericRow.of(1, 1, attrs.apply("buffer-new"), 2L));
+            commit.commit(0, write.prepareCommit(false, 0));
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), value))
+                    .containsExactly(overwrite ? "buffer-new" : "buffer-old");
+            write.write(GenericRow.of(1, 1, attrs.apply("file-new"), 3L));
+            commit.commit(1, write.prepareCommit(false, 1));
+            String expected = overwrite ? "file-new" : "buffer-old";
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), value))
+                    .containsExactly(expected);
+            write.compact(binaryRow(1), 0, true);
+            commit.commit(2, write.prepareCommit(true, 2));
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), value))
+                    .containsExactly(expected);
+        }
+    }
 
     @Test
     public void testNullablePrimaryKey() throws Exception {
@@ -641,6 +726,51 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 .isEqualTo(Collections.singletonList("1000|10"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("20001|21", "202|22"));
+    }
+
+    @Test
+    public void testBatchProjectionWithLookupSpill() throws Exception {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "pt", DataTypes.INT()),
+                        DataTypes.FIELD(1, "a", DataTypes.INT()),
+                        DataTypes.FIELD(2, "payload", DataTypes.INT()),
+                        DataTypes.FIELD(3, "items", DataTypes.ARRAY(DataTypes.INT())));
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(FILE_FORMAT, "avro");
+                            options.set(CHANGELOG_PRODUCER, LOOKUP);
+                            options.set(CoreOptions.WRITE_ONLY, true);
+                            options.set(CoreOptions.LOOKUP_MERGE_RECORDS_THRESHOLD, 1);
+                        },
+                        rowType);
+
+        try (IOManager ioManager = new IOManagerImpl(tempDir.toString())) {
+            try (StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+                    StreamTableCommit commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, 10, 100, new GenericArray(new int[] {1, 2})));
+                commit.commit(0, write.prepareCommit(true, 0));
+                write.write(GenericRow.of(1, 10, 200, new GenericArray(new int[] {3, 4})));
+                commit.commit(1, write.prepareCommit(true, 1));
+            }
+
+            ReadBuilder readBuilder =
+                    table.newReadBuilder().withReadType(rowType.project("pt", "a", "payload"));
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            assertThat(splits).hasSize(1);
+            assertThat(((DataSplit) splits.get(0)).dataFiles()).hasSize(2);
+
+            List<String> result = new ArrayList<>();
+            try (RecordReader<InternalRow> reader =
+                    readBuilder.newRead().withIOManager(ioManager).createReader(splits.get(0))) {
+                reader.forEachRemaining(
+                        row ->
+                                result.add(
+                                        row.getInt(0) + "|" + row.getInt(1) + "|" + row.getInt(2)));
+            }
+            assertThat(result).containsExactly("1|10|200");
+        }
     }
 
     @ParameterizedTest
@@ -2671,7 +2801,11 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 table.newLocalTableQuery().withIOManager(ioManager).withMetrics(metrics);
         for (DataSplit split : dataSplits) {
             query.refreshFiles(
-                    split.partition(), split.bucket(), Collections.emptyList(), split.dataFiles());
+                    split.partition(),
+                    split.bucket(),
+                    Collections.emptyList(),
+                    split.dataFiles(),
+                    split.snapshotId());
         }
         InternalRow value = query.lookup(row(1), 0, row(10));
         assertThat(value).isNotNull();
@@ -2693,7 +2827,11 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                         .withIOManager(ioManager);
         for (DataSplit split : dataSplits) {
             projected.refreshFiles(
-                    split.partition(), split.bucket(), Collections.emptyList(), split.dataFiles());
+                    split.partition(),
+                    split.bucket(),
+                    Collections.emptyList(),
+                    split.dataFiles(),
+                    split.snapshotId());
         }
         assertThatThrownBy(() -> projected.lookup(row(1), 0, row(10)))
                 .isInstanceOf(Exception.class);
@@ -2710,7 +2848,11 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                         .withIOManager(ioManager);
         for (DataSplit split : dataSplits) {
             rebuilt.refreshFiles(
-                    split.partition(), split.bucket(), Collections.emptyList(), split.dataFiles());
+                    split.partition(),
+                    split.bucket(),
+                    Collections.emptyList(),
+                    split.dataFiles(),
+                    split.snapshotId());
         }
         InternalRow projectedValue = rebuilt.lookup(row(1), 0, row(10));
         assertThat(projectedValue).isNotNull();
@@ -2934,7 +3076,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         LocalTableQuery query = table.newLocalTableQuery();
         query.withIOManager(ioManager);
 
-        refreshTableService(query, commitMessages1);
+        refreshTableService(query, commitMessages1, table.snapshotManager().latestSnapshot().id());
         InternalRow value = query.lookup(row(1), 0, row(10));
         assertThat(value).isNotNull();
         assertThat(BATCH_ROW_TO_STRING.apply(value))
@@ -2947,7 +3089,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         List<CommitMessage> commitMessages2 = write.prepareCommit(true, 0);
         commit.commit(0, commitMessages2);
 
-        refreshTableService(query, commitMessages2);
+        refreshTableService(query, commitMessages2, table.snapshotManager().latestSnapshot().id());
 
         value = query.lookup(row(1), 0, row(10));
         assertThat(value).isNotNull();
@@ -2968,8 +3110,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         query.close();
         query.withValueProjection(new int[] {2, 1, 0});
-        refreshTableService(query, commitMessages1);
-        refreshTableService(query, commitMessages2);
+        refreshTableService(query, commitMessages1, table.snapshotManager().latestSnapshot().id());
+        refreshTableService(query, commitMessages2, table.snapshotManager().latestSnapshot().id());
         value = query.lookup(row(1), 0, row(10));
         assertThat(value).isNotNull();
         Function<InternalRow, String> projectToString =
@@ -2981,19 +3123,22 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         commit.close();
     }
 
-    private void refreshTableService(LocalTableQuery query, List<CommitMessage> commitMessages) {
+    private void refreshTableService(
+            LocalTableQuery query, List<CommitMessage> commitMessages, long snapshotId) {
         for (CommitMessage m : commitMessages) {
             CommitMessageImpl msg = (CommitMessageImpl) m;
             query.refreshFiles(
                     msg.partition(),
                     msg.bucket(),
                     Collections.emptyList(),
-                    msg.newFilesIncrement().newFiles());
+                    msg.newFilesIncrement().newFiles(),
+                    snapshotId);
             query.refreshFiles(
                     msg.partition(),
                     msg.bucket(),
                     msg.compactIncrement().compactBefore(),
-                    msg.compactIncrement().compactAfter());
+                    msg.compactIncrement().compactAfter(),
+                    snapshotId);
         }
     }
 

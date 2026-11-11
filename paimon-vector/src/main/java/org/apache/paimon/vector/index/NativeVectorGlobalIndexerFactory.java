@@ -26,6 +26,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.VectorType;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Factory for creating vector indexes backed by paimon-vector-index-java. */
@@ -36,7 +37,12 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
     static final double DEFAULT_TRAIN_SAMPLE_RATIO = 1.0;
 
     @Override
-    public GlobalIndexer create(DataField field, Options options) {
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        if (indexFields.size() != 1) {
+            throw new UnsupportedOperationException(
+                    "Index type '" + identifier() + "' requires exactly one index field.");
+        }
+        DataField field = indexFields.get(0);
         String identifier = identifier();
         return new NativeVectorGlobalIndexer(
                 field.type(),

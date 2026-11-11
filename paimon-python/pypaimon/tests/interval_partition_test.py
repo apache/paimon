@@ -28,8 +28,8 @@ from pypaimon.common.options.options import Options
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.interval_partition import IntervalPartition, default_key_comparator
-from pypaimon.read.scanner.primary_key_table_split_generator import PrimaryKeyTableSplitGenerator
+from pypaimon.execution.python.read.interval_partition import IntervalPartition, default_key_comparator
+from pypaimon.execution.python.read.scanner.primary_key_table_split_generator import (PrimaryKeyTableSplitGenerator)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer, GenericRowSerializer
 
@@ -63,6 +63,7 @@ def test_signed_zero_key_ranges_keep_versions_in_one_split(type_name):
 
     path_factory = Mock()
     path_factory.bucket_path.return_value = '/tmp/interval-test/bucket-0'
+    path_factory.data_file_path.return_value = '/tmp/interval-test'
     table = SimpleNamespace(table_path='/tmp/interval-test', options=CoreOptions(Options({})),
                             path_factory=lambda: path_factory)
     entries = [ManifestEntry(0, GenericRow([], []), 0, 1, file) for file in files]

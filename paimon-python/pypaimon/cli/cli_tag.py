@@ -17,10 +17,10 @@
 
 """Tag commands for the Paimon CLI.
 
-Adds the top-level ``tag {create,list,delete,get}`` subcommands (alongside
-``table`` / ``db`` / ``catalog``). All operations go through the Catalog
-layer so they get typed exceptions and work for both filesystem and REST
-catalogs.
+Adds the top-level ``tag {create,list,get,delete,rename,replace}``
+subcommands (alongside ``table`` / ``db`` / ``catalog``). All operations go
+through the Catalog layer so they get typed exceptions and work for both
+filesystem and REST catalogs.
 """
 
 import json
@@ -61,6 +61,7 @@ def cmd_tag_create(args):
             identifier,
             args.tag_name,
             snapshot_id=args.snapshot_id,
+            time_retained=args.time_retained,
             ignore_if_exists=args.ignore_if_exists,
         )
     except TableNotExistException:
@@ -94,6 +95,54 @@ def cmd_tag_delete(args):
         print("Error: Failed to delete tag: {}".format(e), file=sys.stderr)
         sys.exit(1)
     print("Tag '{}' deleted from table '{}'.".format(args.tag_name, identifier))
+
+
+def cmd_tag_rename(args):
+    """Execute ``tag rename``."""
+    catalog, identifier = _open_catalog(args)
+    try:
+        catalog.rename_tag(identifier, args.tag_name, args.target_tag_name)
+    except TableNotExistException:
+        print("Error: Table '{}' does not exist.".format(identifier),
+              file=sys.stderr)
+        sys.exit(1)
+    except TagNotExistException:
+        print("Error: Tag '{}' does not exist.".format(args.tag_name),
+              file=sys.stderr)
+        sys.exit(1)
+    except TagAlreadyExistException:
+        print("Error: Tag '{}' already exists.".format(args.target_tag_name),
+              file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print("Error: Failed to rename tag: {}".format(e), file=sys.stderr)
+        sys.exit(1)
+    print("Tag '{}' renamed to '{}' on table '{}'.".format(
+        args.tag_name, args.target_tag_name, identifier))
+
+
+def cmd_tag_replace(args):
+    """Execute ``tag replace``."""
+    catalog, identifier = _open_catalog(args)
+    try:
+        catalog.replace_tag(
+            identifier,
+            args.tag_name,
+            snapshot_id=args.snapshot_id,
+            time_retained=args.time_retained,
+        )
+    except TableNotExistException:
+        print("Error: Table '{}' does not exist.".format(identifier),
+              file=sys.stderr)
+        sys.exit(1)
+    except TagNotExistException:
+        print("Error: Tag '{}' does not exist.".format(args.tag_name),
+              file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print("Error: Failed to replace tag: {}".format(e), file=sys.stderr)
+        sys.exit(1)
+    print("Tag '{}' replaced on table '{}'.".format(args.tag_name, identifier))
 
 
 def cmd_tag_list(args):
@@ -179,6 +228,9 @@ def add_tag_subcommands(subparsers):
     create_parser.add_argument(
         '--ignore-if-exists', '-i', action='store_true',
         help='Do not error if the tag already exists')
+    create_parser.add_argument(
+        '--time-retained', '-r', default=None,
+        help='Retention for the new tag, for example 1d or 12h')
     create_parser.set_defaults(func=cmd_tag_create)
 
     # tag list
@@ -212,3 +264,26 @@ def add_tag_subcommands(subparsers):
         'table', help='Table identifier in format: database.table')
     delete_parser.add_argument('tag_name', help='Name of the tag to delete')
     delete_parser.set_defaults(func=cmd_tag_delete)
+
+    # tag rename
+    rename_parser = tag_subparsers.add_parser(
+        'rename', help='Rename a tag')
+    rename_parser.add_argument(
+        'table', help='Table identifier in format: database.table')
+    rename_parser.add_argument('tag_name', help='Current tag name')
+    rename_parser.add_argument('target_tag_name', help='New tag name')
+    rename_parser.set_defaults(func=cmd_tag_rename)
+
+    # tag replace
+    replace_parser = tag_subparsers.add_parser(
+        'replace', help='Point an existing tag at a snapshot')
+    replace_parser.add_argument(
+        'table', help='Table identifier in format: database.table')
+    replace_parser.add_argument('tag_name', help='Name of the tag to replace')
+    replace_parser.add_argument(
+        '--snapshot-id', '-s', type=int, default=None,
+        help='Snapshot id to point at (default: the latest snapshot)')
+    replace_parser.add_argument(
+        '--time-retained', '-r', default=None,
+        help='Retention for the replaced tag, for example 1d or 12h')
+    replace_parser.set_defaults(func=cmd_tag_replace)

@@ -20,8 +20,8 @@
 import unittest
 from unittest.mock import Mock
 
-from pypaimon.read.scanner.delta_follow_up_scanner import DeltaFollowUpScanner
-from pypaimon.read.scanner.follow_up_scanner import FollowUpScanner
+from pypaimon.execution.python.read.scanner.delta_follow_up_scanner import (DeltaFollowUpScanner)
+from pypaimon.execution.python.read.scanner.follow_up_scanner import (FollowUpScanner)
 
 
 class FollowUpScannerInterfaceTest(unittest.TestCase):

@@ -75,7 +75,7 @@ class HybridSearchExecutionTest(unittest.TestCase):
         builder = _execution_builder([lambda: "result"])
 
         with mock.patch(
-                "pypaimon.table.source.hybrid_search_builder."
+                "pypaimon.execution.python.read.search.hybrid_search."
                 "ThreadPoolExecutor") as executor:
             self.assertEqual(
                 [("route-0", "result")], builder.execute_local())
@@ -93,7 +93,7 @@ class HybridSearchExecutionTest(unittest.TestCase):
             return ThreadPoolExecutor(*args, **kwargs)
 
         with mock.patch(
-                "pypaimon.table.source.hybrid_search_builder."
+                "pypaimon.execution.python.read.search.hybrid_search."
                 "ThreadPoolExecutor", side_effect=new_executor):
             builder.execute_local()
 

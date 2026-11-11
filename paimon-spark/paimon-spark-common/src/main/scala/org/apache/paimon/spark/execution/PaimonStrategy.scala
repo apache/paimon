@@ -173,6 +173,7 @@ case class PaimonStrategy(spark: SparkSession)
           replace
         ) =>
       CreatePaimonViewExec(
+        spark,
         viewCatalog,
         ident,
         queryText,

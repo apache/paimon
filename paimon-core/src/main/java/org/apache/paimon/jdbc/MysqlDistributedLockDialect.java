@@ -32,6 +32,7 @@ public class MysqlDistributedLockDialect extends AbstractDistributedLockDialect 
                 + " TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,"
                 + JdbcUtils.EXPIRE_TIME
                 + " BIGINT DEFAULT 0 NOT NULL,"
+                + "lock_owner VARCHAR(36),"
                 + "PRIMARY KEY ("
                 + JdbcUtils.LOCK_ID
                 + ")"
@@ -62,12 +63,31 @@ public class MysqlDistributedLockDialect extends AbstractDistributedLockDialect 
     public String getTryReleaseTimedOutLock() {
         return "DELETE FROM "
                 + JdbcUtils.DISTRIBUTED_LOCKS_TABLE_NAME
-                + " WHERE TIMESTAMPDIFF(SECOND, "
-                + JdbcUtils.ACQUIRED_AT
-                + ", NOW()) >"
-                + JdbcUtils.EXPIRE_TIME
+                + " WHERE "
+                + getExpirationCondition()
                 + " and "
                 + JdbcUtils.LOCK_ID
                 + " = ?";
+    }
+
+    @Override
+    protected String getRenewalTime() {
+        return "SYSDATE()";
+    }
+
+    @Override
+    protected String getOwnedExpirationCondition() {
+        return "TIMESTAMPDIFF(SECOND, "
+                + JdbcUtils.ACQUIRED_AT
+                + ", SYSDATE()) > "
+                + JdbcUtils.EXPIRE_TIME;
+    }
+
+    @Override
+    protected String getExpirationCondition() {
+        return "TIMESTAMPDIFF(SECOND, "
+                + JdbcUtils.ACQUIRED_AT
+                + ", NOW()) >"
+                + JdbcUtils.EXPIRE_TIME;
     }
 }

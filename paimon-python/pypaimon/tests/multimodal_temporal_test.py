@@ -19,6 +19,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import tracemalloc
 import unittest
 from datetime import datetime, timedelta
@@ -30,11 +31,51 @@ import pytest
 import pypaimon.multimodal as pmm
 from pypaimon.multimodal import temporal
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
-from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
+from pypaimon.execution.python.read.reader.format_pyarrow_reader import (FormatPyArrowReader)
 from pypaimon.read.table_scan import TableScan
 
 
 class MultimodalTemporalTest(unittest.TestCase):
+
+    def test_row_id_fetch_preserves_request_order(self):
+        for found in ([1, 2, 3, 9], [9, 2, 1, 3], [2**63 - 1, 0]):
+            for requested in (list(reversed(found)), [found[0]] * 3):
+                with self.subTest(found=found, requested=requested):
+                    fetcher = self._row_id_fetcher(found)
+                    result = fetcher.fetch(np.asarray(requested, dtype=np.int64))
+                    self.assertEqual(result["value"].to_pylist(), requested)
+
+    def test_row_id_fetch_keeps_exact_ranges(self):
+        fetcher = self._row_id_fetcher([1, 2, 4, 5, 9])
+        fetcher.fetch([9, 1, 2, 4, 5, 1])
+        fetcher._find_splits.assert_called_once_with([
+            temporal.Range(1, 2), temporal.Range(4, 5), temporal.Range(9, 9)])
+
+    def test_row_id_fetch_rejects_missing_and_duplicate_ids(self):
+        for found, requested, error in (
+                ([1, 1], [1], "Duplicate row id"),
+                ([1, 2], [3], "disappeared"),
+                ([], [1], "disappeared"),
+                ([None], [1], "Null row id")):
+            with self.subTest(found=found, requested=requested):
+                with self.assertRaisesRegex(RuntimeError, error):
+                    self._row_id_fetcher(found).fetch(requested)
+        self.assertEqual(
+            self._row_id_fetcher([]).fetch(np.array([], dtype=np.int64)).num_rows, 0)
+
+    @staticmethod
+    def _row_id_fetcher(ids):
+        fetcher = temporal._RowIdFetcher.__new__(temporal._RowIdFetcher)
+        fetcher._schema = pa.schema([("value", pa.int64())])
+        fetcher._row_id_name = temporal._ROW_ID
+        fetcher._name_paths = None
+        fetcher._find_splits = mock.Mock(return_value=[])
+        fetcher._read = mock.Mock()
+        fetcher._read.to_arrow.return_value = pa.table({
+            "value": pa.array(ids, type=pa.int64()),
+            temporal._ROW_ID: pa.array(ids, type=pa.int64()),
+        })
+        return fetcher
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp(prefix="pypaimon_temporal_")
@@ -44,6 +85,301 @@ class MultimodalTemporalTest(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _parallel_alignment(self):
+        tables = []
+        for name in ("a", "b", "c", "d"):
+            table = self._table("parallel_" + name, {
+                "episode_id": pa.int32(), "event_time": pa.int64(), name: pa.int64()})
+            table.add([{"episode_id": 1, "event_time": i, name: i} for i in range(3)])
+            tables.append(table)
+        aligned = pmm.join_asof(
+            tables[0].scan(), tables[1].scan(),
+            on="event_time", by="episode_id")
+        return aligned.join_asof(tables[2].scan()).join_asof(tables[3].scan())
+
+    def test_parallel_sources_preserve_results_and_bound_reads(self):
+        aligned = self._parallel_alignment()
+        reader = aligned.to_arrow_batch_reader(parallelism=1)
+        try:
+            expected = reader.read_all()
+        finally:
+            reader.close()
+        barrier = threading.Barrier(2)
+        lock = threading.Lock()
+        active = [0, 0]
+        original = temporal._RowIdFetcher.fetch
+
+        def fetch(fetcher, row_ids):
+            with lock:
+                active[0] += 1
+                active[1] = max(active)
+            try:
+                barrier.wait(timeout=10)
+                return original(fetcher, row_ids)
+            finally:
+                with lock:
+                    active[0] -= 1
+
+        with mock.patch.object(temporal._RowIdFetcher, "fetch", fetch):
+            reader = aligned.to_arrow_batch_reader(batch_size=2, parallelism=2)
+            try:
+                actual = reader.read_all()
+            finally:
+                reader.close()
+        self.assertEqual(expected, actual)
+        self.assertEqual([0, 2], active)
+
+    def test_parallel_sources_plan_independently(self):
+        aligned = self._parallel_alignment()
+        barrier = threading.Barrier(3)
+        original = temporal._AsOfJoinRight.plan
+
+        def plan(source):
+            barrier.wait(timeout=10)
+            return original(source)
+
+        with mock.patch.object(temporal._AsOfJoinRight, "plan", plan):
+            reader = aligned.to_arrow_batch_reader(parallelism=4)
+            try:
+                self.assertEqual(3, len(reader.read_all()))
+            finally:
+                reader.close()
+
+    def test_parallel_payload_failure_joins_workers_and_closes_input(self):
+        aligned = self._parallel_alignment()
+        barrier = threading.Barrier(4)
+        lock = threading.Lock()
+        finished = []
+        closed = []
+        original_fetch = temporal._RowIdFetcher.fetch
+        original_metadata = temporal._metadata_batches
+
+        def metadata(*args):
+            try:
+                yield from original_metadata(*args)
+            finally:
+                closed.append(True)
+
+        def fetch(fetcher, row_ids):
+            try:
+                barrier.wait(timeout=10)
+                if "b" in fetcher.schema.names:
+                    raise RuntimeError("payload failed")
+                return original_fetch(fetcher, row_ids)
+            finally:
+                with lock:
+                    finished.append(True)
+
+        with mock.patch.object(temporal, "_metadata_batches", metadata), \
+                mock.patch.object(temporal._RowIdFetcher, "fetch", fetch):
+            reader = aligned.to_arrow_batch_reader(parallelism=4)
+            try:
+                with self.assertRaisesRegex(Exception, "payload failed"):
+                    reader.read_all()
+                self.assertEqual(4, len(finished))
+                self.assertEqual([True], closed)
+            finally:
+                reader.close()
+
+    def test_parallel_planning_failure_joins_other_sources(self):
+        aligned = self._parallel_alignment()
+        barrier = threading.Barrier(3)
+        finished = []
+        original = temporal._AsOfJoinRight.plan
+
+        def plan(source):
+            try:
+                barrier.wait(timeout=10)
+                if "b" in source.payload_schema.names:
+                    raise RuntimeError("planning failed")
+                return original(source)
+            finally:
+                finished.append(source.label)
+
+        with mock.patch.object(temporal._AsOfJoinRight, "plan", plan):
+            with self.assertRaisesRegex(RuntimeError, "planning failed"):
+                aligned.to_arrow_batch_reader(parallelism=4)
+            self.assertEqual(3, len(finished))
+
+    def test_source_failure_skips_queued_work_before_slow_source_finishes(self):
+        slow_started = threading.Event()
+        release_slow = threading.Event()
+        slow_finished = threading.Event()
+        queued_started = threading.Event()
+        original_wait = temporal.wait
+        failure = RuntimeError("source failed")
+
+        def slow():
+            slow_started.set()
+            try:
+                if not release_slow.wait(timeout=10):
+                    raise AssertionError("Slow source was not released")
+            finally:
+                slow_finished.set()
+
+        def fail():
+            if not slow_started.wait(timeout=10):
+                raise AssertionError("Slow source did not start")
+            raise failure
+
+        def observe(futures, **kwargs):
+            try:
+                # Let the worker dequeue the third wrapper before cancellation.
+                self.assertIsNone(futures[2].result(timeout=10))
+                self.assertFalse(queued_started.is_set())
+                self.assertFalse(slow_finished.is_set())
+                done, pending = original_wait(futures, **kwargs)
+                self.assertIn(futures[1], done)
+                self.assertIn(futures[0], pending)
+                return done, pending
+            finally:
+                release_slow.set()
+
+        with mock.patch.object(temporal, "wait", side_effect=observe) as waiting:
+            with self.assertRaises(RuntimeError) as error:
+                temporal._run_source_tasks([slow, fail, queued_started.set], 2)
+            self.assertIs(failure, error.exception)
+            waiting.assert_called_once()
+        self.assertTrue(slow_finished.is_set())
+        self.assertFalse(queued_started.is_set())
+
+    def test_temporal_parallelism_validation(self):
+        aligned = self._parallel_alignment()
+        for value in (True, 0, -1, 1.5, None):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "parallelism"):
+                    aligned.to_arrow_batch_reader(parallelism=value)
+
+    def test_metadata_batches_coalesce_without_reading_ahead(self):
+        metadata = pa.table({"episode_id": [1] * 11,
+                             "event_time": list(range(11)),
+                             temporal._ROW_ID: list(range(11))})
+        consumed = []
+        closed = []
+
+        class Reader:
+            def __iter__(self):
+                for start, size in ((0, 2), (2, 0), (2, 3), (5, 6)):
+                    consumed.append(start)
+                    if size:
+                        yield metadata.slice(start, size).to_batches()[0]
+                    else:
+                        yield pa.RecordBatch.from_arrays(
+                            [pa.array([], type=field.type) for field in metadata.schema],
+                            schema=metadata.schema)
+
+            def close(self):
+                closed.append(True)
+
+        builder = mock.Mock()
+        builder.new_read.return_value._to_managed_arrow_batch_reader.return_value = Reader()
+        query = mock.Mock(_temporal_empty=False)
+        with mock.patch.object(temporal, "_metadata_builders", return_value=(
+                builder, [], ["episode_id", "event_time"], metadata.column_names)):
+            batches = temporal._metadata_batches(query, "event_time", ("episode_id",), 4)
+            first = next(batches)
+            self.assertEqual([0, 1, 2, 3], first["event_time"].to_pylist())
+            self.assertEqual([0, 2, 2], consumed)
+            remaining = list(batches)
+        self.assertEqual([4, 3], [len(batch) for batch in remaining])
+        self.assertEqual(metadata, pa.concat_tables([first] + remaining))
+        self.assertEqual([True], closed)
+
+    def test_native_interpolation_scans_right_time_bounds_only_during_plan(self):
+        reductions = []
+
+        class TrackedTimes(np.ndarray):
+            def min(self, *args, **kwargs):
+                reductions.append("min")
+                return super().min(*args, **kwargs)
+
+            def max(self, *args, **kwargs):
+                reductions.append("max")
+                return super().max(*args, **kwargs)
+
+        right = temporal._LinearInterpolationRight.__new__(
+            temporal._LinearInterpolationRight)
+        right.query = mock.Mock()
+        right.on = "event_time"
+        right.by = ("episode_id",)
+        right.time_type = pa.int64()
+        right.payload_schema = pa.schema([("value", pa.float64())])
+        row_ids = np.arange(1_000_000, dtype=np.int64)
+        times = (row_ids * 2).view(TrackedTimes)
+        metadata = pa.table({"episode_id": np.zeros(len(times), dtype=np.int32),
+                             "event_time": times, temporal._ROW_ID: row_ids})
+        fetcher = mock.Mock(schema=right.payload_schema)
+        fetcher.fetch.side_effect = lambda ids: pa.table({
+            "value": pa.array(ids, type=pa.float64())})
+        with mock.patch.object(temporal, "_metadata_table", return_value=metadata), \
+                mock.patch.object(temporal, "_time_search_keys", return_value=times):
+            right.plan()
+        self.assertEqual(["min", "max"], reductions)
+        for batch_size in (32, 1024):
+            for start in (0, 1024, 2048):
+                before = np.arange(start, start + batch_size, dtype=np.int64)
+                targets = before * 2 + 1
+                arrays = right._native_float_arrays(
+                    targets, fetcher, (before, before + 1))
+                self.assertEqual((before + 0.5).tolist(), arrays[0].to_pylist())
+            # Wide target spans still fall back without scanning the right side.
+            self.assertIsNone(right._native_float_arrays(
+                np.array([2 ** 54], dtype=np.int64), fetcher,
+                (np.array([0]), np.array([1]))))
+        self.assertEqual(["min", "max"], reductions)
+
+    def test_native_anchor_keys_preserve_timestamp_precision(self):
+        times = pa.array([1, 2, 3], type=pa.timestamp("ns"))
+        metadata = pa.table({"episode_id": [1, 1, 2], "event_time": times,
+                             temporal._ROW_ID: [8, 9, 10]})
+        with mock.patch.object(temporal, "_temporal_match_kernel", return_value=object()):
+            targets, keys, codes = temporal._native_anchor_keys(
+                metadata, "event_time", ("episode_id",), times.type)
+        self.assertEqual([1, 2, 3], targets.tolist())
+        self.assertEqual([(1,), (2,)], keys)
+        self.assertEqual([0, 0, 1], codes.tolist())
+
+    def test_native_temporal_kernel_is_optional(self):
+        for module in (None, mock.Mock(spec=[])):
+            with self.subTest(module=module):
+                temporal._temporal_match_kernel.cache_clear()
+                with mock.patch.dict(sys.modules, {"pypaimon_rust": module}):
+                    self.assertIsNone(temporal._temporal_match_kernel())
+        temporal._temporal_match_kernel.cache_clear()
+
+    def test_native_ci_rejects_missing_temporal_kernel(self):
+        with mock.patch.dict(os.environ, {"PYPAIMON_TEST_NATIVE_READ": "1"}), \
+                mock.patch.object(temporal, "_temporal_match_kernel", return_value=None):
+            with self.assertRaisesRegex(AssertionError, "Native CI requires temporal_match"):
+                self.test_native_temporal_matching_matches_reference()
+
+    def test_native_temporal_matching_matches_reference(self):
+        kernel = temporal._temporal_match_kernel()
+        if os.environ.get("PYPAIMON_TEST_NATIVE_READ") == "1":
+            self.assertIsNotNone(kernel, "Native CI requires temporal_match")
+        if kernel is None:
+            self.skipTest("Requires pypaimon_rust temporal_match")
+        rng = np.random.default_rng(123)
+        for direction in ("backward", "forward", "nearest"):
+            for exact in (False, True):
+                for tolerance in (None, 0, 3):
+                    source = object.__new__(temporal._AsOfJoinRight)
+                    source.by = ("episode_id",)
+                    source._time_keys = np.sort(rng.integers(-20, 20, size=40))
+                    source._row_ids = pa.array(range(40), type=pa.int64())
+                    source._index = {(1,): (0, 40)}
+                    source.direction = direction
+                    source.allow_exact_matches = exact
+                    source._tolerance_key = tolerance
+                    metadata = pa.table({"episode_id": [1] * 50 + [2],
+                                         "event_time": rng.integers(-30, 30, size=51)})
+                    native_keys = temporal._native_anchor_keys(
+                        metadata, "event_time", ("episode_id",), pa.int64())
+                    first, _ = temporal._native_matches(source, native_keys, direction)
+                    expected = [source.match(row) for row in
+                                temporal._metadata_rows(metadata, "event_time", pa.int64())]
+                    self.assertEqual(expected, [None if value < 0 else int(value) for value in first])
 
     def test_alignment_requires_an_explicit_group_boundary(self):
         table = self._table("missing_group", {
@@ -121,6 +457,68 @@ class MultimodalTemporalTest(unittest.TestCase):
                     direction=direction, tolerance=0,
                 ).to_list()[0]
                 self.assertEqual(expected, row["value"])
+
+    def test_alignment_treats_signed_zero_as_one_group(self):
+        schema = {"group": pa.float64(), "event_time": pa.int64()}
+        anchors = self._table("zero_anchors", schema)
+        samples = self._table("zero_samples", {**schema, "value": pa.int32()})
+        anchors.add([{"group": 0.0, "event_time": time} for time in (1, 2)])
+        samples.add(
+            [
+                {"group": -0.0, "event_time": 1, "value": 7},
+                {"group": 0.0, "event_time": 2, "value": 8},
+            ]
+        )
+        rows = pmm.join_asof(
+            anchors.scan(),
+            samples.scan().select("value"),
+            on="event_time",
+            by="group",
+            tolerance=0,
+        ).to_list()
+        self.assertEqual({1: 7, 2: 8}, {row["event_time"]: row["value"] for row in rows})
+
+    def test_alignment_preserves_composite_group_boundaries(self):
+        schema = {"host": pa.string(), "sensor": pa.int32(), "event_time": pa.int64()}
+        anchors = self._table("composite_anchors", schema)
+        samples = self._table("composite_samples", {**schema, "value": pa.int32()})
+        keys = [("a", 1), ("a", 2), ("b", 1)]
+        anchors.add([{"host": host, "sensor": sensor, "event_time": 10} for host, sensor in keys])
+        samples.add(
+            [
+                {"host": host, "sensor": sensor, "event_time": 9, "value": index}
+                for index, (host, sensor) in enumerate(keys)
+            ]
+        )
+        rows = pmm.join_asof(
+            anchors.scan(),
+            samples.scan().select("value"),
+            on="event_time",
+            by=["host", "sensor"],
+        ).to_list()
+        self.assertEqual(dict(zip(keys, range(3))), {(row["host"], row["sensor"]): row["value"] for row in rows})
+
+    def test_alignment_without_run_end_kernel(self):
+        schema = {"group": pa.string(), "event_time": pa.int64()}
+        anchors = self._table("fallback_anchors", schema)
+        samples = self._table("fallback_samples", {**schema, "value": pa.int32()})
+        anchors.add([{"group": "a", "event_time": 1}])
+        samples.add(
+            [
+                {"group": "a", "event_time": 1, "value": 7},
+                {"group": "b", "event_time": 1, "value": 8},
+            ]
+        )
+        for kernel in (None, mock.Mock(side_effect=pa.ArrowNotImplementedError("No kernel"))):
+            with self.subTest(kernel=kernel), mock.patch.object(temporal.pc, "run_end_encode", kernel, create=True):
+                rows = pmm.join_asof(
+                    anchors.scan(),
+                    samples.scan().select("value"),
+                    on="event_time",
+                    by="group",
+                    tolerance=0,
+                ).to_list()
+                self.assertEqual([7], [row["value"] for row in rows])
 
     def test_asof_excludes_exact_matches_within_group(self):
         anchors = self._table("strict_anchors", {
@@ -2139,17 +2537,10 @@ class MultimodalTemporalTest(unittest.TestCase):
             ).to_list()
 
     def test_alignment_rejects_incremental_scans(self):
-        anchors = self.conn.create_table(
-            "incremental_anchors",
-            schema=pa.schema([
-                pa.field("episode_id", pa.int32()),
-                pa.field("event_time", pa.int64()),
-            ]),
-            options={
-                "scan.mode": "incremental",
-                "incremental-between-timestamp": "0,9999999999999",
-            },
-        )
+        anchors = self._table("incremental_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
         source = self._table("incremental_source", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
@@ -2160,13 +2551,19 @@ class MultimodalTemporalTest(unittest.TestCase):
             "episode_id": 1, "event_time": 100, "value": 7,
         }])
 
-        with self.assertRaisesRegex(
-                ValueError, "Temporal alignment.*incremental"):
-            pmm.join_asof(
-                anchors.scan(), source.scan().select("value"),
-                on="event_time", by="episode_id",
-                direction="nearest", tolerance=0,
-            ).to_list()
+        for mode in ("default", "incremental"):
+            for selector, value in (
+                    ("incremental-between", "0,1"),
+                    ("incremental-between-timestamp", "0,9999999999999"),
+                    ("incremental-to-auto-tag", "end")):
+                with self.subTest(mode=mode, selector=selector):
+                    query = temporal.ScanQuery(anchors.raw_table.copy({"scan.mode": mode, selector: value}))
+                    with self.assertRaisesRegex(ValueError, "Temporal alignment.*incremental"):
+                        pmm.join_asof(
+                            query, source.scan().select("value"),
+                            on="event_time", by="episode_id",
+                            direction="nearest", tolerance=0,
+                        ).to_list()
 
     def test_alignment_supports_zero_output_columns(self):
         anchors = self._table("zero_output_anchors", {

@@ -554,6 +554,19 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                                 tEnv.executeSql(
                                         "SELECT name, type, snapshot_id FROM iceberg.`default`.T$refs")))
                 .containsExactlyInAnyOrder(Row.of("tag1", "TAG", 1L), Row.of("tag2", "TAG", 4L));
+
+        // a second tag on snapshot 4 must survive the next commit, which rebuilds the refs
+        tEnv.executeSql("CALL paimon.sys.create_tag('default.T', 'tag3', 4)");
+        tEnv.executeSql("INSERT INTO paimon.`default`.T VALUES (1, 13, 131, 'black')").await();
+
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT name, type, snapshot_id FROM iceberg.`default`.T$refs")))
+                .containsExactlyInAnyOrder(
+                        Row.of("tag1", "TAG", 1L),
+                        Row.of("tag2", "TAG", 4L),
+                        Row.of("tag3", "TAG", 4L));
     }
 
     @ParameterizedTest

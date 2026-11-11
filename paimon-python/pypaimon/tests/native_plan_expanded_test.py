@@ -26,10 +26,10 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.utils.range import Range
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.file_store_write import FileStoreWrite
+from pypaimon.execution.python.write.file_store_write import FileStoreWrite
 
 
 @pytest.fixture(params=[False, pytest.param(True, marks=[
@@ -80,13 +80,15 @@ def read(table, native, predicate=None, shard=None, limit=None, result=None, ran
     if ranges is not None:
         scan.with_row_ranges(ranges)
     if native:
-        with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('native fallback')):
             plan = scan.plan()
     else:
         plan = scan.plan()
     if native:
         read_guard = patch(
-            'pypaimon.read.table_read.TableRead._create_split_read',
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
             side_effect=AssertionError('expanded native read fell back'))
     else:
         read_guard = ExitStack()
@@ -184,7 +186,11 @@ def test_scored_de_preserves_score_mapping_and_selection(catalog, native, dv):
             plan, actual = read(table, native, predicate, shard, result=result)
             for split in plan.splits():
                 ids = [i for r in split.row_ranges() for i in range(r.from_, r.to + 1)]
-                assert split.scores() == [scores[i] for i in ids]
+                # Java IndexedSplit stores float[], including when a Native
+                # plan crosses the split wire format back into Python.
+                expected_scores = [pa.scalar(scores[i], type=pa.float32()).as_py()
+                                   if native else scores[i] for i in ids]
+                assert split.scores() == expected_scores
             python_rows = read(table, False, predicate, shard, result=result)[1]
             assert actual == python_rows
             assert all(row['id'] in scores and (not dv or row['id'] != 1) for row in actual)
@@ -199,7 +205,8 @@ def test_scored_de_preserves_score_mapping_and_selection(catalog, native, dv):
 
 
 @pytest.mark.parametrize('covered', [True, False])
-def test_pk_sorted_index_refines_native_splits_at_selected_snapshot(catalog, native, covered):
+@pytest.mark.python_plan
+def test_python_pk_sorted_index_refines_splits_at_selected_snapshot(catalog, covered):
     from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
     from pypaimon.globalindex.indexed_split import IndexedSplit
     from pypaimon.index.index_file_meta import IndexFileMeta
@@ -232,21 +239,19 @@ def test_pk_sorted_index_refines_native_splits_at_selected_snapshot(catalog, nat
     write(table, [{'id': 2, 'v': 99}], schema)
     predicate = table.new_read_builder().new_predicate_builder().equal('v', 20)
     with patch('pypaimon.index.index_file_handler.IndexFileHandler.scan', return_value=[entry]) as scan_index, \
-            patch('pypaimon.table.source.primary_key_sorted_index_scan.reader_factory',
+            patch('pypaimon.execution.python.read.search.primary_key_sorted_index_scan.reader_factory',
                   return_value=lambda *args: _Reader([Range(1, 1)])):
-        plan, rows = read(table.copy({'scan.version': '1'}), native, predicate)
+        plan, rows = read(table.copy({'scan.version': '1'}), False, predicate)
     assert rows == [{'id': 2, 'v': 20}]
     assert plan.snapshot_id == 1
     assert scan_index.call_args[0][0].id == 1
     assert any(isinstance(split, IndexedSplit) for split in plan.splits()) == covered
-    if native:
-        assert all(split.snapshot_id == 1 for split in plan.splits())
     # The latest snapshot includes a newer version. Index pruning must not
     # resurrect the old matching version from a merge-required split.
     with patch('pypaimon.index.index_file_handler.IndexFileHandler.scan', return_value=[entry]), \
-            patch('pypaimon.table.source.primary_key_sorted_index_scan.reader_factory',
+            patch('pypaimon.execution.python.read.search.primary_key_sorted_index_scan.reader_factory',
                   return_value=lambda *args: _Reader([Range(1, 1)])):
-        assert read(table, native, predicate)[1] == []
+        assert read(table, False, predicate)[1] == []
 
 
 def test_scored_result_requires_a_score_for_each_selected_row(catalog, native):

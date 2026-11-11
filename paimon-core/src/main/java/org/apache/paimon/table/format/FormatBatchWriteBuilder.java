@@ -100,7 +100,8 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
                 table.partitionManager(),
                 options.dynamicPartitionOverwrite(),
                 cleanupThreadNum,
-                publishThreadNum);
+                publishThreadNum,
+                FormatTablePartitionOptions.fileFormat(table.options(), null));
     }
 
     @Override

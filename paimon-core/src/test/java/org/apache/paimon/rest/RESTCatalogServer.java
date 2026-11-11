@@ -160,7 +160,6 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -199,6 +198,7 @@ import static org.apache.paimon.rest.RESTCatalogServerUtils.buildManagementPage;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.canonicalizePolicy;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.errorMessage;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.findCause;
+import static org.apache.paimon.rest.RESTCatalogServerUtils.getParameters;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.getPermissionMaxResults;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.matchesPolicy;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.parseColumnMask;
@@ -208,6 +208,7 @@ import static org.apache.paimon.rest.RESTCatalogServerUtils.permissionResource;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.policyPath;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.policyResourceName;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.resourceName;
+import static org.apache.paimon.rest.RESTCatalogServerUtils.sqlPatternToRegex;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.validatePermissionsForSchema;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.validatePoliciesForSchema;
 import static org.apache.paimon.rest.RESTCatalogServerUtils.withResource;
@@ -259,6 +260,8 @@ public class RESTCatalogServer {
     private final List<String> noPermissionTables = new ArrayList<>();
     private final List<String> noPermissionViews = new ArrayList<>();
     private final Map<String, Function> functionStore = new ConcurrentHashMap<>();
+    private final RESTCatalogModelHandler modelHandler =
+            new RESTCatalogModelHandler(databaseStore, databaseLifecycleLocks);
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
     private final Map<String, List<Predicate>> rowFilterAuthHandler = new HashMap<>();
     private final Map<String, Map<String, Transform>> columnMaskingAuthHandler = new HashMap<>();
@@ -309,6 +312,13 @@ public class RESTCatalogServer {
 
     public String getUrl() {
         return server.url("").toString();
+    }
+
+    public void setTableSchema(Identifier identifier, TableSchema schema) {
+        TableMetadata metadata = tableMetadataStore.get(identifier.getFullName());
+        tableMetadataStore.put(
+                identifier.getFullName(),
+                new TableMetadata(schema, metadata.isExternal(), metadata.uuid()));
     }
 
     public void shutdown() throws IOException {
@@ -502,6 +512,10 @@ public class RESTCatalogServer {
                                 resources.length == 2 && resources[1].startsWith(FUNCTIONS);
                         boolean isFunction =
                                 resources.length == 3 && resources[1].startsWith(FUNCTIONS);
+                        boolean isModel =
+                                resources.length >= 2
+                                        && resources.length <= 3
+                                        && ResourcePaths.MODELS.equals(resources[1]);
                         boolean isFunctionsDetails =
                                 resources.length == 2 && resources[1].startsWith(FUNCTION_DETAILS);
                         boolean isViews = resources.length == 2 && resources[1].startsWith(VIEWS);
@@ -727,12 +741,14 @@ public class RESTCatalogServer {
                             if (!tableMetadataStore.containsKey(identifier.getFullName())) {
                                 throw new Catalog.TableNotExistException(identifier);
                             }
+                            MockRESTMessage.validateRollbackHead(
+                                    requestBody,
+                                    tableLatestSnapshotStore.get(identifier.getFullName()));
                             if (requestBody.getInstant() instanceof Instant.SnapshotInstant) {
                                 long snapshotId =
                                         ((Instant.SnapshotInstant) requestBody.getInstant())
                                                 .getSnapshotId();
-                                return rollbackTableByIdHandle(
-                                        identifier, snapshotId, requestBody.getFromSnapshot());
+                                return rollbackTableByIdHandle(identifier, snapshotId);
                             } else if (requestBody.getInstant() instanceof Instant.TagInstant) {
                                 String tagName =
                                         ((Instant.TagInstant) requestBody.getInstant())
@@ -762,6 +778,15 @@ public class RESTCatalogServer {
                         } else if (isFunction) {
                             return functionApiHandler(
                                     identifier, restAuthParameter.method(), data, parameters);
+                        } else if (isModel) {
+                            return identifier == null
+                                    ? modelHandler.handleCollection(
+                                            databaseName,
+                                            restAuthParameter.method(),
+                                            data,
+                                            parameters)
+                                    : modelHandler.handleModel(
+                                            identifier, restAuthParameter.method());
                         } else if (isFunctionsDetails) {
                             return functionDetailsHandle(
                                     restAuthParameter.method(), databaseName, parameters);
@@ -1195,8 +1220,8 @@ public class RESTCatalogServer {
                 requestBody.getStatistics());
     }
 
-    private MockResponse rollbackTableByIdHandle(
-            Identifier identifier, long snapshotId, @Nullable Long fromSnapshot) throws Exception {
+    private MockResponse rollbackTableByIdHandle(Identifier identifier, long snapshotId)
+            throws Exception {
         FileStoreTable table = getFileTable(identifier);
         String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshotId);
         TableSnapshot toSnapshot = tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId);
@@ -1207,16 +1232,6 @@ public class RESTCatalogServer {
                     404);
         }
         long latestSnapshotId = table.snapshotManager().latestSnapshotId();
-        if (fromSnapshot != null && fromSnapshot != latestSnapshotId) {
-            return mockResponse(
-                    new ErrorResponse(
-                            null,
-                            null,
-                            String.format(
-                                    "Latest snapshot %s is not %s", latestSnapshotId, fromSnapshot),
-                            500),
-                    500);
-        }
         table =
                 table.copy(
                         Collections.singletonMap(SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"));
@@ -1665,6 +1680,7 @@ public class RESTCatalogServer {
                             () -> {
                                 removeDatabaseObjects(viewStore, databaseName);
                                 removeDatabaseObjects(functionStore, databaseName);
+                                modelHandler.removeDatabase(databaseName);
                                 databaseStore.remove(databaseName);
                                 permissionStore.removeDatabase(databaseName);
                                 return null;
@@ -2269,6 +2285,10 @@ public class RESTCatalogServer {
                     } else {
                         existed.add(spec);
                     }
+                }
+                if (formatTable) {
+                    RESTCatalogPartitionSupport.applyRequestedFormats(
+                            storedPartitions, request, requestedOptions, tableMetadata);
                 }
                 RESTCatalogPartitionSupport.settlePartitionLocations(
                         storedPartitions,
@@ -3914,42 +3934,6 @@ public class RESTCatalogServer {
         } else {
             return entity.toString();
         }
-    }
-
-    private Map<String, String> getParameters(String query) {
-        return Arrays.stream(query.split("&"))
-                .map(pair -> pair.split("=", 2))
-                .collect(
-                        Collectors.toMap(
-                                pair -> pair[0].trim(), // key
-                                pair -> RESTUtil.decodeString(pair[1].trim()), // value
-                                (existing, replacement) -> existing // handle duplicates
-                                ));
-    }
-
-    private String sqlPatternToRegex(String pattern) {
-        StringBuilder regex = new StringBuilder();
-        boolean escaped = false;
-
-        for (int i = 0; i < pattern.length(); i++) {
-            char c = pattern.charAt(i);
-
-            if (escaped) {
-                regex.append(c);
-                escaped = false;
-                continue;
-            }
-            if (c == '\\') {
-                escaped = true;
-                continue;
-            }
-            if (c == '%') {
-                regex.append(".*");
-            } else {
-                regex.append(c);
-            }
-        }
-        return "^" + regex + "$";
     }
 
     private MockResponse handleInvalidMaxResults(Map<String, String> parameters) {

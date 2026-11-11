@@ -46,6 +46,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -108,7 +109,7 @@ public class BTreeThreadSafetyTest {
         options.set(BTreeIndexOptions.BTREE_INDEX_CACHE_SIZE, MemorySize.ofMebiBytes(8));
         options.set(BTreeIndexOptions.BTREE_INDEX_BLOOM_FILTER_ENABLED, true);
         DataField dataField = new DataField(1, "id", new IntType());
-        globalIndexer = new BTreeGlobalIndexer(dataField, options);
+        globalIndexer = new BTreeGlobalIndexer(Collections.singletonList(dataField), options);
         keySerializer = KeySerializer.create(new IntType());
         comparator = keySerializer.createComparator();
 

@@ -63,6 +63,10 @@ import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.rebalance;
 public class CompactDatabaseAction extends ActionBase {
     private static final Logger LOG = LoggerFactory.getLogger(CompactDatabaseAction.class);
 
+    private static final String NO_TABLES_MESSAGE =
+            "no tables to be compacted. possible cause is that there are no tables detected after pattern matching. "
+                    + "Table patterns are matched against 'databaseName.tableName'.";
+
     private Pattern includingPattern = Pattern.compile(".*");
     @Nullable private Pattern excludingPattern;
     private Pattern databasePattern = Pattern.compile(".*");
@@ -187,9 +191,7 @@ public class CompactDatabaseAction extends ActionBase {
 
     private void buildForDividedMode() {
         collectTables();
-        Preconditions.checkState(
-                !tableMap.isEmpty(),
-                "no tables to be compacted. possible cause is that there are no tables detected after pattern matching");
+        Preconditions.checkState(!tableMap.isEmpty(), NO_TABLES_MESSAGE);
 
         for (Map.Entry<String, FileStoreTable> entry : tableMap.entrySet()) {
             FileStoreTable fileStoreTable = entry.getValue();
@@ -213,6 +215,7 @@ public class CompactDatabaseAction extends ActionBase {
         Pattern combinedIncludingPattern = includingPattern;
         if (!isStreaming) {
             collectTables();
+            Preconditions.checkState(!tableMap.isEmpty(), NO_TABLES_MESSAGE);
             List<String> combinedTables = new ArrayList<>();
             for (Map.Entry<String, FileStoreTable> entry : tableMap.entrySet()) {
                 if (entry.getValue().coreOptions().dataEvolutionEnabled()) {
@@ -221,7 +224,7 @@ public class CompactDatabaseAction extends ActionBase {
                     combinedTables.add(Pattern.quote(entry.getKey()));
                 }
             }
-            if (combinedTables.isEmpty() && !tableMap.isEmpty()) {
+            if (combinedTables.isEmpty()) {
                 return;
             }
             // Batch table selection is fixed when building the job. Data-evolution tables

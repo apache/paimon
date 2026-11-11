@@ -26,6 +26,7 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -59,7 +60,17 @@ public class MosaicWriterFactory implements FormatWriterFactory {
     @Override
     public FormatWriter create(PositionOutputStream out, String compression) {
         validateCompression(compression);
-        return new MosaicRecordsWriter(out, rowType, formatContext, statsColumnNames, numBuckets);
+        return createWriter(out, rowType, formatContext, statsColumnNames, numBuckets);
+    }
+
+    /** Create the records writer while retaining the factory's option validation. */
+    protected MosaicRecordsWriter createWriter(
+            OutputStream out,
+            RowType type,
+            FileFormatFactory.FormatContext context,
+            List<String> statsColumns,
+            @Nullable Integer buckets) {
+        return new MosaicRecordsWriter(out, type, context, statsColumns, buckets);
     }
 
     private static void validateCompression(String compression) {

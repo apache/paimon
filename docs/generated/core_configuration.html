@@ -141,6 +141,12 @@ under the License.
             <td>Whether to ignore the order of the buckets when reading data from an append-only table.</td>
         </tr>
         <tr>
+            <td><h5>bucket-function.provider</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Optional identifier of a BucketFunctionFactory discovered from the classpath. When configured, the provider is used by both writers and bucket predicate pruning and takes precedence over bucket-function.type.</td>
+        </tr>
+        <tr>
             <td><h5>bucket-function.type</h5></td>
             <td style="word-wrap: break-word;">default</td>
             <td><p>Enum</p></td>
@@ -295,6 +301,12 @@ under the License.
             <td style="word-wrap: break-word;">"auto"</td>
             <td>String</td>
             <td>Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, respectively. When not configured, it will automatically determine the algorithm based on the number of columns in 'clustering.columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.auto-rollback.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Allow Java writers to roll back compaction on write conflicts. May delete snapshots and tags. Does not affect explicit rollback or Python writers.</td>
         </tr>
         <tr>
             <td><h5>commit.callback.#.param</h5></td>
@@ -513,6 +525,12 @@ under the License.
             <td>The TTL in local index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.compaction.discard-conflicting-tasks</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Skip complete data-evolution compaction tasks with row-range conflicts. Skipped inputs remain live for later compaction. Applies only to data-only compaction messages without row-id validation baselines.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.compaction.large-file-ratio</h5></td>
             <td style="word-wrap: break-word;">2.0</td>
             <td>Double</td>
@@ -547,6 +565,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to persist source when process merge into action on data evolution table.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.merged-read.stats-pushdown.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to push filters down into a row-id range whose columns are merged from several data files. The rows which may match are computed from the file statistics and page indexes of the files holding the latest values of the filtered columns, then every file of the range reads only these rows. Only Parquet files are supported.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.nested-field.enabled</h5></td>
@@ -717,16 +741,28 @@ under the License.
             <td>Default aggregate function of all fields for partial-update and aggregate merge function.</td>
         </tr>
         <tr>
+            <td><h5>file-index.format.version</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>File index container version to write (1 or 2). Version 2 supports 64-bit payload positions and lengths.</td>
+        </tr>
+        <tr>
             <td><h5>file-index.in-manifest-threshold</h5></td>
             <td style="word-wrap: break-word;">500 bytes</td>
             <td>MemorySize</td>
-            <td>The threshold to store file index bytes in manifest.</td>
+            <td>The threshold to store file index bytes in manifest. Valid range: 0 to 2,147,483,647 bytes.</td>
         </tr>
         <tr>
             <td><h5>file-index.read.enabled</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>Whether enabled read file index.</td>
+        </tr>
+        <tr>
+            <td><h5>file-index.read.ignore-unknown-type</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore unregistered file index types when reading. If true, skip these indexes with a warning and retain all rows for them. Other indexes can still filter rows. If false, fail when reading an unregistered non-empty index.</td>
         </tr>
         <tr>
             <td><h5>file-operation.thread-num</h5></td>
@@ -813,6 +849,12 @@ under the License.
             <td>Format table file compression.</td>
         </tr>
         <tr>
+            <td><h5>format-table.file.suffix.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to include the file format suffix in data file names written by the Paimon implementation of a format table. Compression suffixes are unaffected.</td>
+        </tr>
+        <tr>
             <td><h5>format-table.implementation</h5></td>
             <td style="word-wrap: break-word;">paimon</td>
             <td><p>Enum</p></td>
@@ -841,6 +883,18 @@ under the License.
             <td style="word-wrap: break-word;">fast</td>
             <td><p>Enum</p></td>
             <td>Search mode for full-text index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>global-index.bitmap.index-columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated columns to index with Bitmap indexes.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.btree.index-columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated columns to index with BTree indexes.</td>
         </tr>
         <tr>
             <td><h5>global-index.build.max-parallelism</h5></td>
@@ -877,6 +931,24 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether a vector, hybrid or full-text search may read the filter columns of candidate rows to verify a row filter that the scalar global index can only answer with a superset, such as contains, ends-with or like on a BTree index or a conjunction with a member no index can evaluate. When false, such candidates are excluded from the search, which never returns a non-matching row but may return fewer than the requested top-k. When true, the read runs on the caller and may cover every candidate row.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.fm.index-columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated character columns to index with FM indexes.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.full-text.index-columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated character columns to index with full-text indexes.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.multivalue.index-columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated ARRAY columns to index with Multivalue indexes.</td>
         </tr>
         <tr>
             <td><h5>global-index.query-in-reader.enabled</h5></td>
@@ -949,6 +1021,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether index file in data file directory.</td>
+        </tr>
+        <tr>
+            <td><h5>lakestream.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable lake-stream mode. When enabled, regular writes are routed to the Lakestream Store. The Lakestream Store's tiering service asynchronously writes data to Paimon. Reads from the original table name access only Paimon, while reads from the '$rt'-suffixed table name combine Paimon and Lakestream Store data.</td>
         </tr>
         <tr>
             <td><h5>local-kv-db.block-size</h5></td>
@@ -1279,6 +1357,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>The default deleted num of partition expiration.</td>
         </tr>
         <tr>
+            <td><h5>partition.expiration-retain-latest</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to retain the latest partition when all partitions are expired. The latest partition is determined by the parsed partition time for values-time or the last file creation time for update-time. Retains one partition for the whole table. Supported by the built-in expiration strategies on normal tables. Explicit partition deletion and truncation are not affected.</td>
+        </tr>
+        <tr>
             <td><h5>partition.expiration-strategy</h5></td>
             <td style="word-wrap: break-word;">"values-time"</td>
             <td>String</td>
@@ -1351,46 +1435,16 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>You can specify a pattern to get a timestamp from partitions. The formatter pattern is defined by 'partition.timestamp-formatter'.<ul><li>By default, read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:00:00'.</li></ul></td>
         </tr>
         <tr>
-            <td><h5>pk-bitmap.index.columns</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Comma-separated columns indexed by primary-key Bitmap indexes.</td>
-        </tr>
-        <tr>
-            <td><h5>pk-btree.index.columns</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Comma-separated columns indexed by primary-key BTree indexes.</td>
-        </tr>
-        <tr>
             <td><h5>pk-clustering-override</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Enables clustering by non-primary key fields. When set to true, the physical sort order of data files is determined by the configured 'clustering.columns' instead of the primary key, optimizing query performance for non-PK columns.</td>
         </tr>
         <tr>
-            <td><h5>pk-fm.index.columns</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Comma-separated character columns indexed by primary-key FM indexes.</td>
-        </tr>
-        <tr>
-            <td><h5>pk-full-text.index.columns</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Comma-separated character columns indexed by primary-key full-text indexes. The first release supports exactly one column.</td>
-        </tr>
-        <tr>
-            <td><h5>pk-multivalue.index.columns</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Comma-separated ARRAY columns indexed by primary-key Multivalue indexes.</td>
-        </tr>
-        <tr>
-            <td><h5>pk-vector.index.columns</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Comma-separated VECTOR columns indexed by primary-key vector indexes. Each column owns one index and must define fields.&lt;column&gt;.pk-vector.index.type. Index options and distance metric are also field-scoped. The first release supports exactly one column.</td>
+            <td><h5>pk-index.build.parallelism</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent primary-key index build tasks per writer instance, shared by its index columns and buckets. Must be greater than zero. Increasing this value may increase memory and I/O usage.</td>
         </tr>
         <tr>
             <td><h5>postpone.batch-write-fixed-bucket</h5></td>
@@ -1471,6 +1525,18 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>Time field for record level expire. It supports the following types: `timestamps in seconds with INT`,`timestamps in seconds with BIGINT`, `timestamps in milliseconds with BIGINT` or `timestamp`.</td>
         </tr>
         <tr>
+            <td><h5>rest.commit.acquire-lock</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether this writer acquires a REST commit lease for each publication attempt. Can be set dynamically for a writer and requires rest.commit.lock-enabled on the server-side table.</td>
+        </tr>
+        <tr>
+            <td><h5>rest.commit.lock-enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable the REST catalog's server-side table commit lease capability. Writers acquire a lease only when rest.commit.acquire-lock is enabled.</td>
+        </tr>
+        <tr>
             <td><h5>row-tracking.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -1517,6 +1583,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>When a batch job queries from a table, if a partition does not exist in the current branch, the reader will try to get this partition from this fallback branch.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.fallback-branch.allow-earliest-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to allow reading the earliest available snapshot of a fallback or primary branch when no snapshot exists at or before the current branch's requested snapshot time. This applies to snapshot-ID time travel, including numeric scan.version. By default, such reads fail unless the other branch has no snapshots. Enabling this option may read data committed after the requested time.</td>
         </tr>
         <tr>
             <td><h5>scan.fallback-branch.read-fail-fast</h5></td>
@@ -1926,6 +1998,12 @@ The size strategy ranges by the data size allocated to each sorting task, which 
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>The Variant shredding schema for writing.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-compaction.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to compact vector-store files when compacting a data evolution table.</td>
         </tr>
         <tr>
             <td><h5>vector-field</h5></td>

@@ -23,6 +23,8 @@ import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 
+import java.util.List;
+
 /** Factory for creating Lumina vector index. */
 public class LuminaVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
@@ -34,7 +36,12 @@ public class LuminaVectorGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public GlobalIndexer create(DataField field, Options options) {
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        if (indexFields.size() != 1) {
+            throw new UnsupportedOperationException(
+                    "Index type '" + identifier() + "' requires exactly one index field.");
+        }
+        DataField field = indexFields.get(0);
         Options fieldOptions = LuminaVectorIndexOptions.resolveFieldOptions(field.name(), options);
         return new LuminaVectorGlobalIndexer(field.type(), fieldOptions);
     }

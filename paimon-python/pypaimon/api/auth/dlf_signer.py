@@ -25,7 +25,7 @@ from abc import ABC, abstractmethod
 from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Dict, NamedTuple, Optional
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, unquote_plus
 
 from pypaimon.api.auth.dlf_openapi_actions import resolve_action
 from pypaimon.api.token_loader import DLFToken
@@ -416,8 +416,8 @@ class DLFOpenApiSigner(DLFRequestSigner):
         return "".join(sb)
 
     def _build_canonicalized_resource(self, rest_auth_parameter: RESTAuthParameter) -> str:
-        # Decode the path and use the original unencoded path for signature calculation
-        path = unquote(rest_auth_parameter.path)
+        # Decode like Java's URLDecoder, which also turns the prefix's '+' back into a space.
+        path = unquote_plus(rest_auth_parameter.path)
         params = rest_auth_parameter.parameters
 
         if not params:

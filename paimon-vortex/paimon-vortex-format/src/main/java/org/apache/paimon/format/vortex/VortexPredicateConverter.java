@@ -38,6 +38,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.TimestampType;
 
@@ -78,6 +79,12 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
             }
             if (predicate.function() instanceof IsNotNull) {
                 return Expression.isNotNull(field);
+            }
+
+            if (fieldRef.type().isAnyOf(DataTypeRoot.FLOAT, DataTypeRoot.DOUBLE)) {
+                // Vortex orders NaN signs and payloads differently from Paimon. Even a finite
+                // literal can therefore exclude matching NaN rows. Null checks remain safe.
+                return null;
             }
 
             List<Object> literals = predicate.literals();
@@ -161,10 +168,6 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
                 return Expression.literalDate((Integer) value, Expression.TimeUnit.DAYS);
             case BIGINT:
                 return Expression.literal((Long) value);
-            case FLOAT:
-                return Expression.literal((Float) value);
-            case DOUBLE:
-                return Expression.literal((Double) value);
             case CHAR:
             case VARCHAR:
                 return Expression.literal(

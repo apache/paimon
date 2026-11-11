@@ -29,6 +29,7 @@ import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -82,7 +83,9 @@ public interface FileEntry {
      * The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data
      * file.
      */
-    class Identifier {
+    class Identifier implements Serializable {
+
+        private static final long serialVersionUID = 1L;
 
         public final BinaryRow partition;
         public final int bucket;

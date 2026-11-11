@@ -20,8 +20,7 @@
 import unittest
 from unittest.mock import Mock
 
-from pypaimon.read.scanner.changelog_follow_up_scanner import \
-    ChangelogFollowUpScanner
+from pypaimon.execution.python.read.scanner.changelog_follow_up_scanner import (ChangelogFollowUpScanner)
 
 
 class ChangelogFollowUpScannerTest(unittest.TestCase):

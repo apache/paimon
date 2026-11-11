@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
 import json
 from collections import Counter
 from unittest.mock import patch
@@ -23,20 +24,15 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
-from pypaimon.read.native_plan import (
-    native_method_available,
-    native_reader_available,
-    native_runtime_available,
-)
+from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
     not native_runtime_available()
-    or not native_method_available('TableScan', 'with_chunk_shuffle'),
-    reason='Rust native chunk planner required')]
+    or not native_runtime_available(),
+    reason='pypaimon-rust not installed')]
 
 
 def _create_chunk_table(kind, tmp_path):
@@ -99,7 +95,7 @@ def _create_chunk_table(kind, tmp_path):
                 vector = BitmapDeletionVector()
                 vector.delete(0)
                 index_adds.append((tuple(split.partition.values), split.bucket,
-                                   TableDeleteByRowId(table)._write_deletion_vector_index(
+                                   PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
                                        split.partition, split.bucket, {file.file_name: vector})))
         commit = table.new_batch_write_builder().new_commit()
         try:
@@ -139,8 +135,12 @@ def _chunks(table, seed, chunk_size=3, shard=None, predicate=None, projection=No
         if shard is not None:
             scan.with_shard(*shard)
         if native_plan_enabled:
-            with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')), \
-                    patch.object(scan.file_scanner, 'plan_files', side_effect=AssertionError('Python manifest scan')):
+            with patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('native fallback')), \
+                    patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.plan_files',
+                        side_effect=AssertionError('Python manifest scan')):
                 plan = scan.plan()
         else:
             plan = scan.plan()
@@ -162,9 +162,9 @@ def _chunks(table, seed, chunk_size=3, shard=None, predicate=None, projection=No
             if native_plan_enabled:
                 assert getattr(split, '_native_split', None) is not None
             if native_read_enabled:
-                assert native_reader_available()
+                assert native_runtime_available()
                 with patch(
-                        'pypaimon.read.table_read.TableRead._create_split_read',
+                        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                         side_effect=AssertionError('Python reader was used')):
                     rows = read_builder.new_read().to_arrow([split]).to_pylist()
             else:

@@ -26,8 +26,7 @@ The end-to-end behaviour on real PK tables is exercised separately in
 
 import unittest
 
-from pypaimon.read.reader.partial_update_merge_function import \
-    PartialUpdateMergeFunction
+from pypaimon.execution.python.read.reader.partial_update_merge_function import (PartialUpdateMergeFunction)
 from pypaimon.table.row.key_value import KeyValue
 from pypaimon.table.row.row_kind import RowKind
 

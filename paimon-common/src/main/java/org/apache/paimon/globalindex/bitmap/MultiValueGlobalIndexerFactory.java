@@ -23,6 +23,8 @@ import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 
+import java.util.List;
+
 /** Factory for bitmap-backed multivalue indexes on array columns. */
 public class MultiValueGlobalIndexerFactory implements GlobalIndexerFactory {
 
@@ -34,7 +36,12 @@ public class MultiValueGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public GlobalIndexer create(DataField indexField, Options options) {
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        if (indexFields.size() != 1) {
+            throw new UnsupportedOperationException(
+                    "Index type '" + identifier() + "' requires exactly one index field.");
+        }
+        DataField indexField = indexFields.get(0);
         return new MultiValueGlobalIndexer(indexField, options);
     }
 }

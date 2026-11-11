@@ -24,6 +24,7 @@ import org.apache.paimon.memory.MemorySliceInput;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.function.ToIntFunction;
 
 /** An {@link Iterator} for a block. */
 public class BlockIterator implements Iterator<Map.Entry<MemorySlice, MemorySlice>> {
@@ -64,6 +65,11 @@ public class BlockIterator implements Iterator<Map.Entry<MemorySlice, MemorySlic
     }
 
     public boolean seekTo(MemorySlice targetKey) {
+        return seekTo(key -> reader.comparator().compare(key, targetKey));
+    }
+
+    /** Seek using a monotone comparison to a key or virtual prefix boundary. */
+    public boolean seekTo(ToIntFunction<MemorySlice> compareToTarget) {
         int left = 0;
         int right = reader.recordCount() - 1;
         polledPosition = -1;
@@ -72,7 +78,7 @@ public class BlockIterator implements Iterator<Map.Entry<MemorySlice, MemorySlic
         while (left <= right) {
             int mid = left + (right - left) / 2;
 
-            int compare = reader.comparator().compare(readKey(mid), targetKey);
+            int compare = compareToTarget.applyAsInt(readKey(mid));
 
             if (compare == 0) {
                 polledPosition = mid;

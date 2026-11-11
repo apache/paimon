@@ -15,20 +15,53 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.common.blob_index_cache import BlobIndexCache
 from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
 
 
 class CatalogContext:
-    def __init__(self, options: Options, hadoop_conf, prefer_loader, fallback_io_loader):
+    def __init__(self, options: Options, hadoop_conf, prefer_loader,
+                 fallback_io_loader, blob_index_cache=None):
+        if isinstance(options, dict):
+            options = Options(options)
         self.options = options
+        self.blob_index_cache = blob_index_cache
+        if self.blob_index_cache is None:
+            self.blob_index_cache = BlobIndexCache(
+                options.get(CatalogOptions.CACHE_BLOB_INDEX_MAX_SIZE))
         self.hadoop_conf = hadoop_conf
         self.prefer_io_loader = prefer_loader
         self.fallback_io_loader = fallback_io_loader
 
     @staticmethod
-    def create(options: Options, hadoop_conf, prefer_loader, fallback_io_loader):
-        return CatalogContext(options, hadoop_conf, prefer_loader, fallback_io_loader)
+    def create(options: Options, hadoop_conf, prefer_loader, fallback_io_loader,
+               blob_index_cache=None):
+        return CatalogContext(
+            options,
+            hadoop_conf,
+            prefer_loader,
+            fallback_io_loader,
+            blob_index_cache,
+        )
 
     @staticmethod
     def create_from_options(options: Options):
         return CatalogContext(options, None, None, None)
+
+    def with_options(self, options: Options):
+        if isinstance(options, dict):
+            options = Options(options)
+        max_size = options.get(CatalogOptions.CACHE_BLOB_INDEX_MAX_SIZE).get_bytes()
+        cache = (
+            self.blob_index_cache
+            if self.blob_index_cache.max_size_bytes == max_size
+            else None
+        )
+        return CatalogContext(
+            options,
+            self.hadoop_conf,
+            self.prefer_io_loader,
+            self.fallback_io_loader,
+            cache,
+        )

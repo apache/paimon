@@ -82,7 +82,7 @@ class CatalogEnvironment:
         if self.catalog_loader is not None and self.supports_version_management:
             from pypaimon.catalog.table_rollback import TableRollback
             catalog = self.catalog_loader.load()
-            return TableRollback(catalog, self.identifier)
+            return TableRollback(catalog, self.identifier, self.uuid)
         return None
 
     def snapshot_loader(self) -> Optional[SnapshotLoader]:
@@ -100,6 +100,9 @@ class CatalogEnvironment:
             return None
         context = getattr(self.catalog_loader, "context", None)
         return context() if callable(context) else None
+
+    def blob_index_cache(self):
+        return getattr(self.catalog_context(), "blob_index_cache", None)
 
     def dependency_read_context(self) -> Optional[CatalogContext]:
         context = self.catalog_context()
@@ -123,12 +126,7 @@ class CatalogEnvironment:
         dependency_options.to_map()[self._READ_VIA_OPTION] = RESTUtil.encode_string(
             JSON.to_json(self.identifier, separators=(",", ":"))
         )
-        return CatalogContext.create(
-            dependency_options,
-            context.hadoop_conf,
-            context.prefer_io_loader,
-            context.fallback_io_loader,
-        )
+        return context.with_options(dependency_options)
 
     def copy(self, identifier: Identifier) -> 'CatalogEnvironment':
         """
@@ -142,7 +140,7 @@ class CatalogEnvironment:
         """
         return CatalogEnvironment(
             identifier=identifier,
-            uuid=self.uuid,
+            uuid=self.uuid if identifier == self.identifier else None,
             catalog_loader=self.catalog_loader,
             supports_version_management=self.supports_version_management,
             rest_table_response=getattr(self, 'rest_table_response', None)

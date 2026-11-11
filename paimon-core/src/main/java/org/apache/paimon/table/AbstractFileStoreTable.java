@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
@@ -92,6 +93,7 @@ import java.util.function.BiConsumer;
 import java.util.function.LongConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 
 /** Abstract {@link FileStoreTable}. */
 abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -105,6 +107,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     // Track explicit copy() keys, including removals, separately from persisted schema options.
     @Nullable private Set<String> appliedDynamicOptionKeys;
+
+    // Runtime option mutations, like the store, do not survive table serialization.
+    @Nullable private transient volatile CoreOptions lazyOptions;
+    private transient volatile FileStore<?> lazyStore;
 
     @Nullable protected transient SegmentsCache<Path> manifestCache;
     @Nullable protected transient SegmentsCache<Path> manifestSidecarCache;
@@ -134,9 +140,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public void setManifestCache(SegmentsCache<Path> manifestCache) {
+    public synchronized void setManifestCache(SegmentsCache<Path> manifestCache) {
         this.manifestCache = manifestCache;
-        store().setManifestCache(manifestCache);
+        if (lazyStore != null) {
+            lazyStore.setManifestCache(manifestCache);
+        }
     }
 
     @Nullable
@@ -146,9 +154,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache) {
+    public synchronized void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache) {
         this.manifestSidecarCache = manifestSidecarCache;
-        store().setManifestSidecarCache(manifestSidecarCache);
+        if (lazyStore != null) {
+            lazyStore.setManifestSidecarCache(manifestSidecarCache);
+        }
     }
 
     @Nullable
@@ -158,9 +168,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public void setSnapshotCache(Cache<Path, Snapshot> cache) {
+    public synchronized void setSnapshotCache(Cache<Path, Snapshot> cache) {
         this.snapshotCache = cache;
-        store().setSnapshotCache(cache);
+        if (lazyStore != null) {
+            lazyStore.setSnapshotCache(cache);
+        }
     }
 
     @Override
@@ -333,10 +345,50 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     protected abstract BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer();
 
+    /** Validate the captured schema and install caches before publishing the runtime store. */
+    protected final FileStore<?> runtimeStore() {
+        FileStore<?> store = lazyStore;
+        if (store == null) {
+            synchronized (this) {
+                store = lazyStore;
+                if (store == null) {
+                    CoreOptions options = coreOptions();
+                    TableSchema runtimeSchema = tableSchema.copy(options.toMap());
+                    Set<String> dynamicOptionKeys =
+                            new HashSet<>(options.toConfiguration().dynamicOptions().keySet());
+                    if (appliedDynamicOptionKeys != null) {
+                        dynamicOptionKeys.addAll(appliedDynamicOptionKeys);
+                    }
+                    SchemaValidation.validateTableSchema(
+                            withoutIcebergMirror(runtimeSchema), dynamicOptionKeys);
+                    store = createStore(runtimeSchema);
+                    if (manifestCache != null) {
+                        store.setManifestCache(manifestCache);
+                    }
+                    if (manifestSidecarCache != null) {
+                        store.setManifestSidecarCache(manifestSidecarCache);
+                    }
+                    if (snapshotCache != null) {
+                        store.setSnapshotCache(snapshotCache);
+                    }
+                    lazyStore = store;
+                }
+            }
+        }
+        return store;
+    }
+
+    protected abstract FileStore<?> createStore(TableSchema runtimeSchema);
+
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
         checkImmutability(dynamicOptions);
         return copyInternal(dynamicOptions, true);
+    }
+
+    @Override
+    public FileStoreTable copyWithoutQueryAuth() {
+        return copyInternal(new Options().set(QUERY_AUTH_ENABLED, false).toMap(), true);
     }
 
     @Override
@@ -350,6 +402,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         // check option is not immutable
         dynamicOptions.forEach(
                 (k, newValue) -> {
+                    if (QUERY_AUTH_ENABLED.key().equals(k)
+                            && CoreOptions.fromMap(oldOptions).queryAuthEnabled()) {
+                        Preconditions.checkArgument(
+                                Boolean.parseBoolean(newValue),
+                                "Option '%s' is not allowed to be disabled dynamically",
+                                k);
+                    }
                     String oldValue = oldOptions.get(k);
                     if (!Objects.equals(oldValue, newValue)
                             && !SchemaManager.isUnchangedNormalizedKey(
@@ -396,8 +455,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                     tryTimeTravel(newOptions, mergedDynamicOptionKeys).orElse(newTableSchema);
         }
 
-        // validate schema with new options
-        SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions.keySet());
         if (new CoreOptions(tableSchema.options())
                         .toConfiguration()
                         .get(IcebergOptions.METADATA_ICEBERG_STORAGE)
@@ -423,11 +480,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Map<String, String> mergedOptions = new HashMap<>(latestSchema.options());
             mergedOptions.putAll(tableSchema.options());
             TableSchema newTableSchema = latestSchema.copy(mergedOptions);
-            SchemaValidation.validateTableSchema(newTableSchema);
             return copy(newTableSchema);
         } else {
             return this;
         }
+    }
+
+    /** Tables the mirror cannot publish must still load; every commit still checks them. */
+    private static TableSchema withoutIcebergMirror(TableSchema schema) {
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.remove(IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+        return schema.copy(options);
     }
 
     @Override
@@ -464,7 +527,35 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public CoreOptions coreOptions() {
-        return store().options();
+        CoreOptions options = lazyOptions;
+        if (options == null) {
+            synchronized (this) {
+                options = lazyOptions;
+                if (options == null) {
+                    options = new CoreOptions(tableSchema.options());
+                    lazyOptions = options;
+                }
+            }
+        }
+        return options;
+    }
+
+    @Override
+    public BucketMode bucketMode() {
+        int bucket = coreOptions().bucket();
+        if (tableSchema.primaryKeys().isEmpty()) {
+            return bucket == -1 ? BucketMode.BUCKET_UNAWARE : BucketMode.HASH_FIXED;
+        }
+        switch (bucket) {
+            case -2:
+                return BucketMode.POSTPONE_MODE;
+            case -1:
+                return tableSchema.crossPartitionUpdate()
+                        ? BucketMode.KEY_DYNAMIC
+                        : BucketMode.HASH_DYNAMIC;
+            default:
+                return BucketMode.HASH_FIXED;
+        }
     }
 
     @Override
@@ -484,12 +575,19 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public SnapshotManager snapshotManager() {
-        return store().snapshotManager();
+        CoreOptions options = coreOptions();
+        return new SnapshotManager(
+                fileIO,
+                options.path(),
+                options.branch(),
+                catalogEnvironment.snapshotLoader(),
+                snapshotCache);
     }
 
     @Override
     public ChangelogManager changelogManager() {
-        return store().changelogManager();
+        CoreOptions options = coreOptions();
+        return new ChangelogManager(fileIO, options.path(), options.branch());
     }
 
     @Override
@@ -576,7 +674,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     /** Prevents current column declarations from overriding a historical schema's field options. */
     private static Map<String, String> excludeCurrentSchemaFieldOptions(
             TableSchema historicalSchema, Options options, Set<String> dynamicOptionKeys) {
-        // Keep scan and runtime options. Only these directive-managed column declarations
+        // Keep scan and runtime options. These column storage declarations
         // must follow the historical schema, since columns may have been added or dropped.
         Map<String, String> historicalOptions = new HashMap<>(options.toMap());
         for (ConfigOption<String> option :
@@ -584,7 +682,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         CoreOptions.VECTOR_FIELD,
                         CoreOptions.BLOB_FIELD,
                         CoreOptions.BLOB_DESCRIPTOR_FIELD,
-                        CoreOptions.BLOB_VIEW_FIELD)) {
+                        CoreOptions.BLOB_VIEW_FIELD,
+                        CoreOptions.VIDEO_FRAME_FIELD)) {
             // Restore the canonical key and aliases together, or a stale alias may take effect
             // when the historical schema has no canonical value.
             List<String> keys = new ArrayList<>();
@@ -760,12 +859,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void deleteTag(String tagName) {
-        tagManager()
-                .deleteTag(
-                        tagName,
-                        store().newTagDeletion(),
-                        snapshotManager(),
-                        store().createTagCallbacks(this));
+        tagManager().deleteTag(tagName, store().createTagCallbacks(this));
     }
 
     @Override

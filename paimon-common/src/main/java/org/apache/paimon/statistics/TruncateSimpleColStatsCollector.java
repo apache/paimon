@@ -157,6 +157,10 @@ public class TruncateSimpleColStatsCollector extends AbstractSimpleColStatsColle
                 // characters = i
                 int offsetByCodePoint = truncatedStringBuilder.offsetByCodePoints(0, i);
                 int nextCodePoint = truncatedStringBuilder.codePointAt(offsetByCodePoint) + 1;
+                if (nextCodePoint >= Character.MIN_SURROGATE
+                        && nextCodePoint <= Character.MAX_SURROGATE) {
+                    nextCodePoint = Character.MAX_SURROGATE + 1;
+                }
                 // No overflow
                 if (nextCodePoint != 0 && Character.isValidCodePoint(nextCodePoint)) {
                     truncatedStringBuilder.setLength(offsetByCodePoint);

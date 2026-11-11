@@ -80,6 +80,11 @@ CREATE TABLE t (...) PARTITIONED BY (other_key, dt) WITH (
 );
 ```
 
+For `DATE` partition columns, `values-time` uses the date value in `yyyy-MM-dd` format,
+not its internal epoch-day integer. Use the default timestamp formatter or a formatter
+that matches this representation, such as `yyyy-MM-dd` with the pattern `$dt`.
+Expiration is based on the partition value, not the partition creation time.
+
 `update-time` strategy.
 ```sql
 CREATE TABLE t (...) PARTITIONED BY (dt) WITH (
@@ -94,6 +99,32 @@ insert into t values('pk', '2024-01-01');
 insert into t values('pk', 'par-1'); 
 
 ```
+
+### Flink Partition Expiration Action
+
+For the Flink `expire_partitions` action, `--expiration_time` and
+`--timestamp_formatter` are required. If `--expire_strategy` or `--timestamp_pattern`
+is omitted, the action inherits the corresponding table option, including overrides
+provided through `--table_conf`. Explicit action arguments take precedence over
+`--table_conf`, which takes precedence over persisted table options. Explicit empty
+or whitespace-only arguments are not treated as omitted.
+
+### Retaining the Latest Partition
+
+Set `'partition.expiration-retain-latest' = 'true'` (default: `false`) to retain the latest
+partition when all partitions have expired. It remains available until a newer partition
+is committed, after which the previous partition can expire normally.
+
+```sql
+CREATE TABLE t (...) PARTITIONED BY (dt) WITH (
+    'partition.expiration-time' = '7 d',
+    'partition.timestamp-formatter' = 'yyyyMMdd',
+    'partition.expiration-retain-latest' = 'true'
+);
+```
+
+This option applies to normal tables. The latest partition is determined by the parsed
+partition timestamp for `values-time`, or the last file creation time for `update-time`.
 
 More options:
 
@@ -129,6 +160,12 @@ More options:
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>The expiration interval of a partition. A partition will be expired if it's lifetime is over this value. Partition time is extracted from the partition value.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.expiration-retain-latest</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Retain the latest partition when all partitions are expired. Applies to one partition across the whole table with the built-in expiration strategies on normal tables.</td>
         </tr>
         <tr>
             <td><h5>partition.timestamp-formatter</h5></td>

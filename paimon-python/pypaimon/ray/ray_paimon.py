@@ -29,7 +29,7 @@ Usage::
 import hashlib
 import importlib
 import uuid
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from pypaimon.common.predicate import Predicate
 
@@ -55,7 +55,7 @@ def read_paimon(
     catalog_options: Dict[str, str],
     *,
     filter: Optional[Predicate] = None,
-    projection: Optional[List[str]] = None,
+    projection: Optional[Union[List[str], Dict[str, str]]] = None,
     limit: Optional[int] = None,
     snapshot_id: Optional[int] = None,
     tag_name: Optional[str] = None,
@@ -73,7 +73,7 @@ def read_paimon(
         catalog_options: Options passed to ``CatalogFactory.create()``,
             e.g. ``{"warehouse": "/path/to/warehouse"}``.
         filter: Optional predicate to push down into the scan.
-        projection: Optional list of column names to read.
+        projection: Optional column names or output-name-to-expression mapping.
         limit: Optional row limit for the scan.
         snapshot_id: Optional snapshot id to time-travel to. Mutually
             exclusive with ``tag_name``.
@@ -120,6 +120,11 @@ def read_paimon(
         schema = PyarrowFieldParser.from_paimon_schema(
             split_provider.read_type()
         )
+        output_projection = split_provider.output_projection()
+        if output_projection is not None:
+            from pypaimon.read.table_read import TableRead
+            schema = TableRead._apply_output_projection_to_schema(
+                schema, output_projection)
         import pyarrow
         empty_table = pyarrow.Table.from_arrays(
             [pyarrow.array([], type=field.type) for field in schema],
@@ -547,8 +552,8 @@ def write_paimon(
     writer. For primary-key tables, ``map_groups`` writes each complete
     ``(partition_keys..., bucket)`` group in one Ray task. Postpone-bucket
     writes follow ``postpone.batch-write-fixed-bucket`` by default. Their
-    bucket plan is resolved once on the driver and workers write sorted
-    blocks to real buckets.
+    bucket plan is resolved once on the driver, then each complete
+    partition/bucket group is written by one task to a real bucket.
     HASH_DYNAMIC and CROSS_PARTITION primary-key Ray writes are rejected
     because Ray write tasks create independent Paimon writers.
 

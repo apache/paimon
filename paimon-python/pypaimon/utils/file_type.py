@@ -31,12 +31,14 @@ class FileType(Enum):
     - META: snapshot, schema, manifest, manifest sidecar, statistics, tag, changelog metadata,
             hint files, _SUCCESS, consumer, service files
     - DATA: data files and any unrecognized files (default)
+    - STRUCTURED_DATA: block-cache-readable Parquet, ORC, Avro, ROW and Mosaic files
     - BUCKET_INDEX: bucket level index files (Hash, DV)
     - GLOBAL_INDEX: table level global index files (btree, lumina, full-text)
     - FILE_INDEX: data-file index files (bloom filter, bitmap, etc.)
     """
     META = "META"
     DATA = "DATA"
+    STRUCTURED_DATA = "STRUCTURED_DATA"
     BUCKET_INDEX = "BUCKET_INDEX"
     GLOBAL_INDEX = "GLOBAL_INDEX"
     FILE_INDEX = "FILE_INDEX"
@@ -46,8 +48,16 @@ class FileType(Enum):
 
     @staticmethod
     def is_mutable(file_path: str) -> bool:
+        """Returns True if the file may be rewritten in place and must not be cached."""
         name = os.path.basename(file_path)
-        return name in ("EARLIEST", "LATEST")
+        # temp files (.{name}.{UUID}.tmp) are still being written
+        if FileType._unwrap_temp_file_name(name) != name:
+            return True
+        # hint, _SUCCESS, consumer, service, tag and Iceberg-compatible metadata (version-hint,
+        # retire-pending, v{N}.metadata.json on tag changes) are overwritten in place
+        return (name in ("EARLIEST", "LATEST", "_SUCCESS", "version-hint.text", "retire-pending")
+                or name.endswith(("_SUCCESS", ".metadata.json"))
+                or name.startswith(("consumer-", "service-", "tag-")))
 
     @staticmethod
     def classify(file_path: str) -> 'FileType':
@@ -84,26 +94,34 @@ class FileType(Enum):
             if parent == "changelog":
                 return FileType.META
 
+        stem, _, extension = name.rpartition('.')
+        if stem and extension.lower() in ('parquet', 'orc', 'avro', 'row', 'mosaic'):
+            return FileType.STRUCTURED_DATA
+
         return FileType.DATA
 
     @staticmethod
     def parse_whitelist(whitelist_str: str) -> set:
         mapping = {
-            "meta": FileType.META,
-            "global-index": FileType.GLOBAL_INDEX,
-            "bucket-index": FileType.BUCKET_INDEX,
-            "data": FileType.DATA,
-            "file-index": FileType.FILE_INDEX,
+            "meta": (FileType.META,),
+            "global-index": (FileType.GLOBAL_INDEX,),
+            "bucket-index": (FileType.BUCKET_INDEX,),
+            "data": (FileType.DATA, FileType.STRUCTURED_DATA),
+            "structured-data": (FileType.STRUCTURED_DATA,),
+            "file-index": (FileType.FILE_INDEX,),
         }
         result = set()
         for name in whitelist_str.split(","):
             name = name.strip()
-            if name in mapping:
-                result.add(mapping[name])
+            if name == "*":
+                result.update(FileType)
+            elif name in mapping:
+                result.update(mapping[name])
             elif name:
                 logger.warning(
                     "Unknown local-cache.whitelist value '%s'. "
-                    "Supported values: meta, global-index, bucket-index, data, file-index.",
+                    "Supported values: meta, global-index, bucket-index, data, "
+                    "structured-data, file-index, or * for all of them.",
                     name,
                 )
         return result

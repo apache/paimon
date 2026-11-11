@@ -21,6 +21,7 @@ package org.apache.paimon.mergetree.compact.aggregate.factory;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldMergeMapWithKeyTimeAgg;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
@@ -59,7 +60,8 @@ public class FieldMergeMapWithKeyTimeAggFactory implements FieldAggregatorFactor
                 rowType.getFieldCount());
 
         int tsFieldIndex = resolveTsFieldIndex(rowType, options, field);
-        return new FieldMergeMapWithKeyTimeAgg(NAME, mapType, tsFieldIndex);
+        return new FieldMergeMapWithKeyTimeAgg(
+                NAME, mapType, tsFieldIndex, options.fieldMergeMapOverwriteOnEqualTs(field));
     }
 
     private int resolveTsFieldIndex(RowType rowType, CoreOptions options, @Nullable String field) {
@@ -77,6 +79,18 @@ public class FieldMergeMapWithKeyTimeAggFactory implements FieldAggregatorFactor
                     field,
                     rowType.getFieldNames());
         }
+
+        DataType tsFieldType = rowType.getTypeAt(tsFieldIndex);
+        checkArgument(
+                tsFieldType.isAnyOf(
+                        DataTypeFamily.CHARACTER_STRING,
+                        DataTypeFamily.INTEGER_NUMERIC,
+                        DataTypeFamily.DATETIME),
+                "Timestamp field '%s' for field '%s' must be CHAR/VARCHAR/STRING, TINYINT/SMALLINT/INT/BIGINT or "
+                        + "DATE/TIME/TIMESTAMP/TIMESTAMP_LTZ but was '%s'.",
+                rowType.getFieldNames().get(tsFieldIndex),
+                field,
+                tsFieldType);
         return tsFieldIndex;
     }
 

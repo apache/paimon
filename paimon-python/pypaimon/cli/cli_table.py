@@ -21,8 +21,11 @@ Table commands for Paimon CLI.
 This module provides table-related commands for the CLI.
 """
 
+import argparse
+import json
 import sys
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 
 from pypaimon.common.json_util import JSON
 
@@ -363,53 +366,77 @@ def cmd_table_snapshot(args):
     Args:
         args: Parsed command line arguments.
     """
-    from pypaimon.cli.cli import load_catalog_config, create_catalog
-    from pypaimon.table.file_store_table import FileStoreTable
-    
-    # Load catalog configuration
-    config_path = args.config
-    config = load_catalog_config(config_path)
-    
-    # Create catalog
-    catalog = create_catalog(config)
-    
-    # Parse table identifier
-    table_identifier = args.table
-    parts = table_identifier.split('.')
-    if len(parts) != 2:
-        print(f"Error: Invalid table identifier '{table_identifier}'. "
-              f"Expected format: 'database.table'", file=sys.stderr)
-        sys.exit(1)
-    
-    database_name, table_name = parts
-    
-    # Get table
+    manager = _open_snapshot_manager(args)
+    snapshot_id = getattr(args, 'snapshot_id', None)
     try:
-        table = catalog.get_table(f"{database_name}.{table_name}")
-    except Exception as e:
-        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
-        sys.exit(1)
-    
-    # Check if table is FileStoreTable
-    if not isinstance(table, FileStoreTable):
-        print(f"Error: Table '{table_identifier}' is not a FileStoreTable. "
-              f"Snapshot operation is not supported for this table type.", file=sys.stderr)
-        sys.exit(1)
-    
-    # Get latest snapshot
-    try:
-        snapshot_manager = table.snapshot_manager()
-        snapshot = snapshot_manager.get_latest_snapshot()
-        
+        snapshot = (
+            # Get latest snapshot
+            manager.get_latest_snapshot() if snapshot_id is None
+            else manager.get_snapshot_by_id(snapshot_id)
+        )
         if snapshot is None:
-            print(f"Error: No snapshot found for table '{table_identifier}'.", file=sys.stderr)
-            sys.exit(1)
+            if snapshot_id is None:
+                raise ValueError(f"No snapshot found for table '{args.table}'.")
+            raise ValueError(f"Snapshot {snapshot_id} not found for table '{args.table}'.")
         
-        # Output snapshot as JSON
-        print(JSON.to_json(snapshot, indent=2))
-        
+        if getattr(args, 'format', 'json') == 'json':
+            # Output snapshot as JSON
+            print(JSON.to_json(snapshot, indent=2))
+        else:
+            import pandas as pd
+            values = json.loads(JSON.to_json(snapshot))
+            rows = [[key, _snapshot_display_value(value)] for key, value in values.items()]
+            for row in rows:
+                if row[0] == 'timeMillis':
+                    row[1] += ' ({})'.format(_snapshot_commit_time(snapshot.time_millis))
+            print(pd.DataFrame(rows, columns=['Field', 'Value']).to_string(index=False))
     except Exception as e:
-        print(f"Error: Failed to get snapshot: {e}", file=sys.stderr)
+        target = 'latest snapshot' if snapshot_id is None else f'snapshot {snapshot_id}'
+        print(f"Error: Failed to get {target} for table '{args.table}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_table_list_snapshots(args):
+    """
+    Execute the 'table list-snapshots' command.
+    
+    Lists retained snapshots in ascending snapshot-ID order without reading table data.
+    
+    Args:
+        args: Parsed command line arguments.
+    """
+    manager = _open_snapshot_manager(args)
+    try:
+        snapshots = []
+        for snapshot_id in manager.list_snapshot_ids():
+            try:
+                snapshot = manager.get_snapshot_by_id(snapshot_id)
+            except FileNotFoundError:
+                # Expiration can remove a file between listing and opening it.
+                continue
+            if snapshot is None:
+                continue
+            snapshots.append(snapshot)
+            if args.limit is not None and len(snapshots) >= args.limit:
+                break
+        
+        if args.format == 'json':
+            # Preserve Snapshot's JSON field names, optional values and integers.
+            print(json.dumps([json.loads(JSON.to_json(s)) for s in snapshots], ensure_ascii=False, indent=2))
+        elif not snapshots:
+            print(f"No snapshots found for table '{args.table}'.")
+        else:
+            import pandas as pd
+            rows = [[s.id, s.schema_id, _snapshot_commit_time(s.time_millis),
+                     s.commit_kind, s.commit_user, s.total_record_count,
+                     s.delta_record_count, s.changelog_record_count] for s in snapshots]
+            # Convert before Pandas can coerce nullable integers to floats.
+            rows = [[_snapshot_display_value(value) for value in row] for row in rows]
+            columns = ['Snapshot ID', 'Schema ID', 'Commit Time (UTC)', 'Commit Kind',
+                       'Commit User', 'Total Records', 'Delta Records', 'Changelog Records']
+            print(pd.DataFrame(rows, columns=columns).to_string(index=False))
+    except Exception as e:
+        print(f"Error: Failed to list snapshots for table '{args.table}': {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -928,6 +955,39 @@ def cmd_table_drop_partition(args):
         sys.exit(1)
 
 
+def _open_snapshot_manager(args):
+    """Load a file-store table for the snapshot inspection commands."""
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+    from pypaimon.table.file_store_table import FileStoreTable
+    
+    # Parse table identifier
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2 or not all(parts):
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+    
+    try:
+        # Load catalog configuration
+        config = load_catalog_config(args.config)
+        
+        # Create catalog
+        catalog = create_catalog(config)
+        
+        # Get table
+        table = catalog.get_table(table_identifier)
+        
+        # Check if table is FileStoreTable
+        if not isinstance(table, FileStoreTable):
+            raise ValueError('Snapshot operation is not supported for this table type; '
+                             'expected a FileStoreTable.')
+        return table.snapshot_manager()
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def add_table_subcommands(table_parser):
     """
     Add table subcommands to the parser.
@@ -1023,12 +1083,35 @@ def add_table_subcommands(table_parser):
     get_parser.set_defaults(func=cmd_table_get)
     
     # table snapshot command
-    snapshot_parser = table_subparsers.add_parser('snapshot', help='Get the latest snapshot of a table')
+    snapshot_parser = table_subparsers.add_parser('snapshot', help='Get the latest or a specific snapshot of a table')
     snapshot_parser.add_argument(
         'table',
         help='Table identifier in format: database.table'
     )
+    snapshot_parser.add_argument(
+        '--snapshot-id', type=_positive_int, default=None,
+        help='Snapshot ID to inspect (default: the latest snapshot)'
+    )
+    snapshot_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='json',
+        help='Output format: json (default) or table'
+    )
     snapshot_parser.set_defaults(func=cmd_table_snapshot)
+
+    # table list-snapshots command
+    list_snapshots_parser = table_subparsers.add_parser(
+        'list-snapshots', help='List available snapshots in ascending snapshot-ID order'
+    )
+    list_snapshots_parser.add_argument('table', help='Table identifier in format: database.table')
+    list_snapshots_parser.add_argument(
+        '--limit', '-l', type=_positive_int, default=None,
+        help='Maximum number of snapshots to display, starting with the oldest (default: all)'
+    )
+    list_snapshots_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='table',
+        help='Output format: table (default) or json'
+    )
+    list_snapshots_parser.set_defaults(func=cmd_table_list_snapshots)
 
     # table rollback command
     rollback_parser = table_subparsers.add_parser(
@@ -1242,3 +1325,28 @@ def add_table_subcommands(table_parser):
     update_comment_parser = alter_subparsers.add_parser('update-comment', help='Update table comment')
     update_comment_parser.add_argument('--comment', '-c', required=True, help='New table comment')
     update_comment_parser.set_defaults(func=cmd_table_alter)
+
+
+def _positive_int(value):
+    """Argparse type for snapshot IDs and result limits."""
+    try:
+        number = int(value)
+        if number > 0:
+            return number
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError('must be a positive integer')
+
+
+def _snapshot_commit_time(time_millis):
+    # Keep millisecond precision and make the display independent of local TZ.
+    instant = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=time_millis)
+    return instant.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
+
+def _snapshot_display_value(value):
+    if value is None:
+        return '-'
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)

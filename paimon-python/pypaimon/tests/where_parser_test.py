@@ -25,6 +25,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.common.predicate import Predicate
 from pypaimon.common.where_parser import parse_where_clause, _tokenize, _cast_literal
 from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
 
@@ -508,6 +509,9 @@ class WhereParserScanTest(unittest.TestCase):
         # any stored value; it must return no rows rather than round into a match.
         self.assertEqual(self._scan_ids("price = 99.999"), [])
 
+    def test_decimal_fractional_range_uses_column_scale(self) -> None:
+        self.assertEqual(self._scan_ids("price < 50.001"), [2])
+
     def test_high_precision_decimal_integer_literal_matches(self):
         # A DECIMAL(38, 2) integer-form literal exceeds the default decimal
         # context; it must still rescale and match the stored scale-2 value.
@@ -526,6 +530,103 @@ class WhereParserScanTest(unittest.TestCase):
 
     def test_time_equality_returns_matching_row(self):
         self.assertEqual(self._scan_ids("t = '12:30:00'"), [1])
+
+
+class ReadBuilderStringFilterTest(unittest.TestCase):
+    """End-to-end: ReadBuilder.with_filter accepts a WHERE string directly."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = tempfile.mkdtemp()
+        cls.catalog = CatalogFactory.create(
+            {'warehouse': os.path.join(cls.tempdir, 'warehouse')})
+        cls.catalog.create_database('default', False)
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('age', pa.int32()),
+            ('city', pa.string()),
+        ])
+        cls.catalog.create_table(
+            'default.where_string_filter', Schema.from_pyarrow_schema(pa_schema), False)
+        cls.table = cls.catalog.get_table('default.where_string_filter')
+        data = pa.table({
+            'id': pa.array([1, 2, 3, 4], pa.int32()),
+            'name': pa.array(['Alice', 'Bob', None, 'Carol'], pa.string()),
+            'age': pa.array([30, 15, 45, 8], pa.int32()),
+            'city': pa.array(['Beijing', 'Shanghai', 'Beijing', 'Shenzhen'], pa.string()),
+        })
+        wb = cls.table.new_batch_write_builder()
+        writer = wb.new_write()
+        commit = wb.new_commit()
+        writer.write_arrow(data)
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
+
+    def _scan_ids(self, where, projection=None):
+        read_builder = self.table.new_read_builder().with_filter(where)
+        if projection is not None:
+            read_builder = read_builder.with_projection(projection)
+        splits = read_builder.new_scan().plan().splits()
+        return sorted(read_builder.new_read().to_arrow(splits).column('id').to_pylist())
+
+    def test_string_filter_matches_predicate_builder(self):
+        # with_filter("age > 18") must be equivalent to building the same
+        # predicate through new_predicate_builder().
+        read_builder = self.table.new_read_builder()
+        predicate = read_builder.new_predicate_builder().greater_than('age', 18)
+        splits = read_builder.with_filter(predicate).new_scan().plan().splits()
+        expected = sorted(
+            read_builder.new_read().to_arrow(splits).column('id').to_pylist())
+        self.assertEqual(self._scan_ids("age > 18"), expected)
+        self.assertEqual(expected, [1, 3])
+
+    def test_and_or_combinations(self):
+        self.assertEqual(self._scan_ids("age > 10 AND city = 'Beijing'"), [1, 3])
+        self.assertEqual(self._scan_ids("age > 40 OR age < 10"), [3, 4])
+        self.assertEqual(
+            self._scan_ids("city = 'Shanghai' OR (age < 10 AND name IS NOT NULL)"),
+            [2, 4])
+
+    def test_in_between_like_is_null(self):
+        self.assertEqual(self._scan_ids("name IN ('Alice', 'Carol')"), [1, 4])
+        self.assertEqual(self._scan_ids("age BETWEEN 10 AND 40"), [1, 2])
+        self.assertEqual(self._scan_ids("city LIKE 'Bei%'"), [1, 3])
+        self.assertEqual(self._scan_ids("name IS NULL"), [3])
+
+    def test_filter_on_unprojected_column(self):
+        # Like PyIceberg's row_filter, the string binds to the table schema,
+        # not the projection: 'age' is not projected but still filters. This
+        # holds for both with_filter/with_projection call orders.
+        self.assertEqual(
+            self._scan_ids("age > 18", projection=['id', 'name']), [1, 3])
+        read_builder = self.table.new_read_builder().with_projection(['id', 'name'])
+        read_builder.with_filter("age < 10")
+        splits = read_builder.new_scan().plan().splits()
+        ids = sorted(read_builder.new_read().to_arrow(splits).column('id').to_pylist())
+        self.assertEqual(ids, [4])
+
+    def test_unknown_field_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            self.table.new_read_builder().with_filter("nope > 1")
+
+    def test_empty_string_clears_filter(self):
+        # parse_where_clause returns None for blank input; the CLI relies on
+        # the same behavior to skip filtering.
+        self.assertEqual(self._scan_ids(""), [1, 2, 3, 4])
+        self.assertEqual(self._scan_ids("   "), [1, 2, 3, 4])
+
+    def test_stream_read_builder_normalizes_string(self):
+        # StreamReadBuilder.new_read() passes the stored predicate straight to
+        # TableRead, so a string must be parsed before it is stored.
+        table_read = self.table.new_stream_read_builder() \
+            .with_filter("age > 18").new_read()
+        self.assertIsInstance(table_read.predicate, Predicate)
 
 
 if __name__ == '__main__':

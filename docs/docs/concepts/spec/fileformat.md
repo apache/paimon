@@ -155,6 +155,7 @@ Format Options:
 | `csv.escape-character` | `\` | String | The escape character for CSV format, must be single character. |
 | `csv.include-header` | false | Boolean | Whether to include header in CSV files. |
 | `csv.null-literal` | `""` | String | Null literal string that is interpreted as a null value (disabled by default). |
+| `csv.skip-empty-lines` | false | Boolean | Whether to skip empty lines when reading, the same way as Spark's CSV source. Only supported for format tables. A line is empty if nothing is left after `String#trim`, which removes spaces, tabs and other characters up to U+0020. By default such a line is read as a row of NULLs. Paimon itself writes a row whose values are all NULL as an empty line in a single-column table, or as a line of delimiters only (e.g. a tab), so such rows are also skipped when this option is enabled. |
 | `csv.mode` | `PERMISSIVE` | String | Allows a mode for dealing with corrupt records during reading. Currently supported values are `'PERMISSIVE'`, `'DROPMALFORMED'` and `'FAILFAST'`: <ul> <li>Option `'PERMISSIVE'` sets malformed fields to null.</li> <li>Option `'DROPMALFORMED'` ignores the whole corrupted records.</li> <li>Option `'FAILFAST'` throws an exception when it meets corrupted records.</li> </ul> |
 
 Paimon CSV format uses [jackson databind API](https://github.com/FasterXML/jackson-databind) to parse and generate CSV string.
@@ -248,11 +249,12 @@ The following table lists the type mapping from Paimon type to Lance (Arrow) typ
 | DATE | DATE32 |
 | TIME | TIME32 / TIME64 |
 | TIMESTAMP(P) | TIMESTAMP (unit based on precision) |
+| TIMESTAMP_LOCAL_ZONE(P) | TIMESTAMP (unit based on precision, UTC time zone) |
 | ARRAY | LIST |
 | ROW | STRUCT |
 
 Limitations:
-1. Lance file format does not support `MAP`, `MULTISET`, `TIMESTAMP_LOCAL_ZONE` or `VARIANT` types.
+1. Lance file format does not support `MAP`, `MULTISET` or `VARIANT` types.
 2. Lance file format does not support `BLOB` fields stored inline in data files (`blob-descriptor-field` or `blob-view-field`). Regular `BLOB` fields are written to dedicated blob files and are not affected.
 
 ## Vortex
@@ -401,61 +403,61 @@ Limitations:
 
 ### Video
 
-Video is an independent, versioned format with the `.video` extension. It packs one or more
-complete encoded-video payloads and logical frame runs. The payloads are raw byte ranges without
-the ordinary BLOB entry header, length trailer, or per-entry CRC:
+`.video` stores complete encoded videos followed by six Delta-Varint arrays.
+A span maps consecutive table rows to consecutive frames in one video.
 
 ```
-+----------------------------+
-| Encoded Video Payload 1    |  Raw complete video bytes
-+----------------------------+
-| Encoded Video Payload 2    |
-+----------------------------+
-| ...                        |
-+----------------------------+
-| Physical Length Index      |  Delta-Varint video lengths
-+----------------------------+
-| Run Length Index           |  Delta-Varint logical row counts
-+----------------------------+
-| Run Reference Index        |  Delta-Varint physical video ordinals
-+----------------------------+
-| Run First-Frame Index      |  Delta-Varint frame ordinals
-+----------------------------+
-| Physical Index Length      |  4 bytes (Little Endian)
-| Run-Length Index Length    |  4 bytes (Little Endian)
-| Run-Reference Index Length |  4 bytes (Little Endian)
-| First-Frame Index Length   |  4 bytes (Little Endian)
-| Magic Number               |  4 bytes (0x4F454449, Little Endian)
-| Version                    |  1 byte
-+----------------------------+
++------------------------------+
+| Encoded Video Payload 1..N   | Complete video bytes, concatenated
++------------------------------+
+| Video Length Index           | Delta-Varint video byte lengths
+| Moov Offset Index            | Delta-Varint moov offsets relative to each video payload
+| Moov Length Index            | Delta-Varint moov byte lengths; 0 means no hint
+| Span Row Count Index         | Delta-Varint logical row counts
+| Span Video Reference Index   | Delta-Varint video ordinals; -1 NULL, -2 placeholder
+| Span First Frame Index       | Delta-Varint starting presentation-order frame ordinals
++------------------------------+
+| Video Length Index Size      | 4 bytes, little endian
+| Moov Offset Index Size       | 4 bytes, little endian
+| Moov Length Index Size       | 4 bytes, little endian
+| Span Row Count Index Size    | 4 bytes, little endian
+| Span Video Ref Index Size    | 4 bytes, little endian
+| Span First Frame Index Size  | 4 bytes, little endian
+| Magic Number                 | 4 bytes, little endian; 0x4F454449
+| Version                      | 1 byte; 1
++------------------------------+
 ```
 
-The run arrays have equal element counts. A non-negative run reference is an ordinal in the
-physical length index. For logical row `r` in a run beginning at logical row `s`, the returned
-`VideoFrameDescriptor` identifies the referenced raw video range and frame ordinal
-`run_first_frame + (r - s)`. `-1` is a NULL run and `-2` is a data-evolution placeholder run.
-Non-negative runs have fixed frame stride one in version 1; a discontinuity starts another run.
+The footer is 29 bytes. Its six sizes are the encoded byte lengths of the arrays.
+Video lengths sum to the payload region size; their prefix sums locate each video.
+The three video arrays have equal entry counts. Moov ranges must fit within their
+video payload; absent hints use `(0, 0)`. The three span arrays have equal entry counts. Row `r` in a span beginning at row
+`s` maps to `first_frame + r - s` in the referenced video. A gap starts a new span.
+One video can be referenced by multiple spans.
 
-The serialized `VideoFrameDescriptor` stored in an Arrow/data-file cell has its own versioned
-wire layout. All numeric values are little endian:
+For example, videos of 1,000 and 2,000 bytes start at offsets 0 and 1,000.
+Span arrays `[3, 2]`, `[0, 1]`, and `[10, 20]` map rows 0–2 to video 0 frames
+10–12, and rows 3–4 to video 1 frames 20–21.
+
+MP4 `moov` contains sample timing, sync flags, sizes and locations. Readers use
+the stored range to fetch it and derive frame locations; no keyframe index or
+metadata bytes are duplicated. Invalid hints fall back to container discovery.
+
+A little-endian `VideoFrameDescriptor` identifies one frame:
 
 | Field | Size | Description |
 | --- | ---: | --- |
-| Version | 1 byte | Descriptor version, currently `1` |
+| Version | 1 byte | `1` |
 | Magic | 8 bytes | `0x564944454F46524D` (`VIDEOFRM`) |
 | URI length | 4 bytes | UTF-8 URI byte length |
-| URI | variable | URI of the containing `.video` file |
-| Offset | 8 bytes | Start of the complete encoded-video payload |
-| Length | 8 bytes | Encoded-video payload length |
+| URI | variable | Containing file |
+| Offset | 8 bytes | Video payload offset in the file |
+| Length | 8 bytes | Complete video payload length |
 | Frame index | 8 bytes | Zero-based presentation-order frame ordinal |
+| Moov offset | 8 bytes | Relative to the video payload |
+| Moov length | 8 bytes | Moov byte length; 0 means no hint |
 
-Descriptor bytes are independently versioned from the `.video` container. Java and Python share
-canonical descriptor and container fixtures to keep both implementations byte-compatible.
-
-Readers validate footer and index bounds, positive physical lengths, full coverage of the payload
-region, equal run-index counts, positive run lengths, physical ordinals, and non-negative first
-frames. The format currently supports one scalar BLOB field per file. Physical video reuse uses
-exact input payload `BlobDescriptor` identity and is file-local; there are no cross-file payload
-references. Ordinary `.blob` files keep their existing version, wrappers, checksums, and layout.
+A `.video` file serves one scalar BLOB field; references are file-local. `.blob` is unchanged.
+This layout replaces the previous v1 layout; existing `.video` files must be reimported.
 
 For usage details, configuration options, and examples, see [Blob Type](../../multimodal-table/blob).

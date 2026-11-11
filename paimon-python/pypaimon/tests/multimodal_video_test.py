@@ -21,6 +21,8 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
+from parameterized import parameterized
+
 from pypaimon.common.file_io import FileIO
 from pypaimon.multimodal import VideoFrameCollator
 from pypaimon.multimodal.lerobot.dataset import _decode_video_rows
@@ -48,6 +50,58 @@ class _FailingCloseDecoder(_Decoder):
     def close(self):
         super().close()
         raise RuntimeError("decoder close failed")
+
+
+class RawVideoRemuxTest(unittest.TestCase):
+
+    def test_read_only_packet_duration(self):
+        from fractions import Fraction
+        from unittest.mock import MagicMock, patch
+        from pypaimon.multimodal.video import _remux_raw_hevc
+
+        class Packet:
+            size = 1
+
+            def __init__(self, duration):
+                self._duration = duration
+
+            @property
+            def duration(self):
+                return self._duration
+
+            def decode(self):
+                return [SimpleNamespace(pts=self.pts, is_corrupt=False)]
+
+        class Streams(list):
+            @property
+            def video(self):
+                return self
+
+        for duration in (48000, 0):
+            with self.subTest(duration=duration), tempfile.TemporaryDirectory() as directory:
+                packets = [Packet(24000), Packet(duration)]
+                first, second, output = MagicMock(), MagicMock(), MagicMock()
+                for container in (first, second, output):
+                    container.__enter__.return_value = container
+                    container.streams = Streams([SimpleNamespace()])
+                first.format.name = "hevc"
+                first.demux.return_value = [Packet(24000), Packet(48000)]
+                second.demux.return_value = packets
+                av = MagicMock()
+                av.open.side_effect = [first, second, output]
+                with patch("pypaimon.multimodal.video._require_video_av", return_value=av):
+                    if duration == 0:
+                        with self.assertRaisesRegex(ValueError, "no duration"):
+                            _remux_raw_hevc(io.BytesIO(b"source"), os.path.join(directory, "out.mp4"), Fraction(1, 30))
+                    else:
+                        self.assertEqual(2, _remux_raw_hevc(
+                            io.BytesIO(b"source"), os.path.join(directory, "out.mp4"), Fraction(1, 30)))
+                        self.assertEqual(2, output.mux.call_count)
+                        for i, packet in enumerate(packets):
+                            self.assertEqual(Fraction(i, 30), packet.pts * packet.time_base)
+                            self.assertEqual(Fraction(i, 30), packet.dts * packet.time_base)
+                            self.assertEqual(Fraction(1, 30), packet.duration * packet.time_base)
+                output.__exit__.assert_called_once()
 
 
 class ImageVideoEncoderTest(unittest.TestCase):
@@ -512,6 +566,253 @@ class VideoFrameCollatorTest(unittest.TestCase):
 
         self.assertEqual("oss://bucket/internal.video", file_io.path)
         self.assertEqual((b"resolved-video", 2), result[0]["frame"])
+
+    @parameterized.expand([0, 5])
+    def test_unused_index_is_not_read_on_decode_eviction_or_close(self, prefetch_max_bytes):
+        streams = []
+
+        class PayloadOnlyIO:
+            def new_input_stream(self, path):
+                stream = io.BytesIO(b"video")
+                streams.append(stream)
+                return stream
+
+            def read_file_range(self, *args):
+                raise AssertionError("unused index must not be read")
+
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=PayloadOnlyIO()), video_column="video",
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            max_open_videos=1, collate_fn=lambda rows: rows,
+            prefetch_max_bytes=prefetch_max_bytes)
+        try:
+            for name in ("first", "second"):
+                descriptor = VideoFrameDescriptor(name, 0, 5, 2)
+                result = collator([{"video": descriptor.serialize()}])
+                self.assertEqual((b"video", 2), result[0]["frame"])
+            self.assertTrue(streams[0].closed)
+        finally:
+            collator.close()
+        self.assertTrue(all(stream.closed for stream in streams))
+
+    def test_prefetch_bounds_retained_payloads_and_reuses_reads(self):
+        reads = []
+        opened = []
+
+        class Source(io.BytesIO):
+            def read(self, size=-1):
+                reads.append(size)
+                return super().read(size)
+
+        class CountingIO:
+            def new_input_stream(self, path):
+                stream = Source(b"video")
+                opened.append(stream)
+                return stream
+
+        decoders = []
+
+        def factory(stream):
+            decoder = _Decoder(stream, [])
+            decoders.append(decoder)
+            return decoder
+
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=CountingIO()), video_column="video",
+            decoder_factory=factory,
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            collate_fn=lambda rows: rows, prefetch_max_bytes=5)
+        first = VideoFrameDescriptor("first", 0, 5, 0, 0, 0).serialize()
+        second = VideoFrameDescriptor("second", 0, 5, 0, 0, 0).serialize()
+        try:
+            for _ in range(2):
+                result = collator([{"video": first}])
+                self.assertEqual((b"video", 0), result[0]["frame"])
+            self.assertEqual([5], reads)
+            self.assertFalse(opened[0].closed)
+            self.assertEqual([b"id", b"o"],
+                             decoders[0]._stream.video_read_ranges([(1, 2), (4, 1)]))
+            self.assertEqual([5], reads)
+            collator([{"video": second}])
+            self.assertEqual(0, getattr(decoders[1]._stream, "video_prefetch_bytes", 0))
+            self.assertFalse(opened[1].closed)
+            self.assertEqual(5, sum(getattr(stream, "video_prefetch_bytes", 0)
+                                    for _, stream in collator._decoders.values()))
+            collator.close()
+            collator([{"video": second}])
+            self.assertEqual(5, decoders[-1]._stream.video_prefetch_bytes)
+        finally:
+            collator.close()
+        self.assertTrue(all(stream.closed for stream in opened))
+
+    def test_disabled_or_oversized_prefetch_keeps_range_reads(self):
+        for budget in (0, 4):
+            with self.subTest(budget=budget):
+                source = io.BytesIO(b"video")
+                captured = []
+
+                def factory(stream):
+                    self.assertEqual(0, source.tell())
+                    captured.append(stream)
+                    return _Decoder(stream, [])
+
+                collator = VideoFrameCollator(
+                    SimpleNamespace(file_io=SimpleNamespace(
+                        new_input_stream=lambda path: source)),
+                    video_column="video", decoder_factory=factory,
+                    decode_fn=lambda decoder, index, row: decoder.decode(index),
+                    collate_fn=lambda rows: rows, prefetch_max_bytes=budget)
+                try:
+                    descriptor = VideoFrameDescriptor("video", 0, 5, 0, 0, 0)
+                    result = collator([{"video": descriptor.serialize()}])
+                    self.assertEqual((b"video", 0), result[0]["frame"])
+                    self.assertEqual(0, getattr(captured[0], "video_prefetch_bytes", 0))
+                finally:
+                    collator.close()
+
+    def test_prefetch_rejects_truncated_payload_and_closes_source(self):
+        source = io.BytesIO(b"short")
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=SimpleNamespace(new_input_stream=lambda path: source)),
+            video_column="video", decoder_factory=lambda stream: self.fail("truncated"),
+            decode_fn=lambda *args: None, prefetch_max_bytes=10)
+        descriptor = VideoFrameDescriptor("video", 0, 10, 0, 0, 0)
+        with self.assertRaisesRegex(IOError, "Incomplete video"):
+            collator([{"video": descriptor.serialize()}])
+        self.assertTrue(source.closed)
+        self.assertFalse(collator._decoders)
+        collator.close()
+
+    def test_prefetch_accepts_short_reads(self):
+        reads = []
+
+        class Source(io.BytesIO):
+            def read(self, size=-1):
+                reads.append(size)
+                return super().read(min(size, 2))
+
+        source = Source(b"video")
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=SimpleNamespace(new_input_stream=lambda path: source)),
+            video_column="video", decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            collate_fn=lambda rows: rows, prefetch_max_bytes=5)
+        try:
+            descriptor = VideoFrameDescriptor("video", 0, 5, 0, 0, 0)
+            result = collator([{"video": descriptor.serialize()}])
+            self.assertEqual((b"video", 0), result[0]["frame"])
+            self.assertEqual([5, 3, 1], reads)
+        finally:
+            collator.close()
+        self.assertTrue(source.closed)
+
+    def test_prefetch_reuses_evicted_decoder_budget(self):
+        opened = []
+        buffered = []
+
+        def open_source(path):
+            source = io.BytesIO(b"video")
+            opened.append(source)
+            return source
+
+        def factory(stream):
+            buffered.append(getattr(stream, "video_prefetch_bytes", 0))
+            self.assertTrue(all(source.closed for source in opened[:-1]))
+            return _Decoder(stream, [])
+
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=SimpleNamespace(new_input_stream=open_source)),
+            video_column="video", decoder_factory=factory,
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            collate_fn=lambda rows: rows, prefetch_max_bytes=5, max_open_videos=1)
+        try:
+            for name in ("first", "second", "third"):
+                descriptor = VideoFrameDescriptor(name, 0, 5, 0, 0, 0)
+                result = collator([{"video": descriptor.serialize()}])
+                self.assertEqual((b"video", 0), result[0]["frame"])
+                self.assertEqual(1, len(collator._decoders))
+            self.assertEqual([5, 5, 5], buffered)
+        finally:
+            collator.close()
+        self.assertTrue(all(source.closed for source in opened))
+
+    def test_invalid_prefetch_budget(self):
+        for budget in (-1, True, 1.5, "10"):
+            with self.subTest(budget=budget):
+                with self.assertRaisesRegex(ValueError, "prefetch_max_bytes"):
+                    VideoFrameCollator(
+                        self.table, video_column="video", decoder_factory=lambda stream: None,
+                        decode_fn=lambda *args: None, prefetch_max_bytes=budget)
+
+    def test_prefetch_preserves_real_indexed_video_frames(self):
+        try:
+            import av
+            import numpy as np
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
+
+        target = io.BytesIO()
+        with av.open(target, mode="w", format="mp4") as container:
+            stream = container.add_stream("mpeg4", rate=30)
+            stream.width = stream.height = 16
+            stream.pix_fmt = "yuv420p"
+            stream.codec_context.gop_size = 4
+            for value in range(12):
+                pixels = np.full((16, 16, 3), value * 15, dtype=np.uint8)
+                for packet in stream.encode(av.VideoFrame.from_ndarray(pixels, format="rgb24")):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+        payload = target.getvalue()
+        from pypaimon.common.mp4_moov import MoovLocator
+        locator = MoovLocator()
+        locator.feed(payload)
+        moov_offset, moov_length = locator.finish()
+        full_file = payload
+        outputs = []
+        for budget in (0, len(payload)):
+            reads = []
+
+            class Source(io.BytesIO):
+                def read(self, size=-1):
+                    reads.append((self.tell(), size))
+                    return super().read(size)
+
+            class CountingIO:
+                def new_input_stream(self, path):
+                    return Source(full_file)
+
+                def read_file_range(self, path, offset, size):
+                    reads.append((offset, size))
+                    return full_file[offset:offset + size]
+
+                def read_ranges_coalesced(self, ranges, parallelism):
+                    return [self.read_file_range(*entry) for entry in ranges]
+
+            collator = VideoFrameCollator(
+                SimpleNamespace(file_io=CountingIO()), video_column="video",
+                decoder_factory=lambda source: _open_video_decoder(source, backend="pyav"),
+                decode_batch_fn=lambda decoder, indices, rows: list(
+                    decoder.get_frames_at(indices=indices).data),
+                collate_fn=lambda rows: rows, prefetch_max_bytes=budget)
+            try:
+                rows = [{"video": VideoFrameDescriptor(
+                    "video", 0, len(payload), frame, moov_offset, moov_length
+                ).serialize()} for frame in (9, 1, 9, 7)]
+                outputs.append(torch.stack([row["frame"] for row in collator(rows)]))
+                if budget:
+                    media_reads = [entry for entry in reads if entry[0] < len(payload)]
+                    self.assertEqual([(0, len(payload))], media_reads)
+                    count = len(reads)
+                    repeated = torch.stack([row["frame"] for row in collator(rows)])
+                    self.assertTrue(torch.equal(outputs[-1], repeated))
+                    self.assertEqual(count, len(reads))
+            finally:
+                collator.close()
+        self.assertTrue(torch.equal(outputs[0], outputs[1]))
 
     def _descriptor(self, name, data, frame_index):
         path = os.path.join(self.temp_dir.name, name)

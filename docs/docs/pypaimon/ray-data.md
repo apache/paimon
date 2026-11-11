@@ -267,15 +267,22 @@ For non-HASH_FIXED append-only tables, the dataset is written as-is.
 Postpone-bucket tables (`bucket = -2`) follow
 `postpone.batch-write-fixed-bucket` (default: `true`). Existing partitions
 reuse their bucket count; new partitions infer one from the configured target
-row count or size. Ray materializes the input for this global plan, then sorts
-by partition, bucket, and primary-key hash. One primary key stays with one
-writer, while a large bucket can span multiple Ray blocks. Set
+row count or size. Ray materializes the input for this global plan, then groups
+by partition and bucket. Each complete group is written by one writer inside
+`map_groups()`, including when its input spans multiple Ray blocks. Each group
+must fit in memory on one node. Set
 `hash_fixed_precluster="off"` to retain `bucket-postpone` writes. Fixed-bucket
 postpone writes support `bucket-function.type=default` only. HASH_DYNAMIC and
 CROSS_PARTITION primary-key Ray writes are not supported and fail fast,
 including the default dynamic-bucket primary-key table (`bucket = -1`).
 Ray write tasks create independent Paimon writers, which can assign
 overlapping buckets or sequence numbers for those modes.
+
+With `write.native.enabled=true`, fixed and postpone input bucket routing runs
+in Rust, including POSTPONE per-partition input statistics and bucket-count
+inference. Ray still materializes, groups, and schedules the input; workers
+reconstruct native routing state from the shared plan. The grouping and
+single-writer ownership rules above remain the same.
 
 **Parameters:**
 - `dataset`: the Ray Dataset to write.

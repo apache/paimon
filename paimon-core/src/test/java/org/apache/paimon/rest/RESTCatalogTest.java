@@ -99,8 +99,11 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
@@ -129,6 +132,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
 import java.io.File;
@@ -2377,9 +2381,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(tagSnapshot).isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
 
         // rollback to snapshot 2 from snapshot
-        assertThatThrownBy(() -> catalog.rollbackTo(identifier, Instant.snapshot(2L), 4L))
+        assertThatThrownBy(() -> catalog.rollbackTo(identifier, null, Instant.snapshot(2L), 4L))
                 .hasMessageContaining("Latest snapshot 3 is not 4");
-        catalog.rollbackTo(identifier, Instant.snapshot(2L), 3L);
+        catalog.rollbackTo(identifier, null, Instant.snapshot(2L), 3L);
         assertThat(table.latestSnapshot().get().id()).isEqualTo(2);
     }
 
@@ -4666,6 +4670,32 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testStreamScanWithAuthRulesKeepsSnapshotNotExistPlan() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_stream_no_snapshot");
+        Table table =
+                createMaskingAuthTable(
+                        identifier, stringFields("name", "secret"), Collections.emptyMap());
+        setRowFilter(
+                identifier,
+                Collections.singletonList(
+                        leaf(
+                                0,
+                                "name",
+                                DataTypes.STRING(),
+                                Equal.INSTANCE,
+                                BinaryString.fromString("john"))));
+        maskConstant(identifier, "secret");
+
+        // stream consumers tell "no new snapshot yet" from an empty plan by this instance
+        StreamTableScan scan = table.newReadBuilder().newStreamScan();
+        assertThat(scan.plan()).isSameAs(SnapshotNotExistPlan.INSTANCE);
+
+        writeStringRow(table, "john", "s1");
+        assertThat(scan.plan().splits()).isNotEmpty();
+        assertThat(scan.plan()).isSameAs(SnapshotNotExistPlan.INSTANCE);
+    }
+
+    @Test
     void testColumnMaskingRejectsNestedPrunedRuleInput() throws Exception {
         Identifier identifier =
                 Identifier.create("test_table_db", "auth_table_masking_pruned_input");
@@ -5909,6 +5939,71 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(scan.plan().splits()).isNotEmpty();
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testQueryAuthCannotBeDisabledDynamically(boolean withoutTimeTravel) throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_dynamic_options");
+        FileStoreTable table =
+                (FileStoreTable)
+                        createMaskingAuthTable(
+                                identifier, stringFields("secret", "other"), emptyMap());
+        writeStringRows(
+                table, new String[] {"secret1", "visible"}, new String[] {"secret2", "hidden"});
+        maskConstant(identifier, "secret");
+        setRowFilter(
+                identifier,
+                singletonList(
+                        new PredicateBuilder(table.rowType())
+                                .equal(1, BinaryString.fromString("visible"))));
+        assertThat(batchRead(table)).containsExactly("+I[****, visible]");
+
+        for (String value : Arrays.asList("false", "FaLsE", null, "", "invalid", " true ")) {
+            Map<String, String> options = singletonMap(QUERY_AUTH_ENABLED.key(), value);
+            assertThatThrownBy(
+                            () -> {
+                                if (withoutTimeTravel) {
+                                    table.copyWithoutTimeTravel(options);
+                                } else {
+                                    table.copy(options);
+                                }
+                            })
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage(
+                            "Option 'query-auth.enabled' is not allowed to be disabled dynamically");
+        }
+
+        for (Map<String, String> options :
+                Arrays.asList(
+                        Collections.<String, String>emptyMap(),
+                        singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        singletonMap(QUERY_AUTH_ENABLED.key(), "TrUe"))) {
+            FileStoreTable copied =
+                    withoutTimeTravel ? table.copyWithoutTimeTravel(options) : table.copy(options);
+            assertThat(batchRead(copied)).containsExactly("+I[****, visible]");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testQueryAuthCanBeEnabledDynamically(boolean withoutTimeTravel) throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_dynamic_enable");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder().column("secret", DataTypes.STRING()).build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        for (String value : Arrays.asList("false", "true", "TrUe")) {
+            Map<String, String> options = singletonMap(QUERY_AUTH_ENABLED.key(), value);
+            FileStoreTable copied =
+                    withoutTimeTravel ? table.copyWithoutTimeTravel(options) : table.copy(options);
+            assertThat(copied.coreOptions().queryAuthEnabled())
+                    .isEqualTo(Boolean.parseBoolean(value));
+        }
+        assertThat(table.coreOptions().queryAuthEnabled()).isFalse();
+    }
+
     @Test
     void testPhysicalMetadataSystemTablesRejectedUnderQueryAuth() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "auth_systab_physical");
@@ -5937,6 +6032,202 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                     .contains("****")
                     .doesNotContain("TOPSECRET");
         }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void testAuditLogQueryAuthWithSequenceNumber(boolean sequenceNumber, boolean masking)
+            throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_audit_log_sequence");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        Arrays.asList(
+                                new DataField(0, "a", DataTypes.BIGINT()),
+                                new DataField(1, "b", DataTypes.STRING()),
+                                new DataField(2, "c", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.singletonList("a"),
+                        Collections.singletonMap("bucket", "1"));
+        GenericRow[] rows = new GenericRow[10];
+        for (int i = 0; i < rows.length; i++) {
+            long a = 9L - i;
+            rows[i] =
+                    GenericRow.of(
+                            a,
+                            BinaryString.fromString("secret" + a),
+                            BinaryString.fromString("value" + a));
+        }
+        commitRows(table, rows);
+        if (masking) {
+            setColumnMask(
+                    identifier,
+                    "b",
+                    new UpperTransform(
+                            Collections.singletonList(new FieldRef(2, "c", DataTypes.STRING()))));
+        }
+
+        Table auditLog =
+                SystemTableLoader.load(
+                        "audit_log",
+                        ((FileStoreTable) table)
+                                .copy(
+                                        Collections.singletonMap(
+                                                CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED
+                                                        .key(),
+                                                Boolean.toString(sequenceNumber))));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        for (boolean firstRows : new boolean[] {true, false}) {
+            setRowFilter(
+                    identifier,
+                    Collections.singletonList(
+                            firstRows
+                                    ? predicates.lessOrEqual(0, 1L)
+                                    : predicates.greaterOrEqual(0, 8L)));
+            int first = firstRows ? 0 : 8;
+            String prefix = masking ? "VALUE" : "secret";
+            for (boolean projected : new boolean[] {false, true}) {
+                RowType readType =
+                        projected ? auditLog.rowType().project("b", "rowkind") : auditLog.rowType();
+                ReadBuilder readBuilder = auditLog.newReadBuilder().withReadType(readType);
+                List<InternalRow> result =
+                        collectRows(
+                                readBuilder
+                                        .newRead()
+                                        .createReader(readBuilder.newScan().plan().splits()),
+                                readType);
+                assertThat(result).hasSize(2);
+                assertThat(result)
+                        .extracting(row -> row.getString(readType.getFieldIndex("b")).toString())
+                        .containsExactlyInAnyOrder(prefix + first, prefix + (first + 1));
+                for (InternalRow row : result) {
+                    assertThat(row.getFieldCount()).isEqualTo(readType.getFieldCount());
+                    assertThat(row.getString(readType.getFieldIndex("rowkind")).toString())
+                            .isEqualTo("+I");
+                    if (sequenceNumber && !projected) {
+                        assertThat(row.getLong(readType.getFieldIndex("_SEQUENCE_NUMBER")))
+                                .isEqualTo(9L - row.getLong(readType.getFieldIndex("a")));
+                    }
+                }
+                if (masking) {
+                    readBuilder.withFilter(
+                            new PredicateBuilder(auditLog.rowType())
+                                    .equal(
+                                            auditLog.rowType().getFieldIndex("b"),
+                                            BinaryString.fromString(prefix + first)));
+                    assertThat(
+                                    collectRows(
+                                            readBuilder
+                                                    .newRead()
+                                                    .createReader(
+                                                            readBuilder.newScan().plan().splits()),
+                                            readType))
+                            .extracting(
+                                    row -> row.getString(readType.getFieldIndex("b")).toString())
+                            .containsExactly(prefix + first);
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void testPrimaryKeyRawQueryAuthWithSequenceNumberOption(boolean masking, boolean projected)
+            throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_pk_raw_sequence");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        Arrays.asList(
+                                new DataField(0, "a", DataTypes.INT()),
+                                new DataField(1, "b", DataTypes.INT()),
+                                new DataField(2, "c", DataTypes.STRING()),
+                                new DataField(3, "d", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.singletonList("a"),
+                        Collections.singletonMap("bucket", "1"));
+        commitRows(
+                table,
+                GenericRow.of(
+                        1, 0, BinaryString.fromString("raw1"), BinaryString.fromString("visible")),
+                GenericRow.of(
+                        2, 1, BinaryString.fromString("raw2"), BinaryString.fromString("hidden")));
+        setRowFilter(
+                identifier,
+                Collections.singletonList(new PredicateBuilder(table.rowType()).lessOrEqual(0, 1)));
+        if (masking) {
+            setColumnMask(
+                    identifier,
+                    "c",
+                    new UpperTransform(
+                            Collections.singletonList(new FieldRef(3, "d", DataTypes.STRING()))));
+        }
+
+        Table readTable =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(), "true"));
+        RowType readType = projected ? readTable.rowType().project("c") : readTable.rowType();
+        ReadBuilder readBuilder = readTable.newReadBuilder().withReadType(readType);
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+        DataSplit dataSplit = (DataSplit) ((QueryAuthSplit) splits.get(0)).split();
+        assertThat(dataSplit.rawConvertible()).isTrue();
+        assertThat(dataSplit.dataFiles()).hasSize(1);
+        assertThat(dataSplit.dataFiles().get(0).deleteRowCount()).hasValue(0L);
+
+        List<InternalRow> result =
+                collectRows(readBuilder.newRead().createReader(splits), readType);
+        assertThat(result)
+                .extracting(row -> row.getString(readType.getFieldIndex("c")).toString())
+                .containsExactly(masking ? "VISIBLE" : "raw1");
+        assertThat(result.get(0).getFieldCount()).isEqualTo(readType.getFieldCount());
+        if (!projected) {
+            assertThat(result.get(0).getInt(0)).isEqualTo(1);
+            assertThat(result.get(0).getInt(1)).isZero();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void testAppendQueryAuthWithSequenceNumberOption(boolean dataEvolution, boolean projected)
+            throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_append_sequence");
+        Map<String, String> options = new HashMap<>();
+        if (dataEvolution) {
+            options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+            options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        }
+        Table table = createMaskingAuthTable(identifier, stringFields("a", "b", "c"), options);
+        writeStringRows(
+                table,
+                new String[] {"yes", "raw", "visible"},
+                new String[] {"no", "yes", "hidden"});
+        setRowFilter(
+                identifier,
+                Collections.singletonList(
+                        new PredicateBuilder(table.rowType())
+                                .equal(0, BinaryString.fromString("yes"))));
+        setColumnMask(
+                identifier,
+                "b",
+                new UpperTransform(
+                        Collections.singletonList(new FieldRef(2, "c", DataTypes.STRING()))));
+
+        Table readTable =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(), "true"));
+        RowType readType = projected ? readTable.rowType().project("b") : readTable.rowType();
+        ReadBuilder readBuilder = readTable.newReadBuilder().withReadType(readType);
+        List<InternalRow> result =
+                collectRows(
+                        readBuilder.newRead().createReader(readBuilder.newScan().plan().splits()),
+                        readType);
+        assertThat(result)
+                .extracting(row -> row.getString(readType.getFieldIndex("b")).toString())
+                .containsExactly("VISIBLE");
+        assertThat(result.get(0).getFieldCount()).isEqualTo(readType.getFieldCount());
     }
 
     @Test
@@ -6203,7 +6494,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Lists.newArrayList(new DataField(0, "col1", DataTypes.INT())),
                         emptyList(),
                         emptyList(),
-                        new HashMap<>(),
+                        Collections.singletonMap("commit.auto-rollback.enabled", "true"),
                         ""),
                 true);
         Table table = catalog.getTable(identifier);

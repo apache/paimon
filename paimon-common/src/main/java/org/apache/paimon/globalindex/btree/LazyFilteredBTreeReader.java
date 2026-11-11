@@ -27,7 +27,9 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
@@ -40,7 +42,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -51,15 +52,19 @@ import java.util.function.Supplier;
 public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIndexReader> {
 
     private final KeySerializer keySerializer;
+    private final List<DataField> indexFields;
     private final CacheManager cacheManager;
     private final GlobalIndexFileReader fileReader;
     @Nullable private final RoaringNavigableMap64 rowIdFilter;
     private final Comparator<Object> comparator;
     private final long totalRowCount;
+    private final List<GlobalIndexIOMeta> indexFiles;
+    private final long fallbackScanMaxSize;
     @Nullable private final Pair<Object, Object> fullRangeBounds;
 
     public LazyFilteredBTreeReader(
             List<GlobalIndexIOMeta> files,
+            List<DataField> indexFields,
             KeySerializer keySerializer,
             GlobalIndexFileReader fileReader,
             CacheManager cacheManager,
@@ -71,6 +76,9 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
+        this.indexFields = indexFields;
+        this.indexFiles = files;
+        this.fallbackScanMaxSize = fallbackScanMaxSize;
         this.rowIdFilter =
                 rowRanges == null ? null : GlobalIndexResult.fromRanges(rowRanges).results();
         this.comparator = keySerializer.createComparator();
@@ -93,6 +101,9 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
                 return null;
             }
             remaining -= file.rowCount();
+            if (file.metadata() == null) {
+                return null;
+            }
             SortedIndexFileMeta meta = SortedIndexFileMeta.deserialize(file.metadata());
             if (meta.hasNulls() || meta.firstKey() == null || meta.lastKey() == null) {
                 return null;
@@ -107,6 +118,27 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             }
         }
         return remaining == 0 ? Pair.of(min, max) : null;
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitComposite(Predicate predicate) {
+        if (indexFields.size() < 2) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        Optional<CompositeBTreePredicate.Plan> planned =
+                CompositeBTreePredicate.plan(indexFields, predicate);
+        if (!planned.isPresent()) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        CompositeBTreePredicate.Plan plan = planned.get();
+        if (plan.isPointLookup() && plan.intervals().size() == 1) {
+            return visitEqual((FieldRef) null, plan.intervals().get(0).pointKey());
+        }
+        List<GlobalIndexIOMeta> selected = plan.selectFiles(indexFiles);
+        if (!plan.canScan(selected, fallbackScanMaxSize)) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        return visitSelectedFiles(Optional.of(selected), reader -> reader.visitComposite(plan));
     }
 
     @Override
@@ -163,7 +195,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
 
     // Only use for predicates whose matching keys form one contiguous interval.
     private CompletableFuture<Optional<GlobalIndexResult>> visitWithAllMatch(
-            Predicate<Object> predicate,
+            java.util.function.Predicate<Object> predicate,
             Supplier<CompletableFuture<Optional<GlobalIndexResult>>> fallback) {
         if (fullRangeBounds != null
                 && predicate.test(fullRangeBounds.getLeft())

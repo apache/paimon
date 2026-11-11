@@ -878,7 +878,13 @@ class FormatTablePartitionRepairTest {
 
         @Override
         public List<Partition> listPartitionsByNames(List<Map<String, String>> partitions) {
-            throw new UnsupportedOperationException();
+            List<Partition> result = new ArrayList<>(partitions.size());
+            for (Map<String, String> spec : partitions) {
+                if (registered.contains(spec)) {
+                    result.add(partition(spec));
+                }
+            }
+            return result;
         }
 
         @Override
@@ -887,22 +893,25 @@ class FormatTablePartitionRepairTest {
             requestedPrefixes.add(prefix);
             List<Partition> partitions = new ArrayList<>(registered.size());
             for (Map<String, String> spec : registered) {
-                partitions.add(
-                        new Partition(
-                                spec,
-                                0L,
-                                0L,
-                                0L,
-                                0L,
-                                0,
-                                false,
-                                null,
-                                null,
-                                null,
-                                null,
-                                partitionOptions.get(spec)));
+                partitions.add(partition(spec));
             }
             return partitions;
+        }
+
+        private Partition partition(Map<String, String> spec) {
+            return new Partition(
+                    spec,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
+                    0,
+                    false,
+                    null,
+                    null,
+                    null,
+                    null,
+                    partitionOptions.get(spec));
         }
     }
 }

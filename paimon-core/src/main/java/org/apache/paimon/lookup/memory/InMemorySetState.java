@@ -56,7 +56,12 @@ public class InMemorySetState<K, V> extends InMemoryState<K, V> implements SetSt
 
     @Override
     public void retract(K key, V value) throws IOException {
-        values.get(wrapBytes(serializeKey(key))).remove(wrapBytes(serializeValue(value)));
+        Set<ByteArray> set = values.get(wrapBytes(serializeKey(key)));
+        // the key may never have been added, for example when only predicate-passing
+        // rows are indexed and the retracted row was filtered out
+        if (set != null) {
+            set.remove(wrapBytes(serializeValue(value)));
+        }
     }
 
     @Override

@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.PredicateRemapper;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.NestedProjectedRow;
@@ -136,6 +137,16 @@ public final class ReadTransform {
         return readType;
     }
 
+    public ReadTransform withSequenceNumber() {
+        RowType readType = prependSequenceNumber(this.readType);
+        return new ReadTransform(
+                readType,
+                prependSequenceNumber(outputType),
+                authResult,
+                masking,
+                filter == null ? null : PredicateRemapper.remap(filter, readType));
+    }
+
     /** Apply authorization, masking, the query filter, and the output projection, in that order. */
     public RecordReader<InternalRow> apply(RecordReader<InternalRow> reader) {
         if (authResult != null) {
@@ -146,6 +157,13 @@ public final class ReadTransform {
         }
         NestedProjectedRow projection = NestedProjectedRow.create(readType, outputType);
         return projection == null ? reader : reader.transform(projection::replaceRow);
+    }
+
+    private static RowType prependSequenceNumber(RowType rowType) {
+        List<DataField> fields = new ArrayList<>();
+        fields.add(SpecialFields.SEQUENCE_NUMBER);
+        fields.addAll(rowType.getFields());
+        return rowType.copy(fields);
     }
 
     @Nullable

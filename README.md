@@ -3,9 +3,12 @@
 [![License](https://img.shields.io/badge/license-Apache%202-4EB1BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 [![Get on Slack](https://img.shields.io/badge/slack-join-orange.svg)](https://the-asf.slack.com/archives/C053Q2NCW8G)
 
-Apache Paimon is a lake format that enables building a Realtime Lakehouse Architecture with Flink and Spark 
-for both streaming and batch operations. Paimon innovatively combines lake format and LSM structure, bringing realtime 
-streaming updates into the lake architecture.
+Apache Paimon is a lake format for streaming and batch workloads with Flink and Spark.
+Append and primary-key tables share versioned snapshots and manifest-based file management.
+Primary-key tables use an LSM-based layout for streaming updates. Append tables can enable
+[Data Evolution](docs/docs/multimodal-table/data-evolution.mdx) to align column files by row ID
+and update selected columns while retaining files for untouched columns. Data Evolution uses
+positional column merging independently of primary-key LSM merging.
 
 Background and documentation are available at https://paimon.apache.org
 

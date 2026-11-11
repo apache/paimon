@@ -61,6 +61,97 @@ INSERT INTO paimon_table /*+ OPTIONS(
 SELECT * FROM source_table;
 ```
 
+### Managed Memory for an Explicit Writer Resource Group
+
+When setting `sink.writer-memory` to configure the writer slot sharing group's task heap,
+use `sink.writer-managed-memory` to also request managed memory for that group. This optional
+budget must be positive and requires `sink.writer-memory`; `sink.writer-cpu` retains its default
+of one core unless explicitly configured.
+See Flink's [fine-grained resource management](https://nightlies.apache.org/flink/flink-docs-release-1.20/docs/deployment/finegrained_resource/)
+for the deployment requirements and limitations of explicit slot sharing group resources.
+
+```sql
+INSERT INTO paimon_table /*+ OPTIONS(
+    'sink.writer-memory' = '512 mb',
+    'sink.writer-managed-memory' = '1 gb',
+    'sink.use-managed-memory-allocator' = 'true',
+    'sink.managed.writer-buffer-memory' = '256 mb'
+) */
+SELECT * FROM source_table;
+```
+
+The managed budget is a resource request for each shared slot of the writer group, not a total
+across all writer subtasks or a guaranteed allocation to the writer alone. Actual allocation
+depends on Flink's resource management mode, available resources, and managed memory consumers.
+The writer-buffer setting remains a weight: `256 mb` in this example does not cap the writer's
+buffer at 256 MiB. Flink determines each writer subtask's share of the slot's managed memory.
+
+Setting the budget does not enable the managed allocator. With the allocator disabled, writer
+buffers still use heap memory. The existing downstream slot sharing and explicit committer
+resource settings are unchanged. Leaving the new option unset preserves existing resource
+configuration, including default-slot managed allocation.
+
+### Task Off-Heap Memory for an Explicit Writer Resource Group
+
+Use `sink.writer-offheap-memory` to request task off-heap memory for the writer slot sharing
+group. This optional budget must be positive and requires `sink.writer-memory`; `sink.writer-cpu`
+retains its default of one core unless explicitly configured. Memory units such as `kb`, `mb`,
+and `gb` are supported, and values retain their byte precision.
+
+```sql
+INSERT INTO paimon_table /*+ OPTIONS(
+    'sink.writer-memory' = '512 mb',
+    'sink.writer-offheap-memory' = '128 mb',
+    'sink.writer-managed-memory' = '64 mb'
+) */
+SELECT * FROM source_table;
+```
+
+Task off-heap memory and managed memory are separate resource budgets. The off-heap budget is
+a request for each shared slot of the writer group, not a total across writer subtasks or a
+guaranteed allocation to the writer alone. It does not switch writer buffers to off-heap memory
+or enable the managed allocator. Allocation follows Flink's
+[fine-grained resource management](https://nightlies.apache.org/flink/flink-docs-release-1.20/docs/deployment/finegrained_resource/)
+requirements and available resources.
+
+This option applies to ordinary sink writers and combined CDC multi-table writers. Existing
+downstream slot sharing is preserved; a committer with its own explicit resource group does not
+receive the writer's off-heap budget. Leaving the option unset preserves existing resource
+configuration.
+
+## Memory for an Explicit Committer Resource Group
+
+Use `sink.committer-memory` to configure the committer slot sharing group's task heap, and
+`sink.committer-cpu` to configure its CPU cores (one core by default). Add
+`sink.committer-offheap-memory` and `sink.committer-managed-memory` to request task off-heap
+and managed memory independently or together. Both optional budgets must be positive and
+require `sink.committer-memory`. Units such as `kb`, `mb`, and `gb` retain their byte precision.
+
+```sql
+INSERT INTO paimon_table /*+ OPTIONS(
+    'sink.committer-cpu' = '0.25',
+    'sink.committer-memory' = '256 mb',
+    'sink.committer-offheap-memory' = '64 mb',
+    'sink.committer-managed-memory' = '128 mb'
+) */
+SELECT * FROM source_table;
+```
+
+These settings apply to ordinary global committers and combined CDC multi-table committers,
+including database synchronization table options. An explicit committer resource group uses
+its own budgets independently of the writer group. Leaving the new options unset preserves
+existing resource configuration and downstream slot sharing.
+
+Each budget is a resource request for a shared slot of the committer group, not a total across
+committer subtasks or a guaranteed allocation to one operator. Allocation follows Flink's
+[fine-grained resource management](https://nightlies.apache.org/flink/flink-docs-release-1.20/docs/deployment/finegrained_resource/)
+requirements and available resources. Declaring a managed budget does not introduce an allocator
+or managed memory consumer, or change the writer's allocator and allocation weight.
+
+When `sink.coordinator-commit.enabled` is enabled, commits run in the writer's
+`OperatorCoordinator` on the JobManager. That path has no global committer operator, so these
+slot sharing group settings do not configure its resources.
+
 ## Setting dynamic options
 
 Dynamic options tune a query or a subsequently submitted job without changing the options

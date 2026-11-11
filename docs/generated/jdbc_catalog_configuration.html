@@ -33,10 +33,34 @@ under the License.
             <td>Custom jdbc catalog store key.</td>
         </tr>
         <tr>
+            <td><h5>lock-acquire-timeout</h5></td>
+            <td style="word-wrap: break-word;">8 min</td>
+            <td>Duration</td>
+            <td>The maximum time to wait for acquiring the lock.</td>
+        </tr>
+        <tr>
+            <td><h5>lock-check-max-sleep</h5></td>
+            <td style="word-wrap: break-word;">8 s</td>
+            <td>Duration</td>
+            <td>The maximum sleep time when retrying to check the lock.</td>
+        </tr>
+        <tr>
             <td><h5>lock-key-max-length</h5></td>
             <td style="word-wrap: break-word;">255</td>
             <td>Integer</td>
             <td>Set the maximum length of the lock key. The 'lock-key' is composed of concatenating three fields : 'catalog-key', 'database', and 'table'.</td>
+        </tr>
+        <tr>
+            <td><h5>lock.enabled</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Enable catalog locking. Defaults to enabled on object stores.</td>
+        </tr>
+        <tr>
+            <td><h5>lock.type</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The catalog lock factory identifier. Defaults to the catalog's built-in lock factory.</td>
         </tr>
     </tbody>
 </table>

@@ -19,7 +19,7 @@
 
 These tests pin the Python wire format to the Java contract so review
 against ``paimon-api/.../rest/requests/CreateBranchRequest.java``,
-``RenameBranchRequest.java``, ``ForwardBranchRequest.java``,
+``ForwardBranchRequest.java``,
 ``responses/ListBranchesResponse.java`` and ``ResourcePaths.java`` does
 not need to inspect a running mock server. They explicitly assert the
 *exact* JSON field names and URL templates Java uses, and that
@@ -30,8 +30,7 @@ returns plain ``List<String>`` — pypaimon mirrors this).
 import json
 import unittest
 
-from pypaimon.api.api_request import (CreateBranchRequest, ForwardBranchRequest,
-                                      RenameBranchRequest)
+from pypaimon.api.api_request import CreateBranchRequest, ForwardBranchRequest
 from pypaimon.api.api_response import ListBranchesResponse
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.common.json_util import JSON
@@ -54,14 +53,6 @@ class CreateBranchRequestSerdeTest(unittest.TestCase):
         # ``fromTag`` is included as null when not set (matches Java
         # @Nullable behavior; jackson serializes nullable Long as null).
         self.assertIsNone(parsed.get("fromTag"))
-
-
-class RenameBranchRequestSerdeTest(unittest.TestCase):
-
-    def test_uses_to_branch_field(self):
-        request = RenameBranchRequest(to_branch="b2")
-        parsed = json.loads(JSON.to_json(request))
-        self.assertEqual(parsed, {"toBranch": "b2"})
 
 
 class ForwardBranchRequestSerdeTest(unittest.TestCase):
@@ -110,12 +101,6 @@ class ResourcePathsBranchesTest(unittest.TestCase):
             "/v1/mock/databases/db/tables/tbl/branches/b1",
         )
 
-    def test_rename_branch_url(self):
-        self.assertEqual(
-            self.paths.rename_branch("db", "tbl", "b1"),
-            "/v1/mock/databases/db/tables/tbl/branches/b1/rename",
-        )
-
     def test_forward_branch_url(self):
         self.assertEqual(
             self.paths.forward_branch("db", "tbl", "b1"),
@@ -124,10 +109,10 @@ class ResourcePathsBranchesTest(unittest.TestCase):
 
     def test_branch_url_url_encodes_branch_name(self):
         # RESTUtil.encode_string escapes characters that are not URL-safe;
-        # a space round-trips to ``%20``. Mirrors the existing tag-name path.
+        # a space round-trips to ``+``. Mirrors the existing tag-name path.
         self.assertEqual(
             self.paths.branch("db", "tbl", "release 1.0"),
-            "/v1/mock/databases/db/tables/tbl/branches/release%201.0",
+            "/v1/mock/databases/db/tables/tbl/branches/release+1.0",
         )
 
 

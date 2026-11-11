@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import os
+from functools import wraps
 
 import pytest
 
@@ -22,22 +23,18 @@ import pytest
 _NATIVE_PLAN_ENV = "PYPAIMON_TEST_NATIVE_PLAN"
 _NATIVE_READ_ENV = "PYPAIMON_TEST_NATIVE_READ"
 _NATIVE_WRITE_ENV = "PYPAIMON_TEST_NATIVE_WRITE"
+_NATIVE_UPDATE_ENV = "PYPAIMON_TEST_NATIVE_UPDATE"
 _NATIVE_COMMIT_ENV = "PYPAIMON_TEST_NATIVE_COMMIT"
 _native_plan_count = 0
 _native_read_count = 0
 _native_write_count = 0
 _native_commit_count = 0
+_native_update_counts = dict.fromkeys(('row_id', 'grouped', 'predicate', 'upsert', 'incremental', 'merge', 'shard'), 0)
 _force_native_for_test = False
 _force_native_read_for_test = False
 _force_native_write_for_test = False
 _force_native_commit_for_test = False
-
-
-def pytest_addoption(parser):
-    parser.addoption(
-        "--robomind-agilex-input",
-        help="Downloaded RoboMIND AgileX directory for the optional sample test.",
-    )
+_force_native_update_for_test = False
 
 
 @pytest.fixture
@@ -81,6 +78,10 @@ def _native_commit_enabled():
     return os.environ.get(_NATIVE_COMMIT_ENV) == "1"
 
 
+def _native_update_enabled():
+    return os.environ.get(_NATIVE_UPDATE_ENV) == "1"
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "python_plan: keep Python planner assertions on the Python lane")
@@ -93,24 +94,38 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "python_commit: keep Python committer assertions on the Python lane")
     if _native_plan_enabled():
-        from pypaimon.read.table_scan import TableScan
+        from pypaimon.execution.native.read.plan import NativeTableScan
 
-        original_plan = TableScan._try_native_plan
+        original_plan = NativeTableScan._plan
 
-        def tracked_plan(self):
+        def tracked_plan(self, *args, **kwargs):
             global _native_plan_count
-            plan = original_plan(self)
+            plan = original_plan(self, *args, **kwargs)
             if plan is not None and _force_native_for_test:
                 _native_plan_count += 1
             return plan
 
-        TableScan._try_native_plan = tracked_plan
+        NativeTableScan._plan = tracked_plan
+
+        from pypaimon.execution.native.read.streaming_table_scan import StreamTableScan
+
+        original_stream_plan = StreamTableScan.plan
+
+        def tracked_stream_plan(self, *args, **kwargs):
+            global _native_plan_count
+            plan = original_stream_plan(self, *args, **kwargs)
+            if plan is not None and _force_native_for_test:
+                _native_plan_count += 1
+            return plan
+
+        StreamTableScan.plan = tracked_stream_plan
 
     if _native_read_enabled():
-        from pypaimon.read.table_read import TableRead
+        from pypaimon.execution.native.read.table_read import NativeTableRead
 
-        original_read = TableRead._try_native_batches
+        original_read = NativeTableRead.read_batches
 
+        @wraps(original_read)
         def tracked_read(self, splits, *args, **kwargs):
             global _native_read_count
             batches = original_read(self, splits, *args, **kwargs)
@@ -118,36 +133,66 @@ def pytest_configure(config):
                 _native_read_count += 1
             return batches
 
-        TableRead._try_native_batches = tracked_read
+        NativeTableRead.read_batches = tracked_read
 
     if _native_write_enabled():
-        from pypaimon.write.native_write import NativeTableWrite
+        from pypaimon.execution.native.write.native_write import NativeTableWrite
 
-        original_write = NativeTableWrite.write_arrow_batch
+        def track_write(method):
+            original_write = getattr(NativeTableWrite, method)
 
-        def tracked_write(self, data):
-            global _native_write_count
-            native = self._native_writer is not None
-            result = original_write(self, data)
-            if native and data.num_rows and _force_native_write_for_test:
-                _native_write_count += 1
-            return result
+            @wraps(original_write)
+            def tracked_write(self, data, *args, **kwargs):
+                global _native_write_count
+                native = self._native_writer is not None
+                result = original_write(self, data, *args, **kwargs)
+                if native and data.num_rows and _force_native_write_for_test:
+                    _native_write_count += 1
+                return result
 
-        NativeTableWrite.write_arrow_batch = tracked_write
+            setattr(NativeTableWrite, method, tracked_write)
+
+        track_write('write_arrow_batch')
 
     if _native_commit_enabled():
         from pypaimon.write.table_commit import TableCommit
 
         original_prepare = TableCommit._prepare_native_commit
 
-        def tracked_prepare(self, messages):
+        def tracked_prepare(self, messages, *args, **kwargs):
             global _native_commit_count
-            prepared = original_prepare(self, messages)
+            prepared = original_prepare(self, messages, *args, **kwargs)
             if prepared is not None and _force_native_commit_for_test:
                 _native_commit_count += 1
             return prepared
 
         TableCommit._prepare_native_commit = tracked_prepare
+
+    if _native_update_enabled():
+        from pypaimon.execution.native.write.native_merge_into import NativeTableMergeInto
+        from pypaimon.execution.native.write.native_update import (
+            NativeBatchTableUpdate, NativePredicateTableUpdate,
+            NativeTableUpdateByRowId, NativeTableUpsert, NativeShardTableUpdator,
+        )
+
+        def track_update(cls, method, kind):
+            original = getattr(cls, method)
+
+            def tracked(self, *args, **kwargs):
+                messages = original(self, *args, **kwargs)
+                if messages and _force_native_update_for_test:
+                    _native_update_counts[kind] += 1
+                return messages
+
+            setattr(cls, method, tracked)
+
+        track_update(NativeBatchTableUpdate, 'update_by_arrow_with_row_id', 'row_id')
+        track_update(NativeBatchTableUpdate, 'update_by_arrow_batches_with_row_id', 'grouped')
+        track_update(NativePredicateTableUpdate, 'update', 'predicate')
+        track_update(NativeTableUpsert, 'upsert', 'upsert')
+        track_update(NativeTableUpdateByRowId, 'update_columns', 'incremental')
+        track_update(NativeTableMergeInto, 'prepare_commit', 'merge')
+        track_update(NativeShardTableUpdator, 'prepare_commit', 'shard')
 
 
 def pytest_collection_modifyitems(items):
@@ -163,11 +208,13 @@ def pytest_collection_modifyitems(items):
 def enable_native_backends(request, monkeypatch):
     global _force_native_for_test, _force_native_read_for_test
     global _force_native_write_for_test, _force_native_commit_for_test
+    global _force_native_update_for_test
     python_plan = request.node.get_closest_marker("python_plan") is not None
     python_read = request.node.get_closest_marker("python_read") is not None
     python_write = request.node.get_closest_marker("python_write") is not None
     python_commit = request.node.get_closest_marker("python_commit") is not None
-    native_plan_test = request.path.name in (
+    # request.path requires pytest 7; Python 3.6 uses pytest 6.
+    native_plan_test = os.path.basename(request.node.location[0]) in (
         "native_plan_test.py", "native_plan_integration_test.py",
         "native_plan_capabilities_test.py")
     force_plan = _native_plan_enabled() and not python_plan and not native_plan_test
@@ -175,7 +222,8 @@ def enable_native_backends(request, monkeypatch):
                   and not native_plan_test)
     force_write = _native_write_enabled() and not python_write
     force_commit = _native_commit_enabled() and not python_commit
-    if not (force_plan or force_read or force_write or force_commit):
+    force_update = _native_update_enabled() and not python_write
+    if not (force_plan or force_read or force_write or force_commit or force_update):
         yield
         return
 
@@ -195,7 +243,7 @@ def enable_native_backends(request, monkeypatch):
             return original_read(self, True if default is None else default)
 
         monkeypatch.setattr(CoreOptions, "native_read_enabled", read_enabled)
-    if force_write:
+    if force_write or force_update:
         original_write = CoreOptions.native_write_enabled
 
         def write_enabled(self, default=None):
@@ -213,6 +261,7 @@ def enable_native_backends(request, monkeypatch):
     _force_native_read_for_test = force_read
     _force_native_write_for_test = force_write
     _force_native_commit_for_test = force_commit
+    _force_native_update_for_test = force_update
     try:
         yield
     finally:
@@ -220,6 +269,7 @@ def enable_native_backends(request, monkeypatch):
         _force_native_read_for_test = False
         _force_native_write_for_test = False
         _force_native_commit_for_test = False
+        _force_native_update_for_test = False
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -227,6 +277,7 @@ def pytest_sessionfinish(session, exitstatus):
         if ((_native_plan_enabled() and _native_plan_count == 0)
                 or (_native_read_enabled() and _native_read_count == 0)
                 or (_native_write_enabled() and _native_write_count == 0)
+                or (_native_update_enabled() and not all(_native_update_counts.values()))
                 or (_native_commit_enabled() and _native_commit_count == 0)):
             session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
@@ -244,3 +295,7 @@ def pytest_terminal_summary(terminalreporter):
     if _native_commit_enabled():
         terminalreporter.write_line(
             "native commits exercised: %d" % _native_commit_count)
+    if _native_update_enabled():
+        terminalreporter.write_line(
+            "native updates exercised: " + ', '.join(
+                '%s=%d' % item for item in _native_update_counts.items()))

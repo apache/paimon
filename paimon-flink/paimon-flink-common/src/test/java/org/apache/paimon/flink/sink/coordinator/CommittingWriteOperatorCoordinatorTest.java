@@ -598,6 +598,46 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
         coordinator.close();
     }
 
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testCloseDrainsQueuedSavepointTag() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 1);
+        CommittingWriteOperatorCoordinator coordinator =
+                createCoordinatorWithAutoTag(table, context);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        // Hold the commit executor so the commit and tag of a stop-with-savepoint are still
+        // queued when close() starts.
+        CountDownLatch release = new CountDownLatch(1);
+        coordinator.runInEventLoop(release::await, "blocking");
+        coordinator.handleEventFromOperator(
+                0, 0, savepointEvent(1L, Collections.singletonList(committable(table, 1, 1))));
+        coordinator.notifyCheckpointComplete(1L);
+
+        CompletableFuture<Void> closed =
+                CompletableFuture.runAsync(
+                        () -> {
+                            try {
+                                coordinator.close();
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+        // Release the executor only once close() has shut it down.
+        while (!coordinator.isCommitExecutorShutdown()) {
+            Thread.sleep(10);
+        }
+        release.countDown();
+        closed.get();
+
+        assertThat(coordinator.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.CLOSED);
+        assertThat(table.snapshotManager().latestSnapshot().commitIdentifier()).isEqualTo(1L);
+        assertThat(table.tagManager().tagExists(savepointTag(1L))).isTrue();
+    }
+
     private static String savepointTag(long checkpointId) {
         return SavepointTagUtils.tagNameOf(checkpointId);
     }
@@ -1365,7 +1405,6 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
                         new SavepointTagger(
                                 table.snapshotManager(),
                                 table.tagManager(),
-                                table.store().newTagDeletion(),
                                 table.store().createTagCallbacks(table),
                                 table.coreOptions().tagDefaultTimeRetained(),
                                 user),

@@ -25,6 +25,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
@@ -153,6 +155,10 @@ public interface Catalog extends AutoCloseable {
      * Return a {@link Table} identified by the given {@link Identifier}.
      *
      * <p>System tables can be got by '$' splitter.
+     *
+     * <p>File-store tables load their definition without initializing the runtime store. Runtime
+     * option validation happens when a read, scan, write, commit, or explicit store access first
+     * initializes that store. Loading a table is not a runtime configuration check.
      *
      * @param identifier Path of the table
      * @return The requested table
@@ -713,7 +719,7 @@ public interface Catalog extends AutoCloseable {
      * <ul>
      *   <li>{@link #commitSnapshot(Identifier, String, String, Snapshot, List)}.
      *   <li>{@link #loadSnapshot(Identifier)}.
-     *   <li>{@link #rollbackTo(Identifier, Instant)}.
+     *   <li>{@link #rollbackTo(Identifier, String, Instant, Long)}.
      *   <li>{@link #createBranch(Identifier, String, String)}.
      *   <li>{@link #dropBranch(Identifier, String)}.
      *   <li>{@link #renameBranch(Identifier, String, String)}.
@@ -838,31 +844,22 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
-     * rollback table by the given {@link Identifier} and instant.
+     * Rollback table by the given {@link Identifier} and instant.
      *
      * @param identifier path of the table
-     * @param instant like snapshotId or tagName
-     * @throws Catalog.TableNotExistException if the table does not exist
-     * @throws UnsupportedOperationException if the catalog does not {@link
-     *     #supportsVersionManagement()}
-     */
-    default void rollbackTo(Identifier identifier, Instant instant)
-            throws Catalog.TableNotExistException {
-        rollbackTo(identifier, instant, null);
-    }
-
-    /**
-     * rollback table by the given {@link Identifier} and instant.
-     *
-     * @param identifier path of the table
+     * @param tableUuid expected table incarnation, or null when its UUID is unavailable
      * @param instant like snapshotId or tagName
      * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
-     *     snapshot.
+     *     snapshot
      * @throws Catalog.TableNotExistException if the table does not exist
      * @throws UnsupportedOperationException if the catalog does not {@link
      *     #supportsVersionManagement()}
      */
-    void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
+    void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException;
 
     /**
@@ -1169,6 +1166,37 @@ public interface Catalog extends AutoCloseable {
     default void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException {}
 
+    // ======================= Model methods ===============================
+
+    /** List model metadata in a database. */
+    default List<Model> listModels(String databaseName) throws DatabaseNotExistException {
+        throw new UnsupportedOperationException("Current Catalog does not support models");
+    }
+
+    /** Get model metadata by identifier. */
+    default Model getModel(Identifier identifier)
+            throws ModelNotExistException, DatabaseNotExistException {
+        throw new UnsupportedOperationException("Current Catalog does not support models");
+    }
+
+    /**
+     * Create model metadata.
+     *
+     * @param identifier path of the model to create
+     * @param model model metadata
+     * @param ignoreIfExists whether to return existing metadata when the model already exists
+     */
+    default Model createModel(Identifier identifier, Model model, boolean ignoreIfExists)
+            throws ModelAlreadyExistException, DatabaseNotExistException, ModelNotExistException {
+        throw new UnsupportedOperationException("Current Catalog does not support models");
+    }
+
+    /** Drop model metadata. */
+    default void dropModel(Identifier identifier, boolean ignoreIfNotExists)
+            throws ModelNotExistException, DatabaseNotExistException {
+        throw new UnsupportedOperationException("Current Catalog does not support models");
+    }
+
     // ======================= Function methods ===============================
 
     /**
@@ -1320,6 +1348,28 @@ public interface Catalog extends AutoCloseable {
      */
     TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException;
+
+    // ========================== Locking ==============================
+
+    /**
+     * Create a lock bound to the table incarnation and exact writer identity.
+     *
+     * <p>The caller owns the returned lock and must close it. A lease may end when its snapshot is
+     * published; each additional snapshot must use a new {@link Lock#runWithLock} scope. Catalogs
+     * without configured locking return a no-op lock.
+     *
+     * @param identifier table and branch to lock
+     * @param tableUuid table incarnation, required by catalogs that fence table recreation
+     * @param commitUser exact logical writer identity for commits; null for catalog operations
+     * @param tableOptions runtime table options controlling lock support
+     */
+    default Lock createLock(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Options tableOptions) {
+        return Lock.empty();
+    }
 
     // ==================== Catalog Information ==========================
 
@@ -1842,6 +1892,48 @@ public interface Catalog extends AutoCloseable {
 
         public String dialect() {
             return dialect;
+        }
+    }
+
+    /** Exception for trying to create a model that already exists. */
+    class ModelAlreadyExistException extends Exception {
+
+        private static final String MSG = "Model %s already exists.";
+
+        private final Identifier identifier;
+
+        public ModelAlreadyExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public ModelAlreadyExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to get a model that doesn't exist. */
+    class ModelNotExistException extends Exception {
+
+        private static final String MSG = "Model %s doesn't exist.";
+
+        private final Identifier identifier;
+
+        public ModelNotExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public ModelNotExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
         }
     }
 

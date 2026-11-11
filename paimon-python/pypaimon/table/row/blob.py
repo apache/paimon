@@ -229,9 +229,10 @@ class VideoFrameDescriptor(BlobDescriptor):
 
     CURRENT_VERSION = 1
     MAGIC = 0x564944454F46524D  # "VIDEOFRM"
-    _FIXED_LENGTH = 1 + 8 + 4 + 8 + 8 + 8
+    _FIXED_LENGTH = 1 + 8 + 4 + 5 * 8
 
-    def __init__(self, uri: str, offset: int, length: int, frame_index: int):
+    def __init__(self, uri: str, offset: int, length: int, frame_index: int,
+                 moov_offset: int = 0, moov_length: int = 0):
         if isinstance(frame_index, bool) or not isinstance(frame_index, int):
             raise TypeError("Video frame index must be an int.")
         if frame_index < 0:
@@ -240,7 +241,23 @@ class VideoFrameDescriptor(BlobDescriptor):
                 % frame_index
             )
         super().__init__(uri, offset, length)
+        if any(isinstance(v, bool) or not isinstance(v, int)
+               for v in (moov_offset, moov_length)):
+            raise TypeError("Moov offset and length must be integers.")
+        if (moov_offset < 0 or moov_length < 0
+                or (moov_length == 0 and moov_offset != 0)
+                or (moov_length > 0 and (length < 0 or moov_offset > length
+                                         or moov_length > length - moov_offset))):
+            raise ValueError("Moov range must be within the video payload.")
+        self.moov_offset = moov_offset
+        self.moov_length = moov_length
         self._frame_index = frame_index
+
+    @property
+    def video_descriptor(self):
+        """Frame-independent decoder cache key retaining the moov hint."""
+        return VideoFrameDescriptor(self.uri, self.offset, self.length, 0,
+                                    self.moov_offset, self.moov_length)
 
     @property
     def frame_index(self) -> int:
@@ -257,7 +274,8 @@ class VideoFrameDescriptor(BlobDescriptor):
             struct.pack('<BQI', self.CURRENT_VERSION, self.MAGIC, len(uri_bytes))
             + uri_bytes
             + struct.pack(
-                '<qqq', self.offset, self.length, self.frame_index
+                '<qqqqq', self.offset, self.length, self.frame_index,
+                self.moov_offset, self.moov_length
             )
         )
 
@@ -293,15 +311,14 @@ class VideoFrameDescriptor(BlobDescriptor):
 
         uri_end = 13 + uri_length
         uri = raw[13:uri_end].decode('utf-8')
-        offset, length, frame_index = struct.unpack(
-            '<qqq', raw[uri_end:uri_end + 24]
+        offset, length, frame_index, moov_offset, moov_length = struct.unpack(
+            '<qqqqq', raw[uri_end:uri_end + 40]
         )
         try:
-            return cls(uri, offset, length, frame_index)
+            return cls(uri, offset, length, frame_index, moov_offset, moov_length)
         except ValueError as error:
             raise ValueError(
-                "Invalid VideoFrameDescriptor data: negative frame index: %s"
-                % frame_index
+                "Invalid VideoFrameDescriptor data: %s" % error
             ) from error
 
     @classmethod
@@ -319,10 +336,13 @@ class VideoFrameDescriptor(BlobDescriptor):
             isinstance(other, VideoFrameDescriptor)
             and self.payload_descriptor == other.payload_descriptor
             and self.frame_index == other.frame_index
+            and self.moov_offset == other.moov_offset
+            and self.moov_length == other.moov_length
         )
 
     def __hash__(self) -> int:
-        return hash((self.payload_descriptor, self.frame_index))
+        return hash((self.payload_descriptor, self.frame_index,
+                     self.moov_offset, self.moov_length))
 
     def __str__(self) -> str:
         return (
@@ -366,13 +386,75 @@ class BlobViewStruct:
     MAGIC = 0x424C4F4256494557  # "BLOBVIEW"
 
     def __init__(self, identifier: Union[Identifier, str], field_id: int, row_id: int):
-        if isinstance(identifier, str):
-            identifier = Identifier.from_string(identifier)
-        if not isinstance(identifier, Identifier):
-            raise TypeError("BlobViewStruct identifier must be Identifier or str.")
-        self._identifier = identifier
+        self._identifier = self._coerce_identifier(identifier)
         self._field_id = field_id
         self._row_id = row_id
+
+    @staticmethod
+    def _coerce_identifier(identifier: Union[Identifier, str]) -> Identifier:
+        if isinstance(identifier, str):
+            return Identifier.from_string(identifier)
+        if not isinstance(identifier, Identifier):
+            raise TypeError("BlobViewStruct identifier must be Identifier or str.")
+        return identifier
+
+    @staticmethod
+    def _extract_fields(upstream):
+        if hasattr(upstream, 'fields') and upstream.fields is not None:
+            return upstream.fields
+        if hasattr(upstream, 'table_schema') and getattr(upstream.table_schema, 'fields', None) is not None:
+            return upstream.table_schema.fields
+        if isinstance(upstream, (list, tuple)):
+            return upstream
+        raise TypeError("Expected Table, TableSchema, RowType, or sequence of DataField.")
+
+    @classmethod
+    def resolve_blob_field_id(
+            cls,
+            identifier: Union[Identifier, str],
+            upstream,
+            field_name: str,
+    ) -> int:
+        from pypaimon.schema.data_types import is_blob_type
+
+        identifier = cls._coerce_identifier(identifier)
+        if not isinstance(field_name, str):
+            raise TypeError("BlobViewStruct field_name must be a str.")
+        fields = cls._extract_fields(upstream)
+        matched_field = None
+        for field in fields:
+            if field.name == field_name:
+                matched_field = field
+                break
+        if matched_field is None:
+            raise ValueError(
+                f"Cannot find blob field {field_name} in upstream table {identifier.get_full_name()}."
+            )
+        if not is_blob_type(matched_field.type):
+            raise ValueError(
+                f"Field {field_name} in upstream table {identifier.get_full_name()} is not a BLOB field."
+            )
+        return matched_field.id
+
+    @classmethod
+    def of(cls, *args) -> 'BlobViewStruct':
+        if len(args) == 3:
+            upstream_table, field_name, row_id = args
+            if not hasattr(upstream_table, 'identifier'):
+                raise TypeError(
+                    "3-argument BlobViewStruct.of expects an upstream Table with an identifier."
+                )
+            identifier = upstream_table.identifier
+            field_id = cls.resolve_blob_field_id(identifier, upstream_table, field_name)
+            return cls(identifier, field_id, row_id)
+        if len(args) == 4:
+            identifier, upstream, field_name, row_id = args
+            field_id = cls.resolve_blob_field_id(identifier, upstream, field_name)
+            return cls(identifier, field_id, row_id)
+        raise TypeError(
+            "BlobViewStruct.of expects (upstream_table, field_name, row_id) or "
+            "(identifier, upstream_schema, field_name, row_id)."
+        )
 
     @property
     def identifier(self) -> Identifier:
@@ -633,8 +715,28 @@ class Blob(ABC):
             descriptor, file_io=file_io, uri_reader_factory=uri_reader_factory)
 
     @staticmethod
-    def from_view(view_struct: BlobViewStruct) -> 'BlobView':
-        return BlobView(view_struct)
+    def from_view(*args, view_struct: Optional[BlobViewStruct] = None) -> 'BlobView':
+        # Case 1: Keyword argument form (backward compatible)
+        if view_struct is not None:
+            if len(args) > 0:
+                raise ValueError("Cannot provide both view_struct keyword argument and positional arguments")
+            return BlobView(view_struct)
+        # Case 2: Positional argument forms
+        if len(args) == 1 and isinstance(args[0], BlobViewStruct):
+            return BlobView(args[0])
+        if len(args) == 3:
+            target, field, row_id = args
+            if isinstance(field, int) and not isinstance(field, bool):
+                return BlobView(BlobViewStruct(target, field, row_id))
+            if isinstance(field, str):
+                return BlobView(BlobViewStruct.of(target, field, row_id))
+        if len(args) == 4:
+            return BlobView(BlobViewStruct.of(*args))
+        raise TypeError(
+            "Blob.from_view expects (BlobViewStruct), (identifier, field_id, row_id), "
+            "(upstream_table, field_name, row_id), or "
+            "(identifier, upstream_schema, field_name, row_id)."
+        )
 
     @staticmethod
     def from_bytes(

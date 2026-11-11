@@ -234,7 +234,7 @@ class FormatTableCommitTest {
         assertThat(fileIO.exists(customData)).isTrue();
         assertThat(fileIO.deleteCalls()).isEqualTo(1);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager).listPartitionsByNames(Collections.singletonList(spec));
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
         assertReplacementReport(partitionManager, tablePath, Collections.singletonList(spec));
     }
@@ -280,7 +280,7 @@ class FormatTableCommitTest {
         assertThat(fileIO.exists(customData)).isTrue();
         assertThat(fileIO.deleteCalls()).isEqualTo(1);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager).listPartitionsByNames(Collections.singletonList(targetSpec));
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
         assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
@@ -420,7 +420,7 @@ class FormatTableCommitTest {
         assertThat(fileIO.mkdirsCalls()).isZero();
         verify(committer).commit(fileIO);
         verify(committer).clean(fileIO);
-        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager).listPartitionsByNames(Collections.singletonList(spec));
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
         assertReplacementReport(partitionManager, tablePath, Collections.singletonList(spec));
     }
@@ -473,7 +473,7 @@ class FormatTableCommitTest {
         assertThat(fileIO.mkdirsCalls()).isZero();
         verify(committer).commit(fileIO);
         verify(committer).clean(fileIO);
-        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager).listPartitionsByNames(Collections.singletonList(targetSpec));
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
         assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
@@ -615,7 +615,7 @@ class FormatTableCommitTest {
 
         assertThat(fileIO.exists(oldData)).isFalse();
         assertThat(fileIO.exists(new Path(tablePath, "part=default"))).isTrue();
-        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager).listPartitionsByNames(Collections.singletonList(targetSpec));
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
         assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
@@ -2185,7 +2185,7 @@ class FormatTableCommitTest {
             assertThat(thirdFinished.await(3, TimeUnit.SECONDS)).isTrue();
             assertThat(activePublishes).hasValue(1);
             verify(partitionManager, never())
-                    .createPartitions(anyList(), eq(true), any(), anyBoolean(), isNull());
+                    .createPartitions(anyList(), eq(true), any(), anyBoolean(), any());
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 verify(committer, never()).clean(fileIO);
             }
@@ -2770,7 +2770,8 @@ class FormatTableCommitTest {
                         partitionManager,
                         /* dynamicPartitionOverwrite */ true,
                         /* cleanupThreadNum */ 2,
-                        /* publishThreadNum */ 1);
+                        /* publishThreadNum */ 1,
+                        null);
 
         commit.commit(Collections.emptyList());
 
@@ -2853,7 +2854,8 @@ class FormatTableCommitTest {
                         partitionManager,
                         /* dynamicPartitionOverwrite */ true,
                         /* cleanupThreadNum */ 4,
-                        /* publishThreadNum */ 1);
+                        /* publishThreadNum */ 1,
+                        null);
 
         commit.commit(Collections.emptyList());
 
@@ -3069,7 +3071,8 @@ class FormatTableCommitTest {
                 null,
                 /* dynamicPartitionOverwrite */ true,
                 /* cleanupThreadNum */ 1,
-                publishThreadNum);
+                publishThreadNum,
+                null);
     }
 
     private void assertOverwriteCleanupSpansPartitions(boolean dynamicPartitionOverwrite)
@@ -3144,6 +3147,8 @@ class FormatTableCommitTest {
                         .field("part", DataTypes.STRING())
                         .field("id", DataTypes.INT())
                         .build();
+        Map<String, String> tableOptions = new LinkedHashMap<>(options);
+        tableOptions.put(CoreOptions.FILE_FORMAT.key(), "csv");
         FormatTable table =
                 FormatTable.builder()
                         .fileIO(fileIO)
@@ -3152,7 +3157,7 @@ class FormatTableCommitTest {
                         .partitionKeys(Collections.singletonList("part"))
                         .location(tablePath.toString())
                         .format(FormatTable.Format.CSV)
-                        .options(options)
+                        .options(tableOptions)
                         .partitionManager(partitionManager)
                         .build();
         return table;
@@ -3163,6 +3168,8 @@ class FormatTableCommitTest {
             FileIO fileIO,
             FormatTablePartitionManager partitionManager,
             Map<String, String> options) {
+        Map<String, String> tableOptions = new LinkedHashMap<>(options);
+        tableOptions.put(CoreOptions.FILE_FORMAT.key(), "csv");
         FormatTable table =
                 FormatTable.builder()
                         .fileIO(fileIO)
@@ -3171,7 +3178,7 @@ class FormatTableCommitTest {
                         .partitionKeys(Collections.emptyList())
                         .location(tablePath.toString())
                         .format(FormatTable.Format.CSV)
-                        .options(options)
+                        .options(tableOptions)
                         .partitionManager(partitionManager)
                         .build();
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
@@ -3199,7 +3206,8 @@ class FormatTableCommitTest {
                 partitionManager,
                 /* dynamicPartitionOverwrite */ true,
                 cleanupThreadNum,
-                /* publishThreadNum */ 1);
+                /* publishThreadNum */ 1,
+                null);
     }
 
     private static void writeOldFiles(LocalFileIO fileIO, Path partitionPath, int count)

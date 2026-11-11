@@ -17,24 +17,24 @@
 ################################################################################
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pyarrow as pa
 
-from pypaimon.read import table_read
-from pypaimon.read.table_read import ROW_KIND_COLUMN, TableRead
+from pypaimon.execution.python.read import table_read
+from pypaimon.read.constants import ROW_KIND_COLUMN
+from pypaimon.execution.python.read.table_read import PythonTableRead
 
 # Patching table_read.pyarrow.array also rebinds pa.array (same module object),
 # so keep a handle to the genuine implementation for use inside the fakes.
 _REAL_ARRAY = pa.array
 
 
-def _make_table_read(include_row_kind: bool) -> TableRead:
+def _make_table_read(include_row_kind: bool) -> PythonTableRead:
     # The conversion method only depends on self.include_row_kind, so build a
     # bare instance instead of standing up a full catalog/table.
-    tr = TableRead.__new__(TableRead)
-    tr.include_row_kind = include_row_kind
-    return tr
+    return PythonTableRead(SimpleNamespace(include_row_kind=include_row_kind))
 
 
 class TableReadChunkedOverflowTest(unittest.TestCase):
@@ -48,6 +48,16 @@ class TableReadChunkedOverflowTest(unittest.TestCase):
     """
 
     OVERFLOW_THRESHOLD = 4  # pretend any column with > 4 rows overflows 2GB
+
+    def test_zero_column_rows_keep_count_and_schema_metadata(self):
+        schema = pa.schema([], metadata={b'contract': b'empty projection'})
+        read = _make_table_read(include_row_kind=False)
+        batches = list(read._convert_rows_to_arrow_batches_with_row_kind(
+            [(), (), ()], [], schema))
+        actual = pa.Table.from_batches(batches)
+        self.assertEqual(actual.num_rows, 3)
+        self.assertEqual(actual.num_columns, 0)
+        self.assertTrue(actual.schema.equals(schema, check_metadata=True))
 
     def _patched_array(self, obj, *args, **kwargs):
         real = _REAL_ARRAY(obj, *args, **kwargs)

@@ -61,7 +61,7 @@ jobs:
 
           source_version="$(
             sed -n 's/^VERSION = "\(.*\)"/\1/p' \
-              paimon-python/setup.py
+              paimon-python/pypaimon/_version.py
           )"
           release_version="${{ inputs.release_version }}"
           if [[ "${source_version}" != "${release_version}" ]]; then

@@ -24,6 +24,12 @@ from urllib.parse import parse_qs, urlparse
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
+from pypaimon.catalog.catalog_utils import (
+    check_not_branch,
+    check_not_system_database,
+    check_not_system_table,
+    encoded_branch_name
+)
 from pypaimon.catalog.catalog_exception import (
     DatabaseAlreadyExistException,
     DatabaseNotExistException,
@@ -33,7 +39,7 @@ from pypaimon.catalog.catalog_exception import (
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.common.file_io import FileIO
-from pypaimon.common.identifier import Identifier
+from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH, Identifier
 from pypaimon.common.options.config import CatalogOptions, JdbcCatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.schema import Schema
@@ -319,6 +325,7 @@ class JdbcCatalog(Catalog):
 
     def create_database(self, name: str, ignore_if_exists: bool,
                         properties: Optional[Dict[str, str]] = None) -> None:
+        check_not_system_database(name)
         if self._database_exists(name):
             if not ignore_if_exists:
                 raise DatabaseAlreadyExistException(name)
@@ -332,6 +339,7 @@ class JdbcCatalog(Catalog):
             self._insert_database_properties(name, create_props)
 
     def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
+        check_not_system_database(name)
         if not self._database_exists(name):
             if not ignore_if_not_exists:
                 raise DatabaseNotExistException(name)
@@ -357,6 +365,7 @@ class JdbcCatalog(Catalog):
             )
 
     def alter_database(self, name: str, changes: List[PropertyChange]) -> None:
+        check_not_system_database(name)
         self.get_database(name)
         set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
         current = self._fetch_database_properties(name)
@@ -411,10 +420,14 @@ class JdbcCatalog(Catalog):
         return FileStoreTable(self.file_io, identifier, table_path, table_schema, catalog_environment)
 
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
-        if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
+        from pypaimon.common.options.options_utils import OptionsUtils
+        auto_create = schema.options.get(CoreOptions.AUTO_CREATE.key()) if schema.options else None
+        if auto_create is not None and OptionsUtils.convert_to_boolean(auto_create):
             raise ValueError(f"The value of {CoreOptions.AUTO_CREATE.key()} property should be False.")
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        check_not_branch(identifier, "create_table")
+        check_not_system_table(identifier, "create_table")
         self.get_database(identifier.get_database_name())
         if self._table_exists(identifier):
             if not ignore_if_exists:
@@ -442,6 +455,8 @@ class JdbcCatalog(Catalog):
     def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        check_not_branch(identifier, "drop_table")
+        check_not_system_table(identifier, "drop_table")
         if not self._table_exists(identifier):
             if not ignore_if_not_exists:
                 raise TableNotExistException(identifier)
@@ -464,6 +479,10 @@ class JdbcCatalog(Catalog):
             source_identifier = Identifier.from_string(source_identifier)
         if not isinstance(target_identifier, Identifier):
             target_identifier = Identifier.from_string(target_identifier)
+        check_not_branch(source_identifier, "rename_table")
+        check_not_branch(target_identifier, "rename_table")
+        check_not_system_table(source_identifier, "rename_table")
+        check_not_system_table(target_identifier, "rename_table")
         if not self._table_exists(source_identifier):
             raise TableNotExistException(source_identifier)
         self.get_database(target_identifier.get_database_name())
@@ -513,10 +532,15 @@ class JdbcCatalog(Catalog):
     ) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        check_not_system_table(identifier, "alter_table")
         if not self._table_exists(identifier):
             if not ignore_if_not_exists:
                 raise TableNotExistException(identifier)
             return
+        # As in Java JdbcCatalog#alterTableImpl, only the main branch can be altered.
+        branch = encoded_branch_name(identifier)
+        if branch is not None and branch != DEFAULT_MAIN_BRANCH:
+            raise NotImplementedError("JdbcCatalog currently does not support table branches")
         schema_manager = SchemaManager(self.file_io, self.get_table_path(identifier))
         table_schema = schema_manager.commit_changes(changes)
         if self._sync_all_properties():

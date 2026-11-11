@@ -223,7 +223,7 @@ public class RewriteFileIndexSource
                 dataOutput.writeInt(b.length);
                 dataOutput.write(b);
             }
-            return new byte[0];
+            return byteArrayOutputStream.toByteArray();
         }
 
         @Override

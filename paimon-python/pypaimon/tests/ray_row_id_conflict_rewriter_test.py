@@ -22,14 +22,40 @@ from unittest.mock import Mock, patch
 from pypaimon.ray.data_evolution_merge_into import _reraise_inner
 from pypaimon.ray.row_id_conflict_rewriter import (
     _partial_file_write_cols,
-    commit_self_merge_with_compaction_retry,
+    _validate_no_logical_conflict,
+    commit_updates_with_compaction_retry,
 )
-from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.data_types import AtomicType, DataField, RowType
 from pypaimon.schema.table_schema import TableSchema
-from pypaimon.write.commit.conflict_detection import RowIdExistenceConflict
+from pypaimon.write.row_id_conflict import RowIdExistenceConflict
 
 
 class RayRowIdConflictRewriterTest(unittest.TestCase):
+
+    def test_cross_schema_check_selects_python_before_dispatch(self):
+        table = Mock()
+        table.options.native_commit_enabled.return_value = True
+        base = Mock(id=1, schema_id=0)
+        latest = Mock(id=2, schema_id=1)
+        messages = [self._message(1, 'staged')]
+        with patch('pypaimon.ray.row_id_conflict_rewriter.check_row_id_conflicts') as check:
+            _validate_no_logical_conflict(table, messages, latest, base)
+        table.copy.assert_called_once_with({'commit.native.enabled': 'false'})
+        check.assert_called_once_with(table.copy.return_value, messages, 2, 1)
+
+    def test_same_schema_native_check_failure_is_not_replayed(self):
+        table = Mock()
+        table.options.native_commit_enabled.return_value = True
+        base = Mock(id=1, schema_id=0)
+        latest = Mock(id=2, schema_id=0)
+        failure = PermissionError('native authorization failed')
+        with patch('pypaimon.ray.row_id_conflict_rewriter.check_row_id_conflicts',
+                   side_effect=failure) as check:
+            with self.assertRaises(PermissionError) as raised:
+                _validate_no_logical_conflict(table, [], latest, base)
+        self.assertIs(raised.exception, failure)
+        table.copy.assert_not_called()
+        check.assert_called_once_with(table, [], 2, 1)
 
     def test_resolve_compact_null_write_cols_for_rewrite(self):
         schema = TableSchema(
@@ -51,9 +77,33 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             ['id', 'name'], _partial_file_write_cols(table, file)
         )
 
+    def test_rewrite_preserves_row_descendant_identity_scope(self):
+        for nested in (False, True):
+            for added_child in (False, True):
+                with self.subTest(nested=nested, added_child=added_child):
+                    old_type = RowType(True, [DataField(10, 'a', AtomicType('INT'))])
+                    children = [DataField(10, 'renamed', AtomicType('BIGINT'))]
+                    if added_child:
+                        # Reusing the historical name still introduces a new field ID.
+                        children.append(DataField(11, 'a', AtomicType('INT')))
+                    current_type = RowType(True, children)
+                    if nested:
+                        old_type = RowType(True, [DataField(5, 'inner', old_type)])
+                        current_type = RowType(True, [DataField(5, 'inner', current_type)])
+                    historical = TableSchema(id=0, fields=[DataField(1, 'nest', old_type)])
+                    current = TableSchema(id=1, fields=[DataField(1, 'renamed_nest', current_type)])
+                    table = Mock(table_schema=current)
+                    table.schema_manager.get_schema.return_value = historical
+                    file = Mock(schema_id=0, write_cols=['nest'], first_row_id=0)
+                    if added_child:
+                        with self.assertRaisesRegex(RuntimeError, 'cannot expand ROW field'):
+                            _partial_file_write_cols(table, file)
+                    else:
+                        self.assertEqual(_partial_file_write_cols(table, file), ['renamed_nest'])
+
     @staticmethod
     def _message(snapshot_id, name):
-        return Mock(check_from_snapshot=snapshot_id, name=name)
+        return Mock(check_from_snapshot=snapshot_id, name=name, new_files=[])
 
     @staticmethod
     def _conflict(name):
@@ -70,6 +120,10 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         builder = Mock()
         builder.new_commit.side_effect = commits
         commit_table = Mock()
+        schema = TableSchema(id=0, fields=[])
+        commit_table.table_schema = schema
+        commit_table.schema_manager.latest.return_value = schema
+        commit_table.copy_without_time_travel.return_value = commit_table
         commit_table.new_batch_write_builder.return_value = builder
         table = Mock()
         table.copy_without_time_travel.return_value = commit_table
@@ -78,6 +132,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         )
         table.options.commit_timeout.return_value = 60_000
         table.options.commit_max_retries.return_value = max_retries
+        table.options.data_evolution_row_id_conflict_rewrite_max_size.return_value = 256 * 1024 * 1024
         return table
 
     def test_nested_row_id_conflict_is_rebased(self):
@@ -108,7 +163,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ) as rewrite_updates, patch(
             'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
         ):
-            commit_self_merge_with_compaction_retry(
+            commit_updates_with_compaction_retry(
                 table,
                 [],
                 [],
@@ -118,21 +173,6 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         rewrite_updates.assert_called_once()
         self.assertEqual(2, commit.commit.call_count)
         self.assertEqual(2, commit.close.call_count)
-
-    def test_commit_preserves_file_store_rollback(self):
-        rollback = Mock()
-        commit = Mock()
-        commit.file_store_commit.rollback = rollback
-        table = self._table([commit], [Mock(id=1)])
-
-        commit_self_merge_with_compaction_retry(
-            table,
-            [],
-            [],
-            num_partitions=1,
-        )
-
-        self.assertIs(commit.file_store_commit.rollback, rollback)
 
     def test_rewrite_error_keeps_row_id_conflict_as_cause(self):
         conflict = self._conflict('compact')
@@ -149,7 +189,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates',
             side_effect=rewrite_error,
         ), self.assertRaises(RuntimeError) as context:
-            commit_self_merge_with_compaction_retry(
+            commit_updates_with_compaction_retry(
                 table,
                 [update],
                 [],
@@ -157,6 +197,86 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             )
 
         self.assertIs(conflict, context.exception.__cause__)
+
+    def test_timeout_after_eager_rewrite_or_retry_wait_does_not_open_publisher(self):
+        for eager in (False, True):
+            with self.subTest(eager=eager):
+                update = self._message(1, 'staged')
+                commit = Mock()
+                commit.commit.side_effect = self._conflict('compact')
+                table = self._table([commit, Mock()], [Mock(id=2)] if eager else [Mock(id=1), Mock(id=2)])
+                table.options.commit_timeout.return_value = 100
+                clock = Mock()
+                clock.monotonic.return_value = 0.0
+                clock.time.side_effect = clock.monotonic
+                result = Mock(update_messages=[self._message(2, 'rewritten')], rewritten_file_count=1)
+
+                def rewrite(*args, **kwargs):
+                    if eager:
+                        clock.monotonic.return_value = 0.25
+                    return result
+
+                def wait(*args):
+                    clock.monotonic.return_value = 0.25
+
+                with patch('pypaimon.ray.row_id_conflict_rewriter.time', clock), patch(
+                    'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates', side_effect=rewrite,
+                ), patch('pypaimon.ray.row_id_conflict_rewriter._retry_wait', side_effect=wait), patch(
+                    'pypaimon.execution.python.write.file_store_commit.FileStoreCommit.abort',
+                ) as abort, self.assertRaisesRegex(TimeoutError, 'before snapshot publication'):
+                    commit_updates_with_compaction_retry(table, [update], [], num_partitions=1)
+                builder = table.copy_without_time_travel.return_value.new_batch_write_builder.return_value
+                self.assertEqual(builder.new_commit.call_count, 0 if eager else 1)
+                self.assertEqual(commit.commit.call_count, 0 if eager else 1)
+                abort.assert_not_called()
+
+    def test_successful_publication_past_deadline_is_not_replayed(self):
+        commit = Mock()
+        table = self._table([commit], [Mock(id=2)])
+        table.options.commit_timeout.return_value = 100
+        clock = Mock()
+        clock.monotonic.return_value = 0.0
+        clock.time.side_effect = clock.monotonic
+
+        def publish(*args):
+            clock.monotonic.return_value = 0.25
+
+        commit.commit.side_effect = publish
+        with patch('pypaimon.ray.row_id_conflict_rewriter.time', clock), patch(
+            'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates',
+            return_value=Mock(update_messages=[], rewritten_file_count=1),
+        ) as rewrite:
+            commit_updates_with_compaction_retry(table, [self._message(1, 'staged')], [], num_partitions=1)
+        rewrite.assert_called_once()
+        commit.commit.assert_called_once()
+        commit.close.assert_called_once()
+
+    def test_publisher_preparation_consumes_remaining_timeout(self):
+        commit = Mock()
+        table = self._table([commit], [Mock(id=2)])
+        table.options.commit_timeout.return_value = 100
+        commit_table = table.copy_without_time_travel.return_value
+        builder = commit_table.new_batch_write_builder.return_value
+        clock = Mock()
+        clock.monotonic.return_value = 0.0
+        clock.time.side_effect = clock.monotonic
+
+        def rewrite(*args, **kwargs):
+            clock.monotonic.return_value = 0.04
+            return Mock(update_messages=[], rewritten_file_count=1)
+
+        def open_publisher():
+            clock.monotonic.return_value = 0.25
+            return commit
+
+        builder.new_commit.side_effect = open_publisher
+        with patch('pypaimon.ray.row_id_conflict_rewriter.time', clock), patch(
+            'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates', side_effect=rewrite,
+        ), self.assertRaisesRegex(TimeoutError, 'before snapshot publication'):
+            commit_updates_with_compaction_retry(table, [self._message(1, 'staged')], [], num_partitions=1)
+        commit_table.copy_without_time_travel.assert_called_once_with({'commit.timeout': '60 ms'})
+        commit.commit.assert_not_called()
+        commit.close.assert_called_once()
 
     def test_public_error_does_not_unwrap_regular_cause(self):
         timeout = TimeoutError('commit timeout')
@@ -223,9 +343,9 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ), patch(
             'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
         ), patch(
-            'pypaimon.write.file_store_commit._abort_commit_messages',
+            'pypaimon.execution.python.write.file_store_commit.FileStoreCommit.abort',
         ) as abort_messages, self.assertRaises(RuntimeError) as context:
-            commit_self_merge_with_compaction_retry(
+            commit_updates_with_compaction_retry(
                 table,
                 [generation_0],
                 [other],
@@ -260,11 +380,11 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ), patch(
             'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
         ), patch(
-            'pypaimon.write.file_store_commit._abort_commit_messages',
+            'pypaimon.execution.python.write.file_store_commit.FileStoreCommit.abort',
         ) as abort_messages, self.assertRaises(
             RowIdExistenceConflict,
         ) as context:
-            commit_self_merge_with_compaction_retry(
+            commit_updates_with_compaction_retry(
                 table,
                 [generation_0],
                 [other],
@@ -295,9 +415,9 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ), patch(
             'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
         ), patch(
-            'pypaimon.write.file_store_commit._abort_commit_messages',
+            'pypaimon.execution.python.write.file_store_commit.FileStoreCommit.abort',
         ) as abort_messages, self.assertRaises(RuntimeError) as context:
-            commit_self_merge_with_compaction_retry(
+            commit_updates_with_compaction_retry(
                 table,
                 [generation_0],
                 [other],

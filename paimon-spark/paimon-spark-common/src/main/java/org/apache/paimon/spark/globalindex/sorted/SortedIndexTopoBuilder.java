@@ -23,9 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
-import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ScanResult;
-import org.apache.paimon.globalindex.SortedGlobalIndexer;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
@@ -45,6 +43,7 @@ import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -72,6 +71,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.groupSplitsByRange;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.shardSplitsByRowRange;
@@ -101,9 +101,38 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             DataField indexField,
             Options options)
             throws IOException {
+        return buildIndex(
+                spark,
+                relation,
+                partitionPredicate,
+                table,
+                indexType,
+                readType,
+                indexField,
+                Collections.emptyList(),
+                options);
+    }
+
+    @Override
+    public List<CommitMessage> buildIndex(
+            SparkSession spark,
+            DataSourceV2Relation relation,
+            PartitionPredicate partitionPredicate,
+            FileStoreTable table,
+            String indexType,
+            RowType readType,
+            DataField indexField,
+            List<DataField> extraFields,
+            Options options)
+            throws IOException {
+        extraFields = extraFields == null ? Collections.emptyList() : extraFields;
+        List<DataField> indexFields = new ArrayList<>();
+        indexFields.add(indexField);
+        indexFields.addAll(extraFields);
+        List<String> indexNames =
+                indexFields.stream().map(DataField::name).collect(Collectors.toList());
         SortedGlobalIndexScanner indexScanner =
-                new SortedGlobalIndexScanner(table, indexType, options)
-                        .withIndexField(indexField.name());
+                new SortedGlobalIndexScanner(table, indexType, options).withIndexFields(indexNames);
         if (partitionPredicate != null) {
             indexScanner = indexScanner.withPartitionPredicate(partitionPredicate);
         }
@@ -126,25 +155,21 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             return Collections.emptyList();
         }
 
+        SortedGlobalIndexWriter indexWriter =
+                new SortedGlobalIndexWriter(table, indexType, options).withIndexFields(indexNames);
+        Options indexOptions = indexWriter.indexOptions();
         // Calculate maximum parallelism bound
-        long recordsPerRange = options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE);
-        int maxParallelism = options.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
+        long recordsPerRange = indexOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE);
+        int maxParallelism =
+                indexOptions.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
 
         List<CommitMessage> allMessages = new ArrayList<>();
-        GlobalIndexer indexer = GlobalIndexer.create(indexType, indexField, options);
-        if (!(indexer instanceof SortedGlobalIndexer)) {
-            throw new IllegalArgumentException(
-                    "Index algorithm " + indexType + " does not expose sorted index keys.");
-        }
-        GlobalIndexKeyExtractor keyExtractor = ((SortedGlobalIndexer) indexer).keyExtractor();
+        GlobalIndexKeyExtractor keyExtractor = indexWriter.keyExtractor();
         String taskIdField = buildTaskIdFieldName(readType);
         RowType normalizedReadType =
                 normalizedReadType(readType, taskIdField, indexField, keyExtractor.keyType());
         final int partitionKeyNum = table.partitionKeys().size();
         BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
-        SortedGlobalIndexWriter indexWriter =
-                new SortedGlobalIndexWriter(table, indexType, options)
-                        .withIndexField(indexField.name());
         final byte[] serializedWriter = InstantiationUtil.serializeObject(indexWriter);
         if (keyExtractor.isIdentity()) {
             List<SortedBuildTask> buildTasks = new ArrayList<>();
@@ -176,7 +201,14 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                     taskInputs.add(
                             selected.select(
                                     functions.col(taskIdField),
-                                    functions.col(indexField.name()),
+                                    extraFields.isEmpty()
+                                            ? functions.col(indexField.name())
+                                            : functions
+                                                    .struct(
+                                                            indexNames.stream()
+                                                                    .map(functions::col)
+                                                                    .toArray(Column[]::new))
+                                                    .alias(indexField.name()),
                                     functions.col(SpecialFields.ROW_ID.name())));
                 }
             }
@@ -184,16 +216,28 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             if (!buildTasks.isEmpty()) {
                 int partitionNum =
                         calculateParallelism(buildTasks, recordsPerRange, maxParallelism);
+                boolean compressNulls =
+                        extraFields.isEmpty()
+                                && indexOptions.get(
+                                        SortedIndexOptions
+                                                .SORTED_INDEX_NULL_BITMAP_SHUFFLE_ENABLED);
                 Dataset<Row> partitioned =
                         combineAndSortBuildTaskInputs(
-                                taskInputs, partitionNum, taskIdField, indexField.name());
+                                taskInputs,
+                                partitionNum,
+                                taskIdField,
+                                indexField.name(),
+                                compressNulls);
                 Map<Long, SortedBuildTask> buildTasksById = new HashMap<>();
                 for (SortedBuildTask task : buildTasks) {
                     buildTasksById.put(task.taskId, task);
                 }
+                JavaRDD<Row> sortedRows = partitioned.javaRDD();
+                if (compressNulls) {
+                    sortedRows = sortedRows.mapPartitions(NullBitmapShuffle::expandRows);
+                }
                 JavaRDD<byte[]> written =
-                        partitioned
-                                .javaRDD()
+                        sortedRows
                                 .map(row -> (InternalRow) (new SparkRow(normalizedReadType, row)))
                                 .mapPartitions(
                                         (FlatMapFunction<Iterator<InternalRow>, byte[]>)
@@ -302,9 +346,23 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             int partitionNum,
             String taskIdField,
             String indexField) {
+        return combineAndSortBuildTaskInputs(
+                taskInputs, partitionNum, taskIdField, indexField, false);
+    }
+
+    static Dataset<Row> combineAndSortBuildTaskInputs(
+            List<Dataset<Row>> taskInputs,
+            int partitionNum,
+            String taskIdField,
+            String indexField,
+            boolean compressNulls) {
         Dataset<Row> combined = taskInputs.get(0);
         for (int i = 1; i < taskInputs.size(); i++) {
             combined = combined.union(taskInputs.get(i));
+        }
+
+        if (compressNulls) {
+            return NullBitmapShuffle.sort(combined, partitionNum, true);
         }
 
         Column[] sortFields =
@@ -419,10 +477,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
     }
 
     private static RowType normalizedReadType(
-            RowType readType,
-            String taskIdField,
-            DataField sourceField,
-            org.apache.paimon.types.DataType keyType) {
+            RowType readType, String taskIdField, DataField sourceField, DataType keyType) {
         return RowType.of(
                 new DataField(BUILD_TASK_ID_FIELD_ID, taskIdField, DataTypes.BIGINT().notNull()),
                 new DataField(sourceField.id(), sourceField.name(), keyType),
@@ -453,8 +508,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
 
         private InternalRow next;
 
-        private SortedTaskInput(
-                Iterator<InternalRow> input, org.apache.paimon.types.DataType keyType) {
+        private SortedTaskInput(Iterator<InternalRow> input, DataType keyType) {
             this.input = input;
             this.keyGetter = InternalRow.createFieldGetter(keyType, 1);
             advance();

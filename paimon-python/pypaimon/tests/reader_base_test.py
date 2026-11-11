@@ -20,7 +20,6 @@ import os
 import shutil
 import tempfile
 import unittest
-import random
 from datetime import date, datetime, time
 from decimal import Decimal
 from unittest.mock import Mock
@@ -30,7 +29,9 @@ import pyarrow as pa
 import pytest
 from parameterized import parameterized
 
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
@@ -40,7 +41,7 @@ from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
-from pypaimon.write.file_store_commit import FileStoreCommit
+from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
 
 
 class ReaderBasicTest(unittest.TestCase):
@@ -228,8 +229,12 @@ class ReaderBasicTest(unittest.TestCase):
         pd.testing.assert_frame_equal(
             actual_df.reset_index(drop=True), expected_df.reset_index(drop=True))
 
+    @parameterized.expand([
+        ('full',),
+        ('none',),
+    ])
     @pytest.mark.python_plan
-    def test_full_data_types(self):
+    def test_full_data_types(self, stats_mode):
         simple_pa_schema = pa.schema([
             ('f0', pa.int8()),
             ('f1', pa.int16()),
@@ -246,11 +251,11 @@ class ReaderBasicTest(unittest.TestCase):
             ('f12', pa.date32()),
             ('f13', pa.time32('ms')),
         ])
-        stats_enabled = random.random() < 0.5
-        options = {'metadata.stats-mode': 'full'} if stats_enabled else {}
+        options = {'metadata.stats-mode': stats_mode}
         schema = Schema.from_pyarrow_schema(simple_pa_schema, options=options)
-        self.catalog.create_table('default.test_full_data_types', schema, False)
-        table = self.catalog.get_table('default.test_full_data_types')
+        table_name = f'default.test_full_data_types_{stats_mode}'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
 
         # to test read and write
         write_builder = table.new_batch_write_builder()
@@ -298,12 +303,12 @@ class ReaderBasicTest(unittest.TestCase):
 
         # to test GenericRow ability
         latest_snapshot = table.snapshot_manager().get_latest_snapshot()
-        manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
-            manifest_files[0].file_name, lambda row: table_scan.file_scanner._filter_manifest_entry(row), False)
+        file_scanner = PythonTableScan(table_scan)._file_scanner()
+        manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = file_scanner.manifest_file_manager.read(
+            manifest_files[0].file_name, lambda row: file_scanner._filter_manifest_entry(row), False)
 
-        # Python write does not produce value stats
-        if stats_enabled:
+        if stats_mode == 'full':
             self.assertEqual(manifest_entries[0].file.value_stats_cols, None)
             min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
                                                                 table.fields).values
@@ -411,7 +416,7 @@ class ReaderBasicTest(unittest.TestCase):
             ('region', pa.string()),
             ('city', pa.string())
         ])
-        schema = Schema.from_pyarrow_schema(pa_schema)
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['region', 'city'])
         self.catalog.create_table('default.tb', schema, False)
         table = self.catalog.get_table('default.tb')
         partition_fields = [
@@ -470,7 +475,7 @@ class ReaderBasicTest(unittest.TestCase):
             ('region', pa.string()),
             ('city', pa.string())
         ])
-        schema = Schema.from_pyarrow_schema(pa_schema)
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['region', 'city'])
         self.catalog.create_table('default.tb1', schema, False)
         table = self.catalog.get_table('default.tb1')
         partition_fields = [
@@ -649,10 +654,11 @@ class ReaderBasicTest(unittest.TestCase):
         pk_read_builder = pk_table.new_read_builder()
         pk_table_scan = pk_read_builder.new_scan()
         latest_snapshot = pk_table.snapshot_manager().get_latest_snapshot()
-        pk_manifest_files = pk_table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
-        pk_manifest_entries = pk_table_scan.file_scanner.manifest_file_manager.read(
+        pk_file_scanner = PythonTableScan(pk_table_scan)._file_scanner()
+        pk_manifest_files = pk_file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        pk_manifest_entries = pk_file_scanner.manifest_file_manager.read(
             pk_manifest_files[0].file_name,
-            lambda row: pk_table_scan.file_scanner._filter_manifest_entry(row),
+            lambda row: pk_file_scanner._filter_manifest_entry(row),
             False
         )
 
@@ -666,7 +672,7 @@ class ReaderBasicTest(unittest.TestCase):
                          f"table.fields should NOT contain system fields, but got: {pk_table_field_names}")
 
         if pk_file_meta.value_stats_cols is None:
-            pk_value_stats_fields = pk_table_scan.file_scanner.manifest_file_manager._get_value_stats_fields(
+            pk_value_stats_fields = pk_file_scanner.manifest_file_manager._get_value_stats_fields(
                 {'_VALUE_STATS_COLS': None},
                 pk_table.fields
             )
@@ -724,10 +730,11 @@ class ReaderBasicTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         latest_snapshot = table.snapshot_manager().get_latest_snapshot()
-        manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
+        file_scanner = PythonTableScan(table_scan)._file_scanner()
+        manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name,
-            lambda row: table_scan.file_scanner._filter_manifest_entry(row),
+            lambda row: file_scanner._filter_manifest_entry(row),
             False
         )
 
@@ -1237,10 +1244,11 @@ class ReaderBasicTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         latest_snapshot = table.snapshot_manager().get_latest_snapshot()
-        manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
+        file_scanner = PythonTableScan(table_scan)._file_scanner()
+        manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name,
-            lambda row: table_scan.file_scanner._filter_manifest_entry(row),
+            lambda row: file_scanner._filter_manifest_entry(row),
             False
         )
 
@@ -1293,7 +1301,7 @@ class ReaderBasicTest(unittest.TestCase):
                 self.assertFalse(is_system_field,
                                  f"value_stats_cols should not contain system field: {field_name}")
             
-            value_stats_fields = table_scan.file_scanner.manifest_file_manager._get_value_stats_fields(
+            value_stats_fields = file_scanner.manifest_file_manager._get_value_stats_fields(
                 {'_VALUE_STATS_COLS': file_meta.value_stats_cols},
                 table.fields
             )
@@ -1515,7 +1523,7 @@ class ReaderBasicTest(unittest.TestCase):
         
         if splits:
             # Use _create_split_read to create reader
-            split_read = table_read._create_split_read(splits[0])
+            split_read = PythonTableRead(table_read)._create_split_read(splits[0])
             reader = split_read.create_reader()
             batch_count = 0
             total_rows = 0

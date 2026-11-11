@@ -30,7 +30,8 @@ def docs(tmp_path):
                         ("embedding", pa.list_(pa.float32(), 2))])
     table = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
         "docs", schema=schema, options={"file.format": "parquet", "vector.file.format": "parquet",
-                                        "vector-index.search-mode": "full", "read.batch-size": "1"})
+                                        "vector-index.search-mode": "full", "read.batch-size": "1",
+                                        "deletion-vectors.enabled": "true"})
     table.add(pa.table({"id": [0, 1, 2, 3], "text": ["paimon long document", "paimon", "other", "paimon"],
                         "embedding": [[2., 1.], [0., 1.], [1., 1.], [0., 1.]]}, schema=schema))
     return table

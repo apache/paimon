@@ -40,6 +40,7 @@ import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFa
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldListaggAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMaxAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapWithKeyTimeAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMinAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedPartialUpdateAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedUpdateAggFactory;
@@ -71,6 +72,9 @@ import org.apache.paimon.utils.TypeCheckUtils;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -2139,6 +2143,51 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldCollectAggWithCountLimit() {
+        DataType[] elementTypes = {DataTypes.INT(), RowType.of(DataTypes.INT())};
+        for (DataType elementType : elementTypes) {
+            assertCollectCountLimit(elementType, false, 3, 2, 1, 2);
+            assertCollectCountLimit(elementType, true, 3, 2, 1, 3);
+            assertCollectCountLimit(elementType, false, -3, 3, 3, 1);
+            assertCollectCountLimit(elementType, true, -3, 2, 3, 1);
+            assertCollectCountLimit(elementType, false, 0);
+            assertCollectCountLimit(elementType, true, 0);
+        }
+    }
+
+    private void assertCollectCountLimit(
+            DataType elementType, boolean distinct, int countLimit, int... expected) {
+        Map<String, String> config = new HashMap<>();
+        config.put("fields.fieldName.distinct", Boolean.toString(distinct));
+        config.put("fields.fieldName.count-limit", Integer.toString(countLimit));
+        CoreOptions options = CoreOptions.fromMap(config);
+        ArrayType arrayType = DataTypes.ARRAY(elementType);
+        FieldCollectAgg agg = new FieldCollectAggFactory().create(arrayType, options, "fieldName");
+        InternalArray.ElementGetter elementGetter = InternalArray.createElementGetter(elementType);
+        Object[] expectedElements = makeArray(elementType, expected).toObjectArray();
+
+        InternalArray input = makeArray(elementType, 2, 1, 2, 3, 3, 1);
+        InternalArray single = (InternalArray) agg.agg(null, input);
+        assertThat(unnest(single, elementGetter)).containsExactly(expectedElements);
+
+        InternalArray older = makeArray(elementType, 2, 1, 2);
+        InternalArray newer = makeArray(elementType, 3, 3, 1);
+        InternalArray forward = (InternalArray) agg.agg(agg.agg(null, older), newer);
+        InternalArray reversed =
+                (InternalArray) agg.aggReversed(agg.aggReversed(null, newer), older);
+        assertThat(unnest(forward, elementGetter)).containsExactly(expectedElements);
+        assertThat(unnest(reversed, elementGetter)).containsExactly(expectedElements);
+    }
+
+    private GenericArray makeArray(DataType elementType, int... values) {
+        Object[] elements = new Object[values.length];
+        for (int i = 0; i < values.length; i++) {
+            elements[i] = elementType instanceof RowType ? GenericRow.of(values[i]) : values[i];
+        }
+        return new GenericArray(elements);
+    }
+
+    @Test
     public void testFieldCollectAggWithDistinct() {
         FieldCollectAgg agg =
                 new FieldCollectAggFactory()
@@ -3033,25 +3082,43 @@ public class FieldAggregatorTest {
         return result;
     }
 
-    @Test
-    public void testFieldMergeMapWithKeyTimeAgg() {
+    private static Stream<Arguments> mergeMapTimestampValues() {
+        return Stream.of(
+                Arguments.of(DataTypes.STRING(), "100", "110"),
+                Arguments.of(DataTypes.TINYINT(), (byte) 100, (byte) 110),
+                Arguments.of(DataTypes.SMALLINT(), (short) 100, (short) 110),
+                Arguments.of(DataTypes.INT(), 9, 100),
+                Arguments.of(DataTypes.BIGINT(), Long.MAX_VALUE - 1, Long.MAX_VALUE),
+                Arguments.of(DataTypes.DATE(), -1, 0),
+                Arguments.of(DataTypes.TIME(3), 86_399_998, 86_399_999),
+                Arguments.of(
+                        DataTypes.TIMESTAMP(9),
+                        Timestamp.fromEpochMillis(0, 1),
+                        Timestamp.fromEpochMillis(0, 2)),
+                Arguments.of(
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9),
+                        Timestamp.fromEpochMillis(0, 1),
+                        Timestamp.fromEpochMillis(0, 2)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("mergeMapTimestampValues")
+    public void testFieldMergeMapWithKeyTimeAgg(DataType tsType, Object older, Object newer) {
         MapType mapType =
                 DataTypes.MAP(
                         DataTypes.STRING(),
                         DataTypes.ROW(
                                 DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
-                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
-        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
+                                DataTypes.FIELD(1, "dbsync_ts", tsType)));
+        FieldAggregator agg =
+                new FieldMergeMapWithKeyTimeAggFactory()
+                        .create(mapType, new CoreOptions(new HashMap<>()), "f");
 
         GenericMap map1 =
-                createTestMap(
-                        createEntry("key1", "A", "17682882903686900100"),
-                        createEntry("key2", "B", "17682882903686900100"));
+                createTestMap(createEntry("key1", "A", older), createEntry("key2", "B", newer));
         GenericMap map2 =
-                createTestMap(
-                        createEntry("key1", "A1", "17682882903686900200"),
-                        createEntry("key3", "C", "17682882903686900200"));
-        GenericMap map3 = createTestMap(createEntry("key2", "B2", "17682882903686900050"));
+                createTestMap(createEntry("key1", "A1", newer), createEntry("key3", "C", newer));
+        GenericMap map3 = createTestMap(createEntry("key2", "B2", older));
 
         Object acc = agg.agg(null, map1);
         assertTestMap(acc, createExpectedEntry("key1", "A"), createExpectedEntry("key2", "B"));
@@ -3069,6 +3136,72 @@ public class FieldAggregatorTest {
                 createExpectedEntry("key1", "A1"),
                 createExpectedEntry("key2", "B"),
                 createExpectedEntry("key3", "C"));
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeOverwriteOnEqualTs() {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.STRING(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        GenericMap oldMap = createTestMap(createEntry("k", "old", "100"));
+        GenericMap newMap = createTestMap(createEntry("k", "new", "100"));
+        for (String setting : Arrays.asList(null, "false", "true")) {
+            Map<String, String> options = new HashMap<>();
+            if (setting != null) {
+                options.put("fields.f." + CoreOptions.MERGE_MAP_OVERWRITE_ON_EQUAL_TS, setting);
+            }
+            FieldAggregator agg =
+                    new FieldMergeMapWithKeyTimeAggFactory()
+                            .create(mapType, new CoreOptions(options), "f");
+            boolean overwrite = Boolean.parseBoolean(setting);
+            assertTestMap(
+                    agg.agg(oldMap, newMap), createExpectedEntry("k", overwrite ? "new" : "old"));
+            assertTestMap(
+                    agg.aggReversed(oldMap, newMap),
+                    createExpectedEntry("k", overwrite ? "old" : "new"));
+            assertTestMap(
+                    agg.agg(oldMap, createTestMap(createEntry("k", "older", "090"))),
+                    createExpectedEntry("k", "old"));
+            assertTestMap(
+                    agg.agg(oldMap, createTestMap(createEntry("k", "newer", "110"))),
+                    createExpectedEntry("k", "newer"));
+            assertTestMap(
+                    agg.agg(oldMap, createTestMap(createEntry("k", "no-time", null))),
+                    createExpectedEntry("k", "old"));
+            assertThat(agg.agg(oldMap, null)).isSameAs(oldMap);
+            assertThat(
+                            ((InternalMap)
+                                            agg.agg(
+                                                    oldMap,
+                                                    new GenericMap(
+                                                            Collections.singletonMap(
+                                                                    BinaryString.fromString("k"),
+                                                                    null))))
+                                    .size())
+                    .isZero();
+        }
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggFactoryRejectsUnsupportedTsField() {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.STRING(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.DOUBLE())));
+        assertThatThrownBy(
+                        () ->
+                                new FieldMergeMapWithKeyTimeAggFactory()
+                                        .create(mapType, new CoreOptions(new HashMap<>()), "f"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Timestamp field 'dbsync_ts' for field 'f' must be CHAR/VARCHAR/STRING, "
+                                + "TINYINT/SMALLINT/INT/BIGINT or DATE/TIME/TIMESTAMP/TIMESTAMP_LTZ "
+                                + "but was 'DOUBLE'.");
     }
 
     /**
@@ -3152,12 +3285,12 @@ public class FieldAggregatorTest {
         return row.getString(0).toString();
     }
 
-    private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, String ts) {
+    private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, Object ts) {
         return new AbstractMap.SimpleEntry<>(
                 BinaryString.fromString(key),
                 GenericRow.of(
                         value == null ? null : BinaryString.fromString(value),
-                        ts == null ? null : BinaryString.fromString(ts)));
+                        ts instanceof String ? BinaryString.fromString((String) ts) : ts));
     }
 
     private Map.Entry<String, String> createExpectedEntry(String key, String value) {

@@ -18,7 +18,10 @@
 import logging
 from typing import Any, Callable, Dict, List, Optional, Union
 from pypaimon.api.api_response import ErrorResponse, GetTableResponse, GetTagResponse, PagedList, Partition
+from pypaimon.api.model import CreateModelRequest
 from pypaimon.api.rest_api import RESTApi
+from pypaimon.api.rest_permission_management import RESTPermissionManagement
+from pypaimon.api.rest_policy_management import RESTPolicyManagement
 from pypaimon.catalog.catalog_exception import IllegalArgumentError, IllegalStateError
 from pypaimon.api.rest_exception import (NoSuchResourceException, AlreadyExistsException,
                                          ForbiddenException, BadRequestException,
@@ -26,16 +29,21 @@ from pypaimon.api.rest_exception import (NoSuchResourceException, AlreadyExistsE
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
+from pypaimon.catalog.catalog_utils import check_not_branch, check_not_system_database, check_not_system_table
 from pypaimon.catalog.catalog_exception import (
+    ColumnAlreadyExistException, ColumnNotExistException,
     TableNotExistException, DatabaseAlreadyExistException,
     TableAlreadyExistException, DatabaseNotExistException,
     TableNoPermissionException, DatabaseNoPermissionException,
+    TableIdNotExistException, TableIdNoPermissionException,
     FunctionNotExistException, FunctionAlreadyExistException,
+    ModelNotExistException, ModelAlreadyExistException,
     DefinitionAlreadyExistException, DefinitionNotExistException,
     TagNotExistException, TagAlreadyExistException,
     BranchNotExistException, BranchAlreadyExistException,
 )
 from pypaimon.catalog.database import Database
+from pypaimon.catalog.model import Model, ModelDefinition
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.catalog.rest.table_metadata import TableMetadata
@@ -46,6 +54,8 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.caching_file_io import CachingFileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
+from pypaimon.management.permission_management import PermissionManagement
+from pypaimon.management.policy_management import PolicyManagement
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
@@ -71,8 +81,7 @@ class RESTCatalog(Catalog):
     def __init__(self, context: CatalogContext, config_required: Optional[bool] = True):
         self.warehouse = context.options.get(CatalogOptions.WAREHOUSE)
         self.rest_api = RESTApi(context.options, config_required)
-        self.context = CatalogContext.create(self.rest_api.options, context.hadoop_conf,
-                                             context.prefer_io_loader, context.fallback_io_loader)
+        self.context = context.with_options(self.rest_api.options)
         self.data_token_enabled = self.rest_api.options.get(CatalogOptions.DATA_TOKEN_ENABLED)
         self._cache_manager = CachingFileIO.create_cache_manager(self.context.options)
 
@@ -92,6 +101,12 @@ class RESTCatalog(Catalog):
         """
         from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
         return RESTCatalogLoader(self.context)
+
+    def permission_management(self) -> PermissionManagement:
+        return RESTPermissionManagement(self.rest_api)
+
+    def policy_management(self) -> PolicyManagement:
+        return RESTPolicyManagement(self.rest_api)
 
     def supports_version_management(self) -> bool:
         """
@@ -152,6 +167,7 @@ class RESTCatalog(Catalog):
 
     def create_database(self, name: str, ignore_if_exists: bool,
                         properties: Optional[Dict[str, str]] = None) -> None:
+        check_not_system_database(name)
         try:
             self.rest_api.create_database(name, properties)
         except AlreadyExistsException as e:
@@ -175,6 +191,7 @@ class RESTCatalog(Catalog):
             raise DatabaseNoPermissionException(name) from e
 
     def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
+        check_not_system_database(name)
         if not cascade:
             try:
                 tables = self.list_tables(name)
@@ -197,6 +214,7 @@ class RESTCatalog(Catalog):
             raise DatabaseNoPermissionException(name) from e
 
     def alter_database(self, name: str, changes: List[PropertyChange]) -> None:
+        check_not_system_database(name)
         try:
             set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
             self.rest_api.alter_database(name, list(remove_keys), set_properties)
@@ -241,6 +259,22 @@ class RESTCatalog(Catalog):
             return self._load_system_table(identifier)
         return self._load_data_table(identifier)
 
+    def get_table_by_id(self, table_id: str) -> Table:
+        try:
+            response = self.rest_api.get_table_by_id(table_id)
+        except NoSuchResourceException as e:
+            raise TableIdNotExistException(table_id) from e
+        except ForbiddenException as e:
+            raise TableIdNoPermissionException(table_id) from e
+        database = response.get_database()
+        identifier = Identifier.create(database, response.get_name())
+        return self.load_table(
+            identifier,
+            lambda path: self.file_io_for_data(path, identifier),
+            self.file_io_from_options,
+            lambda _: self.to_table_metadata(database, response),
+        )
+
     def _load_data_table(self, identifier: Identifier) -> Union[FormatTable, IcebergTable, ObjectTable, FileStoreTable]:
         return self.load_table(
             identifier,
@@ -268,11 +302,15 @@ class RESTCatalog(Catalog):
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        check_not_branch(identifier, "create_table")
+        check_not_system_table(identifier, "create_table")
         try:
             self.rest_api.create_table(identifier, schema)
         except AlreadyExistsException as e:
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier) from e
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(identifier.get_database_name()) from e
 
     def rename_table(self, source_identifier: Union[str, Identifier],
                      target_identifier: Union[str, Identifier]) -> None:
@@ -280,6 +318,10 @@ class RESTCatalog(Catalog):
             source_identifier = Identifier.from_string(source_identifier)
         if not isinstance(target_identifier, Identifier):
             target_identifier = Identifier.from_string(target_identifier)
+        check_not_branch(source_identifier, "rename_table")
+        check_not_branch(target_identifier, "rename_table")
+        check_not_system_table(source_identifier, "rename_table")
+        check_not_system_table(target_identifier, "rename_table")
         try:
             self.rest_api.rename_table(source_identifier, target_identifier)
         except NoSuchResourceException as e:
@@ -292,6 +334,8 @@ class RESTCatalog(Catalog):
     def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        check_not_branch(identifier, "drop_table")
+        check_not_system_table(identifier, "drop_table")
         try:
             self.rest_api.drop_table(identifier)
         except NoSuchResourceException as e:
@@ -364,6 +408,27 @@ class RESTCatalog(Catalog):
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
+        except NotImplementedException:
+            # The server does not implement the partition-listing endpoint.
+            # Mirror Java RESTCatalog#listPartitionsPaged and fall back to
+            # computing partitions from the table's own metadata.
+            #
+            # Scope: this Python fallback reads Paimon manifests, so it only
+            # supports data tables (FileStoreTable). Java re-raises solely for
+            # catalog-managed-partition tables (a FormatTable whose
+            # partitionManager is set) and otherwise scans the table's file
+            # system, including an unmanaged format table's directory layout
+            # (CatalogUtils.listPartitionsFromFileSystem). PyPaimon does not
+            # scan format/object tables here yet, so those still surface the
+            # server's NotImplemented error rather than being listed.
+            from pypaimon.catalog.catalog_utils import (
+                list_partitions_from_file_system)
+
+            table = self.get_table(identifier)
+            if not isinstance(table, FileStoreTable):
+                raise
+            return list_partitions_from_file_system(
+                table, max_results, page_token, partition_name_pattern)
 
     def alter_table(
         self,
@@ -373,16 +438,24 @@ class RESTCatalog(Catalog):
     ) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        check_not_system_table(identifier, "alter_table")
         try:
             self.rest_api.alter_table(identifier, changes)
         except NoSuchResourceException as e:
             if not ignore_if_not_exists:
+                if e.resource_type == ErrorResponse.RESOURCE_TYPE_COLUMN:
+                    raise ColumnNotExistException(e.resource_name) from e
                 raise TableNotExistException(identifier) from e
+        except AlreadyExistsException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_COLUMN:
+                raise ColumnAlreadyExistException(e.resource_name) from e
+            raise
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 
     def rollback_to(self, identifier: Union[str, Identifier], instant: Instant,
-                    from_snapshot: Optional[int] = None) -> None:
+                    from_snapshot: Optional[int] = None, *,
+                    table_uuid: Optional[str] = None) -> None:
         """Rollback table by the given identifier and instant.
 
         Args:
@@ -390,6 +463,7 @@ class RESTCatalog(Catalog):
             instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
             from_snapshot: Optional snapshot ID. Success only occurs when the
                 latest snapshot is this snapshot.
+            table_uuid: Expected table or branch UUID from the loaded table view.
 
         Raises:
             TableNotExistException: If the table does not exist.
@@ -398,7 +472,8 @@ class RESTCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            self.rest_api.rollback_to(identifier, instant, from_snapshot)
+            self.rest_api.rollback_to(
+                identifier, instant, from_snapshot, table_uuid=table_uuid)
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
                 raise ValueError(
@@ -533,6 +608,76 @@ class RESTCatalog(Catalog):
         except NoSuchResourceException as e:
             raise DatabaseNotExistException(database_name) from e
 
+    def create_model(
+            self,
+            identifier: Union[str, Identifier],
+            definition: Union[ModelDefinition, Dict[str, Any]],
+            comment: Optional[str] = None,
+            ignore_if_exists: bool = False,
+    ) -> Model:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        request = CreateModelRequest(
+            name=identifier.get_object_name(),
+            definition=definition,
+            comment=comment,
+        )
+        try:
+            response = self.rest_api.create_model(identifier, request)
+            return response.to_model(identifier.get_database_name())
+        except AlreadyExistsException as e:
+            if ignore_if_exists:
+                return self.get_model(identifier)
+            raise ModelAlreadyExistException(identifier) from e
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(identifier.get_database_name()) from e
+        except NotImplementedException as e:
+            raise NotImplementedError("REST Catalog does not support models") from e
+
+    def get_model(self, identifier: Union[str, Identifier]) -> Model:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            response = self.rest_api.get_model(identifier)
+            return response.to_model(identifier.get_database_name())
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_DATABASE:
+                raise DatabaseNotExistException(identifier.get_database_name()) from e
+            raise ModelNotExistException(identifier) from e
+        except NotImplementedException as e:
+            raise NotImplementedError("REST Catalog does not support models") from e
+
+    def list_models(self, database_name: str) -> List[Model]:
+        try:
+            return [
+                response.to_model(database_name)
+                for response in self.rest_api.list_models(database_name)
+            ]
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+        except NotImplementedException as e:
+            raise NotImplementedError("REST Catalog does not support models") from e
+
+    def drop_model(
+            self,
+            identifier: Union[str, Identifier],
+            ignore_if_not_exists: bool = False,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.drop_model(identifier)
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_DATABASE:
+                raise DatabaseNotExistException(identifier.get_database_name()) from e
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_MODEL:
+                if ignore_if_not_exists:
+                    return
+                raise ModelNotExistException(identifier) from e
+            raise
+        except NotImplementedException as e:
+            raise NotImplementedError("REST Catalog does not support models") from e
+
     # Tag CRUD: mirrors Java RESTCatalog tag handlers.
     def create_tag(self, identifier: Union[str, Identifier], tag_name: str,
                    snapshot_id: Optional[int] = None,
@@ -594,6 +739,24 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 
+    def rename_tag(self, identifier: Union[str, Identifier], tag_name: str,
+                   target_tag_name: str) -> None:
+        # The REST API has create, get, list, and delete only. Renaming the
+        # tag file through FileStoreTable would leave the server registry
+        # pointing at a name whose file is gone.
+        raise NotImplementedError(
+            "REST catalog does not support rename_tag. "
+            "The REST API has no rename endpoint."
+        )
+
+    def replace_tag(self, identifier: Union[str, Identifier], tag_name: str,
+                    snapshot_id: Optional[int] = None,
+                    time_retained: Optional[str] = None) -> None:
+        raise NotImplementedError(
+            "REST catalog does not support replace_tag. "
+            "The REST API has no replace endpoint."
+        )
+
     # Branch CRUD: mirrors Java RESTCatalog branch handlers.
     def create_branch(self, identifier: Union[str, Identifier], branch_name: str,
                       tag_name: Optional[str] = None) -> None:
@@ -604,7 +767,9 @@ class RESTCatalog(Catalog):
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
                 raise TagNotExistException(tag_name) from e
-            raise TableNotExistException(identifier) from e
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_TABLE:
+                raise TableNotExistException(identifier) from e
+            raise
         except AlreadyExistsException as e:
             raise BranchAlreadyExistException(branch_name) from e
         except ForbiddenException as e:
@@ -624,16 +789,7 @@ class RESTCatalog(Catalog):
 
     def rename_branch(self, identifier: Union[str, Identifier], from_branch: str,
                       to_branch: str) -> None:
-        if not isinstance(identifier, Identifier):
-            identifier = Identifier.from_string(identifier)
-        try:
-            self.rest_api.rename_branch(identifier, from_branch, to_branch)
-        except NoSuchResourceException as e:
-            raise BranchNotExistException(from_branch) from e
-        except AlreadyExistsException as e:
-            raise BranchAlreadyExistException(to_branch) from e
-        except ForbiddenException as e:
-            raise TableNoPermissionException(identifier) from e
+        raise NotImplementedError('REST branch rename is not supported, matching Java RESTCatalog.')
 
     def fast_forward(self, identifier: Union[str, Identifier], branch_name: str) -> None:
         if not isinstance(identifier, Identifier):

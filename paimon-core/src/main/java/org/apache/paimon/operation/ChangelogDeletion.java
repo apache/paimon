@@ -22,9 +22,7 @@ import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.ExpireFileEntry;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
@@ -116,10 +114,7 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
             String indexManifest = skippingSnapshot.indexManifest();
             if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
                 skippingSet.add(indexManifest);
-                indexFileHandler.readManifest(indexManifest).stream()
-                        .map(IndexManifestEntry::indexFile)
-                        .map(IndexFileMeta::fileName)
-                        .forEach(skippingSet::add);
+                addIndexFilesToSkippingSet(skippingSnapshot, skippingSet);
             }
 
             // statistics

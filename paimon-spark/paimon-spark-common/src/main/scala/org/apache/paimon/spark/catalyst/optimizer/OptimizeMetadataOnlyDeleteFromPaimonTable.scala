@@ -59,7 +59,7 @@ case class OptimizeMetadataOnlyDeleteFromPaimonTable(spark: SparkSession)
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.transform {
       case d @ DeleteFromPaimonTableCommand(r: DataSourceV2Relation, table, condition) =>
-        if (isTruncateTable(condition)) {
+        if (isTruncateTable(table, condition)) {
           TruncatePaimonTableWithFilter(table, None)
         } else if (isTruncatePartition(table, condition)) {
           tryConvertToPartitionPredicate(r, table, condition) match {
@@ -73,11 +73,12 @@ case class OptimizeMetadataOnlyDeleteFromPaimonTable(spark: SparkSession)
   }
 
   def isMetadataOnlyDelete(table: FileStoreTable, condition: Expression): Boolean = {
-    isTruncateTable(condition) || isTruncatePartition(table, condition)
+    isTruncateTable(table, condition) || isTruncatePartition(table, condition)
   }
 
-  private def isTruncateTable(condition: Expression): Boolean = {
-    condition == null || condition == TrueLiteral
+  private def isTruncateTable(table: FileStoreTable, condition: Expression): Boolean = {
+    !table.coreOptions().deleteForceProduceChangelog() &&
+    (condition == null || condition == TrueLiteral)
   }
 
   private def isTruncatePartition(table: FileStoreTable, condition: Expression): Boolean = {

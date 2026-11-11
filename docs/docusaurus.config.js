@@ -40,10 +40,11 @@ const config = {
     trinoGithubRepo: 'https://github.com/apache/paimon-trino.git',
     prestoGithubRepo: 'https://github.com/apache/paimon-presto.git',
     scalaVersion: '_2.12',
-    stableDocs: 'https://paimon.apache.org/docs/2.0',
+    stableDocs: 'https://paimon.apache.org/docs/2.1',
     previousDocs: [
       {label: 'master', href: 'https://paimon.apache.org/docs/master'},
-      {label: 'stable (2.0)', href: 'https://paimon.apache.org/docs/2.0'},
+      {label: 'stable (2.1)', href: 'https://paimon.apache.org/docs/2.1'},
+      {label: '2.0', href: 'https://paimon.apache.org/docs/2.0'},
       {label: '1.4', href: 'https://paimon.apache.org/docs/1.4'},
       {label: '1.3', href: 'https://paimon.apache.org/docs/1.3'},
       {label: '1.2', href: 'https://paimon.apache.org/docs/1.2'},
@@ -127,7 +128,8 @@ const config = {
             position: 'right',
             items: [
               {label: 'master (2.2-SNAPSHOT)', href: 'https://paimon.apache.org/docs/master'},
-              {label: '2.0 (stable)', href: 'https://paimon.apache.org/docs/2.0'},
+              {label: '2.1 (stable)', href: 'https://paimon.apache.org/docs/2.1'},
+              {label: '2.0', href: 'https://paimon.apache.org/docs/2.0'},
               {label: '1.4', href: 'https://paimon.apache.org/docs/1.4'},
               {label: '1.3', href: 'https://paimon.apache.org/docs/1.3'},
               {label: '1.2', href: 'https://paimon.apache.org/docs/1.2'},

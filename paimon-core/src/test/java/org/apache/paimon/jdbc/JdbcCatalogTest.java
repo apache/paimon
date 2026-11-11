@@ -25,13 +25,18 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.view.View;
@@ -92,8 +97,8 @@ public class JdbcCatalogTest extends CatalogTestBase {
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "username", "user");
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
         properties.put(CatalogOptions.WAREHOUSE.key(), warehouse);
-        properties.put(CatalogOptions.LOCK_ENABLED.key(), "true");
-        properties.put(CatalogOptions.LOCK_TYPE.key(), "jdbc");
+        properties.put(JdbcCatalogOptions.LOCK_ENABLED.key(), "true");
+        properties.put(JdbcCatalogOptions.LOCK_TYPE.key(), "jdbc");
         properties.putAll(props);
         JdbcCatalog catalog =
                 new JdbcCatalog(
@@ -446,13 +451,13 @@ public class JdbcCatalogTest extends CatalogTestBase {
 
     private JdbcCatalog initCatalogWithoutLock() {
         Map<String, String> props = Maps.newHashMap();
-        props.put(CatalogOptions.LOCK_ENABLED.key(), "false");
+        props.put(JdbcCatalogOptions.LOCK_ENABLED.key(), "false");
         return initCatalog(props);
     }
 
     private JdbcCatalog initCatalogWithoutLock(String uri) {
         Map<String, String> props = Maps.newHashMap();
-        props.put(CatalogOptions.LOCK_ENABLED.key(), "false");
+        props.put(JdbcCatalogOptions.LOCK_ENABLED.key(), "false");
         return initCatalog(props, uri);
     }
 
@@ -1505,5 +1510,28 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                         ImmutableList.of(ViewChange.dropDialect("missing")),
                                         false))
                 .isInstanceOf(Catalog.DialectNotExistException.class);
+    }
+
+    @Test
+    public void testSnapshotLoaderDisabledWithoutVersionManagement() throws Exception {
+        String databaseName = "snapshot_loader_db";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), false);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(catalog.supportsVersionManagement()).isFalse();
+        assertThat(table.catalogEnvironment().snapshotLoader()).isNull();
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1));
+            commit.commit(write.prepareCommit());
+        }
+
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(1L);
     }
 }

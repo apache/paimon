@@ -252,11 +252,12 @@ class IndexManifestFile:
         if not adds and not deletes:
             return previous_name
         previous = self.read(previous_name) if previous_name else []
-        delete_names = {e.index_file.file_name for e in deletes}
-        survivors = [e for e in previous if e.index_file.file_name not in delete_names]
+        _validate_global_index_deletes(previous, deletes)
+        delete_files = {(e.index_file.index_type, e.index_file.file_name) for e in deletes}
+        survivors = [e for e in previous
+                     if (e.index_file.index_type, e.index_file.file_name) not in delete_files]
         _validate_retained_global_index_files(survivors, adds)
-        _validate_hash_index_changes(survivors, adds)
-        combined = survivors + adds
+        combined = _combine_hash_indexes(survivors, adds, deletes)
         if not combined:
             return None
         return self.write(combined)
@@ -314,6 +315,29 @@ class IndexManifestFile:
         }
 
 
+def _validate_global_index_deletes(previous_entries, deleted_entries) -> None:
+    # Java combines global indexes by index type and file name. Verify each
+    # removal against the current entry, including metadata-only reassignment.
+    # HASH and DV keep their existing bucket/index-specific deletion rules.
+    current = {(entry.index_file.index_type, entry.index_file.file_name): entry
+               for entry in previous_entries if _is_global_index(entry.index_file.index_type)}
+    for deleted in deleted_entries:
+        meta = deleted.index_file
+        if not _is_global_index(meta.index_type):
+            continue
+        previous = current.pop((meta.index_type, meta.file_name), None)
+        if previous is None:
+            raise RuntimeError(
+                'Trying to delete global index file %s which does not exist.' % meta.file_name)
+        previous_meta = previous.index_file
+        if (previous.partition != deleted.partition or previous.bucket != deleted.bucket
+                or previous_meta != meta or previous_meta.dv_ranges != meta.dv_ranges
+                or previous_meta.external_path != meta.external_path
+                or previous_meta.global_index_meta != meta.global_index_meta):
+            raise RuntimeError(
+                'Index file %s metadata does not match the current entry.' % meta.file_name)
+
+
 def _validate_retained_global_index_files(
     retained_entries: List[IndexManifestEntry],
     added_entries: List[IndexManifestEntry],
@@ -353,33 +377,26 @@ def _validate_retained_global_index_files(
             )
 
 
-def _validate_hash_index_changes(
-    retained_entries: List[IndexManifestEntry],
-    added_entries: List[IndexManifestEntry],
-) -> None:
-    """Keep the one-HASH-file-per-bucket manifest invariant."""
-    by_bucket = {
-        (tuple(entry.partition.values), entry.bucket): entry
-        for entry in retained_entries
-        if entry.index_file.index_type == _HASH_INDEX
-    }
-    for added in added_entries:
-        if added.kind != _ADD or added.index_file.index_type != _HASH_INDEX:
-            continue
-        key = (tuple(added.partition.values), added.bucket)
-        previous = by_bucket.get(key)
-        if previous is not None:
-            raise RuntimeError(
-                "Trying to add HASH index file {} for partition {}, bucket {}, "
-                "but HASH index file {} still exists. Remove the previous file "
-                "first.".format(
-                    added.index_file.file_name,
-                    key[0],
-                    key[1],
-                    previous.index_file.file_name,
-                )
-            )
-        by_bucket[key] = added
+def _combine_hash_indexes(retained_entries, added_entries, deleted_entries):
+    """Java BucketedCombiner replaces HASH by (partition, bucket, index type).
+
+    Writers submit a complete replacement file, so an ADD need not carry the
+    previous file as a DELETE. Each bucket must have a single writer owner.
+    """
+    def key(entry):
+        return tuple(entry.partition.values), entry.bucket
+
+    hash_indexes = {key(entry): entry for entry in retained_entries
+                    if entry.index_file.index_type == _HASH_INDEX}
+    for entry in deleted_entries:
+        if entry.index_file.index_type == _HASH_INDEX:
+            hash_indexes.pop(key(entry), None)
+    for entry in added_entries:
+        if entry.index_file.index_type == _HASH_INDEX:
+            hash_indexes[key(entry)] = entry
+    return ([entry for entry in retained_entries + added_entries
+             if entry.index_file.index_type != _HASH_INDEX]
+            + list(hash_indexes.values()))
 
 
 def _is_global_index(index_type: str) -> bool:
@@ -387,9 +404,10 @@ def _is_global_index(index_type: str) -> bool:
 
 
 def _can_keep_existing_global_index(retained_meta, added_meta) -> bool:
+    # The caller has already matched the index type and primary field.
     return (
-        _extra_field_ids(retained_meta) == _extra_field_ids(added_meta)
-        and not _row_ranges_intersect(retained_meta, added_meta)
+        _extra_field_ids(retained_meta) != _extra_field_ids(added_meta)
+        or not _row_ranges_intersect(retained_meta, added_meta)
     )
 
 

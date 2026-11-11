@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Comparator;
+import java.util.function.ToIntFunction;
 
 import static org.apache.paimon.sst.SstFileUtils.crc32c;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -279,15 +280,19 @@ public class SstFileReader implements Closeable {
          */
         public void seekTo(byte[] key) {
             MemorySlice keySlice = MemorySlice.wrap(key);
+            seekTo(candidate -> comparator.compare(candidate, keySlice));
+        }
 
-            indexIterator.seekTo(keySlice);
+        /** Seek to a virtual boundary without encoding it as a persisted key. */
+        public void seekTo(ToIntFunction<MemorySlice> compareToTarget) {
+            indexIterator.seekTo(compareToTarget);
             if (indexIterator.hasNext()) {
                 seekedDataBlock = getNextBlock(indexIterator);
                 // The index block entry key is the last key of the corresponding data block.
                 // If there is some index entry key >= targetKey, the related data block must
                 // also contain some key >= target key, which means seekedDataBlock.hasNext()
                 // must be true
-                seekedDataBlock.seekTo(keySlice);
+                seekedDataBlock.seekTo(compareToTarget);
                 Preconditions.checkState(seekedDataBlock.hasNext());
             } else {
                 seekedDataBlock = null;

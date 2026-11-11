@@ -86,11 +86,56 @@ public class ProcedureUtils {
                 .snapshotMaxDeletes(
                         Optional.ofNullable(maxDeletes).orElse(tableOptions.snapshotExpireLimit()))
                 .snapshotTimeRetain(tableOptions.snapshotTimeRetain());
+        // Unset changelog options must follow the effective snapshot options, including overrides.
+        builder.changelogRetainMin(
+                        tableOptions
+                                .toConfiguration()
+                                .getOptional(CoreOptions.CHANGELOG_NUM_RETAINED_MIN)
+                                .orElse(null))
+                .changelogRetainMax(
+                        tableOptions
+                                .toConfiguration()
+                                .getOptional(CoreOptions.CHANGELOG_NUM_RETAINED_MAX)
+                                .orElse(null))
+                .changelogTimeRetain(
+                        tableOptions
+                                .toConfiguration()
+                                .getOptional(CoreOptions.CHANGELOG_TIME_RETAINED)
+                                .orElse(null));
         if (!StringUtils.isNullOrWhitespaceOnly(olderThanStr)) {
             long olderThanMills =
                     DateTimeUtils.parseTimestampData(olderThanStr, 3, TimeZone.getDefault())
                             .getMillisecond();
             builder.snapshotTimeRetain(
+                    Duration.ofMillis(System.currentTimeMillis() - olderThanMills));
+        }
+        return builder;
+    }
+
+    public static ExpireConfig.Builder fillInChangelogOptions(
+            CoreOptions tableOptions,
+            Integer retainMax,
+            Integer retainMin,
+            String olderThanStr,
+            Integer maxDeletes) {
+
+        ExpireConfig.Builder builder = ExpireConfig.builder();
+        builder.snapshotRetainMax(tableOptions.snapshotNumRetainMax())
+                .snapshotRetainMin(tableOptions.snapshotNumRetainMin())
+                .snapshotTimeRetain(tableOptions.snapshotTimeRetain())
+                .snapshotMaxDeletes(tableOptions.snapshotExpireLimit())
+                .changelogRetainMax(
+                        Optional.ofNullable(retainMax).orElse(tableOptions.changelogNumRetainMax()))
+                .changelogRetainMin(
+                        Optional.ofNullable(retainMin).orElse(tableOptions.changelogNumRetainMin()))
+                .changelogMaxDeletes(
+                        Optional.ofNullable(maxDeletes).orElse(tableOptions.snapshotExpireLimit()))
+                .changelogTimeRetain(tableOptions.changelogTimeRetain());
+        if (!StringUtils.isNullOrWhitespaceOnly(olderThanStr)) {
+            long olderThanMills =
+                    DateTimeUtils.parseTimestampData(olderThanStr, 3, TimeZone.getDefault())
+                            .getMillisecond();
+            builder.changelogTimeRetain(
                     Duration.ofMillis(System.currentTimeMillis() - olderThanMills));
         }
         return builder;

@@ -25,10 +25,15 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.BufferOnlyVariant;
+import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.GenericVariantBuilder;
+import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
@@ -51,6 +56,145 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link NestedProjectedRow}. */
 public class NestedProjectedRowTest {
+
+    @Test
+    void testVariantExtractionProjection() {
+        RowType dataSchema =
+                DataTypes.ROW(
+                        DataTypes.FIELD(7, "id", DataTypes.INT()),
+                        DataTypes.FIELD(41, "payload", DataTypes.VARIANT()));
+        RowType extractedType =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.BIGINT(), "$.a.b")
+                        .field(DataTypes.INT(), "$.items[1]")
+                        .field(DataTypes.STRING(), "$.missing.deep")
+                        .field(DataTypes.INT(), "$.items[10]")
+                        .field(DataTypes.BIGINT(), "$.wrong", false, "UTC")
+                        .field(DataTypes.STRING(), "$.number")
+                        .field(DataTypes.VARIANT(), "$.a")
+                        .build();
+        RowType projectionSchema =
+                DataTypes.ROW(
+                        DataTypes.FIELD(41, "payload", extractedType),
+                        DataTypes.FIELD(7, "id", DataTypes.INT()));
+        NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectionSchema);
+        GenericVariant variant =
+                GenericVariant.fromJson(
+                        "{\"a\":{\"b\":42},\"items\":[1,7],\"wrong\":\"invalid\",\"number\":123}");
+        InternalRow projected =
+                projection.replaceRow(GenericRow.of(5, new BufferOnlyVariant(variant)));
+        assertThat(projected.getInt(1)).isEqualTo(5);
+        InternalRow extracted = projected.getRow(0, extractedType.getFieldCount());
+        assertThat(extracted.getLong(0)).isEqualTo(42L);
+        assertThat(extracted.getInt(1)).isEqualTo(7);
+        assertThat(extracted.isNullAt(2)).isTrue();
+        assertThat(extracted.isNullAt(3)).isTrue();
+        assertThat(extracted.isNullAt(4)).isTrue();
+        assertThat(extracted.getString(5).toString()).isEqualTo("123");
+        assertThat(extracted.getVariant(6).toJson()).isEqualTo("{\"b\":42}");
+    }
+
+    @Test
+    void testVariantProjectionDistinguishesSqlNullAndVariantNull() {
+        RowType dataSchema = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        RowType extractedType =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.STRING(), "$.field")
+                        .field(DataTypes.VARIANT(), "$")
+                        .build();
+        NestedProjectedRow projection =
+                NestedProjectedRow.create(
+                        dataSchema, DataTypes.ROW(DataTypes.FIELD(0, "v", extractedType)));
+        InternalRow sqlNull = projection.replaceRow(GenericRow.of((Object) null));
+        assertThat(sqlNull.isNullAt(0)).isTrue();
+
+        InternalRow variantNull =
+                projection.replaceRow(GenericRow.of(GenericVariant.fromJson("null")));
+        assertThat(variantNull.isNullAt(0)).isFalse();
+        InternalRow extracted = variantNull.getRow(0, 2);
+        assertThat(extracted.isNullAt(0)).isTrue();
+        assertThat(extracted.isNullAt(1)).isFalse();
+        assertThat(extracted.getVariant(1).toJson()).isEqualTo("null");
+    }
+
+    @Test
+    void testNestedVariantProjectionCanBeReused() {
+        RowType nestedType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(8, "skipped", DataTypes.INT()),
+                        DataTypes.FIELD(21, "v", DataTypes.VARIANT()));
+        RowType dataSchema =
+                DataTypes.ROW(
+                        DataTypes.FIELD(1, "nested", nestedType),
+                        DataTypes.FIELD(2, "unmodified", DataTypes.VARIANT()));
+        RowType extractedType =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.INT(), "$.x")
+                        .build();
+        RowType projectedNested = DataTypes.ROW(DataTypes.FIELD(21, "v", extractedType));
+        RowType projectedSchema =
+                DataTypes.ROW(
+                        DataTypes.FIELD(2, "unmodified", DataTypes.VARIANT()),
+                        DataTypes.FIELD(1, "nested", projectedNested));
+        NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
+        GenericVariant unchanged = GenericVariant.fromJson("[1,2]");
+        InternalRow first =
+                projection.replaceRow(
+                        GenericRow.of(
+                                GenericRow.of(100, GenericVariant.fromJson("{\"x\":41}")),
+                                unchanged));
+        assertThat(first.getVariant(0)).isSameAs(unchanged);
+        InternalRow firstExtracted = first.getRow(1, 1).getRow(0, 1);
+        assertThat(firstExtracted.getInt(0)).isEqualTo(41);
+        InternalRow second =
+                projection.replaceRow(
+                        GenericRow.of(
+                                GenericRow.of(200, GenericVariant.fromJson("{\"x\":3}")),
+                                unchanged));
+        assertThat(second.getRow(1, 1).getRow(0, 1).getInt(0)).isEqualTo(3);
+        assertThat(firstExtracted.getInt(0)).isEqualTo(41);
+        assertThat(projection.replaceRow(GenericRow.of(null, unchanged)).isNullAt(1)).isTrue();
+        InternalRow nullVariant =
+                projection.replaceRow(GenericRow.of(GenericRow.of(0, null), unchanged));
+        assertThat(nullVariant.getRow(1, 1).isNullAt(0)).isTrue();
+    }
+
+    @Test
+    void testVariantProjectionPreservesStrictCastPolicy() {
+        RowType dataSchema = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        RowType extractedType =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.INT(), "$.x")
+                        .build();
+        NestedProjectedRow projection =
+                NestedProjectedRow.create(
+                        dataSchema, DataTypes.ROW(DataTypes.FIELD(0, "v", extractedType)));
+        InternalRow projected =
+                projection.replaceRow(
+                        GenericRow.of(GenericVariant.fromJson("{\"x\":\"invalid\"}")));
+        assertThatThrownBy(() -> projected.getRow(0, 1))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Invalid cast")
+                .hasMessageContaining("INT");
+    }
+
+    @Test
+    void testVariantProjectionUsesRequestedTimeZone() {
+        RowType dataSchema = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        RowType extractedType =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.STRING(), "$", true, "UTC")
+                        .field(DataTypes.STRING(), "$", true, "Asia/Shanghai")
+                        .build();
+        NestedProjectedRow projection =
+                NestedProjectedRow.create(
+                        dataSchema, DataTypes.ROW(DataTypes.FIELD(0, "v", extractedType)));
+        GenericVariantBuilder builder = new GenericVariantBuilder(false);
+        builder.appendTimestamp(0);
+        InternalRow extracted = projection.replaceRow(GenericRow.of(builder.result())).getRow(0, 2);
+        assertThat(extracted.getString(0).toString()).isEqualTo("1970-01-01 00:00:00");
+        assertThat(extracted.getString(1).toString()).isEqualTo("1970-01-01 08:00:00");
+    }
 
     @Test
     void testReturnNullWhenSchemasAreEqual() {

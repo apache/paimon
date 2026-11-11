@@ -37,15 +37,46 @@ public class VideoFrameDescriptor extends BlobDescriptor {
     private static final long MAGIC = 0x564944454F46524DL; // "VIDEOFRM"
     private static final byte CURRENT_VERSION = 1;
     private static final int FIXED_LENGTH =
-            Byte.BYTES + Long.BYTES + Integer.BYTES + 3 * Long.BYTES;
+            Byte.BYTES + Long.BYTES + Integer.BYTES + 5 * Long.BYTES;
 
     private final long frameIndex;
+    private final long moovOffset;
+    private final long moovLength;
 
     public VideoFrameDescriptor(String uri, long offset, long length, long frameIndex) {
+        this(uri, offset, length, frameIndex, 0, 0);
+    }
+
+    public VideoFrameDescriptor(
+            String uri,
+            long offset,
+            long length,
+            long frameIndex,
+            long moovOffset,
+            long moovLength) {
         super(uri, offset, length);
+        checkArgument(
+                moovOffset >= 0
+                        && moovLength >= 0
+                        && (moovLength != 0 || moovOffset == 0)
+                        && (moovLength == 0
+                                || (length >= 0
+                                        && moovOffset <= length
+                                        && moovLength <= length - moovOffset)),
+                "Moov range must be within the video payload.");
+        this.moovOffset = moovOffset;
+        this.moovLength = moovLength;
         checkArgument(
                 frameIndex >= 0, "Video frame index must be non-negative, but was %s.", frameIndex);
         this.frameIndex = frameIndex;
+    }
+
+    public long moovOffset() {
+        return moovOffset;
+    }
+
+    public long moovLength() {
+        return moovLength;
     }
 
     public long frameIndex() {
@@ -86,6 +117,8 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         buffer.putLong(offset());
         buffer.putLong(length());
         buffer.putLong(frameIndex);
+        buffer.putLong(moovOffset);
+        buffer.putLong(moovLength);
         return buffer.array();
     }
 
@@ -109,7 +142,7 @@ public class VideoFrameDescriptor extends BlobDescriptor {
             throw invalidPayload("missing magic header");
         }
         int uriLength = buffer.getInt();
-        // checked by comparison and subtraction: uriLength + 3 * Long.BYTES wraps negative
+        // checked by comparison and subtraction: uriLength + 5 * Long.BYTES wraps negative
         // for a uriLength near Integer.MAX_VALUE
         if (uriLength < 0) {
             throw invalidPayload("negative URI length: " + uriLength);
@@ -117,7 +150,7 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         if (uriLength > buffer.remaining()) {
             throw invalidPayload("URI length exceeds data size");
         }
-        if (buffer.remaining() - uriLength < 3 * Long.BYTES) {
+        if (buffer.remaining() - uriLength < 5 * Long.BYTES) {
             throw invalidPayload("missing offset/length/frame index");
         }
 
@@ -127,13 +160,15 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         long offset = buffer.getLong();
         long length = buffer.getLong();
         long frameIndex = buffer.getLong();
+        long moovOffset = buffer.getLong();
+        long moovLength = buffer.getLong();
         if (buffer.hasRemaining()) {
             throw invalidPayload("trailing bytes");
         }
         if (frameIndex < 0) {
             throw invalidPayload("negative frame index: " + frameIndex);
         }
-        return new VideoFrameDescriptor(uri, offset, length, frameIndex);
+        return new VideoFrameDescriptor(uri, offset, length, frameIndex, moovOffset, moovLength);
     }
 
     public static boolean isVideoFrameDescriptor(byte[] bytes) {
@@ -154,12 +189,14 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         }
         VideoFrameDescriptor that = (VideoFrameDescriptor) o;
         return frameIndex == that.frameIndex
+                && moovOffset == that.moovOffset
+                && moovLength == that.moovLength
                 && payloadDescriptor().equals(that.payloadDescriptor());
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(payloadDescriptor(), frameIndex);
+        return Objects.hash(payloadDescriptor(), frameIndex, moovOffset, moovLength);
     }
 
     @Override

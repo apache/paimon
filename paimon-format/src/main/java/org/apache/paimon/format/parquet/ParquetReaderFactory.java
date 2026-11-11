@@ -24,6 +24,7 @@ import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.shredding.MapSharedShreddingReadPlanFactory;
 import org.apache.paimon.data.shredding.ShreddingReadPlan;
+import org.apache.paimon.format.FileMetadataCache;
 import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.ParquetListLayoutResolver.LayoutContext;
@@ -34,6 +35,9 @@ import org.apache.paimon.format.shredding.ShreddingReadPlanFactories;
 import org.apache.paimon.format.shredding.ShreddingReadPlanFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
@@ -47,6 +51,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.Range;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.filter2.compat.FilterCompat;
@@ -130,7 +135,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 // Parquet treats unprojected filter columns as null. Keep only conjuncts
                 // covered by the projection; an OR with an unprojected field must be dropped.
                 for (Predicate conjunct : PredicateBuilder.splitAnd(predicate)) {
-                    if (projectedFields.containsAll(PredicateVisitor.collectFieldNames(conjunct))) {
+                    if (projectedFields.containsAll(PredicateVisitor.collectFieldNames(conjunct))
+                            && nestedPathsProjected(conjunct)) {
                         this.predicates.add(conjunct);
                     }
                 }
@@ -138,9 +144,100 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
     }
 
+    /**
+     * Parquet also reads an unrequested nested column as all-null, so a nested field filter is only
+     * safe when its whole path survives the (possibly pruned) read type.
+     */
+    private boolean nestedPathsProjected(Predicate predicate) {
+        if (predicate instanceof CompoundPredicate) {
+            for (Predicate child : ((CompoundPredicate) predicate).children()) {
+                if (!nestedPathsProjected(child)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (!(predicate instanceof LeafPredicate)
+                || !(((LeafPredicate) predicate).transform() instanceof NestedFieldTransform)) {
+            return true;
+        }
+        NestedFieldTransform nested =
+                (NestedFieldTransform) ((LeafPredicate) predicate).transform();
+        DataType current = findProjectedField(readType, nested.fieldRef().name());
+        for (String component : nested.path()) {
+            current =
+                    current instanceof RowType
+                            ? findProjectedField((RowType) current, component)
+                            : null;
+        }
+        return current != null;
+    }
+
+    @Nullable
+    private DataType findProjectedField(RowType rowType, String name) {
+        for (DataField field : rowType.getFields()) {
+            if (caseSensitive ? field.name().equals(name) : field.name().equalsIgnoreCase(name)) {
+                return field.type();
+            }
+        }
+        return null;
+    }
+
     @VisibleForTesting
     Map<MessageType, RequestedSchema> requestedSchemaCache() {
         return requestedSchemaCache;
+    }
+
+    @Nullable
+    @Override
+    public List<Range> candidateRowRanges(FormatReaderFactory.Context context) throws IOException {
+        if (predicates == null || predicates.isEmpty()) {
+            return null;
+        }
+
+        ParquetInputFile inputFile =
+                ParquetInputFile.fromPath(context.fileIO(), context.filePath(), context.fileSize());
+        ParquetReadOptions.Builder readOptionsBuilder =
+                ParquetUtil.getParquetReadOptionsBuilder(conf).withRange(0, context.fileSize());
+        ParquetInputStream inputStream = inputFile.newStream();
+        ParquetFileReader reader = null;
+        try {
+            ParquetMetadata footer =
+                    readFooter(context, inputFile, readOptionsBuilder.build(), inputStream);
+            MessageType fileSchema = footer.getFileMetaData().getSchema();
+            FilterCompat.Filter filter =
+                    ParquetFilters.convert(predicates, fileSchema, caseSensitive);
+            if (!FilterCompat.isFilteringRequired(filter)) {
+                return null;
+            }
+            ParquetReadOptions readOptions = readOptionsBuilder.withRecordFilter(filter).build();
+            reader = new ParquetFileReader(inputFile, footer, readOptions, inputStream, null);
+            // only the filtered columns, the column index store reads the indexes of all of them
+            reader.setRequestedSchema(getOrCreateRequestedSchema(fileSchema).messageType);
+            return reader.candidateRowRanges();
+        } finally {
+            // the reader owns the stream once it is created
+            if (reader != null) {
+                reader.close();
+            } else {
+                inputStream.close();
+            }
+        }
+    }
+
+    private static ParquetMetadata readFooter(
+            FormatReaderFactory.Context context,
+            ParquetInputFile inputFile,
+            ParquetReadOptions options,
+            ParquetInputStream inputStream)
+            throws IOException {
+        FileMetadataCache cache = context.metadataCache();
+        if (cache == null) {
+            return ParquetFileReader.readFooter(inputFile, options, inputStream, true);
+        }
+        return cache.getOrLoad(
+                context.filePath(),
+                path -> ParquetFileReader.readFooter(inputFile, options, inputStream, true));
     }
 
     @Override
@@ -152,8 +249,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 ParquetUtil.getParquetReadOptionsBuilder(conf).withRange(0, context.fileSize());
         ParquetInputStream inputStream = inputFile.newStream();
         ParquetMetadata footer =
-                ParquetFileReader.readFooter(
-                        inputFile, readOptionsBuilder.build(), inputStream, true);
+                readFooter(context, inputFile, readOptionsBuilder.build(), inputStream);
 
         MessageType fileSchema = footer.getFileMetaData().getSchema();
         ParquetFileReader reader;

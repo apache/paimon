@@ -20,6 +20,8 @@ import shutil
 import tempfile
 import unittest
 
+from pypaimon.read.read_type import OutputProjection
+
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
@@ -99,6 +101,15 @@ class SplitProviderTest(unittest.TestCase):
         read_type = provider.read_type()
         field_names = [f.name for f in read_type]
         self.assertEqual(field_names, ['id'])
+
+        named = CatalogSplitProvider(
+            table_identifier=self.identifier,
+            catalog_options=self.catalog_options,
+            projection={'identifier': 'id'},
+        )
+        self.assertEqual([field.name for field in named.read_type()], ['id'])
+        self.assertEqual(named.output_projection(),
+                         OutputProjection([('identifier', ['id'])], True))
 
     def test_catalog_provider_propagates_predicate(self):
         """``predicate`` is held on the provider and surfaced via predicate()."""
@@ -285,8 +296,11 @@ class SplitProviderTest(unittest.TestCase):
 
         self.assertFalse(provider.include_row_kind())
         provider = PreResolvedSplitProvider(
-            table, splits, read_type, include_row_kind=True)
+            table, splits, read_type, include_row_kind=True,
+            output_projection=OutputProjection([('alias', ['id'])], True))
         self.assertTrue(provider.include_row_kind())
+        self.assertEqual(OutputProjection([('alias', ['id'])], True),
+                         provider.output_projection())
 
 
 if __name__ == '__main__':

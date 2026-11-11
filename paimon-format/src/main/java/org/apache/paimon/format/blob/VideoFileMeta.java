@@ -35,6 +35,8 @@ public class VideoFileMeta {
 
     private final long[] physicalVideoLengths;
     private final long[] physicalVideoOffsets;
+    private final long[] moovOffsets;
+    private final long[] moovLengths;
     private final long[] runEnds;
     private final long[] runReferences;
     private final long[] runFirstFrames;
@@ -54,11 +56,13 @@ public class VideoFileMeta {
         byte[] footer = new byte[VideoFormatWriter.FILE_FOOTER_LENGTH];
         IOUtils.readFully(in, footer);
         int physicalIndexLength = BytesUtils.getInt(footer, 0);
-        int runLengthIndexLength = BytesUtils.getInt(footer, Integer.BYTES);
-        int runReferenceIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 2);
-        int firstFrameIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 3);
-        int magic = BytesUtils.getInt(footer, Integer.BYTES * 4);
-        byte version = footer[Integer.BYTES * 5];
+        int moovOffsetIndexLength = BytesUtils.getInt(footer, Integer.BYTES);
+        int moovLengthIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 2);
+        int runLengthIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 3);
+        int runReferenceIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 4);
+        int firstFrameIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 5);
+        int magic = BytesUtils.getInt(footer, Integer.BYTES * 6);
+        byte version = footer[Integer.BYTES * 7];
         if (magic != VideoFormatWriter.MAGIC_NUMBER) {
             throw corrupt("invalid footer magic %s.", magic);
         }
@@ -68,6 +72,8 @@ public class VideoFileMeta {
 
         int[] indexLengths = {
             physicalIndexLength,
+            moovOffsetIndexLength,
+            moovLengthIndexLength,
             runLengthIndexLength,
             runReferenceIndexLength,
             firstFrameIndexLength
@@ -87,6 +93,23 @@ public class VideoFileMeta {
         long offset = indexStart;
         long[] physicalVideoLengths = readIndex(in, offset, physicalIndexLength, "physical video");
         offset += physicalIndexLength;
+        this.moovOffsets = readIndex(in, offset, moovOffsetIndexLength, "moov offset");
+        offset += moovOffsetIndexLength;
+        this.moovLengths = readIndex(in, offset, moovLengthIndexLength, "moov length");
+        offset += moovLengthIndexLength;
+        if (moovOffsets.length != physicalVideoLengths.length
+                || moovLengths.length != physicalVideoLengths.length) {
+            throw corrupt("video indexes have different counts.");
+        }
+        for (int i = 0; i < moovOffsets.length; i++) {
+            if (moovOffsets[i] < 0
+                    || moovLengths[i] < 0
+                    || moovOffsets[i] > physicalVideoLengths[i]
+                    || moovLengths[i] > physicalVideoLengths[i] - moovOffsets[i]
+                    || (moovLengths[i] == 0 && moovOffsets[i] != 0)) {
+                throw corrupt("invalid moov range.");
+            }
+        }
         long[] runLengths = readIndex(in, offset, runLengthIndexLength, "run length");
         offset += runLengthIndexLength;
         long[] runReferences = readIndex(in, offset, runReferenceIndexLength, "run reference");
@@ -183,6 +206,14 @@ public class VideoFileMeta {
 
     public long videoLength(int returnedRow) {
         return physicalVideoLengths[physicalOrdinal(returnedRow)];
+    }
+
+    public long moovOffset(int returnedRow) {
+        return moovOffsets[physicalOrdinal(returnedRow)];
+    }
+
+    public long moovLength(int returnedRow) {
+        return moovLengths[physicalOrdinal(returnedRow)];
     }
 
     public long frameIndex(int returnedRow) {

@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.utils.SnapshotManagerTest;
 
 import org.junit.jupiter.api.Test;
@@ -47,7 +48,8 @@ public class CatalogSnapshotCommitTest {
                         Collections.emptyList()))
                 .thenReturn(true);
 
-        CatalogSnapshotCommit commit = new CatalogSnapshotCommit(catalog, identifier, "table-uuid");
+        CatalogSnapshotCommit commit =
+                new CatalogSnapshotCommit(catalog, identifier, "table-uuid", Lock.empty());
 
         assertThat(commit.commit("base-snapshot-uuid", snapshot, "branch", Collections.emptyList()))
                 .isTrue();

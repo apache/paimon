@@ -52,11 +52,13 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
     public static final int MAGIC_NUMBER = 0x4F454449; // "IDEO" in little endian
     public static final long NULL_REFERENCE = -1L;
     public static final long PLACEHOLDER_REFERENCE = -2L;
-    public static final int FILE_FOOTER_LENGTH = Integer.BYTES * 5 + Byte.BYTES;
+    public static final int FILE_FOOTER_LENGTH = Integer.BYTES * 7 + Byte.BYTES;
 
     private final PositionOutputStream out;
     private final RawVideoPayloadWriter payloadWriter;
     private final LongArrayList physicalVideoLengths;
+    private final LongArrayList moovOffsets;
+    private final LongArrayList moovLengths;
     private final LongArrayList runLengths;
     private final LongArrayList runReferences;
     private final LongArrayList runFirstFrames;
@@ -86,6 +88,8 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
                         blobFetchMetricReporter,
                         copyBufferSize);
         this.physicalVideoLengths = new LongArrayList(16);
+        this.moovOffsets = new LongArrayList(16);
+        this.moovLengths = new LongArrayList(16);
         this.runLengths = new LongArrayList(16);
         this.runReferences = new LongArrayList(16);
         this.runFirstFrames = new LongArrayList(16);
@@ -129,9 +133,19 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
                 return;
             }
             ordinal = physicalVideoLengths.size();
+            checkArgument(
+                    frame.moovOffset() <= length
+                            && frame.moovLength() <= length - frame.moovOffset(),
+                    "Moov range must be within the video payload.");
             physicalVideoLengths.add(length);
+            moovOffsets.add(frame.moovOffset());
+            moovLengths.add(frame.moovLength());
             physicalVideos.put(payload, ordinal);
         }
+        checkArgument(
+                moovOffsets.get(ordinal) == frame.moovOffset()
+                        && moovLengths.get(ordinal) == frame.moovLength(),
+                "Conflicting moov ranges for the same video payload.");
         append(ordinal, frame.frameIndex());
     }
 
@@ -145,24 +159,34 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
         if (closed) {
             return;
         }
-        flushRun();
-        payloadWriter.close();
+        try {
+            flushRun();
+            payloadWriter.close();
 
-        byte[] physicalIndex = DeltaVarintCompressor.compressLongArrayList(physicalVideoLengths);
-        byte[] runLengthIndex = DeltaVarintCompressor.compressLongArrayList(runLengths);
-        byte[] runReferenceIndex = DeltaVarintCompressor.compressLongArrayList(runReferences);
-        byte[] firstFrameIndex = DeltaVarintCompressor.compressLongArrayList(runFirstFrames);
-        out.write(physicalIndex);
-        out.write(runLengthIndex);
-        out.write(runReferenceIndex);
-        out.write(firstFrameIndex);
-        out.write(intToLittleEndian(physicalIndex.length));
-        out.write(intToLittleEndian(runLengthIndex.length));
-        out.write(intToLittleEndian(runReferenceIndex.length));
-        out.write(intToLittleEndian(firstFrameIndex.length));
-        out.write(intToLittleEndian(MAGIC_NUMBER));
-        out.write(VERSION);
-        closed = true;
+            byte[] physicalIndex =
+                    DeltaVarintCompressor.compressLongArrayList(physicalVideoLengths);
+            byte[] moovOffsetIndex = DeltaVarintCompressor.compressLongArrayList(moovOffsets);
+            byte[] moovLengthIndex = DeltaVarintCompressor.compressLongArrayList(moovLengths);
+            byte[] runLengthIndex = DeltaVarintCompressor.compressLongArrayList(runLengths);
+            byte[] runReferenceIndex = DeltaVarintCompressor.compressLongArrayList(runReferences);
+            byte[] firstFrameIndex = DeltaVarintCompressor.compressLongArrayList(runFirstFrames);
+            out.write(physicalIndex);
+            out.write(moovOffsetIndex);
+            out.write(moovLengthIndex);
+            out.write(runLengthIndex);
+            out.write(runReferenceIndex);
+            out.write(firstFrameIndex);
+            out.write(intToLittleEndian(physicalIndex.length));
+            out.write(intToLittleEndian(moovOffsetIndex.length));
+            out.write(intToLittleEndian(moovLengthIndex.length));
+            out.write(intToLittleEndian(runLengthIndex.length));
+            out.write(intToLittleEndian(runReferenceIndex.length));
+            out.write(intToLittleEndian(firstFrameIndex.length));
+            out.write(intToLittleEndian(MAGIC_NUMBER));
+            out.write(VERSION);
+        } finally {
+            closed = true;
+        }
     }
 
     int physicalVideoCount() {

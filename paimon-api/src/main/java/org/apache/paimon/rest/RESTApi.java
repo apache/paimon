@@ -45,17 +45,21 @@ import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
+import org.apache.paimon.rest.requests.CommitLockRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
+import org.apache.paimon.rest.requests.CreateModelRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.DeleteLabelRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.DropPolicyRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
+import org.apache.paimon.rest.requests.GetLabelRequest;
 import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
@@ -72,6 +76,7 @@ import org.apache.paimon.rest.requests.UpsertLabelRequest;
 import org.apache.paimon.rest.requests.UpsertSemanticViewRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
+import org.apache.paimon.rest.responses.CommitLockResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreatePartitionsResponse;
@@ -80,6 +85,7 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetLabelResponse;
+import org.apache.paimon.rest.responses.GetModelResponse;
 import org.apache.paimon.rest.responses.GetSchemaResponse;
 import org.apache.paimon.rest.responses.GetSemanticViewResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
@@ -95,6 +101,7 @@ import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListLabelsResponse;
+import org.apache.paimon.rest.responses.ListModelsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
@@ -129,6 +136,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -174,6 +182,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class RESTApi {
 
     public static final String HEADER_PREFIX = "header.";
+    private static final String USER_AGENT_HEADER = "User-Agent";
     /**
      * Optional header carrying the URL-encoded {@link Identifier} JSON of the table which initiated
      * a dependency read.
@@ -193,6 +202,8 @@ public class RESTApi {
     public static final String FUNCTION_NAME_PATTERN = "functionNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
     public static final String TAG_NAME_PREFIX = "tagNamePrefix";
+    public static final String ENTITY_TYPE = "entityType";
+    public static final String ENTITY_NAME = "entityName";
 
     public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
 
@@ -240,13 +251,26 @@ public class RESTApi {
                                             ResourcePaths.config(),
                                             queryParams,
                                             ConfigResponse.class,
-                                            new RESTAuthFunction(baseHeaders, authProvider))
+                                            new RESTAuthFunction(
+                                                    withUserAgent(baseHeaders, options),
+                                                    authProvider))
                                     .merge(options.toMap()));
             baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }
-        this.restAuthFunction = new RESTAuthFunction(baseHeaders, authProvider);
+        this.restAuthFunction =
+                new RESTAuthFunction(withUserAgent(baseHeaders, options), authProvider);
         this.options = options;
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
+    }
+
+    /** Adds Paimon's unified User-Agent unless {@code header.User-Agent} is set. */
+    private static Map<String, String> withUserAgent(Map<String, String> headers, Options options) {
+        if (headers.keySet().stream().anyMatch(USER_AGENT_HEADER::equalsIgnoreCase)) {
+            return headers;
+        }
+        Map<String, String> result = new HashMap<>(headers);
+        result.put(USER_AGENT_HEADER, HttpClientUtils.userAgent(options));
+        return result;
     }
 
     /** Get the configured options which has been merged from REST Server. */
@@ -719,24 +743,30 @@ public class RESTApi {
         return response.isSuccess();
     }
 
-    /**
-     * Rollback instant for table.
-     *
-     * @param identifier database name and table name.
-     * @param instant instant to rollback
-     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
-     *     or the tag not exists
-     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
-     *     this table
-     */
-    public void rollbackTo(Identifier identifier, Instant instant) {
-        rollbackTo(identifier, instant, null);
+    public CommitLockResponse acquireCommitLock(
+            Identifier identifier, String tableUuid, String commitUser) {
+        return client.post(
+                resourcePaths.commitLock(identifier.getDatabaseName(), identifier.getObjectName()),
+                new CommitLockRequest(tableUuid, commitUser),
+                CommitLockResponse.class,
+                restAuthFunction);
+    }
+
+    public CommitLockResponse renewCommitLock(
+            Identifier identifier, String tableUuid, String commitUser) {
+        return client.post(
+                resourcePaths.commitLock(identifier.getDatabaseName(), identifier.getObjectName())
+                        + "/renew",
+                new CommitLockRequest(tableUuid, commitUser),
+                CommitLockResponse.class,
+                restAuthFunction);
     }
 
     /**
      * Rollback instant for table.
      *
      * @param identifier database name and table name.
+     * @param tableUuid expected table incarnation, or null when its UUID is unavailable
      * @param instant instant to rollback
      * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
      *     snapshot.
@@ -745,8 +775,12 @@ public class RESTApi {
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
-    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot) {
-        RollbackTableRequest request = new RollbackTableRequest(instant, fromSnapshot);
+    public void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot) {
+        RollbackTableRequest request = new RollbackTableRequest(instant, fromSnapshot, tableUuid);
         client.post(
                 resourcePaths.rollbackTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),
@@ -891,8 +925,7 @@ public class RESTApi {
      * <p>The server atomically upserts the binding identified by entity type, canonical entity
      * name, and key. Only its value is replaced; other labels are unchanged. Repeating the same
      * request leaves the same label value. Entity types and name resolution are server-defined;
-     * this client does not split, normalize, or resolve entity names. The path carries the binding
-     * identity; the request body contains only its value.
+     * this client does not split, normalize, or resolve entity names.
      *
      * @param value label value; an empty string is allowed, null is not
      * @throws NoSuchResourceException if the entity does not exist
@@ -901,8 +934,8 @@ public class RESTApi {
     @Experimental
     public void upsertLabel(String entityType, String entityName, String key, String value) {
         client.post(
-                resourcePaths.label(entityType, entityName, key),
-                new UpsertLabelRequest(value),
+                resourcePaths.upsertLabel(),
+                new UpsertLabelRequest(entityType, entityName, key, value),
                 restAuthFunction);
     }
 
@@ -914,8 +947,9 @@ public class RESTApi {
      */
     @Experimental
     public GetLabelResponse getLabel(String entityType, String entityName, String key) {
-        return client.get(
-                resourcePaths.label(entityType, entityName, key),
+        return client.post(
+                resourcePaths.getLabel(),
+                new GetLabelRequest(entityType, entityName, key),
                 GetLabelResponse.class,
                 restAuthFunction);
     }
@@ -923,10 +957,16 @@ public class RESTApi {
     /** Lists all labels attached directly to an entity, following catalog pagination. */
     @Experimental
     public List<GetLabelResponse> listLabels(String entityType, String entityName) {
-        String path = resourcePaths.labels(entityType, entityName);
+        Map<String, String> entity = labelEntityQueryParams(entityType, entityName);
         return listDataFromPageApi(
-                queryParams ->
-                        client.get(path, queryParams, ListLabelsResponse.class, restAuthFunction));
+                queryParams -> {
+                    queryParams.putAll(entity);
+                    return client.get(
+                            resourcePaths.labels(),
+                            queryParams,
+                            ListLabelsResponse.class,
+                            restAuthFunction);
+                });
     }
 
     /**
@@ -946,10 +986,12 @@ public class RESTApi {
         checkArgument(
                 maxResults == null || (maxResults >= 1 && maxResults <= 1000),
                 "maxResults must be between 1 and 1000");
+        Map<String, String> queryParams = labelEntityQueryParams(entityType, entityName);
+        queryParams.putAll(buildPagedQueryParams(maxResults, pageToken));
         ListLabelsResponse response =
                 client.get(
-                        resourcePaths.labels(entityType, entityName),
-                        buildPagedQueryParams(maxResults, pageToken),
+                        resourcePaths.labels(),
+                        queryParams,
                         ListLabelsResponse.class,
                         restAuthFunction);
         return new PagedList<>(response.getLabels(), response.getNextPageToken());
@@ -963,7 +1005,10 @@ public class RESTApi {
      */
     @Experimental
     public void deleteLabel(String entityType, String entityName, String key) {
-        client.delete(resourcePaths.label(entityType, entityName, key), restAuthFunction);
+        client.post(
+                resourcePaths.deleteLabel(),
+                new DeleteLabelRequest(entityType, entityName, key),
+                restAuthFunction);
     }
 
     /**
@@ -1718,6 +1763,47 @@ public class RESTApi {
                 restAuthFunction);
     }
 
+    /** List model metadata for a database. */
+    public List<GetModelResponse> listModels(String databaseName) {
+        return listDataFromPageApi(
+                queryParams ->
+                        client.get(
+                                resourcePaths.models(databaseName),
+                                queryParams,
+                                ListModelsResponse.class,
+                                restAuthFunction));
+    }
+
+    /** Get model metadata by identifier. */
+    public GetModelResponse getModel(Identifier identifier) {
+        return client.get(
+                resourcePaths.model(identifier.getDatabaseName(), identifier.getObjectName()),
+                GetModelResponse.class,
+                restAuthFunction);
+    }
+
+    /** Create model metadata and return its persisted representation. */
+    public GetModelResponse createModel(Identifier identifier, CreateModelRequest request) {
+        checkArgument(
+                !".".equals(request.getName()) && !"..".equals(request.getName()),
+                "Model name must not be a dot segment");
+        checkArgument(
+                identifier.getObjectName().equals(request.getName()),
+                "Model request name must match the identifier");
+        return client.post(
+                resourcePaths.models(identifier.getDatabaseName()),
+                request,
+                GetModelResponse.class,
+                restAuthFunction);
+    }
+
+    /** Drop model metadata by identifier. */
+    public void dropModel(Identifier identifier) {
+        client.delete(
+                resourcePaths.model(identifier.getDatabaseName(), identifier.getObjectName()),
+                restAuthFunction);
+    }
+
     /**
      * Alter a function.
      *
@@ -1988,7 +2074,7 @@ public class RESTApi {
             if (response.data() != null) {
                 results.addAll(response.data());
             }
-            if (pageToken == null || response.data() == null || response.data().isEmpty()) {
+            if (pageToken == null) {
                 break;
             }
         } while (StringUtils.isNotEmpty(pageToken));
@@ -2021,6 +2107,18 @@ public class RESTApi {
     @VisibleForTesting
     RESTAuthFunction authFunction() {
         return restAuthFunction;
+    }
+
+    private static Map<String, String> labelEntityQueryParams(
+            String entityType, String entityName) {
+        checkArgument(
+                entityType != null && !entityType.trim().isEmpty(), "entityType must not be blank");
+        checkArgument(
+                entityName != null && !entityName.trim().isEmpty(), "entityName must not be blank");
+        Map<String, String> queryParams = Maps.newHashMap();
+        queryParams.put(ENTITY_TYPE, entityType);
+        queryParams.put(ENTITY_NAME, entityName);
+        return queryParams;
     }
 
     private static void putQueryParameter(

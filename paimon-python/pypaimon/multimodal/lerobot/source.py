@@ -214,6 +214,11 @@ def _import_lerobot_dataset():
     return LeRobotDataset
 
 
+def _info_dict(info):
+    # LeRobot 0.6 exposes DatasetInfo instead of a dict.
+    return dict(info.to_dict() if hasattr(info, "to_dict") else info)
+
+
 def _load_hub_info(source):
     try:
         from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
@@ -222,7 +227,9 @@ def _load_hub_info(source):
             "load_from_lerobot requires LeRobot; install "
             "'pypaimon[lerobot]'.") from error
     try:
-        return dict(LeRobotDatasetMetadata(repo_id=source.repo_id).info)
+        metadata = LeRobotDatasetMetadata(repo_id=source.repo_id)
+        # DatasetInfo omits unknown fields; preserve the downloaded source JSON.
+        return _local_source(Path(metadata.root), source.path)[1]
     except Exception as error:
         raise ValueError(
             "Cannot open LeRobot Dataset v3 metadata %s: %s"
@@ -492,6 +499,17 @@ class _SourceUriReaderFactory:
 
 def _pandas_index_column(schema, component):
     encoded = (schema.metadata or {}).get(b"pandas")
+    if encoded is None:
+        # Arrow-written task tables may omit Pandas index metadata.
+        expected = {component + "_index", component}
+        if len(schema.names) == 2 and set(schema.names) == expected \
+                and (pa.types.is_string(schema.field(component).type)
+                     or pa.types.is_large_string(schema.field(component).type)):
+            return component
+        raise ValueError(
+            "LeRobot %s metadata must contain a Pandas index or the "
+            "canonical %s and %s columns."
+            % (component, component + "_index", component))
     try:
         pandas_metadata = json.loads(encoded.decode("utf-8"))
         index_columns = pandas_metadata["index_columns"]
@@ -543,6 +561,8 @@ def _remote_source_path(root, path, name, source_file_io=None):
                 % (name, path))
         source_path = posixpath.normpath(
             _fully_unquote(path_uri.path) or "/")
+    elif root_uri.scheme.lower() == "file" and Path(path).is_absolute():
+        source_path = str(Path(path).resolve())
     else:
         relative_path = _relative_dataset_path(path, name)
         source_path = posixpath.normpath(posixpath.join(

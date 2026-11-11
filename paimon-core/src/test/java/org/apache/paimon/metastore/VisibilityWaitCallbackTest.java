@@ -98,7 +98,8 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
             writeFuture.get(10, TimeUnit.SECONDS);
 
             SortedGlobalIndexScanner builder =
-                    new SortedGlobalIndexScanner(getTableDefault(), "btree").withIndexField("f1");
+                    new SortedGlobalIndexScanner(getTableDefault(), "btree")
+                            .withIndexFields(Collections.singletonList("f1"));
             assertThat(builder.incrementalScan()).isNotPresent();
         } finally {
             executor.shutdownNow();
@@ -160,7 +161,8 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
 
     private void buildIndex(FileStoreTable table, boolean incremental) throws Exception {
         SortedGlobalIndexScanner builder =
-                new SortedGlobalIndexScanner(table, "btree").withIndexField("f1");
+                new SortedGlobalIndexScanner(table, "btree")
+                        .withIndexFields(Collections.singletonList("f1"));
         Optional<ScanResult<DataSplit>> scan =
                 incremental ? builder.incrementalScan() : builder.scan();
         assertThat(scan).isPresent();
@@ -180,7 +182,7 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
     private void buildPartitionIndex(FileStoreTable table, String partition) throws Exception {
         SortedGlobalIndexScanner builder =
                 new SortedGlobalIndexScanner(table, "btree")
-                        .withIndexField("f1")
+                        .withIndexFields(Collections.singletonList("f1"))
                         .withPartitionPredicate(partitionPredicate(table, partition));
         Optional<ScanResult<DataSplit>> scan = builder.scan();
         assertThat(scan).isPresent();

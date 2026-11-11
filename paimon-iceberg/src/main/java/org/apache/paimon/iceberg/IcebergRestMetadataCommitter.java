@@ -603,12 +603,20 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
             int size =
                     spec.fields().stream().mapToInt(PartitionField::sourceId).max().orElseThrow();
-            // prefill the schema with dummy fields
+            Set<String> partitionNames = new HashSet<>();
+            for (PartitionField f : spec.fields()) {
+                partitionNames.add(newMetadata.schema().findColumnName(f.sourceId()));
+            }
+            // prefill the schema with dummy fields, whose names must not clash with the
+            // partition fields kept in this schema
             NestedField[] columns = new NestedField[size];
             for (int idx = 0; idx < size; idx++) {
                 int fieldId = idx + 1;
-                columns[idx] =
-                        NestedField.optional(fieldId, "f" + fieldId, Types.BooleanType.get());
+                String name = "f" + fieldId;
+                while (partitionNames.contains(name)) {
+                    name = "_" + name;
+                }
+                columns[idx] = NestedField.optional(fieldId, name, Types.BooleanType.get());
             }
             // find and set partition fields with offset -1, so they align correctly after table
             // creation

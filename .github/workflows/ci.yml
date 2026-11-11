@@ -56,6 +56,9 @@ jobs:
             --pattern 'actionlint_1.7.11_linux_amd64.tar.gz' --dir "$RUNNER_TEMP"
           tar -xzf "$RUNNER_TEMP/actionlint_1.7.11_linux_amd64.tar.gz" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -shellcheck= -pyflakes=
+      # The RAT scan takes seconds, so it runs on every change rather than in Licensing.
+      - name: Check PyPaimon licensing
+        run: ./paimon-python/dev/check-licensing.sh
       - name: Select affected tests and check changed file sizes
         id: plan
         run: python3 tools/ci/plan.py

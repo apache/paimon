@@ -23,8 +23,8 @@ from pathlib import Path
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.read.reader.format_blob_reader import FormatBlobReader
-from pypaimon.read.reader.video_format_reader import VideoFileMeta
+from pypaimon.execution.python.read.reader.format_blob_reader import FormatBlobReader
+from pypaimon.execution.python.read.reader.video_format_reader import VideoFileMeta
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.blob import (
     Blob,
@@ -34,7 +34,7 @@ from pypaimon.table.row.blob import (
 )
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
-from pypaimon.write.video_format_writer import VideoFormatWriter
+from pypaimon.execution.python.write.video_format_writer import VideoFormatWriter
 
 
 class VideoFormatTest(unittest.TestCase):
@@ -167,6 +167,25 @@ class VideoFormatTest(unittest.TestCase):
         writer.close()
         self.assertEqual(fixture, (self.root / "written.video").read_bytes())
 
+    def test_moov_fixture_and_invalid_ranges(self):
+        import io
+        fixture = self._fixture_bytes(self.VIDEO_FIXTURE.with_name('video-v1-moov.hex'))
+        meta = VideoFileMeta(io.BytesIO(fixture), len(fixture))
+        self.assertEqual((16, 8), meta.moov_range(0))
+        self.assertEqual((0, 24, 7), meta.frame(0))
+        self.assertEqual((0, 24, 8), meta.frame(1))
+        for offset, size in [(-1, 8), (1, 0), (24, 1), (16, 9)]:
+            with self.assertRaisesRegex(ValueError, 'Moov range'):
+                VideoFrameDescriptor('x', 0, 24, 0, offset, size)
+        # Index array counts and bounds are checked before returning any row.
+        for offsets, sizes in [([], [8]), ([16], []), ([17], [8]), ([1], [0])]:
+            indexes = [DeltaVarintCompressor.compress(x)
+                       for x in ([24], offsets, sizes, [1], [0], [0])]
+            raw = fixture[:24] + b''.join(indexes) + struct.pack(
+                '<IIIIIIIB', *(len(x) for x in indexes), 0x4F454449, 1)
+            with self.assertRaises(IOError):
+                VideoFileMeta(io.BytesIO(raw), len(raw))
+
     def test_selection_keeps_logical_frame_positions(self):
         target = (self.root / "selection.video").as_uri()
         writer = VideoFormatWriter(self.file_io.new_output_stream(target))
@@ -233,6 +252,8 @@ class VideoFormatTest(unittest.TestCase):
         target_path = self.root / "corrupt.video"
         indexes = [
             DeltaVarintCompressor.compress([]),
+            DeltaVarintCompressor.compress([]),
+            DeltaVarintCompressor.compress([]),
             DeltaVarintCompressor.compress([1]),
             DeltaVarintCompressor.compress([0]),
             DeltaVarintCompressor.compress([0]),
@@ -240,7 +261,7 @@ class VideoFormatTest(unittest.TestCase):
         target_path.write_bytes(
             b"".join(indexes)
             + struct.pack(
-                '<IIIIIB',
+                '<IIIIIIIB',
                 *(len(index) for index in indexes),
                 VideoFormatWriter.FOOTER_MAGIC_NUMBER,
                 VideoFormatWriter.VERSION,

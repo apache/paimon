@@ -25,13 +25,15 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
 from pypaimon.common.options.options import Options
+from pypaimon.common.options.vector_index_options import VectorIndexOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
-from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluation
+from pypaimon.execution.python.globalindex.global_index_evaluator import GlobalIndexEvaluation
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
+from pypaimon.read.read_dispatch import _python_scan_execution
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.tests.data_evolution_test_helpers import (
@@ -44,14 +46,96 @@ from pypaimon.utils.range import Range
 
 class GlobalIndexTest(unittest.TestCase):
 
+    def test_generic_merge_does_not_interpret_vector_parameters(self):
+        values = {'fields.embedding.index-options': '{"metric":"INNER-PRODUCT","nlist":64}'}
+        resolved = CoreOptions(Options(values)).global_index_options('ivf-pq', 'embedding').to_map()
+        self.assertEqual('INNER-PRODUCT', resolved['ivf-pq.metric'])
+        self.assertNotIn('ivf-pq.distance.metric', resolved)
+        self.assertNotIn('ivf-pq.metric', CoreOptions(Options({})).global_index_options(
+            'ivf-pq', 'embedding').to_map())
+
+    def test_legacy_primary_key_metric_resolution_is_idempotent(self):
+        for metric in ('COSINE', 'inner-product', 'L2'):
+            with self.subTest(metric=metric):
+                values = {'pk-vector.index.columns': 'embedding',
+                          'fields.embedding.pk-vector.index.type': 'ivf-pq',
+                          'fields.embedding.pk-vector.distance.metric': metric.lower().replace('-', '_'),
+                          'fields.embedding.pk-vector.index.options': '{"metric":"%s"}' % metric}
+                first = VectorIndexOptions.resolve(Options(values), None, 'embedding').options
+                second = VectorIndexOptions.resolve(first, 'ivf-pq', 'embedding').options
+                self.assertEqual(first.to_map(), second.to_map())
+                self.assertEqual('{"metric":"%s"}' % metric,
+                                 values['fields.embedding.pk-vector.index.options'])
+
+    def test_shared_index_column_precedence_and_legacy_fallback(self):
+        for index_type, legacy in (("btree", "btree"), ("bitmap", "bitmap"),
+                                   ("full-text", "full-text"), ("ivf-pq", "vector"),
+                                   ("fm", "fm"), ("multivalue", "multivalue")):
+            with self.subTest(index_type=index_type):
+                values = {"pk-%s.index.columns" % legacy: "old",
+                          "fields.old.pk-vector.index.type": "ivf-pq"}
+                core = CoreOptions(Options(values))
+                columns = (VectorIndexOptions.columns(core.options) if CoreOptions._is_vector_index_type(index_type)
+                           else core.global_index_columns(index_type))
+                self.assertEqual(["old"], columns)
+                values["global-index.%s.index-column" % index_type] = "single"
+                self.assertEqual(["single"], CoreOptions(Options(values)).global_index_columns(index_type))
+                values["global-index.%s.index-columns" % index_type] = " first, second "
+                core = CoreOptions(Options(values))
+                self.assertEqual(["first", "second"], core.global_index_columns(index_type))
+                self.assertEqual([index_type], core.global_index_types())
+
+    def test_shared_field_options_override_type_defaults(self):
+        for index_type, prefix, key in (("btree", "btree-index.", "block-size"),
+                                        ("bitmap", "bitmap-index.", "dictionary-block-size"),
+                                        ("full-text", "full-text.", "tokenizer"),
+                                        ("ivf-pq", "ivf-pq.", "nlist")):
+            with self.subTest(index_type=index_type):
+                values = {prefix + key: "old",
+                          "fields.payload.index-options": '{"%s":"new"}' % key,
+                          "sorted-index.records-per-file": "20"}
+                core = CoreOptions(Options(values))
+                resolved = core.global_index_options(index_type, "payload").to_map()
+                self.assertEqual("new", resolved[prefix + key])
+                self.assertEqual("20", resolved["sorted-index.records-per-file"])
+                self.assertEqual("old", values[prefix + key])
+
+    def test_shared_vector_type_and_documented_metric(self):
+        values = {"global-index.ivf-pq.index-columns": "embedding",
+                  "pk-vector.index.columns": "old",
+                  "fields.embedding.pk-vector.index.type": "diskann",
+                  "ivf-pq.distance.metric": "l2",
+                  "ivf-pq.dimension": "768",
+                  "fields.embedding.nlist": "48",
+                  "fields.embedding.distance.metric": "cosine"}
+        core = CoreOptions(Options(values))
+        self.assertEqual(["embedding"], VectorIndexOptions.columns(core.options))
+        self.assertEqual("ivf-pq", VectorIndexOptions.resolve(
+            core.options, None, "embedding", default_metric=False).index_type)
+        self.assertEqual("cosine", VectorIndexOptions.resolve(core.options, None, "embedding").metric)
+        values["fields.embedding.index-options"] = '{"nlist":64,"distance.metric":"inner_product"}'
+        core = CoreOptions(Options(values))
+        self.assertEqual("inner_product", VectorIndexOptions.resolve(core.options, None, "embedding").metric)
+        resolved = VectorIndexOptions.resolve(core.options, None, "embedding").options.to_map()
+        self.assertEqual("768", resolved["ivf-pq.dimension"])
+        self.assertEqual("64", resolved["fields.embedding.nlist"])
+        self.assertEqual("inner_product", resolved["ivf-pq.distance.metric"])
+
+    def test_shared_field_options_reject_invalid_values(self):
+        for serialized in ('[]', '{"nlist":null}', '{"":64}', 'invalid'):
+            with self.subTest(serialized=serialized):
+                core = CoreOptions(Options({"fields.embedding.index-options": serialized}))
+                with self.assertRaisesRegex(ValueError, 'fields.embedding.index-options'):
+                    core.global_index_options("ivf-pq", "embedding")
+
     def test_primary_key_sorted_index_columns_preserve_java_split_semantics(self):
         options = CoreOptions(Options({
             "pk-btree.index.columns": "name, id",
             "pk-bitmap.index.columns": "category",
         }))
 
-        self.assertEqual(["name", "id"], options.primary_key_btree_index_columns())
-        self.assertEqual(["category"], options.primary_key_bitmap_index_columns())
+        self.assertEqual(["name", "id"], options.btree_index_columns())
+        self.assertEqual(["category"], options.bitmap_index_columns())
 
     def test_global_index_meta_preserves_primary_key_source_meta(self):
         source_meta = b"\x00\x00\x00\x01source-file"
@@ -126,7 +210,9 @@ def _coverage_index_file(field_id, start, end, extra_field_ids=None):
 class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
 
     def test_fast_mode_does_not_return_unindexed_ranges(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable(GlobalIndexSearchMode.FAST)
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -139,7 +225,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([], coverage.unindexed_ranges(0))
 
     def test_full_mode_uses_snapshot_next_row_id(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("full")
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -152,7 +240,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([Range(5, 9)], coverage.unindexed_ranges(0))
 
     def test_full_mode_accepts_multiple_field_ids(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("full")
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -168,7 +258,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([Range(5, 9)], coverage.unindexed_ranges([0, 1]))
 
     def test_full_mode_intersects_coverage_for_all_predicate_fields(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("full")
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -192,8 +284,10 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
             coverage.unindexed_ranges(table.fields, predicate),
         )
 
-    def test_extra_fields_count_as_index_coverage(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+    def test_composite_fields_do_not_count_as_scalar_coverage(self):
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("full")
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -203,10 +297,12 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
             [_coverage_index_file(0, 0, 9, extra_field_ids=[1])],
         )
 
-        self.assertEqual([], coverage.unindexed_ranges(1))
+        self.assertEqual([Range(0, 9)], coverage.unindexed_ranges(1))
 
     def test_detail_mode_uses_table_data_ranges(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("detail", data_ranges=[Range(0, 2), Range(7, 9)])
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -221,10 +317,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
 
 class GlobalIndexScalarFallbackTest(unittest.TestCase):
 
+    @pytest.mark.python_plan
     def test_full_fallback_groups_are_pruned_before_split_packing(self):
-        from pypaimon.read.scanner.file_scanner import (
-            _GlobalIndexPlanningResult,
-        )
+        from pypaimon.execution.python.read.scanner.file_scanner import (_GlobalIndexPlanningResult)
 
         with tempfile.TemporaryDirectory() as warehouse:
             catalog = CatalogFactory.create({'warehouse': warehouse})
@@ -268,17 +363,18 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             )
 
             baseline_scan = read_builder.new_scan()
-            baseline_scan.file_scanner._global_index_result = index_plan
-            baseline_scan.file_scanner.predicate_for_stats = None
+            baseline_scanner = _python_scan_execution(baseline_scan)._file_scanner()
+            baseline_scanner._global_index_result = index_plan
+            baseline_scanner.predicate_for_stats = None
             baseline_plan = baseline_scan.plan()
 
             scan = read_builder.new_scan()
-            scan.file_scanner._global_index_result = index_plan
+            _python_scan_execution(scan)._file_scanner()._global_index_result = index_plan
             plan = scan.plan()
 
             stats_scan = read_builder.new_scan()
-            stats_scan.file_scanner._global_index_result = index_plan
-            stats_plan, stats = stats_scan.file_scanner.scan_with_stats()
+            _python_scan_execution(stats_scan)._file_scanner()._global_index_result = index_plan
+            stats_plan, stats = stats_scan.scan_with_stats()
 
             self.assertEqual(
                 10,
@@ -302,10 +398,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             self.assertEqual(baseline_result, pruned_result)
 
     def test_eval_global_index_keeps_unindexed_ranges_out_of_bitmap(self):
-        from pypaimon.read.scanner.file_scanner import (
-            FileScanner,
-            _GlobalIndexPlanningResult,
-        )
+        from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner, _GlobalIndexPlanningResult)
 
         class _Options:
             def global_index_enabled(self):
@@ -316,6 +409,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
 
         class _Table:
             options = _Options()
+            fields = [DataField(0, 'id', AtomicType('INT'))]
 
         predicate = Predicate(method="equal", index=0, field="id", literals=[1])
         scanner = FileScanner.__new__(FileScanner)
@@ -334,7 +428,8 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         fake_scanner.__exit__.return_value = None
 
         with unittest.mock.patch(
-                "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
+                "pypaimon.execution.python.globalindex.data_evolution_global_index_scanner."
+                "DataEvolutionGlobalIndexScanner.create",
                 return_value=fake_scanner), unittest.mock.patch.object(
                     GlobalIndexResult,
                     "from_ranges",
@@ -351,10 +446,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         )
 
     def test_split_planning_merges_indexed_and_unindexed_ranges(self):
-        from pypaimon.read.scanner.file_scanner import (
-            FileScanner,
-            _GlobalIndexPlanningResult,
-        )
+        from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner, _GlobalIndexPlanningResult)
 
         scanner = FileScanner.__new__(FileScanner)
         scanner.idx_of_this_subtask = None
@@ -375,18 +467,29 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         scanner.open_file_cost = 1
         scanner._deletion_files_map = unittest.mock.MagicMock(return_value={})
 
-        with unittest.mock.patch(
-                "pypaimon.read.scanner.file_scanner.DataEvolutionSplitGenerator"
-        ) as split_generator:
-            scanner._create_data_evolution_split_generator()
+        for query_auth in (False, True):
+            with self.subTest(query_auth=query_auth):
+                scanner.table.options = CoreOptions(Options({
+                    "query-auth.enabled": str(query_auth).lower(),
+                }))
+                scanner._eval_global_index.reset_mock()
+                with unittest.mock.patch(
+                        "pypaimon.execution.python.read.scanner.file_scanner.DataEvolutionSplitGenerator"
+                ) as split_generator:
+                    scanner._create_data_evolution_split_generator()
 
-        self.assertEqual(
-            [Range(1, 1), Range(10, 10 ** 12)],
-            split_generator.call_args[0][4],
-        )
+                self.assertEqual(
+                    None if query_auth else [Range(1, 1), Range(10, 10 ** 12)],
+                    split_generator.call_args[0][4],
+                )
+                if query_auth:
+                    scanner._eval_global_index.assert_not_called()
+                else:
+                    scanner._eval_global_index.assert_called_once_with(
+                        scanner.manifest_scanner.return_value[1])
 
     def test_eval_global_index_keeps_none_as_full_scan(self):
-        from pypaimon.read.scanner.file_scanner import FileScanner
+        from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 
         class _Options:
             def global_index_enabled(self):
@@ -394,6 +497,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
 
         class _Table:
             options = _Options()
+            fields = [DataField(0, 'id', AtomicType('INT'))]
 
         scanner = FileScanner.__new__(FileScanner)
         scanner.is_streaming = False
@@ -408,7 +512,8 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         fake_scanner.__exit__.return_value = None
 
         with unittest.mock.patch(
-                "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
+                "pypaimon.execution.python.globalindex.data_evolution_global_index_scanner."
+                "DataEvolutionGlobalIndexScanner.create",
                 return_value=fake_scanner):
             result = scanner._eval_global_index(snapshot=object())
 

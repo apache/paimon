@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -159,6 +160,9 @@ public class AggregatePushDownUtils {
 
         List<Split> splits = readBuilder.newScan().plan().splits();
         List<DataSplit> dataSplits = new ArrayList<>(splits.size());
+        SimpleStatsEvolutions evolutions =
+                new SimpleStatsEvolutions(
+                        id -> table.schemaManager().schema(id).fields(), table.schema().id());
         for (Split split : splits) {
             if (!(split instanceof DataSplit)) {
                 return null;
@@ -169,7 +173,8 @@ public class AggregatePushDownUtils {
                 return null;
             }
 
-            if (!minMaxColumns.isEmpty() && !minmaxAvailable(split, minMaxColumns)) {
+            if (!minMaxColumns.isEmpty()
+                    && !minmaxAvailable(split, minMaxColumns, table.rowType(), evolutions)) {
                 return null;
             }
 

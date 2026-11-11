@@ -25,11 +25,8 @@ any concrete aggregators land in :mod:`aggregators`.
 
 import unittest
 
-from pypaimon.read.reader.aggregate import (
-    create_field_aggregator,
-    register_aggregator,
-)
-from pypaimon.read.reader.aggregate.field_aggregator import FieldAggregator
+from pypaimon.execution.python.read.reader.aggregate import (create_field_aggregator, register_aggregator)
+from pypaimon.execution.python.read.reader.aggregate.field_aggregator import (FieldAggregator)
 from pypaimon.schema.data_types import AtomicType
 
 

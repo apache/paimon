@@ -39,6 +39,7 @@ import org.apache.paimon.utils.IOUtils;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -130,7 +131,9 @@ public class PkSortedIndexFile extends IndexFile {
             Options indexOptions,
             GlobalIndexFileWriter fileWriter)
             throws IOException {
-        GlobalIndexer indexer = GlobalIndexer.create(indexType, indexField, indexOptions);
+        GlobalIndexer indexer =
+                GlobalIndexer.create(
+                        indexType, Collections.singletonList(indexField), indexOptions);
         GlobalIndexWriter writer = indexer.createWriter(fileWriter);
         checkArgument(
                 writer instanceof GlobalIndexSingleColumnWriter,

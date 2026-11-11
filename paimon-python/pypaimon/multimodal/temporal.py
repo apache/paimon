@@ -17,32 +17,30 @@
 """Temporal alignment for multimodal table scans."""
 
 from bisect import bisect_left, bisect_right
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from datetime import timedelta
 from fractions import Fraction
+from functools import lru_cache, partial
 import json
 import math
 from numbers import Integral, Real
+from threading import Event
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.common.options.core_options import CoreOptions, StartupMode
-from pypaimon.common.predicate_json_parser import (
-    _apply_predicate_transform,
-    _collect_all_field_refs_from_transform,
-)
+from pypaimon.common.predicate_json_parser import _collect_all_field_refs_from_transform
+from pypaimon.common.transform_schema import effective_masked_schema as _effective_masked_schema
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.read.query_auth_split import QueryAuthSplit, resolve_auth_result
-from pypaimon.read.reader.format_pyarrow_reader import _DecodedRowGroupCache
-from pypaimon.read.table_read import _ClosableArrowBatchReader
+from pypaimon.read.read_support import _ClosableArrowBatchReader, _ParquetRowGroupCacheRequest
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.table.source.global_index_live_row_filter import (
-    table_at_snapshot,
-)
 from pypaimon.utils.range import Range
 
 
@@ -197,35 +195,37 @@ class TemporalAlignment:
         result.schema = result._output_schema()
         return result
 
-    def to_arrow_batch_reader(self, *, batch_size=1024):
-        """Index right-side timestamps, then stream aligned rows in batches."""
+    def to_arrow_batch_reader(self, *, batch_size=1024, parallelism=1):
+        """Stream aligned batches; ``parallelism`` limits concurrent sources (default 1)."""
         if (isinstance(batch_size, bool)
                 or not isinstance(batch_size, int)
                 or batch_size <= 0):
             raise ValueError("batch_size must be a positive integer.")
 
+        if (isinstance(parallelism, bool)
+                or not isinstance(parallelism, int) or parallelism <= 0):
+            raise ValueError("parallelism must be a positive integer.")
+
         anchor_metadata = _metadata_batches(
             self._anchor, self._on, self._by, batch_size)
-        row_group_cache = _DecodedRowGroupCache(
+        row_group_cache = _ParquetRowGroupCacheRequest(
             _TEMPORAL_ROW_GROUP_CACHE_MAX_SIZE)
-        anchor_fetcher = _RowIdFetcher(self._anchor, row_group_cache)
-        source_fetchers = []
-        for source in self._sources:
+
+        def prepare_source(source):
             source.plan()
-            source_fetchers.append(
-                _RowIdFetcher(
-                    source.query, row_group_cache, source._fetch_names))
+            return _RowIdFetcher(source.query, row_group_cache, source._fetch_names)
+
+        tasks = [partial(_RowIdFetcher, self._anchor, row_group_cache)]
+        tasks.extend(partial(prepare_source, source) for source in self._sources)
+        anchor_fetcher, *source_fetchers = _run_source_tasks(tasks, parallelism)
         schema = self._output_schema(anchor_fetcher.schema, source_fetchers)
         self.schema = schema
 
         def batches():
             try:
                 for metadata in anchor_metadata:
-                    rows = _metadata_rows(
-                        metadata, self._on,
-                        self._anchor_table_schema.field(self._on).type)
                     yield from self._build_batches(
-                        rows, anchor_fetcher, source_fetchers, schema)
+                        metadata, anchor_fetcher, source_fetchers, schema, parallelism)
             finally:
                 anchor_metadata.close()
 
@@ -315,14 +315,24 @@ class TemporalAlignment:
         return pa.schema(fields, metadata=anchor_schema.metadata)
 
     def _build_batch(
-            self, anchor_rows, anchor_fetcher, source_fetchers, schema):
-        anchor_ids = [row[_ROW_ID] for row in anchor_rows]
-        anchor = anchor_fetcher.fetch(anchor_ids)
+            self, anchor_rows, anchor_fetcher, source_fetchers, schema, parallelism=1):
+        native_keys = None
+        if isinstance(anchor_rows, pa.Table):
+            time_type = self._anchor_table_schema.field(self._on).type
+            native_keys = _native_anchor_keys(anchor_rows, self._on, self._by, time_type)
+            anchor_ids = anchor_rows[_ROW_ID].to_pylist()
+            if native_keys is None:
+                anchor_rows = _metadata_rows(anchor_rows, self._on, time_type)
+        else:
+            anchor_ids = [row[_ROW_ID] for row in anchor_rows]
+        tasks = [partial(anchor_fetcher.fetch, anchor_ids)]
+        tasks.extend(partial(source.build_arrays, anchor_rows, fetcher, native_keys)
+                     for source, fetcher in zip(self._sources, source_fetchers))
+        anchor, *source_arrays = _run_source_tasks(tasks, parallelism)
         anchor.validate()
         arrays = [anchor[name] for name in self._anchor_schema.names]
-
-        for source, fetcher in zip(self._sources, source_fetchers):
-            arrays.extend(source.build_arrays(anchor_rows, fetcher))
+        for columns in source_arrays:
+            arrays.extend(columns)
 
         if arrays:
             table = pa.Table.from_arrays(
@@ -333,20 +343,52 @@ class TemporalAlignment:
         return batch.replace_schema_metadata(schema.metadata)
 
     def _build_batches(
-            self, anchor_rows, anchor_fetcher, source_fetchers, schema):
+            self, anchor_rows, anchor_fetcher, source_fetchers, schema, parallelism=1):
         try:
             yield self._build_batch(
-                anchor_rows, anchor_fetcher, source_fetchers, schema)
+                anchor_rows, anchor_fetcher, source_fetchers, schema, parallelism)
         except pa.ArrowInvalid as error:
             if len(anchor_rows) < 2 or "offset" not in str(error).lower():
                 raise
             middle = len(anchor_rows) // 2
             yield from self._build_batches(
                 anchor_rows[:middle], anchor_fetcher,
-                source_fetchers, schema)
+                source_fetchers, schema, parallelism)
             yield from self._build_batches(
                 anchor_rows[middle:], anchor_fetcher,
-                source_fetchers, schema)
+                source_fetchers, schema, parallelism)
+
+
+def _run_source_tasks(tasks, parallelism):
+    if parallelism == 1 or len(tasks) < 2:
+        return [task() for task in tasks]
+    failed = Event()
+
+    def run(task):
+        # A worker may dequeue another task before the caller observes failure.
+        if failed.is_set():
+            return None
+        try:
+            return task()
+        except BaseException:
+            failed.set()
+            raise
+
+    with ThreadPoolExecutor(max_workers=min(parallelism, len(tasks))) as executor:
+        futures = []
+        try:
+            for task in tasks:
+                futures.append(executor.submit(run, task))
+            done, _ = wait(futures, return_when=FIRST_EXCEPTION)
+            for future in done:
+                if future.exception() is not None:
+                    future.result()
+            return [future.result() for future in futures]
+        except BaseException:
+            failed.set()
+            for future in futures:
+                future.cancel()
+            raise
 
 
 class _AsOfJoinRight:
@@ -390,6 +432,30 @@ class _AsOfJoinRight:
         self._row_ids = metadata[_ROW_ID].combine_chunks()
         self._index = {}
         group_columns = [metadata[name].combine_chunks() for name in self.by]
+        encode = getattr(pc, "run_end_encode", None)
+        if len(group_columns) == 1 and encode is not None:
+            column = group_columns[0]
+            data_type = column.type
+            # Only use types whose Arrow runs have Python key equality.
+            # In particular, run-end encoding distinguishes -0.0 from +0.0.
+            if (pa.types.is_integer(data_type)
+                    or pa.types.is_boolean(data_type)
+                    or pa.types.is_string(data_type)
+                    or pa.types.is_large_string(data_type)
+                    or pa.types.is_binary(data_type)
+                    or pa.types.is_large_binary(data_type)):
+                try:
+                    groups = encode(column, run_end_type=pa.int64())
+                except pa.ArrowNotImplementedError:
+                    pass
+                else:
+                    start = 0
+                    # Avoid Arrow scalar conversion per run for dense groups.
+                    ends = groups.run_ends.to_numpy().tolist()
+                    for key, end in zip(groups.values.to_pylist(), ends):
+                        self._index[(key,)] = (start, end)
+                        start = end
+                    return
         previous = None
         start = 0
         for position in range(len(metadata)):
@@ -428,7 +494,21 @@ class _AsOfJoinRight:
             for name in self.payload_schema.names
         ]
 
-    def build_arrays(self, anchor_rows, fetcher):
+    def build_arrays(self, anchor_rows, fetcher, native_keys=None):
+        native = _native_matches(self, native_keys, self.direction)
+        if native is not None:
+            first, _ = native
+            missing = first < 0
+            ids = self._row_ids.to_numpy(zero_copy_only=False)
+            requested = (ids[np.maximum(first, 0)] if len(ids)
+                         else np.zeros(len(first), dtype=np.int64))
+            unique = np.unique(requested[~missing])
+            values = fetcher.fetch(unique.tolist())
+            take = pa.array(np.searchsorted(unique, requested),
+                            mask=missing, type=pa.int64())
+            return [pc.take(values[field.name], take)
+                    for field in self.payload_schema]
+        anchor_rows = _reference_rows(anchor_rows, self)
         matches = [self.match(row) for row in anchor_rows]
         matched_ids = [match for match in matches if match is not None]
         unique_ids = list(dict.fromkeys(matched_ids))
@@ -455,6 +535,12 @@ class _LinearInterpolationRight(_AsOfJoinRight):
         super().__init__(
             label, query, anchor_on, by, "nearest", tolerance,
             right_on, suffix)
+
+    def plan(self):
+        super().plan()
+        times = self._time_keys
+        self._time_min = times.min() if len(times) else None
+        self._time_max = times.max() if len(times) else None
 
     @staticmethod
     def output_field(field, effective=True):
@@ -498,8 +584,28 @@ class _LinearInterpolationRight(_AsOfJoinRight):
             *_linear_weight(target, before_time, after_time, self.time_type),
         )
 
-    def build_arrays(self, anchor_rows, fetcher):
-        matches = [self.match(row) for row in anchor_rows]
+    def build_arrays(self, anchor_rows, fetcher, native_keys=None):
+        native = _native_matches(self, native_keys, "interpolate")
+        if native is None:
+            anchor_rows = _reference_rows(anchor_rows, self)
+            matches = [self.match(row) for row in anchor_rows]
+        else:
+            arrays = self._native_float_arrays(native_keys[0], fetcher, native)
+            if arrays is not None:
+                return arrays
+            first, second = native
+            matches = []
+            for index, (before, after) in enumerate(zip(first, second)):
+                if before < 0:
+                    matches.append(None)
+                    continue
+                before_id = self._row_ids[int(before)].as_py()
+                after_id = self._row_ids[int(after)].as_py()
+                ratio = ((0.0, 0, 1) if before == after else _linear_weight(
+                    _python_scalar(native_keys[0][index]),
+                    _python_scalar(self._time_keys[before]),
+                    _python_scalar(self._time_keys[after]), self.time_type))
+                matches.append((before_id, after_id, *ratio))
         matched_ids = []
         for match in matches:
             if match is not None:
@@ -537,6 +643,34 @@ class _LinearInterpolationRight(_AsOfJoinRight):
             array.validate()
             arrays.append(array)
         return arrays
+
+    def _native_float_arrays(self, targets, fetcher, indices):
+        if (not len(targets) or not len(self._row_ids)
+                or not all(pa.types.is_floating(fetcher.schema.field(field.name).type)
+                           for field in self.payload_schema)):
+            return None
+        times = self._time_keys
+        # Keep exact-ratio interpolation for wide spans and integer payloads.
+        if (max(int(self._time_max), int(targets.max()))
+                - min(int(self._time_min), int(targets.min())) > 2 ** 53):
+            return None
+        first, second = indices
+        missing = first < 0
+        first, second = np.maximum(first, 0), np.maximum(second, 0)
+        ids = self._row_ids.to_numpy(zero_copy_only=False)
+        before_ids, after_ids = ids[first], ids[second]
+        unique = np.unique(np.concatenate((before_ids[~missing], after_ids[~missing])))
+        values = fetcher.fetch(unique.tolist())
+        before = pa.array(np.searchsorted(unique, before_ids), mask=missing, type=pa.int64())
+        after = pa.array(np.searchsorted(unique, after_ids), mask=missing, type=pa.int64())
+        numerator = targets - times[first]
+        denominator = times[second] - times[first]
+        weights = np.zeros(len(targets), dtype=np.float64)
+        np.divide(numerator, denominator, out=weights, where=denominator != 0)
+        weights = pa.array(weights, mask=missing)
+        return [_interpolate_array(pc.take(values[field.name], before),
+                                   pc.take(values[field.name], after), weights, None)
+                for field in self.payload_schema]
 
 
 class _WindowJoinRight(_AsOfJoinRight):
@@ -634,8 +768,13 @@ class _WindowJoinRight(_AsOfJoinRight):
             )
         return first, last
 
-    def build_arrays(self, anchor_rows, fetcher):
-        ranges = [self._match_range(row) for row in anchor_rows]
+    def build_arrays(self, anchor_rows, fetcher, native_keys=None):
+        native = _native_matches(self, native_keys, "window")
+        ranges = ([self._match_range(row) for row in
+                   _reference_rows(anchor_rows, self)]
+                  if native is None else [
+                      (0, 0) if start < 0 else (int(start), int(end))
+                      for start, end in zip(*native)])
         slices = [(0, 0)] * len(ranges)
         unique_ids = []
         covered_end = 0
@@ -923,8 +1062,7 @@ def _pin_scan_to_snapshot(query):
         raise ValueError(
             "Temporal alignment requires 'row-tracking.enabled' = 'true'.")
     if (options.scan_mode() == StartupMode.INCREMENTAL
-            or options.options.contains(
-                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)):
+            or any(options.options.contains_key(key) for key in CoreOptions.INCREMENTAL_SCAN_KEYS)):
         raise ValueError(
             "Temporal alignment does not support incremental scans; "
             "inputs must "
@@ -944,7 +1082,7 @@ def _pin_scan_to_snapshot(query):
         else None
     )
     if snapshot is not None and tag_name is None:
-        table = table_at_snapshot(table, snapshot)
+        table = table._copy_with_snapshot(snapshot)
     pinned = ScanQuery(table)
     pinned._predicate = query._predicate
     pinned._projection = query._projection
@@ -977,8 +1115,8 @@ def _query_schema_and_paths(query):
         CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true",
     })
     builder = query._configured_read_builder(table)
-    schema = PyarrowFieldParser.from_paimon_schema(builder.read_type())
-    paths = builder._nested_name_paths()
+    schema = PyarrowFieldParser.from_paimon_schema(builder._output_fields())
+    paths = builder._output_name_paths()
     if paths is None:
         paths = [[field.name] for field in schema]
     return schema, paths
@@ -1007,11 +1145,23 @@ def _metadata_batches(query, on, by, batch_size):
         return
     reader = read_builder.new_read()._to_managed_arrow_batch_reader(splits)
     try:
+        pending = []
+        pending_rows = 0
         for batch in reader:
             metadata = pa.Table.from_batches([batch]).select(output_columns)
             _validate_metadata(query, metadata, key_columns)
-            for start in range(0, len(metadata), batch_size):
-                yield metadata.slice(start, batch_size)
+            start = 0
+            while start < len(metadata):
+                size = min(batch_size - pending_rows, len(metadata) - start)
+                pending.append(metadata.slice(start, size))
+                pending_rows += size
+                start += size
+                if pending_rows == batch_size:
+                    yield pa.concat_tables(pending)
+                    pending = []
+                    pending_rows = 0
+        if pending:
+            yield pa.concat_tables(pending)
     finally:
         reader.close()
 
@@ -1113,7 +1263,7 @@ class _RowIdFetcher:
             plan_projection = visible_projection
             projected = table.new_read_builder().with_projection(
                 visible_projection)
-            projected_paths = projected._nested_name_paths()
+            projected_paths = projected._output_name_paths()
             if projected_paths is not None:
                 plan_projection = list(dict.fromkeys(
                     path[0] for path in projected_paths))
@@ -1133,8 +1283,8 @@ class _RowIdFetcher:
         projected_builder = table.new_read_builder().with_projection(
             list(dict.fromkeys(read_projection + [_ROW_ID])))
         projected_schema = PyarrowFieldParser.from_paimon_schema(
-            projected_builder.read_type())
-        projected_paths = projected_builder._nested_name_paths()
+            projected_builder._output_fields())
+        projected_paths = projected_builder._output_name_paths()
         if projected_paths is not None:
             table_names = set(_table_schema(query).names)
             for field, path in zip(projected_schema, projected_paths):
@@ -1157,8 +1307,8 @@ class _RowIdFetcher:
         visible_builder = table.new_read_builder().with_projection(
             read_projection)
         self._fetch_schema = PyarrowFieldParser.from_paimon_schema(
-            visible_builder.read_type())
-        self._name_paths = visible_builder._nested_name_paths()
+            visible_builder._output_fields())
+        self._name_paths = visible_builder._output_name_paths()
         self._row_id_name = _ROW_ID
         if self._name_paths is not None:
             self._row_id_name = next(
@@ -1220,14 +1370,21 @@ class _RowIdFetcher:
         return Range.sort_and_merge_overlap(ranges, True)
 
     def fetch(self, row_ids):
-        if not row_ids:
+        if len(row_ids) == 0:
             return pa.Table.from_arrays(
                 [pa.array([], type=field.type) for field in self._schema],
                 schema=self._schema,
             )
 
-        wanted = Range.sort_and_merge_overlap(
-            [Range(row_id, row_id) for row_id in set(row_ids)], True)
+        requested = np.asarray(row_ids, dtype=np.int64)
+        unique = np.unique(requested)
+        boundaries = np.flatnonzero(unique[1:] - unique[:-1] != 1) + 1
+        starts = np.concatenate(([0], boundaries))
+        ends = np.concatenate((boundaries - 1, [len(unique) - 1]))
+        wanted = [
+            Range(int(unique[start]), int(unique[end]))
+            for start, end in zip(starts, ends)
+        ]
         selected_splits = []
         for split_index in self._find_splits(wanted):
             original = self._splits[split_index]
@@ -1247,21 +1404,27 @@ class _RowIdFetcher:
             selected_splits.append(indexed)
 
         arrow = self._project_fetch(self._read.to_arrow(selected_splits))
-        found = arrow[self._row_id_name].to_pylist()
-        positions = {}
-        for index, row_id in enumerate(found):
-            if row_id in positions:
-                raise RuntimeError(
-                    "Duplicate row id %r in aligned scan." % row_id)
-            positions[row_id] = index
-        missing = [row_id for row_id in row_ids if row_id not in positions]
-        if missing:
+        found = arrow[self._row_id_name]
+        if found.null_count:
+            raise RuntimeError("Null row id in aligned scan.")
+        found = found.to_numpy()
+        order = None
+        if len(found) > 1 and not np.all(found[1:] > found[:-1]):
+            order = np.argsort(found)
+            found = found[order]
+            if np.any(found[1:] == found[:-1]):
+                raise RuntimeError("Duplicate row id in aligned scan.")
+        positions = np.searchsorted(found, requested)
+        present = positions < len(found)
+        if len(found):
+            present &= found[np.minimum(positions, len(found) - 1)] == requested
+        if not np.all(present):
             raise RuntimeError(
                 "Aligned row ids disappeared from pinned snapshot: %r."
-                % missing
+                % requested[~present].tolist()
             )
         take = pa.array(
-            [positions[row_id] for row_id in row_ids], type=pa.int64())
+            positions if order is None else order[positions], type=pa.int64())
         visible = pa.Table.from_arrays(
             [arrow.column(index) for index in range(len(self._schema))],
             schema=self._schema,
@@ -1303,6 +1466,75 @@ def _arrow_rows(table):
         {name: columns[name][index] for name in table.column_names}
         for index in range(table.num_rows)
     ]
+
+
+def _reference_rows(metadata, source):
+    return (_metadata_rows(metadata, source.anchor_on, source.time_type)
+            if isinstance(metadata, pa.Table) else metadata)
+
+
+def _native_anchor_keys(metadata, on, by, time_type):
+    targets = _time_search_keys(metadata[on].combine_chunks(), time_type)
+    if targets.dtype != np.dtype("int64") or _temporal_match_kernel() is None:
+        return None
+    if len(by) == 1:
+        column = metadata[by[0]].combine_chunks()
+        data_type = column.type
+        if (pa.types.is_integer(data_type)
+                or pa.types.is_string(data_type)
+                or pa.types.is_large_string(data_type)
+                or pa.types.is_binary(data_type)
+                or pa.types.is_large_binary(data_type)
+                or pa.types.is_boolean(data_type)):
+            encoded = pc.dictionary_encode(column)
+            return (targets,
+                    [(key,) for key in encoded.dictionary.to_pylist()],
+                    encoded.indices.to_numpy(zero_copy_only=False))
+    keys, positions, codes = [], {}, []
+    for row in metadata.select(list(by)).to_pylist():
+        key = tuple(row[name] for name in by)
+        if key not in positions:
+            positions[key] = len(keys)
+            keys.append(key)
+        codes.append(positions[key])
+    return targets, keys, np.asarray(codes, dtype=np.int64)
+
+
+@lru_cache(maxsize=1)
+def _temporal_match_kernel():
+    try:
+        import pypaimon_rust
+    except ImportError:
+        return None
+    return getattr(pypaimon_rust, "temporal_match", None)
+
+
+def _native_matches(source, native_keys, mode):
+    if native_keys is None or source._time_keys.dtype != np.dtype("int64"):
+        return None
+    tolerance = source._tolerance_key
+    preceding = getattr(source, "_preceding_key", 0)
+    following = getattr(source, "_following_key", 0)
+    if any(value is not None and (
+            not isinstance(value, Integral) or not 0 <= value <= _MAX_INT64)
+            for value in (tolerance, preceding, following)):
+        return None
+    kernel = _temporal_match_kernel()
+    if kernel is None:
+        return None
+    targets, keys, codes = native_keys
+    bounds = np.asarray([source._index.get(key, (0, 0)) for key in keys],
+                        dtype=np.int64).reshape((-1, 2))
+    closed = getattr(source, "closed", "both")
+    result = kernel(
+        pa.array(source._time_keys), pa.array(targets),
+        pa.array(bounds[:, 0][codes]), pa.array(bounds[:, 1][codes]),
+        mode, exact=source.allow_exact_matches, tolerance=tolerance,
+        preceding=preceding, following=following,
+        left_closed=closed in ("both", "left"),
+        right_closed=closed in ("both", "right"))
+    return tuple(column.to_numpy(zero_copy_only=False)
+                 for column in result.columns)
 
 
 def _metadata_rows(table, on, time_type):
@@ -1437,26 +1669,6 @@ def _mask_dependencies(masking, targets, table_schema):
     return [
         name for name in table_schema.names if name in dependencies
     ]
-
-
-def _effective_masked_schema(schema, masking):
-    if not masking:
-        return schema
-    batch = pa.RecordBatch.from_arrays([
-        pa.array([], type=field.type) for field in schema
-    ], schema=schema)
-    fields = []
-    for field in schema:
-        transform = masking.get(field.name)
-        if transform is None:
-            fields.append(field)
-            continue
-        masked = _apply_predicate_transform(
-            transform, batch, null_type=field.type)
-        fields.append(pa.field(
-            field.name, masked.type, nullable=True,
-            metadata=field.metadata))
-    return pa.schema(fields, metadata=schema.metadata)
 
 
 def _project_effective_schema(

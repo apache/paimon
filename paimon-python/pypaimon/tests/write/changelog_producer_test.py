@@ -310,7 +310,7 @@ class ChangelogProducerTest(unittest.TestCase):
         self.assertIsNotNone(snapshot.changelog_manifest_list)
         self.assertEqual(snapshot.changelog_record_count, 2)
 
-    def test_abort_cleans_up_changelog_files(self):
+    def test_explicit_abort_deletes_prepared_data_and_changelog_files(self):
         table = self._create_table(
             'test_input_abort',
             options={'changelog-producer': 'input', 'bucket': '1'}
@@ -331,8 +331,8 @@ class ChangelogProducerTest(unittest.TestCase):
 
         data_files_after = glob.glob(os.path.join(bucket_dir, 'data-*'))
         changelog_files_after = glob.glob(os.path.join(bucket_dir, 'changelog-*'))
-        self.assertEqual(len(data_files_after), 0, "Data files should be cleaned up after abort")
-        self.assertEqual(len(changelog_files_after), 0, "Changelog files should be cleaned up after abort")
+        self.assertFalse(data_files_after)
+        self.assertFalse(changelog_files_after)
 
         table_write.close()
         table_commit.close()

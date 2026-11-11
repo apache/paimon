@@ -922,6 +922,36 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: merge into with a spilling append write buffer") {
+    withTable("s", "t") {
+      sql("""CREATE TABLE t (id INT, b STRING, c INT) TBLPROPERTIES
+            |('row-tracking.enabled' = 'true',
+            |'data-evolution.enabled' = 'true',
+            |'write-buffer-for-append' = 'true',
+            |'write-buffer-size' = '256 kb',
+            |'page-size' = '64 kb')""".stripMargin)
+      sql(
+        "INSERT INTO t SELECT /*+ REPARTITION(1) */ CAST(id AS INT), CAST(id AS STRING), " +
+          "CAST(id AS INT) FROM range(0, 20000)")
+      sql("CREATE TABLE s (id INT, b STRING)")
+      sql(
+        "INSERT INTO s SELECT CAST(id AS INT), concat(repeat('x', 100), CAST(id AS STRING)) " +
+          "FROM range(0, 20000)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |""".stripMargin)
+      checkAnswer(
+        sql(
+          "SELECT count(*) FROM t WHERE b = concat(repeat('x', 100), CAST(id AS STRING)) " +
+            "AND c = id"),
+        Seq(Row(20000)))
+    }
+  }
+
   test("Data Evolution: merge into table with data-evolution for any source table") {
     withTable("s", "t") {
       Seq((1, 11), (2, 22)).toDF("id", "b").createOrReplaceTempView("s")

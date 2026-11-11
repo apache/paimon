@@ -34,10 +34,15 @@ independent image, audio clip, or binary object.
 
 ## Create a Video Table
 
-Use `video-frame-field` when the logical table has one row per frame while the physical storage
-and decoding unit is a complete encoded video. The comma-separated option also marks each named
-SQL `BYTES` or `BINARY` column as a BLOB column. It selects the dedicated `.video` format; the
+Use `video-frame-field` on a [Data Evolution append table](./data-evolution) when the logical
+table has one row per frame while the physical payload is a complete encoded video.
+The comma-separated option also marks each named SQL `BYTES` or `BINARY` column as a BLOB
+column. It selects the dedicated `.video` format; the
 ordinary `.blob` version and layout are not changed.
+
+The examples use two cameras with aligned frame rows. `frame_index` is an application column
+for ordering rows within an episode; the video descriptor independently records which frame
+to decode. Keep timestamps in another ordinary column if the application needs them.
 
 <Tabs groupId="video-create">
 
@@ -46,6 +51,7 @@ ordinary `.blob` version and layout are not changed.
 ```sql
 CREATE TABLE video_frames (
     episode_id BIGINT,
+    frame_index BIGINT,
     camera_front BYTES,
     camera_wrist BYTES
 ) WITH (
@@ -62,6 +68,7 @@ CREATE TABLE video_frames (
 ```sql
 CREATE TABLE video_frames (
     episode_id BIGINT,
+    frame_index BIGINT,
     camera_front BINARY,
     camera_wrist BINARY
 ) TBLPROPERTIES (
@@ -73,20 +80,171 @@ CREATE TABLE video_frames (
 
 </TabItem>
 
+<TabItem value="python" label="PyPaimon">
+
+Use Python 3.10 or newer and a PyPaimon build matching this documentation version,
+including its `.video` format and decoding APIs. To run the complete walkthrough from
+a matching source checkout, install from the repository root before starting Python:
+
+```shell
+python -m pip install -e './paimon-python[torch,video]'
+```
+
+This installs the PyTorch and video extras used by the decoding example below.
+
+```python
+import pyarrow as pa
+import pypaimon.multimodal as pm
+
+conn = pm.connect(options={"warehouse": "file:///tmp/video_lake"})
+frames = conn.create_table(
+    "video_frames",
+    schema=pa.schema([
+        pa.field("episode_id", pa.int64()),
+        pa.field("frame_index", pa.int64()),
+        pa.field("camera_front", pa.large_binary()),
+        pa.field("camera_wrist", pa.large_binary()),
+    ]),
+    options={"video-frame-field": "camera_front,camera_wrist"},
+)
+```
+
+The multimodal API enables row tracking and Data Evolution by default. When opening a table
+created with SQL, use `frames = conn.get_table("video_frames")` and connect to its catalog
+and database.
+
+</TabItem>
+
 </Tabs>
 
-Creating the table does not ingest or decode video files. Use the
-[PyPaimon video ingestion API](../pypaimon/video#video-frame-storage)
-to write complete videos and their logical frame rows.
+Creating the table does not ingest or decode video files.
+
+## Write Videos with PyPaimon
+
+Continue with `frames` from the PyPaimon example above. Suppose episode 42 has two aligned
+videos, each containing 120 frames in presentation order:
+
+```python
+frame_rows = [{"episode_id": 42, "frame_index": i} for i in range(120)]
+frames.add_video(
+    pm.Blob.from_local("/data/episode-42-front.mp4"),
+    frame_rows,
+    video_column="camera_front",
+    first_frame=0,
+)
+```
+
+`add_video()` appends 120 rows and assigns consecutive video frame ordinals starting at
+`first_frame`. It copies the complete encoded video into `.video` storage without decoding
+or re-encoding it. Consecutive frame rows share that payload inside the pack; they do not
+store 120 copies of the MP4. With explicit `frame_rows`, the caller must supply a valid
+frame count and frame ordinals for the source video. `camera_wrist` is initially `NULL`.
+
+Fill the second camera on those same rows with `replace_video()`:
+
+```python
+frames.replace_video(
+    where="episode_id = 42",
+    video=pm.Blob.from_local("/data/episode-42-wrist.mp4"),
+    video_column="camera_wrist",
+    first_frame=0,
+)
+```
+
+Matching rows are ordered by `_ROW_ID` and receive consecutive frame ordinals. This writes
+only the wrist-camera column, retaining the front video and ordinary columns. Each call
+commits separately. A second `add_video()` would append another set of rows; use
+`replace_video()` to populate or replace a camera on existing rows. The `video_column`
+argument is required when the table configures multiple video fields.
+
+For multiple episodes, `add_videos()` keeps one writer and commit open across its inputs,
+allowing several complete videos to share a pack. For automatic frame counting and timestamp
+generation, use a schema with `frame_index` and `timestamp` columns as shown in the
+[automatic video import API](../pypaimon/video#import-a-video). That path inspects the video
+with PyAV; the explicit-frame example above does not require a decoder.
+
+## Add a Video Column
+
+Use the `__VIDEO_FRAME_FIELD` comment directive to add a nullable video column to an
+existing [Data Evolution append table](./data-evolution). The table must already have
+`row-tracking.enabled=true` and `data-evolution.enabled=true`, no primary key, and
+`bucket=-1`.
+
+The directive converts the declared `BYTES` or `BINARY` type to scalar `BLOB` and
+automatically appends the new column to `video-frame-field`, preserving existing video
+fields. Text after `;` is stored as the column comment. Existing rows read `NULL` in
+the new column; adding it does not ingest videos or backfill frame values.
+
+The examples below add `camera_side` to the `video_frames` table created above.
+Point the PyPaimon connection at the same warehouse and database as that table.
+
+<Tabs groupId="video-add-column">
+
+<TabItem value="flink" label="Flink SQL">
+
+```sql
+ALTER TABLE video_frames
+    ADD camera_side BYTES COMMENT '__VIDEO_FRAME_FIELD; side camera frame';
+```
+
+</TabItem>
+
+<TabItem value="spark" label="Spark SQL">
+
+```sql
+ALTER TABLE video_frames
+    ADD COLUMN camera_side BINARY COMMENT '__VIDEO_FRAME_FIELD; side camera frame';
+```
+
+</TabItem>
+
+<TabItem value="python" label="PyPaimon">
+
+```python
+import pypaimon.multimodal as pm
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import SchemaChange
+
+conn = pm.connect(options={"warehouse": "file:///tmp/video_lake"})
+conn.catalog.alter_table("default.video_frames", [
+    SchemaChange.add_column(
+        "camera_side", AtomicType("BYTES"),
+        "__VIDEO_FRAME_FIELD; side camera frame",
+    ),
+])
+# Reload the table to use the new schema.
+frames = conn.get_table("video_frames")
+```
+
+</TabItem>
+
+</Tabs>
+
+Changing an existing column's comment or directly setting `video-frame-field` cannot
+convert an ordinary BLOB column to video storage. Add a new column with the directive
+instead. To populate existing frame rows, use
+[`replace_video()`](../pypaimon/video#update-frame-rows-and-replace-a-video).
 
 ## Descriptors and Physical Layout
 
-Each logical value is a `VideoFrameDescriptor`: its URI range identifies one complete encoded
-video and its frame ordinal selects a frame inside that video. On write, a `.video` data region
-concatenates raw video payloads without ordinary BLOB entry wrappers. Four embedded delta-varint
-indexes record physical video lengths, logical run lengths, run-to-video references, and the first
-frame ordinal of each run. Consecutive frames therefore need one run entry rather than one index
-entry per row. NULL and data-evolution placeholders use negative run references.
+Each `VideoFrameDescriptor` identifies a complete video byte range and a frame ordinal.
+Consecutive rows referencing consecutive frames share one span.
+
+<pre>
+.video (version 1, in file order)
+├─ Complete encoded videos A, B, ...
+├─ Video byte lengths
+├─ Moov offsets (relative to each video)
+├─ Moov byte lengths (0: absent)
+├─ Span row counts
+├─ Span video references (-1: NULL, -2: placeholder)
+├─ Span starting frame ordinals
+└─ Footer: six 4-byte index sizes, 4-byte magic, and 1-byte version
+</pre>
+
+The six arrays use Delta-Varint encoding. Moov ranges locate MP4 metadata; readers derive
+frame positions in memory; unsupported containers use scanning. See the
+[file format specification](../concepts/spec/fileformat#video).
 
 ## Reuse, Rolling, and Compaction
 
@@ -101,10 +259,9 @@ BLOB, and vector rolling is deferred until the next payload boundary and all act
 together. The resulting file group remains row-aligned and a single large episode may exceed the
 configured target.
 
-When BLOB compaction is enabled, it byte-copies the complete encoded-video ranges into a new self-contained `.video` pack
-and rebuilds the embedded indexes; it does not decode or re-encode frames. The aligned normal data
-file contains only application columns such as `episode_id`, state, and action. Paimon stores the
-frame mapping in the `.video` descriptor/index path.
+When BLOB compaction is enabled, it copies videos and frame mappings into a new self-contained
+`.video` pack without decoding frames. The aligned normal data file contains only application
+columns such as `episode_id`, state, and action.
 `blob-compaction.enabled` defaults to `false`; ordinary normal-file compaction can
 leave the video packs unchanged. See [Data Evolution Maintenance](./data-evolution-maintenance#ordinary-compaction).
 
@@ -113,16 +270,41 @@ leave the video packs unchanged. See [Data Evolution Maintenance](./data-evoluti
 - Append-only tables only; primary-key tables continue to use managed BLOB storage.
 - Every configured field must be a scalar `BLOB`; `ARRAY<BLOB>` and `MAP<K, BLOB>` continue to use
   `.blob`.
-- Non-null writes must be exact descriptor-backed `BlobRef` values containing a
-  `VideoFrameDescriptor`. Inline bytes and ordinary `BlobDescriptor` values are rejected.
-- Version 1 addresses frames by zero-based presentation-order ordinal with stride one. It does not
-  store PTS values or parse codec/container metadata.
+- At the storage-writer boundary, non-null values must be exact descriptor-backed `BlobRef`
+  values containing a `VideoFrameDescriptor`. Inline bytes and ordinary `BlobDescriptor`
+  values are rejected there. The PyPaimon video APIs above construct the frame descriptors
+  automatically from complete-video sources.
 - A `BlobConsumer` callback is not supported for the video field.
 
 ## Read Frames
 
 A frame descriptor identifies the encoded video and the frame to decode. It does
-not contain decoded image pixels. Read behavior differs by API:
+not contain decoded image pixels.
+
+![A selected row is mapped through the video pack index to a video byte range and frame ordinal. A PyPaimon worker opens that range, builds an in-memory MP4 sample index, and decodes from a preceding keyframe to the requested frame.](/img/multimodal-video-read.svg)
+
+1. Paimon plans the selected snapshot and columns, aligning the normal data and video
+   column files by row ID. The `.video` footer and span index map each selected row position
+   to a physical video and a zero-based frame ordinal.
+2. The reader returns a `VideoFrameDescriptor`: the pack URI, the complete video's offset
+   and length, the frame ordinal, and the MP4 `moov` range when available. Resolving the
+   descriptor does not decode the video or load its complete payload.
+3. A PyPaimon decoding worker opens a seekable stream restricted to that video's range.
+   For supported MP4 files, it reads the `moov` sample tables to derive frame timing,
+   sample locations, and keyframe positions in memory. Paimon does not persist a separate
+   keyframe index. Unsupported layouts use the decoder's scanning path.
+4. The decoder locates a preceding keyframe and decodes forward to the requested
+   presentation-order frame, including any required reference frames. Neighboring requests
+   can reuse the decoder and cached data. The result is image pixels or a tensor, rather
+   than encoded MP4 bytes. Random access can require decoding more than one frame.
+
+Decoder sessions and range caches are local to each worker process. The diagram describes
+PyPaimon's built-in decoding path; a custom decoder supplied to `VideoFrameCollator` controls
+its own seeking and decoding behavior.
+
+### Read Descriptors
+
+Read behavior differs by API:
 
 | API | How to obtain frame descriptors |
 | --- | --- |
@@ -154,7 +336,64 @@ This table property remains enabled for subsequent SQL reads.
 
 </TabItem>
 
+<TabItem value="python" label="PyPaimon">
+
+```python
+rows = (
+    frames.scan()
+    .where("episode_id = 42")
+    .select(["episode_id", "frame_index", "camera_front"])
+    .limit(3)
+    .to_list()
+)
+for row in rows:
+    descriptor = pm.VideoFrameDescriptor.deserialize(row["camera_front"])
+    print(descriptor.uri, descriptor.offset, descriptor.length, descriptor.frame_index)
+```
+
+These are serialized frame descriptors, not image bytes. Calling `read_blobs()` on a
+video column materializes the complete encoded video for each selected row; it does
+not extract the selected frame.
+
+</TabItem>
+
 </Tabs>
 
-For Python ingestion and PyTorch `DataLoader` usage, including decoder-session reuse in workers,
-see [PyPaimon Multimodal API: Video Frame Storage](../pypaimon/video#video-frame-storage).
+### Decode Frames with PyPaimon
+
+Use the matching PyPaimon build and PyTorch/video extras installed in the
+[PyPaimon creation example](#create-a-video-table).
+
+The window dataset decodes configured video columns with PyAV or TorchCodec. This example
+requests one front-camera frame per row and stacks the decoded RGB tensors:
+
+```python
+import torch
+from torch.utils.data import DataLoader
+
+dataset = frames.scan().where("episode_id = 42").to_contiguous_window_dataset(
+    columns=["camera_front"],
+    frame_offsets={"camera_front": [0]},
+    group_key="episode_id",
+    order_key="frame_index",
+    video_backend="pyav",
+    column_transforms={"camera_front": torch.stack},
+)
+try:
+    loader = DataLoader(dataset, batch_size=8, num_workers=0, shuffle=False)
+    batch = next(iter(loader))
+    # [batch, time=1, channels=3, height, width]
+    print(batch["camera_front"].shape)
+finally:
+    dataset.close()
+```
+
+Within each episode, `frame_index` must be non-null and increase by one. Use offsets such
+as `[-2, -1, 0]` for temporal windows; the dataset keeps descriptors through row selection
+and decodes the requested frames before assembling each window. TorchCodec is optional
+and must be installed separately when selecting `video_backend="torchcodec"`.
+
+For a row-oriented `scan().to_torch()` dataset, use `VideoFrameCollator` to decode frames;
+`to_torch()` alone returns descriptors. See the
+[complete collator example](../pypaimon/video#read-with-pytorch-dataloader) and
+[video training windows](../pypaimon/video#read-video-training-windows).

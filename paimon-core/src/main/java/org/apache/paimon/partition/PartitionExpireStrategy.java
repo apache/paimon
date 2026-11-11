@@ -24,14 +24,20 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+
+import org.apache.paimon.shade.guava30.com.google.common.primitives.UnsignedBytes;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -73,11 +79,35 @@ public abstract class PartitionExpireStrategy implements Serializable {
     }
 
     public Object[] convertPartition(BinaryRow partition) {
-        return toObjectArrayConverter.convert(partition);
+        Object[] values = toObjectArrayConverter.convert(partition);
+        RowType partitionType = toObjectArrayConverter.rowType();
+        for (int index = 0; index < values.length; index++) {
+            if (values[index] != null
+                    && partitionType.getTypeAt(index).getTypeRoot() == DataTypeRoot.DATE) {
+                values[index] = LocalDate.ofEpochDay((Integer) values[index]);
+            }
+        }
+        return values;
     }
 
     public abstract List<PartitionEntry> selectExpiredPartitions(
             FileStoreScan scan, LocalDateTime expirationTime);
+
+    protected static void retainLatestPartition(
+            List<PartitionEntry> partitions,
+            List<PartitionEntry> expired,
+            Comparator<PartitionEntry> timeComparator) {
+        if (expired.isEmpty() || expired.size() != partitions.size()) {
+            return;
+        }
+
+        // Use the complete partition key to break ties independently of scan order.
+        Comparator<PartitionEntry> comparator =
+                timeComparator.thenComparing(
+                        entry -> entry.partition().toBytes(),
+                        UnsignedBytes.lexicographicalComparator());
+        expired.remove(Collections.max(expired, comparator));
+    }
 
     public static PartitionExpireStrategy createPartitionExpireStrategy(
             CoreOptions options,

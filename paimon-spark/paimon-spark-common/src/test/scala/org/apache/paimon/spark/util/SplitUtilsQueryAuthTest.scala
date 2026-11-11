@@ -19,14 +19,18 @@
 package org.apache.paimon.spark.util
 
 import org.apache.paimon.catalog.TableQueryAuthResult
-import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.data.{BinaryRow, BinaryString, GenericRow, InternalRow}
 import org.apache.paimon.io.DataFileMeta
+import org.apache.paimon.reader.RecordReader
 import org.apache.paimon.spark.PaimonRecordReaderIterator
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.stats.SimpleStats
-import org.apache.paimon.table.source.{DataSplit, QueryAuthSplit, Split}
+import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackSplitImpl
+import org.apache.paimon.table.source.{ChainSplit, DataSplit, QueryAuthSplit, Split}
+import org.apache.paimon.types.{DataType, DataTypes, RowType}
+import org.apache.paimon.utils.IteratorRecordReader
 
-import org.apache.spark.sql.types.BinaryType
+import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.scalatest.funsuite.AnyFunSuite
 
 import java.util.Collections
@@ -59,6 +63,7 @@ class SplitUtilsQueryAuthTest extends AnyFunSuite {
       .build()
   }
 
+  // Synthetic wrapper: the supplied readers already contain post-authorization rows.
   private def authorized(split: Split): Split =
     new QueryAuthSplit(split, new TableQueryAuthResult(null, null))
 
@@ -72,12 +77,84 @@ class SplitUtilsQueryAuthTest extends AnyFunSuite {
     assert(SplitUtils.dataFileCount(wrapped) == 1L, "file count collapsed under query auth")
   }
 
-  test("partition metadata columns are refused on a query-authorized split") {
-    val partitionColumn =
-      PaimonMetadataColumn(-1, PaimonMetadataColumn.PARTITION_COLUMN, BinaryType)
-    val error = intercept[RuntimeException] {
-      PaimonRecordReaderIterator(null, Seq(partitionColumn), authorized(dataSplit()))
+  private val partitionColumn =
+    PaimonMetadataColumn.PARTITION(StructType(Seq(StructField("dt", StringType))))
+
+  private class EmptyReader extends RecordReader[InternalRow] {
+    var closed = false
+
+    override def readBatch(): RecordReader.RecordIterator[InternalRow] = null
+
+    override def close(): Unit = {
+      closed = true
     }
-    assert(error.getMessage.contains("DataSplit"))
+  }
+
+  test("empty partition metadata reads release the reader") {
+    val reader = new EmptyReader
+    val iterator =
+      PaimonRecordReaderIterator(
+        reader,
+        Seq(partitionColumn),
+        dataSplit(),
+        RowType.of(Array[DataType](DataTypes.STRING()), Array("dt")))
+    try {
+      assert(!iterator.hasNext)
+    } finally {
+      iterator.close()
+    }
+    assert(reader.closed)
+  }
+
+  private def chainAndAuthorizedSplits(): Seq[Split] = {
+    val chainSplit = ChainSplit.from(dataSplit(), "snapshot")
+    Seq(
+      authorized(dataSplit()),
+      chainSplit,
+      authorized(chainSplit),
+      new FallbackSplitImpl(chainSplit, true),
+      new FallbackSplitImpl(authorized(chainSplit), true))
+  }
+
+  test("partition metadata uses visible rows for data, authorized and chain splits") {
+    (Seq(dataSplit()) ++ chainAndAuthorizedSplits()).foreach {
+      split =>
+        val rows = java.util.Arrays.asList[InternalRow](
+          GenericRow.of(BinaryString.fromString("masked-a")),
+          GenericRow.of(BinaryString.fromString("masked-b")),
+          GenericRow.of(null.asInstanceOf[AnyRef]))
+        val iterator = PaimonRecordReaderIterator(
+          new IteratorRecordReader[InternalRow](rows.iterator()),
+          Seq(partitionColumn),
+          split,
+          RowType.of(Array[DataType](DataTypes.STRING()), Array("dt")))
+        try {
+          assert(iterator.next().getRow(1, 1).getString(0).toString == "masked-a")
+          assert(iterator.next().getRow(1, 1).getString(0).toString == "masked-b")
+          assert(iterator.next().getRow(1, 1).isNullAt(0))
+          assert(!iterator.hasNext)
+        } finally {
+          iterator.close()
+        }
+    }
+  }
+
+  test("bucket metadata supports authorized and chain splits") {
+    chainAndAuthorizedSplits().foreach {
+      split =>
+        val reader = new IteratorRecordReader[InternalRow](
+          Collections.singletonList[InternalRow](GenericRow.of(Int.box(42))).iterator())
+        val iterator =
+          PaimonRecordReaderIterator(reader, Seq(PaimonMetadataColumn.BUCKET), split)
+        try {
+          assert(iterator.hasNext)
+          val row = iterator.next()
+          assert(row.getInt(0) == 42)
+          assert(row.getInt(1) == 0)
+          assert(!iterator.hasNext)
+        } finally {
+          iterator.close()
+        }
+    }
   }
 }

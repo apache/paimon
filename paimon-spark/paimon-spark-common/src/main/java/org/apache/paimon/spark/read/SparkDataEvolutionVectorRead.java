@@ -22,7 +22,6 @@ import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexResultSerializer;
 import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -42,6 +41,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -125,8 +125,10 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
         SerializableFunction<List<SerializedSplit>, byte[]> task =
                 group -> {
                     GlobalIndexer taskGlobalIndexer =
-                            GlobalIndexerFactoryUtils.load(indexType)
-                                    .create(vectorColumn, table.coreOptions().toConfiguration());
+                            GlobalIndexer.create(
+                                    indexType,
+                                    Collections.singletonList(vectorColumn),
+                                    table.coreOptions().toConfiguration());
                     IndexPathFactory indexPathFactory =
                             table.store().pathFactory().globalIndexFileFactory();
 

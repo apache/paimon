@@ -19,12 +19,20 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
+import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.types.Row;
@@ -58,6 +66,64 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for catalog tables. */
 public class CatalogTableITCase extends CatalogITCaseBase {
+
+    @Test
+    void testGeneratedPartitionSchemaRoundTrip() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("ts", DataTypes.TIMESTAMP(3))
+                        .generatedColumn("dt", DataTypes.DATE(), "CAST(ts AS DATE)")
+                        .partitionKeys("dt")
+                        .build();
+        flinkCatalog()
+                .catalog()
+                .createTable(
+                        Identifier.create(tEnv.getCurrentDatabase(), "generated_events"),
+                        schema,
+                        false);
+        CatalogTable source = table("generated_events");
+        ResolvedCatalogTable resolved =
+                new ResolvedCatalogTable(source, tEnv.from("generated_events").getResolvedSchema());
+        assertThat(FlinkCatalog.fromCatalogTable(resolved).fields().get(1).generationExpression())
+                .isEqualTo("CAST(ts AS DATE)");
+        sql("ALTER TABLE generated_events MODIFY dt DATE COMMENT 'generated date'");
+        assertThat(paimonTable("generated_events").rowType().getField("dt").generationExpression())
+                .isEqualTo("CAST(ts AS DATE)");
+    }
+
+    @Test
+    void testDataEvolutionPartialWritePreservesGeneratedColumns() throws Exception {
+        tEnv.getConfig().set(TABLE_DML_SYNC, true);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .generatedColumn("label", DataTypes.STRING(), "UPPER(name)")
+                        .option("row-tracking.enabled", "true")
+                        .option("data-evolution.enabled", "true")
+                        .build();
+        flinkCatalog()
+                .catalog()
+                .createTable(
+                        Identifier.create(tEnv.getCurrentDatabase(), "generated_evolution"),
+                        schema,
+                        false);
+        tEnv.executeSql(
+                        "INSERT INTO generated_evolution VALUES (1, 'old', 'stored'), (2, 'other', 'OTHER')")
+                .await();
+        sql("CREATE TABLE generated_updates (id INT, name STRING)");
+        tEnv.executeSql("INSERT INTO generated_updates VALUES (1, 'new')").await();
+        sql(
+                "CALL sys.data_evolution_merge_into('default.generated_evolution', '', '', 'generated_updates', "
+                        + "'generated_evolution.id=generated_updates.id', 'name=generated_updates.name', 1)");
+        assertThat(sql("SELECT * FROM generated_evolution"))
+                .containsExactlyInAnyOrder(Row.of(1, "new", "stored"), Row.of(2, "other", "OTHER"));
+        sql(
+                "CALL sys.data_evolution_merge_into('default.generated_evolution', '', '', 'generated_updates', "
+                        + "'generated_evolution.id=generated_updates.id', 'label=generated_updates.name', 1)");
+        assertThat(sql("SELECT * FROM generated_evolution"))
+                .containsExactlyInAnyOrder(Row.of(1, "new", "new"), Row.of(2, "other", "OTHER"));
+    }
 
     @Override
     protected Map<String, String> catalogOptions() {
@@ -147,6 +213,30 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         result = sql("SELECT next_row_id FROM T$snapshots");
 
         assertThat(result).contains(Row.of(1L), Row.of(2L), Row.of(3L));
+    }
+
+    @Test
+    public void testSnapshotProperties() throws Exception {
+        sql("CREATE TABLE T (a INT)");
+        FileStoreTable table = paimonTable("T");
+        Map<String, String> properties = new HashMap<>();
+        properties.put("source.batch-id", "42");
+        properties.put("empty", "");
+        properties.put("nullable", null);
+        ManifestCommittable committable = new ManifestCommittable(0);
+        properties.forEach(committable::addProperty);
+        try (TableCommitImpl commit = table.newCommit("test").ignoreEmptyCommit(false)) {
+            commit.commit(committable);
+            commit.commit(new ManifestCommittable(1));
+        }
+
+        assertThat(sql("SELECT snapshot_id, properties FROM T$snapshots ORDER BY snapshot_id"))
+                .containsExactly(Row.of(1L, properties), Row.of(2L, null));
+        assertThat(
+                        sql(
+                                "SELECT snapshot_id, properties['source.batch-id'], properties['missing'] "
+                                        + "FROM T$snapshots WHERE properties['source.batch-id'] = '42'"))
+                .containsExactly(Row.of(1L, "42", null));
     }
 
     @Test
@@ -385,14 +475,13 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                         + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5"))
                 .isEmpty();
 
-        // check with not exist schema id
-        assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "SELECT schema_id, fields, partition_keys, "
-                                                + "primary_keys, options, `comment` FROM T$schemas where schema_id>=6"))
-                .hasCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage("schema id: 6 should not greater than max schema id: 4");
+        // check with out-of-range schema id: no schema has id >= 6 (latest is 4), so the
+        // query returns zero rows instead of failing
+        assertThat(
+                        sql(
+                                "SELECT schema_id, fields, partition_keys, "
+                                        + "primary_keys, options, `comment` FROM T$schemas where schema_id>=6"))
+                .isEmpty();
     }
 
     @Test
@@ -1345,6 +1434,20 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 createRowWithNamedPositions(
                         RowKind.INSERT, new Object[] {expectedVariant}, positionByNames);
         assertThat(rows).containsExactlyInAnyOrder(expectedRow);
+    }
+
+    @Test
+    @EnabledIf("isFlink2_1OrAbove")
+    void testVariantNotNull() throws Exception {
+        sql("CREATE TABLE t (id INT, v VARIANT NOT NULL)");
+
+        assertThatThrownBy(() -> sql("INSERT INTO t VALUES (1, CAST(NULL AS VARIANT))"))
+                .hasRootCauseMessage(
+                        "Column 'v' is NOT NULL, however, a null value is being written into it. "
+                                + "You can set job configuration 'table.exec.sink.not-null-enforcer'='DROP' "
+                                + "to suppress this exception and drop such records silently.");
+        assertThat(sql("SELECT * FROM t")).isEmpty();
+        assertThat(paimonTable("t").rowType().getTypeAt(1).isNullable()).isFalse();
     }
 
     private void innerTestReadOptimizedTableAndCheckData(String insertTableName) {

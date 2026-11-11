@@ -95,9 +95,35 @@ public class LanceRecordsWriter implements BundleFormatWriter {
 
     @Override
     public void close() throws IOException {
-        flush();
+        Throwable throwable = null;
+
+        try {
+            flush();
+        } catch (Throwable t) {
+            throwable = t;
+        }
+
         LOG.info("Jni cost: " + jniCost + "ms for file: " + nativeWriter.path());
-        closeImpl();
+        long t1 = System.currentTimeMillis();
+
+        try {
+            nativeWriter.close();
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        try {
+            arrowFormatWriter.close();
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        long closeCost = (System.currentTimeMillis() - t1);
+        LOG.info("Close cost: " + closeCost + "ms for file: " + nativeWriter.path());
+
+        if (throwable != null) {
+            rethrow(throwable);
+        }
     }
 
     private void flush() throws IOException {
@@ -110,11 +136,24 @@ public class LanceRecordsWriter implements BundleFormatWriter {
         arrowFormatWriter.reset();
     }
 
-    private void closeImpl() throws IOException {
-        long t1 = System.currentTimeMillis();
-        this.nativeWriter.close();
-        this.arrowFormatWriter.close();
-        long closeCost = (System.currentTimeMillis() - t1);
-        LOG.info("Close cost: " + closeCost + "ms for file: " + nativeWriter.path());
+    private static Throwable addSuppressed(Throwable throwable, Throwable suppressed) {
+        if (throwable == null) {
+            return suppressed;
+        }
+        throwable.addSuppressed(suppressed);
+        return throwable;
+    }
+
+    private static void rethrow(Throwable throwable) throws IOException {
+        if (throwable instanceof IOException) {
+            throw (IOException) throwable;
+        }
+        if (throwable instanceof RuntimeException) {
+            throw (RuntimeException) throwable;
+        }
+        if (throwable instanceof Error) {
+            throw (Error) throwable;
+        }
+        throw new IOException(throwable);
     }
 }

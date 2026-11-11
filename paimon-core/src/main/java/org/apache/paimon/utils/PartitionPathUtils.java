@@ -167,6 +167,46 @@ public class PartitionPathUtils {
     }
 
     /**
+     * Write-side guard for the value-only partition layout.
+     *
+     * <p>Scans treat any value-only directory whose name starts with {@code '_'} or {@code '.'} as
+     * a hidden staging or metadata directory (see {@link #isHiddenName}) and skip it, so a
+     * partition written under such a value and all of its data would silently disappear from every
+     * read with no error at write or scan time. Validating the value here turns that silent data
+     * loss into a loud write-time failure.
+     *
+     * <p>The configured default partition name stays allowed because scans deliberately un-hide
+     * exactly that name (see {@link #isHiddenFile}). Callers only reach this for the value-only
+     * layout; the key-value layout writes {@code pt=<value>} directories whose leading {@code '_'}
+     * or {@code '.'} is contributed by the column name, not the value, and is therefore never
+     * hidden.
+     */
+    public static void validatePartitionValueForWrite(
+            String value, boolean onlyValueInPath, @Nullable String defaultPartValue) {
+        validatePartitionValueForPath(value, onlyValueInPath);
+        if (onlyValueInPath && !value.equals(defaultPartValue) && isHiddenName(value)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Partition value '%s' cannot be written in a value-only partition "
+                                    + "layout: scans treat a directory whose name starts with '_' or "
+                                    + "'.' as hidden and would silently drop this partition and all "
+                                    + "of its data. Use a partition value that does not start with "
+                                    + "'_' or '.', or switch to the key-value partition layout.",
+                            value));
+        }
+    }
+
+    /** Validate every value of a partition spec against the write-side value-only rules. */
+    public static void validatePartitionSpecForWrite(
+            Iterable<String> partitionValues,
+            boolean onlyValueInPath,
+            @Nullable String defaultPartValue) {
+        for (String value : partitionValues) {
+            validatePartitionValueForWrite(value, onlyValueInPath, defaultPartValue);
+        }
+    }
+
+    /**
      * Build the partition-name prefix pattern pushed down to a partition-managing catalog from the
      * leading equality prefix of a partition predicate.
      *

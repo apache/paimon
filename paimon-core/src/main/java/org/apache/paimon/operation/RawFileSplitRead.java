@@ -51,6 +51,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
@@ -68,9 +69,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
+import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateReferencingFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
-import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
+import static org.apache.paimon.table.SpecialFields.ROW_TRACKING_FIELD_NAMES;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
 public class RawFileSplitRead implements SplitRead<InternalRow> {
@@ -80,10 +83,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
     private final TableSchema schema;
+    private final Function<TableSchema, List<DataField>> fieldsExtractor;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
+    private final boolean fileIndexReadIgnoreUnknownType;
     private final boolean rowTrackingEnabled;
     private final boolean nestedFieldEnabled;
     private final boolean ignoreCorruptFiles;
@@ -91,6 +96,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
+    // true if some filters are not pushed down, so TopN and limit must wait for them
+    private boolean hasResidualFilters;
     @Nullable private TopN topN;
     @Nullable private Long limit;
     @Nullable private ReadBatchSizer readBatchSizer;
@@ -100,16 +107,19 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             SchemaManager schemaManager,
             TableSchema schema,
             RowType rowType,
+            Function<TableSchema, List<DataField>> fieldsExtractor,
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
             CoreOptions coreOptions) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
+        this.fieldsExtractor = fieldsExtractor;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
         this.fileIndexReadEnabled = coreOptions.fileIndexReadEnabled();
+        this.fileIndexReadIgnoreUnknownType = coreOptions.fileIndexReadIgnoreUnknownType();
         this.ignoreCorruptFiles = coreOptions.scanIgnoreCorruptFile();
         this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
         this.rowTrackingEnabled = coreOptions.rowTrackingEnabled();
@@ -140,6 +150,13 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     public RawFileSplitRead withFilter(Predicate predicate) {
         if (predicate != null) {
             this.filters = splitAnd(predicate);
+            if (rowTrackingEnabled) {
+                // Row ids and sequence numbers may only be in the file meta, not in the file.
+                List<Predicate> pushed =
+                        excludePredicateReferencingFields(filters, ROW_TRACKING_FIELD_NAMES);
+                this.hasResidualFilters = pushed.size() < filters.size();
+                this.filters = pushed;
+            }
         }
         return this;
     }
@@ -210,7 +227,9 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
         RowType outputRowType = readRowType;
         Builder formatReaderMappingBuilder =
-                createFormatReaderMappingBuilder(outputRowType, topN, intLimit(limit));
+                hasResidualFilters
+                        ? createFormatReaderMappingBuilder(outputRowType, null, null)
+                        : createFormatReaderMappingBuilder(outputRowType, topN, intLimit(limit));
 
         for (DataFileMeta file : files) {
             suppliers.add(
@@ -226,7 +245,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
         RecordReader<InternalRow> reader = ConcatRecordReader.create(suppliers);
         // Apply the final limit after deletion vectors when no later predicate can drop rows.
-        if (topN == null && (filters == null || filters.isEmpty())) {
+        if (topN == null && !hasResidualFilters && (filters == null || filters.isEmpty())) {
             return LimitRecordReader.limit(reader, limit);
         }
         return reader;
@@ -263,14 +282,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         return new Builder(
                 formatDiscover,
                 outputRowType.getFields(),
-                schema -> {
-                    if (rowTrackingEnabled) {
-                        // maybe file has no row id and sequence number, but in manifest entry
-                        return rowTypeWithRowTracking(schema.logicalRowType(), true, true)
-                                .getFields();
-                    }
-                    return schema.fields();
-                },
+                fieldsExtractor,
                 filters,
                 pushDownTopN,
                 pushDownLimit,
@@ -338,7 +350,9 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             formatReaderMapping.getLimit(),
                             dataFilePathFactory,
                             file,
-                            deletionVector);
+                            deletionVector,
+                            0L,
+                            fileIndexReadIgnoreUnknownType);
             if (!fileIndexResult.remain()) {
                 return new EmptyFileRecordReader<>();
             }

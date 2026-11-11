@@ -27,7 +27,13 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+
+import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
  * The {@code MaxwellRecordParser} class extends the abstract {@link AbstractJsonRecordParser} and
@@ -50,12 +56,37 @@ public class MaxwellRecordParser extends AbstractJsonRecordParser {
     private static final String OP_UPDATE = "update";
     private static final String OP_DELETE = "delete";
 
+    /**
+     * Types of the DDL events Maxwell writes when {@code output_ddl} is enabled. Unless {@code
+     * ddl_kafka_topic} is set they go to the same topic as the data changes, and they carry the
+     * table definition ('def', 'old', 'sql') instead of a 'data' field.
+     */
+    private static final Set<String> DDL_TYPES =
+            new HashSet<>(
+                    Arrays.asList(
+                            "database-create",
+                            "database-alter",
+                            "database-drop",
+                            "table-create",
+                            "table-alter",
+                            "table-drop"));
+
     public MaxwellRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         super(typeMapping, computedColumns);
     }
 
     @Override
+    protected boolean isDDL() {
+        JsonNode node = root.get(FIELD_TYPE);
+        return !isNull(node) && DDL_TYPES.contains(node.asText());
+    }
+
+    @Override
     public List<RichCdcMultiplexRecord> extractRecords() {
+        if (isDDL()) {
+            return Collections.emptyList();
+        }
+
         String operation = getAndCheck(FIELD_TYPE).asText();
         JsonNode data = getAndCheck(dataField());
         List<RichCdcMultiplexRecord> records = new ArrayList<>();

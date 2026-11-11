@@ -35,6 +35,7 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 
@@ -367,6 +368,7 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
             table.new_read_builder().new_read()
         self.assertIn('fields.ts.aggregate-function', str(ctx.exception))
 
+    @pytest.mark.python_write
     def test_sequence_group_still_rejected(self):
         """Top-level sequence.field is supported, but per-field
         sequence-group is not -- it must still be rejected. The shared
@@ -409,6 +411,7 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
             [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'high'}],
         )
 
+    @pytest.mark.python_read
     def test_complex_type_sequence_field_rejected(self):
         """A complex (non-atomic) sequence field is valid in Java (handled
         via RecordComparator) but unimplemented in pypaimon's atomic-only
@@ -443,16 +446,14 @@ class SequenceFieldComparabilityUnitTest(unittest.TestCase):
     """
 
     def test_variant_sequence_field_not_comparable(self):
-        from pypaimon.read.reader.sort_merge_reader import (
-            is_comparable_seq_field)
+        from pypaimon.execution.python.read.reader.sort_merge_reader import (is_comparable_seq_field)
         from pypaimon.schema.data_types import AtomicType, DataField
 
         variant = DataField(0, 'seq', AtomicType('VARIANT'))
         self.assertFalse(is_comparable_seq_field(variant))
 
     def test_atomic_types_are_comparable(self):
-        from pypaimon.read.reader.sort_merge_reader import (
-            is_comparable_seq_field)
+        from pypaimon.execution.python.read.reader.sort_merge_reader import (is_comparable_seq_field)
         from pypaimon.schema.data_types import AtomicType, DataField
 
         for type_str in ('BIGINT', 'INT', 'TIMESTAMP(6)', 'DECIMAL(10, 2)',
@@ -462,8 +463,7 @@ class SequenceFieldComparabilityUnitTest(unittest.TestCase):
                             '{} should be comparable'.format(type_str))
 
     def test_complex_types_not_comparable(self):
-        from pypaimon.read.reader.sort_merge_reader import (
-            is_comparable_seq_field)
+        from pypaimon.execution.python.read.reader.sort_merge_reader import (is_comparable_seq_field)
         from pypaimon.schema.data_types import (
             ArrayType, AtomicType, DataField)
 

@@ -19,7 +19,6 @@ import logging
 import os
 import shutil
 import threading
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import unquote, urlparse
@@ -27,12 +26,11 @@ from urllib.parse import unquote, urlparse
 import pyarrow
 import pyarrow.fs as pafs
 
-from pypaimon.common.file_io import FileIO, create_temp_path
+from pypaimon.common.file_io import FileIO, create_temp_path, normalize_naive_datetimes
 from pypaimon.common.options import Options
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.local import PaimonLocalFileSystem
-from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
-from pypaimon.write.blob_format_writer import BlobFormatWriter
+from pypaimon.schema.data_types import PyarrowFieldParser
 
 
 def _file_uri_path(parsed, windows=None) -> str:
@@ -71,7 +69,8 @@ class LocalFileIO(FileIO):
     def create():
         return LocalFileIO()
     
-    def _to_file(self, path: str) -> Path:
+    @staticmethod
+    def _to_file(path: str) -> Path:
         parsed = urlparse(path)
         
         if parsed.scheme and len(parsed.scheme) == 1 and not parsed.netloc:
@@ -131,7 +130,7 @@ class LocalFileIO(FileIO):
         class LocalFileStatus:
             def __init__(self, file_path: Path, original_path: str):
                 stat_info = file_path.stat()
-                self.path = str(file_path.absolute())
+                self.path = file_path.absolute().as_posix()
                 self.original_path = original_path
                 self.base_name = os.path.basename(original_path)
                 self.size = stat_info.st_size if file_path.is_file() else None
@@ -358,9 +357,7 @@ class LocalFileIO(FileIO):
                 record = {}
                 for col in records_dict.keys():
                     value = records_dict[col][i]
-                    if isinstance(value, datetime) and value.tzinfo is None:
-                        value = value.replace(tzinfo=timezone.utc)
-                    record[col] = value
+                    record[col] = normalize_naive_datetimes(value)
                 yield record
         
         records = record_generator()
@@ -393,23 +390,6 @@ class LocalFileIO(FileIO):
                 kwargs['codec_compression_level'] = zstd_level
             fastavro.writer(output_stream, avro_schema, records, codec=codec, **kwargs)
     
-    def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
-        try:
-            import lance
-            from pypaimon.read.reader.lance_utils import to_lance_specified
-            file_path_for_lance, storage_options = to_lance_specified(self, path)
-            
-            writer = lance.file.LanceFileWriter(
-                file_path_for_lance, data.schema, storage_options=storage_options, **kwargs)
-            try:
-                for batch in data.to_batches():
-                    writer.write_batch(batch)
-            finally:
-                writer.close()
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
-
     def write_mosaic(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             import mosaic
@@ -419,76 +399,6 @@ class LocalFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
-
-    def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
-        try:
-            import vortex
-            from vortex._lib.io import write as vortex_write
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-
-            from pypaimon.read.reader.vortex_utils import to_vortex_specified
-            _, store_kwargs = to_vortex_specified(self, path)
-
-            if store_kwargs:
-                from vortex import store
-                vortex_store = store.from_url(path, **store_kwargs)
-                vortex_store.write(vortex.array(data))
-            else:
-                vortex_write(vortex.array(data), path)
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
-
-    def write_row(self, path: str, data: pyarrow.Table, fields=None, zstd_level: int = 1, **kwargs):
-        try:
-            from pypaimon.write.writer.format_row_writer import FormatRowWriter
-            from pypaimon.schema.data_types import PyarrowFieldParser
-
-            if fields is None:
-                fields = PyarrowFieldParser.to_paimon_schema(data.schema)
-
-            file_path = self._to_file(path)
-            parent = file_path.parent
-            if parent and not parent.exists():
-                parent.mkdir(parents=True, exist_ok=True)
-
-            with open(file_path, 'wb') as output_stream:
-                writer = FormatRowWriter(output_stream, fields, zstd_level=zstd_level)
-                writer.write_table(data)
-                writer.close()
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write row file {path}: {e}") from e
-
-    def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
-        try:
-            if data.num_columns != 1:
-                raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
-            
-            field = data.schema[0]
-            if pyarrow.types.is_large_binary(field.type):
-                fields = [DataField(0, field.name, AtomicType("BLOB"))]
-            else:
-                paimon_type = PyarrowFieldParser.to_paimon_type(field.type, field.nullable)
-                fields = [DataField(0, field.name, paimon_type)]
-            
-            records_dict = data.to_pydict()
-            num_rows = data.num_rows
-            field_name = fields[0].name
-            
-            file_path = self._to_file(path)
-            parent = file_path.parent
-            if parent and not parent.exists():
-                parent.mkdir(parents=True, exist_ok=True)
-            
-            with open(file_path, 'wb') as output_stream:
-                writer = BlobFormatWriter(output_stream)
-                for i in range(num_rows):
-                    writer.write_value(records_dict[field_name][i], fields, self.uri_reader_factory)
-                writer.close()
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
 
 
 class FuseLocalFileIO(LocalFileIO):

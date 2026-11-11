@@ -27,6 +27,8 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 
@@ -107,5 +109,76 @@ public class InternalRowPartitionComputerTest {
         // paired each column name with the other column's getter and cast executor.
         assertThat(computer.generatePartValues(binaryRow))
                 .containsExactly(entry("dt", "20240731"), entry("id", "1"));
+    }
+
+    @Test
+    public void testBinaryPartitionNamesUseStableUtf8Values() {
+        DataType[] binaryTypes = {DataTypes.BINARY(16), DataTypes.VARBINARY(16), DataTypes.BYTES()};
+        byte[][] values = {
+            null,
+            new byte[0],
+            " \t\u001c".getBytes(StandardCharsets.UTF_8),
+            "a/b=c".getBytes(StandardCharsets.UTF_8),
+            "汉字".getBytes(StandardCharsets.UTF_8),
+            "\u00a0".getBytes(StandardCharsets.UTF_8),
+            new byte[] {(byte) 0xed, (byte) 0xa0, (byte) 0x80}
+        };
+        String[] expected = {
+            "__DEFAULT_PARTITION__",
+            "__DEFAULT_PARTITION__",
+            "__DEFAULT_PARTITION__",
+            "a/b=c",
+            "汉字",
+            "\u00a0",
+            "\ufffd"
+        };
+        for (boolean legacy : new boolean[] {true, false}) {
+            for (DataType type : binaryTypes) {
+                RowType rowType =
+                        RowType.of(
+                                new DataType[] {DataTypes.INT(), type}, new String[] {"id", "p"});
+                InternalRowPartitionComputer computer =
+                        new InternalRowPartitionComputer(
+                                "__DEFAULT_PARTITION__", rowType, new String[] {"p"}, legacy);
+                for (int valueIndex = 0; valueIndex < values.length; valueIndex++) {
+                    BinaryRow row = new BinaryRow(2);
+                    BinaryRowWriter writer = new BinaryRowWriter(row);
+                    writer.writeInt(0, 123);
+                    byte[] value = values[valueIndex];
+                    if (value == null) {
+                        writer.setNullAt(1);
+                    } else {
+                        writer.writeBinary(1, value, 0, value.length);
+                    }
+                    writer.complete();
+                    // BinaryRow.getBinary creates a fresh byte[] on every call. Partition
+                    // names must depend on its contents, including after row serialization.
+                    assertThat(computer.generatePartValues(row))
+                            .containsExactly(entry("p", expected[valueIndex]));
+                    assertThat(computer.generatePartValues(row))
+                            .containsExactly(entry("p", expected[valueIndex]));
+                    assertThat(computer.generatePartValues(row.copy()))
+                            .containsExactly(entry("p", expected[valueIndex]));
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testBinaryPartitionKeepsOtherLegacyValues() {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.DATE(), DataTypes.BYTES()},
+                        new String[] {"dt", "p"});
+        InternalRowPartitionComputer computer =
+                new InternalRowPartitionComputer(
+                        "__DEFAULT_PARTITION__", rowType, new String[] {"p", "dt"}, true);
+        BinaryRow row = new BinaryRow(2);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        writer.writeInt(0, 1);
+        writer.writeBinary(1, new byte[] {65}, 0, 1);
+        writer.complete();
+        assertThat(computer.generatePartValues(row))
+                .containsExactly(entry("p", "A"), entry("dt", "1"));
     }
 }

@@ -167,6 +167,15 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testChangelogRowDeduplicateIgnoreFieldsTrim() {
+        Options conf = new Options();
+        conf.set(CoreOptions.CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS, " f1 ,f2 ,  f3  ");
+
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.changelogRowDeduplicateIgnoreFields()).containsExactly("f1", "f2", "f3");
+    }
+
+    @Test
     public void testIgnoreGlobalIndexColumnUpdateAction() {
         Options conf = new Options();
         conf.setString(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(), "IGNORE");
@@ -351,6 +360,24 @@ public class CoreOptionsTest {
         assertThatThrownBy(() -> new CoreOptions(conf).localKvDbBlockSize())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("local-kv-db.block-size");
+    }
+
+    @Test
+    public void testFileIndexInManifestThreshold() {
+        Options conf = new Options();
+        conf.set(CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.parse("0 bytes"));
+        assertThat(new CoreOptions(conf).fileIndexInManifestThreshold()).isZero();
+
+        conf.set(
+                CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.parse("2147483647 bytes"));
+        assertThat(new CoreOptions(conf).fileIndexInManifestThreshold())
+                .isEqualTo((long) Integer.MAX_VALUE);
+
+        conf.set(
+                CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.parse("2147483648 bytes"));
+        assertThatThrownBy(() -> new CoreOptions(conf).fileIndexInManifestThreshold())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD.key());
     }
 
     @Test

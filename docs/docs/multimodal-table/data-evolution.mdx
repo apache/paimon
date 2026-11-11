@@ -234,9 +234,13 @@ CALL sys.data_evolution_merge_into(
 ```
 
 Use `''` for unused optional positional arguments. Updating partition columns
-is not supported. For BLOB updates, this Flink procedure supports
-[descriptor-only](./blob-references#descriptor-only-storage) and [BLOB view](./blob-references#blob-view)
-fields; it rejects raw-data BLOB fields, including BLOB arrays and maps.
+is not supported. For BLOB updates, this Flink procedure supports managed
+raw-data fields (`BLOB`, `ARRAY<BLOB>`, and `MAP<K, BLOB>`, including updates
+to `NULL`), [descriptor-only](./blob-references#descriptor-only-storage) fields,
+and scalar [BLOB view](./blob-references#blob-view) fields. Unchanged managed
+BLOB payloads stay in the previous blob file. Video-frame fields cannot be
+updated. A managed BLOB value is inlined into the merge sort buffer, so a
+single row larger than `write-buffer-size` (256 MB by default) fails the job.
 
 ### Python API
 

@@ -77,6 +77,7 @@ import static java.util.Collections.singletonList;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode.FULL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode.MEMORY;
+import static org.apache.paimon.flink.lookup.LookupFileStoreTable.LookupStreamScanMode.COMPACT_DELTA_MONITOR;
 import static org.apache.paimon.types.DataTypes.INT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -432,6 +433,34 @@ public class LookupTableTest extends TableTestBase {
         table.refresh(singletonList(row(1, 22, 222)).iterator());
         List<InternalRow> result = table.get(row(22));
         assertThat(result.stream().map(row -> row.getInt(0))).contains(1);
+    }
+
+    @TestTemplate
+    public void testSecKeyTableDeleteWithoutSecKey() throws Exception {
+        FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        null,
+                        tempDir.toFile(),
+                        singletonList("f1"),
+                        null);
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        table.refresh(singletonList(row(1, 11, 111)).iterator());
+        assertThat(table.get(row(11))).hasSize(1);
+
+        // a delete record that carries only the key
+        table.refresh(singletonList(row(RowKind.DELETE, 1, null, 222)).iterator());
+        assertThat(table.get(row(11))).isEmpty();
+
+        // reinsert the key with another sec key
+        table.refresh(singletonList(row(1, 22, 333)).iterator());
+        assertThat(table.get(row(11))).isEmpty();
+        assertThat(table.get(row(22)).stream().map(row -> row.getInt(2))).containsExactly(333);
     }
 
     @TestTemplate
@@ -1066,6 +1095,23 @@ public class LookupTableTest extends TableTestBase {
         result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, -1, 111);
+    }
+
+    @TestTemplate
+    public void testCopyWithoutQueryAuthPreservesLookupScanMode() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.QUERY_AUTH_ENABLED, true);
+        FileStoreTable storeTable = createTable(singletonList("f0"), options);
+        LookupFileStoreTable lookupTable =
+                new LookupFileStoreTable(storeTable, COMPACT_DELTA_MONITOR);
+        FileStoreTable copied = lookupTable.copyWithoutQueryAuth();
+
+        assertThat(copied).isInstanceOf(LookupFileStoreTable.class);
+        assertThat(copied.coreOptions().queryAuthEnabled()).isFalse();
+        assertThat(copied.newRead()).isInstanceOf(LookupCompactDiffRead.class);
+        assertThat(copied.newStreamScan()).isInstanceOf(LookupDataTableScan.class);
+        assertThat(lookupTable.coreOptions().queryAuthEnabled()).isTrue();
     }
 
     @TestTemplate

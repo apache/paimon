@@ -30,6 +30,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.WriterBufferMetric;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -161,9 +162,10 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
 
     @Override
     public void close() throws Exception {
-        super.close();
-        if (this.writerBufferMetric != null) {
-            this.writerBufferMetric.close();
+        if (writerBufferMetric == null) {
+            super.close();
+        } else {
+            IOUtils.closeAll(super::close, writerBufferMetric::close);
         }
     }
 }

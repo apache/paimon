@@ -441,7 +441,7 @@ public class GenericIndexTopoBuilder {
             long startTime = System.currentTimeMillis();
 
             GlobalIndexWriter indexWriter =
-                    createIndexWriter(table, indexType, indexField, extraFields, mergedOptions);
+                    createIndexWriter(table, indexType, indexedFields, mergedOptions);
 
             try {
                 long rowsSeen = 0;

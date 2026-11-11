@@ -29,6 +29,7 @@ from packaging.version import parse
 import ray
 from ray.data.datasource import Datasource
 
+from pypaimon.read.read_support import close_read_source
 from pypaimon.read.datasource.split_provider import SplitProvider
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import PyarrowFieldParser
@@ -124,15 +125,21 @@ class RayDatasource(Datasource):
         table = self._split_provider.table()
         predicate = self._split_provider.predicate()
         read_type = self._split_provider.read_type()
-        nested_name_paths = self._split_provider.nested_name_paths()
+        output_projection = self._split_provider.output_projection()
         splits = self._split_provider.splits()
         limit = self._split_provider.limit()
+        if per_task_row_limit is not None:
+            limit = per_task_row_limit if limit is None else min(limit, per_task_row_limit)
         include_row_kind = self._split_provider.include_row_kind()
         if not splits:
             return []
 
         if self._schema is None:
             self._schema = PyarrowFieldParser.from_paimon_schema(read_type)
+            if output_projection is not None:
+                from pypaimon.read.table_read import TableRead
+                self._schema = TableRead._apply_output_projection_to_schema(
+                    self._schema, output_projection)
             if include_row_kind:
                 from pypaimon.read.table_read import TableRead
                 self._schema = TableRead._add_row_kind_to_schema(self._schema)
@@ -153,36 +160,39 @@ class RayDatasource(Datasource):
                 read_type=read_type,
                 schema=schema,
                 limit=limit,
-                nested_name_paths=nested_name_paths,
+                output_projection=output_projection,
                 include_row_kind=include_row_kind,
         ) -> Iterable[pyarrow.Table]:
             """Read function that will be executed by Ray workers."""
             from pypaimon.read.table_read import TableRead
-            # nested_name_paths must be forwarded so a nested-leaf projection
-            # widens to the parent struct and extracts the leaves; without it
-            # the worker treats the flattened leaf names as missing top-level
-            # columns and reads every projected leaf as NULL.
             worker_table_read = TableRead(
                 table, predicate, read_type, limit=limit,
-                nested_name_paths=nested_name_paths,
+                output_projection=output_projection,
                 include_row_kind=include_row_kind)
 
             batch_reader = worker_table_read.to_arrow_batch_reader(splits)
-            has_data = False
-            for batch in iter(batch_reader.read_next_batch, None):
-                if batch.num_rows == 0:
-                    continue
-                has_data = True
-                table = pyarrow.Table.from_batches([batch])
-                if table.schema != schema:
-                    table = table.cast(schema)
-                yield table
+            failure = None
+            try:
+                has_data = False
+                for batch in iter(batch_reader.read_next_batch, None):
+                    if batch.num_rows == 0:
+                        continue
+                    has_data = True
+                    table = pyarrow.Table.from_batches([batch])
+                    if table.schema != schema:
+                        table = table.cast(schema)
+                    yield table
 
-            if not has_data:
-                yield pyarrow.Table.from_arrays(
-                    [pyarrow.array([], type=field.type) for field in schema],
-                    schema=schema
-                )
+                if not has_data:
+                    yield pyarrow.Table.from_arrays(
+                        [pyarrow.array([], type=field.type) for field in schema],
+                        schema=schema
+                    )
+            except BaseException as error:
+                failure = error
+                raise
+            finally:
+                close_read_source(batch_reader, failure)
 
         # Use partial to create read function without capturing self
         get_read_task = partial(
@@ -192,7 +202,7 @@ class RayDatasource(Datasource):
             read_type=read_type,
             schema=schema,
             limit=limit,
-            nested_name_paths=nested_name_paths,
+            output_projection=output_projection,
             include_row_kind=include_row_kind,
         )
 
@@ -231,6 +241,8 @@ class RayDatasource(Datasource):
                 num_rows = None  # Can't estimate with predicate filtering
             else:
                 num_rows = total_rows
+            if num_rows is not None and limit is not None:
+                num_rows = min(num_rows, limit)
             size_bytes = total_size if total_size > 0 else None
 
             metadata_kwargs = {

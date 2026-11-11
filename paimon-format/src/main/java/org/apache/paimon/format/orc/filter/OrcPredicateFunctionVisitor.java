@@ -185,6 +185,11 @@ public class OrcPredicateFunctionVisitor
         if (colType == null) {
             return Optional.empty();
         }
+        for (Object literal : literals) {
+            if (signedZeroPushdown(colType, literal)) {
+                return Optional.empty();
+            }
+        }
 
         Object[] orcLiterals = new Object[literals.size()];
         for (int i = 0; i < literals.size(); i++) {
@@ -238,7 +243,7 @@ public class OrcPredicateFunctionVisitor
             Object literal,
             TriFunction<String, PredicateLeaf.Type, Serializable, OrcFilters.Predicate> func) {
         PredicateLeaf.Type litType = toOrcType(fieldRef.type());
-        if (litType == null) {
+        if (litType == null || signedZeroPushdown(litType, literal)) {
             return Optional.empty();
         }
         // fetch literal and ensure it is serializable
@@ -247,6 +252,27 @@ public class OrcPredicateFunctionVisitor
         return orcObj instanceof Serializable
                 ? Optional.of(func.apply(fieldRef.name(), litType, (Serializable) orcObj))
                 : Optional.empty();
+    }
+
+    /**
+     * ORC SearchArgument uses primitive comparisons, so {@code -0.0} and {@code +0.0} compare equal
+     * and a row group can be dropped while it still holds the other zero. Leave the predicate for
+     * the engine.
+     */
+    private static boolean signedZeroPushdown(PredicateLeaf.Type litType, Object literal) {
+        if (litType != PredicateLeaf.Type.FLOAT || literal == null) {
+            return false;
+        }
+        if (literal instanceof Double) {
+            long bits = Double.doubleToRawLongBits((Double) literal);
+            return bits == Double.doubleToRawLongBits(0.0d)
+                    || bits == Double.doubleToRawLongBits(-0.0d);
+        }
+        if (literal instanceof Float) {
+            int bits = Float.floatToRawIntBits((Float) literal);
+            return bits == Float.floatToRawIntBits(0.0f) || bits == Float.floatToRawIntBits(-0.0f);
+        }
+        return false;
     }
 
     @Nullable

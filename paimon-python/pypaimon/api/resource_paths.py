@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import urllib.parse
 from typing import Optional
 
 from pypaimon.api.rest_util import RESTUtil
@@ -26,16 +27,23 @@ class ResourcePaths:
     V1 = "v1"
     DATABASES = "databases"
     TABLES = "tables"
+    ID = "id"
     TABLE_DETAILS = "table-details"
     PARTITIONS = "partitions"
     FUNCTIONS = "functions"
     FUNCTION_DETAILS = "function-details"
+    MODELS = "models"
     TAGS = "tags"
     BRANCHES = "branches"
-    RENAME = "rename"
     FORWARD = "forward"
+    PERMISSIONS = "permissions"
+    POLICIES = "policies"
 
     def __init__(self, prefix: str):
+        # Java encodes the prefix once with URLEncoder, so it stays one path segment. '~' stays raw:
+        # requests un-escapes %7E before sending, and the signature must cover the path sent.
+        if prefix:
+            prefix = urllib.parse.quote_plus(prefix, safe="*~", errors="replace")
         self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
 
     @classmethod
@@ -64,8 +72,15 @@ class ResourcePaths:
         return ("{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                 self.TABLES, RESTUtil.encode_string(table_name)))
 
+    def table_by_id(self, table_id: str) -> str:
+        # Keep '~' raw, as in table_details.
+        table_id = urllib.parse.quote_plus(table_id, safe="*~", errors="replace")
+        return "{}/{}/{}/{}".format(self.base_path, self.TABLES, self.ID, table_id)
+
     def table_details(self, database_name: str) -> str:
-        return "{}/{}/{}/{}".format(self.base_path, self.DATABASES, database_name, self.TABLE_DETAILS)
+        database_name = urllib.parse.quote_plus(database_name, safe="*~", errors="replace")
+        return "{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, database_name, self.TABLE_DETAILS)
 
     def table_token(self, database_name: str, table_name: str) -> str:
         return ("{}/{}/{}/{}/{}/token".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
@@ -104,6 +119,19 @@ class ResourcePaths:
         return "{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                                        self.FUNCTIONS, RESTUtil.encode_string(function_name))
 
+    def models(self, database_name: str) -> str:
+        return "{}/{}/{}/{}".format(
+            self.base_path,
+            self.DATABASES,
+            RESTUtil.encode_string(database_name),
+            self.MODELS,
+        )
+
+    def model(self, database_name: str, model_name: str) -> str:
+        return "{}/{}".format(
+            self.models(database_name), RESTUtil.encode_string(model_name)
+        )
+
     def tags(self, database_name: str, table_name: str) -> str:
         return "{}/{}/{}/{}/{}/{}".format(
             self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
@@ -126,10 +154,6 @@ class ResourcePaths:
             self.TABLES, RESTUtil.encode_string(table_name), self.BRANCHES,
             RESTUtil.encode_string(branch_name))
 
-    def rename_branch(self, database_name: str, table_name: str, branch_name: str) -> str:
-        return "{}/{}".format(
-            self.branch(database_name, table_name, branch_name), self.RENAME)
-
     def forward_branch(self, database_name: str, table_name: str, branch_name: str) -> str:
         return "{}/{}".format(
             self.branch(database_name, table_name, branch_name), self.FORWARD)
@@ -139,3 +163,19 @@ class ResourcePaths:
             self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
             self.TABLES, RESTUtil.encode_string(table_name)
         )
+
+    def permissions(self) -> str:
+        return "{}/{}".format(self.base_path, self.PERMISSIONS)
+
+    def grant_permission(self) -> str:
+        return "{}/grant".format(self.permissions())
+
+    def revoke_permission(self) -> str:
+        return "{}/revoke".format(self.permissions())
+
+    def policies(self, resource) -> str:
+        resource.validate_policy_attachment()
+        return "{}/{}".format(self.table(resource.get_database(), resource.get_table()), self.POLICIES)
+
+    def drop_policy(self, resource) -> str:
+        return "{}/drop".format(self.policies(resource))

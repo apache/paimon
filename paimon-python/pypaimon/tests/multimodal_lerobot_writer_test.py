@@ -31,9 +31,9 @@ import pypaimon.multimodal as pmm
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
 from pypaimon.multimodal.lerobot.metadata import (
     _append_arrow,
-    _restore_pandas_metadata,
 )
 from pypaimon.multimodal.lerobot.writer import _read_arrow
+from pypaimon.multimodal.table import _target_schema
 
 try:
     from PIL import Image
@@ -52,6 +52,10 @@ def _catalog_rows(connection, name):
     builder = table.new_read_builder()
     return builder.new_read().to_arrow(
         builder.new_scan().plan().splits()).to_pylist()
+
+
+def _dataset_row(connection, name):
+    return _catalog_rows(connection, name + "_datasets")[0]
 
 
 class PaimonLeRobotWriterTest(unittest.TestCase):
@@ -92,15 +96,16 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         frames = self.connection.get_table("table_group")
         self.assertNotIn("task", [field.name for field in frames.raw_table.fields])
         options = frames.raw_table.table_schema.options
-        self.assertEqual("default.table_group__episodes", options[
+        self.assertEqual("default.table_group_episodes", options[
             "pypaimon.lerobot.episodes-table"])
-        self.assertEqual("default.table_group__tasks", options[
-            "pypaimon.lerobot.tasks-table"])
-        self.assertEqual("default.table_group__info", options[
-            "pypaimon.lerobot.info-table"])
+        self.assertEqual("default.table_group_datasets", options[
+            "pypaimon.lerobot.datasets-table"])
+        self.assertEqual(
+            {"table_group", "table_group_episodes", "table_group_datasets"},
+            set(self.connection.catalog.list_tables("default")))
 
         episode = _catalog_rows(
-            self.connection, "table_group__episodes")[0]
+            self.connection, "table_group_episodes")[0]
         self.assertEqual({
             "episode_index": 0,
             "dataset_from_index": 0,
@@ -113,11 +118,8 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual([{
             "task_index": 0,
             "task": "pick",
-        }], _catalog_rows(self.connection, "table_group__tasks"))
-        info = {
-            row["key"]: json.loads(row["value"])
-            for row in _catalog_rows(self.connection, "table_group__info")
-        }
+        }], _dataset_row(self.connection, "table_group")["tasks"])
+        info = json.loads(_dataset_row(self.connection, "table_group")["info"])
         self.assertEqual(10, info["fps"])
         self.assertEqual(1, info["total_frames"])
         self.assertEqual(1, info["total_episodes"])
@@ -125,7 +127,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual({"train": "0:1"}, info["splits"])
         self.assertIn("action", info["features"])
         self.assertEqual(
-            {"frames", "episodes", "tasks", "info", "stats"},
+            {"frames", "episodes", "datasets"},
             set(self.connection.create_lerobot_tag(
                 "table_group", "training")),
         )
@@ -174,23 +176,19 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual([
             {"subtask_index": 0, "subtask": "approach"},
             {"subtask_index": 1, "subtask": "grasp"},
-        ], _catalog_rows(self.connection, "with_subtasks__subtasks"))
+        ], _dataset_row(self.connection, "with_subtasks")["subtasks"])
         for component, expected in (
                 ("tasks", ["pick"]),
                 ("subtasks", ["approach", "grasp"])):
-            table = self.connection.catalog.get_table(
-                self.connection._identifier(
-                    "with_subtasks__%s" % component))
-            data = _restore_pandas_metadata(
-                table, _read_arrow(table)).to_pandas()
-            self.assertEqual(expected, data.index.tolist())
+            labels = _dataset_row(self.connection, "with_subtasks")[component]
+            self.assertEqual(expected, [row[component[:-1]] for row in labels])
         self.assertEqual(
-            "default.with_subtasks__subtasks",
+            "default.with_subtasks_datasets",
             frames.raw_table.table_schema.options[
-                "pypaimon.lerobot.subtasks-table"],
+                "pypaimon.lerobot.datasets-table"],
         )
         self.assertEqual(
-            {"frames", "episodes", "tasks", "info", "stats", "subtasks"},
+            {"frames", "episodes", "datasets"},
             set(self.connection.create_lerobot_tag(
                 "with_subtasks", "training")),
         )
@@ -295,7 +293,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
 
         self.assertIsNone(writer.finalize())
         self.assertEqual(
-            1, table.raw_table.snapshot_manager().get_latest_snapshot().id)
+            2, table.raw_table.snapshot_manager().get_latest_snapshot().id)
 
     def test_existing_table_resumes_global_and_task_indices(self):
         features = {
@@ -315,8 +313,10 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         first.save_episode()
         first.finalize()
 
-        snapshot = self.connection.get_table(
-            "resume").raw_table.snapshot_manager().get_latest_snapshot()
+        manager = self.connection.get_table(
+            "resume").raw_table.snapshot_manager()
+        self.assertEqual(2, manager.get_latest_snapshot().id)
+        snapshot = manager.get_snapshot_by_id(1)
         self.assertEqual("1", snapshot.properties[
             "pypaimon.lerobot.state-version"])
         with patch(
@@ -365,9 +365,10 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         writer.save_episode()
         writer.finalize()
 
-        snapshot = self.connection.get_table(
-            "snapshot_state").raw_table.snapshot_manager() \
-            .get_latest_snapshot()
+        manager = self.connection.get_table(
+            "snapshot_state").raw_table.snapshot_manager()
+        self.assertEqual(2, manager.get_latest_snapshot().id)
+        snapshot = manager.get_snapshot_by_id(1)
         self.assertEqual("1", snapshot.properties[
             "pypaimon.lerobot.state-version"])
         self.assertNotIn(
@@ -383,12 +384,12 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         }
         PaimonLeRobotWriter(
             self.connection, "inconsistent", fps=10, features=features)
-        tasks = self.connection.catalog.get_table(
-            self.connection._identifier("inconsistent__tasks"))
-        _append_arrow(tasks, pa.Table.from_pylist([{
-            "task_index": 0,
-            "task": "pick",
-        }], schema=_read_arrow(tasks).schema))
+        datasets = self.connection.catalog.get_table(
+            self.connection._identifier("inconsistent_datasets"))
+        _append_arrow(datasets, pa.Table.from_pylist([{
+            "index": 0, "name": None, "info": "{}", "tasks": [],
+            "subtasks": None, "stats": "{}",
+        }], schema=_target_schema(datasets)))
 
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             PaimonLeRobotWriter(
@@ -520,7 +521,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         })
         self.assertIsNone(writer.save_episode())
         self.assertEqual(
-            1, table.raw_table.snapshot_manager().get_latest_snapshot().id)
+            2, table.raw_table.snapshot_manager().get_latest_snapshot().id)
 
         rows = table.scan().select([
             "episode_index",
@@ -540,7 +541,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual([
             {"task_index": 0, "task": "pick"},
             {"task_index": 1, "task": "place"},
-        ], _catalog_rows(self.connection, "robot_data__tasks"))
+        ], _dataset_row(self.connection, "robot_data")["tasks"])
 
     def test_multiple_flushes_append_rows_and_replace_info(self):
         writer = PaimonLeRobotWriter(
@@ -565,16 +566,10 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         writer.finalize()
 
         self.assertEqual(2, len(_catalog_rows(
-            self.connection, "multiple_flushes__episodes")))
-        self.assertEqual(2, len(_catalog_rows(
-            self.connection, "multiple_flushes__tasks")))
-        info_rows = _catalog_rows(self.connection, "multiple_flushes__info")
-        self.assertEqual(len({row["key"] for row in info_rows}),
-                         len(info_rows))
-        info = {
-            row["key"]: json.loads(row["value"])
-            for row in info_rows
-        }
+            self.connection, "multiple_flushes_episodes")))
+        self.assertEqual(2, len(_dataset_row(
+            self.connection, "multiple_flushes")["tasks"]))
+        info = json.loads(_dataset_row(self.connection, "multiple_flushes")["info"])
         self.assertEqual(2, info["total_frames"])
         self.assertEqual(2, info["total_episodes"])
         self.assertEqual(2, info["total_tasks"])
@@ -609,9 +604,9 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
 
         options = self.connection.get_table(
             "stats").raw_table.table_schema.options
-        self.assertEqual("default.stats__stats", options[
-            "pypaimon.lerobot.stats-table"])
-        episodes = _catalog_rows(self.connection, "stats__episodes")
+        self.assertEqual("default.stats_datasets", options[
+            "pypaimon.lerobot.datasets-table"])
+        episodes = _catalog_rows(self.connection, "stats_episodes")
         native_episodes = [
             compute_episode_stats(
                 {"action": np.asarray(values, dtype=np.float32)},
@@ -634,10 +629,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
             },
         )
 
-        stats = {
-            row["key"]: json.loads(row["value"])
-            for row in _catalog_rows(self.connection, "stats__stats")
-        }
+        stats = json.loads(_dataset_row(self.connection, "stats")["stats"])
         expected_stats = aggregate_stats(native_episodes)["action"]
         for stat, expected in expected_stats.items():
             np.testing.assert_allclose(expected, stats["action"][stat])
@@ -700,7 +692,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         writer.finalize()
 
         episodes = self.connection.catalog.get_table(
-            self.connection._identifier("projected_metadata__episodes"))
+            self.connection._identifier("projected_metadata_episodes"))
         projected = _read_arrow(
             episodes, ["episode_index", "stats/index/count"])
         self.assertEqual(
@@ -738,20 +730,35 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         image = Image.open(io.BytesIO(blobs["observation.image"][0]))
         self.assertEqual((5, 4), image.size)
         self.assertEqual((73, 73, 73), image.getpixel((0, 0)))
-        episode = _catalog_rows(self.connection, "images__episodes")[0]
+        episode = _catalog_rows(self.connection, "images_episodes")[0]
         np.testing.assert_allclose(
             np.full((3, 1, 1), 73 / 255.0),
             episode["stats/observation.image/mean"],
         )
-        stats = {
-            row["key"]: json.loads(row["value"])
-            for row in _catalog_rows(self.connection, "images__stats")
-        }
+        stats = json.loads(_dataset_row(self.connection, "images")["stats"])
         np.testing.assert_allclose(
             np.full((3, 1, 1), 73 / 255.0),
             stats["observation.image"]["mean"],
         )
         self.assertEqual([1], stats["observation.image"]["count"])
+
+        writer.add_frame({
+            "observation.image": np.full((4, 5, 3), 91, dtype=np.uint8),
+            "task": "inspect",
+        })
+        writer.save_episode()
+        writer.finalize()
+        self.connection.create_lerobot_tag("images", "training")
+        reader = pmm.PaimonLeRobotDataset(
+            table, tag_name="training", return_uint8=True)
+        try:
+            sample = reader[0]
+            self.assertEqual("inspect", sample["task"])
+            self.assertEqual((3, 4, 5), tuple(sample["observation.image"].shape))
+            self.assertEqual(73, int(sample["observation.image"][0, 0, 0]))
+            self.assertEqual(91, int(reader[1]["observation.image"][0, 0, 0]))
+        finally:
+            reader.close()
 
     @unittest.skipUnless(Image is not None, "Pillow is required for image tests")
     def test_writes_native_hwc_image_frame_as_png_blob(self):
@@ -817,6 +824,85 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
                          rows[0]["observation.matrix"])
         self.assertEqual([True, False], rows[0]["observation.flags"])
 
+    def test_multiframe_boolean_statistics_preserve_extrema(self):
+        for shape in ((2,), (2, 2)):
+            with self.subTest(shape=shape):
+                name = "bool_stats_%d" % len(shape)
+                writer = PaimonLeRobotWriter(
+                    self.connection, name, fps=10, features={
+                        "observation.flags": {
+                            "dtype": "bool", "shape": shape, "names": None,
+                        },
+                    })
+                first = np.array([True, False] * (int(np.prod(shape)) // 2),
+                                 dtype=np.bool_).reshape(shape)
+                for flags in (first, ~first):
+                    writer.add_frame({
+                        "observation.flags": flags, "task": "inspect",
+                    })
+                writer.save_episode()
+                writer.finalize()
+
+                rows = self.connection.get_table(name).scan().select([
+                    "index", "observation.flags"
+                ]).to_arrow().sort_by("index").to_pylist()
+                self.assertEqual(
+                    [first.tolist(), (~first).tolist()],
+                    [row["observation.flags"] for row in rows])
+                episode = _catalog_rows(
+                    self.connection, name + "_episodes")[0]
+                stats = json.loads(_dataset_row(
+                    self.connection, name)["stats"])["observation.flags"]
+                for stat, expected in (("min", np.zeros(shape, dtype=bool)),
+                                       ("max", np.ones(shape, dtype=bool))):
+                    value = episode["stats/observation.flags/" + stat]
+                    self.assertEqual(expected.tolist(), value)
+                    self.assertEqual(np.dtype(bool), np.asarray(value).dtype)
+                    self.assertEqual(expected.tolist(), stats[stat])
+                    self.assertEqual(
+                        np.dtype(bool), np.asarray(stats[stat]).dtype)
+
+    def test_multiframe_int64_statistics_preserve_extrema(self):
+        cases = (
+            ("precision", (2 ** 53 + 1, 2 ** 53 + 3)),
+            ("upper_bound", (2 ** 63 - 2, 2 ** 63 - 1)),
+        )
+        for name, values in cases:
+            with self.subTest(name=name):
+                table_name = "int64_stats_" + name
+                writer = PaimonLeRobotWriter(
+                    self.connection, table_name, fps=10, features={
+                        "observation.counter": {
+                            "dtype": "int64", "shape": (1,), "names": None,
+                        },
+                    })
+                for value in values:
+                    writer.add_frame({
+                        "observation.counter": np.array([value], dtype=np.int64),
+                        "task": "inspect",
+                    })
+                writer.save_episode()
+                writer.finalize()
+
+                rows = self.connection.get_table(table_name).scan().select([
+                    "index", "observation.counter"
+                ]).to_arrow().sort_by("index").to_pylist()
+                self.assertEqual(
+                    list(values),
+                    [row["observation.counter"] for row in rows])
+                episode = _catalog_rows(
+                    self.connection, table_name + "_episodes")[0]
+                stats = json.loads(_dataset_row(
+                    self.connection, table_name)["stats"])["observation.counter"]
+                for stat, expected in (("min", min(values)),
+                                       ("max", max(values))):
+                    episode_value = episode["stats/observation.counter/" + stat][0]
+                    stats_value = stats[stat][0]
+                    self.assertEqual(expected, episode_value)
+                    self.assertEqual(expected, stats_value)
+                    self.assertIsInstance(episode_value, int)
+                    self.assertIsInstance(stats_value, int)
+
     def test_discards_rerecorded_episode_and_finalizes_tail_batch(self):
         writer = PaimonLeRobotWriter(
             self.connection,
@@ -874,7 +960,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual([
             {"task_index": 0, "task": "keep"},
             {"task_index": 1, "task": "also keep"},
-        ], _catalog_rows(self.connection, "rerecord__tasks"))
+        ], _dataset_row(self.connection, "rerecord")["tasks"])
         with self.assertRaisesRegex(RuntimeError, "after finalize"):
             writer.add_frame({
                 "action": np.array([2.0], dtype=np.float32),

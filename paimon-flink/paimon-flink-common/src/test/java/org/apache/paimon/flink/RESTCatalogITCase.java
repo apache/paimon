@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.partition.Partition;
@@ -35,7 +36,10 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.RESTToken;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -56,6 +60,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -63,6 +70,39 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** ITCase for REST catalog. */
 class RESTCatalogITCase extends RESTCatalogITCaseBase {
+
+    @Test
+    void testMetadataOperationsWithInvalidOptions() throws Exception {
+        Identifier identifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
+        org.apache.paimon.catalog.Catalog catalog =
+                ((FlinkCatalog) tEnv.getCatalog("PAIMON").get()).catalog();
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        TableSchema schema = table.schema();
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "missing");
+        restCatalogServer.setTableSchema(identifier, schema.copy(options));
+        catalog.invalidateTable(identifier);
+
+        String name = DATABASE_NAME + "." + TABLE_NAME;
+        assertThat(sql("SHOW CREATE TABLE " + name).toString())
+                .contains("record-level.time-field", "missing");
+        assertThatThrownBy(() -> batchSql("SELECT * FROM " + name))
+                .hasStackTraceContaining("missing");
+        assertThatThrownBy(() -> batchSql("INSERT INTO " + name + " VALUES ('1', 11)"))
+                .hasStackTraceContaining("missing");
+
+        sql("ALTER TABLE " + name + " RESET ('record-level.time-field')");
+        batchSql("INSERT INTO " + name + " VALUES ('1', 11)");
+        assertThat(batchSql("SELECT * FROM " + name)).containsExactly(Row.of("1", 11.0D));
+
+        TableSchema repaired = ((FileStoreTable) catalog.getTable(identifier)).schema();
+        options = new HashMap<>(repaired.options());
+        options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "missing");
+        restCatalogServer.setTableSchema(identifier, repaired.copy(options));
+        catalog.invalidateTable(identifier);
+        sql("DROP TABLE " + name);
+        assertThat(catalog.listTables(DATABASE_NAME)).doesNotContain(TABLE_NAME);
+    }
 
     @Test
     void testCreateTable() {
@@ -102,6 +142,7 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of("1", 11.0D), Row.of("2", 22.0D));
     }
 
+    @Test
     public void testExpiredDataToken() {
         Identifier identifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
         RESTToken expiredDataToken =
@@ -714,6 +755,63 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                                 String.format(
                                         "SELECT COUNT(*) FROM %s.%s", DATABASE_NAME, filterTable)))
                 .containsExactlyInAnyOrder(Row.of(4L));
+    }
+
+    @Test
+    public void testAlignedStreamingReadWithRowFilterOnEmptyTable() throws Exception {
+        checkAlignedStreamingReadWithRowFilter("aligned_row_filter_empty", false);
+    }
+
+    @Test
+    public void testAlignedStreamingReadWithRowFilter() throws Exception {
+        checkAlignedStreamingReadWithRowFilter("aligned_row_filter", true);
+    }
+
+    private void checkAlignedStreamingReadWithRowFilter(String table, boolean writeFirst)
+            throws Exception {
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (id INT, name STRING) WITH ('query-auth.enabled' = 'true')",
+                        DATABASE_NAME, table));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, table),
+                Collections.singletonList(
+                        LeafPredicate.of(
+                                new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                                GreaterThan.INSTANCE,
+                                Collections.singletonList(0))));
+        String insert = "INSERT INTO %s.%s VALUES (%s)";
+        if (writeFirst) {
+            batchSql(String.format(insert, DATABASE_NAME, table, "1, 'a'"));
+        }
+
+        BlockingIterator<Row, Row> iter =
+                streamSqlBlockIter(
+                        "SELECT * FROM %s.%s /*+ OPTIONS('source.checkpoint-align.enabled' = 'true', "
+                                + "'continuous.discovery-interval' = '100 ms') */",
+                        DATABASE_NAME, table);
+        CompletableFuture<List<Row>> result =
+                CompletableFuture.supplyAsync(
+                        () -> {
+                            try {
+                                return iter.collect(1, 60, TimeUnit.SECONDS);
+                            } catch (Exception e) {
+                                throw new CompletionException(e);
+                            }
+                        });
+        try {
+            if (!writeFirst) {
+                batchSql(String.format(insert, DATABASE_NAME, table, "1, 'a'"));
+            }
+            // an aligned checkpoint waits for a new snapshot, so keep committing rows the row
+            // filter drops
+            while (!result.isDone()) {
+                batchSql(String.format(insert, DATABASE_NAME, table, "0, 'z'"));
+            }
+            assertThat(result.get()).containsExactly(Row.of(1, "a"));
+        } finally {
+            iter.close();
+        }
     }
 
     @Test

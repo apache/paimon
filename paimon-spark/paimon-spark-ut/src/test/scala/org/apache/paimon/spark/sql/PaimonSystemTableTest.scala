@@ -125,4 +125,16 @@ class PaimonSystemTableTest extends PaimonSparkTestBase {
       Seq(Row("+I", Array(3)), Row("+I", Array(2)))
     )
   }
+
+  test("system table: snapshots and schemas tables with out-of-range id filter") {
+    sql("CREATE TABLE T (a INT, b STRING)")
+    sql("INSERT INTO T VALUES (1, 'a')")
+    sql("INSERT INTO T VALUES (2, 'b')")
+
+    checkAnswer(sql("SELECT snapshot_id FROM `T$snapshots` WHERE snapshot_id > 2"), Nil)
+    checkAnswer(sql("SELECT schema_id FROM `T$schemas` WHERE schema_id > 0"), Nil)
+
+    sql("CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1, retain_min => 1)")
+    checkAnswer(sql("SELECT snapshot_id FROM `T$snapshots` WHERE snapshot_id < 2"), Nil)
+  }
 }

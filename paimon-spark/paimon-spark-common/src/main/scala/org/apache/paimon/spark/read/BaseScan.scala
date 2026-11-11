@@ -21,7 +21,7 @@ package org.apache.paimon.spark.read
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{FullTextSearch, HybridSearch, Predicate, TopN, VectorSearch}
-import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonNumSplitMetric, PaimonPartitionSizeMetric, PaimonReadBatchTimeMetric, PaimonResultedTableFilesMetric, PaimonResultedTableFilesTaskMetric, SparkTypeUtils}
+import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonNumSplitMetric, PaimonPartitionSizeMetric, PaimonReadBatchTimeMetric, PaimonResultedTableFilesMetric, PaimonResultedTableFilesTaskMetric, PhysicalBucketFilter, SparkTypeUtils}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.{OptionUtils, SplitUtils}
@@ -29,6 +29,7 @@ import org.apache.paimon.table.{SpecialFields, Table}
 import org.apache.paimon.table.BlobDescriptorReadUtils
 import org.apache.paimon.table.source.{ReadBuilder, Split}
 import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.TypeUtils
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
@@ -49,6 +50,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   // Push down
   def pushedPartitionFilters: Seq[PartitionPredicate]
   def pushedDataFilters: Seq[Predicate]
+  def pushedBucketFilters: Seq[Predicate] = Seq.empty
   def pushedLimit: Option[Int] = None
   def pushedTopN: Option[TopN] = None
   def pushedVectorSearch: Option[VectorSearch] = None
@@ -119,22 +121,40 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     }
   }
 
+  // Metadata fields are user-visible dependencies: read and authorize only the requested
+  // partition fields, including when no ordinary columns are projected.
+  private lazy val readRowTypeWithPartitions: RowType = {
+    val partitionFields = metadataFields
+      .filter(_.name == PARTITION_COLUMN)
+      .flatMap(_.dataType.asInstanceOf[StructType].fieldNames)
+      .toSet
+    TypeUtils.withMissingFields(tableRowType, readTableRowType, partitionFields.asJava)
+  }
+
   lazy val readBuilder: ReadBuilder = {
-    val _readBuilder = table.newReadBuilder().withReadType(readTableRowType)
+    val _readBuilder = table.newReadBuilder().withReadType(readRowTypeWithPartitions)
     if (pushedPartitionFilters.nonEmpty) {
       _readBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
     }
     if (pushedDataFilters.nonEmpty) {
       _readBuilder.withFilter(pushedDataFilters.asJava)
     }
+    PhysicalBucketFilter.push(
+      _readBuilder,
+      pushedBucketFilters,
+      Option(coreOptions.scanBucket()).map(_.intValue()))
     pushedLimit.foreach(_readBuilder.withLimit)
     pushedTopN.foreach(_readBuilder.withTopN)
     _readBuilder.dropStats()
   }
 
   override def readSchema(): StructType = {
-    val _readSchema = StructType(
-      SparkTypeUtils.fromPaimonRowType(readTableRowType).fields ++ metadataFields)
+    // Preserve Spark's nullability for ordinary columns: a partition column declared NOT NULL
+    // in storage can be nullable in the relation schema because of a column mask.
+    val dataFields = SparkTypeUtils.fromPaimonRowType(readTableRowType).fields.map {
+      field => field.copy(nullable = requiredSchema(field.name).nullable)
+    }
+    val _readSchema = StructType(dataFields ++ metadataFields)
     if (!_readSchema.equals(requiredSchema)) {
       logInfo(
         s"Actual readSchema: ${_readSchema} is not equal to spark pushed requiredSchema: $requiredSchema")
@@ -143,20 +163,31 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   }
 
   override def toBatch: Batch = {
-    val metadataColumns = metadataFields.map(
-      field => PaimonMetadataColumn.get(field.name, SparkTypeUtils.toSparkPartitionType(table)))
+    val metadataColumns = metadataFields.map {
+      case field if field.name == PARTITION_COLUMN =>
+        // Preserve nested column pruning in both the output struct and its read dependencies.
+        PaimonMetadataColumn.PARTITION(field.dataType)
+      case field =>
+        PaimonMetadataColumn.get(field.name, SparkTypeUtils.toSparkPartitionType(table))
+    }
+    val dataProjection =
+      if (readRowTypeWithPartitions == readTableRowType) null
+      else readRowTypeWithPartitions.getFieldIndices(readTableRowType.getFieldNames)
     val blobAsDescriptor = coreOptions.blobAsDescriptor()
     val blobDescriptorFieldIndices =
-      BlobDescriptorReadUtils.blobDescriptorFieldIndices(table, readTableRowType, blobAsDescriptor)
+      BlobDescriptorReadUtils.blobDescriptorFieldIndices(
+        table,
+        readRowTypeWithPartitions,
+        blobAsDescriptor)
     val uriReaderFactory =
       BlobDescriptorReadUtils.createUriReaderFactory(table, blobDescriptorFieldIndices)
     PaimonBatch(
       inputPartitions = inputPartitions,
       readBuilder = readBuilder,
       blobAsDescriptor = blobAsDescriptor,
-      metadataColumns = metadataColumns)(
-      uriReaderFactory = uriReaderFactory,
-      blobDescriptorFieldIndices = blobDescriptorFieldIndices)
+      metadataColumns = metadataColumns,
+      dataProjection = dataProjection
+    )(uriReaderFactory = uriReaderFactory, blobDescriptorFieldIndices = blobDescriptorFieldIndices)
   }
 
   def estimateStatistics: Statistics = {
@@ -210,6 +241,11 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     } else {
       ""
     }
+    val pushedBucketFiltersStr = if (pushedBucketFilters.nonEmpty) {
+      s", BucketFilters: [${pushedBucketFilters.mkString(",")}]"
+    } else {
+      ""
+    }
     val pushedVariantsStr =
       if (pushedVariantExtractions.isEmpty) ""
       else
@@ -228,6 +264,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
       pushedPartitionFiltersStr +
       pushedRuntimePartitionFiltersStr +
       pushedDataFiltersStr +
+      pushedBucketFiltersStr +
       pushedTopN.map(topN => s", TopN: [$topN]").getOrElse("") +
       pushedLimit.map(limit => s", Limit: [$limit]").getOrElse("") +
       pushedVectorSearch.map(vs => s", VectorSearch: [$vs]").getOrElse("") +

@@ -21,8 +21,10 @@ from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Sequence
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.multimodal.query import (
     BatchVectorQuery,
     HybridQuery,
@@ -39,6 +41,7 @@ from pypaimon.table.data_evolution_merge_into import (
     source_col as _source_col,
 )
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.write.update_validation import predicate_fields
 
 
 _ALL_SOURCE_COLUMNS = object()
@@ -102,6 +105,12 @@ class MultimodalTable:
         self.raw_table = raw_table
         self.table = raw_table
 
+    def copy(self, options: dict) -> 'MultimodalTable':
+        """Return a table view with dynamic Paimon options."""
+        raw_table = self.raw_table.copy(options)
+        return MultimodalTable(
+            self.catalog, raw_table.identifier.get_full_name(), raw_table)
+
     def add(self, data):
         arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))
         write_builder = self.raw_table.new_batch_write_builder()
@@ -118,17 +127,116 @@ class MultimodalTable:
     def add_video(
             self,
             video,
-            frames,
+            frames=None,
             *,
             video_column=None,
-            first_frame=0):
-        """Append logical frame rows backed by one complete encoded video.
+            first_frame=0,
+            metadata=None,
+            source_fps=None):
+        """Append frame rows sharing one encoded video.
 
-        ``frames`` supplies every table column except the configured
-        ``video-frame-field``. Frame ordinals are generated from
-        ``first_frame`` and stored in the video descriptor, not in the normal
-        data file.
+        ``frames`` supplies non-video columns; descriptor ordinals start at
+        ``first_frame``. Omit it to generate ``frame_index`` (int64) and
+        ``timestamp`` (float64 seconds relative to the first frame).
+        ``metadata`` supplies constant fields. Auto import requires PyAV
+        and one video stream. For raw HEVC, ``source_fps`` sets fixed-rate
+        timing and remuxes to MP4 without re-encoding.
         """
+        if frames is None:
+            import os
+            import stat
+            import tempfile
+            from contextlib import ExitStack
+            from urllib.parse import urlparse
+
+            from pypaimon.table.row.blob import Blob, BlobDescriptor
+            from pypaimon.common.file_io import _is_local_path
+            from pypaimon.filesystem.local_file_io import LocalFileIO
+            from pypaimon.multimodal.video import (
+                _inspect_video_frames, _require_video_av, _raw_video_time_base, _remux_raw_hevc,
+            )
+
+            time_base = _raw_video_time_base(source_fps) if source_fps is not None else None
+
+            if isinstance(first_frame, bool) or not isinstance(first_frame, int) or first_frame != 0:
+                raise ValueError("first_frame must be 0 when frames is omitted.")
+            column = self._resolve_video_frame_column(video_column)
+            schema = _target_schema(self.raw_table)
+            generated = {"frame_index": pa.int64(), "timestamp": pa.float64()}
+            for name, dtype in generated.items():
+                if name == column or name not in schema.names or schema.field(name).type != dtype:
+                    raise ValueError(
+                        "Automatic video import requires column %r of type %s."
+                        % (name, dtype))
+            if metadata is not None and not isinstance(metadata, Mapping):
+                raise ValueError("metadata must be a mapping or None.")
+            metadata = dict(metadata or {})
+            allowed = set(schema.names) - set(generated) - set(self.raw_table.options.video_frame_fields())
+            if set(metadata) - allowed:
+                raise ValueError("metadata must contain only non-video, non-generated columns.")
+            fields = [field for field in schema if field.name not in generated and field.name != column]
+            constants = _to_arrow_table([metadata], pa.schema(fields)) if fields else None
+            for field in fields:
+                if not field.nullable and constants[field.name].null_count:
+                    raise ValueError("Missing required metadata: %s." % field.name)
+            if isinstance(video, os.PathLike):
+                video = os.fspath(video)
+            if isinstance(video, str):
+                if not urlparse(video).scheme:
+                    video = os.path.abspath(video)
+                video = BlobDescriptor(video, 0, -1)
+            if not isinstance(video, BlobDescriptor):
+                raise ValueError("Automatic video import requires a path, URI, or BlobDescriptor.")
+            _require_video_av()
+            local_path = LocalFileIO._to_file(video.uri) if _is_local_path(video.uri) else None
+
+            def source_state():
+                if local_path is None:
+                    return None
+                info = os.stat(local_path)
+                if not stat.S_ISREG(info.st_mode):
+                    raise ValueError("Automatic video import requires a regular local file.")
+                return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+            with ExitStack() as stack:
+                original = source_state()
+                # Reuse the writer's source credentials.
+                reader = self.raw_table.file_io.uri_reader_factory.create(video.uri)
+                with Blob.from_descriptor(reader, video).new_input_stream() as stream:
+                    if time_base is not None:
+                        directory = stack.enter_context(tempfile.TemporaryDirectory(prefix="paimon_hevc_"))
+                        path = os.path.join(directory, "video.mp4")
+                        count = _remux_raw_hevc(stream, path, time_base)
+                        video = BlobDescriptor(path, 0, os.path.getsize(path))
+                        timestamps = _inspect_video_frames(path)
+                        if len(timestamps) != count:
+                            raise ValueError("HEVC frame count changed during remux.")
+                    else:
+                        timestamps = _inspect_video_frames(stream)
+
+                def check_source():
+                    if source_state() != original:
+                        raise ValueError("Video source changed during import.")
+
+                check_source()
+
+                def batches():
+                    for start in range(0, len(timestamps), 1024):
+                        end = min(start + 1024, len(timestamps))
+                        values = {
+                            "frame_index": pa.array(range(start, end), type=pa.int64()),
+                            "timestamp": pa.array(timestamps[start:end], type=pa.float64()),
+                        }
+                        if constants is not None:
+                            repeated = constants.take(pa.array([0] * (end - start), type=pa.int32()))
+                            values.update({name: repeated[name] for name in repeated.column_names})
+                        yield _video_frame_table(video, pa.table(values), column, start, schema)
+                    # Check again before commit.
+                    check_source()
+
+                return self.add_batches(batches())
+        elif metadata is not None or source_fps is not None:
+            raise ValueError("metadata and source_fps are only supported when frames is omitted.")
         return self.add_videos(
             [(video, frames, first_frame)], video_column=video_column
         )
@@ -309,6 +417,15 @@ class MultimodalTable:
         return self
 
     def update(self, where, values):
+        """Update visible rows matching a SQL-like predicate and return this table.
+
+        Row-tracking tables also accept ``_ROW_ID`` predicates. Missing or
+        deleted rows do not match. ``_ROW_ID`` is read-only. Use
+        ``update_columns_by_row_id`` for external per-row values with strict
+        ID matching. Row-ID predicates require a current table schema; reopen
+        the table after external schema changes or a branch copy with a
+        different schema.
+        """
         video_columns = self.raw_table.options.video_frame_fields()
         if isinstance(values, Mapping):
             assigned_video_columns = video_columns.intersection(values)
@@ -318,8 +435,12 @@ class MultimodalTable:
                     "replace_video() with a complete encoded video."
                     % sorted(assigned_video_columns)[0]
                 )
-        query = self.scan().where(where)
-        predicate = query._predicate
+        if isinstance(where, str) and self.raw_table.options.row_tracking_enabled():
+            predicate = parse_where_clause(where, SpecialFields.row_type_with_row_id(self.raw_table.fields))
+        else:
+            predicate = self.scan().where(where)._predicate
+        if predicate is not None and SpecialFields.ROW_ID.name in predicate_fields(predicate):
+            _validate_row_id_update_schema(self)
         write_builder = self.raw_table.new_batch_write_builder()
         table_update = write_builder.new_update()
         table_commit = write_builder.new_commit()
@@ -346,7 +467,8 @@ class MultimodalTable:
         """
         column = self._resolve_video_frame_column(video_column)
         target_schema = _target_schema(self.raw_table)
-        payload, first_frame = _video_payload(video, first_frame)
+        payload, first_frame = _video_payload(
+            video, first_frame)
 
         row_ids = (
             self.scan()
@@ -396,6 +518,96 @@ class MultimodalTable:
     def merge(self, on):
         return _MergeBuilder(self, on)
 
+    def merge_columns(self, data, *, on):
+        """Match external column values without inserting rows or rewriting other columns.
+
+        Missing output columns are added as nullable columns using the input
+        Arrow types. Matching follows an update-only MERGE: unmatched source
+        rows are ignored, one source row may update multiple target rows, and
+        multiple source rows matching the same target row are rejected.
+        Existing output types must match the table types. Execution reuses
+        the standard MERGE backend, including native execution when enabled.
+        Schema publication and data commit are separate operations. Requires
+        a current full-table view and a single writer for the operation.
+        Returns :class:`pypaimon.multimodal.ColumnUpdateResult` with
+        ``updated_rows=None`` because MERGE does not return logical row counts.
+        """
+        from pypaimon.multimodal.columns import merge_columns
+        return merge_columns(self, data, on=on)
+
+    def add_columns(self, schema, *, inputs=None, fn=None, batch_size=1024):
+        """Add nullable columns, optionally computing their values in batches.
+
+        ``schema`` declares new columns. If supplied, ``fn`` receives an
+        Arrow RecordBatch containing only ``inputs`` and returns a Table or
+        RecordBatch of the declared columns in the same row order and count.
+        Ordinary BLOB inputs are payload bytes. Video-frame inputs retain
+        their descriptor semantics; decoding belongs in the function.
+        The function may run repeatedly and must be side-effect-free.
+
+        Outputs are grouped by the original file row-ID ranges before being
+        written. Untouched columns, including media, retain their files.
+        Schema publication precedes computation; failures leave new columns
+        visible as NULL. Requires a current full-table view and a single
+        writer. Returns :class:`pypaimon.multimodal.ColumnUpdateResult`.
+        """
+        from pypaimon.multimodal.columns import add_columns
+        return add_columns(self, schema, inputs=inputs, fn=fn, batch_size=batch_size)
+
+    def update_columns_by_row_id(self, data, *, columns):
+        """Update existing columns from one local Arrow table containing ``_ROW_ID``.
+
+        ``columns`` is a required column name or sequence of output names.
+        Only those columns are written; other input columns are ignored.
+        IDs must be unique, non-NULL, non-negative integers representable as
+        int64. Every ID must identify a visible row in the captured source
+        snapshot. Input order does not affect matching. Outputs must be existing,
+        non-partition columns with the table's types and nullability; use ``replace_video``
+        for video-frame columns. Omitted rows keep their values, and untouched
+        columns retain their files. No columns or rows are added.
+
+        Validation and writing use one snapshot and the standard update backend.
+        All prepared updates are committed together. Requires a current
+        full-table Data Evolution view and a single writer for the entire call.
+        A schema mismatch with the current target branch is rejected before
+        writing; reopen the table after external schema changes or a branch
+        copy with a different schema.
+        IDs from historical results are not remapped or checked for staleness.
+        Rollback followed by an append can reuse row IDs and numeric snapshot
+        IDs. Discard pending annotations from the rolled-back history before
+        writing them back; a matching numeric snapshot ID does not prove validity.
+        Returns :class:`pypaimon.multimodal.ColumnUpdateResult` with the input
+        row count in ``updated_rows`` and ``added_columns=()``. Empty input
+        creates no data snapshot. There are no automatic retries.
+        """
+        from pypaimon.multimodal.columns import update_columns_by_row_id
+        return update_columns_by_row_id(self, data, columns=columns)
+
+    def compute_columns(self, columns, *, inputs, fn, batch_size=1024, execution="local",
+                        concurrency=None, ray_remote_args=None):
+        """Compute existing columns for all visible rows without changing the schema.
+
+        ``columns`` is a column name or a sequence of names. Outputs must be
+        existing, non-partition columns; use ``replace_video`` for video-frame
+        outputs. Types and nullability are taken from the table schema.
+        ``fn`` follows the same input and output contract as ``add_columns``.
+        Inputs may also be outputs; all reads use the captured source snapshot.
+
+        Execution requires a current full-table view and a single writer.
+        With ``execution="ray"``, workers use the Python shard updater on
+        disjoint file groups, then the driver commits once after all succeed.
+        ``concurrency`` bounds the number of shards (default 4) and
+        ``ray_remote_args`` configures Ray task resources. Workers must be able
+        to serialize and run ``fn`` and access the table storage.
+        Every call recomputes all visible rows, including non-NULL outputs.
+        Untouched columns retain their files. There are no automatic retries
+        or checkpoints. Returns :class:`pypaimon.multimodal.ColumnUpdateResult`
+        with ``added_columns=()`` and the computed row count in ``updated_rows``.
+        """
+        from pypaimon.multimodal.columns import compute_columns
+        return compute_columns(self, columns, inputs=inputs, fn=fn, batch_size=batch_size,
+                               execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)
+
     def map_with_blobs(self, dataset, columns, fn, **kwargs):
         from pypaimon.ray import map_with_blobs
 
@@ -426,9 +638,17 @@ class MultimodalTable:
             *,
             snapshot_id: Optional[int] = None,
             tag_name: Optional[str] = None):
+        """Return a scan filtering rows by Paimon row ID; requires row tracking.
+
+        Input order and duplicates do not affect this membership query.
+        Missing or deleted IDs are omitted. Use ``take_batch`` for ordered
+        sampling with replacement.
+        """
         row_ids = _coerce_row_ids(row_ids)
         read_table = _time_travel_table(
             self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
+        if not read_table.options.row_tracking_enabled():
+            raise ValueError("Row ID reads require row-tracking.enabled=true.")
         read_builder = read_table.new_read_builder().with_projection(
             [field.name for field in read_table.fields]
             + [SpecialFields.ROW_ID.name]
@@ -438,6 +658,44 @@ class MultimodalTable:
         query = ScanQuery(read_table)
         query._predicate = predicate
         return query
+
+    def take_batch(
+            self,
+            row_ids,
+            *,
+            columns=None,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None) -> pa.Table:
+        """Fetch an ordered batch by Paimon row ID, preserving duplicates.
+
+        Returns an Arrow table with one row per input ID, in input order.
+        ``columns`` defaults to all table columns; include ``_ROW_ID``
+        explicitly to return it. Missing, deleted, or filtered-out IDs raise
+        KeyError instead of shortening the batch. An empty input returns an
+        empty table with the projected schema.
+
+        Requires row tracking. IDs are table row handles, not Dataset position
+        indices. Pass the source snapshot or tag when sampling a saved manifest.
+        BLOB columns follow the table's read options, as in ``scan()``.
+        """
+        row_ids = _coerce_row_ids(row_ids)
+        query = self.take_row_ids(
+            row_ids, snapshot_id=snapshot_id, tag_name=tag_name)
+        if columns is None:
+            columns = [field.name for field in query._table.fields]
+        elif isinstance(columns, str):
+            columns = [columns]
+        else:
+            columns = list(columns)
+
+        batch = query.select(columns).with_row_id().to_arrow()
+        requested = pa.array(row_ids, type=pa.int64())
+        positions = pc.index_in(
+            requested, value_set=batch.column(SpecialFields.ROW_ID.name))
+        if positions.null_count:
+            missing = requested.filter(pc.is_null(positions)).to_pylist()
+            raise KeyError("Row IDs not found: %s" % list(dict.fromkeys(missing)))
+        return batch.take(positions).select(columns)
 
     def blobs(self, *, column: Optional[str] = None, key_column: Optional[str] = None):
         from pypaimon.multimodal.blob_store import BlobStore
@@ -533,9 +791,11 @@ class MultimodalTable:
             pre_filter=pre_filter,
         )
 
-    def create_index(self, column, index_type, options=None):
+    def create_index(self, column, index_type, options=None, *, execution="local",
+                     concurrency=None, ray_remote_args=None):
         return self.raw_table.create_global_index(
-            column, index_type=_normalize_index_type(index_type), options=options)
+            column, index_type=_normalize_index_type(index_type), options=options,
+            execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)
 
     def _merge(
             self,
@@ -778,6 +1038,13 @@ def _time_travel_table(table, snapshot_id=None, tag_name=None):
             CoreOptions.SCAN_TAG_NAME.key(): tag_name,
         })
     return table
+
+
+def _validate_row_id_update_schema(owner):
+    raw = owner.raw_table
+    current = owner.catalog.get_table(raw.identifier)
+    if current.table_schema.id != raw.table_schema.id or current.fields != raw.fields:
+        raise ValueError("Table schema has changed. Reopen the table before updating columns by row ID.")
 
 
 def _target_schema(table):

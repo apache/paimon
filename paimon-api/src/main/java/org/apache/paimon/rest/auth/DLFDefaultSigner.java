@@ -138,7 +138,8 @@ public class DLFDefaultSigner implements DLFRequestSigner {
                                 dateTime,
                                 String.format("%s/%s/%s/%s", date, region, PRODUCT, REQUEST_TYPE),
                                 sha256Hex(canonicalRequest));
-        byte[] dateKey = hmacSha256(("aliyun_v4" + dlfToken.getAccessKeySecret()).getBytes(), date);
+        byte[] dateKey =
+                hmacSha256(("aliyun_v4" + dlfToken.getAccessKeySecret()).getBytes(UTF_8), date);
         byte[] dateRegionKey = hmacSha256(dateKey, region);
         byte[] dateRegionServiceKey = hmacSha256(dateRegionKey, PRODUCT);
         byte[] signingKey = hmacSha256(dateRegionServiceKey, REQUEST_TYPE);
@@ -169,7 +170,7 @@ public class DLFDefaultSigner implements DLFRequestSigner {
             SecretKeySpec secretKeySpec = new SecretKeySpec(key, HMAC_SHA256);
             Mac mac = Mac.getInstance(HMAC_SHA256);
             mac.init(secretKeySpec);
-            return mac.doFinal(data.getBytes());
+            return mac.doFinal(data.getBytes(UTF_8));
         } catch (Exception e) {
             throw new RuntimeException("Failed to calculate HMAC-SHA256", e);
         }

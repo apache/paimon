@@ -19,20 +19,34 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.FileSystemSchemaManager;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -54,6 +68,8 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 /** Unit tests for the {@link ContinuousFileSplitEnumerator}. */
 public class ContinuousFileSplitEnumeratorTest
         extends FileSplitEnumeratorTestBase<FileStoreSourceSplit> {
+
+    @TempDir java.nio.file.Path tempDir;
 
     @Test
     public void testSplitAllocationIsOrdered() {
@@ -257,6 +273,52 @@ public class ContinuousFileSplitEnumeratorTest
         assignments = context.getSplitAssignments();
         assertThat(assignments).containsOnlyKeys(1);
         assertThat(assignments.get(1).hasReceivedNoMoreSplitsSignal()).isTrue();
+    }
+
+    @Test
+    public void testPostponeBucketFilesAssignedToDifferentReaders() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toString());
+        TableSchema schema =
+                new FileSystemSchemaManager(fileIO, tablePath)
+                        .createTable(
+                                Schema.newBuilder()
+                                        .column("k", DataTypes.INT())
+                                        .column("v", DataTypes.INT())
+                                        .primaryKey("k")
+                                        .option("bucket", "-2")
+                                        .option("write-only", "true")
+                                        .build());
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, tablePath, schema);
+
+        String commitUser = UUID.randomUUID().toString();
+        StreamTableCommit commit = table.newCommit(commitUser);
+        List<CommitMessage> messages = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            StreamTableWrite writer = table.newWrite(commitUser, i);
+            writer.write(GenericRow.of(i, i * 10));
+            messages.addAll(writer.prepareCommit(false, 1));
+            writer.close();
+        }
+        commit.commit(1, messages);
+        commit.close();
+
+        StreamTableScan scan = table.newStreamScan();
+        scan.restore(1L);
+        TestingSplitEnumeratorContext<FileStoreSourceSplit> context = getSplitEnumeratorContext(2);
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setScan(scan)
+                        .withSplitMaxPerTask(1)
+                        .build();
+        enumerator.start();
+        context.triggerAllActions();
+        for (int i = 0; i < 2; i++) {
+            enumerator.handleSplitRequest(i, "test-host");
+        }
+        assertThat(context.getSplitAssignments()).hasSize(2);
+        enumerator.close();
     }
 
     @Test

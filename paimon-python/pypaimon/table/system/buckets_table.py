@@ -24,7 +24,8 @@ import pyarrow
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
-from pypaimon.table.system.system_table import SystemTable
+from pypaimon.table.system.files_table import _render_partition
+from pypaimon.table.system.system_table import SystemTable, metadata_snapshot
 
 
 TABLE_TYPE = RowType(False, [
@@ -57,7 +58,7 @@ class BucketsTable(SystemTable):
         return ["partition", "bucket"]
 
     def _build_arrow_table(self) -> pyarrow.Table:
-        snapshot = self.base_table.snapshot_manager().get_latest_snapshot()
+        snapshot = metadata_snapshot(self.base_table)
         if snapshot is None:
             return self._empty_table()
 
@@ -80,11 +81,8 @@ class BucketsTable(SystemTable):
 
             stats = bucket_map.get(key)
             if stats is None:
-                render_items = tuple(
-                    (name, str(val) if val is not _NULL else None)
-                    for name, val in raw_key)
                 stats = {
-                    "render_items": render_items,
+                    "partition": _render_partition(entry.partition),
                     "bucket": bucket_id,
                     "record_count": 0,
                     "file_size_in_bytes": 0,
@@ -96,7 +94,7 @@ class BucketsTable(SystemTable):
             stats["record_count"] += int(entry.file.row_count)
             stats["file_size_in_bytes"] += int(entry.file.file_size)
             stats["file_count"] += 1
-            ct_ms = entry.file.creation_time_epoch_millis()
+            ct_ms = None if entry.file.creation_time is None else entry.file.creation_time.get_millisecond()
             if ct_ms is not None:
                 if (stats["last_update_time"] is None
                         or ct_ms > stats["last_update_time"]):
@@ -105,7 +103,7 @@ class BucketsTable(SystemTable):
         sorted_keys = sorted(
             bucket_map.keys(),
             key=lambda k: (
-                _render_partition(bucket_map[k]["render_items"]) or "",
+                bucket_map[k]["partition"] or "",
                 k[1]))
 
         partition_strings: List[Optional[str]] = []
@@ -117,7 +115,7 @@ class BucketsTable(SystemTable):
 
         for key in sorted_keys:
             stats = bucket_map[key]
-            partition_strings.append(_render_partition(stats["render_items"]))
+            partition_strings.append(stats["partition"])
             buckets.append(stats["bucket"])
             record_counts.append(stats["record_count"])
             file_sizes.append(stats["file_size_in_bytes"])
@@ -147,19 +145,3 @@ class BucketsTable(SystemTable):
             "file_count": pyarrow.array([], type=pyarrow.int64()),
             "last_update_time": pyarrow.array([], type=_TIMESTAMP_TYPE),
         })
-
-
-def _render_partition(spec_items) -> Optional[str]:
-    """Render a partition spec as ``pt=v/pt2=v2`` or None when empty.
-
-    Null partition values are rendered as ``__NULL__`` to distinguish them
-    from the literal string ``"None"``.  A partition whose value is
-    literally ``"__NULL__"`` will produce the same rendered string —
-    aggregation keys are still distinct, but the displayed partition
-    column will collide.  This is a display-only limitation.
-    """
-    if not spec_items:
-        return None
-    return "/".join(
-        "{}={}".format(name, "__NULL__" if value is None else value)
-        for name, value in spec_items)

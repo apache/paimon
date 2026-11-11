@@ -18,7 +18,7 @@
 import unittest
 from unittest import mock
 
-from pypaimon.read.reader.field_bunch import BlobBunch
+from pypaimon.execution.python.read.reader.field_bunch import (BlobBunch)
 from pypaimon.utils.range import Range
 
 
