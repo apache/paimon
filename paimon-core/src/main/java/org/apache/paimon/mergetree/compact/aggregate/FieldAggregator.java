@@ -41,6 +41,11 @@ public abstract class FieldAggregator implements Serializable {
         return agg(inputField, accumulator);
     }
 
+    /** Whether a single input requires aggregation, for example to validate its value. */
+    public boolean requireSingleInputProcessing() {
+        return false;
+    }
+
     /** reset the aggregator to a clean start state. */
     public void reset() {}
 

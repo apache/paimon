@@ -70,6 +70,9 @@ import org.apache.paimon.utils.RoaringBitmap64;
 import org.apache.paimon.utils.TypeCheckUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.junit.jupiter.api.Test;
 
@@ -96,6 +99,163 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /** test whether {@link FieldAggregator}' subclasses behaviors are expected. */
 public class FieldAggregatorTest {
+
+    @Test
+    public void testMergeTopLevel() throws Exception {
+        FieldAggregator agg =
+                FieldAggregatorFactory.create(
+                        DataTypes.STRING(),
+                        "json",
+                        "merge_top_level",
+                        new CoreOptions(new HashMap<>()));
+        Object result =
+                agg.agg(
+                        BinaryString.fromString(
+                                "{\"keep\":1,\"object\":{\"old\":1},\"array\":[1,2],\"type\":{},\"A\":1,\"a.b\":2}"),
+                        BinaryString.fromString(
+                                "{\"object\":{\"new\":2},\"array\":[3,1,3],\"type\":false,\"added\":null,\"a\":3,\"a\\u002eb\":4}"));
+        assertThat(mergeTopLevelJson(result))
+                .isEqualTo(
+                        mergeTopLevelJson(
+                                "{\"keep\":1,\"object\":{\"new\":2},\"array\":[3,1,3],\"type\":false,\"added\":null,\"A\":1,\"a\":3,\"a.b\":4}"));
+    }
+
+    @Test
+    public void testMergeTopLevelIdentitiesAndAssociativity() throws Exception {
+        FieldAggregator agg =
+                FieldAggregatorFactory.create(
+                        DataTypes.STRING(),
+                        "json",
+                        "merge_top_level",
+                        new CoreOptions(new HashMap<>()));
+        BinaryString a = BinaryString.fromString("{\"x\":1,\"nested\":{\"a\":1}}");
+        BinaryString b = BinaryString.fromString("{\"x\":null,\"array\":[1]}");
+        BinaryString c = BinaryString.fromString("{\"nested\":2,\"array\":[2]}");
+        assertThat(agg.agg(null, null)).isNull();
+        assertThat(mergeTopLevelJson(agg.agg(null, BinaryString.fromString("{}")))).isEmpty();
+        for (Object identity : Arrays.asList(null, BinaryString.fromString("{}"))) {
+            assertThat(mergeTopLevelJson(agg.agg(a, identity))).isEqualTo(mergeTopLevelJson(a));
+            assertThat(mergeTopLevelJson(agg.agg(identity, a))).isEqualTo(mergeTopLevelJson(a));
+        }
+        assertThat(mergeTopLevelJson(agg.agg(a, a))).isEqualTo(mergeTopLevelJson(a));
+        assertThat(mergeTopLevelJson(agg.agg(a, BinaryString.fromString("{\"nested\":{}}"))))
+                .isEqualTo(mergeTopLevelJson("{\"x\":1,\"nested\":{}}"));
+        assertThat(mergeTopLevelJson(agg.agg(agg.agg(a, b), c)))
+                .isEqualTo(mergeTopLevelJson(agg.agg(a, agg.agg(b, c))))
+                .isEqualTo(mergeTopLevelJson("{\"x\":null,\"nested\":2,\"array\":[2]}"));
+    }
+
+    @Test
+    public void testMergeTopLevelReversed() throws Exception {
+        FieldAggregator agg =
+                FieldAggregatorFactory.create(
+                        DataTypes.STRING(),
+                        "json",
+                        "merge_top_level",
+                        new CoreOptions(new HashMap<>()));
+        BinaryString newer = BinaryString.fromString("{\"x\":null,\"nested\":{\"new\":2}}");
+        BinaryString older =
+                BinaryString.fromString("{\"x\":1,\"nested\":{\"old\":1},\"missing\":3}");
+        assertThat(mergeTopLevelJson(agg.aggReversed(newer, older)))
+                .isEqualTo(mergeTopLevelJson("{\"x\":null,\"nested\":{\"new\":2},\"missing\":3}"));
+        assertThatThrownBy(() -> agg.retract(newer, older))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    public void testMergeTopLevelRejectsInvalidJson() {
+        FieldAggregator agg =
+                FieldAggregatorFactory.create(
+                        DataTypes.STRING(),
+                        "json",
+                        "merge_top_level",
+                        new CoreOptions(new HashMap<>()));
+        for (String invalid :
+                Arrays.asList(
+                        "",
+                        " \t\n",
+                        "1",
+                        "true",
+                        "\"text\"",
+                        "null",
+                        "{} {}",
+                        "{} null",
+                        "{\"n\":1e2147483648}",
+                        "{\"n\":999e2147483647}")) {
+            BinaryString value = BinaryString.fromString(invalid);
+            assertThatThrownBy(() -> agg.agg(null, value))
+                    .as(invalid)
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> agg.agg(value, null))
+                    .as(invalid)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        for (String invalid :
+                Arrays.asList(
+                        "[]",
+                        "{",
+                        "{\"a\":1,\"a\":2}",
+                        "{\"nested\":{\"a\":1,\"a\":2}}",
+                        "{\"array\":[{\"a\":1,\"\\u0061\":2}]}",
+                        "{\"a\":1,\"\\u0061\":2}")) {
+            BinaryString value = BinaryString.fromString(invalid);
+            assertThatThrownBy(() -> agg.agg(null, value))
+                    .as(invalid)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasCauseInstanceOf(JsonProcessingException.class);
+            assertThatThrownBy(() -> agg.agg(value, null))
+                    .as(invalid)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasCauseInstanceOf(JsonProcessingException.class);
+        }
+    }
+
+    @Test
+    public void testMergeTopLevelPreservesNumericPrecision() throws Exception {
+        FieldAggregator agg =
+                FieldAggregatorFactory.create(
+                        DataTypes.STRING(),
+                        "json",
+                        "merge_top_level",
+                        new CoreOptions(new HashMap<>()));
+        BinaryString numbers =
+                BinaryString.fromString(
+                        "{\"integer\":123456789012345678901234567890,\"longMax\":9223372036854775807,"
+                                + "\"decimal\":1.2345678901234567890123456789,"
+                                + "\"large\":1e1000,\"tiny\":1e-1000,\"beyondDouble\":9007199254740993,"
+                                + "\"boundary\":1e2147483647,"
+                                + "\"nested\":[{\"value\":9007199254740993.123456789}]}");
+        Object first = agg.agg(null, numbers);
+        assertThat(mergeTopLevelJson(first)).isEqualTo(mergeTopLevelJson(numbers));
+        Map<Object, Object> expected = new HashMap<>(mergeTopLevelJson(numbers));
+        expected.put("added", true);
+        Object second = agg.agg(first, BinaryString.fromString("{\"added\":true}"));
+        assertThat(mergeTopLevelJson(second)).isEqualTo(expected);
+        assertThat(mergeTopLevelJson(agg.agg(second, BinaryString.fromString("{}"))))
+                .isEqualTo(expected);
+    }
+
+    @Test
+    public void testMergeTopLevelRejectsNonStringTypes() {
+        for (DataType type :
+                Arrays.asList(DataTypes.INT(), DataTypes.VARCHAR(10), DataTypes.CHAR(10))) {
+            assertThatThrownBy(
+                            () ->
+                                    FieldAggregatorFactory.create(
+                                            type,
+                                            "json",
+                                            "merge_top_level",
+                                            new CoreOptions(new HashMap<>())))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    private static Map<?, ?> mergeTopLevelJson(Object value) throws IOException {
+        return new ObjectMapper()
+                .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS)
+                .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .readValue(value.toString(), Map.class);
+    }
 
     @Test
     public void testFieldBoolAndAgg() {

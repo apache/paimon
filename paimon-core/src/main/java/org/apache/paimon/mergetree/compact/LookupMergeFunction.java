@@ -138,6 +138,11 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     }
 
     @Override
+    public boolean requireSingleInputProcessing() {
+        return mergeFunction.requireSingleInputProcessing();
+    }
+
+    @Override
     public boolean requireCopy() {
         return true;
     }

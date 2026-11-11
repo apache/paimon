@@ -26,8 +26,9 @@ import org.apache.paimon.KeyValue;
  * <p>A reducer is a type of function. If there is only one input the result is equal to that input;
  * Otherwise the result is calculated by merging all the inputs in some way.
  *
- * <p>This wrapper optimize the wrapped {@link MergeFunction}. If there is only one input, the input
- * will be stored and the inner merge function will not be called, thus saving some computing time.
+ * <p>This wrapper optimizes the wrapped {@link MergeFunction}. If there is only one input, the
+ * input will be stored and the inner merge function will not be called, unless it requires
+ * single-input processing.
  */
 public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValue> {
 
@@ -53,6 +54,10 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
     public void add(KeyValue kv) {
         if (initialKv == null) {
             initialKv = kv;
+            if (mergeFunction.requireSingleInputProcessing()) {
+                merge(kv);
+                isInitialized = true;
+            }
         } else {
             if (!isInitialized) {
                 merge(initialKv);

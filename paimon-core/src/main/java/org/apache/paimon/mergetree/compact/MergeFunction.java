@@ -48,6 +48,11 @@ public interface MergeFunction<T> {
     /** Get current merged value. */
     T getResult();
 
+    /** Whether even a single input must be processed instead of being returned unchanged. */
+    default boolean requireSingleInputProcessing() {
+        return false;
+    }
+
     /** Require copy input kv, this may cache kv in memory. */
     boolean requireCopy();
 }

@@ -50,6 +50,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
     private final InternalRow.FieldGetter[] getters;
     private final FieldAggregator[] aggregators;
+    private final boolean requireSingleInputProcessing;
     private final boolean[] nullables;
 
     private KeyValue latestKv;
@@ -65,6 +66,8 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
             boolean[] nullables) {
         this.getters = getters;
         this.aggregators = aggregators;
+        this.requireSingleInputProcessing =
+                Arrays.stream(aggregators).anyMatch(FieldAggregator::requireSingleInputProcessing);
         this.removeRecordOnDelete = removeRecordOnDelete;
         this.nullables = nullables;
     }
@@ -122,6 +125,11 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         }
         RowKind rowKind = currentDeleteRow ? RowKind.DELETE : RowKind.INSERT;
         return reused.replace(latestKv.key(), latestKv.sequenceNumber(), rowKind, row);
+    }
+
+    @Override
+    public boolean requireSingleInputProcessing() {
+        return requireSingleInputProcessing;
     }
 
     @Override

@@ -133,6 +133,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private final List<WrapperWithFieldIndex<FieldsComparator>> fieldSeqComparators;
     private final boolean fieldSequenceEnabled;
     private final List<WrapperWithFieldIndex<FieldAggregator>> fieldAggregators;
+    private final boolean requireSingleInputProcessing;
     private final boolean removeRecordOnDelete;
     private final Set<Integer> sequenceGroupPartialDelete;
     private final boolean[] nullables;
@@ -164,6 +165,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         this.ignoreDelete = ignoreDelete;
         this.fieldSeqComparators = getKeySortedListFromMap(fieldSeqComparators);
         this.fieldAggregators = getKeySortedListFromMap(fieldAggregators);
+        this.requireSingleInputProcessing =
+                fieldAggregators.values().stream()
+                        .anyMatch(FieldAggregator::requireSingleInputProcessing);
         this.fieldSequenceEnabled = fieldSequenceEnabled;
         this.removeRecordOnDelete = removeRecordOnDelete;
         this.sequenceGroupPartialDelete = sequenceGroupPartialDelete;
@@ -433,6 +437,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
         RowKind rowKind = currentDeleteRow || !meetInsert ? RowKind.DELETE : RowKind.INSERT;
         return reused.replace(currentKey, latestSequenceNumber, rowKind, row);
+    }
+
+    @Override
+    public boolean requireSingleInputProcessing() {
+        return requireSingleInputProcessing;
     }
 
     @Override

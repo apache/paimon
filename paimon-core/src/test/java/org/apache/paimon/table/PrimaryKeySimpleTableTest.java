@@ -161,6 +161,89 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
     @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testMergeTopLevel(boolean partialUpdate) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.STRING(), DataTypes.BIGINT()
+                        },
+                        new String[] {"pt", "a", "attrs", "seq"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(MERGE_ENGINE, partialUpdate ? PARTIAL_UPDATE : AGGREGATE);
+                            conf.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+                            conf.set("fields.attrs.aggregate-function", "merge_top_level");
+                            if (partialUpdate) {
+                                conf.set("fields.seq.sequence-group", "attrs");
+                            } else {
+                                conf.set(CoreOptions.SEQUENCE_FIELD, "seq");
+                            }
+                        },
+                        rowType);
+        Function<InternalRow, String> attrs = row -> row.getString(2).toString();
+        Map<?, ?> buffered =
+                JsonSerdeUtil.fromJson(
+                        "{\"keep\":1,\"object\":{\"new\":2},\"array\":[3],\"nil\":null}",
+                        Map.class);
+        Map<?, ?> crossCommit =
+                JsonSerdeUtil.fromJson(
+                        "{\"keep\":1,\"object\":false,\"array\":[3],\"nil\":null,\"fresh\":true}",
+                        Map.class);
+        Map<Object, Object> withOlderPatch = new HashMap<>(crossCommit);
+        withOlderPatch.put("missing", 7);
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(
+                    GenericRow.of(
+                            1,
+                            1,
+                            BinaryString.fromString(
+                                    "{\"object\":{\"new\":2},\"array\":[3],\"nil\":null}"),
+                            2L));
+            write.write(
+                    GenericRow.of(
+                            1,
+                            1,
+                            BinaryString.fromString(
+                                    "{\"keep\":1,\"object\":{\"old\":1},\"array\":[1,2],\"nil\":\"old\"}"),
+                            1L));
+            commit.commit(0, write.prepareCommit(false, 0));
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), attrs))
+                    .extracting(json -> JsonSerdeUtil.fromJson(json, Map.class))
+                    .containsExactly(buffered);
+            write.write(
+                    GenericRow.of(
+                            1,
+                            1,
+                            BinaryString.fromString("{\"object\":false,\"fresh\":true}"),
+                            3L));
+            commit.commit(1, write.prepareCommit(false, 1));
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), attrs))
+                    .extracting(json -> JsonSerdeUtil.fromJson(json, Map.class))
+                    .containsExactly(crossCommit);
+            write.write(
+                    GenericRow.of(
+                            1,
+                            1,
+                            BinaryString.fromString(
+                                    "{\"object\":\"stale\",\"nil\":\"stale\",\"missing\":7}"),
+                            0L));
+            commit.commit(2, write.prepareCommit(false, 2));
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), attrs))
+                    .extracting(json -> JsonSerdeUtil.fromJson(json, Map.class))
+                    .containsExactly(withOlderPatch);
+            write.compact(binaryRow(1), 0, true);
+            commit.commit(3, write.prepareCommit(true, 3));
+            assertThat(table.snapshotManager().latestSnapshot().commitKind()).isEqualTo(COMPACT);
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), attrs))
+                    .extracting(json -> JsonSerdeUtil.fromJson(json, Map.class))
+                    .containsExactly(withOlderPatch);
+        }
+    }
+
+    @ParameterizedTest
     @CsvSource({"false,false", "false,true", "true,false", "true,true"})
     public void testMergeMapOverwriteOnEqualTs(boolean partialUpdate, boolean overwrite)
             throws Exception {

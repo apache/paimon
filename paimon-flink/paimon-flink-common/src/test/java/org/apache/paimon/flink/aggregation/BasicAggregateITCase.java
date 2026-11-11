@@ -19,17 +19,57 @@
 package org.apache.paimon.flink.aggregation;
 
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT Test for aggregation merge engine. */
 public class BasicAggregateITCase extends CatalogITCaseBase {
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testMergeTopLevel(boolean partialUpdate) {
+        sql(
+                "CREATE TABLE json_merge (id INT PRIMARY KEY NOT ENFORCED, `json` STRING, seq BIGINT) WITH ("
+                        + "'merge-engine'='"
+                        + (partialUpdate ? "partial-update" : "aggregation")
+                        + "', 'fields.json.aggregate-function'='merge_top_level', "
+                        + (partialUpdate
+                                ? "'fields.seq.sequence-group'='json'"
+                                : "'sequence.field'='seq'")
+                        + ")");
+        sql(
+                "INSERT INTO json_merge VALUES "
+                        + "(1, '{\"object\":{\"new\":2},\"array\":[3],\"nil\":null}', 2), "
+                        + "(1, '{\"keep\":1,\"object\":{\"old\":1},\"array\":[1,2],\"nil\":1}', 1)");
+        assertThat(batchSql("SELECT `json` FROM json_merge"))
+                .extracting(row -> JsonSerdeUtil.fromJson(row.getField(0).toString(), Map.class))
+                .containsExactly(
+                        JsonSerdeUtil.fromJson(
+                                "{\"keep\":1,\"object\":{\"new\":2},\"array\":[3],\"nil\":null}",
+                                Map.class));
+        sql(
+                "INSERT INTO json_merge VALUES "
+                        + "(1, '{\"object\":\"stale\",\"nil\":\"stale\",\"missing\":7}', 0)");
+        assertThat(batchSql("SELECT `json` FROM json_merge"))
+                .extracting(row -> JsonSerdeUtil.fromJson(row.getField(0).toString(), Map.class))
+                .containsExactly(
+                        JsonSerdeUtil.fromJson(
+                                "{\"keep\":1,\"object\":{\"new\":2},\"array\":[3],\"nil\":null,\"missing\":7}",
+                                Map.class));
+        assertThatThrownBy(() -> sql("INSERT INTO json_merge VALUES (2, '[]', 4)"))
+                .hasStackTraceContaining("merge_top_level requires valid JSON Object strings");
+    }
 
     @Override
     protected List<String> ddl() {

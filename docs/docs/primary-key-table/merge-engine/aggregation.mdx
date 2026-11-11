@@ -83,7 +83,7 @@ Check [Retraction](#retraction) before accepting `UPDATE_BEFORE` or `DELETE` rec
 | --- | --- |
 | Numeric aggregation | [sum](#sum), [product](#product), [max](#max), [min](#min), [counting with sum](#count) |
 | Retain a value | [last_value](#last_value), [last_non_null_value](#last_non_null_value), [first_value](#first_value), [first_non_null_value](#first_non_null_value) |
-| Strings and booleans | [listagg](#listagg), [bool_and](#bool_and), [bool_or](#bool_or) |
+| Strings and booleans | [listagg](#listagg), [merge_top_level](#merge_top_level), [bool_and](#bool_and), [bool_or](#bool_or) |
 | Arrays and maps | [collect](#collect), [merge_map](#merge_map), [merge_map_with_keytime](#merge_map_with_keytime) |
 | Nested rows | [nested_update](#nested_update), [nested_partial_update](#nested_partial_update) |
 | Bitmap union | [rbm32](#rbm32), [rbm64](#rbm64) |
@@ -191,6 +191,39 @@ count of distinct event IDs.
 
 ### merge_map
   The merge_map function merge input maps. It only supports MAP type.
+
+### merge_top_level
+
+The `merge_top_level` function merges JSON Object strings. It supports STRING (unbounded VARCHAR):
+
+```sql
+'fields.quality_summary.aggregate-function' = 'merge_top_level'
+```
+
+Only top-level properties are merged. A newer property's entire value replaces the older value,
+including nested objects and arrays; properties absent from the newer input are retained.
+For example, merging these inputs in order:
+
+```text
+{"manual":{"status":"passed","count":3},"cloud":true,"tags":["a"]}
+{"manual":{"status":"rejected"},"tags":["b"],"remark":null}
+```
+
+produces `{"manual":{"status":"rejected"},"cloud":true,"tags":["b"],"remark":null}`.
+
+SQL NULL does not update the field; two SQL NULLs produce SQL NULL. An empty object `{}` preserves
+existing properties, while `{"a":{}}` replaces `a` with an empty object. JSON null is a value, not a
+deletion marker: `{"a":null}` retains `a` with a null value. The string `null` is not an Object and
+is rejected. Property names are case-sensitive decoded JSON names, not paths.
+
+Inputs must be valid JSON Objects, without trailing values or duplicate property names at any
+nesting level. Invalid inputs and unrepresentable numbers fail rather than falling back to string
+replacement. Integer and decimal precision is preserved; textual formatting and object property
+order are not guaranteed. Array element order is preserved.
+
+Newer means later in the engine's aggregation/sequence order, not wall-clock arrival time or a
+timestamp inside the JSON. With `partial-update`, configure a sequence group for this field, as
+required for other field aggregation functions. Retraction is not supported; see [Retraction](#retraction).
 
 ### merge_map_with_keytime
 
