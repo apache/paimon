@@ -68,23 +68,17 @@ class RowIdFileIndex:
             files_with_row_id = [
                 file for file in split.files if file.first_row_id is not None
             ]
-            data_files = [
-                file for file in files_with_row_id
-                if not DataFileMeta.is_blob_file(file.file_name)
-            ]
-            for file in split.files:
-                if (
-                        file.first_row_id is None
-                        or DataFileMeta.is_blob_file(file.file_name)
-                ):
+            for file in files_with_row_id:
+                # Dedicated column files can start inside their normal file's range.
+                if DataFileMeta.is_blob_file(file.file_name) or DataFileMeta.is_vector_file(file.file_name):
                     continue
-                row_id_ranges.append(file.row_id_range())
-            for file in data_files:
+                row_range = file.row_id_range()
+                row_id_ranges.append(row_range)
                 target_files = [
                     target_file
                     for target_file in files_with_row_id
                     if cls._overlaps(
-                        file.row_id_range(), target_file.row_id_range()
+                        row_range, target_file.row_id_range()
                     )
                 ]
 

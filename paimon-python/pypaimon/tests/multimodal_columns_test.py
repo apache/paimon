@@ -302,6 +302,52 @@ def test_compute_columns_reads_output_columns_and_accepts_reordered_record_batch
     assert _rows(frames, ["id", "label"]) == [{"id": i + 20, "label": "old!!"} for i in range(5)]
 
 
+@pytest.mark.python_plan
+@pytest.mark.python_write
+@pytest.mark.parametrize("rolled_vectors", [False, True], ids=["aligned-input", "rolled-input"])
+def test_compute_columns_preserves_vector_file_groups(tmp_path, rolled_vectors):
+    vector_type = pa.list_(pa.float32(), 2)
+    connection = pmm.connect(options={"warehouse": str(tmp_path)})
+    table = connection.create_table(
+        "frames",
+        schema=pa.schema([("id", pa.int64()), ("embedding", vector_type)]),
+        options={"file.format": "parquet", "vector.file.format": "parquet",
+                 "vector.target-file-size": "1 b", "deletion-vectors.enabled": "true"},
+    )
+    append_table = table.copy({"vector.target-file-size": "16 b" if rolled_vectors else "1 mb"})
+    for start in (0, 6):
+        rows = [{"id": i, "embedding": [float(i), -1.]} for i in range(start, start + 6)]
+        append_table.add_batches(rows[offset:offset + 2] for offset in range(0, 6, 2))
+
+    table.delete("id = 3")
+    source = _snapshot(table)
+    files = _files(table)
+    assert sorted((file.first_row_id, file.row_count) for file in files.values()
+                  if not DataFileMeta.is_vector_file(file.file_name)) == [(0, 6), (6, 6)]
+    expected_vector_ranges = [(i, 2) for i in range(0, 12, 2)] if rolled_vectors else [(0, 6), (6, 6)]
+    assert sorted((file.first_row_id, file.row_count) for file in files.values()
+                  if DataFileMeta.is_vector_file(file.file_name)) == expected_vector_ranges
+    visible_ids = [i for i in range(12) if i != 3]
+    assert _rows(table, ["id", "embedding"]) == [
+        {"id": i, "embedding": [float(i), -1.]} for i in visible_ids]
+
+    def recompute(batch):
+        return pa.table({"embedding": pa.array(
+            [[float(i), 1.] for i in batch["id"].to_pylist()], type=vector_type)})
+
+    result = table.compute_columns("embedding", inputs=["id"], fn=recompute, batch_size=2)
+
+    assert result.updated_rows == len(visible_ids)
+    assert result.snapshot_id == source + 1
+    assert _rows(table, ["id", "embedding"]) == [
+        {"id": i, "embedding": [float(i), 1.]} for i in visible_ids]
+    current_files = _files(table)
+    assert set(files).issubset(current_files)
+    new_files = [file for name, file in current_files.items() if name not in files]
+    assert all(DataFileMeta.is_vector_file(file.file_name) for file in new_files)
+    assert sorted((file.first_row_id, file.row_count) for file in new_files) == [(0, 6), (6, 6)]
+
+
 def test_compute_columns_preserves_deleted_rows_across_partitions(tmp_path):
     connection = pmm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     table = connection.create_table(

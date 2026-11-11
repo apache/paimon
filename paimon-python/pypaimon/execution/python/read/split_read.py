@@ -17,6 +17,7 @@
 
 import os
 from abc import ABC, abstractmethod
+from copy import copy
 from functools import partial
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -1730,9 +1731,11 @@ class DataEvolutionSplitRead(SplitRead):
                     ): r]
                     file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
                 else:
-                    # Create concatenated reader for multiple files
+                    # Lazy readers must keep this bunch's projection after
+                    # self.read_fields is restored to the full projection.
+                    bunch_reader = copy(self)
                     suppliers = [
-                        partial(self._create_file_reader, file=file,
+                        partial(bunch_reader._create_file_reader, file=file,
                                 read_fields=read_field_names,
                                 deletion_vector=deletion_vector) for file in bunch.files()
                     ]
