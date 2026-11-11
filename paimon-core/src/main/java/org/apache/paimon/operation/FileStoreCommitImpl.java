@@ -1678,6 +1678,49 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
             @Nullable Map<String, String> properties) {
+        return replaceManifestListOnce(
+                        latest,
+                        totalRecordCount,
+                        baseManifestList,
+                        deltaManifestList,
+                        indexManifest,
+                        nextRowId,
+                        properties,
+                        false)
+                != null;
+    }
+
+    /**
+     * Replaces the manifest lists to repair the table, marking the new snapshot as a manifest
+     * replacement and notifying {@link CommitCallback#onManifestReplacement} after the commit.
+     *
+     * <p>Only repairs use this path. Other metadata-only replacements (such as row-id reassignment)
+     * use {@link #replaceManifestList} and do not notify callbacks.
+     */
+    public boolean replaceManifestListForRepair(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList) {
+        return replaceManifestListForRepair(
+                latest,
+                totalRecordCount,
+                baseManifestList,
+                deltaManifestList,
+                latest.indexManifest(),
+                latest.nextRowId());
+    }
+
+    /**
+     * Like {@link #replaceManifestListForRepair(Snapshot, long, Pair, Pair)} with explicit index.
+     */
+    public boolean replaceManifestListForRepair(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList,
+            @Nullable String indexManifest,
+            @Nullable Long nextRowId) {
         Snapshot snapshot =
                 replaceManifestListOnce(
                         latest,
@@ -1686,7 +1729,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         deltaManifestList,
                         indexManifest,
                         nextRowId,
-                        properties);
+                        latest.properties(),
+                        true);
         if (snapshot == null) {
             return false;
         }
@@ -1716,7 +1760,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Pair<String, Long> deltaManifestList,
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
-            @Nullable Map<String, String> properties) {
+            @Nullable Map<String, String> properties,
+            boolean repair) {
         return runWithLock(
                 () ->
                         replaceManifestListOnceWithoutLock(
@@ -1726,7 +1771,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 deltaManifestList,
                                 indexManifest,
                                 nextRowId,
-                                properties));
+                                properties,
+                                repair));
     }
 
     @Nullable
@@ -1737,14 +1783,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Pair<String, Long> deltaManifestList,
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
-            @Nullable Map<String, String> properties) {
+            @Nullable Map<String, String> properties,
+            boolean repair) {
         Snapshot head = snapshotManager.latestSnapshot();
         if (head == null || !head.equals(latest)) {
             return null;
         }
-        Map<String, String> replacementProperties =
-                properties == null ? new HashMap<>() : new HashMap<>(properties);
-        replacementProperties.put(MANIFEST_REPLACEMENT_SNAPSHOT_ID, Long.toString(latest.id() + 1));
+        Map<String, String> replacementProperties;
+        if (repair) {
+            replacementProperties =
+                    properties == null ? new HashMap<>() : new HashMap<>(properties);
+            replacementProperties.put(
+                    MANIFEST_REPLACEMENT_SNAPSHOT_ID, Long.toString(latest.id() + 1));
+        } else {
+            // if empty properties, just set to null
+            replacementProperties = properties == null || properties.isEmpty() ? null : properties;
+        }
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,

@@ -115,7 +115,7 @@ public class RemoveUnexistingManifests {
                 (FileStoreCommitImpl)
                         table.store().newCommit("Repair-table-" + UUID.randomUUID(), table)) {
             boolean result =
-                    fileStoreCommit.replaceManifestList(
+                    fileStoreCommit.replaceManifestListForRepair(
                             latest, totalRecordCount, baseManifestList, deltaManifestList);
             if (!result) {
                 throw new RuntimeException(

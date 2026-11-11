@@ -830,7 +830,7 @@ public class IcebergManifestReplacementTest {
                 (FileStoreCommitImpl)
                         table.store().newCommit(UUID.randomUUID().toString(), table)) {
             assertThat(
-                            commit.replaceManifestList(
+                            commit.replaceManifestListForRepair(
                                     before,
                                     before.totalRecordCount(),
                                     baseManifestList,
@@ -1132,7 +1132,7 @@ public class IcebergManifestReplacementTest {
                 (FileStoreCommitImpl)
                         table.store().newCommit(UUID.randomUUID().toString(), table)) {
             assertThat(
-                            commit.replaceManifestList(
+                            commit.replaceManifestListForRepair(
                                     before,
                                     before.totalRecordCount(),
                                     baseManifestList,

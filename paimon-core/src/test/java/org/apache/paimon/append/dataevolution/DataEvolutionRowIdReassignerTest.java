@@ -37,6 +37,9 @@ import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.iceberg.IcebergCommitCallback;
+import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.iceberg.IcebergPathFactory;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -242,6 +245,39 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         return schemaBuilder.build();
+    }
+
+    @Test
+    public void testReassignDoesNotPublishIcebergMetadata() throws Exception {
+        createTableDefault();
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                                        "table-location"));
+        writeOneRow(table, "a", 0);
+        writeOneRow(table, "b", 1);
+        writeOneRow(table, "a", 2);
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(IcebergCommitCallback.catalogTableMetadataPath(table));
+        long beforeId = table.snapshotManager().latestSnapshotId();
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(beforeId))).isTrue();
+
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(table).reassign("reassign-with-iceberg");
+
+        assertThat(result.reassigned).isTrue();
+        Snapshot reassigned = table.snapshotManager().latestSnapshot();
+        assertThat(reassigned.id()).isEqualTo(beforeId + 1);
+        // row-id reassignment is not a repair: no marker and no Iceberg publication
+        assertThat(FileStoreCommitImpl.isManifestReplacement(reassigned)).isFalse();
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(reassigned.id()))).isFalse();
+
+        // the next regular commit still publishes Iceberg metadata
+        writeOneRow(table, "b", 3);
+        long nextId = table.snapshotManager().latestSnapshotId();
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(nextId))).isTrue();
     }
 
     @Test

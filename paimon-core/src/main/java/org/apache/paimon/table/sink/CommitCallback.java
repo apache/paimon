@@ -43,8 +43,9 @@ public interface CommitCallback extends AutoCloseable {
     void call(Context context);
 
     /**
-     * Called after manifest lists are replaced without a delta describing the file changes.
-     * Implementations must derive the new state from the committed snapshot.
+     * Called after a repair replaces manifest lists without a delta describing the file changes.
+     * Implementations must derive the new state from the committed snapshot. Other metadata-only
+     * replacements, such as row-id reassignment, do not trigger this callback.
      *
      * <p>May also be replayed when recovering an already-committed replacement.
      */

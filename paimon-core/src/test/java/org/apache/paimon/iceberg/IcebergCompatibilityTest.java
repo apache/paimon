@@ -804,7 +804,9 @@ public class IcebergCompatibilityTest {
         String repairUser = UUID.randomUUID().toString();
         try (FileStoreCommitImpl commit =
                 (FileStoreCommitImpl) disabled.store().newCommit(repairUser, disabled)) {
-            assertThat(commit.replaceManifestList(before, 0L, emptyManifestList, emptyManifestList))
+            assertThat(
+                            commit.replaceManifestListForRepair(
+                                    before, 0L, emptyManifestList, emptyManifestList))
                     .isTrue();
         }
         if (missingBase) {
@@ -869,7 +871,7 @@ public class IcebergCompatibilityTest {
         try (FileStoreCommitImpl commit =
                 (FileStoreCommitImpl) table.store().newCommit(commitUser, table)) {
             assertThat(
-                            commit.replaceManifestList(
+                            commit.replaceManifestListForRepair(
                                     before,
                                     before.totalRecordCount(),
                                     baseManifestList,
