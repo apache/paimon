@@ -313,10 +313,10 @@ def create_python_row_id_delete(table, precomputed=None):
     return PythonTableDeleteByRowId().initialize(table, precomputed)
 
 
-def create_python_shard_updator(table, projection, columns, commit_user, shard, shard_count):
+def create_python_shard_updator(table, projection, columns, commit_user, shard=0, shard_count=1, *, splits=None):
     """Initialize the Python shard resources only after backend selection."""
     from pypaimon.execution.python.write.table_update import ShardTableUpdator
-    return ShardTableUpdator(table, projection, columns, commit_user, shard, shard_count)
+    return ShardTableUpdator(table, projection, columns, commit_user, shard, shard_count, splits=splits)
 
 
 def create_python_update_operation(context, commit_identifier, predicate=None, *, has_callable=False, has_array=False):

@@ -348,6 +348,26 @@ Use this method after a schema-only addition or to recompute a column left by
 failed `add_columns` computation. A new call starts a complete run, without
 resuming an earlier run or retrying function calls automatically.
 
+To recompute an existing column on Ray, install `pypaimon[ray]` and set
+`execution="ray"`. The driver plans one source snapshot and assigns complete
+Data Evolution file groups to workers. Each worker reads the requested inputs
+and uses the Python shard updater to prepare the output files. The driver
+publishes them in one commit after all shards succeed. A worker failure leaves
+the prepared files unpublished.
+
+```python
+result = frames.compute_columns(
+    "image_size", inputs=["image"], fn=image_sizes, batch_size=128,
+    execution="ray", concurrency=4, ray_remote_args={"num_cpus": 1},
+)
+```
+
+`concurrency` caps the number of shards and defaults to four. Parallelism also
+depends on the number of complete file groups and available Ray resources.
+`ray_remote_args` accepts task resource options such as `num_gpus`. The function
+must be serializable by Ray, and workers need its dependencies and access to
+the table storage. Ray task retries are disabled for this write operation.
+
 `merge_columns` accepts the same key forms as `merge`: a name, a list of names,
 or a mapping from target names to source names. It updates only non-key columns
 present in the source and never inserts rows. Omitted columns keep their values;
@@ -386,7 +406,7 @@ annotations are still valid.
 `merge_columns` delegates matching and updates to the standard MERGE executor.
 With a compatible `pypaimon_rust` runtime and `write.native.enabled=true`,
 supported tables use native MERGE without a separate Python target-key scan.
-`add_columns` and `compute_columns` can use the native shard reader and writer
+`add_columns` and local `compute_columns` can use the native shard reader and writer
 with the same option; the supplied `fn` still runs in Python. Unsupported native
 routes select Python before execution.
 `update_columns_by_row_id` uses the standard row-ID update backend with the same
@@ -400,13 +420,13 @@ physical writes. `add_columns` and `compute_columns` buffer outputs per original
 file group so a small function batch does not repeatedly rewrite the same group.
 `batch_size` bounds function input rows, not total memory usage.
 
-These are local, single-writer operations on a current full-table view.
+These are single-writer operations on a current full-table view.
 As with other table methods, reopen the table after external schema changes.
 Time-travel and incremental table views are rejected. `merge_columns` materializes
 the source as an Arrow table; target matching is handled by the selected MERGE
 executor. The read snapshot is fixed for the
 operation. Coordinate writers for the entire call.
-The APIs do not provide automatic retries, checkpoints, or distributed jobs.
+The APIs do not provide automatic function retries or checkpoints.
 
 Successful calls return `ColumnUpdateResult` with added column names,
 the source and final data snapshot IDs, and the schema ID. `updated_rows` is the
@@ -417,8 +437,10 @@ logical row counts. `update_columns_by_row_id` reports the input row count in
 the schema unchanged on success or failure. Schema-only changes
 leave the data snapshot ID unchanged. Schema publication and data publication
 are separate operations. Failures during schema publication or data preparation
-and commit raise
-`ColumnUpdateError`, retaining the original exception as `__cause__` and exposing:
+and commit raise `ColumnUpdateError` with the underlying error as `__cause__`.
+For Ray worker failures, the original exception type is preserved only if Ray
+can serialize and deserialize the exception. If Ray cannot restore it, the
+cause can be a Ray error containing the worker traceback.
 
 | Attribute | Meaning |
 | --- | --- |
