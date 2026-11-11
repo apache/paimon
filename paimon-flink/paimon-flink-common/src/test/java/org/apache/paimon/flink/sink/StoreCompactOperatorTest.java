@@ -63,6 +63,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link StoreCompactOperator}. */
@@ -170,6 +171,28 @@ public class StoreCompactOperatorTest extends TableTestBase {
         operator.prepareCommit(true, 1);
         assertThat(operator.compactionWaitingSet()).isEmpty();
         assertThat(compactRememberStoreWrite.compactTime).isEqualTo(3);
+    }
+
+    @Test
+    public void testCloseAfterInitializeStateFailure() throws Exception {
+        createTableDefault();
+
+        StoreCompactOperator.Factory operatorFactory =
+                new StoreCompactOperator.Factory(
+                        getTableDefault(),
+                        (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) -> {
+                            throw new RuntimeException("Failed to create write");
+                        },
+                        "10086",
+                        false);
+        try (OneInputStreamOperatorTestHarness<RowData, Committable> harness =
+                new OneInputStreamOperatorTestHarness<>(operatorFactory)) {
+            harness.setup(new CommittableTypeInfo().createSerializer(new ExecutionConfig()));
+            assertThatThrownBy(harness::initializeEmptyState)
+                    .hasMessageContaining("Failed to create write");
+
+            assertThatCode(() -> harness.getOperator().close()).doesNotThrowAnyException();
+        }
     }
 
     @Test

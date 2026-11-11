@@ -124,7 +124,9 @@ public class AppendBypassCoordinateOperator<CommitT>
 
     @Override
     public void close() throws Exception {
-        ExecutorUtils.gracefulShutdown(1, TimeUnit.MINUTES, executorService);
+        if (executorService != null) {
+            ExecutorUtils.gracefulShutdown(1, TimeUnit.MINUTES, executorService);
+        }
         super.close();
     }
 }
