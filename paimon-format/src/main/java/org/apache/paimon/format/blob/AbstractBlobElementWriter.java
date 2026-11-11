@@ -73,7 +73,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             @Nullable BlobConsumer writeConsumer,
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure,
-            BlobFetchMetricReporter blobFetchMetricReporter,
+            @Nullable BlobFetchMetricReporter blobFetchMetricReporter,
             int copyBufferSize) {
         checkArgument(
                 copyBufferSize > 0,
@@ -84,8 +84,11 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         this.writeConsumer = writeConsumer;
         this.writeNullOnMissingFile = writeNullOnMissingFile;
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
-        this.blobFetchMetricReporter = blobFetchMetricReporter;
-        this.transferMetricsEnabled = blobFetchMetricReporter.isTransferMetricsEnabled();
+        this.blobFetchMetricReporter =
+                blobFetchMetricReporter == null
+                        ? BlobFetchMetricReporter.NOOP
+                        : blobFetchMetricReporter;
+        this.transferMetricsEnabled = this.blobFetchMetricReporter.isTransferMetricsEnabled();
         this.crc32 = new CRC32();
         this.copyBuffer = new byte[copyBufferSize];
         this.reuseSource = new ReusingBlobRefStreamProvider();
