@@ -24,8 +24,10 @@ import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.Expression;
+import org.apache.paimon.flink.action.cdc.PrefixedMetadataConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlRecordParser;
+import org.apache.paimon.flink.action.cdc.postgres.PostgresRecordParser;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.CdcRecordUtils;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -66,6 +68,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Binary values must survive Debezium parsing, key projection and table writes. */
@@ -91,6 +94,48 @@ class DebeziumBinaryRecordTest {
     @ValueSource(strings = {"json", "mysql"})
     void testComputedColumnsKeepTextSemantics(String format) throws Exception {
         assertComputedColumns((bytes, computed) -> parse(format, bytes, computed));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"mysql", "postgres"})
+    void testComputedColumnsReferenceSourceMetadata(String format) throws Exception {
+        CdcMetadataConverter[] metadata = {
+            new PrefixedMetadataConverter(
+                    new CdcMetadataConverter.DatabaseNameConverter(), "__source_"),
+            new PrefixedMetadataConverter(
+                    new CdcMetadataConverter.TableNameConverter(), "__source_")
+        };
+        List<ComputedColumn> columns =
+                buildComputedColumns(
+                        Arrays.asList(
+                                "source_db=substring(__source_database_name,0)",
+                                "source_table=substring(__source_table_name,0)"),
+                        Collections.emptyList(),
+                        metadata,
+                        true);
+        FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> parser =
+                format.equals("mysql")
+                        ? new MySqlRecordParser(
+                                new Configuration(),
+                                columns,
+                                TypeMapping.defaultMapping(),
+                                metadata)
+                        : new PostgresRecordParser(
+                                new Configuration(),
+                                columns,
+                                TypeMapping.defaultMapping(),
+                                metadata);
+        CdcRecord record =
+                collectRecord(
+                                parser,
+                                jsonValue(ByteBuffer.wrap(new byte[] {0, (byte) 0xff})).toString())
+                        .toRichCdcRecord()
+                        .toCdcRecord();
+
+        assertThat(record.data())
+                .containsEntry("source_db", "test")
+                .containsEntry("source_table", "binary_table");
+        assertThat(record.base64EncodedFields()).containsExactly("payload");
     }
 
     @Test

@@ -50,6 +50,16 @@ public class ComputedColumnUtils {
      */
     public static List<ComputedColumn> buildComputedColumns(
             List<String> computedColumnArgs, List<DataField> physicFields, boolean caseSensitive) {
+        return buildComputedColumns(
+                computedColumnArgs, physicFields, new CdcMetadataConverter[0], caseSensitive);
+    }
+
+    /** Builds computed columns from physical fields and configured metadata columns. */
+    public static List<ComputedColumn> buildComputedColumns(
+            List<String> computedColumnArgs,
+            List<DataField> physicFields,
+            CdcMetadataConverter[] metadataConverters,
+            boolean caseSensitive) {
         Map<String, DataType> typeMapping =
                 physicFields.stream()
                         .collect(
@@ -57,6 +67,11 @@ public class ComputedColumnUtils {
                                         field -> toLowerCaseIfNeed(field.name(), caseSensitive),
                                         DataField::type,
                                         (v1, v2) -> v2));
+
+        for (CdcMetadataConverter converter : metadataConverters) {
+            typeMapping.put(
+                    toLowerCaseIfNeed(converter.columnName(), caseSensitive), converter.dataType());
+        }
 
         // sort computed column args by dependencies
         LinkedHashMap<String, Tuple2<String, String[]>> sortedArgs =

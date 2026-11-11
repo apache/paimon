@@ -277,6 +277,12 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
             resultMap.put(fieldName, newValue);
         }
 
+        for (CdcMetadataConverter metadataConverter : metadataConverters) {
+            resultMap.put(
+                    metadataConverter.columnName(),
+                    metadataConverter.read(root.payload().source()));
+        }
+
         // generate values of computed columns
         Set<String> base64EncodedFields =
                 computedColumns.isEmpty() ? Collections.emptySet() : extractBase64EncodedFields();
@@ -287,12 +293,6 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
 
             // remember the computed column data type for later reference by other computed columns
             schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
-        }
-
-        for (CdcMetadataConverter metadataConverter : metadataConverters) {
-            resultMap.put(
-                    metadataConverter.columnName(),
-                    metadataConverter.read(root.payload().source()));
         }
 
         return resultMap;

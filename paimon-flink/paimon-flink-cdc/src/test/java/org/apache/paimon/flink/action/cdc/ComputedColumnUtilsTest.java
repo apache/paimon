@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.flink.action.cdc.kafka.KafkaMetadataConverter;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
@@ -125,6 +126,26 @@ public class ComputedColumnUtilsTest {
         assertEquals(DataTypes.INT(), columns.get(0).columnType());
         assertEquals(DataTypes.STRING(), columns.get(1).columnType());
         assertEquals("20", columns.get(1).eval(columns.get(0).eval("2023-03-23")));
+    }
+
+    @Test
+    public void testCaseInsensitiveMetadataReference() {
+        CdcMetadataConverter timestamp =
+                new PrefixedMetadataConverter(
+                        new KafkaMetadataConverter.TimestampConverter(), "__kafka_");
+        List<ComputedColumn> columns =
+                buildComputedColumns(
+                        Collections.singletonList("dt=date_format(__KAFKA_TIMESTAMP,yyyy-MM-dd)"),
+                        Collections.emptyList(),
+                        new CdcMetadataConverter[] {timestamp},
+                        false);
+
+        assertEquals(
+                "2024-12-30",
+                columns.get(0)
+                        .evalFromRecord(
+                                Collections.singletonMap(
+                                        "__kafka_timestamp", "2024-12-30 10:00:00.000")));
     }
 
     @Test

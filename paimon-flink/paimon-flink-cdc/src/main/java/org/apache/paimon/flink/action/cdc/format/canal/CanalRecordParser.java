@@ -180,8 +180,8 @@ public class CanalRecordParser extends AbstractJsonRecordParser {
             }
         }
 
-        evalComputedColumns(rowData, schemaBuilder);
         evalMetadataColumns(rowData, schemaBuilder);
+        evalComputedColumns(rowData, schemaBuilder);
         return rowData;
     }
 

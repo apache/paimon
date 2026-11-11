@@ -355,6 +355,12 @@ public class PostgresRecordParser
             resultMap.put(fieldName, newValue);
         }
 
+        for (CdcMetadataConverter metadataConverter : metadataConverters) {
+            resultMap.put(
+                    metadataConverter.columnName(),
+                    metadataConverter.read(root.payload().source()));
+        }
+
         // generate values of computed columns
         Set<String> base64EncodedFields =
                 computedColumns.isEmpty() ? Collections.emptySet() : extractBase64EncodedFields();
@@ -362,12 +368,6 @@ public class PostgresRecordParser
             resultMap.put(
                     computedColumn.columnName(),
                     computedColumn.evalFromRecord(resultMap, base64EncodedFields));
-        }
-
-        for (CdcMetadataConverter metadataConverter : metadataConverters) {
-            resultMap.put(
-                    metadataConverter.columnName(),
-                    metadataConverter.read(root.payload().source()));
         }
 
         return resultMap;

@@ -39,10 +39,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.assertSchemaCompatible;
 import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
 
 /** Base {@link Action} for synchronizing into one Paimon table. */
 public abstract class SyncTableActionBase extends SynchronizationActionBase {
@@ -121,7 +125,11 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
             try {
                 Schema retrievedSchema = retrieveSchema();
                 computedColumns =
-                        buildComputedColumns(computedColumnArgs, retrievedSchema.fields());
+                        buildComputedColumns(
+                                computedColumnArgs,
+                                retrievedSchema.fields(),
+                                metadataConverters,
+                                caseSensitive);
                 Schema paimonSchema = buildPaimonSchema(retrievedSchema);
                 assertSchemaCompatible(fileStoreTable.schema(), paimonSchema.fields());
             } catch (SchemaRetrievalException e) {
@@ -135,16 +143,45 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                         buildComputedColumns(
                                 computedColumnArgs,
                                 fileStoreTable.schema().fields(),
+                                metadataConverters,
                                 caseSensitive);
                 // check partition keys and primary keys in case that user specified them
                 checkConstraints();
             }
+            validateMetadataComputedColumns(fileStoreTable.primaryKeys());
         } catch (Catalog.TableNotExistException e) {
             Schema retrievedSchema = retrieveSchema();
-            computedColumns = buildComputedColumns(computedColumnArgs, retrievedSchema.fields());
+            computedColumns =
+                    buildComputedColumns(
+                            computedColumnArgs,
+                            retrievedSchema.fields(),
+                            metadataConverters,
+                            caseSensitive);
             Schema paimonSchema = buildPaimonSchema(retrievedSchema);
+            validateMetadataComputedColumns(paimonSchema.primaryKeys());
             catalog.createTable(identifier, paimonSchema, false);
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        }
+    }
+
+    private void validateMetadataComputedColumns(List<String> targetPrimaryKeys) {
+        if (targetPrimaryKeys.isEmpty()) {
+            return;
+        }
+
+        Set<String> metadataNames =
+                Arrays.stream(metadataConverters)
+                        .map(converter -> toLowerCaseIfNeed(converter.columnName(), caseSensitive))
+                        .collect(Collectors.toSet());
+        for (ComputedColumn column : computedColumns) {
+            String reference = column.fieldReference();
+            checkArgument(
+                    reference == null
+                            || !metadataNames.contains(toLowerCaseIfNeed(reference, caseSensitive)),
+                    "Computed column '%s' references metadata column '%s'. "
+                            + "Metadata references in computed columns are only supported for append-only tables without primary keys.",
+                    column.columnName(),
+                    reference);
         }
     }
 

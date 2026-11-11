@@ -214,8 +214,8 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
                             debeziumType, className, parameters.get(fieldName)));
         }
 
-        evalComputedColumns(resultMap, schemaBuilder);
         evalMetadataColumns(resultMap, schemaBuilder);
+        evalComputedColumns(resultMap, schemaBuilder);
 
         return resultMap;
     }
