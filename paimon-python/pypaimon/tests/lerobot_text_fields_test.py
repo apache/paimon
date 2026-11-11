@@ -16,7 +16,8 @@
 
 import io
 import sys
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from urllib.parse import unquote, urlparse
 
 import pyarrow.fs as pafs
@@ -61,9 +62,12 @@ def test_text_file_globs_keep_directory_boundaries(tmp_path, backend):
         source = _LeRobotSource("memory://bucket/dataset", None, "", MemoryFileIO(tmp_path))
     elif backend == "hub":
         source = _LeRobotSource("example/dataset", None, "example/dataset")
-    with patch("huggingface_hub.list_repo_files", return_value=list(files)) as listing, \
-            patch("huggingface_hub.hf_hub_download",
-                  side_effect=lambda repo, name, **kw: str(tmp_path / name)) as download:
+    listing = Mock(return_value=list(files))
+    download = Mock(side_effect=lambda repo, name, **kw: str(tmp_path / name))
+    with patch.dict(sys.modules, {
+        "huggingface_hub": SimpleNamespace(list_repo_files=listing, hf_hub_download=download),
+        "huggingface_hub.errors": SimpleNamespace(EntryNotFoundError=FileNotFoundError),
+    }):
         actual = _read_text_fields(source, {"config": "config/*.json", "notes": "notes.md"})
         assert actual == {"config": {"model": files["config/model.json"],
                                      "model a": files["config/model a.json"]},
