@@ -19,10 +19,15 @@
 package org.apache.paimon.spark.globalindex.sorted;
 
 import org.apache.paimon.globalindex.sorted.NullBitmapBuffer;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.apache.spark.Partitioner;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.RowFactory;
+import org.apache.spark.sql.catalyst.expressions.GenericRowWithSchema;
+import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.MetadataBuilder;
+import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -67,6 +72,27 @@ class NullBitmapShuffleTest {
         assertThat(compressed).hasSize(3);
         assertThat(collect(NullBitmapShuffle.expandRows(compressed.iterator())))
                 .containsExactlyInAnyOrderElementsOf(input);
+    }
+
+    @Test
+    void testTransportDoesNotSerializeSourceSchemaMetadata() throws Exception {
+        StructType schema =
+                new StructType()
+                        .add("task_id", DataTypes.LongType, false)
+                        .add(
+                                "index_key",
+                                DataTypes.IntegerType,
+                                true,
+                                new MetadataBuilder()
+                                        .putString("unused", new String(new char[4096]))
+                                        .build())
+                        .add("row_id", DataTypes.LongType, false);
+        Row input = new GenericRowWithSchema(new Object[] {0L, 10, 1L}, schema);
+        Row transport =
+                NullBitmapShuffle.compressRows(Collections.singletonList(input).iterator()).next();
+        assertThat(transport).isEqualTo(input);
+        // Only the three scalar values belong in the Java-serialized shuffle payload.
+        assertThat(InstantiationUtil.serializeObject(transport).length).isLessThan(1024);
     }
 
     @Test

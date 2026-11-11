@@ -340,7 +340,8 @@ final class NullBitmapShuffle {
                         Row row = pending;
                         pending = null;
                         if (!row.isNullAt(1)) {
-                            next = row;
+                            // The receiving DataFrame supplies the schema; shuffle only values.
+                            next = RowFactory.create(row.get(0), row.get(1), row.get(2));
                             return true;
                         }
                         taskId = row.getLong(0);
