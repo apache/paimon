@@ -96,8 +96,7 @@ def test_rest_system_table_parity_and_no_python_materialization(source, name, em
     if not empty:
         _append(table, [{'id': 1, 'value': 'old', 'pt': 'a'},
                         {'id': 2, 'value': None, 'pt': None}])
-        table.create_tag('first', snapshot_id=1, time_retained='1d')
-        catalog.create_tag(table.identifier, 'first', 1)
+        catalog.create_tag(table.identifier, 'first', 1, time_retained='1d')
         catalog.create_branch(table.identifier, 'dev', tag_name='first')
         from pypaimon.consumer.consumer import Consumer
         table.consumer_manager().reset_consumer('reader', Consumer(2))
@@ -132,7 +131,6 @@ def test_captured_metadata_view(source, name, view):
     catalog, table, _ = source
     _append(table, [{'id': 1, 'value': 'a', 'pt': 'old'}])
     first = table.snapshot_manager().get_latest_snapshot()
-    table.create_tag('first', snapshot_id=1)
     catalog.create_tag(table.identifier, 'first', 1)
     _append(table, [{'id': 2, 'value': 'b', 'pt': 'new'}])
     if view == 'tag':
@@ -215,7 +213,6 @@ def test_branch_namespace(source, name):
     from pypaimon.consumer.consumer import Consumer
     catalog, table, _ = source
     _append(table, [{'id': 1, 'value': 'main', 'pt': 'a'}])
-    table.create_tag('first', snapshot_id=1)
     catalog.create_tag(table.identifier, 'first', 1)
     catalog.create_branch(table.identifier, 'dev', tag_name='first')
     branch = catalog.get_table(Identifier('default', 'metadata', branch='dev'))

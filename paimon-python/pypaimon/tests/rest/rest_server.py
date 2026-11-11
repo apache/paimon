@@ -85,6 +85,8 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.api.typedef import RESTAuthParameter
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.time_utils import (duration_to_iso8601,
+                                        local_datetime_to_system_zone_millis)
 from pypaimon.management.column_mask import ColumnMask
 from pypaimon.management.data_policy import DataPolicy
 from pypaimon.management.list_permissions_request import ListPermissionsRequest
@@ -910,8 +912,6 @@ class RESTCatalogServer:
         self.table_partitions_store: Dict[str, List] = {}
         self.function_store: Dict[str, Dict] = {}  # key: "db.func_name", value: GetFunctionResponse-like dict
         self.model_store: Dict[str, GetModelResponse] = {}
-        # Tag store: key = full table name, value = {tag_name: GetTagResponse}.
-        self.tag_store: Dict[str, Dict[str, GetTagResponse]] = {}
         # Branch store: key = full table name, value = set of branch names.
         self.branch_store: Dict[str, set] = {}
         self.no_permission_databases: List[str] = []
@@ -1095,7 +1095,7 @@ class RESTCatalogServer:
                 else:
                     destination_table_dir.parent.mkdir(parents=True, exist_ok=True)
                     source_table_dir.rename(destination_table_dir)
-                for store in (self.table_metadata_store, self.branch_store, self.tag_store,
+                for store in (self.table_metadata_store, self.branch_store,
                               self.table_latest_snapshot_store, self.table_partitions_store):
                     if source_name in store:
                         store[destination_name] = store.pop(source_name)
@@ -1311,14 +1311,14 @@ class RESTCatalogServer:
             elif operation == ResourcePaths.PARTITIONS:
                 return self._table_partitions_handle(method, data, lookup_identifier, parameters)
             elif operation == ResourcePaths.TAGS:
-                return self._tags_handle(method, data, lookup_identifier, parameters)
+                return self._tags_handle(method, data, lookup_identifier, parameters, branch_part)
             elif operation == ResourcePaths.BRANCHES:
                 return self._branches_handle(method, data, lookup_identifier)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
         elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.TAGS:
             tag_name = RESTUtil.decode_string(path_parts[4])
-            return self._tag_handle(method, lookup_identifier, tag_name)
+            return self._tag_handle(method, lookup_identifier, tag_name, branch_part)
         elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.BRANCHES:
             branch_name = RESTUtil.decode_string(path_parts[4])
             return self._branch_handle(method, lookup_identifier, branch_name)
@@ -1861,34 +1861,35 @@ class RESTCatalogServer:
     # ======================= Tag Handlers ====================================
 
     def _tags_handle(self, method: str, data: str, identifier: Identifier,
-                     parameters: Dict[str, str]) -> Tuple[str, int]:
+                     parameters: Dict[str, str], branch: Optional[str] = None) -> Tuple[str, int]:
         """Handle the table-scoped tags collection (POST create / GET list-paged)."""
-        if identifier.get_full_name() not in self.table_metadata_store:
-            raise TableNotExistException(identifier)
+        table = self._get_file_table(identifier, branch)
+        # Share tag files with clients using FileStoreTable directly.
+        tags = table.tag_manager()
 
         if method == "POST":
             request = JSON.from_json(data, CreateTagRequest)
-            store = self.tag_store.setdefault(identifier.get_full_name(), {})
-            if request.tag_name in store:
+            if tags.tag_exists(request.tag_name):
                 raise TagAlreadyExistException(request.tag_name)
-            snapshot = self._resolve_tag_snapshot(identifier, request.snapshot_id)
-            store[request.tag_name] = GetTagResponse(
-                tag_name=request.tag_name,
-                snapshot=snapshot,
-                tag_create_time=int(time.time() * 1000),
-                tag_time_retained=request.time_retained,
-            )
+            snapshots = table.snapshot_manager()
+            snapshot = (snapshots.get_latest_snapshot() if request.snapshot_id is None
+                        else snapshots.get_snapshot_by_id(request.snapshot_id))
+            if snapshot is None:
+                return self._mock_response(ErrorResponse(
+                    ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
+                    None if request.snapshot_id is None else str(request.snapshot_id), "", 404), 404)
+            tags.create_tag(snapshot, request.tag_name, time_retained=request.time_retained)
             return self._mock_response("", 200)
 
         if method == "GET":
-            tags = list(self.tag_store.get(identifier.get_full_name(), {}).keys())
+            names = tags.list_tags()
             tag_name_prefix = parameters.get(TAG_NAME_PREFIX)
             if tag_name_prefix:
-                tags = [t for t in tags if t.startswith(tag_name_prefix)]
-            if tags:
+                names = [name for name in names if name.startswith(tag_name_prefix)]
+            if names:
                 max_results = self._get_max_results(parameters)
                 page_token = parameters.get(PAGE_TOKEN)
-                paged = self._build_paged_entities(tags, max_results, page_token)
+                paged = self._build_paged_entities(names, max_results, page_token)
                 response = ListTagsResponse(
                     tags=paged.elements, next_page_token=paged.next_page_token)
             else:
@@ -1898,39 +1899,28 @@ class RESTCatalogServer:
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
     def _tag_handle(self, method: str, identifier: Identifier,
-                    tag_name: str) -> Tuple[str, int]:
+                    tag_name: str, branch: Optional[str] = None) -> Tuple[str, int]:
         """Handle a single tag (GET / DELETE)."""
-        if identifier.get_full_name() not in self.table_metadata_store:
-            raise TableNotExistException(identifier)
-        store = self.tag_store.get(identifier.get_full_name(), {})
+        tags = self._get_file_table(identifier, branch).tag_manager()
 
         if method == "GET":
-            if tag_name not in store:
+            tag = tags.get(tag_name)
+            if tag is None:
                 raise TagNotExistException(tag_name)
-            return self._mock_response(store[tag_name], 200)
+            response = GetTagResponse(
+                tag_name=tag_name,
+                snapshot=tag.trim_to_snapshot(),
+                tag_create_time=(None if tag.tag_create_time is None
+                                 else local_datetime_to_system_zone_millis(tag.tag_create_time)),
+                tag_time_retained=(None if tag.tag_time_retained is None
+                                   else duration_to_iso8601(tag.tag_time_retained)),
+            )
+            return self._mock_response(response, 200)
         if method == "DELETE":
-            if tag_name not in store:
+            if not tags.delete_tag(tag_name):
                 raise TagNotExistException(tag_name)
-            del store[tag_name]
             return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
-
-    def _resolve_tag_snapshot(self, identifier: Identifier,
-                              snapshot_id: Optional[int]):
-        """Look up the snapshot to embed in GetTagResponse.
-
-        When ``snapshot_id`` is None, fall back to the table's latest snapshot.
-        Mirrors Java behavior of ``TagManager`` resolving the latest snapshot
-        when no explicit id is supplied.
-        """
-        try:
-            table = self._get_file_table(identifier)
-            snapshot_manager = table.snapshot_manager()
-            if snapshot_id is None:
-                return snapshot_manager.get_latest_snapshot()
-            return snapshot_manager.get_snapshot_by_id(snapshot_id)
-        except Exception:
-            return None
 
     # ======================= Branch Handlers ================================
 
@@ -1955,11 +1945,11 @@ class RESTCatalogServer:
             metadata = self.table_metadata_store[identifier.get_full_name()]
             schema_id, snapshot = metadata.schema.id, None
             if request.from_tag is not None:
-                tags = self.tag_store.get(identifier.get_full_name(), {})
-                if request.from_tag not in tags:
+                tag = self._get_file_table(identifier).tag_manager().get(request.from_tag)
+                if tag is None:
                     raise TagNotExistException(request.from_tag)
-                snapshot = tags[request.from_tag].snapshot
-                schema_id = schema_id if snapshot is None else snapshot.schema_id
+                snapshot = tag.trim_to_snapshot()
+                schema_id = snapshot.schema_id
             if self._restricted(identifier, metadata):
                 raise ValueError("Tables with data policies or column permissions cannot have branches.")
             manager = self._schema_manager(identifier)
