@@ -96,10 +96,9 @@ def test_commit_resolves_updated_index_columns_by_file_schema(native_rest_catalo
     else:
         assert messages[0].new_files[0].schema_id == original.table_schema.id
     target = latest.copy({'commit.native.enabled': str(native).lower()})
-    # Python publication rejects removed field IDs even when the index now
-    # belongs to a different field with the same name.
-    dropped_update = evolution == 'drop_readd' and not native
-    if dropped_update or (action == 'THROW_ERROR' and evolution != 'drop_readd'):
+    # Reject updates to removed field IDs even when a new field has the same name.
+    dropped_update = evolution == 'drop_readd'
+    if dropped_update or action == 'THROW_ERROR':
         error = 'cannot restore a dropped field' if dropped_update else 'globally indexed columns'
         with pytest.raises(Exception, match=error):
             _commit(target, messages, native)
@@ -110,8 +109,8 @@ def test_commit_resolves_updated_index_columns_by_file_schema(native_rest_catalo
         _commit(target, messages, native)
         after = latest.snapshot_manager().get_latest_snapshot()
         assert after.id == before.id + 1
-        expected_indexes = [] if action == 'DROP_PARTITION_INDEX' and evolution != 'drop_readd' else ['identity.index']
-        expected_value = None if evolution == 'drop_readd' else 11
+        expected_indexes = [] if action == 'DROP_PARTITION_INDEX' else ['identity.index']
+        expected_value = 11
     snapshot = latest.snapshot_manager().get_latest_snapshot()
     indexes = scan_global_index_entries(latest, snapshot)
     assert [entry.index_file.file_name for entry in indexes] == expected_indexes
