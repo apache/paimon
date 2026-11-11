@@ -73,6 +73,47 @@ public class RetainedChangelogScanTest extends ScannerTestBase {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"timestamp", "creation-timestamp"})
+    public void testRestoreAfterTimestampHistoryExpires(String start) throws Exception {
+        writeFourCommits();
+        expireSnapshots();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int i = 5; i <= 8; i++) {
+                waitForNextCommitMillis();
+                write.write(rowData(1, i, (long) i));
+                commit.commit(i, write.prepareCommit(true, i));
+            }
+        }
+        long timestamp = table.snapshotManager().snapshot(5L).timeMillis();
+        table.newExpireSnapshots().config(table.coreOptions().expireConfig()).expire();
+        assertThat(table.changelogManager().longLivedChangelogExists(3L)).isTrue();
+        assertThat(table.snapshotManager().snapshotExists(4L)).isFalse();
+        assertThat(table.changelogManager().longLivedChangelogExists(4L)).isFalse();
+
+        Options options = new Options();
+        options.set(
+                start.equals("timestamp")
+                        ? CoreOptions.SCAN_TIMESTAMP_MILLIS
+                        : CoreOptions.SCAN_CREATION_TIME_MILLIS,
+                timestamp);
+        FileStoreTable reloaded =
+                FileStoreTableFactory.create(fileIO, tablePath).copy(options.toMap());
+        // Fresh startup cannot resolve the original timestamp across the gap.
+        assertThatThrownBy(() -> reloaded.newReadBuilder().newStreamScan().plan())
+                .isInstanceOf(OutOfRangeException.class)
+                .hasMessageContaining("IDs 4 to 4");
+
+        StreamTableScan scan = reloaded.newReadBuilder().newStreamScan();
+        scan.restore(7L);
+        for (int i = 7; i <= 8; i++) {
+            assertThat(getResult(reloaded.newRead(), scan.plan().splits()))
+                    .containsExactly("+I 1|" + i + "|" + i);
+        }
+        assertThat(scan.checkpoint()).isEqualTo(9L);
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"snapshot", "timestamp", "consumer"})
     public void testStartAfterSnapshotRetentionOverride(String start) throws Exception {
         writeFourCommits();
@@ -111,6 +152,81 @@ public class RetainedChangelogScanTest extends ScannerTestBase {
                     .containsExactly("+I 1|" + i + "|" + i);
         }
         assertThat(scan.checkpoint()).isEqualTo(5L);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,0", "true,-1", "false,0", "false,-1"})
+    public void testCreationTimestampAtEarliestHistory(boolean expire, long timeOffset)
+            throws Exception {
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int i = 1; i <= 4; i++) {
+                waitForNextCommitMillis();
+                write.write(rowData(1, 1, (long) i));
+                commit.commit(i, write.prepareCommit(true, i));
+            }
+        }
+        long timestamp = table.snapshotManager().snapshot(1L).timeMillis();
+        if (expire) {
+            expireSnapshots();
+            assertThat(table.snapshotManager().snapshotExists(1L)).isFalse();
+            assertThat(table.changelogManager().longLivedChangelogExists(1L)).isTrue();
+        }
+        Options options = new Options();
+        options.set(CoreOptions.SCAN_CREATION_TIME_MILLIS, timestamp + timeOffset);
+        FileStoreTable reloaded =
+                FileStoreTableFactory.create(fileIO, tablePath).copy(options.toMap());
+        StreamTableScan scan = reloaded.newReadBuilder().newStreamScan();
+        if (timeOffset < 0) {
+            // A strictly older timestamp still falls back to scanning current table files.
+            assertThat(getResult(reloaded.newRead(), scan.plan().splits()))
+                    .containsExactly("+I 1|1|4");
+        } else {
+            assertThat(scan.plan().splits()).isEmpty();
+            for (int i = 1; i <= 4; i++) {
+                assertThat(getResult(reloaded.newRead(), scan.plan().splits()))
+                        .containsExactly("+I 1|1|" + i);
+            }
+        }
+        assertThat(scan.checkpoint()).isEqualTo(5L);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "true,1,4", "true,2,4", "true,3,3", "true,4,4",
+        "false,1,4", "false,2,4", "false,3,3", "false,4,4"
+    })
+    public void testBatchCreationTimestampUsesSnapshotHistory(
+            boolean independent, int requestedId, int expectedValue) throws Exception {
+        Options tableOptions = new Options(table.options());
+        tableOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 2);
+        tableOptions.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, independent ? 4 : 2);
+        tablePath = new Path(tablePath, "batch");
+        table = createFileStoreTable(tableOptions);
+        long[] timestamps = new long[4];
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int i = 1; i <= 4; i++) {
+                waitForNextCommitMillis();
+                write.write(rowData(1, 1, (long) i));
+                commit.commit(i, write.prepareCommit(true, i));
+                timestamps[i - 1] = table.snapshotManager().snapshot(i).timeMillis();
+            }
+        }
+        table.newExpireSnapshots().config(table.coreOptions().expireConfig()).expire();
+        assertThat(table.snapshotManager().earliestSnapshotId()).isEqualTo(3L);
+        assertThat(table.snapshotManager().snapshotExists(1L)).isFalse();
+        assertThat(table.changelogManager().longLivedChangelogExists(1L)).isEqualTo(independent);
+
+        Options readOptions = new Options();
+        readOptions.set(CoreOptions.SCAN_CREATION_TIME_MILLIS, timestamps[requestedId - 1]);
+        FileStoreTable reloaded =
+                FileStoreTableFactory.create(fileIO, tablePath).copy(readOptions.toMap());
+        assertThat(reloaded.coreOptions().changelogLifecycleDecoupled()).isEqualTo(independent);
+        // Times before snapshot 3 use the current files. Within the snapshot range, read
+        // the selected full snapshot, regardless of whether older changelogs are retained.
+        assertThat(getResult(reloaded.newRead(), reloaded.newScan().plan().splits()))
+                .containsExactly("+I 1|1|" + expectedValue);
     }
 
     @ParameterizedTest

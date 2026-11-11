@@ -28,6 +28,7 @@ import org.apache.paimon.table.system.AuditLogTable
 
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.connector.read.streaming.ReadLimit
+import org.apache.spark.sql.streaming.Trigger
 
 import java.io.File
 import java.util.{Collections, HashMap}
@@ -482,6 +483,116 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
 
   }
 
+  for {
+    timestampOption <- Seq(CoreOptions.SCAN_TIMESTAMP_MILLIS, CoreOptions.SCAN_CREATION_TIME_MILLIS)
+    availableNow <- Seq(false, true)
+  } {
+    test(
+      s"restore after timestamp history expires (${timestampOption.key()}, availableNow=$availableNow)") {
+      withTempDir {
+        directory =>
+          val sourceTable = createChangelogTable()
+          appendChangelogRows(sourceTable, 1, 4)
+          spark.sql("CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1)")
+          appendChangelogRows(sourceTable, 5, 6)
+          val timestamp = sourceTable.snapshotManager().snapshot(5L).timeMillis()
+          val checkpoint = new File(directory, "checkpoint").getCanonicalPath
+          val output = new File(directory, "output").getCanonicalPath
+          val writer = retainedChangelogStream(
+            "table",
+            sourceTable,
+            Map(timestampOption.key() -> timestamp.toString)).writeStream
+            .format("parquet")
+            .option("checkpointLocation", checkpoint)
+            .outputMode("append")
+          if (availableNow) {
+            writer.trigger(Trigger.AvailableNow())
+          }
+          val first = writer.start(output)
+          try {
+            if (availableNow) {
+              assert(first.awaitTermination(60000L))
+            } else {
+              first.processAllAvailable()
+            }
+            checkAnswer(spark.read.parquet(output), expectedChangelogRows("table", 5, 6))
+          } finally {
+            first.stop()
+          }
+
+          appendChangelogRows(sourceTable, 7, 8)
+          sourceTable.newExpireSnapshots().config(sourceTable.coreOptions().expireConfig()).expire()
+          assert(!sourceTable.snapshotManager().snapshotExists(4L))
+          assert(!sourceTable.changelogManager().longLivedChangelogExists(4L))
+          assert(sourceTable.changelogManager().longLivedChangelogExists(3L))
+          // Keep the saved position readable only through changelog metadata as well.
+          spark.sql("CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1)")
+          assert(!sourceTable.snapshotManager().snapshotExists(7L))
+          assert(sourceTable.changelogManager().longLivedChangelogExists(7L))
+          assert(!loadTable("T").coreOptions().changelogLifecycleDecoupled())
+          val readTable =
+            loadTable("T").copy(Collections.singletonMap(timestampOption.key(), timestamp.toString))
+          intercept[OutOfRangeException] {
+            readTable.newStreamScan().plan()
+          }
+
+          val restarted = writer.start(output)
+          try {
+            if (availableNow) {
+              assert(restarted.awaitTermination(60000L))
+            } else {
+              restarted.processAllAvailable()
+            }
+            // The same checkpoint must resume at 7 without replaying 5 or 6.
+            checkAnswer(spark.read.parquet(output), expectedChangelogRows("table", 5, 8))
+          } finally {
+            restarted.stop()
+          }
+      }
+    }
+  }
+
+  test("AvailableNow keeps its full startup snapshot when a new commit arrives") {
+    val sourceTable = createChangelogTable()
+    appendChangelogRows(sourceTable, 1, 4)
+    val stream = createStream(sourceTable)
+    // Spark prepares AvailableNow before asking for the initial offset of a fresh query.
+    stream.prepareForTriggerAvailableNow()
+    appendChangelogRows(sourceTable, 5, 5)
+    val initial = stream.initialOffset().asInstanceOf[PaimonSourceOffset]
+    assert(initial.snapshotId == 4L)
+    assert(initial.scanSnapshot)
+    val end = latestOffset(stream, initial, ReadLimit.allAvailable())
+    assert(end.snapshotId == 4L)
+    assert(stream.planInputPartitions(initial, end).nonEmpty)
+  }
+
+  Seq(false, true).foreach {
+    initiallyEmpty =>
+      test(s"AvailableNow excludes commits after preparation (initiallyEmpty=$initiallyEmpty)") {
+        val sourceTable = createChangelogTable()
+        if (!initiallyEmpty) {
+          appendChangelogRows(sourceTable, 1, 4)
+        }
+        val stream = createStream(
+          sourceTable.copy(Collections.singletonMap(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), "0")))
+        var offset = stream.initialOffset().asInstanceOf[PaimonSourceOffset]
+        stream.prepareForTriggerAvailableNow()
+        val nextId = if (initiallyEmpty) 1 else 5
+        appendChangelogRows(sourceTable, nextId, nextId)
+        if (!initiallyEmpty) {
+          (1 to 4).foreach {
+            id =>
+              val next = latestOffset(stream, offset, ReadLimit.maxFiles(1))
+              assert(next.snapshotId == id.toLong)
+              assert(stream.planInputPartitions(offset, next).length == 1)
+              offset = next
+          }
+        }
+        assert(stream.latestOffset(offset, ReadLimit.allAvailable()) == null)
+      }
+  }
+
   Seq(false, true).foreach {
     audit =>
       test(
@@ -540,6 +651,13 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     try {
       (from to last).foreach {
         i =>
+          Option(table.snapshotManager().latestSnapshotId()).foreach {
+            latest =>
+              val previousTime = table.snapshotManager().snapshot(latest).timeMillis()
+              while (System.currentTimeMillis() <= previousTime) {
+                Thread.sleep(1L)
+              }
+          }
           writer.write(GenericRow.of(Int.box(i), Int.box(i * 10)))
           commit.commit(i.toLong, writer.prepareCommit(true, i.toLong))
       }

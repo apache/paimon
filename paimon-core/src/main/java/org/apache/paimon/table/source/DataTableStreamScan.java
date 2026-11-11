@@ -127,7 +127,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         if (!initialized) {
             initScanner();
         }
-        return startingScanner.startingContext();
+        return startingScanner().startingContext();
     }
 
     @Override
@@ -149,10 +149,15 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 "List Partition Entries is not supported in Stream Scan.");
     }
 
-    private void initScanner() {
+    private StartingScanner startingScanner() {
+        // A restored scan must not resolve its original startup options against expired history.
         if (startingScanner == null) {
             startingScanner = createStartingScanner(true);
         }
+        return startingScanner;
+    }
+
+    private void initScanner() {
         if (followUpScanner == null) {
             followUpScanner = createFollowUpScanner();
         }
@@ -166,6 +171,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     }
 
     private Plan tryFirstPlan() {
+        StartingScanner startingScanner = startingScanner();
         StartingScanner.Result result;
         if (scanMode == FILE_MONITOR) {
             result = startingScanner.scan(snapshotReader);

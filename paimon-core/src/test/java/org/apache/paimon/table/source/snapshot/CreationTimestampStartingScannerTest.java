@@ -40,18 +40,18 @@ public class CreationTimestampStartingScannerTest extends ScannerTestBase {
         write.write(rowData(1, 20, 200L));
         write.write(rowData(1, 40, 400L));
 
-        long t1 = System.currentTimeMillis();
         commit.commit(0, write.prepareCommit(true, 0));
-        long t2 = System.currentTimeMillis();
 
         write.write(rowData(1, 11, 100L));
         write.write(rowData(1, 21, 200L));
         write.write(rowData(1, 41, 400L));
         commit.commit(0, write.prepareCommit(true, 0));
-        long t3 = System.currentTimeMillis();
         write.close();
         commit.close();
 
+        long t1 = snapshotManager.earliestSnapshot().timeMillis() - 1;
+        long t2 = snapshotManager.earliestSnapshot().timeMillis();
+        long t3 = snapshotManager.latestSnapshot().timeMillis() + 1;
         StartingScanner scanner =
                 createCreationTimestampStartingScanner(
                         snapshotManager, table.changelogManager(), t1, false, true);
@@ -86,7 +86,7 @@ public class CreationTimestampStartingScannerTest extends ScannerTestBase {
                         snapshotManager.earliestSnapshot().timeMillis(),
                         true,
                         true);
-        assertThat(scanner instanceof FileCreationTimeStartingScanner).isTrue();
+        assertThat(scanner instanceof ContinuousFromSnapshotStartingScanner).isTrue();
         scanner =
                 createCreationTimestampStartingScanner(
                         snapshotManager,
@@ -94,7 +94,7 @@ public class CreationTimestampStartingScannerTest extends ScannerTestBase {
                         snapshotManager.earliestSnapshot().timeMillis(),
                         false,
                         false);
-        assertThat(scanner instanceof FileCreationTimeStartingScanner).isTrue();
+        assertThat(scanner instanceof StaticFromSnapshotStartingScanner).isTrue();
 
         scanner =
                 createCreationTimestampStartingScanner(

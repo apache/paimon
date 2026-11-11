@@ -602,12 +602,13 @@ abstract class AbstractDataTableScan implements DataTableScan {
             long creationMillis,
             boolean changelogDecoupled,
             boolean isStreaming) {
+        // Batch reads need full snapshots; only streaming reads can start from changelog metadata.
         Long startingSnapshotPrevId =
                 TimeTravelUtil.earlierThanTimeMills(
                         snapshotManager,
                         changelogManager,
                         creationMillis,
-                        changelogDecoupled,
+                        isStreaming && changelogDecoupled,
                         true);
         final StartingScanner scanner;
         Optional<Long> startingSnapshotId =
@@ -616,7 +617,9 @@ abstract class AbstractDataTableScan implements DataTableScan {
                         .filter(
                                 id ->
                                         snapshotManager.snapshotExists(id)
-                                                || changelogManager.longLivedChangelogExists(id));
+                                                || (isStreaming
+                                                        && changelogManager
+                                                                .longLivedChangelogExists(id)));
         if (startingSnapshotId.isPresent()) {
             scanner =
                     isStreaming

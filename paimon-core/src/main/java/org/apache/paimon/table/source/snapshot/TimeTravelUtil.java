@@ -196,8 +196,11 @@ public class TimeTravelUtil {
             return latest - 1;
         }
 
-        if (earliestSnapshot.timeMillis() >= timestampMills) {
+        if (earliestSnapshot.timeMillis() > timestampMills) {
             return returnNullIfTooEarly ? null : earliestSnapshot.id() - 1;
+        }
+        if (earliestSnapshot.timeMillis() == timestampMills) {
+            return earliestSnapshot.id() - 1;
         }
 
         long earliest = earliestSnapshot.id();
