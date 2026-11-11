@@ -163,8 +163,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
             schemaBuilder.column(fieldName, avroToPaimonDataType(schema), field.doc());
         }
 
-        evalMetadataColumns(resultMap, schemaBuilder);
-        evalComputedColumns(resultMap, schemaBuilder);
+        evalComputedAndMetadataColumns(resultMap, schemaBuilder);
         return resultMap;
     }
 

@@ -169,9 +169,14 @@ partition from the Kafka record timestamp:
 The metadata timestamp is a `TIMESTAMP_LTZ(3)`, so this expression does not use an epoch precision
 argument. A missing metadata value produces a null computed value.
 
+Source fields and earlier computed columns take precedence over equally named metadata when
+resolving expression inputs. Use a metadata prefix such as `__kafka_` to avoid ambiguous names.
+
 Computed columns based on metadata are rejected when the target has primary keys, including keys
 inferred from the source. Values such as the Kafka record timestamp can change between inserts,
 updates, and deletes, so they cannot reliably identify a row's original partition.
+When starting against an existing table with an empty topic, ambiguous references are checked
+against incoming records once they become available.
 
 ## Synchronizing Databases
 

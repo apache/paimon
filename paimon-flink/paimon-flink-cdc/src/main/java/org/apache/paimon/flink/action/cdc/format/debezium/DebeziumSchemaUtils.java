@@ -163,11 +163,8 @@ public class DebeziumSchemaUtils {
         return "bytes".equals(debeziumType) && schemaName == null;
     }
 
-    /** Collect Base64-encoded source fields, excluding computed and metadata output columns. */
-    public static Set<String> extractBase64EncodedFields(
-            DebeziumEvent.Field schema,
-            List<ComputedColumn> computedColumns,
-            CdcMetadataConverter[] metadataConverters) {
+    /** Collect Base64-encoded source fields before computed and metadata outputs are added. */
+    public static Set<String> extractBase64EncodedFields(DebeziumEvent.Field schema) {
         Set<String> fields = new HashSet<>();
         schema.beforeAndAfterFields()
                 .forEach(
@@ -176,6 +173,15 @@ public class DebeziumSchemaUtils {
                                 fields.add(name);
                             }
                         });
+        return fields;
+    }
+
+    /** Collect Base64-encoded source fields, excluding computed and metadata output columns. */
+    public static Set<String> extractBase64EncodedFields(
+            DebeziumEvent.Field schema,
+            List<ComputedColumn> computedColumns,
+            CdcMetadataConverter[] metadataConverters) {
+        Set<String> fields = extractBase64EncodedFields(schema);
         computedColumns.forEach(column -> fields.remove(column.columnName()));
         for (CdcMetadataConverter converter : metadataConverters) {
             fields.remove(converter.columnName());

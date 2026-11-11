@@ -29,6 +29,8 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * A Computed column's value is computed from input columns. Only expression with at most two inputs
  * (with referenced field at the first) is supported currently.
@@ -40,6 +42,7 @@ public class ComputedColumn implements Serializable {
     private final String columnName;
     private final Expression expression;
     private final boolean caseSensitive;
+    private boolean metadataReferencesDisallowed;
 
     public ComputedColumn(String columnName, Expression expression, boolean caseSensitive) {
         this.columnName = columnName;
@@ -82,23 +85,56 @@ public class ComputedColumn implements Serializable {
     /** Evaluate binary source fields as text, preserving the existing expression semantics. */
     @Nullable
     public String evalFromRecord(Map<String, String> rowData, Set<String> base64EncodedFields) {
-        return eval(referencedValue(rowData, base64EncodedFields));
+        return evalFromRecord(rowData, base64EncodedFields, Collections.emptyMap());
+    }
+
+    /** Source and previously computed fields take precedence over metadata, including nulls. */
+    @Nullable
+    public String evalFromRecord(
+            Map<String, String> rowData,
+            Set<String> base64EncodedFields,
+            Map<String, String> metadataValues) {
+        String field = referencedField(rowData);
+        if (field != null) {
+            return eval(
+                    decodeBase64IfNeeded(rowData.get(field), base64EncodedFields.contains(field)));
+        }
+
+        field = referencedField(metadataValues);
+        if (field != null) {
+            checkMetadataReferenceAllowed();
+            return eval(metadataValues.get(field));
+        }
+        return eval(null);
+    }
+
+    void disallowMetadataReferences() {
+        metadataReferencesDisallowed = true;
+    }
+
+    void checkMetadataReferenceAllowed() {
+        checkArgument(
+                !metadataReferencesDisallowed,
+                "Computed column '%s' references metadata column '%s'. "
+                        + "Metadata references in computed columns are only supported for append-only tables without primary keys.",
+                columnName,
+                fieldReference());
     }
 
     @Nullable
-    private String referencedValue(Map<String, String> rowData, Set<String> base64EncodedFields) {
+    private String referencedField(Map<String, String> values) {
         String reference = fieldReference();
         if (reference == null) {
             return null;
         }
-        String value = rowData.get(reference);
-        if (caseSensitive || rowData.containsKey(reference)) {
-            return decodeBase64IfNeeded(value, base64EncodedFields.contains(reference));
+        if (values.containsKey(reference)) {
+            return reference;
         }
-        for (Map.Entry<String, String> entry : rowData.entrySet()) {
-            if (reference.equalsIgnoreCase(entry.getKey())) {
-                return decodeBase64IfNeeded(
-                        entry.getValue(), base64EncodedFields.contains(entry.getKey()));
+        if (!caseSensitive) {
+            for (String field : values.keySet()) {
+                if (reference.equalsIgnoreCase(field)) {
+                    return field;
+                }
             }
         }
         return null;

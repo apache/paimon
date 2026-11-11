@@ -23,6 +23,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -146,6 +148,50 @@ public class ComputedColumnUtilsTest {
                         .evalFromRecord(
                                 Collections.singletonMap(
                                         "__kafka_timestamp", "2024-12-30 10:00:00.000")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testPhysicalFieldTypeTakesPrecedenceOverMetadata(boolean caseSensitive) {
+        String sourceName = caseSensitive ? "offset" : "OFFSET";
+        ComputedColumn column =
+                buildComputedColumns(
+                                Collections.singletonList("s=truncate(offset,2)"),
+                                Collections.singletonList(
+                                        new DataField(0, sourceName, DataTypes.STRING())),
+                                new CdcMetadataConverter[] {
+                                    new KafkaMetadataConverter.OffsetConverter()
+                                },
+                                caseSensitive)
+                        .get(0);
+
+        assertEquals(DataTypes.STRING(), column.columnType());
+        assertEquals("so", column.eval("source"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testPhysicalFieldValueTakesPrecedenceOverMetadata(boolean caseSensitive) {
+        String sourceName = caseSensitive ? "topic" : "TOPIC";
+        ComputedColumn column =
+                buildComputedColumns(
+                                Collections.singletonList("s=substring(topic,0)"),
+                                Collections.singletonList(
+                                        new DataField(0, sourceName, DataTypes.STRING())),
+                                caseSensitive)
+                        .get(0);
+        Map<String, String> source = new HashMap<>();
+        source.put(sourceName, "source-value");
+        Map<String, String> metadata = Collections.singletonMap("topic", "wire-topic");
+
+        assertEquals(
+                "source-value", column.evalFromRecord(source, Collections.emptySet(), metadata));
+        source.put(sourceName, null);
+        assertNull(column.evalFromRecord(source, Collections.emptySet(), metadata));
+        source.clear();
+        assertEquals(
+                "wire-topic",
+                column.evalFromRecord(source, Collections.singleton("topic"), metadata));
     }
 
     @Test

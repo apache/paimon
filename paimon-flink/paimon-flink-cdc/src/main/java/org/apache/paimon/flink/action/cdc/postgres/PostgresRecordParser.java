@@ -217,9 +217,13 @@ public class PostgresRecordParser
         CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
         CdcSchema schema = extractSchema(root.schema(), schemaBuilder);
 
-        Map<String, String> before = extractRow(root.payload().before(), schemaBuilder);
-        if (!before.isEmpty()) {
-            records.add(createRecord(RowKind.DELETE, before));
+        JsonNode beforeRow = root.payload().before();
+        // Check the raw image before expression lookup populates absent source fields with nulls.
+        if (!isNull(beforeRow) && beforeRow.size() > 0) {
+            Map<String, String> before = extractRow(beforeRow, schemaBuilder);
+            if (!before.isEmpty()) {
+                records.add(createRecord(RowKind.DELETE, before));
+            }
         }
 
         Map<String, String> after = extractRow(root.payload().after(), schemaBuilder);
@@ -256,6 +260,7 @@ public class PostgresRecordParser
             String postgresSqlType = field.getValue().type();
             JsonNode objectValue = recordRow.get(fieldName);
             if (isNull(objectValue)) {
+                resultMap.put(fieldName, null);
                 continue;
             }
 
@@ -355,20 +360,26 @@ public class PostgresRecordParser
             resultMap.put(fieldName, newValue);
         }
 
+        Map<String, String> metadataValues = new LinkedHashMap<>();
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
-            resultMap.put(
+            metadataValues.put(
                     metadataConverter.columnName(),
                     metadataConverter.read(root.payload().source()));
         }
 
         // generate values of computed columns
         Set<String> base64EncodedFields =
-                computedColumns.isEmpty() ? Collections.emptySet() : extractBase64EncodedFields();
+                computedColumns.isEmpty()
+                        ? Collections.emptySet()
+                        : DebeziumSchemaUtils.extractBase64EncodedFields(root.schema());
         for (ComputedColumn computedColumn : computedColumns) {
             resultMap.put(
                     computedColumn.columnName(),
-                    computedColumn.evalFromRecord(resultMap, base64EncodedFields));
+                    computedColumn.evalFromRecord(resultMap, base64EncodedFields, metadataValues));
+            base64EncodedFields.remove(computedColumn.columnName());
         }
+
+        resultMap.putAll(metadataValues);
 
         return resultMap;
     }

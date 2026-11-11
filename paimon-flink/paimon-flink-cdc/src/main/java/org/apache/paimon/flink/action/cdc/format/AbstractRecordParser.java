@@ -36,6 +36,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -116,30 +117,72 @@ public abstract class AbstractRecordParser
 
     protected abstract List<String> extractPrimaryKeys();
 
-    /** generate values for computed columns. */
+    /**
+     * Evaluate against source fields and metadata, then append computed columns before metadata.
+     */
+    protected void evalComputedAndMetadataColumns(
+            Map<String, String> rowData, CdcSchema.Builder schemaBuilder) {
+        Map<String, String> metadataValues = readMetadataColumns();
+        evalComputedColumns(rowData, schemaBuilder, metadataValues);
+        evalMetadataColumns(rowData, schemaBuilder, metadataValues);
+    }
+
+    /** Generate computed values from source fields for parsers using the original helper API. */
     protected void evalComputedColumns(
             Map<String, String> rowData, CdcSchema.Builder schemaBuilder) {
+        evalComputedColumns(rowData, schemaBuilder, Collections.emptyMap());
+    }
+
+    private void evalComputedColumns(
+            Map<String, String> rowData,
+            CdcSchema.Builder schemaBuilder,
+            Map<String, String> metadataValues) {
         Set<String> base64EncodedFields =
-                computedColumns.isEmpty() ? Collections.emptySet() : extractBase64EncodedFields();
+                computedColumns.isEmpty()
+                        ? Collections.emptySet()
+                        : new HashSet<>(extractBase64EncodedFields());
         computedColumns.forEach(
                 computedColumn -> {
-                    String result = computedColumn.evalFromRecord(rowData, base64EncodedFields);
+                    String result =
+                            computedColumn.evalFromRecord(
+                                    rowData, base64EncodedFields, metadataValues);
 
                     rowData.put(computedColumn.columnName(), result);
+                    base64EncodedFields.remove(computedColumn.columnName());
                     schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
                 });
     }
 
-    /** Extract metadata values using metadata converters. */
+    /** Append metadata outputs for parsers using the original helper API. */
     protected void evalMetadataColumns(
             Map<String, String> rowData, CdcSchema.Builder schemaBuilder) {
+        evalMetadataColumns(rowData, schemaBuilder, readMetadataColumns());
+    }
+
+    private void evalMetadataColumns(
+            Map<String, String> rowData,
+            CdcSchema.Builder schemaBuilder,
+            Map<String, String> metadataValues) {
+        for (CdcMetadataConverter converter : metadataConverters) {
+            if (metadataValues.containsKey(converter.columnName())) {
+                String value = metadataValues.get(converter.columnName());
+                if (value != null) {
+                    rowData.put(converter.columnName(), value);
+                }
+                schemaBuilder.column(converter.columnName(), converter.dataType());
+            }
+        }
+    }
+
+    private Map<String, String> readMetadataColumns() {
+        if (metadataConverters.length == 0) {
+            return Collections.emptyMap();
+        }
+        Map<String, String> metadataValues = new HashMap<>();
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
             try {
-                String value = metadataConverter.read(currentRecord);
-                if (value != null) {
-                    rowData.put(metadataConverter.columnName(), value);
-                }
-                schemaBuilder.column(metadataConverter.columnName(), metadataConverter.dataType());
+                metadataValues.put(
+                        metadataConverter.columnName(), metadataConverter.read(currentRecord));
             } catch (UnsupportedOperationException e) {
                 // This converter doesn't support CdcSourceRecord, skip it
                 LOG.debug(
@@ -147,6 +190,7 @@ public abstract class AbstractRecordParser
                         metadataConverter.getClass().getSimpleName());
             }
         }
+        return metadataValues;
     }
 
     /** Handle case sensitivity here. */

@@ -140,8 +140,7 @@ public class DebeziumBsonRecordParser extends DebeziumJsonRecordParser {
             schemaBuilder.column(fieldName, DataTypes.STRING());
         }
 
-        evalMetadataColumns(resultMap, schemaBuilder);
-        evalComputedColumns(resultMap, schemaBuilder);
+        evalComputedAndMetadataColumns(resultMap, schemaBuilder);
 
         return resultMap;
     }

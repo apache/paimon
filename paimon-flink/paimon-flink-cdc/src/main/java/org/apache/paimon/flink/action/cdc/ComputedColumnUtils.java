@@ -69,7 +69,7 @@ public class ComputedColumnUtils {
                                         (v1, v2) -> v2));
 
         for (CdcMetadataConverter converter : metadataConverters) {
-            typeMapping.put(
+            typeMapping.putIfAbsent(
                     toLowerCaseIfNeed(converter.columnName(), caseSensitive), converter.dataType());
         }
 

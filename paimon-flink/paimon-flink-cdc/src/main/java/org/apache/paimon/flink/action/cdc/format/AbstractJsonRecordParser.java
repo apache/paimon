@@ -104,8 +104,7 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
                                             }
                                             return Objects.toString(entry.getValue());
                                         }));
-        evalMetadataColumns(rowData, schemaBuilder);
-        evalComputedColumns(rowData, schemaBuilder);
+        evalComputedAndMetadataColumns(rowData, schemaBuilder);
 
         return rowData;
     }

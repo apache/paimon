@@ -21,12 +21,22 @@ package org.apache.paimon.flink.action.cdc;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaSyncTableAction;
+import org.apache.paimon.flink.sink.cdc.CdcSchema;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+
+import org.apache.flink.api.common.functions.util.ListCollector;
+import org.apache.flink.configuration.Configuration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -34,8 +44,10 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -124,11 +136,72 @@ class SyncTableActionBaseTest {
                     Collections.singletonList("dt=date_format(timestamp,yyyy-MM-dd)"));
             action.failSchemaRetrieval = emptyTopic;
 
-            assertThatThrownBy(action::beforeBuildingSourceSink)
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Computed column 'dt'")
-                    .hasMessageContaining("metadata column 'timestamp'")
-                    .hasMessageContaining("only supported for append-only tables");
+            if (emptyTopic) {
+                // The target schema cannot distinguish a physical timestamp from metadata. Check
+                // the actual record before allowing the expression to consume a metadata value.
+                action.beforeBuildingSourceSink();
+                assertThatThrownBy(() -> action.parse("{\"id\":1}"))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("Computed column 'dt'")
+                        .hasMessageContaining("metadata column 'timestamp'")
+                        .hasMessageContaining("only supported for append-only tables");
+            } else {
+                assertThatThrownBy(action::beforeBuildingSourceSink)
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("Computed column 'dt'")
+                        .hasMessageContaining("metadata column 'timestamp'")
+                        .hasMessageContaining("only supported for append-only tables");
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testPhysicalMetadataNameAllowedForExistingPrimaryKeyTable(boolean caseSensitive)
+            throws Exception {
+        try (TestingKafkaSyncTableAction action =
+                new TestingKafkaSyncTableAction(warehouse, caseSensitive)) {
+            action.sourceSchema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("topic", DataTypes.STRING())
+                            .build();
+            action.withPrimaryKeys("id");
+            action.withComputedColumnArgs(Collections.singletonList("s=substring(topic,0)"));
+            action.beforeBuildingSourceSink();
+
+            action.withPrimaryKeys(Collections.emptyList());
+            action.withMetadataColumns(Collections.singletonList("topic"));
+            action.failSchemaRetrieval = true;
+            action.beforeBuildingSourceSink();
+
+            String sourceName = caseSensitive ? "topic" : "TOPIC";
+            assertThat(
+                            action.parse("{\"id\":1,\"" + sourceName + "\":\"source-value\"}")
+                                    .toRichCdcRecord()
+                                    .toCdcRecord()
+                                    .data())
+                    .containsEntry("s", "source-value");
+        }
+    }
+
+    @Test
+    void testSchemaEvolutionKeepsComputedColumnsBeforeMetadata() throws Exception {
+        try (TestingKafkaSyncTableAction action = new TestingKafkaSyncTableAction(warehouse)) {
+            action.sourceSchema = Schema.newBuilder().column("id", DataTypes.STRING()).build();
+            action.beforeBuildingSourceSink();
+            action.withComputedColumnArgs(Collections.singletonList("s=substring(id,0)"));
+            action.withMetadataColumnPrefix("__kafka_");
+            action.withMetadataColumns(Collections.singletonList("timestamp"));
+            action.failSchemaRetrieval = true;
+            action.beforeBuildingSourceSink();
+
+            RichCdcMultiplexRecord record = action.parse("{\"id\":\"1\"}");
+            action.evolveSchema(record.cdcSchema());
+
+            assertThat(action.fileStoreTable().schema().fields())
+                    .extracting(DataField::name)
+                    .containsExactly("id", "s", "__kafka_timestamp");
         }
     }
 
@@ -180,7 +253,7 @@ class SyncTableActionBaseTest {
                             .set(CatalogOptions.WAREHOUSE, warehouse.toString())
                             .set(CatalogOptions.CASE_SENSITIVE, caseSensitive)
                             .toMap(),
-                    Collections.emptyMap());
+                    Collections.singletonMap("value.format", "json"));
             catalog.createDatabase(database, true);
             withTableConfig(Collections.singletonMap("bucket", "-1"));
         }
@@ -200,6 +273,38 @@ class SyncTableActionBaseTest {
             } catch (Catalog.TableNotExistException e) {
                 return false;
             }
+        }
+
+        private RichCdcMultiplexRecord parse(String value) throws Exception {
+            List<RichCdcMultiplexRecord> records = new ArrayList<>();
+            recordParse()
+                    .flatMap(
+                            new CdcSourceRecord(
+                                    "wire-topic",
+                                    null,
+                                    JsonSerdeUtil.fromJson(value, JsonNode.class),
+                                    Collections.singletonMap("timestamp", 1700000000000L)),
+                            new ListCollector<>(records));
+            assertThat(records).hasSize(1);
+            return records.get(0);
+        }
+
+        private void evolveSchema(CdcSchema schema) throws Exception {
+            Identifier identifier = new Identifier(database, table);
+            UpdatedDataFieldsProcessFunction function =
+                    new UpdatedDataFieldsProcessFunction(
+                            new FileSystemSchemaManager(
+                                    fileStoreTable.fileIO(), fileStoreTable.location()),
+                            identifier,
+                            catalogLoader(),
+                            typeMapping);
+            function.open(new Configuration());
+            try {
+                function.processElement(schema, null, new ListCollector<>(new ArrayList<>()));
+            } finally {
+                function.close();
+            }
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         }
 
         @Override

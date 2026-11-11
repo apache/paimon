@@ -214,8 +214,20 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
                             debeziumType, className, parameters.get(fieldName)));
         }
 
-        evalMetadataColumns(resultMap, schemaBuilder);
-        evalComputedColumns(resultMap, schemaBuilder);
+        // A nullable source field omitted from the payload must not fall back to metadata.
+        for (String fieldName : debeziumTypes.keySet()) {
+            if (!recordMap.containsKey(fieldName)) {
+                resultMap.put(fieldName, null);
+                schemaBuilder.column(
+                        fieldName,
+                        DebeziumSchemaUtils.toDataType(
+                                debeziumTypes.get(fieldName),
+                                classNames.get(fieldName),
+                                parameters.get(fieldName)));
+            }
+        }
+
+        evalComputedAndMetadataColumns(resultMap, schemaBuilder);
 
         return resultMap;
     }

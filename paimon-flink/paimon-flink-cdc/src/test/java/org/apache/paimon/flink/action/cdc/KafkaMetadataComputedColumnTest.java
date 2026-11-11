@@ -28,6 +28,7 @@ import org.apache.paimon.flink.action.cdc.format.json.JsonRecordParser;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaMetadataConverter;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -39,8 +40,11 @@ import org.apache.avro.generic.GenericRecord;
 import org.apache.flink.api.common.functions.util.ListCollector;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -85,6 +89,15 @@ class KafkaMetadataComputedColumnTest {
         parser.flatMap(input, new ListCollector<>(records));
 
         assertThat(records).hasSize(1);
+        assertThat(records.get(0).cdcSchema().fields())
+                .extracting(DataField::name)
+                .containsExactly(
+                        format.equals("debezium-bson") ? "_id" : "id",
+                        "dt",
+                        "source",
+                        "yr",
+                        timestamp.columnName(),
+                        topic.columnName());
         assertThat(records.get(0).toRichCdcRecord().toCdcRecord().data())
                 .containsEntry(timestamp.columnName(), timestampValue)
                 .containsEntry("dt", date)
@@ -102,6 +115,42 @@ class KafkaMetadataComputedColumnTest {
                 .containsEntry("dt", null)
                 .containsEntry("yr", null)
                 .containsEntry("source", "test-topic");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,true", "true,false", "false,true", "false,false"})
+    void testAvroBinarySourceFieldWithMetadataName(boolean caseSensitive, boolean nullValue) {
+        CdcMetadataConverter topic = new KafkaMetadataConverter.TopicConverter();
+        String sourceName = caseSensitive ? "topic" : "TOPIC";
+        List<ComputedColumn> columns =
+                buildComputedColumns(
+                        Collections.singletonList("s=substring(topic,0)"),
+                        Collections.singletonList(new DataField(0, sourceName, DataTypes.BYTES())),
+                        new CdcMetadataConverter[] {topic},
+                        caseSensitive);
+        Schema payloadSchema =
+                SchemaBuilder.record("row")
+                        .fields()
+                        .requiredInt("id")
+                        .optionalBytes(sourceName)
+                        .endRecord();
+        GenericRecord value = createAvroValue(payloadSchema);
+        ((GenericRecord) value.get("after"))
+                .put(
+                        sourceName,
+                        nullValue
+                                ? null
+                                : ByteBuffer.wrap("source-value".getBytes(StandardCharsets.UTF_8)));
+        AbstractRecordParser parser =
+                new DebeziumAvroRecordParser(TypeMapping.defaultMapping(), columns)
+                        .withMetadataConverters(new CdcMetadataConverter[] {topic});
+        List<RichCdcMultiplexRecord> records = new ArrayList<>();
+        parser.flatMap(
+                new CdcSourceRecord("wire-topic", null, value), new ListCollector<>(records));
+
+        assertThat(records).hasSize(1);
+        assertThat(records.get(0).toRichCdcRecord().toCdcRecord().data())
+                .containsEntry("s", nullValue ? null : "source-value");
     }
 
     private static Stream<Arguments> formatsAndPrefixes() {
@@ -165,6 +214,10 @@ class KafkaMetadataComputedColumnTest {
 
     private static GenericRecord createAvroValue() {
         Schema payloadSchema = SchemaBuilder.record("row").fields().requiredInt("id").endRecord();
+        return createAvroValue(payloadSchema);
+    }
+
+    private static GenericRecord createAvroValue(Schema payloadSchema) {
         Schema sourceSchema =
                 SchemaBuilder.record("source")
                         .fields()
