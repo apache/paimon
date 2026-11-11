@@ -609,4 +609,56 @@ public class LookupChangelogMergeFunctionWrapperTest {
         kv = result.result();
         assertThat(kv.value().getInt(0)).isEqualTo(3);
     }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testPreserveFieldOnRetractDelete(boolean preserveField) {
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        LookupChangelogMergeFunctionWrapper<KeyValue> function =
+                createPreserveFieldFunction(highLevel, preserveField);
+        highLevel.put(row(1), new KeyValue().replace(row(1), 1, INSERT, row(10, 50)).setLevel(2));
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, DELETE, row(20, 100)).setLevel(0));
+
+        List<KeyValue> changelogs = function.getResult().changelogs();
+        assertThat(changelogs).hasSize(1);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(DELETE);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(10);
+        assertThat(changelogs.get(0).value().getInt(1)).isEqualTo(preserveField ? 100 : 50);
+        assertThat(changelogs.get(0).sequenceNumber()).isEqualTo(preserveField ? 2 : 1);
+    }
+
+    @Test
+    public void testPreserveFieldOnRetractUpdate() {
+        LookupChangelogMergeFunctionWrapper<KeyValue> function =
+                createPreserveFieldFunction(Collections.emptyMap(), true);
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(10, 50)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(20, 100)).setLevel(0));
+
+        List<KeyValue> changelogs = function.getResult().changelogs();
+        assertThat(changelogs).hasSize(2);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(10);
+        assertThat(changelogs.get(0).value().getInt(1)).isEqualTo(100);
+        assertThat(changelogs.get(0).sequenceNumber()).isEqualTo(2);
+        assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+        assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(20);
+        assertThat(changelogs.get(1).value().getInt(1)).isEqualTo(100);
+    }
+
+    private LookupChangelogMergeFunctionWrapper<KeyValue> createPreserveFieldFunction(
+            Map<InternalRow, KeyValue> highLevel, boolean preserveField) {
+        RowType valueType =
+                RowType.builder().field("f0", DataTypes.INT()).field("f1", DataTypes.INT()).build();
+        return new LookupChangelogMergeFunctionWrapper<>(
+                LookupMergeFunction.wrap(DeduplicateMergeFunction.factory(), null, null, null),
+                highLevel::get,
+                null,
+                LookupStrategy.from(false, true, false, false),
+                null,
+                UserDefinedSeqComparator.create(
+                        valueType, CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f1"))),
+                preserveField ? new int[] {1} : null);
+    }
 }
