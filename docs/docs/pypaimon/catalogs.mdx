@@ -162,6 +162,12 @@ catalog_options = {
 catalog = CatalogFactory.create(catalog_options)
 ```
 
+For DLF authentication (`token.provider='dlf'`), PyPaimon can discover a JSON token
+file through the `DLF_TOKEN_PATH` environment variable. Explicit token loaders,
+token paths, and inline AK/STS credentials take precedence over this environment
+variable. The discovered file uses the existing local-file loader, including
+credential refresh according to its `Expiration` field.
+
 </TabItem>
 
 </Tabs>
