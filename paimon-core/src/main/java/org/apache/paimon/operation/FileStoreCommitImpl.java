@@ -1696,7 +1696,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     /** Identifies the replacement itself, ignoring properties inherited by later snapshots. */
-    static boolean isManifestReplacement(Snapshot snapshot) {
+    public static boolean isManifestReplacement(Snapshot snapshot) {
         Map<String, String> properties = snapshot.properties();
         return properties != null
                 && Long.toString(snapshot.id())
