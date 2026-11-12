@@ -30,6 +30,8 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.cli.cli import main
 from pypaimon.common.json_util import JSON
 from pypaimon.schema.data_types import DataField
+from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
@@ -130,6 +132,28 @@ class CliTableTest(unittest.TestCase):
             for snapshot in snapshots:
                 table.file_io.try_to_write_atomic(manager.get_snapshot_path(snapshot.id), JSON.to_json(snapshot))
             table.file_io.try_to_write_atomic(manager.latest_file, str(max(s.id for s in snapshots)))
+        return identifier, table
+
+    def _create_schema_table(self):
+        """Create schema history whose snapshots reference different field definitions."""
+        identifier, table = self._create_snapshot_table(
+            snapshots=[self._snapshot(4, schema_id=0), self._snapshot(5, schema_id=2),
+                       self._snapshot(6, schema_id=10)], suffix='schemas')
+        definitions = [
+            {'id': 0, 'name': 'id', 'type': 'BIGINT NOT NULL', 'description': 'Identifier'},
+            {'id': 1, 'name': 'region', 'type': 'STRING'},
+            {'id': 2, 'name': 'profile', 'type': {'type': 'ROW', 'fields': [
+                {'id': 3, 'name': 'city', 'type': 'STRING', 'description': '城市'}]}},
+            {'id': 4, 'name': 'age', 'type': 'INT'},
+        ]
+        for schema_id, field_count in ((10, 4), (0, 2), (2, 3)):
+            schema = TableSchema.from_schema(schema_id, Schema(
+                fields=[DataField.from_dict(f) for f in definitions[:field_count]],
+                partition_keys=['region'], options={'bucket': '-1', 'custom': '值'},
+                comment='Schema {}'.format(schema_id)))
+            schema.time_millis = 1700000000123 + schema_id
+            with open(table.schema_manager._to_schema_path(schema_id), 'w') as f:
+                f.write(JSON.to_json(schema))
         return identifier, table
 
     def _run_table_command(self, *argv, config=None):
@@ -269,6 +293,205 @@ class CliTableTest(unittest.TestCase):
                 self.assertIn('name', field_names)
                 self.assertIn('age', field_names)
                 self.assertIn('city', field_names)
+
+                self.assertEqual({'fields', 'partitionKeys', 'primaryKeys', 'options', 'comment'}, set(schema_json))
+                expected = JSON.to_json(self.catalog.get_table('test_db.users').table_schema.to_schema(), indent=2)
+                self.assertEqual(expected + '\n', output)
+
+    def test_cli_table_get_schema_versions(self):
+        identifier, _ = self._create_schema_table()
+        cases = [((), ['id', 'region', 'profile', 'age']),
+                 (('--schema-id', '0'), ['id', 'region']),
+                 (('--schema-id', '2', '-f', 'json'), ['id', 'region', 'profile']),
+                 (('--snapshot-id', '4'), ['id', 'region']),
+                 (('--snapshot-id', '5'), ['id', 'region', 'profile'])]
+        with patch.object(SnapshotManager, 'get_latest_snapshot', side_effect=AssertionError('latest snapshot lookup')):
+            for options, field_names in cases:
+                with self.subTest(options=options):
+                    output = self._run_table_command_success('get', identifier, *options)
+                    schema = json.loads(output)
+                    self.assertEqual({'fields', 'partitionKeys', 'primaryKeys', 'options', 'comment'}, set(schema))
+                    self.assertEqual(field_names, [f['name'] for f in schema['fields']])
+                    self.assertEqual(field_names, [f.name for f in JSON.from_json(output, Schema).fields])
+
+    def test_cli_table_list_schemas_json(self):
+        identifier, _ = self._create_schema_table()
+        output = self._run_table_command_success('list-schemas', identifier)
+        schemas = json.loads(output)
+        self.assertEqual([0, 2, 10], [s['id'] for s in schemas])
+        self.assertEqual([2, 3, 4], [len(s['fields']) for s in schemas])
+        self.assertEqual([1, 3, 4], [s['highestFieldId'] for s in schemas])
+        self.assertEqual(3, schemas[1]['version'])
+        self.assertEqual(1700000000125, schemas[1]['timeMillis'])
+        self.assertEqual(['region'], schemas[1]['partitionKeys'])
+        self.assertEqual([], schemas[1]['primaryKeys'])
+        self.assertEqual({'bucket': '-1', 'custom': '值'}, schemas[1]['options'])
+        self.assertEqual('Schema 2', schemas[1]['comment'])
+        self.assertEqual({'id': 0, 'name': 'id', 'type': 'BIGINT NOT NULL', 'description': 'Identifier'},
+                         schemas[1]['fields'][0])
+        profile = schemas[1]['fields'][2]
+        self.assertEqual(2, profile['id'])
+        self.assertTrue(profile['type']['nullable'])
+        self.assertEqual([{'id': 3, 'name': 'city', 'type': 'STRING', 'description': '城市'}],
+                         profile['type']['fields'])
+        self.assertIn('城市', output)
+        self.assertEqual(schemas, json.loads(self._run_table_command_success('list-schemas', identifier, '-f', 'json')))
+
+    def test_cli_table_schemas_format_table(self):
+        identifier, _ = self._create_schema_table()
+        for command in ('get', 'list-schemas'):
+            with self.subTest(command=command):
+                output = self._run_table_command_success(command, identifier, '--format', 'table')
+                for value in ('id', 'region', 'profile', 'city', 'BIGINT NOT NULL', 'Identifier', 'Schema 10', '值'):
+                    self.assertIn(value, output)
+                if command == 'list-schemas':
+                    self.assertEqual(['schema_id', 'fields', 'partition_keys', 'primary_keys',
+                                      'options', 'comment', 'update_time'], output.splitlines()[0].split())
+                    self.assertIn('2023-11-14T22:13:20.125Z', output)
+                    self.assertIn('{"bucket":"-1","custom":"值"}', output)
+                    self.assertIn('{"id":3,"name":"city","type":"STRING","description":"城市"}', output)
+        output = self._run_table_command_success('list-schemas', 'test_db.users', '--format', 'table')
+        self.assertRegex(output, r'-\s+\d{4}-\d{2}-\d{2}')
+
+    def test_cli_table_list_schemas_limit(self):
+        identifier, table = self._create_schema_table()
+        schemas = json.loads(self._run_table_command_success('list-schemas', identifier, '-l', '2'))
+        self.assertEqual([0, 2], [s['id'] for s in schemas])
+        # The manager must stop before reading an unselected, corrupt schema.
+        with open(table.schema_manager._to_schema_path(5), 'w') as f:
+            f.write('{invalid json')
+        schemas = json.loads(self._run_table_command_success('list-schemas', identifier, '-l', '2'))
+        self.assertEqual([0, 2], [s['id'] for s in schemas])
+
+    def test_cli_table_list_schemas_skips_missing(self):
+        identifier, _ = self._create_schema_table()
+        original = SchemaManager.get_schema
+
+        def disappearing_read(manager, schema_id):
+            return None if schema_id == 0 else original(manager, schema_id)
+
+        with patch.object(SchemaManager, 'get_schema', autospec=True, side_effect=disappearing_read):
+            schemas = json.loads(self._run_table_command_success('list-schemas', identifier, '--limit', '1'))
+        self.assertEqual([2], [s['id'] for s in schemas])
+
+    def test_cli_table_schemas_without_snapshots(self):
+        identifier, _ = self._create_snapshot_table(snapshots=[], suffix='schemas')
+        with patch.object(SnapshotManager, 'get_latest_snapshot', side_effect=AssertionError('snapshot lookup')):
+            self.assertEqual([0], [s['id'] for s in json.loads(
+                self._run_table_command_success('list-schemas', identifier))])
+            schema = json.loads(self._run_table_command_success('get', identifier, '--schema-id', '0'))
+        self.assertEqual(['id'], [f['name'] for f in schema['fields']])
+
+    def test_cli_table_list_schemas_empty(self):
+        table = self.catalog.get_table('test_db.users')
+        with patch('pypaimon.cli.cli_table._open_schema_table', return_value=table):
+            with patch.object(table.schema_manager, '_list_versioned_files', return_value=[]):
+                self.assertEqual([], json.loads(self._run_table_command_success('list-schemas', 'test_db.users')))
+                self.assertIn('No schemas', self._run_table_command_success(
+                    'list-schemas', 'test_db.users', '-f', 'table'))
+
+    def test_cli_table_get_missing_schema_or_snapshot(self):
+        identifier, table = self._create_schema_table()
+        os.remove(table.schema_manager._to_schema_path(2))
+        for option, value, target in (('--schema-id', '7', '7'), ('--snapshot-id', '99', '99'),
+                                      ('--snapshot-id', '5', '2')):
+            with self.subTest(option=option, value=value):
+                out, err, code = self._run_table_command('get', identifier, option, value)
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn(identifier, err)
+                self.assertIn(target, err)
+
+    def test_cli_table_schema_invalid_selectors(self):
+        for command, option, values in (('get', '--schema-id', ('-1', 'bad')),
+                                        ('get', '--snapshot-id', ('0', '-1', 'bad')),
+                                        ('list-schemas', '--limit', ('0', '-1', 'bad'))):
+            for value in values:
+                with self.subTest(command=command, option=option, value=value):
+                    out, err, code = self._run_table_command(command, 'test_db.users', option, value)
+                    self.assertEqual(('', 2), (out, code))
+                    self.assertIn(option, err)
+        out, err, code = self._run_table_command('get', 'test_db.users', '--schema-id', '0', '--snapshot-id', '1')
+        self.assertEqual(('', 2), (out, code))
+        self.assertIn('not allowed with argument', err)
+
+    def test_cli_table_get_snapshot_without_schema_id(self):
+        identifier, table = self._create_schema_table()
+        snapshot = json.loads(JSON.to_json(self._snapshot(5, schema_id=None)))
+        for missing in (False, True):
+            with self.subTest(missing=missing):
+                if missing:
+                    del snapshot['schemaId']
+                with open(table.snapshot_manager().get_snapshot_path(5), 'w') as f:
+                    json.dump(snapshot, f)
+                out, err, code = self._run_table_command('get', identifier, '--snapshot-id', '5')
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn('5', err)
+                self.assertIn('schema', err.lower())
+
+    def test_cli_table_schemas_invalid_target(self):
+        for command in ('get', 'list-schemas'):
+            identifiers = ('db', '.t', 'db.', 'db.t.extra', 'test_db.missing_schema_table', 'test_db.users$schemas')
+            for identifier in identifiers:
+                with self.subTest(command=command, identifier=identifier):
+                    out, err, code = self._run_table_command(command, identifier)
+                    self.assertEqual(('', 1), (out, code))
+                    self.assertIn(identifier, err)
+            out, err, code = self._run_table_command(
+                command, 'test_db.users', config=os.path.join(self.tempdir, 'missing.yaml'))
+            self.assertEqual(('', 1), (out, code))
+            self.assertIn('missing.yaml', err)
+
+    def test_cli_table_schemas_corrupt_metadata(self):
+        identifier, table = self._create_schema_table()
+        cases = [(table.schema_manager._to_schema_path(2),
+                  [('get', '--schema-id', '2'), ('get', '--snapshot-id', '5'), ('list-schemas',)]),
+                 (table.snapshot_manager().get_snapshot_path(5), [('get', '--snapshot-id', '5')])]
+        for path, commands in cases:
+            with open(path) as f:
+                original = f.read()
+            with open(path, 'w') as f:
+                f.write('{invalid json')
+            for command in commands:
+                with self.subTest(path=path, command=command):
+                    out, err, code = self._run_table_command(command[0], identifier, *command[1:])
+                    self.assertEqual(('', 1), (out, code))
+                    self.assertIn(identifier, err)
+            with open(path, 'w') as f:
+                f.write(original)
+
+    def test_cli_table_schemas_permission_error(self):
+        identifier, table = self._create_schema_table()
+        file_io = table.file_io
+        original = type(file_io).read_file_utf8
+
+        def denied_read(io, path):
+            if path.endswith('/schema-2'):
+                raise PermissionError('access denied')
+            return original(io, path)
+
+        with patch.object(type(file_io), 'read_file_utf8', autospec=True, side_effect=denied_read):
+            for command in (('get', '--schema-id', '2'), ('get', '--snapshot-id', '5'), ('list-schemas',)):
+                with self.subTest(command=command):
+                    out, err, code = self._run_table_command(command[0], identifier, *command[1:])
+                    self.assertEqual(('', 1), (out, code))
+                    self.assertIn(identifier, err)
+
+    def test_cli_table_schemas_table_modes(self):
+        modes = [('append', [], {'bucket': '-1'}),
+                 ('primary_key', ['id'], {'bucket': '1'}),
+                 ('data_evolution', [], {'bucket': '-1', 'row-tracking.enabled': 'true',
+                                         'data-evolution.enabled': 'true'})]
+        for name, primary_keys, options in modes:
+            with self.subTest(mode=name):
+                identifier, _ = self._create_snapshot_table(
+                    snapshots=[], primary_keys=primary_keys, options=options, suffix=name)
+                schemas = json.loads(self._run_table_command_success('list-schemas', identifier))
+                self.assertEqual([0], [s['id'] for s in schemas])
+                self.assertEqual(primary_keys, schemas[0]['primaryKeys'])
+                self.assertEqual(options, schemas[0]['options'])
+                schema = json.loads(self._run_table_command_success('get', identifier, '--schema-id', '0'))
+                self.assertEqual(primary_keys, schema['primaryKeys'])
+                self.assertEqual(options, schema['options'])
 
     def test_cli_table_snapshot_basic(self):
         """Test basic table snapshot via CLI."""

@@ -205,6 +205,66 @@ Output:
 
 **Note:** The output JSON can be saved to a file and used directly with the `table create` command to recreate the table structure.
 
+Use an explicit schema ID or resolve the schema referenced by a historical snapshot:
+
+```shell
+paimon table get mydb.users --schema-id 0
+paimon table get mydb.users --schema-id 3 --format json
+paimon table get mydb.users --snapshot-id 42 --format json
+paimon table get mydb.users --schema-id 3 --format table
+```
+
+**Options:**
+
+- `--schema-id`: Schema ID to inspect, including `0`. Defaults to the current table schema.
+- `--snapshot-id`: Read the schema ID recorded in this snapshot, then load that schema.
+  Mutually exclusive with `--schema-id`.
+- `--format, -f`: Output format, `json` (default) or `table`.
+
+## Table List Schemas
+
+List available schema versions in ascending numeric schema-ID order. JSON is the default output
+format. Each array element contains the complete serialized `TableSchema`, including its ID,
+metadata version, field definitions and IDs, highest field ID, keys, options, comment, and update
+time. Field definitions preserve nested types, nullability, and column comments.
+
+```shell
+# List all available schema versions as JSON
+paimon table list-schemas mydb.users
+
+# Return the oldest 20 available versions
+paimon table list-schemas mydb.users --limit 20
+
+# Display schema definitions and update times in a readable table
+paimon table list-schemas mydb.users --format table
+```
+
+**Options:**
+
+- `--limit, -l`: Maximum number of schemas to return, starting with the oldest. Must be positive;
+  omitted by default, which returns all available schemas.
+- `--format, -f`: Output format, `json` (default) or `table`.
+
+Example JSON for a table with one schema version:
+
+```json
+[
+  {
+    "version": 3,
+    "id": 0,
+    "fields": [
+      {"id": 0, "name": "user_id", "type": "BIGINT NOT NULL"}
+    ],
+    "highestFieldId": 0,
+    "partitionKeys": [],
+    "primaryKeys": [],
+    "options": {"bucket": "-1"},
+    "comment": null,
+    "timeMillis": 1700000000123
+  }
+]
+```
+
 ## Table Snapshot
 
 Get the latest snapshot or inspect a specific retained snapshot. JSON remains the default output
