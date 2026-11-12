@@ -100,6 +100,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -397,7 +398,55 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 throw new UncheckedIOException(e);
             }
         }
+        if (!compactInputsStillLive(committable)) {
+            return null;
+        }
         return new CompactRecoveryCommittable(committable, messages);
+    }
+
+    /**
+     * A concurrent compaction may already have removed some compact-before files. Replaying such an
+     * increment would fail conflict detection on every restart, so only recover it when all of its
+     * inputs are still live in the latest snapshot.
+     */
+    private boolean compactInputsStillLive(ManifestCommittable committable) {
+        Set<List<Object>> inputs = new HashSet<>();
+        Set<String> inputNames = new HashSet<>();
+        Set<BinaryRow> partitions = new HashSet<>();
+        for (CommitMessage message : committable.fileCommittables()) {
+            for (DataFileMeta file :
+                    ((CommitMessageImpl) message).compactIncrement().compactBefore()) {
+                inputs.add(Arrays.asList(message.partition(), message.bucket(), file.fileName()));
+                inputNames.add(file.fileName());
+                partitions.add(message.partition());
+            }
+        }
+        if (inputs.isEmpty()) {
+            return true;
+        }
+        Snapshot latest = snapshotManager.latestSnapshot();
+        Set<List<Object>> live = new HashSet<>();
+        if (latest != null) {
+            for (SimpleFileEntry entry :
+                    scanner.readAllEntriesFromDataFiles(
+                            latest, new ArrayList<>(partitions), inputNames)) {
+                if (entry.kind() == FileKind.ADD) {
+                    live.add(Arrays.asList(entry.partition(), entry.bucket(), entry.fileName()));
+                }
+            }
+        }
+        for (List<Object> input : inputs) {
+            if (!live.contains(input)) {
+                LOG.warn(
+                        "Skipping compaction recovery for table {}, user {}, identifier {}: input {} was removed by a concurrent commit",
+                        tableName,
+                        commitUser,
+                        committable.identifier(),
+                        input.get(2));
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Runtime-only marker: the first phase was published, even if empty commits are enabled. */

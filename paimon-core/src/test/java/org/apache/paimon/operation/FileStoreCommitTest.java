@@ -529,6 +529,75 @@ public class FileStoreCommitTest {
         }
     }
 
+    @Test
+    public void testFilterHalfCommittedIdentifierWithConcurrentlyCompactedInput() throws Exception {
+        TestFileStore store = createStore(false);
+        KeyValue row = gen.nextInsert("20211110", 8, 1L, null, "replacement");
+        List<ManifestCommittable> prepared = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            store.commitDataImpl(
+                    Collections.singletonList(row),
+                    gen::getPartition,
+                    value -> 0,
+                    false,
+                    2L,
+                    123L,
+                    Collections.emptyList(),
+                    (commit, committable) -> prepared.add(committable));
+        }
+        CommitMessageImpl append = (CommitMessageImpl) prepared.get(0).fileCommittables().get(0);
+        CommitMessageImpl ours = (CommitMessageImpl) prepared.get(1).fileCommittables().get(0);
+        CommitMessageImpl theirs = (CommitMessageImpl) prepared.get(2).fileCommittables().get(0);
+        ManifestCommittable pending =
+                new ManifestCommittable(
+                        2,
+                        123L,
+                        Collections.singletonList(
+                                new CommitMessageImpl(
+                                        append.partition(),
+                                        append.bucket(),
+                                        append.totalBuckets(),
+                                        append.newFilesIncrement(),
+                                        new CompactIncrement(
+                                                append.newFilesIncrement().newFiles(),
+                                                ours.newFilesIncrement().newFiles(),
+                                                Collections.emptyList()))));
+        try (FileStoreCommit commit = store.newCommit("writer", null)) {
+            // The first phase of identifier 2 publishes the append files.
+            commit.commit(prepared.get(0), false);
+            assertThat(commit.filterCommitted(Collections.singletonList(pending))).hasSize(1);
+
+            // Another job compacts the same input away before the writer restarts.
+            try (FileStoreCommit other = store.newCommit("other", null)) {
+                other.commit(
+                        new ManifestCommittable(
+                                1,
+                                null,
+                                Collections.singletonList(
+                                        new CommitMessageImpl(
+                                                append.partition(),
+                                                append.bucket(),
+                                                append.totalBuckets(),
+                                                DataIncrement.emptyIncrement(),
+                                                new CompactIncrement(
+                                                        append.newFilesIncrement().newFiles(),
+                                                        theirs.newFilesIncrement().newFiles(),
+                                                        Collections.emptyList())))),
+                        false);
+            }
+            Snapshot compacted = store.snapshotManager().latestSnapshot();
+            assertThat(compacted.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+
+            // The stale compaction cannot be replayed, so recovery must discard it instead of
+            // rebuilding a committable that fails conflict detection on every restart.
+            ManifestCommittable next = new ManifestCommittable(3);
+            assertThat(commit.filterCommitted(Arrays.asList(pending, next))).containsExactly(next);
+            assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(compacted.id());
+            assertThat(store.toKvMap(store.readKvsFromSnapshot(compacted.id())))
+                    .isEqualTo(store.toKvMap(Collections.singletonList(row)));
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"data", "auxiliary", "changelog", "index", "io"})
     public void testFilterHalfCommittedIdentifierWithUnavailableOutput(String unavailable)
