@@ -191,6 +191,16 @@ public class RowIdPredicateVisitorTest {
     }
 
     @Test
+    public void testOrWithMaximumRowIdBound() {
+        Predicate predicate =
+                PredicateBuilder.or(
+                        builder.between(rowIdIndex, 0L, Long.MAX_VALUE),
+                        builder.equal(rowIdIndex, 0L));
+        assertThat(predicate.visit(visitor))
+                .contains(Collections.singletonList(new Range(0, Long.MAX_VALUE)));
+    }
+
+    @Test
     public void testCompoundedPredicate() {
         // Test AND intersection
         Predicate equal5 = builder.equal(rowIdIndex, 5L);

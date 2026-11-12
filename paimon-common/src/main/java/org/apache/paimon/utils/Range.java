@@ -138,8 +138,8 @@ public class Range implements Serializable {
 
         for (int i = 1; i < sorted.size(); i++) {
             Range next = sorted.get(i);
-            // Check if current and next overlap (not just adjacent)
-            if (current.to + (adjacent ? 1 : 0) >= next.from) {
+            // Check overlap first, since adding one to Long.MAX_VALUE would overflow.
+            if (current.to >= next.from || (adjacent && current.to + 1 == next.from)) {
                 // Merge: extend current range
                 current = new Range(current.from, Math.max(current.to, next.to));
             } else {
