@@ -326,35 +326,80 @@ def cmd_table_get(args):
     Args:
         args: Parsed command line arguments.
     """
-    from pypaimon.cli.cli import load_catalog_config, create_catalog
-    
-    # Load catalog configuration
-    config_path = args.config
-    config = load_catalog_config(config_path)
-    
-    # Create catalog
-    catalog = create_catalog(config)
-    
-    # Parse table identifier
-    table_identifier = args.table
-    parts = table_identifier.split('.')
-    if len(parts) != 2:
-        print(f"Error: Invalid table identifier '{table_identifier}'. "
-              f"Expected format: 'database.table'", file=sys.stderr)
-        sys.exit(1)
-    
-    database_name, table_name = parts
-    
-    # Get table
+    table = _open_schema_table(args)
+    schema_id = getattr(args, 'schema_id', None)
+    snapshot_id = getattr(args, 'snapshot_id', None)
     try:
-        table = catalog.get_table(f"{database_name}.{table_name}")
+        if snapshot_id is not None:
+            snapshot = table.snapshot_manager().get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                raise ValueError(f"Snapshot {snapshot_id} not found for table '{args.table}'.")
+            schema_id = snapshot.schema_id
+            if schema_id is None:
+                raise ValueError(f"Snapshot {snapshot_id} does not contain a schema ID.")
+        table_schema = table.table_schema if schema_id is None else table.schema_manager.get_schema(schema_id)
+        if table_schema is None:
+            raise ValueError(f"Schema {schema_id} not found for table '{args.table}'.")
+        
+        # Get table schema and convert to Schema, then output as JSON
+        schema = table_schema.to_schema()
+        if getattr(args, 'format', 'json') == 'json':
+            print(JSON.to_json(schema, indent=2))
+        else:
+            import pandas as pd
+            values = json.loads(JSON.to_json(schema))
+            rows = [[key, _snapshot_display_value(value)] for key, value in values.items()]
+            print(pd.DataFrame(rows, columns=['Field', 'Value']).to_string(index=False))
     except Exception as e:
-        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        target = 'latest schema' if schema_id is None else f'schema {schema_id}'
+        if snapshot_id is not None:
+            target = f'schema for snapshot {snapshot_id}'
+        print(f"Error: Failed to get {target} for table '{args.table}': {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def cmd_table_list_schemas(args):
+    """
+    Execute the 'table list-schemas' command.
     
-    # Get table schema and convert to Schema, then output as JSON
-    schema = table.table_schema.to_schema()
-    print(JSON.to_json(schema, indent=2))
+    Lists available schemas in ascending schema-ID order without reading table data.
+    
+    Args:
+        args: Parsed command line arguments.
+    """
+    table = _open_schema_table(args)
+    try:
+        manager = table.schema_manager
+        schemas = []
+        for schema_id in sorted(manager._list_versioned_files()):
+            schema = manager.get_schema(schema_id)
+            if schema is None:
+                continue
+            schemas.append(schema)
+            if args.limit is not None and len(schemas) >= args.limit:
+                break
+        
+        if args.format == 'json':
+            print(json.dumps([json.loads(JSON.to_json(s)) for s in schemas], ensure_ascii=False, indent=2))
+        elif not schemas:
+            print(f"No schemas found for table '{args.table}'.")
+        else:
+            import pandas as pd
+            rows = []
+            for s in schemas:
+                row = [str(s.id)]
+                for value in ([f.to_dict() for f in s.fields], s.partition_keys, s.primary_keys, s.options):
+                    row.append(json.dumps(value, ensure_ascii=False, separators=(',', ':')))
+                update_time = _snapshot_commit_time(s.time_millis) if s.time_millis is not None else '-'
+                row.extend([s.comment, update_time])
+                rows.append(row)
+            # Convert before Pandas can coerce nullable integers to floats.
+            rows = [[_snapshot_display_value(value) for value in row] for row in rows]
+            columns = ['schema_id', 'fields', 'partition_keys', 'primary_keys', 'options', 'comment', 'update_time']
+            print(pd.DataFrame(rows, columns=columns).to_string(index=False))
+    except Exception as e:
+        print(f"Error: Failed to list schemas for table '{args.table}': {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_table_snapshot(args):
@@ -955,6 +1000,36 @@ def cmd_table_drop_partition(args):
         sys.exit(1)
 
 
+def _open_schema_table(args):
+    """Load a file-store table for the schema inspection commands."""
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+    
+    # Parse table identifier
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2 or not all(parts):
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+    
+    database_name, table_name = parts
+    
+    try:
+        # Load catalog configuration
+        config_path = args.config
+        config = load_catalog_config(config_path)
+        
+        # Create catalog
+        catalog = create_catalog(config)
+        
+        # Get table
+        table = catalog.get_table(f"{database_name}.{table_name}")
+        return table
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def _open_snapshot_manager(args):
     """Load a file-store table for the snapshot inspection commands."""
     from pypaimon.cli.cli import load_catalog_config, create_catalog
@@ -1080,7 +1155,31 @@ def add_table_subcommands(table_parser):
         'table',
         help='Table identifier in format: database.table'
     )
+    schema_target = get_parser.add_mutually_exclusive_group()
+    schema_target.add_argument('--schema-id', type=_non_negative_int, default=None,
+                               help='Schema ID to inspect (default: the latest schema)')
+    schema_target.add_argument('--snapshot-id', type=_positive_int, default=None,
+                               help='Inspect the schema referenced by this snapshot')
+    get_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='json',
+        help='Output format: json (default) or table'
+    )
     get_parser.set_defaults(func=cmd_table_get)
+
+    # table list-schemas command
+    list_schemas_parser = table_subparsers.add_parser(
+        'list-schemas', help='List available schemas in ascending schema-ID order'
+    )
+    list_schemas_parser.add_argument('table', help='Table identifier in format: database.table')
+    list_schemas_parser.add_argument(
+        '--limit', '-l', type=_positive_int, default=None,
+        help='Maximum number of schemas to display, starting with the oldest (default: all)'
+    )
+    list_schemas_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='json',
+        help='Output format: json (default) or table'
+    )
+    list_schemas_parser.set_defaults(func=cmd_table_list_schemas)
     
     # table snapshot command
     snapshot_parser = table_subparsers.add_parser('snapshot', help='Get the latest or a specific snapshot of a table')
@@ -1325,6 +1424,17 @@ def add_table_subcommands(table_parser):
     update_comment_parser = alter_subparsers.add_parser('update-comment', help='Update table comment')
     update_comment_parser.add_argument('--comment', '-c', required=True, help='New table comment')
     update_comment_parser.set_defaults(func=cmd_table_alter)
+
+
+def _non_negative_int(value):
+    """Argparse type for schema IDs, including the initial schema ID zero."""
+    try:
+        number = int(value)
+        if number >= 0:
+            return number
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError('must be a non-negative integer')
 
 
 def _positive_int(value):
