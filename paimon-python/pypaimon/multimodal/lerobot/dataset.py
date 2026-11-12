@@ -1229,8 +1229,10 @@ def _merged_source_stats(sources, episodes_table):
         raise ValueError("LeRobot sources disagree on stats metadata.")
     decoded = [json.loads(value) for value in values]
     names = dict.fromkeys(name for value in decoded for name in value)
-    merged = {name: _merge_stats([value[name] for value in decoded if name in value])
-              for name in names if name not in _CONTROLS}
+    merged = {
+        name: (decoded[0][name] if len(decoded) == 1 else
+               _merge_stats([value[name] for value in decoded if name in value]))
+        for name in names if name not in _CONTROLS}
     columns = _target_schema(episodes_table).names
     if "stats" in columns:
         stats_rows = _read_arrow(episodes_table, ["stats"])["stats"].to_pylist()

@@ -209,6 +209,29 @@ def test_import_uses_group_prefix(setup, multiple):
         "frames", "episodes", "datasets"}
 
 
+def test_single_source_preserves_feature_quantiles(setup):
+    conn, sources = setup
+    source_path = Path(sources[0][7:])
+    stats_path = source_path / "meta/stats.json"
+    original = json.loads(stats_path.read_text())
+    original["action"]["q01"] = [0.0, -4.0]
+    original["action"]["q99"] = [4.0, 0.0]
+    stats_path.write_text(json.dumps(original))
+
+    conn.load_from_lerobot("single", sources[0], tag_name="train")
+    reader = pm.PaimonLeRobotDataset(
+        conn.get_table("single_frames"), tag_name="train")
+    try:
+        for name in ("action", "observation.state"):
+            quantiles = ("q50", "q01", "q99") if name == "action" else ("q50",)
+            for quantile in quantiles:
+                np.testing.assert_allclose(
+                    reader.meta.stats[name][quantile], original[name][quantile])
+        assert "q50" not in reader.meta.stats["index"]
+    finally:
+        reader.close()
+
+
 @pytest.mark.parametrize("import_parallelism", [1, 2], indirect=True)
 def test_append_source_preserves_existing_indices_and_tags(setup, import_parallelism):
     conn, sources = setup

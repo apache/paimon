@@ -487,8 +487,10 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
     if stats[0] is not None:
         decoded = [_json_table(s) for s in stats]
         names = dict.fromkeys(name for item in decoded for name in item)
-        merged_stats = {name: _merge_stats([item[name] for item in decoded if name in item])
-                        for name in names if name not in _CONTROLS}
+        merged_stats = {
+            name: (decoded[0][name] if len(decoded) == 1 else
+                   _merge_stats([item[name] for item in decoded if name in item]))
+            for name in names if name not in _CONTROLS}
     metadata["info_table"] = _metadata_table(info)
     metadata["stats_table"] = (None if merged_stats is None
                                else _metadata_table(merged_stats))
@@ -539,10 +541,25 @@ def _merged_episodes(plans, schema):
         for group in _episode_variant_groups(plan["metadata"]["episodes_schema"])
         if group not in _EPISODE_VARIANT_GROUPS))
     for plan in plans:
+        validated = plan["metadata"]["episodes"]
+        task_indices = plan["metadata"]["task_indices"]
+        episode_offset = 0
         for table in _source_episode_tables(plan["metadata"]):
             source_groups = set(_episode_variant_groups(table.schema))
             records = []
             for original in table.to_pylist():
+                try:
+                    expected = validated[episode_offset]
+                    source_tasks = [task_indices[name] for name in original["tasks"]]
+                except (IndexError, KeyError, TypeError):
+                    raise ValueError(
+                        "LeRobot Episode metadata changed after validation.") from None
+                if (original["episode_index"] != episode_offset
+                        or original["dataset_from_index"] != expected["dataset_from_index"]
+                        or original["dataset_to_index"] != expected["dataset_to_index"]
+                        or original["length"] != expected["length"]
+                        or source_tasks != list(expected["task_indices"])):
+                    raise ValueError("LeRobot Episode metadata changed after validation.")
                 row = {name: original[name] for name in schema.names
                        if name in original}
                 for group in ("meta", "data", "videos"):
@@ -569,7 +586,10 @@ def _merged_episodes(plans, schema):
                     stats[name] = values
                 row["stats"] = _variant_value(stats)
                 records.append(row)
+                episode_offset += 1
             yield pa.Table.from_pylist(records, schema=schema)
+        if episode_offset != len(validated):
+            raise ValueError("LeRobot Episode metadata changed after validation.")
 
 
 def _import_sources(connection, table_name, sources, batch_size, options,
