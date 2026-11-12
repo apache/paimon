@@ -19,13 +19,11 @@
 package org.apache.paimon.codegen
 
 import org.apache.paimon.codegen.GenerateUtils._
-import org.apache.paimon.codegen.ScalarOperatorGens.{generateEquals, generateRowEqualiser}
+import org.apache.paimon.codegen.ScalarOperatorGens.{generateEquals, generateRowEqualiser, supportsBinaryEquals}
 import org.apache.paimon.types.{BooleanType, DataType}
-import org.apache.paimon.types.DataTypeChecks.{getNestedTypes, isCompositeType}
+import org.apache.paimon.types.DataTypeChecks.isCompositeType
 import org.apache.paimon.types.DataTypeRoot._
 import org.apache.paimon.utils.TypeUtils.isPrimitive
-
-import scala.collection.JavaConverters._
 
 class EqualiserCodeGenerator(fieldTypes: Array[DataType], fields: Array[Int]) {
 
@@ -43,7 +41,16 @@ class EqualiserCodeGenerator(fieldTypes: Array[DataType], fields: Array[Int]) {
     val className = newName(name)
 
     val containsIgnoreFields = fieldTypes.length > fields.length
-    val supportsBinaryRowEquals = !fields.exists(idx => containsFloatingPoint(fieldTypes(idx)))
+    val bothBinary = s"$LEFT_INPUT instanceof $BINARY_ROW && $RIGHT_INPUT instanceof $BINARY_ROW"
+    val binaryEqualsCode =
+      if (containsIgnoreFields) {
+        ""
+      } else if (fields.forall(idx => supportsBinaryEquals(fieldTypes(idx)))) {
+        s"if ($bothBinary) { return $LEFT_INPUT.equals($RIGHT_INPUT); }"
+      } else {
+        // Equal bytes still mean equal values, but different bytes may not.
+        s"if ($bothBinary && $LEFT_INPUT.equals($RIGHT_INPUT)) { return true; }"
+      }
     val equalsMethodCodes = for (idx <- fields) yield generateEqualsMethod(ctx, idx)
     val equalsMethodCalls = for (idx <- fields) yield {
       val methodName = getEqualsMethodName(idx)
@@ -61,9 +68,7 @@ class EqualiserCodeGenerator(fieldTypes: Array[DataType], fields: Array[Int]) {
 
           @Override
           public boolean equals($ROW_DATA $LEFT_INPUT, $ROW_DATA $RIGHT_INPUT) {
-            if ($LEFT_INPUT instanceof $BINARY_ROW && $RIGHT_INPUT instanceof $BINARY_ROW && !$containsIgnoreFields && $supportsBinaryRowEquals) {
-              return $LEFT_INPUT.equals($RIGHT_INPUT);
-            }
+            $binaryEqualsCode
 
             if ($LEFT_INPUT.getRowKind() != $RIGHT_INPUT.getRowKind()) {
               return false;
@@ -158,13 +163,6 @@ class EqualiserCodeGenerator(fieldTypes: Array[DataType], fields: Array[Int]) {
 
     case DATE | TIME_WITHOUT_TIME_ZONE => true
 
-    case _ => false
-  }
-
-  private def containsFloatingPoint(t: DataType): Boolean = t.getTypeRoot match {
-    case FLOAT | DOUBLE => true
-    case ARRAY | MAP | MULTISET | ROW | VECTOR =>
-      getNestedTypes(t).asScala.exists(containsFloatingPoint)
     case _ => false
   }
 }
