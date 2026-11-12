@@ -189,6 +189,48 @@ public class UnionGlobalIndexReader implements ContainsRefiningGlobalIndexReader
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexPredicateResult>> visitRangeWithCompleteness(
+            FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        long start = durationConsumer == null ? 0L : System.nanoTime();
+        List<CompletableFuture<Optional<GlobalIndexPredicateResult>>> futures = new ArrayList<>();
+        for (GlobalIndexReader reader : readers) {
+            futures.add(
+                    reader.visitRangeWithCompleteness(
+                            fieldRef, from, to, fromInclusive, toInclusive));
+        }
+        CompletableFuture<Optional<GlobalIndexPredicateResult>> result =
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                        .thenApply(
+                                ignored -> {
+                                    GlobalIndexResult union = null;
+                                    boolean fullyEvaluated = true;
+                                    for (CompletableFuture<Optional<GlobalIndexPredicateResult>>
+                                            future : futures) {
+                                        Optional<GlobalIndexPredicateResult> current =
+                                                future.join();
+                                        if (!current.isPresent()) {
+                                            return Optional.empty();
+                                        }
+                                        GlobalIndexPredicateResult value = current.get();
+                                        union =
+                                                union == null
+                                                        ? value.result()
+                                                        : union.or(value.result());
+                                        fullyEvaluated &= value.fullyEvaluated();
+                                    }
+                                    return union == null
+                                            ? Optional.empty()
+                                            : Optional.of(
+                                                    new GlobalIndexPredicateResult(
+                                                            union, fullyEvaluated));
+                                });
+        return durationConsumer == null
+                ? result
+                : result.whenComplete(
+                        (ignored, throwable) -> durationConsumer.accept(System.nanoTime() - start));
+    }
+
+    @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
             FieldRef fieldRef, Object from, Object to) {
         return unionAsync(reader -> reader.visitBetween(fieldRef, from, to));

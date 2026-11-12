@@ -89,6 +89,17 @@ public interface GlobalIndexReader
      */
     default CompletableFuture<Optional<GlobalIndexResult>> visitRange(
             FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        return visitRangeWithCompleteness(fieldRef, from, to, fromInclusive, toInclusive)
+                .thenApply(result -> result.map(GlobalIndexPredicateResult::result));
+    }
+
+    /**
+     * Evaluate both range bounds without mistaking a supported single bound for the whole range.
+     * Readers with a combined scan can override this method to retain that optimization and report
+     * whether both bounds were evaluated. Existing readers default to evaluating the two leaves.
+     */
+    default CompletableFuture<Optional<GlobalIndexPredicateResult>> visitRangeWithCompleteness(
+            FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
         CompletableFuture<Optional<GlobalIndexResult>> lower =
                 fromInclusive
                         ? visitGreaterOrEqual(fieldRef, from)
@@ -99,9 +110,12 @@ public interface GlobalIndexReader
                 upper,
                 (left, right) -> {
                     if (!left.isPresent()) {
-                        return right;
+                        return right.map(result -> new GlobalIndexPredicateResult(result, false));
                     }
-                    return right.isPresent() ? Optional.of(left.get().and(right.get())) : left;
+                    return Optional.of(
+                            new GlobalIndexPredicateResult(
+                                    right.isPresent() ? left.get().and(right.get()) : left.get(),
+                                    right.isPresent()));
                 });
     }
 

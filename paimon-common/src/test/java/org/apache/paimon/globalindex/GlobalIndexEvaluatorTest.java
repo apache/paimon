@@ -94,14 +94,16 @@ class GlobalIndexEvaluatorTest {
         GlobalIndexReader reader =
                 new StubGlobalIndexReader(null) {
                     @Override
-                    public CompletableFuture<Optional<GlobalIndexResult>> visitRange(
-                            FieldRef field,
-                            Object from,
-                            Object to,
-                            boolean fromInclusive,
-                            boolean toInclusive) {
+                    public CompletableFuture<Optional<GlobalIndexPredicateResult>>
+                            visitRangeWithCompleteness(
+                                    FieldRef field,
+                                    Object from,
+                                    Object to,
+                                    boolean fromInclusive,
+                                    boolean toInclusive) {
                         rangeCalls.incrementAndGet();
-                        return super.visitRange(field, from, to, fromInclusive, toInclusive);
+                        return super.visitRangeWithCompleteness(
+                                field, from, to, fromInclusive, toInclusive);
                     }
 
                     @Override
@@ -152,6 +154,215 @@ class GlobalIndexEvaluatorTest {
         assertThat(result).isPresent();
         assertBitmapContainsExactly(result.get().results(), 1L, 2L, 3L);
         evaluator.close();
+    }
+
+    @Test
+    void testCompletenessTracksPredicatesNotFields() {
+        RowType type = RowType.of(new DataField(0, "price", DataTypes.DOUBLE()));
+        PredicateBuilder b = new PredicateBuilder(type);
+        GlobalIndexReader reader =
+                new StubGlobalIndexReader(resultOf(1, 2)) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
+                            FieldRef field, Object literal) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1, 2)));
+                    }
+                };
+        try (GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(type, field -> Collections.singletonList(reader))) {
+            Predicate supported = PredicateBuilder.and(b.equal(0, 10.0), b.greaterThan(0, 0.0));
+            Predicate partial = PredicateBuilder.and(b.greaterThan(0, 0.0), b.isNaN(0));
+            GlobalIndexEvaluator.Evaluation complete =
+                    evaluator.evaluateWithContributingFields(supported).get();
+            GlobalIndexEvaluator.Evaluation incomplete =
+                    evaluator.evaluateWithContributingFields(partial).get();
+            assertThat(complete.contributingFieldIds())
+                    .isEqualTo(incomplete.contributingFieldIds());
+            assertThat(complete.fullyEvaluated()).isTrue();
+            assertThat(incomplete.fullyEvaluated()).isFalse();
+            assertThat(
+                            evaluator
+                                    .evaluateWithContributingFields(
+                                            PredicateBuilder.or(partial, supported))
+                                    .get()
+                                    .fullyEvaluated())
+                    .isFalse();
+            assertThat(
+                            evaluator
+                                    .evaluateWithContributingFields(
+                                            PredicateBuilder.and(
+                                                    supported,
+                                                    PredicateBuilder.or(
+                                                            b.equal(0, 5.0), b.isNaN(0))))
+                                    .get()
+                                    .fullyEvaluated())
+                    .isFalse();
+            assertThat(
+                            evaluator.evaluateWithContributingFields(
+                                    PredicateBuilder.or(b.equal(0, 5.0), b.isNaN(0))))
+                    .isEmpty();
+        }
+    }
+
+    @Test
+    void testRangeCompletenessSurvivesReaderWrappers() throws Exception {
+        FieldRef field = new FieldRef(0, "a", DataTypes.INT());
+        for (boolean upperSupported : Arrays.asList(false, true)) {
+            GlobalIndexReader delegate =
+                    new StubGlobalIndexReader(null) {
+                        @Override
+                        public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
+                                FieldRef ref, Object value) {
+                            return CompletableFuture.completedFuture(Optional.of(resultOf(1, 2)));
+                        }
+
+                        @Override
+                        public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
+                                FieldRef ref, Object value) {
+                            return CompletableFuture.completedFuture(
+                                    upperSupported ? Optional.of(resultOf(2)) : Optional.empty());
+                        }
+                    };
+            try (GlobalIndexReader reader =
+                    new UnionGlobalIndexReader(
+                            Collections.singletonList(
+                                    new OffsetGlobalIndexReader(delegate, 10, 19)))) {
+                GlobalIndexPredicateResult result =
+                        reader.visitRangeWithCompleteness(field, 0, 5, true, false).get().get();
+                assertThat(result.fullyEvaluated()).isEqualTo(upperSupported);
+                assertBitmapContainsExactly(
+                        result.result().results(),
+                        upperSupported ? new long[] {12} : new long[] {11, 12});
+                try (GlobalIndexEvaluator evaluator =
+                        new GlobalIndexEvaluator(
+                                rowType(), id -> Collections.singletonList(reader))) {
+                    PredicateBuilder b = new PredicateBuilder(rowType());
+                    assertThat(
+                                    evaluator
+                                            .evaluateWithContributingFields(
+                                                    PredicateBuilder.and(
+                                                            b.greaterOrEqual(0, 0),
+                                                            b.lessThan(0, 5)))
+                                            .get()
+                                            .fullyEvaluated())
+                            .isEqualTo(upperSupported);
+                }
+            }
+        }
+    }
+
+    @Test
+    void testAlternativeIndexMayProvideCompleteAnswer() {
+        Predicate filter = new PredicateBuilder(rowType()).equal(0, 1);
+        try (GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType(),
+                        id ->
+                                Arrays.asList(
+                                        new StubGlobalIndexReader(null),
+                                        new StubGlobalIndexReader(resultOf(1))))) {
+            assertThat(evaluator.evaluateWithContributingFields(filter).get().fullyEvaluated())
+                    .isTrue();
+        }
+    }
+
+    @Test
+    void testRangeUnionRequiresCompletenessFromEveryShard() throws Exception {
+        GlobalIndexReader complete =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexPredicateResult>>
+                            visitRangeWithCompleteness(
+                                    FieldRef field,
+                                    Object from,
+                                    Object to,
+                                    boolean lowerInclusive,
+                                    boolean upperInclusive) {
+                        return CompletableFuture.completedFuture(
+                                Optional.of(new GlobalIndexPredicateResult(resultOf(1), true)));
+                    }
+                };
+        GlobalIndexReader partial =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexPredicateResult>>
+                            visitRangeWithCompleteness(
+                                    FieldRef field,
+                                    Object from,
+                                    Object to,
+                                    boolean lowerInclusive,
+                                    boolean upperInclusive) {
+                        return CompletableFuture.completedFuture(
+                                Optional.of(new GlobalIndexPredicateResult(resultOf(2), false)));
+                    }
+                };
+        FieldRef field = new FieldRef(0, "a", DataTypes.INT());
+        try (GlobalIndexReader union =
+                new UnionGlobalIndexReader(Arrays.asList(complete, partial))) {
+            GlobalIndexPredicateResult result =
+                    union.visitRangeWithCompleteness(field, 0, 5, true, false).get().get();
+            assertBitmapContainsExactly(result.result().results(), 1L, 2L);
+            assertThat(result.fullyEvaluated()).isFalse();
+        }
+        try (GlobalIndexReader union =
+                new UnionGlobalIndexReader(
+                        Arrays.asList(complete, new StubGlobalIndexReader(null)))) {
+            assertThat(union.visitRangeWithCompleteness(field, 0, 5, true, false).get()).isEmpty();
+        }
+    }
+
+    @Test
+    void testEmptyShortcutDoesNotInventCompleteness() {
+        PredicateBuilder b = new PredicateBuilder(rowType());
+        try (GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType(),
+                        id ->
+                                Collections.singletonList(
+                                        new StubGlobalIndexReader(
+                                                GlobalIndexResult.createEmpty())))) {
+            GlobalIndexEvaluator.Evaluation result =
+                    evaluator
+                            .evaluateWithContributingFields(
+                                    PredicateBuilder.and(b.equal(0, 1), b.lessThan(0, 5)))
+                            .get();
+            assertThat(result.result().results()).isEmpty();
+            assertThat(result.fullyEvaluated()).isFalse();
+        }
+    }
+
+    @Test
+    void testContainsDoesNotForgetUnsupportedRemainingCondition() {
+        RowType type = RowType.of(new DataField(0, "name", DataTypes.STRING()));
+        PredicateBuilder b = new PredicateBuilder(type);
+        ContainsRefiningGlobalIndexReader reader =
+                new StubContainsRefiningGlobalIndexReader() {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+                            FieldRef ref, List<Object> literals, GlobalIndexResult candidates) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1)));
+                    }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunction(
+                            FieldRef ref, List<Object> literals, GlobalIndexResult candidates) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1)));
+                    }
+                };
+        try (GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(type, id -> Collections.singletonList(reader))) {
+            GlobalIndexEvaluator.Evaluation result =
+                    evaluator
+                            .evaluateWithContributingFields(
+                                    PredicateBuilder.and(
+                                            b.contains(0, BinaryString.fromString("a")),
+                                            b.startsWith(0, BinaryString.fromString("ab"))
+                                                    .negate()
+                                                    .get()))
+                            .get();
+            assertBitmapContainsExactly(result.result().results(), 1L);
+            assertThat(result.fullyEvaluated()).isFalse();
+        }
     }
 
     @Test
