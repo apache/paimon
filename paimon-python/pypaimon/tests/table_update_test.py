@@ -1782,6 +1782,42 @@ class _StreamModeMixin(StreamModeMixin):
 class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestCase):
     """All shared update tests under batch (``BatchWriteBuilder``) semantics."""
 
+    def test_combined_prepared_updates_reject_same_column(self):
+        for reverse in (False, True):
+            with self.subTest(reverse=reverse):
+                table = self._create_seeded_table()
+                before_snapshot = table.snapshot_manager().get_latest_snapshot().id
+                first_builder = self._make_write_builder(table)
+                first = first_builder.new_update().update_by_arrow_with_row_id(
+                    pa.table({'_ROW_ID': [0], 'age': pa.array([26], type=pa.int32())}))
+                second_builder = self._make_write_builder(table)
+                second = second_builder.new_update().update_by_arrow_with_row_id(
+                    pa.table({'_ROW_ID': [1], 'age': pa.array([31], type=pa.int32())}))
+
+                messages = second + first if reverse else first + second
+                with self.assertRaisesRegex(RuntimeError, 'same row-id range and column'):
+                    first_builder.new_commit().commit(messages)
+
+                self.assertEqual(before_snapshot, table.snapshot_manager().get_latest_snapshot().id)
+                self.assertEqual([25, 30, 35, 40, 45],
+                                 self._read_all(table)['age'].to_pylist())
+
+    def test_combined_prepared_updates_allow_different_columns(self):
+        table = self._create_seeded_table()
+        first_builder = self._make_write_builder(table)
+        first = first_builder.new_update().update_by_arrow_with_row_id(
+            pa.table({'_ROW_ID': [0], 'age': pa.array([26], type=pa.int32())}))
+        second_builder = self._make_write_builder(table)
+        second = second_builder.new_update().update_by_arrow_with_row_id(
+            pa.table({'_ROW_ID': [1], 'city': ['Seattle']}))
+
+        first_builder.new_commit().commit(first + second)
+
+        rows = self._read_all(table)
+        self.assertEqual([26, 30, 35, 40, 45], rows['age'].to_pylist())
+        self.assertEqual(['NYC', 'Seattle', 'Chicago', 'Houston', 'Phoenix'],
+                         rows['city'].to_pylist())
+
     @pytest.mark.python_write
     def test_update_batches_reject_same_file_and_preserve_staged_files(self):
         table = self._create_seeded_table()
