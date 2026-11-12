@@ -49,6 +49,16 @@ class RowRangeIndexTest {
     }
 
     @Test
+    void testOverlappingRangeWithMaximumEnd() {
+        RowRangeIndex index =
+                RowRangeIndex.create(Arrays.asList(new Range(0, Long.MAX_VALUE), new Range(0, 0)));
+
+        assertThat(index.intersects(1, 9)).isTrue();
+        assertThat(index.contains(new Range(1, 9))).isTrue();
+        assertThat(index.intersectedRanges(1, 9)).containsExactly(new Range(1, 9));
+    }
+
+    @Test
     void testContains() {
         RowRangeIndex index =
                 RowRangeIndex.create(
