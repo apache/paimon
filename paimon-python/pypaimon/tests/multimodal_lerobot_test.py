@@ -907,6 +907,34 @@ class LeRobotValidationTest(unittest.TestCase):
             with self.assertRaises(OSError):
                 _open_video_decoder(stream, backend="torchcodec")
 
+    def test_mp4_bootstrap_prefetch_coalesces_front_moov_probe(self):
+        payload = bytes(512 * 1024)
+        module = "pypaimon.multimodal.lerobot.dataset."
+        cases = (
+            ((28, 11759), [(0, 28 + 11759 + 128 * 1024)]),
+            ((200 * 1024, 11759),
+             [(0, 65536), (200 * 1024, 11759)]),
+        )
+        for hint, expected in cases:
+            with self.subTest(hint=hint):
+                source = io.BytesIO(payload)
+                source.video_length = len(payload)
+                source.video_moov_range = hint
+                calls = []
+
+                def read_ranges(ranges):
+                    calls.append(list(ranges))
+                    return [payload[start:start + size]
+                            for start, size in ranges]
+
+                source.video_read_ranges = read_ranges
+                with patch(module + "ContainerFrameIndex",
+                           return_value=object()), patch(
+                               module + "_PyAVVideoDecoder",
+                               return_value=object()):
+                    _open_video_decoder(source)
+                self.assertEqual([expected], calls)
+
     def test_indexed_default_backend_falls_back_to_torchcodec(self):
         stream = Mock()
         stream.video_keyframe_index = FrameIndex(

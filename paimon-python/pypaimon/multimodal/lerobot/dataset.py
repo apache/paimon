@@ -2228,7 +2228,12 @@ def _open_video_decoder(stream, backend=None, codec_threads=0):
                 if 0 < hint[1] <= _MAX_METADATA_BYTES and callable(ranges):
                     source = _RangeBackedVideo(stream.video_length, ranges)
                     source.video_moov_range = hint
-                    source.prefetch([(0, min(65536, stream.video_length)), hint])
+                    head = 65536
+                    if 0 <= hint[0] and hint[0] + hint[1] <= head:
+                        # PyAV may probe past a front-loaded moov. Fetch its
+                        # immediate neighborhood in the same range request.
+                        head = min(256 * 1024, hint[0] + hint[1] + 128 * 1024)
+                    source.prefetch([(0, min(head, stream.video_length)), hint])
                     stream.video_bootstrap = source
                 keyframe_index = ContainerFrameIndex(source, stream.video_length)
             except (ValueError, OSError, RuntimeError, EOFError, OverflowError, IndexError, struct.error):
