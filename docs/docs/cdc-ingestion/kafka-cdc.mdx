@@ -151,6 +151,33 @@ Command syntax (square brackets indicate optional arguments):
 
 <ConfigTable html={kafkaSyncTableHtml} />
 
+### Compute columns from Kafka metadata
+
+For table synchronization into an append-only table without primary keys, computed columns can
+reference metadata columns enabled with `--metadata_column`. Include the configured metadata
+prefix in the expression's field name. For example, for insert-only JSON records, derive a daily
+partition from the Kafka record timestamp:
+
+```bash
+--kafka_conf value.format=json \
+--metadata_column timestamp \
+--metadata_column_prefix __kafka_ \
+--computed_column 'dt=date_format(__kafka_timestamp,yyyy-MM-dd)' \
+--partition_keys dt
+```
+
+The metadata timestamp is a `TIMESTAMP_LTZ(3)`, so this expression does not use an epoch precision
+argument. A missing metadata value produces a null computed value.
+
+Source fields and earlier computed columns take precedence over equally named metadata when
+resolving expression inputs. Use a metadata prefix such as `__kafka_` to avoid ambiguous names.
+
+Computed columns based on metadata are rejected when the target has primary keys, including keys
+inferred from the source. Values such as the Kafka record timestamp can change between inserts,
+updates, and deletes, so they cannot reliably identify a row's original partition.
+When starting against an existing table with an empty topic, ambiguous references are checked
+against incoming records once they become available.
+
 ## Synchronizing Databases
 
 By using [KafkaSyncDatabaseAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/kafka/KafkaSyncDatabaseAction.html) in a Flink DataStream job or directly through `flink run`, users can route source tables from one or more topics into a Paimon database.

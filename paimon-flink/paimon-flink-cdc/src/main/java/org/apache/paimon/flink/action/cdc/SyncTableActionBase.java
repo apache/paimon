@@ -29,6 +29,7 @@ import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -39,10 +40,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.assertSchemaCompatible;
 import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 import static org.apache.paimon.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
 
 /** Base {@link Action} for synchronizing into one Paimon table. */
 public abstract class SyncTableActionBase extends SynchronizationActionBase {
@@ -118,10 +122,16 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
         try {
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
             fileStoreTable = alterTableOptions(identifier, fileStoreTable);
+            List<DataField> sourceFields;
             try {
                 Schema retrievedSchema = retrieveSchema();
+                sourceFields = retrievedSchema.fields();
                 computedColumns =
-                        buildComputedColumns(computedColumnArgs, retrievedSchema.fields());
+                        buildComputedColumns(
+                                computedColumnArgs,
+                                retrievedSchema.fields(),
+                                metadataConverters,
+                                caseSensitive);
                 Schema paimonSchema = buildPaimonSchema(retrievedSchema);
                 assertSchemaCompatible(fileStoreTable.schema(), paimonSchema.fields());
             } catch (SchemaRetrievalException e) {
@@ -131,20 +141,58 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                                 + "here will use the existed Paimon table schema to build them. Please make sure "
                                 + "the Paimon table has defined all the argument columns used for computed columns.");
                 // schema evolution will add the computed columns
+                // These fields may include metadata outputs. Runtime validation resolves ambiguous
+                // references against the actual source record when the topic becomes available.
+                sourceFields = fileStoreTable.schema().fields();
                 computedColumns =
                         buildComputedColumns(
                                 computedColumnArgs,
                                 fileStoreTable.schema().fields(),
+                                metadataConverters,
                                 caseSensitive);
                 // check partition keys and primary keys in case that user specified them
                 checkConstraints();
             }
+            validateMetadataComputedColumns(fileStoreTable.primaryKeys(), sourceFields);
         } catch (Catalog.TableNotExistException e) {
             Schema retrievedSchema = retrieveSchema();
-            computedColumns = buildComputedColumns(computedColumnArgs, retrievedSchema.fields());
+            computedColumns =
+                    buildComputedColumns(
+                            computedColumnArgs,
+                            retrievedSchema.fields(),
+                            metadataConverters,
+                            caseSensitive);
             Schema paimonSchema = buildPaimonSchema(retrievedSchema);
+            validateMetadataComputedColumns(paimonSchema.primaryKeys(), retrievedSchema.fields());
             catalog.createTable(identifier, paimonSchema, false);
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        }
+    }
+
+    private void validateMetadataComputedColumns(
+            List<String> targetPrimaryKeys, List<DataField> sourceFields) {
+        if (targetPrimaryKeys.isEmpty()) {
+            return;
+        }
+
+        Set<String> metadataNames =
+                Arrays.stream(metadataConverters)
+                        .map(converter -> toLowerCaseIfNeed(converter.columnName(), caseSensitive))
+                        .collect(Collectors.toSet());
+        Set<String> availableFields =
+                sourceFields.stream()
+                        .map(field -> toLowerCaseIfNeed(field.name(), caseSensitive))
+                        .collect(Collectors.toSet());
+        for (ComputedColumn column : computedColumns) {
+            column.disallowMetadataReferences();
+            String reference = column.fieldReference();
+            if (reference != null) {
+                String name = toLowerCaseIfNeed(reference, caseSensitive);
+                if (metadataNames.contains(name) && !availableFields.contains(name)) {
+                    column.checkMetadataReferenceAllowed();
+                }
+            }
+            availableFields.add(toLowerCaseIfNeed(column.columnName(), caseSensitive));
         }
     }
 

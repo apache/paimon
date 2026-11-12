@@ -185,14 +185,14 @@ public class AliyunRecordParser extends AbstractJsonRecordParser {
             DataType paimonDataType =
                     MySqlTypeUtils.toDataType(typeInfo.f0, typeInfo.f1, typeInfo.f2, typeMapping);
             schemaBuilder.column(originalName, paimonDataType);
+            rowData.put(originalName, null);
         }
 
         for (Map.Entry<String, Object> entry : recordMap.entrySet()) {
             rowData.put(entry.getKey(), Objects.toString(entry.getValue(), null));
         }
 
-        evalComputedColumns(rowData, schemaBuilder);
-        evalMetadataColumns(rowData, schemaBuilder);
+        evalComputedAndMetadataColumns(rowData, schemaBuilder);
 
         return rowData;
     }

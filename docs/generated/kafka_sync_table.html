@@ -49,7 +49,7 @@
     </tr>
     <tr>
         <td><h5>--computed_column</h5></td>
-        <td>The definitions of computed columns. The argument field is from Kafka topic's table field name. See <a href="./action-configuration#computed-functions">here</a> for a complete list of configurations. </td>
+        <td>The definitions of computed columns. Arguments can reference Kafka topic table fields. For append-only targets without primary keys, arguments can also reference enabled metadata columns, including any configured metadata prefix. See <a href="./action-configuration#computed-functions">here</a> for a complete list of configurations. </td>
     </tr>
     <tr>
         <td><h5>--metadata_column</h5></td>
