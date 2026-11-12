@@ -141,7 +141,8 @@ class FileStoreCommit:
 
     def __init__(self, snapshot_commit: SnapshotCommit, table, commit_user: str,
                  commit_callbacks: Optional[List[CommitCallback]] = None,
-                 close_commit_callbacks: bool = True):
+                 close_commit_callbacks: bool = True,
+                 commit_condition=None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.snapshot_commit = snapshot_commit
@@ -149,6 +150,7 @@ class FileStoreCommit:
         self.commit_user = commit_user
         self.commit_callbacks: List[CommitCallback] = commit_callbacks if commit_callbacks is not None else []
         self.close_commit_callbacks = close_commit_callbacks
+        self.commit_condition = commit_condition
 
         self.snapshot_manager = table.snapshot_manager()
         self.manifest_file_manager = ManifestFileManager(table)
@@ -244,15 +246,17 @@ class FileStoreCommit:
             # Detect concurrent bucket-count changes in postpone APPENDs.
             detect_conflicts = True
 
-        self._try_commit(commit_kind=commit_kind,
-                         commit_identifier=commit_identifier,
-                         commit_entries_plan=lambda snapshot: commit_entries,
-                         changelog_entries=changelog_entries,
-                         detect_conflicts=detect_conflicts,
-                         index_deletes=index_deletes,
-                         index_adds=index_adds,
-                         snapshot_properties=snapshot_properties,
-                         allow_empty_commit=not ignore_empty_commit)
+        committed = self._try_commit(commit_kind=commit_kind,
+                                     commit_identifier=commit_identifier,
+                                     commit_entries_plan=lambda snapshot: commit_entries,
+                                     prepared_messages=commit_messages,
+                                     changelog_entries=changelog_entries,
+                                     detect_conflicts=detect_conflicts,
+                                     index_deletes=index_deletes,
+                                     index_adds=index_adds,
+                                     snapshot_properties=snapshot_properties,
+                                     allow_empty_commit=not ignore_empty_commit)
+        return committed if self.commit_condition is not None else None
 
     def overwrite(
             self,
@@ -288,16 +292,18 @@ class FileStoreCommit:
 
         if not skip_overwrite:
             provider = self._overwrite_changes_provider(partition_filter, commit_messages)
-            self._try_commit(
+            committed = self._try_commit(
                 commit_kind="OVERWRITE",
                 commit_identifier=commit_identifier,
                 commit_entries_plan=provider.provide,
+                prepared_messages=commit_messages,
                 changelog_entries=[],
                 detect_conflicts=True,
                 snapshot_properties=snapshot_properties,
                 # Java records static/table overwrite even when no files match.
                 allow_empty_commit=True,
             )
+            return committed if self.commit_condition is not None else None
 
     def drop_partitions(self, partitions: List[Dict[str, str]], commit_identifier: int) -> None:
         if not partitions:
@@ -345,11 +351,13 @@ class FileStoreCommit:
                     detect_conflicts=False, index_deletes=None,
                     index_adds=None, changelog_entries=None,
                     snapshot_properties: Optional[Dict[str, str]] = None,
-                    allow_empty_commit=False):
+                    allow_empty_commit=False, prepared_messages=None):
 
         retry_count = 0
         retry_result = None
-        commit_result_may_be_uncertain = False
+        commit_result_may_be_uncertain = any(
+            getattr(message, 'commit_outcome_uncertain', False) is True
+            for message in (prepared_messages or []))
         uncertain_commit_exception = None
         rewritten_commit_entries = None
         start_time_ms = int(time.time() * 1000)
@@ -361,7 +369,19 @@ class FileStoreCommit:
                     commit_identifier,
                     commit_kind,
                     notify_callbacks=True):
-                break
+                return True
+            if self.commit_condition is not None:
+                try:
+                    needed = self.commit_condition(latest_snapshot)
+                except BaseException:
+                    if not commit_result_may_be_uncertain and prepared_messages is not None:
+                        self.abort(prepared_messages)
+                    raise
+                if not needed:
+                    # An uncertain response may have published these files.
+                    if not commit_result_may_be_uncertain and prepared_messages is not None:
+                        self.abort(prepared_messages)
+                    return False
             changes = (
                 rewritten_commit_entries
                 if rewritten_commit_entries is not None
@@ -424,11 +444,13 @@ class FileStoreCommit:
                         self.table.identifier,
                         commit_duration_ms,
                     )
-                break
+                return True
             else:
                 retry_result = result
                 if result.commit_result_may_be_uncertain:
                     commit_result_may_be_uncertain = True
+                    for message in prepared_messages or []:
+                        message.commit_outcome_uncertain = True
                     if uncertain_commit_exception is None:
                         uncertain_commit_exception = result.exception
 

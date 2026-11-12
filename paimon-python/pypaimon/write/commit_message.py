@@ -41,6 +41,9 @@ class CommitMessage:
     compact_changelog_files: List[DataFileMeta] = field(default_factory=list)
     compact_index_adds: List['IndexManifestEntry'] = field(default_factory=list)
     compact_index_deletes: List['IndexManifestEntry'] = field(default_factory=list)
+    # A lost commit response may have published these files. Keep this state
+    # with the prepared messages when they are retried by another committer.
+    commit_outcome_uncertain: bool = False
 
     def is_empty(self):
         return (

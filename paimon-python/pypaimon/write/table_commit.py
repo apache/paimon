@@ -51,11 +51,24 @@ class TableCommit:
         self._commit_callbacks: List[CommitCallback] = []
         self._native_commit = None
         self._python_commit = None
+        self._commit_condition = None
         self._closed = False
 
     def add_commit_callback(self, callback: CommitCallback) -> None:
         """Register a callback to be invoked after each successful commit."""
         self._commit_callbacks.append(callback)
+
+    def with_commit_condition(self, condition):
+        """Check the latest snapshot before each commit attempt.
+
+        The callable receives a snapshot and returns whether the prepared
+        write is still needed. It is reevaluated after a snapshot conflict.
+        Conditional commits use the Python backend.
+        """
+        if not callable(condition):
+            raise TypeError("commit condition must be callable")
+        self._commit_condition = condition
+        return self
 
     def _commit(
             self,
@@ -94,7 +107,7 @@ class BatchTableCommit(TableCommit):
             snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit once, attaching optional properties to the snapshot."""
         self._check_committed()
-        self._commit(
+        return self._commit(
             commit_messages,
             BATCH_COMMIT_IDENTIFIER,
             snapshot_properties=snapshot_properties)
@@ -130,7 +143,7 @@ class StreamTableCommit(TableCommit):
             commit_identifier: int,
             snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit a stream checkpoint with optional snapshot properties."""
-        self._commit(
+        return self._commit(
             commit_messages,
             commit_identifier,
             snapshot_properties=snapshot_properties)

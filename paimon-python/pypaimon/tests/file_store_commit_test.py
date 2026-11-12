@@ -17,6 +17,7 @@
 
 import unittest
 import uuid
+import pickle
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -80,6 +81,201 @@ class TestRowIdCheckFromMessages(unittest.TestCase):
 
 
 class TestExplicitCommitAbort(unittest.TestCase):
+
+    def test_retry_after_lost_response_keeps_published_files(self):
+        import pyarrow as pa
+        from pypaimon import CatalogFactory, Schema
+        from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
+
+        with TemporaryDirectory() as warehouse:
+            catalog = CatalogFactory.create({'warehouse': warehouse})
+            catalog.create_database('default', True)
+            schema = pa.schema([pa.field('id', pa.int64())])
+            options = {'write.native.enabled': 'false',
+                       'commit.native.enabled': 'false',
+                       'read.native.enabled': 'false',
+                       'commit.max-retries': '0'}
+            catalog.create_table('default.t', Schema.from_pyarrow_schema(
+                schema, options=options), False)
+            table = catalog.get_table('default.t')
+            builder = table.new_stream_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(pa.Table.from_pylist([{'id': 1}], schema=schema))
+                messages = writer.prepare_commit(1)
+                paths = [file.physical_path() for message in messages
+                         for file in message.new_files]
+                commit.with_commit_condition(lambda snapshot: snapshot is None)
+                publish = RenamingSnapshotCommit.commit
+
+                def lose_response(snapshot_commit, *args, **kwargs):
+                    result = publish(snapshot_commit, *args, **kwargs)
+                    if result:
+                        raise OSError('lost response')
+                    return result
+
+                with patch.object(RenamingSnapshotCommit, 'commit', lose_response):
+                    with self.assertRaisesRegex(RuntimeError, 'Commit failed'):
+                        commit.commit(messages, 1)
+                self.assertEqual(1, table.snapshot_manager().get_latest_snapshot().id)
+                self.assertTrue(all(message.commit_outcome_uncertain
+                                    for message in messages))
+                self.assertFalse(commit.commit(messages, 1))
+                another_commit = table.new_stream_write_builder().new_commit()
+                try:
+                    another_commit.with_commit_condition(
+                        lambda snapshot: snapshot is None)
+                    self.assertFalse(another_commit.commit(
+                        pickle.loads(pickle.dumps(messages)), 1))
+                finally:
+                    another_commit.close()
+                self.assertTrue(all(table.file_io.exists(path) for path in paths))
+                read = table.new_read_builder()
+                actual = read.new_read().to_arrow(read.new_scan().plan().splits())
+                self.assertEqual([{'id': 1}], actual.to_pylist())
+            finally:
+                writer.close()
+                commit.close()
+
+    def test_conditional_overwrite_rejection_cleans_files(self):
+        import pyarrow as pa
+        from pypaimon import CatalogFactory, Schema
+
+        for partitioned in (False, True):
+            with self.subTest(partitioned=partitioned), TemporaryDirectory() as warehouse:
+                catalog = CatalogFactory.create({'warehouse': warehouse})
+                catalog.create_database('default', True)
+                schema = pa.schema([pa.field('pt', pa.string()),
+                                    pa.field('id', pa.int64())])
+                options = {'write.native.enabled': 'false',
+                           'commit.native.enabled': 'false',
+                           'read.native.enabled': 'false'}
+                catalog.create_table('default.t', Schema.from_pyarrow_schema(
+                    schema, options=options,
+                    partition_keys=['pt'] if partitioned else []), False)
+                table = catalog.get_table('default.t')
+
+                def write(builder, value, condition=None):
+                    writer, commit = builder.new_write(), builder.new_commit()
+                    try:
+                        writer.write_arrow(pa.Table.from_pylist(
+                            [{'pt': 'a', 'id': value}], schema=schema))
+                        messages = writer.prepare_commit()
+                        paths = [file.physical_path() for message in messages
+                                 for file in message.new_files]
+                        if condition is not None:
+                            commit.with_commit_condition(condition)
+                        return commit.commit(messages), paths
+                    finally:
+                        writer.close()
+                        commit.close()
+
+                committed, initial_paths = write(table.new_batch_write_builder(), 1)
+                self.assertIsNone(committed)
+                builder = table.new_batch_write_builder().overwrite(
+                    {'pt': 'a'} if partitioned else None)
+                committed, rejected_paths = write(builder, 2, lambda snapshot: False)
+                self.assertIs(committed, False)
+                self.assertEqual(1, table.snapshot_manager().get_latest_snapshot().id)
+                self.assertTrue(all(table.file_io.exists(path)
+                                    for path in initial_paths))
+                self.assertTrue(all(not table.file_io.exists(path)
+                                    for path in rejected_paths))
+                read = table.new_read_builder()
+                actual = read.new_read().to_arrow(read.new_scan().plan().splits())
+                self.assertEqual([{'pt': 'a', 'id': 1}], actual.to_pylist())
+
+                from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
+                publish = RenamingSnapshotCommit.commit
+                lost = [False]
+
+                def lose_response(snapshot_commit, *args, **kwargs):
+                    result = publish(snapshot_commit, *args, **kwargs)
+                    if result and not lost[0]:
+                        lost[0] = True
+                        raise OSError('lost overwrite response')
+                    return result
+
+                builder = table.new_batch_write_builder().overwrite(
+                    {'pt': 'a'} if partitioned else None)
+                with patch.object(RenamingSnapshotCommit, 'commit', lose_response):
+                    committed, published_paths = write(builder, 3, lambda snapshot: True)
+                self.assertTrue(lost[0])
+                self.assertIs(committed, True)
+                self.assertEqual(2, table.snapshot_manager().get_latest_snapshot().id)
+                self.assertTrue(all(table.file_io.exists(path)
+                                    for path in published_paths))
+                read = table.new_read_builder()
+                actual = read.new_read().to_arrow(read.new_scan().plan().splits())
+                self.assertEqual([{'pt': 'a', 'id': 3}], actual.to_pylist())
+
+    def test_condition_exception_aborts_definite_loser(self):
+        commit = FileStoreCommit.__new__(FileStoreCommit)
+        commit.snapshot_manager = Mock()
+        commit.snapshot_manager.get_latest_snapshot.return_value = Mock()
+        commit.commit_condition = Mock(side_effect=ValueError('conflicting source'))
+        commit.abort = Mock()
+        messages = [Mock()]
+
+        with self.assertRaisesRegex(ValueError, 'conflicting source'):
+            commit._try_commit('APPEND', 1, lambda snapshot: [Mock()],
+                               prepared_messages=messages)
+        commit.abort.assert_called_once_with(messages)
+
+    def test_condition_exception_preserves_uncertain_commit_messages(self):
+        commit = FileStoreCommit.__new__(FileStoreCommit)
+        commit.snapshot_manager = Mock()
+        snapshots = [Mock(), Mock()]
+        commit.snapshot_manager.get_latest_snapshot.side_effect = snapshots
+        commit.commit_condition = Mock(side_effect=[True, ValueError('conflicting source')])
+        commit._is_duplicate_commit = Mock(return_value=False)
+        commit._try_commit_once = Mock(return_value=CommitFailRetryResult(
+            snapshots[0], OSError('lost response'),
+            commit_result_may_be_uncertain=True))
+        commit._commit_retry_wait = Mock()
+        commit.abort = Mock()
+        commit.commit_timeout = 10000
+        commit.commit_max_retries = 3
+        messages = [Mock()]
+
+        with self.assertRaisesRegex(ValueError, 'conflicting source'):
+            commit._try_commit('APPEND', 1, lambda snapshot: [Mock()],
+                               prepared_messages=messages)
+        commit.abort.assert_not_called()
+
+    def test_condition_rejection_preserves_uncertain_commit_messages(self):
+        commit = FileStoreCommit.__new__(FileStoreCommit)
+        commit.snapshot_manager = Mock()
+        snapshots = [Mock(), Mock()]
+        commit.snapshot_manager.get_latest_snapshot.side_effect = snapshots
+        commit.commit_condition = Mock(side_effect=[True, False])
+        commit._is_duplicate_commit = Mock(return_value=False)
+        commit._try_commit_once = Mock(return_value=CommitFailRetryResult(
+            snapshots[0], OSError('lost response'),
+            commit_result_may_be_uncertain=True))
+        commit._commit_retry_wait = Mock()
+        commit.abort = Mock()
+        commit.commit_timeout = 10000
+        commit.commit_max_retries = 3
+        messages = [Mock()]
+
+        self.assertFalse(commit._try_commit(
+            'APPEND', 1, lambda snapshot: [Mock()],
+            prepared_messages=messages))
+        commit.abort.assert_not_called()
+
+    def test_condition_rejection_aborts_definite_loser(self):
+        commit = FileStoreCommit.__new__(FileStoreCommit)
+        commit.snapshot_manager = Mock()
+        commit.snapshot_manager.get_latest_snapshot.return_value = Mock()
+        commit.commit_condition = Mock(return_value=False)
+        commit.abort = Mock()
+        messages = [Mock()]
+
+        self.assertFalse(commit._try_commit(
+            'APPEND', 1, lambda snapshot: [Mock()],
+            prepared_messages=messages))
+        commit.abort.assert_called_once_with(messages)
 
     def test_abort_deletes_new_data_sidecars_changelog_compact_and_indexes_only(self):
         with TemporaryDirectory() as directory:
