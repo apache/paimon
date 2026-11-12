@@ -55,10 +55,10 @@ public abstract class LeafTernaryFunction extends LeafFunction {
             Object max,
             Long nullCount,
             List<Object> literals) {
-        if (nullCount != null) {
-            if (rowCount == nullCount || literals.get(0) == null || literals.get(1) == null) {
-                return false;
-            }
+        if ((nullCount != null && rowCount == nullCount)
+                || literals.get(0) == null
+                || literals.get(1) == null) {
+            return false;
         }
 
         return test(type, rowCount, min, max, nullCount, literals.get(0), literals.get(1));
