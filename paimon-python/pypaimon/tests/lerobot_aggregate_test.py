@@ -209,6 +209,23 @@ def test_import_uses_group_prefix(setup, multiple):
         "frames", "episodes", "datasets"}
 
 
+@pytest.mark.parametrize("source_as_list", [False, True])
+def test_single_source_accepts_string_episode_tasks(setup, source_as_list):
+    conn, sources = setup
+    episode_path = (Path(sources[0][7:]) /
+                    "meta/episodes/chunk-000/file-000.parquet")
+    episodes = pq.read_table(episode_path)
+    names = [value[0] for value in episodes["tasks"].to_pylist()]
+    episodes = episodes.set_column(
+        episodes.schema.get_field_index("tasks"), "tasks",
+        pa.array(names, type=pa.string()))
+    pq.write_table(episodes, episode_path)
+
+    conn.load_from_lerobot("robot", [sources[0]] if source_as_list else sources[0])
+    assert rows(conn, "robot_episodes")["tasks"].to_pylist() == names
+    assert_dataset_uuids(conn, "robot", 1)
+
+
 def test_single_source_preserves_feature_quantiles(setup):
     conn, sources = setup
     source_path = Path(sources[0][7:])

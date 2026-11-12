@@ -568,6 +568,24 @@ def _source_episodes(dataset, source):
     return {"paths": paths, "schema": schema}
 
 
+def _episode_task_indices(names, task_indices, episode_index):
+    names = names or []
+    if isinstance(names, str):
+        names = [names]
+    if task_indices and not names:
+        raise ValueError(
+            "LeRobot Episode %d does not declare any task." % episode_index)
+    try:
+        result = [task_indices[str(name)] for name in names]
+    except (KeyError, TypeError) as error:
+        raise ValueError(
+            "LeRobot Episode %d refers to an unknown task." % episode_index
+        ) from error
+    if len(set(result)) != len(result):
+        raise ValueError("LeRobot Episode %d repeats a task." % episode_index)
+    return result
+
+
 def _validated_episode_tables(metadata, video_fields=(), check_episode_fps=False):
     episodes = _EpisodeIndex(video_fields)
     expected_begin = 0
@@ -619,23 +637,8 @@ def _validated_episode_tables(metadata, video_fields=(), check_episode_fps=False
                 raise ValueError(
                     "LeRobot Episode %d has inconsistent index, range, "
                     "or length." % len(episodes))
-            names = columns["tasks"][offset].as_py() or []
-            if isinstance(names, str):
-                names = [names]
-            if metadata["task_indices"] and not names:
-                raise ValueError(
-                    "LeRobot Episode %d does not declare any task." % index)
-            try:
-                task_indices = [
-                    metadata["task_indices"][str(name)] for name in names
-                ]
-            except (KeyError, TypeError) as error:
-                raise ValueError(
-                    "LeRobot Episode %d refers to an unknown task." % index
-                ) from error
-            if len(set(task_indices)) != len(task_indices):
-                raise ValueError(
-                    "LeRobot Episode %d repeats a task." % index)
+            task_indices = _episode_task_indices(
+                columns["tasks"][offset].as_py(), metadata["task_indices"], index)
             video_values = {}
             for field in video_fields:
                 prefix = "videos/%s/" % field

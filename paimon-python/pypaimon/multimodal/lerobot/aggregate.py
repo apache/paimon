@@ -38,7 +38,7 @@ from pypaimon.multimodal.lerobot.metadata import (
     _EPISODE_CONTROL_COLUMNS, _append_arrow,
     _commit_metadata, _companion_identifier, _companion_table_identifiers,
     _dataset_fps, _json_value, _load_dataset_metadata, _tag_snapshot_id,
-    _metadata_table, _prepare_metadata_tables,
+    _episode_task_indices, _metadata_table, _prepare_metadata_tables,
     _source_episode_tables, _validated_episode_tables,
 )
 from pypaimon.multimodal.lerobot.schema import (
@@ -550,8 +550,9 @@ def _merged_episodes(plans, schema):
             for original in table.to_pylist():
                 try:
                     expected = validated[episode_offset]
-                    source_tasks = [task_indices[name] for name in original["tasks"]]
-                except (IndexError, KeyError, TypeError):
+                    source_tasks = _episode_task_indices(
+                        original["tasks"], task_indices, episode_offset)
+                except (IndexError, KeyError, TypeError, ValueError):
                     raise ValueError(
                         "LeRobot Episode metadata changed after validation.") from None
                 if (original["episode_index"] != episode_offset
