@@ -64,7 +64,8 @@ def _torch_autocast_value(torch, device_type, generic_name, legacy_name=None):
 
 
 def _capture_torch_thread_context(torch):
-    default_device = torch.get_default_device()
+    # get_default_device() ignores the thread-local ``with torch.device(...)`` context.
+    default_device = torch.empty(0).device
     device_types = list(_TORCH_AUTOCAST_DEVICE_TYPES)
     if default_device.type not in device_types:
         device_types.append(default_device.type)
