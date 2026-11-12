@@ -18,16 +18,21 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -62,6 +67,56 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
                 dataNum,
                 null,
                 newDirectExecutorService());
+    }
+
+    @TestTemplate
+    public void testLegacyNullBounds() throws Exception {
+        boolean stringType = dataType.is(DataTypeFamily.CHARACTER_STRING);
+        for (boolean onlyNulls : new boolean[] {true, false}) {
+            if (!stringType && !onlyNulls) {
+                continue;
+            }
+            Object key = stringType ? BinaryString.EMPTY_UTF8 : data.get(0).getKey();
+            Object value = onlyNulls ? null : key;
+            Options options = new Options();
+            options.set(BTreeIndexOptions.BTREE_INDEX_FILE_VERSION, 1);
+            BTreeGlobalIndexer indexer =
+                    new BTreeGlobalIndexer(
+                            Collections.singletonList(new DataField(1, "testField", dataType)),
+                            options);
+            GlobalIndexIOMeta written =
+                    writeData(
+                            Arrays.asList(
+                                    Pair.of(value, 0L), Pair.of(null, 1L), Pair.of(value, 2L)),
+                            indexer.createWriter(fileWriter));
+            MemorySliceOutput legacyMeta = new MemorySliceOutput(9);
+            legacyMeta.writeInt(0);
+            legacyMeta.writeInt(0);
+            legacyMeta.writeByte(1);
+            GlobalIndexIOMeta legacy =
+                    new GlobalIndexIOMeta(
+                            written.filePath(),
+                            written.fileSize(),
+                            written.rowCount(),
+                            legacyMeta.toSlice().copyBytes());
+            List<Long> expected = onlyNulls ? Collections.emptyList() : Arrays.asList(0L, 2L);
+            try (BTreeIndexReader reader =
+                    new BTreeIndexReader(keySerializer, fileReader, legacy, CACHE_MANAGER, null)) {
+                assertResult(reader.visitEqual(key).get(), expected);
+                assertResult(reader.visitGreaterOrEqual(key).get(), expected);
+                assertResult(reader.visitLessOrEqual(key).get(), expected);
+                assertResult(reader.visitIsNotNull().get(), expected);
+                assertResult(
+                        reader.visitIsNull().get(),
+                        onlyNulls ? Arrays.asList(0L, 1L, 2L) : Collections.singletonList(1L));
+                if (stringType) {
+                    assertResult(reader.visitStartsWith(BinaryString.EMPTY_UTF8).get(), expected);
+                }
+                TopN topN =
+                        new TopN(new FieldRef(1, "testField", dataType), ASCENDING, NULLS_LAST, 1);
+                assertThat(reader.visitTopN(topN).get().results()).containsExactly(0L);
+            }
+        }
     }
 
     @TestTemplate
