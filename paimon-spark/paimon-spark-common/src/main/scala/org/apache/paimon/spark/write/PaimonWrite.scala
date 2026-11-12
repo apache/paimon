@@ -23,7 +23,7 @@ import org.apache.paimon.spark.SaveMode
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.{DataFrame, PaimonUtils}
 import org.apache.spark.sql.connector.write.V1Write
 import org.apache.spark.sql.sources.InsertableRelation
 
@@ -33,7 +33,10 @@ class PaimonWrite(val table: FileStoreTable, saveMode: SaveMode, options: Option
   override def toInsertableRelation: InsertableRelation = {
     (data: DataFrame, overwrite: Boolean) =>
       {
-        WriteIntoPaimonTable(table, saveMode, data, options).run(data.sparkSession)
+        // Spark may pass an optimized plan containing DPP subqueries which cannot be reanalyzed
+        // by writer-side Dataset transformations.
+        val writeData = PaimonUtils.createNewDataFrame(data)
+        WriteIntoPaimonTable(table, saveMode, writeData, options).run(data.sparkSession)
       }
   }
 
