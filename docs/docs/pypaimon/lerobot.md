@@ -46,10 +46,7 @@ with row tracking, no primary key, and `bucket=-1`. The indices below identify
 LeRobot records; they are independent of Paimon's internal row IDs. These
 relationships are used by the reader and do not declare database foreign keys.
 
-The diagram and field tables below describe **list imports**, including a
-one-element list such as `source=["/data/source_a"]`. This form adds
-`dataset_index` to frames and Episodes and also supports later appends.
-[Single-source shorthand](#single-source-shorthand) has a smaller schema.
+The same three-table schema is used for one source and for a list of sources.
 
 [![LeRobot metadata files map to the Dataset table, Episode Parquet maps to the Episode table, and frame Parquet plus media map to the Frame table. Dataset and Episode indices relate the three tables.](/img/lerobot-data-model.svg)](/img/lerobot-data-model.svg)
 
@@ -61,7 +58,8 @@ new ordinals after the existing sources.
 
 | Field | Paimon type | Meaning |
 | --- | --- | --- |
-| `index` | `BIGINT` | Source ordinal, starting at 0. Referenced by frame and Episode `dataset_index`. |
+| `index` | `STRING` | UUID assigned to this source; referenced by frame and Episode `dataset_index`. |
+| `source_ordinal` | `BIGINT` | Source order, starting at 0; later appends use the next ordinal. This is not an association key. |
 | `name` | `STRING`, nullable | Optional label supplied through `dataset_name`; omitted names are null. |
 | `info` | `STRING` | JSON containing the source's original `meta/info.json`, including `features`, `fps`, robot type, and counts. FPS is not a separate column. |
 | `tasks` | `ARRAY<ROW<task_index BIGINT, task STRING>>` | Source-local task IDs and their text from `meta/tasks.parquet`. |
@@ -81,7 +79,7 @@ forced to `BIGINT`.
 
 | Field | Representation | Meaning |
 | --- | --- | --- |
-| `dataset_index` | `BIGINT` | Source ordinal referencing `_datasets.index`. |
+| `dataset_index` | `STRING` | Source UUID referencing `_datasets.index`. |
 | `episode_index` | Source integer type | Episode number within that source, starting at 0. |
 | `dataset_from_index` | Source integer type | Inclusive start of the Episode's source-local frame `index` range. |
 | `dataset_to_index` | Source integer type | Exclusive end of that frame range. |
@@ -90,7 +88,7 @@ forced to `BIGINT`.
 | `meta`, `data`, `videos`, `stats` | `VARIANT` columns | Grouped source fields describing metadata locations, data shards, per-camera video locations/timestamps, and per-Episode feature statistics. Empty groups are `{}`. |
 | Other source fields | Source type, or a `VARIANT` for a `/` prefix group | Custom Episode metadata, such as quality labels or camera calibration. |
 
-For list imports, a field such as `data/chunk_index` becomes the
+A field such as `data/chunk_index` becomes the
 `"chunk_index"` key inside `_episodes.data`. A field such as
 `videos/observation.images.front/from_timestamp` becomes the
 `"observation.images.front/from_timestamp"` key inside `_episodes.videos`.
@@ -110,7 +108,7 @@ names, including dots such as `observation.state`, remain column names.
 
 | Field | Paimon type | Meaning |
 | --- | --- | --- |
-| `dataset_index` | `BIGINT` | Source ordinal referencing `_datasets.index`. |
+| `dataset_index` | `STRING` | Source UUID referencing `_datasets.index`. |
 | `index` | `BIGINT` | Frame position within the original source, across all its Episodes. |
 | `episode_index` | `BIGINT` | Episode containing this frame, within the same source. |
 | `frame_index` | `BIGINT` | Frame position within the Episode; restarts at 0 for each Episode. |
@@ -151,19 +149,6 @@ shape, dtype, and dimension names are retained in column metadata. Images and
 videos become `BLOB`, so each camera remains a feature column rather than a
 separate Paimon table. See [video import options](#load-lerobot-dataset-v3)
 for optional Episode remuxing.
-
-### Single-source shorthand
-
-For a new import with a single source string and no `dataset_name` or non-empty
-`extra_dataset_fields`, `load_from_lerobot("robot_data", "/data/source_a")`
-still creates the same three tables. Its Dataset row has `index=0` and
-`name=null`, but frames and Episodes do not gain a source `dataset_index`.
-Episode fields such as `data/chunk_index` and `stats/action/mean` retain their
-original names and types instead of being grouped into VARIANT columns.
-
-To use the source-indexed schema above, or to append more sources later, pass
-`source=["/data/source_a"]`. Supplying `dataset_name` or non-empty
-`extra_dataset_fields` also selects this schema, even for one source.
 
 ## Load LeRobot Dataset v3
 
@@ -224,7 +209,8 @@ source is rejected before creating tables to avoid losing original frame IDs.
 Sources must share robot type and compatible definitions for common features. Each source retains its own
 FPS from `info`; different source frame rates are handled automatically. Use
 `PaimonLeRobotDataset` to train from mixed-FPS groups. Pass `dataset_index=N` to
-that reader to select one source. Frame-rate handling is automatic and does not
+that reader to select source ordinal `N`; this reader argument is not the stored
+UUID. Frame-rate handling is automatic and does not
 require an import option.
 
 ### Schema evolution
@@ -308,8 +294,7 @@ removing suffixes, and names that overwrite standard `_datasets` columns are
 rejected before creating target tables. Training readers project only required
 source metadata and skip extra text columns.
 
-Append another Dataset to a source-local group with `append_to_lerobot`.
-Create the group by importing a list, including a one-element list for one source:
+Append another Dataset to a source-local group with `append_to_lerobot`:
 
 ```python
 conn.load_from_lerobot("robot_merged", ["/data/source_a", "/data/source_b"])

@@ -18,6 +18,7 @@
 
 import copy
 import json
+import uuid
 from decimal import Decimal
 from contextlib import ExitStack, contextmanager
 
@@ -34,7 +35,7 @@ from pypaimon.multimodal.lerobot.loader import (
 from pypaimon.multimodal.lerobot.metadata import (
     _EPISODE_CONTROL_COLUMNS, _append_arrow,
     _commit_metadata, _companion_identifier, _companion_table_identifiers,
-    _json_value, _load_dataset_metadata, _tag_snapshot_id,
+    _dataset_fps, _json_value, _load_dataset_metadata, _tag_snapshot_id,
     _metadata_table, _prepare_metadata_tables,
     _source_episode_tables, _validated_episode_tables,
 )
@@ -82,7 +83,8 @@ _SOURCE_SUBTASKS_TYPE = pa.list_(pa.struct([
     pa.field("subtask", pa.string(), nullable=False),
 ]))
 _DATASETS_SCHEMA = pa.schema([
-    pa.field("index", pa.int64(), nullable=False),
+    pa.field("index", pa.string(), nullable=False),
+    pa.field("source_ordinal", pa.int64(), nullable=False),
     pa.field("name", pa.string()),
     pa.field("info", pa.string(), nullable=False),
     pa.field("tasks", _SOURCE_TASKS_TYPE, nullable=False),
@@ -107,7 +109,8 @@ def _recover_incomplete_append(connection, table_name):
     identifiers = _companion_table_identifiers(frames)
     datasets = connection.catalog.get_table(identifiers["datasets"])
     episodes = connection.catalog.get_table(identifiers["episodes"])
-    source_rows = _read_arrow(datasets, ["index", "info"]).sort_by("index").to_pylist()
+    source_rows = _read_arrow(datasets, ["index", "source_ordinal", "info"]).sort_by(
+        "source_ordinal").to_pylist()
     if not source_rows:
         raise ValueError("LeRobot append recovery requires Dataset metadata.")
     ranges = _source_dataset_ranges(source_rows)
@@ -414,7 +417,7 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
     metadata["tasks_table"] = _vocabulary(plans, "tasks", existing_sources)
     metadata["subtasks_table"] = _vocabulary(plans, "subtasks", existing_sources)
     for field in (
-            pa.field(_DATASET_INDEX_COLUMN, pa.int64(), nullable=False),
+            pa.field(_DATASET_INDEX_COLUMN, pa.string(), nullable=False),
             pa.field("meta", _VARIANT_TYPE, nullable=False),
             pa.field("data", _VARIANT_TYPE, nullable=False),
             pa.field("videos", _VARIANT_TYPE, nullable=False),
@@ -429,7 +432,8 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
     PaimonSchema.from_pyarrow_schema(metadata["episodes_schema"])
     metadata["datasets_table"] = pa.Table.from_pylist([
         {
-            "index": ordinal,
+            "index": plan[_DATASET_INDEX_COLUMN],
+            "source_ordinal": ordinal,
             "name": plan["dataset_name"],
             "info": json.dumps(_json_value(plan["info"]),
                                ensure_ascii=False, separators=(",", ":")),
@@ -484,8 +488,8 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
 
 def _transform_frames(plan, batch, episode):
     batch = batch.append_column(
-        pa.field(_DATASET_INDEX_COLUMN, pa.int64(), nullable=False),
-        pa.array([plan[_DATASET_INDEX_COLUMN]] * batch.num_rows, type=pa.int64()))
+        pa.field(_DATASET_INDEX_COLUMN, pa.string(), nullable=False),
+        pa.array([plan[_DATASET_INDEX_COLUMN]] * batch.num_rows, type=pa.string()))
     for name in _CONTROLS:
         if name not in batch.column_names:
             continue
@@ -579,6 +583,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                 info = _load_hub_info(resolved)
             _require_v3(info, "source %d" % ordinal)
             _validate_info_paths(info)
+            _dataset_fps(info.get("fps"))
             _validated_counts(info, "source %d" % ordinal)
             _validate_v3_required_features(info)
             schema = _schema_from_info(info)
@@ -591,7 +596,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                 dataset_resources.callback(_close_quietly, dataset, "dataset")
             plans.append({"dataset": dataset, "dataset_resources": dataset_resources,
                           "source": resolved, "info": info,
-                          _DATASET_INDEX_COLUMN: ordinal,
+                          _DATASET_INDEX_COLUMN: str(uuid.uuid4()),
                           "dataset_name": (dataset_name[ordinal] if dataset_name is not None
                                            else None),
                           "schema": schema, "videos": videos,
@@ -619,8 +624,8 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             if _DATASET_INDEX_COLUMN not in _target_schema(tables["episodes"]).names:
                 raise ValueError("LeRobot append requires a source-local table group.")
             source_rows = _read_arrow(tables["datasets"], [
-                "index", "info", "tasks", "subtasks", "stats",
-            ]).sort_by("index").to_pylist()
+                "index", "source_ordinal", "info", "tasks", "subtasks", "stats",
+            ]).sort_by("source_ordinal").to_pylist()
             if not source_rows:
                 raise ValueError("LeRobot append requires an initialized table group.")
             ranges = _source_dataset_ranges(source_rows)
@@ -641,7 +646,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             source_rows if existing is not None else None)
         target_schema = metadata["frame_schema"]
         target_schema = target_schema.append(
-            pa.field(_DATASET_INDEX_COLUMN, pa.int64(), nullable=False))
+            pa.field(_DATASET_INDEX_COLUMN, pa.string(), nullable=False))
         if existing is None:
             table = _create_target_table(connection, table_name, target_schema,
                                          options, metadata,
@@ -709,10 +714,9 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             dataset_offset = len(source_rows)
             for plan in plans:
                 plan["frame_offset"] += frame_offset
-                plan[_DATASET_INDEX_COLUMN] += dataset_offset
             datasets = metadata["datasets_table"].to_pylist()
             for row in datasets:
-                row["index"] += dataset_offset
+                row["source_ordinal"] += dataset_offset
             metadata["datasets_table"] = pa.Table.from_pylist(
                 datasets, schema=_target_schema(tables["datasets"]))
         if existing is not None:

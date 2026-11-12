@@ -1638,7 +1638,7 @@ class LeRobotValidationTest(unittest.TestCase):
 
     def test_import_validates_tag_before_source_access(self):
         connection = Mock()
-        with patch("pypaimon.multimodal.lerobot.api._resolved_source",
+        with patch("pypaimon.multimodal.lerobot.aggregate._resolved_source",
                    side_effect=RuntimeError("source accessed")) as resolve:
             for tag_name in (1, "", " ", "a/b", "a\\b", "a\x00b"):
                 with self.subTest(tag_name=tag_name):
@@ -1651,7 +1651,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 load_from_lerobot(connection, "robot", "source", tag_name=None)
             resolve.assert_called_once()
 
-    @patch("pypaimon.multimodal.lerobot.api._import_lerobot_dataset",
+    @patch("pypaimon.multimodal.lerobot.aggregate._import_lerobot_dataset",
            return_value=Mock())
     def test_training_tag_uses_current_component_snapshots(self, _):
         import pandas as pd
@@ -1680,7 +1680,9 @@ class LeRobotValidationTest(unittest.TestCase):
                 "custom": {"labels": ["pick", None], "enabled": True},
             }
             (source / "meta" / "info.json").write_text(json.dumps(info))
-            stats = {"timestamp": {"min": [0.0], "max": [0.0]}}
+            stats = {"timestamp": {
+                "min": [0.0], "max": [0.0], "mean": [0.0],
+                "std": [0.0], "count": [1]}}
             (source / "meta" / "stats.json").write_text(json.dumps(stats))
             pq.write_table(pa.Table.from_pandas(pd.DataFrame(
                 {"task_index": [0]}, index=pd.Index(["pick"], name="task"),
@@ -1715,15 +1717,20 @@ class LeRobotValidationTest(unittest.TestCase):
                     self.assertEqual("-1", schema.options.get("bucket", "-1"))
                     self.assertFalse(schema.primary_keys)
                     self.assertGreater(component.scan().to_arrow().num_rows, 0)
+            dataset_row = _catalog_rows(connection, "robot_datasets")[0]
             self.assertEqual([{"subtask_index": 0, "subtask": "reach"}],
-                             _catalog_rows(connection, "robot_subtasks"))
-            self.assertEqual(info, _catalog_metadata(connection, "robot_info"))
-            self.assertEqual(stats, _catalog_metadata(connection, "robot_stats"))
+                             dataset_row["subtasks"])
+            self.assertEqual(info, json.loads(dataset_row["info"]))
+            self.assertEqual(stats, json.loads(dataset_row["stats"]))
             table = connection.get_table("robot_frames")
+            frames = frames.append_column(
+                "dataset_index", pa.array([dataset_row["index"]]))
             self.assertEqual([], table.raw_table.tag_manager().list_tags())
             table.add(frames)
             snapshots = connection.create_lerobot_tag("robot_frames", "training")
-            self.assertEqual({"frames": 3, "episodes": 1, "datasets": 1}, snapshots)
+            self.assertEqual({"frames": table.raw_table.snapshot_manager()
+                              .get_latest_snapshot().id, "episodes": 1, "datasets": 1},
+                             snapshots)
             table.add(frames)
             self.assertEqual(2, table.scan(tag_name="training").to_arrow().num_rows)
             self.assertEqual(3, table.scan().to_arrow().num_rows)
@@ -1751,7 +1758,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "tag failed"):
                     connection.create_lerobot_tag("robot_frames", "retry")
             self.assertFalse(table.raw_table.tag_manager().tag_exists("retry"))
-            self.assertEqual(4, connection.create_lerobot_tag(
+            self.assertEqual(snapshots["frames"] + 1, connection.create_lerobot_tag(
                 "robot_frames", "retry")["frames"])
             self.assertEqual(3, table.scan(tag_name="retry").to_arrow().num_rows)
 
@@ -1768,8 +1775,10 @@ class LeRobotValidationTest(unittest.TestCase):
                 connection.load_from_lerobot("no_stats", remote, tag_name="ready")
             with self.assertRaises(TableNotExistException):
                 connection.get_table("no_stats_stats")
-            self.assertEqual({"frames": 2, "episodes": 1, "datasets": 1},
-                             connection.create_lerobot_tag("no_stats_frames", "training"))
+            no_stats = connection.get_table("no_stats_frames")
+            self.assertEqual(
+                no_stats.raw_table.snapshot_manager().get_latest_snapshot().id,
+                connection.create_lerobot_tag("no_stats_frames", "training")["frames"])
 
     def test_self_contained_import_rejects_table_branches(self):
         with self.assertRaisesRegex(ValueError, "does not support"):
@@ -2802,7 +2811,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 "warehouse": str(temp_dir / "warehouse"),
             })
             with patch(
-                    "pypaimon.multimodal.lerobot.api._import_lerobot_dataset"
+                    "pypaimon.multimodal.lerobot.aggregate._import_lerobot_dataset"
             ) as import_lerobot:
                 with self.assertRaisesRegex(ValueError, "non-empty"):
                     connection.load_from_lerobot("empty_frames", source)
@@ -2913,7 +2922,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     (source / "meta" / "info.json").write_text(
                         json.dumps(info))
                     with patch(
-                            "pypaimon.multimodal.lerobot.api."
+                            "pypaimon.multimodal.lerobot.aggregate."
                             "_import_lerobot_dataset"
                     ) as import_lerobot:
                         with self.assertRaisesRegex(ValueError, message):
@@ -3326,11 +3335,11 @@ class LeRobotValidationTest(unittest.TestCase):
                 )
 
             with patch(
-                    "pypaimon.multimodal.lerobot.api."
+                    "pypaimon.multimodal.lerobot.aggregate."
                     "_import_lerobot_dataset",
                     return_value=object,
             ), patch(
-                    "pypaimon.multimodal.lerobot.api."
+                    "pypaimon.multimodal.lerobot.aggregate."
                     "_open_resolved_dataset",
                     return_value=Dataset(),
             ), patch(
@@ -3396,7 +3405,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     "pypaimon.multimodal.lerobot.source._SourceFileIO",
                     return_value=source_file_io,
             ), patch(
-                    "pypaimon.multimodal.lerobot.api."
+                    "pypaimon.multimodal.lerobot.aggregate."
                     "_import_lerobot_dataset",
                     return_value=object,
             ), patch(
@@ -3435,11 +3444,11 @@ class LeRobotValidationTest(unittest.TestCase):
             })
             pq.write_table(pa.Table.from_pylist(episodes), episodes_path)
             with patch(
-                    "pypaimon.multimodal.lerobot.api."
+                    "pypaimon.multimodal.lerobot.aggregate."
                     "_import_lerobot_dataset",
                     return_value=object,
             ), patch(
-                    "pypaimon.multimodal.lerobot.api."
+                    "pypaimon.multimodal.lerobot.aggregate."
                     "_open_resolved_dataset",
                     return_value=Dataset(),
             ), patch(
@@ -3686,11 +3695,11 @@ class LeRobotValidationTest(unittest.TestCase):
                     return _prepare_dataset(table, *args, **kwargs)
 
             with patch(
-                    "pypaimon.multimodal.lerobot.api."
+                    "pypaimon.multimodal.lerobot.aggregate."
                     "_import_lerobot_dataset",
                     return_value=object,
             ), patch(
-                    "pypaimon.multimodal.lerobot.api."
+                    "pypaimon.multimodal.lerobot.aggregate."
                     "_open_resolved_dataset",
                     return_value=Dataset(),
             ), patch(
@@ -4285,7 +4294,7 @@ class LeRobotImportTest(unittest.TestCase):
     def test_training_reads_previously_imported_vector_features(self):
         import torch
 
-        with patch("pypaimon.multimodal.lerobot.api._schema_from_info",
+        with patch("pypaimon.multimodal.lerobot.aggregate._schema_from_info",
                    side_effect=lambda info: _schema_from_info(info, legacy_vectors=True)):
             self.connection.load_from_lerobot(
                 "legacy_vectors", self.image_source, batch_size=2)

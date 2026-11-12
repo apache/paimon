@@ -16,47 +16,19 @@
 
 """Public LeRobot import API."""
 
-import json
 import numbers
 import sys
-from functools import partial
 from typing import Mapping, Optional
-
-import pyarrow as pa
 
 from pypaimon.catalog.catalog_exception import TableAlreadyExistException
 from pypaimon.multimodal.lerobot.metadata import (
     _COMPANION_OPTION_KEYS,
-    _json_value,
     _companion_identifier,
-    _append_arrow_tables,
-    _load_dataset_metadata,
     _managed_table_options,
-    _prepare_metadata_tables,
-    _dataset_fps,
-    _commit_metadata,
     _validate_tag_name,
-    _validated_episode_tables,
-)
-from pypaimon.multimodal.lerobot.loader import _write_dataset
-from pypaimon.multimodal.lerobot.schema import (
-    _require_v3,
-    _schema_from_info,
-    _validate_v3_required_features,
-    _video_feature_names,
-)
-from pypaimon.multimodal.lerobot.source import (
-    _close_quietly,
-    _import_lerobot_dataset,
-    _info_dict,
-    _load_hub_info,
-    _open_resolved_dataset,
-    _resolved_source,
-    _validate_info_paths,
 )
 from pypaimon.multimodal.source_utils import (
     _validated_source_options,
-    _validate_source_kerberos,
 )
 from pypaimon.multimodal.lerobot.text_fields import _validated_text_fields
 
@@ -119,149 +91,17 @@ def load_from_lerobot(
     if extra_dataset_fields is not None:
         from pypaimon.multimodal.lerobot.aggregate import _DATASETS_SCHEMA
         extra_dataset_fields = _validated_text_fields(extra_dataset_fields, _DATASETS_SCHEMA.names)
-    if append or isinstance(source, (list, tuple)) or dataset_name is not None \
-            or extra_dataset_fields:
-        if not isinstance(source, (list, tuple)):
-            source = [source]
-        if not source:
-            raise ValueError("LeRobot sources must not be empty.")
-        if tag_name is not None:
-            _validate_tag_name(tag_name)
-        from pypaimon.multimodal.lerobot.aggregate import _import_sources
-        return _import_sources(
-            connection, table_name, source, batch_size, options,
-            _validated_source_options(source_options), tag_name, parallelism,
-            dataset_name, extra_dataset_fields, schema_evolution, append)
-    if parallelism > 1:
-        from pypaimon.multimodal.lerobot.ray_loader import _require_ray, _ray_source_uri
-        _require_ray()
-        source = _ray_source_uri(source)
-
+    if not isinstance(source, (list, tuple)):
+        source = [source]
+    if not source:
+        raise ValueError("LeRobot sources must not be empty.")
     if tag_name is not None:
         _validate_tag_name(tag_name)
-
-    validated_source_options = _validated_source_options(source_options)
-    _validate_source_kerberos(
-        [source], validated_source_options, "LeRobot")
-    with _resolved_source(source, validated_source_options) as (
-            resolved_source, local_info):
-        if local_info is None:
-            local_info = _load_hub_info(resolved_source)
-        _require_v3(local_info, resolved_source.path)
-        _validate_info_paths(local_info)
-        _schema_from_info(local_info)
-        _dataset_fps(local_info.get("fps"))
-        _validated_counts(local_info, resolved_source.path)
-        _validate_v3_required_features(local_info)
-        video_fields = _video_feature_names(local_info)
-        LeRobotDataset = (_import_lerobot_dataset()
-                          if parallelism == 1 and resolved_source.file_io is None
-                          else None)
-        dataset = _open_resolved_dataset(
-            LeRobotDataset,
-            resolved_source,
-            local_info,
-            download_videos=bool(video_fields),
-        )
-        try:
-            info = _info_dict(dataset.meta.info)
-            _require_v3(info, resolved_source.path)
-            _validated_counts(info, resolved_source.path)
-            _validate_v3_required_features(info)
-            video_fields = _video_feature_names(info)
-
-            lerobot_schema = _schema_from_info(info)
-            # Preserve source extensions omitted by LeRobot DatasetInfo.to_dict().
-            metadata = _load_dataset_metadata(
-                dataset, local_info, resolved_source)
-            from pypaimon.multimodal.lerobot.aggregate import (
-                _DATASETS_SCHEMA, _stats_json, _vocabulary_rows,
-            )
-            metadata["datasets_table"] = pa.Table.from_pylist([{
-                "index": 0,
-                "name": None,
-                "info": json.dumps(_json_value(local_info), ensure_ascii=False),
-                "tasks": _vocabulary_rows(metadata["tasks_table"], "task"),
-                "subtasks": _vocabulary_rows(metadata["subtasks_table"], "subtask"),
-                "stats": _stats_json(metadata["stats_table"]),
-            }], schema=_DATASETS_SCHEMA)
-            _import_dataset(
-                connection,
-                table_name,
-                dataset,
-                info,
-                resolved_source,
-                lerobot_schema,
-                batch_size,
-                options,
-                metadata,
-                tag_name,
-                video_fields,
-                parallelism,
-                validated_source_options,
-            )
-        finally:
-            close = getattr(dataset, "close", None)
-            if callable(close):
-                _close_quietly(dataset, "dataset")
-
-
-def _import_dataset(
-        connection,
-        table_name,
-        dataset,
-        info,
-        source,
-        source_schema,
-        batch_size,
-        options,
-        metadata,
-        tag_name,
-        video_fields,
-        parallelism=1,
-        source_options=None):
-    table = _create_target_table(
-        connection,
-        table_name,
-        source_schema,
-        options,
-        metadata,
-        video_fields,
-    )
-    tables = _prepare_metadata_tables(
-        connection, table.raw_table, metadata)
-    episodes_snapshot_id = _append_arrow_tables(
-        tables["episodes"],
-        _validated_episode_tables(metadata, video_fields),
-    )
-    frames_snapshot_id = None
-    if int(info["total_frames"]) > 0:
-        if parallelism > 1:
-            from pypaimon.multimodal.lerobot.ray_loader import _write_dataset_ray
-            write_dataset = partial(
-                _write_dataset_ray, parallelism=parallelism,
-                source_options=source_options)
-        else:
-            write_dataset = _write_dataset
-        frames_snapshot_id = write_dataset(
-            table,
-            dataset,
-            info,
-            source,
-            source_schema,
-            batch_size,
-            metadata,
-            video_fields,
-        )
-    _commit_metadata(
-        connection,
-        tables,
-        tag_name,
-        metadata,
-        table.identifier,
-        frames_snapshot_id,
-        episodes_snapshot_id,
-    )
+    from pypaimon.multimodal.lerobot.aggregate import _import_sources
+    return _import_sources(
+        connection, table_name, source, batch_size, options,
+        _validated_source_options(source_options), tag_name, parallelism,
+        dataset_name, extra_dataset_fields, schema_evolution, append)
 
 
 def _validated_counts(info, source):

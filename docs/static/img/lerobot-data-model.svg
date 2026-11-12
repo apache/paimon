@@ -18,7 +18,7 @@ specific language governing permissions and limitations
 under the License.
 -->
   <title id="title">LeRobot v3 files and the three Paimon tables</title>
-  <desc id="desc">For list imports, source metadata becomes one Dataset row, Episode Parquet becomes Episode rows, and frame Parquet plus image or video payloads become Frame rows. Dataset indices identify sources, and dataset plus Episode indices relate frames to Episodes. These are logical relationships, not primary or foreign key constraints.</desc>
+  <desc id="desc">Source metadata becomes one Dataset row, Episode Parquet becomes Episode rows, and frame Parquet plus image or video payloads become Frame rows. A UUID links each source Dataset to its Episodes and frames. These are logical relationships, not primary or foreign key constraints.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/>
@@ -27,7 +27,7 @@ under the License.
   <rect width="1000" height="780" rx="16" fill="#ffffff"/>
   <g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
     <text x="28" y="42" font-size="27" font-weight="700">LeRobot files → Paimon table group</text>
-    <text x="28" y="73" font-size="18" fill="#526277">List imports: preserve source-local IDs and add dataset_index.</text>
+    <text x="28" y="73" font-size="18" fill="#526277">Preserve source-local IDs; link the three tables with a Dataset UUID.</text>
     <text x="28" y="112" font-size="19" font-weight="700">LeRobot v3 source files</text>
     <text x="532" y="112" font-size="19" font-weight="700">Paimon tables · prefix robot_data</text>
 
@@ -42,12 +42,12 @@ under the License.
     <rect x="532" y="132" width="440" height="152" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
     <text x="550" y="165" font-size="23" font-weight="700" fill="#2166b1">robot_data_datasets</text>
     <text x="550" y="195" font-size="18">One row per source</text>
-    <text x="550" y="225" font-size="18">index, name, info</text>
+    <text x="550" y="225" font-size="18">index (UUID), source_ordinal, name, info</text>
     <text x="550" y="255" font-size="18">tasks, subtasks, stats</text>
 
     <path d="M 554 286 V 354" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
     <text x="574" y="311" font-size="17" fill="#526277">1 source → many Episodes</text>
-    <text x="574" y="336" font-size="17" fill="#526277">dataset_index references source index</text>
+    <text x="574" y="336" font-size="17" fill="#526277">dataset_index references the source UUID</text>
     <rect x="28" y="364" width="396" height="132" rx="10" fill="#f5f7fa" stroke="#b6c2d0" stroke-width="1.5"/>
     <text x="46" y="399" font-size="18">meta/episodes/**/*.parquet</text>
     <text x="46" y="431" font-size="18">Episode boundaries and task labels</text>
