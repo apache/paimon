@@ -176,6 +176,10 @@ paimon sql "SELECT city, COUNT(*) AS cnt FROM users GROUP BY city ORDER BY cnt D
 paimon sql "SELECT * FROM users LIMIT 5" --format json
 ```
 
+JSON output represents timestamps as ISO 8601 strings, preserving fractional
+seconds (up to nanosecond precision) and timezone offsets when present.
+SQL `NULL` values are represented as JSON `null`.
+
 ### Interactive REPL
 
 Start an interactive SQL session by running `paimon sql` without a query argument. The REPL supports arrow keys for line editing, and command history is persisted across sessions in `~/.paimon_history`.

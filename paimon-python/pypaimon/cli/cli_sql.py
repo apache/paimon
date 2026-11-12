@@ -25,6 +25,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime
 
 import pyarrow as pa
 
@@ -166,16 +167,44 @@ def _execute_query(ctx, query, output_format):
 
 def _print_table(table, output_format, elapsed=None):
     """Print a PyArrow Table in the requested format."""
-    df = table.to_pandas()
     if output_format == 'json':
         import json
-        print(json.dumps(df.to_dict(orient='records'), ensure_ascii=False))
+        # Keep Arrow scalars: to_pylist() loses the minimum nanosecond timestamp.
+        names = table.column_names
+        rows = [dict(zip(names, row)) for row in zip(*table.columns)]
+        print(json.dumps(rows, ensure_ascii=False, default=_json_default))
     else:
-        print(df.to_string(index=False))
+        print(table.to_pandas().to_string(index=False))
 
     if elapsed is not None:
-        row_count = len(df)
+        row_count = table.num_rows
         print(f"({row_count} {'row' if row_count == 1 else 'rows'} in {elapsed:.2f}s)")
+
+
+def _json_default(value):
+    """Serialize Arrow values and timestamps without losing precision or nulls."""
+    if isinstance(value, pa.Scalar):
+        if not value.is_valid:
+            return None
+        if (isinstance(value, pa.TimestampScalar)
+                and value.type.unit == 'ns' and value.value == -(2 ** 63)):
+            # Pandas reserves -2**63 ns for NaT, but Arrow can store it as a valid timestamp.
+            microseconds, nanoseconds = divmod(value.value, 1000)
+            timestamp = pa.scalar(microseconds, type=pa.timestamp('us', tz=value.type.tz)).as_py()
+            fraction = f'.{timestamp.microsecond:06d}'
+            return timestamp.isoformat().replace(fraction, f'{fraction}{nanoseconds:03d}', 1)
+        if isinstance(value, pa.StructScalar):
+            return dict(value.items())
+        if isinstance(value, pa.MapScalar):
+            return [(entry[0], entry[1]) for entry in value.values]
+        if isinstance(value, pa.ListScalar):
+            return list(value.values)
+        if isinstance(value, pa.DictionaryScalar):
+            return value.value
+        return value.as_py()
+    if isinstance(value, datetime):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def _read_multiline_query():
