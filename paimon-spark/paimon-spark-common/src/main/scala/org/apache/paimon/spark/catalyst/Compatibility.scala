@@ -35,13 +35,32 @@ object Compatibility {
       query: LogicalPlan,
       byName: Boolean,
       conf: SQLConf): LogicalPlan = {
-    TableOutputResolver.resolveOutputColumns(
-      tableName,
-      expected,
-      query,
-      byName,
-      conf,
-      supportColDefaultValue = false)
+    // Spark 4.2 replaced the boolean with DefaultValueFillMode. Preserve the old false
+    // behavior (NONE) without linking 3.x/4.1 builds to the new enumeration.
+    val method = TableOutputResolver.getClass.getMethods
+      .find(m => m.getName == "resolveOutputColumns" && m.getParameterTypes.length == 6)
+      .get
+    val fillMode: AnyRef = if (method.getParameterTypes.last == java.lang.Boolean.TYPE) {
+      java.lang.Boolean.FALSE
+    } else {
+      val cls = Class.forName(
+        "org.apache.spark.sql.catalyst.analysis.TableOutputResolver$DefaultValueFillMode$")
+      cls.getMethod("NONE").invoke(cls.getField("MODULE$").get(null))
+    }
+    try {
+      method
+        .invoke(
+          TableOutputResolver,
+          tableName,
+          expected,
+          query,
+          java.lang.Boolean.valueOf(byName),
+          conf,
+          fillMode)
+        .asInstanceOf[LogicalPlan]
+    } catch {
+      case e: java.lang.reflect.InvocationTargetException => throw e.getCause
+    }
   }
 
   def withNewQuery(o: V2WriteCommand, query: LogicalPlan): V2WriteCommand = {

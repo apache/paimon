@@ -25,6 +25,7 @@ import org.apache.spark.sql.connector.catalog.SupportsWrite;
 import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCapability;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.connector.metric.CustomTaskMetric;
 import org.apache.spark.sql.connector.read.ScanBuilder;
 import org.apache.spark.sql.connector.write.LogicalWriteInfo;
 import org.apache.spark.sql.connector.write.WriteBuilder;
@@ -96,6 +97,12 @@ class RollbackStagedTable implements StagedTable, SupportsRead, SupportsWrite, S
     @Override
     public Set<TableCapability> capabilities() {
         return table.capabilities();
+    }
+
+    // Resolve the StagedTable / TruncatableTable default-method conflict on Spark 4.2.
+    // No @Override: older Spark versions do not expose this method.
+    public CustomTaskMetric[] reportDriverMetrics() {
+        return new CustomTaskMetric[0];
     }
 
     @Override

@@ -46,8 +46,14 @@ case class PaimonDescribeTableExec(
   extends PaimonLeafV2CommandExec {
 
   override protected def run(): Seq[InternalRow] = {
-    val rows =
-      ArrayBuffer.empty ++= DescribeTableExec(output, table, isExtended).executeCollect()
+    val constructor = classOf[DescribeTableExec].getConstructors.head
+    val args: Seq[AnyRef] = if (constructor.getParameterTypes.length == 3) {
+      Seq(output, table, java.lang.Boolean.valueOf(isExtended))
+    } else {
+      Seq(output, catalog.name(), identifier, table, java.lang.Boolean.valueOf(isExtended))
+    }
+    val description = constructor.newInstance(args: _*).asInstanceOf[DescribeTableExec]
+    val rows = ArrayBuffer.empty ++= description.executeCollect()
 
     if (partitionSpec.nonEmpty) {
       describeDetailedPartitionInfo(rows)

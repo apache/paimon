@@ -164,7 +164,13 @@ case class PaimonV1FunctionRegistry(session: SparkSession) extends SQLConfHelper
   }
 
   private def qualifyIdentifier(ident: FunctionIdentifier): FunctionIdentifier = {
-    FunctionIdentifier(funcName = format(ident.funcName), database = ident.database)
+    val catalog = if (org.apache.spark.SPARK_VERSION.startsWith("4.2.")) {
+      ident.catalog.orElse(Some(session.sessionState.catalogManager.currentCatalog.name))
+    } else None
+    FunctionIdentifier(
+      funcName = format(ident.funcName),
+      database = ident.database,
+      catalog = catalog)
   }
 
   protected def format(name: String): String = {

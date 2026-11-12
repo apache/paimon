@@ -56,13 +56,16 @@ case class PaimonViewResolver(spark: SparkSession)
             u
         }
 
-      case u @ UnresolvedTableOrView(CatalogAndIdentifier(catalog: SupportView, ident), _, _) =>
-        try {
-          catalog.loadView(ident)
-          ResolvedPaimonView(catalog, ident)
-        } catch {
-          case _: ViewNotExistException =>
-            u
+      case u: UnresolvedTableOrView =>
+        u.multipartIdentifier match {
+          case CatalogAndIdentifier(catalog: SupportView, ident) =>
+            try {
+              catalog.loadView(ident)
+              ResolvedPaimonView(catalog, ident)
+            } catch {
+              case _: ViewNotExistException => u
+            }
+          case _ => u
         }
     }
   }

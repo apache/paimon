@@ -30,20 +30,15 @@ object MergePaimonScalarSubqueries extends MergePaimonScalarSubqueriesBase {
       newV2ScanRelation: DataSourceV2ScanRelation,
       cachedV2ScanRelation: DataSourceV2ScanRelation)
       : Option[(LogicalPlan, AttributeMap[Attribute])] = {
-    (newV2ScanRelation, cachedV2ScanRelation) match {
-      case (
-            DataSourceV2ScanRelation(
-              newRelation,
-              newScan: PaimonScan,
-              newOutput,
-              newPartitioning,
-              newOrdering),
-            DataSourceV2ScanRelation(
-              cachedRelation,
-              cachedScan: PaimonScan,
-              _,
-              cachedPartitioning,
-              cacheOrdering)) =>
+    (newV2ScanRelation.scan, cachedV2ScanRelation.scan) match {
+      case (newScan: PaimonScan, cachedScan: PaimonScan) =>
+        val newRelation = newV2ScanRelation.relation
+        val cachedRelation = cachedV2ScanRelation.relation
+        val newOutput = newV2ScanRelation.output
+        val newPartitioning = newV2ScanRelation.keyGroupedPartitioning
+        val cachedPartitioning = cachedV2ScanRelation.keyGroupedPartitioning
+        val newOrdering = newV2ScanRelation.ordering
+        val cacheOrdering = cachedV2ScanRelation.ordering
         checkIdenticalPlans(newRelation, cachedRelation).flatMap {
           outputMap =>
             if (

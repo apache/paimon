@@ -260,6 +260,10 @@ object UnResolvedPaimonV1Function {
       funcIdent: FunctionIdentifier,
       u: UnresolvedFunction,
       fun: Option[PaimonFunction]): UnResolvedPaimonV1Function = {
-    UnResolvedPaimonV1Function(funcIdent, u.arguments, u.isDistinct, u.filter, u.ignoreNulls, fun)
+    val ignoreNulls = u.ignoreNulls.asInstanceOf[Any] match {
+      case value: Boolean => value
+      case value: Option[_] => value.contains(true)
+    }
+    UnResolvedPaimonV1Function(funcIdent, u.arguments, u.isDistinct, u.filter, ignoreNulls, fun)
   }
 }
