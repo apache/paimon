@@ -26,6 +26,7 @@ import operator
 import pickle
 import sys
 import struct
+import uuid
 import zlib
 from abc import ABC, abstractmethod
 from collections import OrderedDict
@@ -689,9 +690,6 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
             if sources is None or dataset_index >= len(sources):
                 raise ValueError("LeRobot source dataset_index %d does not exist."
                                  % dataset_index)
-            source = sources[dataset_index]
-            if source.get("index", source.get("dataset_index")) != dataset_index:
-                raise ValueError("LeRobot source dataset indices are not contiguous.")
             begin, end = _source_dataset_ranges(sources)[dataset_index][1:3]
             episodes = list(range(begin, end))
         self.tag_name = tag_name
@@ -734,6 +732,9 @@ class _SourceEpisodeFrameReader:
     def __init__(self, reader, datasets, vocabulary_maps=None):
         self._reader = reader
         ranges = _source_dataset_ranges(datasets)
+        self._physical_ids = [source["id"] for source in datasets]
+        self._id_to_ordinal = {value: ordinal
+                               for ordinal, value in enumerate(self._physical_ids)}
         self._frame_starts = [source[3] for source in ranges]
         self._frame_ends = [source[4] for source in ranges]
         self._episode_offsets = pa.array(
@@ -761,8 +762,8 @@ class _SourceEpisodeFrameReader:
     def read_indices(self, indices, columns):
         mapped = [name for name in self._vocabulary if name in columns]
         projection = list(columns)
-        if "dataset_index" not in projection:
-            projection.append("dataset_index")
+        if "dataset_id" not in projection:
+            projection.append("dataset_id")
         if "index" not in projection:
             projection.append("index")
         keys = []
@@ -770,20 +771,23 @@ class _SourceEpisodeFrameReader:
             dataset_index = bisect.bisect_right(self._frame_ends, index)
             if dataset_index >= len(self._frame_ends) or index < 0:
                 raise IndexError("LeRobot frame index %d is out of range." % index)
-            keys.append((dataset_index, index - self._frame_starts[dataset_index]))
+            keys.append((self._physical_ids[dataset_index],
+                         index - self._frame_starts[dataset_index]))
         data = self._reader.read_keys(keys, projection)
         if data.num_rows == 0:
             return data.select(columns)
         expected = set(keys)
-        actual = list(zip(data["dataset_index"].to_pylist(),
+        actual = list(zip(data["dataset_id"].to_pylist(),
                           data["index"].to_pylist()))
         if len(actual) != len(expected) or set(actual) != expected:
             raise ValueError("LeRobot frame keys are missing or duplicated.")
         data = data.set_column(
             data.schema.get_field_index("index"), data.schema.field("index"),
-            pa.array([self._frame_starts[dataset_index] + local
-                      for dataset_index, local in actual], type=pa.int64()))
-        source_ids = data["dataset_index"]
+            pa.array([self._frame_starts[self._id_to_ordinal[dataset_id]] + local
+                      for dataset_id, local in actual], type=pa.int64()))
+        source_ids = pa.array([self._id_to_ordinal[value]
+                               for value in data["dataset_id"].to_pylist()],
+                              type=pa.int64())
         if "episode_index" in columns:
             try:
                 local_ids = data["episode_index"]
@@ -1089,12 +1093,12 @@ def _load_dataset(table, tag_name):
     frames = _component_table(catalog, raw_table, tag_name)
     episodes_table = _component_table(
         catalog, catalog.get_table(identifiers["episodes"]), tag_name)
-    source_local_layout = "dataset_index" in _target_schema(episodes_table).names
+    source_local_layout = "dataset_id" in _target_schema(episodes_table).names
     datasets_table = _component_table(
         catalog, catalog.get_table(identifiers["datasets"]), tag_name)
     source_rows = _read_arrow(datasets_table, [
-        "index", "name", "info", "tasks", "subtasks", "stats",
-    ]).sort_by("index").to_pylist()
+        "id", "name", "info", "tasks", "subtasks", "stats",
+    ]).sort_by("id").to_pylist()
     datasets = ([{key: value for key, value in row.items()
                   if key not in ("tasks", "subtasks", "stats")}
                  for row in source_rows] if source_local_layout else None)
@@ -1225,8 +1229,10 @@ def _merged_source_stats(sources, episodes_table):
         raise ValueError("LeRobot sources disagree on stats metadata.")
     decoded = [json.loads(value) for value in values]
     names = dict.fromkeys(name for value in decoded for name in value)
-    merged = {name: _merge_stats([value[name] for value in decoded if name in value])
-              for name in names if name not in _CONTROLS}
+    merged = {
+        name: (decoded[0][name] if len(decoded) == 1 else
+               _merge_stats([value[name] for value in decoded if name in value]))
+        for name in names if name not in _CONTROLS}
     columns = _target_schema(episodes_table).names
     if "stats" in columns:
         stats_rows = _read_arrow(episodes_table, ["stats"])["stats"].to_pylist()
@@ -1288,12 +1294,21 @@ def _episode_dataset(table, datasets=None):
 
     if datasets is not None:
         # Merged Episodes may contain Arrow extensions unsupported by HF Dataset.
-        projection = _EPISODE_CONTROL_COLUMNS + ["dataset_index"]
+        projection = _EPISODE_CONTROL_COLUMNS + ["dataset_id"]
     else:
         projection = [name for name in _target_schema(table).names
                       if not name.startswith("stats/") and name != "stats"]
     data = _read_arrow(table, projection)
     if datasets is not None:
+        physical_ids = [dataset["id"] for dataset in datasets]
+        ordinals = pc.index_in(data["dataset_id"],
+                               value_set=pa.array(physical_ids, type=pa.string()))
+        if ordinals.null_count:
+            raise ValueError("LeRobot Episode references an unknown Dataset UUID.")
+        ordinals = pc.cast(ordinals, pa.int64())
+        data = data.set_column(
+            data.schema.get_field_index("dataset_id"),
+            pa.field("dataset_index", pa.int64()), ordinals)
         data = data.sort_by([
             ("dataset_index", "ascending"),
             ("episode_index", "ascending"),
@@ -1417,10 +1432,16 @@ def _source_dataset_ranges(datasets):
     """Derive source ranges from the original counts in each source's info."""
     result = []
     episode_offset = frame_offset = 0
+    previous_id = None
     for ordinal, dataset in enumerate(datasets):
         try:
-            if operator.index(dataset.get("index", dataset.get("dataset_index"))) != ordinal:
-                raise ValueError("index must be contiguous")
+            identifier = dataset["id"]
+            if not isinstance(identifier, str) or str(uuid.UUID(identifier)) != identifier \
+                    or uuid.UUID(identifier).version != 7:
+                raise ValueError("id must be a canonical UUIDv7 string")
+            if previous_id is not None and identifier <= previous_id:
+                raise ValueError("id must be unique and sorted")
+            previous_id = identifier
             info = json.loads(dataset["info"] if "info" in dataset else dataset["info_json"])
             if not isinstance(info, dict):
                 raise ValueError("info must be a JSON object")

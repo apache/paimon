@@ -21,6 +21,7 @@ import json
 import shutil
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -119,6 +120,13 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
             "task_index": 0,
             "task": "pick",
         }], _dataset_row(self.connection, "table_group")["tasks"])
+        dataset_id = _dataset_row(self.connection, "table_group")["id"]
+        self.assertEqual(7, uuid.UUID(dataset_id).version)
+        self.assertEqual([dataset_id], self.connection.get_table(
+            "table_group").scan().select(["dataset_id"]).to_arrow()[
+                "dataset_id"].to_pylist())
+        self.assertEqual([dataset_id], [row["dataset_id"] for row in
+            _catalog_rows(self.connection, "table_group_episodes")])
         info = json.loads(_dataset_row(self.connection, "table_group")["info"])
         self.assertEqual(10, info["fps"])
         self.assertEqual(1, info["total_frames"])
@@ -312,6 +320,8 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
             })
         first.save_episode()
         first.finalize()
+        dataset_id = _dataset_row(self.connection, "resume")["id"]
+        self.assertEqual(7, uuid.UUID(dataset_id).version)
 
         manager = self.connection.get_table(
             "resume").raw_table.snapshot_manager()
@@ -336,6 +346,10 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         })
         resumed.save_episode()
         resumed.finalize()
+        self.assertEqual(dataset_id, _dataset_row(self.connection, "resume")["id"])
+        self.assertEqual([dataset_id] * 4, self.connection.get_table(
+            "resume").scan().select(["dataset_id"]).to_arrow()[
+                "dataset_id"].to_pylist())
 
         rows = self.connection.get_table("resume").scan().select([
             "episode_index", "frame_index", "index", "task_index"
@@ -387,7 +401,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         datasets = self.connection.catalog.get_table(
             self.connection._identifier("inconsistent_datasets"))
         _append_arrow(datasets, pa.Table.from_pylist([{
-            "index": 0, "name": None, "info": "{}", "tasks": [],
+            "id": str(uuid.uuid4()), "name": None, "info": "{}", "tasks": [],
             "subtasks": None, "stats": "{}",
         }], schema=_target_schema(datasets)))
 
@@ -450,6 +464,19 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
                         "dtype": "video",
                         "shape": (3, 4, 5),
                         "names": ["channels", "height", "width"],
+                    },
+                },
+            )
+
+    def test_dataset_id_feature_is_reserved(self):
+        with self.assertRaisesRegex(ValueError, "dataset_id is managed"):
+            PaimonLeRobotWriter(
+                self.connection,
+                "reserved_id",
+                fps=10,
+                features={
+                    "dataset_id": {
+                        "dtype": "string", "shape": (1,), "names": None,
                     },
                 },
             )
@@ -557,16 +584,23 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
                 },
             },
         )
+        first_id = None
         for value, task in ((1.0, "pick"), (2.0, "place")):
             writer.add_frame({
                 "action": np.array([value], dtype=np.float32),
                 "task": task,
             })
             writer.save_episode()
+            current_id = _dataset_row(self.connection, "multiple_flushes")["id"]
+            if first_id is None:
+                first_id = current_id
+            else:
+                self.assertEqual(first_id, current_id)
         writer.finalize()
 
         self.assertEqual(2, len(_catalog_rows(
             self.connection, "multiple_flushes_episodes")))
+        self.assertEqual(7, uuid.UUID(first_id).version)
         self.assertEqual(2, len(_dataset_row(
             self.connection, "multiple_flushes")["tasks"]))
         info = json.loads(_dataset_row(self.connection, "multiple_flushes")["info"])
