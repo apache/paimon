@@ -684,11 +684,21 @@ def test_column_enrichment_on_an_empty_table(tmp_path):
     (pa.schema([pa.field("feature", pa.int64(), nullable=False)]), {}),
     (pa.schema([("_ROW_ID", pa.int64())]), {}),
     (pa.schema([("feature", pa.int64())]), {"batch_size": 0}),
+    (pa.schema([("feature", pa.int64())]), {"execution": "ray"}),
 ])
 def test_add_columns_validation_never_publishes_schema(frames, schema, kwargs):
     schema_id = frames.raw_table.table_schema.id
     with pytest.raises(ValueError):
         frames.add_columns(schema, **kwargs)
+    assert frames.catalog.get_table(frames.identifier).table_schema.id == schema_id
+
+
+def test_add_columns_requires_ray_before_publishing_schema(frames):
+    schema_id = frames.raw_table.table_schema.id
+    with patch.dict("sys.modules", {"ray": None}):
+        with pytest.raises(ImportError, match=r"pypaimon\[ray\]"):
+            frames.add_columns(pa.schema([("feature", pa.int64())]), inputs=["id"],
+                               fn=lambda batch: batch, execution="ray")
     assert frames.catalog.get_table(frames.identifier).table_schema.id == schema_id
 
 

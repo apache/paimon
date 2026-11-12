@@ -127,7 +127,7 @@ commit identifier to `new_update().new_update_by_row_id(commit_identifier)`.
 
 # Multimodal column enrichment
 
-Multimodal Data Evolution tables provide local column-enrichment methods:
+Multimodal Data Evolution tables provide column-enrichment methods:
 
 ```python
 # labels is a typed Arrow table containing sample_id and the columns to fill.
@@ -158,7 +158,13 @@ Outputs must have the declared/existing types. A fixed-size Arrow list declares
 a VECTOR column, for example `pa.list_(pa.float32(), 768)` for an embedding.
 
 These methods require a current full-table view and a single writer during the
-operation. They do not provide distributed execution or automatic retries.
+operation. `add_columns` with `fn` and `compute_columns` support `execution="ray"`
+with `pypaimon[ray]` installed. `concurrency` caps the number of shards and
+`ray_remote_args` configures task resources. The driver commits the backfill
+after all workers succeed. For `add_columns`, task definition and static
+resource checks run before schema publication. Ray can still reject placement
+group constraints during submission, and workers can fail during execution.
+There are no automatic retries.
 `compute_columns` requires existing, non-partition output columns and never
 changes the schema. It uses the table's output types and nullability. Every call
 computes all visible rows, including rows with existing values. Use `replace_video`
@@ -170,8 +176,8 @@ Function calls have at most
 `merge_columns` materializes the source as an Arrow table and delegates target
 matching and updates to the standard MERGE backend. Supported routes use native
 MERGE when `write.native.enabled=true` and a compatible `pypaimon_rust` is available.
-`add_columns` and `compute_columns` can use the native shard reader and writer;
-their `fn` runs in Python.
+Local `add_columns` and `compute_columns` can use the native shard reader and
+writer; their `fn` runs in Python.
 
 `update_columns_by_row_id(data, *, columns)` accepts one Arrow Table and requires
 an explicit output column name or sequence of names. The input must contain
