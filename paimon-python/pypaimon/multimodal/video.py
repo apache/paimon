@@ -100,7 +100,12 @@ def _capture_torch_thread_context(torch):
 def _restore_torch_thread_context(torch, state):
     default_device, grad_enabled, inference_enabled, cache_enabled, autocast = state
     with ExitStack() as stack:
-        stack.enter_context(torch.device(default_device))
+        device_context = torch.device(default_device)
+        # Torch 1.13's device is a value type, not a context manager. It has
+        # no thread-local default-device context to restore in a worker.
+        if (hasattr(type(device_context), "__enter__")
+                and hasattr(type(device_context), "__exit__")):
+            stack.enter_context(device_context)
         for device_type, dtype in autocast:
             stack.enter_context(torch.autocast(
                 device_type, dtype=dtype, cache_enabled=cache_enabled))

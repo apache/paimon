@@ -306,6 +306,27 @@ class VideoFrameCollatorTest(unittest.TestCase):
         finally:
             collator.close()
 
+    def test_parallel_direct_callbacks_accept_legacy_torch_device(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from unittest.mock import patch
+
+        rows = [{"video": self._descriptor(str(i), b"video", i)} for i in range(2)]
+        collator = VideoFrameCollator(
+            self.table, video_column="video", collate_fn=list,
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: index,
+            decode_parallelism=2)
+        try:
+            # Torch 1.13 has torch.device(...) but no __enter__/__exit__.
+            with patch.object(torch, "device", side_effect=lambda device: object()):
+                self.assertEqual([0], [row["frame"] for row in collator(rows[:1])])
+                self.assertEqual([0, 1], [row["frame"] for row in collator(rows)])
+        finally:
+            collator.close()
+
     def test_parallel_direct_callbacks_preserve_torch_device_and_autocast(self):
         try:
             import torch
