@@ -342,6 +342,11 @@ class VideoFrameCollator:
     order to avoid unnecessary decoder seeks. Rows are restored to their input
     order before ``collate_fn`` is called.
 
+    ``decode_parallelism`` runs callbacks for distinct videos concurrently,
+    bounded by ``max_open_videos``. It defaults to 1 for callbacks that share
+    mutable state. Decoder creation stays ordered; callbacks for a single
+    video never overlap.
+
     Optional ``decode_batch_fn`` replaces ``decode_fn`` for each payload group.
     It receives the cached decoder, sorted frame indices, and corresponding row
     dictionaries, and returns a sequence with one frame per row in that order.
@@ -369,7 +374,8 @@ class VideoFrameCollator:
             collate_fn=None,
             decode_batch_fn=None,
             range_parallelism=4,
-            prefetch_max_bytes=0):
+            prefetch_max_bytes=0,
+            decode_parallelism=1):
         if not video_column:
             raise ValueError("video_column is required.")
         if not callable(decoder_factory):
@@ -399,6 +405,11 @@ class VideoFrameCollator:
                 or prefetch_max_bytes < 0):
             raise ValueError("prefetch_max_bytes must be a non-negative int.")
 
+        if (isinstance(decode_parallelism, bool)
+                or not isinstance(decode_parallelism, int)
+                or decode_parallelism <= 0):
+            raise ValueError("decode_parallelism must be a positive int.")
+
         raw_table = getattr(table, "raw_table", table)
         file_io = getattr(raw_table, "file_io", None)
         if file_io is None:
@@ -414,6 +425,8 @@ class VideoFrameCollator:
         self.collate_fn = collate_fn
         self.range_parallelism = range_parallelism
         self.prefetch_max_bytes = prefetch_max_bytes
+        self.decode_parallelism = decode_parallelism
+        self._decode_pool = _VideoDecodePool()
         self._decoders = OrderedDict()
         self._video_metadata_cache = _VideoMetadataCache()
         self._owner_pid = os.getpid()
@@ -428,6 +441,7 @@ class VideoFrameCollator:
         return self._collate(decoded_rows)
 
     def close(self):
+        self._decode_pool.close()
         resources = list(self._decoders.values())
         self._decoders.clear()
         self._video_metadata_cache = _VideoMetadataCache()
@@ -446,6 +460,7 @@ class VideoFrameCollator:
         # stream state opened in the parent process.
         state = self.__dict__.copy()
         state["_decoders"] = OrderedDict()
+        state["_decode_pool"] = _VideoDecodePool()
         state["_video_metadata_cache"] = None
         state["_owner_pid"] = None
         return state
@@ -500,8 +515,7 @@ class VideoFrameCollator:
             payload = descriptor.video_descriptor
             grouped.setdefault(payload, []).append((descriptor.frame_index, position, output))
 
-        for payload, frames in grouped.items():
-            decoder = self._decoder(payload)
+        def decode(decoder, frames):
             frames.sort(key=lambda frame: frame[0])
             if self.decode_batch_fn is not None:
                 values = self.decode_batch_fn(
@@ -520,6 +534,15 @@ class VideoFrameCollator:
             for (_, position, output), value in zip(frames, values):
                 output[self.output_column] = value
                 decoded[position] = output
+
+        if grouped:
+            parallelism = min(self.decode_parallelism, self.max_open_videos, len(grouped))
+            requests = OrderedDict(((payload,), frames) for payload, frames in grouped.items())
+            with self._map_decoders(
+                    requests, decode, parallelism,
+                    self._decode_pool.get(parallelism)) as results:
+                for _ in results:
+                    pass
         return decoded
 
     def _prepare_row(self, row):

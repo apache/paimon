@@ -209,6 +209,94 @@ class VideoFrameCollatorTest(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_parallel_direct_calls_preserve_order_and_bound_cache(self):
+        import threading
+
+        barrier = threading.Barrier(2)
+        calls = {}
+        decoders = []
+
+        def factory(stream):
+            decoder = _Decoder(stream, [])
+            decoders.append(decoder)
+            return decoder
+
+        def decode_batch(decoder, indices, rows):
+            barrier.wait(timeout=5)
+            self.assertFalse(decoder.closed)
+            calls[rows[0]["video_id"]] = list(indices)
+            return [decoder.decode(index) for index in indices]
+
+        rows = [{"video_id": name, "video": self._descriptor(name, name.encode(), index)}
+                for name, index in (("a", 2), ("b", 1), ("a", 0), ("c", 3), ("d", 0))]
+        rows.insert(1, {"video_id": "null", "video": None})
+        collator = VideoFrameCollator(
+            self.table, video_column="video", decoder_factory=factory,
+            decode_batch_fn=decode_batch, collate_fn=list,
+            max_open_videos=2, decode_parallelism=4)
+        try:
+            result = collator(rows)
+            self.assertEqual([row["video_id"] for row in rows],
+                             [row["video_id"] for row in result])
+            self.assertEqual([(b"a", 2), None, (b"b", 1), (b"a", 0), (b"c", 3), (b"d", 0)],
+                             [row["frame"] for row in result])
+            self.assertEqual({"a": [0, 2], "b": [1], "c": [3], "d": [0]}, calls)
+            self.assertEqual(2, sum(not decoder.closed for decoder in decoders))
+            executor = collator._decode_pool._executor
+        finally:
+            collator.close()
+        self.assertTrue(executor._shutdown)
+        self.assertTrue(all(decoder.closed for decoder in decoders))
+
+    def test_parallel_direct_callback_failure_drains_before_reuse(self):
+        import threading
+
+        barrier = threading.Barrier(2)
+        finished = threading.Event()
+
+        def decode(decoder, index, row):
+            barrier.wait(timeout=5)
+            if index == 0:
+                raise ValueError("decode failed")
+            self.assertFalse(decoder.closed)
+            finished.set()
+            return decoder.decode(index)
+
+        rows = [{"video": self._descriptor(str(index), b"video", index)}
+                for index in (0, 1)]
+        collator = VideoFrameCollator(
+            self.table, video_column="video",
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=decode, collate_fn=list, decode_parallelism=2)
+        try:
+            with self.assertRaisesRegex(ValueError, "decode failed"):
+                collator(rows)
+            self.assertTrue(finished.is_set())
+            collator.decode_fn = lambda decoder, index, row: decoder.decode(index)
+            self.assertEqual([(b"video", 0), (b"video", 1)],
+                             [row["frame"] for row in collator(rows)])
+        finally:
+            collator.close()
+
+    def test_direct_parallelism_validation_and_serial_default(self):
+        import threading
+
+        options = dict(table=self.table, video_column="video",
+                       decoder_factory=lambda stream: _Decoder(stream, []),
+                       decode_fn=lambda decoder, index, row: threading.get_ident(),
+                       collate_fn=list)
+        for value in (0, -1, True, 1.5, None):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "decode_parallelism"):
+                VideoFrameCollator(**options, decode_parallelism=value)
+        collator = VideoFrameCollator(**options)
+        try:
+            self.assertEqual([], collator([]))
+            row = {"video": self._descriptor("serial", b"video", 0)}
+            self.assertEqual(threading.get_ident(), collator(row)["frame"])
+            self.assertIsNone(collator._decode_pool._executor)
+        finally:
+            collator.close()
+
     def test_accepts_batch_callback_without_single_frame_callback(self):
         descriptors = [
             self._descriptor("episode.mp4", b"video", index)
