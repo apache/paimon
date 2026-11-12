@@ -289,12 +289,12 @@ class LeRobotRayImportTest(unittest.TestCase):
                     self.assertEqual(
                         Blob.from_descriptor_bytes(original.as_py(), file_io=file_io).to_data(),
                         Blob.from_descriptor_bytes(imported.as_py(), file_io=file_io).to_data())
-                left, right = left.drop(["camera", "dataset_index"]), right.drop(
-                    ["camera", "dataset_index"])
+                left, right = left.drop(["camera", "dataset_id"]), right.drop(
+                    ["camera", "dataset_id"])
             else:
                 left = left.sort_by(left.column_names[0])
                 right = right.sort_by(right.column_names[0])
-                field = "index" if suffix == "_datasets" else "dataset_index"
+                field = "id" if suffix == "_datasets" else "dataset_id"
                 left, right = left.drop([field]), right.drop([field])
             self.assertTrue(left.equals(right), suffix)
         # Parallel import publishes the same number of snapshots as serial import.

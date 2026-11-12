@@ -20,6 +20,7 @@
 import copy
 import io
 import json
+import uuid
 from typing import Mapping, Optional, Sequence
 
 import numpy as np
@@ -32,7 +33,10 @@ from pypaimon.catalog.catalog_exception import (
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.multimodal.arrow_utils import strict_arrow_table
 from pypaimon.multimodal.hdf5 import _SnapshotRecorder
-from pypaimon.multimodal.lerobot.aggregate import _DATASETS_SCHEMA
+from pypaimon.multimodal.lerobot.aggregate import (
+    _DATASETS_SCHEMA,
+    _next_dataset_uuid,
+)
 from pypaimon.multimodal.lerobot.metadata import (
     _COMPANION_OPTION_KEYS,
     _EMPTY_EPISODES_SCHEMA,
@@ -79,7 +83,7 @@ _INTEGER_DTYPES = {
     "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32",
 }
 _EPISODE_STATE_COLUMNS = list(_EMPTY_EPISODES_SCHEMA.names) + [
-    "stats/index/count",
+    "stats/index/count", "dataset_id",
 ]
 
 
@@ -267,6 +271,8 @@ class PaimonLeRobotWriter:
             raise ValueError("features must be a non-empty mapping.")
         if "task" in features:
             raise ValueError("task is managed by PaimonLeRobotWriter.")
+        if "dataset_id" in features:
+            raise ValueError("dataset_id is managed by PaimonLeRobotWriter.")
         video_fields = _video_feature_names({"features": features})
         if video_fields:
             raise ValueError(
@@ -282,7 +288,8 @@ class PaimonLeRobotWriter:
         self._user_features = copy.deepcopy(dict(features))
         self.features.update(copy.deepcopy(_DEFAULT_FEATURES))
         _validate_v3_required_features({"features": self.features})
-        self._source_schema = _schema_from_info({"features": self.features})
+        self._source_schema = _schema_from_info({"features": self.features}).append(
+            pa.field("dataset_id", pa.string(), nullable=False))
         metadata = self._writer_metadata(self.features)
         self._episodes_schema = metadata["episodes_schema"]
         create_options = dict(options or {})
@@ -327,7 +334,8 @@ class PaimonLeRobotWriter:
         )
 
         (self.num_frames, self.num_episodes, self._task_indices,
-         self._stats, stored_subtasks) = self._load_existing_state()
+         self._stats, stored_subtasks, self._dataset_uuid) = \
+            self._load_existing_state()
         if stored_subtasks is not None:
             if requested_subtasks is not None \
                     and requested_subtasks != stored_subtasks:
@@ -356,7 +364,8 @@ class PaimonLeRobotWriter:
     @staticmethod
     def _writer_metadata(features):
         return {
-            "episodes_schema": _episode_schema(features),
+            "episodes_schema": _episode_schema(features).append(
+                pa.field("dataset_id", pa.string(), nullable=False)),
             "datasets_table": pa.Table.from_pylist([], schema=_DATASETS_SCHEMA),
         }
 
@@ -388,7 +397,7 @@ class PaimonLeRobotWriter:
                    for table in self._metadata_tables.values()):
                 raise ValueError(
                     "Existing LeRobot table group state is inconsistent.")
-            return 0, 0, {}, None, None
+            return 0, 0, {}, None, None, _next_dataset_uuid()
         properties = snapshot.properties or {}
         if _STATE_VERSION in properties:
             state = self._state_from_snapshot_properties(properties)
@@ -403,9 +412,17 @@ class PaimonLeRobotWriter:
 
     def _state_from_companion_tables(self):
         sources = _read_arrow(self._metadata_tables["datasets"]).to_pylist()
-        if len(sources) != 1 or sources[0]["index"] != 0:
+        if len(sources) != 1:
             raise ValueError("Existing LeRobot Dataset metadata is invalid.")
         source_row = sources[0]
+        try:
+            source_id = source_row["id"]
+            if str(uuid.UUID(source_id)) != source_id \
+                    or uuid.UUID(source_id).version != 7:
+                raise ValueError("Expected a UUIDv7 Dataset ID.")
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                "Existing LeRobot Dataset metadata is invalid.") from error
         task_rows = source_row["tasks"]
         task_rows.sort(key=lambda row: row["task_index"])
         task_indices = {}
@@ -443,6 +460,7 @@ class PaimonLeRobotWriter:
         next_index = 0
         for expected, row in enumerate(episode_rows):
             if row["episode_index"] != expected \
+                    or row["dataset_id"] != source_id \
                     or row["dataset_from_index"] != next_index \
                     or row["dataset_to_index"] <= next_index \
                     or row["length"] != (
@@ -490,7 +508,7 @@ class PaimonLeRobotWriter:
             raise ValueError(
                 "Existing LeRobot stats metadata is inconsistent.")
         return (next_index, len(episode_rows), task_indices, numpy_stats,
-                subtasks)
+                subtasks, source_id)
 
     @staticmethod
     def _state_from_snapshot_properties(properties):
@@ -630,6 +648,7 @@ class PaimonLeRobotWriter:
         self.num_episodes += 1
         self.pending_episodes += 1
         self._pending_episode_rows.append({
+            "dataset_id": self._dataset_uuid,
             "episode_index": self.num_episodes - 1,
             "dataset_from_index": self.num_frames - episode.num_rows,
             "dataset_to_index": self.num_frames,
@@ -689,7 +708,7 @@ class PaimonLeRobotWriter:
                 {"subtask_index": index, "subtask": text}
                 for index, text in enumerate(self.subtasks)])
             dataset_row = {
-                "index": 0,
+                "id": self._dataset_uuid,
                 "name": None,
                 "info": json.dumps(_json_value(info), ensure_ascii=False),
                 "tasks": task_rows,
@@ -759,6 +778,7 @@ class PaimonLeRobotWriter:
             field = self._source_schema.field(name)
             arrays.append(_safe_array(
                 values, field, name, str(feature.get("dtype", ""))))
+        arrays.append(pa.array([self._dataset_uuid] * size, type=pa.string()))
         source = pa.Table.from_arrays(arrays, schema=self._source_schema)
         return strict_arrow_table(
             source,

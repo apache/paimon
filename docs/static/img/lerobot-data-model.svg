@@ -42,12 +42,12 @@ under the License.
     <rect x="532" y="132" width="440" height="152" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
     <text x="550" y="165" font-size="23" font-weight="700" fill="#2166b1">robot_data_datasets</text>
     <text x="550" y="195" font-size="18">One row per source</text>
-    <text x="550" y="225" font-size="18">index (UUIDv7), name, info</text>
+    <text x="550" y="225" font-size="18">id (UUIDv7), name, info</text>
     <text x="550" y="255" font-size="18">tasks, subtasks, stats</text>
 
     <path d="M 554 286 V 354" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
     <text x="574" y="311" font-size="17" fill="#526277">1 source → many Episodes</text>
-    <text x="574" y="336" font-size="17" fill="#526277">dataset_index references the source UUID</text>
+    <text x="574" y="336" font-size="17" fill="#526277">dataset_id references the source UUID</text>
     <rect x="28" y="364" width="396" height="132" rx="10" fill="#f5f7fa" stroke="#b6c2d0" stroke-width="1.5"/>
     <text x="46" y="399" font-size="18">meta/episodes/**/*.parquet</text>
     <text x="46" y="431" font-size="18">Episode boundaries and task labels</text>
@@ -56,12 +56,12 @@ under the License.
     <rect x="532" y="364" width="440" height="132" rx="10" fill="#e8f5ef" stroke="#10705d" stroke-width="1.5"/>
     <text x="550" y="397" font-size="23" font-weight="700" fill="#10705d">robot_data_episodes</text>
     <text x="550" y="427" font-size="18">One row per Episode</text>
-    <text x="550" y="455" font-size="18">dataset_index, episode_index, frame range</text>
+    <text x="550" y="455" font-size="18">dataset_id, episode_index, frame range</text>
     <text x="550" y="483" font-size="18">length, tasks, metadata / statistics</text>
 
     <path d="M 554 498 V 566" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
     <text x="574" y="523" font-size="17" fill="#526277">1 Episode → many frames</text>
-    <text x="574" y="548" font-size="17" fill="#526277">match dataset_index + episode_index</text>
+    <text x="574" y="548" font-size="17" fill="#526277">match dataset_id + episode_index</text>
     <rect x="28" y="576" width="396" height="142" rx="10" fill="#f5f7fa" stroke="#b6c2d0" stroke-width="1.5"/>
     <text x="46" y="611" font-size="18">data/**/*.parquet</text>
     <text x="46" y="643" font-size="18">Image payloads or videos/ MP4 shards</text>
@@ -70,7 +70,7 @@ under the License.
     <rect x="532" y="576" width="440" height="142" rx="10" fill="#f1eafa" stroke="#7140ad" stroke-width="1.5"/>
     <text x="550" y="609" font-size="23" font-weight="700" fill="#7140ad">robot_data_frames</text>
     <text x="550" y="639" font-size="18">One row per frame</text>
-    <text x="550" y="669" font-size="18">dataset_index, indices, timestamp, task IDs</text>
+    <text x="550" y="669" font-size="18">dataset_id, indices, timestamp, task IDs</text>
     <text x="550" y="699" font-size="18">Observations, actions, image / video BLOBs</text>
     <text x="28" y="754" font-size="17" fill="#526277">Logical relationships only. LeRobot indices are separate from Paimon's internal row IDs.</text>
   </g>

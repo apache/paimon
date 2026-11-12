@@ -137,25 +137,25 @@ def source_rows(conn, name):
     """Project physical UUIDs to source ordinals for logical test assertions."""
     data = rows(conn, name)
     prefix = name.rsplit("_", 1)[0]
-    datasets = rows(conn, prefix + "_datasets").sort_by("index")
+    datasets = rows(conn, prefix + "_datasets").sort_by("id")
     ordinals = {identifier: ordinal
-                for ordinal, identifier in enumerate(datasets["index"].to_pylist())}
+                for ordinal, identifier in enumerate(datasets["id"].to_pylist())}
     return data.set_column(
-        data.schema.get_field_index("dataset_index"),
+        data.schema.get_field_index("dataset_id"),
         pa.field("dataset_index", pa.int64()),
-        pa.array([ordinals[value] for value in data["dataset_index"].to_pylist()],
+        pa.array([ordinals[value] for value in data["dataset_id"].to_pylist()],
                  type=pa.int64()))
 
 
 def assert_dataset_uuids(conn, prefix, count):
-    datasets = rows(conn, prefix + "_datasets").sort_by("index")
-    identifiers = datasets["index"].to_pylist()
+    datasets = rows(conn, prefix + "_datasets").sort_by("id")
+    identifiers = datasets["id"].to_pylist()
     assert len(identifiers) == count
     assert len(set(identifiers)) == count
     assert [str(uuid.UUID(value)) for value in identifiers] == identifiers
     assert [uuid.UUID(value).version for value in identifiers] == [7] * count
     for suffix in ("frames", "episodes"):
-        actual = rows(conn, prefix + "_" + suffix)["dataset_index"].to_pylist()
+        actual = rows(conn, prefix + "_" + suffix)["dataset_id"].to_pylist()
         assert set(actual) == set(identifiers)
     return datasets
 
@@ -184,7 +184,7 @@ def metadata(conn, suffix):
         _merged_source_info, _merged_source_stats, _source_vocabulary,
     )
 
-    sources = rows(conn, "merged_datasets").sort_by("index").to_pylist()
+    sources = rows(conn, "merged_datasets").sort_by("id").to_pylist()
     tasks, _ = _source_vocabulary(sources, "task")
     subtasks, _ = _source_vocabulary(sources, "subtask")
     if suffix == "info":
@@ -395,29 +395,29 @@ def test_append_twice_keeps_source_keys_and_training_order(setup, tmp_path):
         dataset.close()
 
 
-def test_single_source_feature_named_dataset_index(setup):
+def test_single_source_feature_named_dataset_id(setup):
     pytest.importorskip("datasets")
     pytest.importorskip("torch")
     conn, sources = setup
     root = Path(sources[0][7:])
     info_path = root / "meta/info.json"
     info = json.loads(info_path.read_text())
-    info["features"]["dataset_index"] = {
+    info["features"]["dataset_id"] = {
         "dtype": "int64", "shape": [1], "names": None,
     }
     info_path.write_text(json.dumps(info))
     data_path = root / "data/chunk-000/file-000.parquet"
     data = pq.read_table(data_path).append_column(
-        "dataset_index", pa.array([7] * 5, type=pa.int64()))
+        "dataset_id", pa.array([7] * 5, type=pa.int64()))
     pq.write_table(data, data_path)
 
-    with pytest.raises(ValueError, match="reserved source index columns"):
+    with pytest.raises(ValueError, match="reserved dataset_id column"):
         conn.load_from_lerobot("single", sources[0])
 
 
 def test_transform_frames_preserves_unlabelled_subtasks():
     plan = {
-        "dataset_index": str(uuid.uuid4()),
+        "dataset_id": str(uuid.uuid4()),
         "frame_offset": 5,
         "episode_offset": 2,
         "task_index": {0: 1},
@@ -435,7 +435,7 @@ def test_transform_frames_preserves_unlabelled_subtasks():
 
     assert converted["index"].to_pylist() == [0, 1]
     assert converted["episode_index"].to_pylist() == [0, 0]
-    assert converted["dataset_index"].to_pylist() == [plan["dataset_index"]] * 2
+    assert converted["dataset_id"].to_pylist() == [plan["dataset_id"]] * 2
     assert "source_index" not in converted.column_names
     assert converted["task_index"].to_pylist() == [0, 0]
     assert converted["subtask_index"].to_pylist() == [0, None]
@@ -484,8 +484,8 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     assert episodes["episode_index"].to_pylist() == [0, 1, 0, 1]
     assert "source_frame_from_index" not in episodes.column_names
     assert "source_frame_to_index" not in episodes.column_names
-    datasets = rows(conn, "merged_datasets").sort_by("index")
-    assert datasets.column_names == ["index", "name", "info", "tasks", "subtasks", "stats"]
+    datasets = rows(conn, "merged_datasets").sort_by("id")
+    assert datasets.column_names == ["id", "name", "info", "tasks", "subtasks", "stats"]
     assert datasets["name"].to_pylist() == [None, None]
     assert "fps" not in datasets.column_names
     assert [json.loads(value)["fps"] for value in datasets["info"].to_pylist()] == [10, 10]
@@ -826,7 +826,7 @@ def test_source_info_remains_distinct_from_merged_info(setup):
     conn.load_from_lerobot("merged", sources,
                            dataset_name=["move cup", "empty cup"])
     assert "vendor_extension" not in metadata(conn, "info")
-    datasets = rows(conn, "merged_datasets").sort_by("index")
+    datasets = rows(conn, "merged_datasets").sort_by("id")
     assert datasets["name"].to_pylist() == ["move cup", "empty cup"]
     assert [json.loads(value)["vendor_extension"]["source"]
             for value in datasets["info"].to_pylist()] == [0, 1]
@@ -897,7 +897,7 @@ def test_shared_business_label_does_not_merge_source_datasets(setup):
     conn, sources = setup
     conn.load_from_lerobot("merged", sources,
                            dataset_name=["same task", "same task"])
-    datasets = rows(conn, "merged_datasets").sort_by("index")
+    datasets = rows(conn, "merged_datasets").sort_by("id")
     assert_dataset_uuids(conn, "merged", 2)
     assert datasets["name"].to_pylist() == ["same task", "same task"]
     assert episode_rows(conn, "merged_episodes")["episode_index"].to_pylist() == [
@@ -999,7 +999,7 @@ def test_mixed_fps_group_keeps_episode_rates(tmp_path, import_parallelism):
     info = metadata(conn, "info")
     assert info["fps"] is None
     assert "fps_mode" not in info
-    datasets = rows(conn, "merged_datasets").sort_by("index")
+    datasets = rows(conn, "merged_datasets").sort_by("id")
     assert "fps" not in datasets.column_names
     assert [json.loads(value)["fps"] for value in
             datasets["info"].to_pylist()] == [25, 30]
@@ -1055,7 +1055,7 @@ def test_vocabulary_columns_without_pandas_index_are_preserved(setup):
             table = pq.read_table(path).replace_schema_metadata(None)
             pq.write_table(table, path)
     conn.load_from_lerobot("merged", sources)
-    dataset = rows(conn, "merged_datasets").sort_by("index").to_pylist()[0]
+    dataset = rows(conn, "merged_datasets").sort_by("id").to_pylist()[0]
     for component in ("tasks", "subtasks"):
         expected = pq.read_table(Path(sources[0][7:]) / ("meta/%s.parquet" % component))
         actual = dataset[component]
@@ -1159,8 +1159,8 @@ def test_ray_merge_multifile_sources_matches_serial(setup, ray_cluster):
     conn.load_from_lerobot("parallel", sources, batch_size=1, parallelism=2)
     for suffix, reader in (("_frames", frame_rows), ("_episodes", episode_rows)):
         assert reader(conn, "serial" + suffix).equals(reader(conn, "parallel" + suffix))
-    serial = rows(conn, "serial_datasets").sort_by("index").drop(["index"])
-    parallel = rows(conn, "parallel_datasets").sort_by("index").drop(["index"])
+    serial = rows(conn, "serial_datasets").sort_by("id").drop(["id"])
+    parallel = rows(conn, "parallel_datasets").sort_by("id").drop(["id"])
     assert serial.equals(parallel)
     assert_dataset_uuids(conn, "serial", 2)
     assert_dataset_uuids(conn, "parallel", 2)
@@ -1479,7 +1479,7 @@ def test_merge_archives_standard_vocabulary_columns(setup, import_parallelism):
             pq.write_table(table, path)
             originals[index, kind] = pq.read_table(path).select([kind[:-1] + "_index", kind[:-1]])
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism, tag_name="train")
-    datasets = rows(conn, "merged_datasets").sort_by("index").to_pylist()
+    datasets = rows(conn, "merged_datasets").sort_by("id").to_pylist()
     for index, dataset in enumerate(datasets):
         for kind in ("tasks", "subtasks"):
             restored = dataset[kind]
@@ -1634,7 +1634,7 @@ def test_merge_archives_vocabulary_without_arrow_schema(setup, import_parallelis
             pq.write_table(data.cast(schema), path)
             originals[index, kind] = pq.read_table(path)
     conn.load_from_lerobot("merged", sources, parallelism=import_parallelism)
-    for ordinal, row in enumerate(rows(conn, "merged_datasets").sort_by("index").to_pylist()):
+    for ordinal, row in enumerate(rows(conn, "merged_datasets").sort_by("id").to_pylist()):
         for kind in ("task", "subtask"):
             restored = row[kind + "s"]
             assert restored == originals[ordinal, kind].to_pylist()
@@ -1770,7 +1770,7 @@ def test_merge_rejects_episode_json_group_column_collision(setup):
 
 
 @pytest.mark.parametrize("name,values,error", [
-    ("dataset_index/vendor", pa.array([1, 2]), "reserved column dataset_index"),
+    ("dataset_id/vendor", pa.array([1, 2]), "reserved column dataset_id"),
     ("vendor_flag", pa.array([1, 2], type=pa.uint8()), "Unsupported pyarrow type: uint8"),
 ])
 def test_merge_rejects_unwritable_episode_extensions_before_create(setup, name, values, error):
@@ -2006,7 +2006,7 @@ def test_extra_dataset_text_fields(setup, multiple, import_parallelism):
         table_name="merged", source=sources if multiple else sources[0],
         dataset_name=["A", "B"] if multiple else "A", parallelism=import_parallelism,
         extra_dataset_fields={"config": "config/*.json", "notes": "notes.md"}, tag_name="train")
-    data = rows(conn, "merged_datasets").sort_by("index")
+    data = rows(conn, "merged_datasets").sort_by("id")
     assert pa.types.is_map(data.schema.field("config").type)
     assert data.schema.field("notes").type == pa.string()
     assert data["name"].to_pylist() == (["A", "B"] if multiple else ["A"])
@@ -2136,7 +2136,7 @@ def test_schema_evolution_unions_three_tables(setup, import_parallelism, reverse
                            extra_dataset_fields={"config": "config/*.json", "notes": "notes.md"})
     data = frame_rows(conn, "merged_frames")
     episodes = episode_rows(conn, "merged_episodes").to_pylist()
-    datasets = rows(conn, "merged_datasets").sort_by("index").to_pylist()
+    datasets = rows(conn, "merged_datasets").sort_by("id").to_pylist()
     for ordinal, uri in enumerate(sources):
         first = uri == original[0]
         assert data["temperature"].slice(ordinal * 5, 5).to_pylist() == (
@@ -2310,7 +2310,7 @@ def test_append_evolves_frame_and_dataset_columns(setup, tmp_path, import_parall
     current = conn.get_table("merged_frames").raw_table
     assert {f.name: f.id for f in current.fields if f.name in field_ids} == field_ids
     assert next(f.type.nullable for f in current.fields if f.name == "humidity")
-    datasets = rows(conn, "merged_datasets").sort_by("index")
+    datasets = rows(conn, "merged_datasets").sort_by("id")
     assert datasets["notes"].to_pylist() == [None, None, "# Third dataset"]
     assert datasets["config"].to_pylist() == [None, None, None]
     assert_dataset_uuids(conn, "merged", 3)

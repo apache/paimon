@@ -49,18 +49,18 @@ class _PaimonTableFrameReader:
         from pypaimon.common.predicate_builder import PredicateBuilder
 
         by_dataset = {}
-        for dataset_index, index in keys:
-            by_dataset.setdefault(dataset_index, []).append(index)
+        for dataset_id, index in keys:
+            by_dataset.setdefault(dataset_id, []).append(index)
         builder = self._table.new_read_builder().new_predicate_builder()
         predicate = PredicateBuilder.or_predicates([
             PredicateBuilder.and_predicates([
-                builder.equal("dataset_index", dataset_index),
+                builder.equal("dataset_id", dataset_id),
                 builder.is_in("index", indices),
             ])
-            for dataset_index, indices in by_dataset.items()
+            for dataset_id, indices in by_dataset.items()
         ])
         projection = list(columns)
-        for name in ("dataset_index", "index"):
+        for name in ("dataset_id", "index"):
             if name not in projection:
                 projection.append(name)
         return self._read_predicate(predicate, projection)

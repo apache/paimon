@@ -261,9 +261,9 @@ def _commit_metadata(
     _require_initial_snapshot("datasets", snapshot_id)
     component_snapshots.append((tables["datasets"].identifier, snapshot_id))
     frames_table = connection.catalog.get_table(frames_identifier)
-    if "dataset_index" in _target_schema(frames_table).names:
+    if "dataset_id" in _target_schema(frames_table).names:
         frames_snapshot_id = _build_initial_btree(
-            frames_table, "dataset_index", frames_snapshot_id)
+            frames_table, "dataset_id", frames_snapshot_id)
     frames_snapshot_id = _build_initial_btree(
         frames_table, "index", frames_snapshot_id)
     # Tag the root last so a failed component tag does not expose a root tag.

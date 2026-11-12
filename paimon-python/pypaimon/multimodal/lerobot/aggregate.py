@@ -69,7 +69,7 @@ _REBUILT_INFO = {
     "total_chunks", "splits", "data_path", "video_path", "chunks_size",
     "data_files_size_in_mb", "video_files_size_in_mb", "features",
 }
-_DATASET_INDEX_COLUMN = "dataset_index"
+_DATASET_ID_COLUMN = "dataset_id"
 _EPISODE_VARIANT_GROUPS = ("meta", "data", "videos", "stats")
 _EPISODE_EXTRA_VARIANT_GROUP_DESCRIPTION = "pypaimon.lerobot.episode-variant-group"
 _VARIANT_TYPE = pa.struct([
@@ -85,7 +85,7 @@ _SOURCE_SUBTASKS_TYPE = pa.list_(pa.struct([
     pa.field("subtask", pa.string(), nullable=False),
 ]))
 _DATASETS_SCHEMA = pa.schema([
-    pa.field("index", pa.string(), nullable=False),
+    pa.field("id", pa.string(), nullable=False),
     pa.field("name", pa.string()),
     pa.field("info", pa.string(), nullable=False),
     pa.field("tasks", _SOURCE_TASKS_TYPE, nullable=False),
@@ -120,7 +120,7 @@ def _recover_incomplete_append(connection, table_name):
     identifiers = _companion_table_identifiers(frames)
     datasets = connection.catalog.get_table(identifiers["datasets"])
     episodes = connection.catalog.get_table(identifiers["episodes"])
-    source_rows = _read_arrow(datasets, ["index", "info"]).sort_by("index").to_pylist()
+    source_rows = _read_arrow(datasets, ["id", "info"]).sort_by("id").to_pylist()
     if not source_rows:
         raise ValueError("LeRobot append recovery requires Dataset metadata.")
     ranges = _source_dataset_ranges(source_rows)
@@ -354,10 +354,10 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
                 existing_sources=None):
     first = plans[0]
     mixed_fps = len({plan["metadata"]["fps"] for plan in plans}) > 1
-    reserved_frame_fields = {_DATASET_INDEX_COLUMN}
+    reserved_frame_fields = {_DATASET_ID_COLUMN}
     for plan in plans:
         if reserved_frame_fields.intersection(plan["schema"].names):
-            raise ValueError("LeRobot source frame features use reserved source index columns.")
+            raise ValueError("LeRobot source frame features use reserved dataset_id column.")
     frame_schema = _merge_schemas([plan["schema"] for plan in plans], schema_evolution,
                                   _V3_REQUIRED_FEATURE_DTYPES)
     features, contracts = {}, {}
@@ -379,9 +379,9 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
     groups = tuple(dict.fromkeys(group for plan in plans
                                  for group in _episode_variant_groups(
                                      plan["metadata"]["episodes_schema"])))
-    if _DATASET_INDEX_COLUMN in groups:
-        raise ValueError("LeRobot Episode VARIANT group uses reserved column dataset_index.")
-    reserved_episode_fields = {_DATASET_INDEX_COLUMN, *groups}
+    if _DATASET_ID_COLUMN in groups:
+        raise ValueError("LeRobot Episode VARIANT group uses reserved column dataset_id.")
+    reserved_episode_fields = {_DATASET_ID_COLUMN, *groups}
     for ordinal, plan in enumerate(plans):
         conflicts = reserved_episode_fields.intersection(
             plan["metadata"]["episodes_schema"].names)
@@ -427,7 +427,7 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
     metadata["tasks_table"] = _vocabulary(plans, "tasks", existing_sources)
     metadata["subtasks_table"] = _vocabulary(plans, "subtasks", existing_sources)
     for field in (
-            pa.field(_DATASET_INDEX_COLUMN, pa.string(), nullable=False),
+            pa.field(_DATASET_ID_COLUMN, pa.string(), nullable=False),
             pa.field("meta", _VARIANT_TYPE, nullable=False),
             pa.field("data", _VARIANT_TYPE, nullable=False),
             pa.field("videos", _VARIANT_TYPE, nullable=False),
@@ -442,7 +442,7 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
     PaimonSchema.from_pyarrow_schema(metadata["episodes_schema"])
     metadata["datasets_table"] = pa.Table.from_pylist([
         {
-            "index": plan[_DATASET_INDEX_COLUMN],
+            "id": plan[_DATASET_ID_COLUMN],
             "name": plan["dataset_name"],
             "info": json.dumps(_json_value(plan["info"]),
                                ensure_ascii=False, separators=(",", ":")),
@@ -497,8 +497,8 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
 
 def _transform_frames(plan, batch, episode):
     batch = batch.append_column(
-        pa.field(_DATASET_INDEX_COLUMN, pa.string(), nullable=False),
-        pa.array([plan[_DATASET_INDEX_COLUMN]] * batch.num_rows, type=pa.string()))
+        pa.field(_DATASET_ID_COLUMN, pa.string(), nullable=False),
+        pa.array([plan[_DATASET_ID_COLUMN]] * batch.num_rows, type=pa.string()))
     for name in _CONTROLS:
         if name not in batch.column_names:
             continue
@@ -559,7 +559,7 @@ def _merged_episodes(plans, schema):
                         # original quantiles cannot describe the merged IDs.
                         if feature not in _CONTROLS or not statistic.startswith("q"):
                             stats.setdefault(feature, {})[statistic] = value
-                row[_DATASET_INDEX_COLUMN] = plan[_DATASET_INDEX_COLUMN]
+                row[_DATASET_ID_COLUMN] = plan[_DATASET_ID_COLUMN]
                 episode = row["episode_index"]
                 if "subtask_index" not in plan["control_stats"][episode]:
                     if "subtask_index" in stats:
@@ -605,7 +605,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                 dataset_resources.callback(_close_quietly, dataset, "dataset")
             plans.append({"dataset": dataset, "dataset_resources": dataset_resources,
                           "source": resolved, "info": info,
-                          _DATASET_INDEX_COLUMN: None,
+                          _DATASET_ID_COLUMN: None,
                           "dataset_name": (dataset_name[ordinal] if dataset_name is not None
                                            else None),
                           "schema": schema, "videos": videos,
@@ -630,11 +630,11 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                                         tag_name) is not None:
                         raise ValueError("LeRobot tag %s already exists on %s."
                                          % (tag_name, component.identifier))
-            if _DATASET_INDEX_COLUMN not in _target_schema(tables["episodes"]).names:
+            if _DATASET_ID_COLUMN not in _target_schema(tables["episodes"]).names:
                 raise ValueError("LeRobot append requires a source-local table group.")
             source_rows = _read_arrow(tables["datasets"], [
-                "index", "info", "tasks", "subtasks", "stats",
-            ]).sort_by("index").to_pylist()
+                "id", "info", "tasks", "subtasks", "stats",
+            ]).sort_by("id").to_pylist()
             if not source_rows:
                 raise ValueError("LeRobot append requires an initialized table group.")
             ranges = _source_dataset_ranges(source_rows)
@@ -650,16 +650,16 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                         "LeRobot group has incomplete %s data; call "
                         "recover_lerobot_append before appending." % name)
             existing = (table, tables, source_rows, ranges)
-        previous = source_rows[-1]["index"] if existing is not None else None
+        previous = source_rows[-1]["id"] if existing is not None else None
         for plan in plans:
             previous = _next_dataset_uuid(previous)
-            plan[_DATASET_INDEX_COLUMN] = previous
+            plan[_DATASET_ID_COLUMN] = previous
         metadata, stats = _plan_merge(
             plans, extra_dataset_fields, schema_evolution if existing is None else True,
             source_rows if existing is not None else None)
         target_schema = metadata["frame_schema"]
         target_schema = target_schema.append(
-            pa.field(_DATASET_INDEX_COLUMN, pa.string(), nullable=False))
+            pa.field(_DATASET_ID_COLUMN, pa.string(), nullable=False))
         if existing is None:
             table = _create_target_table(connection, table_name, target_schema,
                                          options, metadata,
@@ -705,9 +705,9 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             _validate_lerobot_schema(target_schema, _target_schema(table.raw_table), "append")
             # Validate every component before making any catalog changes.
             requests = [
-                (table.raw_table, target_schema, (*_V3_REQUIRED_FEATURE_DTYPES, _DATASET_INDEX_COLUMN)),
+                (table.raw_table, target_schema, (*_V3_REQUIRED_FEATURE_DTYPES, _DATASET_ID_COLUMN)),
                 (tables["episodes"], metadata["episodes_schema"],
-                 (*_EPISODE_CONTROL_COLUMNS, _DATASET_INDEX_COLUMN)),
+                 (*_EPISODE_CONTROL_COLUMNS, _DATASET_ID_COLUMN)),
                 (tables["datasets"], metadata["datasets_table"].schema,
                  tuple(field.name for field in _DATASETS_SCHEMA if not field.nullable)),
             ]
@@ -785,7 +785,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             _commit_metadata(connection, tables, tag_name, metadata, table.identifier,
                              frames_snapshot, episodes_snapshot)
         else:
-            for column in ("dataset_index", "index"):
+            for column in ("dataset_id", "index"):
                 if table.raw_table.create_global_index(column, index_type="btree") <= 0:
                     raise RuntimeError("LeRobot append did not refresh %s index."
                                        % column)

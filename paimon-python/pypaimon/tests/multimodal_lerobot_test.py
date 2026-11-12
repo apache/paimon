@@ -1724,7 +1724,7 @@ class LeRobotValidationTest(unittest.TestCase):
             self.assertEqual(stats, json.loads(dataset_row["stats"]))
             table = connection.get_table("robot_frames")
             frames = frames.append_column(
-                "dataset_index", pa.array([dataset_row["index"]]))
+                "dataset_id", pa.array([dataset_row["id"]]))
             self.assertEqual([], table.raw_table.tag_manager().list_tags())
             table.add(frames)
             snapshots = connection.create_lerobot_tag("robot_frames", "training")

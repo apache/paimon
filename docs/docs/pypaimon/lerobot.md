@@ -48,7 +48,7 @@ relationships are used by the reader and do not declare database foreign keys.
 
 The same three-table schema is used for one source and for a list of sources.
 
-[![LeRobot metadata files map to the Dataset table, Episode Parquet maps to the Episode table, and frame Parquet plus media map to the Frame table. Dataset and Episode indices relate the three tables.](/img/lerobot-data-model.svg)](/img/lerobot-data-model.svg)
+[![LeRobot metadata files map to the Dataset table, Episode Parquet maps to the Episode table, and frame Parquet plus media map to the Frame table. Dataset IDs and Episode indices relate the three tables.](/img/lerobot-data-model.svg)](/img/lerobot-data-model.svg)
 
 ### Dataset fields
 
@@ -57,7 +57,7 @@ have the same label. UUIDv7 values retain the order of serial imports and append
 
 | Field | Paimon type | Meaning |
 | --- | --- | --- |
-| `index` | `STRING` | UUIDv7 assigned to this source; referenced by frame and Episode `dataset_index`. |
+| `id` | `STRING` | UUIDv7 assigned to this source; referenced by frame and Episode `dataset_id`. |
 | `name` | `STRING`, nullable | Optional label supplied through `dataset_name`; omitted names are null. |
 | `info` | `STRING` | JSON containing the source's original `meta/info.json`, including `features`, `fps`, robot type, and counts. FPS is not a separate column. |
 | `tasks` | `ARRAY<ROW<task_index BIGINT, task STRING>>` | Source-local task IDs and their text from `meta/tasks.parquet`. |
@@ -77,7 +77,7 @@ forced to `BIGINT`.
 
 | Field | Representation | Meaning |
 | --- | --- | --- |
-| `dataset_index` | `STRING` | Source UUID referencing `_datasets.index`. |
+| `dataset_id` | `STRING` | Source UUID referencing `_datasets.id`. |
 | `episode_index` | Source integer type | Episode number within that source, starting at 0. |
 | `dataset_from_index` | Source integer type | Inclusive start of the Episode's source-local frame `index` range. |
 | `dataset_to_index` | Source integer type | Exclusive end of that frame range. |
@@ -106,7 +106,7 @@ names, including dots such as `observation.state`, remain column names.
 
 | Field | Paimon type | Meaning |
 | --- | --- | --- |
-| `dataset_index` | `STRING` | Source UUID referencing `_datasets.index`. |
+| `dataset_id` | `STRING` | Source UUID referencing `_datasets.id`. |
 | `index` | `BIGINT` | Frame position within the original source, across all its Episodes. |
 | `episode_index` | `BIGINT` | Episode containing this frame, within the same source. |
 | `frame_index` | `BIGINT` | Frame position within the Episode; restarts at 0 for each Episode. |
@@ -115,11 +115,11 @@ names, including dots such as `observation.state`, remain column names.
 | `subtask_index` | `BIGINT`, nullable, when declared | ID resolved through that source's `_datasets.subtasks`; null means no subtask label. |
 | Feature columns | Scalars, `ARRAY`, or `BLOB` | Observations, actions, and other features, mapped as described below. |
 
-Within a table group, `(dataset_index, index)` identifies a frame and
-`(dataset_index, episode_index)` identifies an Episode. Task/subtask IDs are
+Within a table group, `(dataset_id, index)` identifies a frame and
+`(dataset_id, episode_index)` identifies an Episode. Task/subtask IDs are
 also scoped to a source. For example, two sources can both contain frame
 `index=0`, Episode `episode_index=0`, and task `task_index=0` with different
-task texts; `dataset_index` keeps them distinct. The training reader derives
+task texts; `dataset_id` keeps them distinct. The training reader derives
 continuous sample positions at read time without rewriting the stored IDs.
 
 ### Mapping the native LeRobot v3 format
