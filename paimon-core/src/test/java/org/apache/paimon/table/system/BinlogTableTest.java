@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -36,7 +37,11 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -49,6 +54,7 @@ import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -120,6 +126,69 @@ public class BinlogTableTest extends TableTestBase {
         List<InternalRow> result = read(updatedBinlogTable);
         List<InternalRow> expectRow = getExpectedResultWithSequenceNumber();
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectRow);
+    }
+
+    @Test
+    public void testStreamingUpdateWithSequenceNumber() throws Exception {
+        String tableName = "binlog_stream_with_seq";
+        catalog.createTable(
+                identifier(tableName),
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("payload", DataTypes.STRING())
+                        .primaryKey("pk")
+                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
+                        .option(CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED.key(), "true")
+                        .option("bucket", "1")
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier(tableName));
+        BinaryString before = BinaryString.fromString("before");
+        BinaryString after = BinaryString.fromString("after");
+        write(table, GenericRow.of(1, before));
+        long nextSnapshotId = table.snapshotManager().latestSnapshotId() + 1;
+        write(
+                table,
+                GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, before),
+                GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, after));
+
+        BinlogTable binlogTable =
+                (BinlogTable)
+                        catalog.getTable(
+                                identifier(tableName + SYSTEM_TABLE_SPLITTER + BinlogTable.BINLOG));
+        StreamTableScan scan = binlogTable.newReadBuilder().newStreamScan();
+        scan.restore(nextSnapshotId);
+        TableScan.Plan plan = scan.plan();
+        assertThat(plan.splits()).hasSize(1);
+        assertThat(((DataSplit) plan.splits().get(0)).isStreaming()).isTrue();
+
+        BinaryString rowKind = BinaryString.fromString(RowKind.UPDATE_AFTER.shortString());
+        GenericArray keys = new GenericArray(new Object[] {1, 1});
+        GenericArray values = new GenericArray(new Object[] {before, after});
+        assertStreamingUpdate(
+                binlogTable.newReadBuilder(), plan, GenericRow.of(rowKind, 1L, keys, values));
+        assertStreamingUpdate(
+                binlogTable.newReadBuilder().withProjection(new int[] {3, 1, 0}),
+                plan,
+                GenericRow.of(values, 1L, rowKind));
+        assertStreamingUpdate(
+                binlogTable.newReadBuilder().withProjection(new int[] {0, 3}),
+                plan,
+                GenericRow.of(rowKind, values));
+    }
+
+    private void assertStreamingUpdate(
+            ReadBuilder readBuilder, TableScan.Plan plan, InternalRow expected) {
+        InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
+        List<InternalRow> rows = new ArrayList<>();
+        assertThatCode(
+                        () ->
+                                readBuilder
+                                        .newRead()
+                                        .createReader(plan)
+                                        .forEachRemaining(row -> rows.add(serializer.copy(row))))
+                .doesNotThrowAnyException();
+        assertThat(rows).containsExactly(expected);
     }
 
     private BinlogTable createBinlogTable(String tableName, boolean enableSequenceNumber)
