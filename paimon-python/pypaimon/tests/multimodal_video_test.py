@@ -248,6 +248,83 @@ class VideoFrameCollatorTest(unittest.TestCase):
         self.assertTrue(executor._shutdown)
         self.assertTrue(all(decoder.closed for decoder in decoders))
 
+    def test_parallel_direct_callbacks_preserve_context(self):
+        try:
+            from contextvars import ContextVar
+        except ImportError:
+            self.skipTest("contextvars requires Python 3.7+")
+        import threading
+
+        marker = ContextVar("decode_marker", default="default")
+        token = marker.set("caller")
+        rows = [{"video": self._descriptor(str(i), b"video", i)} for i in range(2)]
+        try:
+            for batch in (False, True):
+                barrier = threading.Barrier(2)
+
+                def decode(decoder, index, row):
+                    barrier.wait(timeout=5)
+                    return marker.get()
+
+                def decode_batch(decoder, indices, group):
+                    barrier.wait(timeout=5)
+                    return [marker.get()] * len(indices)
+
+                callback = ({"decode_batch_fn": decode_batch} if batch
+                            else {"decode_fn": decode})
+                collator = VideoFrameCollator(
+                    self.table, video_column="video", collate_fn=list,
+                    decoder_factory=lambda stream: _Decoder(stream, []),
+                    decode_parallelism=2, **callback)
+                try:
+                    self.assertEqual(["caller", "caller"],
+                                     [row["frame"] for row in collator(rows)])
+                finally:
+                    collator.close()
+        finally:
+            marker.reset(token)
+
+    def test_parallel_direct_callbacks_preserve_torch_mode(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        rows = [{"video": self._descriptor(str(i), b"video", i)} for i in range(2)]
+        collator = VideoFrameCollator(
+            self.table, video_column="video", collate_fn=list,
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: (
+                torch.is_grad_enabled(), torch.is_inference_mode_enabled()),
+            decode_parallelism=2)
+        try:
+            for mode, expected in ((torch.no_grad(), (False, False)),
+                                   (torch.inference_mode(), (False, True))):
+                with mode:
+                    self.assertEqual([expected, expected],
+                                     [row["frame"] for row in collator(rows)])
+        finally:
+            collator.close()
+
+    def test_direct_pool_survives_variable_video_counts(self):
+        rows = [{"video": self._descriptor(str(i), b"video", i)} for i in range(4)]
+        collator = VideoFrameCollator(
+            self.table, video_column="video", collate_fn=list,
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            max_open_videos=4, decode_parallelism=4)
+        try:
+            collator(rows)
+            executor = collator._decode_pool._executor
+            self.assertIsNotNone(executor)
+            collator(rows[:1])
+            self.assertIs(executor, collator._decode_pool._executor)
+            self.assertFalse(executor._shutdown)
+            collator(rows)
+            self.assertIs(executor, collator._decode_pool._executor)
+        finally:
+            collator.close()
+
     def test_parallel_direct_callback_failure_drains_before_reuse(self):
         import threading
 

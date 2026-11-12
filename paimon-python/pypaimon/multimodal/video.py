@@ -19,6 +19,7 @@
 
 import io
 import os
+import sys
 import weakref
 from collections import OrderedDict, deque
 from collections.abc import Mapping
@@ -26,6 +27,11 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from fractions import Fraction
 from itertools import chain
+
+try:
+    from contextvars import copy_context
+except ImportError:  # Python 3.6
+    copy_context = None
 
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 
@@ -475,6 +481,17 @@ class VideoFrameCollator:
             return
         items = iter(requests.items())
         pending = deque()
+        torch = sys.modules.get("torch")
+        if torch is not None:
+            grad_enabled = torch.is_grad_enabled()
+            inference_enabled = torch.is_inference_mode_enabled()
+
+        def run_decode(decoder, value):
+            if torch is None:
+                return decode(decoder, value)
+            with torch.inference_mode(inference_enabled), \
+                    torch.set_grad_enabled(grad_enabled):
+                return decode(decoder, value)
 
         def submit():
             try:
@@ -483,7 +500,11 @@ class VideoFrameCollator:
                 return
             # Keep cache mutations ordered; pending decoders remain most recent.
             decoder = self._decoder(*key)
-            pending.append(executor.submit(decode, decoder, value))
+            if copy_context is None:
+                pending.append(executor.submit(run_decode, decoder, value))
+            else:
+                context = copy_context()
+                pending.append(executor.submit(context.run, run_decode, decoder, value))
 
         def results():
             while pending:
@@ -538,9 +559,10 @@ class VideoFrameCollator:
         if grouped:
             parallelism = min(self.decode_parallelism, self.max_open_videos, len(grouped))
             requests = OrderedDict(((payload,), frames) for payload, frames in grouped.items())
+            executor = (self._decode_pool.get(min(self.decode_parallelism, self.max_open_videos))
+                        if parallelism > 1 else None)
             with self._map_decoders(
-                    requests, decode, parallelism,
-                    self._decode_pool.get(parallelism)) as results:
+                    requests, decode, parallelism, executor) as results:
                 for _ in results:
                     pass
         return decoded
