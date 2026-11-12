@@ -24,7 +24,7 @@ import weakref
 from collections import OrderedDict, deque
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, wait
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from fractions import Fraction
 from itertools import chain
 
@@ -34,6 +34,78 @@ except ImportError:  # Python 3.6
     copy_context = None
 
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+
+
+_TORCH_AUTOCAST_DEVICE_TYPES = ("cpu", "cuda", "xpu", "ipu", "hpu", "xla", "mps")
+
+
+def _torch_autocast_value(torch, device_type, generic_name, legacy_name=None):
+    generic = getattr(torch, generic_name, None)
+    if generic is not None:
+        try:
+            return generic(device_type)
+        except TypeError:
+            # Torch 2.3's APIs do not accept a device_type argument.
+            pass
+        except RuntimeError:
+            return None
+
+    module = getattr(torch, device_type, None)
+    owners = ((torch, module) if legacy_name is not None else (module,))
+    accessor_name = legacy_name or generic_name
+    for owner in owners:
+        accessor = getattr(owner, accessor_name, None) if owner is not None else None
+        if accessor is not None:
+            try:
+                return accessor()
+            except RuntimeError:
+                return None
+    return None
+
+
+def _capture_torch_thread_context(torch):
+    default_device = torch.get_default_device()
+    device_types = list(_TORCH_AUTOCAST_DEVICE_TYPES)
+    if default_device.type not in device_types:
+        device_types.append(default_device.type)
+
+    legacy_names = {
+        "cpu": ("is_autocast_cpu_enabled", "get_autocast_cpu_dtype"),
+        "cuda": ("is_autocast_enabled", "get_autocast_gpu_dtype"),
+        "xpu": ("is_autocast_xpu_enabled", "get_autocast_xpu_dtype"),
+        "ipu": ("is_autocast_ipu_enabled", "get_autocast_ipu_dtype"),
+        "hpu": ("is_autocast_hpu_enabled", "get_autocast_hpu_dtype"),
+        "xla": ("is_autocast_xla_enabled", "get_autocast_xla_dtype"),
+    }
+    autocast = []
+    for device_type in device_types:
+        enabled_name, dtype_name = legacy_names.get(device_type, (None, None))
+        enabled = _torch_autocast_value(
+            torch, device_type, "is_autocast_enabled", enabled_name)
+        if enabled:
+            dtype = _torch_autocast_value(
+                torch, device_type, "get_autocast_dtype", dtype_name)
+            if dtype is None:
+                raise RuntimeError(
+                    "Cannot capture the Torch autocast dtype for %s." % device_type)
+            autocast.append((device_type, dtype))
+
+    cache_enabled = torch.is_autocast_cache_enabled() if autocast else None
+    return (default_device, torch.is_grad_enabled(),
+            torch.is_inference_mode_enabled(), cache_enabled, autocast)
+
+
+@contextmanager
+def _restore_torch_thread_context(torch, state):
+    default_device, grad_enabled, inference_enabled, cache_enabled, autocast = state
+    with ExitStack() as stack:
+        stack.enter_context(torch.device(default_device))
+        for device_type, dtype in autocast:
+            stack.enter_context(torch.autocast(
+                device_type, dtype=dtype, cache_enabled=cache_enabled))
+        stack.enter_context(torch.inference_mode(inference_enabled))
+        stack.enter_context(torch.set_grad_enabled(grad_enabled))
+        yield
 
 
 def _require_video_av():
@@ -482,15 +554,13 @@ class VideoFrameCollator:
         items = iter(requests.items())
         pending = deque()
         torch = sys.modules.get("torch")
-        if torch is not None:
-            grad_enabled = torch.is_grad_enabled()
-            inference_enabled = torch.is_inference_mode_enabled()
+        torch_context = (_capture_torch_thread_context(torch)
+                         if torch is not None else None)
 
         def run_decode(decoder, value):
             if torch is None:
                 return decode(decoder, value)
-            with torch.inference_mode(inference_enabled), \
-                    torch.set_grad_enabled(grad_enabled):
+            with _restore_torch_thread_context(torch, torch_context):
                 return decode(decoder, value)
 
         def submit():

@@ -306,6 +306,35 @@ class VideoFrameCollatorTest(unittest.TestCase):
         finally:
             collator.close()
 
+    def test_parallel_direct_callbacks_preserve_torch_device_and_autocast(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        rows = [{"video": self._descriptor(str(i), b"video", i)} for i in range(2)]
+        collator = VideoFrameCollator(
+            self.table, video_column="video", collate_fn=list,
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: torch.empty(1).device.type,
+            decode_parallelism=2)
+        try:
+            with torch.device("meta"):
+                inline = collator(rows[:1])[0]["frame"]
+                parallel = [row["frame"] for row in collator(rows)]
+            self.assertEqual([inline, inline], parallel)
+            self.assertEqual("meta", inline)
+
+            collator.decode_fn = lambda decoder, index, row: torch.mm(
+                torch.ones((2, 2)), torch.ones((2, 2))).dtype
+            with torch.device("cpu"), torch.autocast("cpu", dtype=torch.bfloat16):
+                inline = collator(rows[:1])[0]["frame"]
+                parallel = [row["frame"] for row in collator(rows)]
+            self.assertEqual([inline, inline], parallel)
+            self.assertEqual(torch.bfloat16, inline)
+        finally:
+            collator.close()
+
     def test_direct_pool_survives_variable_video_counts(self):
         rows = [{"video": self._descriptor(str(i), b"video", i)} for i in range(4)]
         collator = VideoFrameCollator(
