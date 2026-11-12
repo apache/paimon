@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.manifest.ManifestCommittable;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -32,14 +33,15 @@ import java.util.List;
 public class NoopCommittableStateManager implements CommittableStateManager<ManifestCommittable> {
 
     @Override
-    public void initializeState(
+    public List<ManifestCommittable> initializeState(
             Committer.Context context, Committer<?, ManifestCommittable> committer)
             throws Exception {
-        // nothing to do
+        return Collections.emptyList();
     }
 
     @Override
-    public void snapshotState(List<ManifestCommittable> committables) throws Exception {
+    public void snapshotState(List<ManifestCommittable> committables, boolean completeEndInput)
+            throws Exception {
         // nothing to do
     }
 }
