@@ -327,6 +327,9 @@ conn.append_to_lerobot("robot_merged", ["/data/source_d", "/data/source_e"],
                        parallelism=2)
 ```
 
+Create a tag separately with `conn.create_lerobot_tag("robot_merged", "tag")`
+after a coordinated append succeeds; `tag_name` is not accepted on that append.
+
 If source C adds `humidity`, the append adds that column to `_frames`, keeps A
 and B, and reads their humidity values as null. New `extra_dataset_fields` columns
 are added to `_datasets` in the same way; omitted extra fields receive nulls.
@@ -337,6 +340,8 @@ For a non-coordinated append, if the sole writer stops between component commits
 unfinished Frame and Episode commits back to the Dataset metadata boundary.
 Nullable columns added before a failed append remain in the schema and are
 reused on retry. This recovery is not a repair mechanism for concurrent appends.
+It rejects groups containing published coordinated Datasets; retry those with
+the same `dataset_id` instead.
 
 For FileIO URIs, pass credentials through `source_options`:
 

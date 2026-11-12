@@ -127,15 +127,25 @@ def _dataset_absent(table, physical_id, source_hash, count, dataset_table=False)
         builder = pinned.new_read_builder().with_projection([key, hash_key])
         from pypaimon.common.predicate_builder import PredicateBuilder
         builder.with_filter(PredicateBuilder(pinned.fields).equal(key, physical_id))
-        rows = builder.new_read().to_arrow(builder.new_scan().plan().splits()).to_pylist()
-        if not rows:
+        row_count = 0
+        read = builder.new_read()
+        for split in builder.new_scan().plan().splits():
+            with read.to_arrow_batch_reader([split]) as batches:
+                for batch in batches:
+                    row_count += batch.num_rows
+                    ids = batch.column(batch.schema.get_field_index(key))
+                    if pc.any(pc.fill_null(pc.not_equal(ids, physical_id), True)).as_py():
+                        raise ValueError("LeRobot Dataset %r has conflicting %s rows."
+                                         % (physical_id, table.identifier))
+                    hashes = batch.column(batch.schema.get_field_index(hash_key))
+                    if pc.any(pc.fill_null(pc.not_equal(hashes, source_hash), True)).as_py():
+                        raise ValueError("LeRobot Dataset %r was used for different sources."
+                                         % physical_id)
+        if not row_count:
             return True
-        if len(rows) != count or any(row[key] != physical_id for row in rows):
+        if row_count != count:
             raise ValueError("LeRobot Dataset %r has conflicting %s rows."
                              % (physical_id, table.identifier))
-        if any(row[hash_key] != source_hash for row in rows):
-            raise ValueError("LeRobot Dataset %r was used for different sources."
-                             % physical_id)
         return False
 
     return condition
@@ -250,9 +260,15 @@ def _recover_incomplete_append(connection, table_name):
     identifiers = _companion_table_identifiers(frames)
     datasets = connection.catalog.get_table(identifiers["datasets"])
     episodes = connection.catalog.get_table(identifiers["episodes"])
-    source_rows = _read_arrow(datasets, ["id", "info"]).sort_by("id").to_pylist()
+    source_columns = ["id", "info"]
+    if "coordinated" in _target_schema(datasets).names:
+        source_columns.append("coordinated")
+    source_rows = _read_arrow(datasets, source_columns).sort_by("id").to_pylist()
     if not source_rows:
         raise ValueError("LeRobot append recovery requires Dataset metadata.")
+    if any(row.get("coordinated") for row in source_rows):
+        raise ValueError("Count-based LeRobot recovery cannot run on a group with "
+                         "coordinated Datasets; retry the same dataset_id instead.")
     ranges = _source_dataset_ranges(source_rows)
     expected = {"frames": ranges[-1][4], "episodes": ranges[-1][2]}
     restored = []
@@ -766,6 +782,9 @@ def _import_sources(connection, table_name, sources, batch_size, options,
     physical_id = _stable_dataset_uuid(dataset_id) if dataset_id is not None else None
     source_hash = _source_hash(sources, dataset_name, extra_dataset_fields) \
         if dataset_id is not None else None
+    if coordinated and tag_name is not None:
+        raise ValueError("Coordinated LeRobot append cannot create a tag; "
+                         "call create_lerobot_tag after publication.")
     if append and physical_id is not None and _published_dataset(
             connection, table_name, physical_id, source_hash):
         return
@@ -903,6 +922,26 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             if (old_stats is None) != (new_stats is None):
                 raise ValueError("LeRobot append has incompatible statistics.")
             _validate_lerobot_schema(target_schema, _target_schema(table.raw_table), "append")
+            if not coordinated:
+                # Internal coordination columns are optional for ordinary appends to
+                # groups created before those columns existed. The business schema
+                # evolution switch must not require adding them.
+                target_schema = pa.schema([
+                    field for field in target_schema
+                    if field.name != _SOURCE_HASH_COLUMN or
+                    field.name in _target_schema(table.raw_table).names],
+                    metadata=target_schema.metadata)
+                metadata["episodes_schema"] = pa.schema([
+                    field for field in metadata["episodes_schema"]
+                    if field.name != _SOURCE_HASH_COLUMN or
+                    field.name in existing_episode_schema.names],
+                    metadata=metadata["episodes_schema"].metadata)
+                dataset_schema = _target_schema(tables["datasets"])
+                missing_internal = {"source_hash", "coordinated", "control_counts"} - \
+                    set(dataset_schema.names)
+                if missing_internal:
+                    metadata["datasets_table"] = metadata["datasets_table"].drop(
+                        sorted(missing_internal))
             # Validate every component before making any catalog changes.
             requests = [
                 (table.raw_table, target_schema, (*_V3_REQUIRED_FEATURE_DTYPES, _DATASET_ID_COLUMN)),

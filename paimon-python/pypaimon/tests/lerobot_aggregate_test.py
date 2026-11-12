@@ -33,6 +33,7 @@ import pytest
 from pypaimon import Schema as PaimonSchema
 from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.data.generic_variant import GenericVariant
+from pypaimon.schema.schema_change import SchemaChange
 import pypaimon.multimodal as pm
 from pypaimon.multimodal.lerobot import aggregate
 from pypaimon.multimodal.lerobot.aggregate import _batch_stats, _transform_frames
@@ -2641,6 +2642,70 @@ def test_coordinated_reader_ignores_unpublished_episodes(setup, tmp_path):
                       side_effect=AssertionError("completed Frames must not be prepared")):
         conn.append_to_lerobot("robot", third, dataset_id="ingest-c", coordinated=True)
     assert len(pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))) == 12
+
+
+def test_recovery_rejects_coordinated_group_with_later_publication(setup, tmp_path):
+    conn, sources = setup
+    third = source(tmp_path / "third", value=40)
+    conn.load_from_lerobot("robot", sources[0])
+    with patch.object(aggregate, "_append_arrow",
+                      side_effect=RuntimeError("injected Dataset failure")):
+        with pytest.raises(RuntimeError, match="injected Dataset failure"):
+            conn.append_to_lerobot(
+                "robot", sources[1], dataset_id="ingest-b", coordinated=True)
+    conn.append_to_lerobot("robot", third, dataset_id="ingest-c", coordinated=True)
+    before = [rows(conn, "robot_" + name).num_rows
+              for name in ("frames", "episodes", "datasets")]
+    assert before == [15, 6, 2]
+    with pytest.raises(ValueError, match="Count-based LeRobot recovery"):
+        conn.recover_lerobot_append("robot")
+    assert [rows(conn, "robot_" + name).num_rows
+            for name in ("frames", "episodes", "datasets")] == before
+    dataset_ids = set(rows(conn, "robot_datasets")["id"].to_pylist())
+    assert aggregate._stable_dataset_uuid("ingest-c") in dataset_ids
+    assert aggregate._stable_dataset_uuid("ingest-b") not in dataset_ids
+
+
+def test_ordinary_strict_append_preserves_old_internal_schema(setup):
+    conn, sources = setup
+    conn.load_from_lerobot("robot", sources[0])
+    for suffix, internal in (
+            ("frames", [aggregate._SOURCE_HASH_COLUMN]),
+            ("episodes", [aggregate._SOURCE_HASH_COLUMN]),
+            ("datasets", ["source_hash", "coordinated", "control_counts"])):
+        conn.catalog.alter_table(
+            "default.robot_" + suffix,
+            [SchemaChange.drop_column(name) for name in internal])
+    conn.append_to_lerobot("robot", sources[1], schema_evolution=False)
+    assert [rows(conn, "robot_" + name).num_rows
+            for name in ("frames", "episodes", "datasets")] == [10, 4, 2]
+    assert "source_hash" not in rows(conn, "robot_datasets").column_names
+
+
+def test_coordinated_append_rejects_tag_before_writing(setup):
+    conn, sources = setup
+    conn.load_from_lerobot("robot", sources[0])
+    with pytest.raises(ValueError, match="cannot create a tag"):
+        conn.append_to_lerobot(
+            "robot", sources[1], dataset_id="ingest-b",
+            coordinated=True, tag_name="after")
+    assert rows(conn, "robot_frames").num_rows == 5
+    assert rows(conn, "robot_datasets").num_rows == 1
+
+
+def test_coordinated_dedup_scans_batches_without_materializing_frames(setup):
+    from pypaimon.read.table_read import TableRead
+
+    conn, sources = setup
+    conn.load_from_lerobot("robot", sources[0])
+    conn.append_to_lerobot("robot", sources[1],
+                           dataset_id="ingest-b", coordinated=True)
+    frames = conn.get_table("robot_frames").raw_table
+    condition = aggregate._dataset_absent(
+        frames, aggregate._stable_dataset_uuid("ingest-b"),
+        aggregate._source_hash([sources[1]], None, None), 5)
+    with patch.object(TableRead, "to_arrow", side_effect=AssertionError("full read")):
+        assert not condition(frames.snapshot_manager().get_latest_snapshot())
 
 
 def test_coordinated_reader_stats_follow_published_order(setup, tmp_path):
