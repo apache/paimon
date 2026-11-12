@@ -2435,6 +2435,65 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             5: b'blob-5',
         })
 
+    def test_update_blob_column_after_rolling_write(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'blob.target-file-size': '1 B',
+        })
+        table_name = 'test_db.blob_update_column_after_rolling_write'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        num_rows = 10
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'blob_data': [f'blob-{i}'.encode() for i in range(num_rows)],
+        }, schema=pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        table = self.catalog.get_table(table_name)
+        snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        blob_files = [
+            f for split in table.new_read_builder().new_scan().plan().splits()
+            for f in split.files if f.file_name.endswith('.blob')
+        ]
+        self.assertEqual(len(blob_files), num_rows)
+        for f in blob_files:
+            self.assertEqual(f.min_sequence_number, snapshot_id, f.file_name)
+            self.assertEqual(f.max_sequence_number, snapshot_id, f.file_name)
+
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(
+            ['blob_data'])
+        update_messages = table_update.update_by_arrow_with_row_id(
+            pa.Table.from_pydict({
+                '_ROW_ID': pa.array([2, 7], type=pa.int64()),
+                'blob_data': pa.array(
+                    [b'updated-2', b'updated-7'], type=pa.large_binary()),
+            }))
+        update_builder.new_commit().commit(update_messages)
+
+        table = self.catalog.get_table(table_name)
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        by_id = {
+            row['id']: row['blob_data']
+            for row in result.select(['id', 'blob_data']).to_pylist()
+        }
+        expected = {i: f'blob-{i}'.encode() for i in range(num_rows)}
+        expected[2] = b'updated-2'
+        expected[7] = b'updated-7'
+        self.assertEqual(by_id, expected)
+
     @pytest.mark.python_plan
     def test_blob_write_read_partition(self):
         """Test complete end-to-end blob functionality: write blob data and read it back to verify correctness."""
