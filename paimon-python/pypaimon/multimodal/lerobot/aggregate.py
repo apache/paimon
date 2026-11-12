@@ -72,6 +72,8 @@ _REBUILT_INFO = {
 }
 _DATASET_ID_COLUMN = "dataset_id"
 _SOURCE_HASH_COLUMN = "__paimon_source_hash"
+_COORDINATED_COLUMN = "__paimon_coordinated"
+_CONTROL_COUNTS_COLUMN = "__paimon_control_counts"
 _EPISODE_VARIANT_GROUPS = ("meta", "data", "videos", "stats")
 _EPISODE_EXTRA_VARIANT_GROUP_DESCRIPTION = "pypaimon.lerobot.episode-variant-group"
 _VARIANT_TYPE = pa.struct([
@@ -88,9 +90,9 @@ _SOURCE_SUBTASKS_TYPE = pa.list_(pa.struct([
 ]))
 _DATASETS_SCHEMA = pa.schema([
     pa.field("id", pa.string(), nullable=False),
-    pa.field("source_hash", pa.string()),
-    pa.field("coordinated", pa.bool_()),
-    pa.field("control_counts", pa.string()),
+    pa.field(_SOURCE_HASH_COLUMN, pa.string()),
+    pa.field(_COORDINATED_COLUMN, pa.bool_()),
+    pa.field(_CONTROL_COUNTS_COLUMN, pa.string()),
     pa.field("name", pa.string()),
     pa.field("info", pa.string(), nullable=False),
     pa.field("tasks", _SOURCE_TASKS_TYPE, nullable=False),
@@ -118,7 +120,7 @@ def _source_hash(sources, names, extra_fields):
 def _dataset_absent(table, physical_id, source_hash, count, dataset_table=False):
     """Check the same pinned snapshot the optimistic commit will use."""
     key = "id" if dataset_table else _DATASET_ID_COLUMN
-    hash_key = "source_hash" if dataset_table else _SOURCE_HASH_COLUMN
+    hash_key = _SOURCE_HASH_COLUMN
 
     def condition(snapshot):
         if snapshot is None:
@@ -157,15 +159,15 @@ def _published_dataset(connection, table_name, physical_id, source_hash):
     frames = connection.get_table(frames_name).raw_table
     identifiers = _companion_table_identifiers(frames)
     datasets = connection.catalog.get_table(identifiers["datasets"])
-    if "source_hash" not in _target_schema(datasets).names:
+    if _SOURCE_HASH_COLUMN not in _target_schema(datasets).names:
         return False
-    builder = datasets.new_read_builder().with_projection(["id", "source_hash"])
+    builder = datasets.new_read_builder().with_projection(["id", _SOURCE_HASH_COLUMN])
     from pypaimon.common.predicate_builder import PredicateBuilder
     builder.with_filter(PredicateBuilder(datasets.fields).equal("id", physical_id))
     rows = builder.new_read().to_arrow(builder.new_scan().plan().splits()).to_pylist()
     if not rows:
         return False
-    if len(rows) != 1 or rows[0]["source_hash"] != source_hash:
+    if len(rows) != 1 or rows[0][_SOURCE_HASH_COLUMN] != source_hash:
         raise ValueError("LeRobot Dataset %r was used for different sources."
                          % physical_id)
     return True
@@ -261,12 +263,12 @@ def _recover_incomplete_append(connection, table_name):
     datasets = connection.catalog.get_table(identifiers["datasets"])
     episodes = connection.catalog.get_table(identifiers["episodes"])
     source_columns = ["id", "info"]
-    if "coordinated" in _target_schema(datasets).names:
-        source_columns.append("coordinated")
+    if _COORDINATED_COLUMN in _target_schema(datasets).names:
+        source_columns.append(_COORDINATED_COLUMN)
     source_rows = _read_arrow(datasets, source_columns).sort_by("id").to_pylist()
     if not source_rows:
         raise ValueError("LeRobot append recovery requires Dataset metadata.")
-    if any(row.get("coordinated") for row in source_rows):
+    if any(row.get(_COORDINATED_COLUMN) for row in source_rows):
         raise ValueError("Count-based LeRobot recovery cannot run on a group with "
                          "coordinated Datasets; retry the same dataset_id instead.")
     ranges = _source_dataset_ranges(source_rows)
@@ -591,9 +593,9 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
     metadata["datasets_table"] = pa.Table.from_pylist([
         {
             "id": plan[_DATASET_ID_COLUMN],
-            "source_hash": plan.get("source_hash"),
-            "coordinated": plan.get("coordinated"),
-            "control_counts": None,
+            _SOURCE_HASH_COLUMN: plan.get("source_hash"),
+            _COORDINATED_COLUMN: plan.get("coordinated"),
+            _CONTROL_COUNTS_COLUMN: None,
             "name": plan["dataset_name"],
             "info": json.dumps(_json_value(plan["info"]),
                                ensure_ascii=False, separators=(",", ":")),
@@ -845,8 +847,8 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             if _DATASET_ID_COLUMN not in _target_schema(tables["episodes"]).names:
                 raise ValueError("LeRobot append requires a source-local table group.")
             source_columns = [name for name in (
-                "id", "info", "tasks", "subtasks", "stats", "source_hash",
-                "coordinated", "control_counts")
+                "id", "info", "tasks", "subtasks", "stats", _SOURCE_HASH_COLUMN,
+                _COORDINATED_COLUMN, _CONTROL_COUNTS_COLUMN)
                 if name in _target_schema(tables["datasets"]).names]
             source_rows = _read_arrow(tables["datasets"], source_columns).sort_by("id").to_pylist()
             if not source_rows:
@@ -864,7 +866,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                         raise ValueError(
                             "LeRobot group has incomplete %s data; call "
                             "recover_lerobot_append before appending." % name)
-                if any(row.get("coordinated") for row in source_rows):
+                if any(row.get(_COORDINATED_COLUMN) for row in source_rows):
                     raise ValueError("LeRobot group has coordinated Datasets; "
                                      "append with coordinated=True.")
             existing = (table, tables, source_rows, ranges)
@@ -937,7 +939,8 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                     field.name in existing_episode_schema.names],
                     metadata=metadata["episodes_schema"].metadata)
                 dataset_schema = _target_schema(tables["datasets"])
-                missing_internal = {"source_hash", "coordinated", "control_counts"} - \
+                missing_internal = {_SOURCE_HASH_COLUMN, _COORDINATED_COLUMN,
+                                    _CONTROL_COUNTS_COLUMN} - \
                     set(dataset_schema.names)
                 if missing_internal:
                     metadata["datasets_table"] = metadata["datasets_table"].drop(
@@ -1043,7 +1046,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                     episode_commit.abort(episode_messages)
         rows = metadata["datasets_table"].to_pylist()
         for row, plan in zip(rows, plans):
-            row["control_counts"] = json.dumps(
+            row[_CONTROL_COUNTS_COLUMN] = json.dumps(
                 plan["control_counts"], sort_keys=True, separators=(",", ":"))
         metadata["datasets_table"] = pa.Table.from_pylist(
             rows, schema=metadata["datasets_table"].schema)

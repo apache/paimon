@@ -82,6 +82,39 @@ class TestRowIdCheckFromMessages(unittest.TestCase):
 
 class TestExplicitCommitAbort(unittest.TestCase):
 
+    def test_reused_stream_commit_applies_new_condition(self):
+        import pyarrow as pa
+        from pypaimon import CatalogFactory, Schema
+
+        with TemporaryDirectory() as warehouse:
+            catalog = CatalogFactory.create({'warehouse': warehouse})
+            catalog.create_database('default', True)
+            schema = pa.schema([pa.field('id', pa.int64())])
+            options = {'write.native.enabled': 'false',
+                       'commit.native.enabled': 'false',
+                       'read.native.enabled': 'false'}
+            catalog.create_table('default.t', Schema.from_pyarrow_schema(
+                schema, options=options), False)
+            table = catalog.get_table('default.t')
+            builder = table.new_stream_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(pa.Table.from_pylist([{'id': 1}], schema=schema))
+                self.assertIsNone(commit.commit(writer.prepare_commit(1), 1))
+                self.assertIsNotNone(commit._python_commit)
+
+                writer.write_arrow(pa.Table.from_pylist([{'id': 2}], schema=schema))
+                messages = writer.prepare_commit(2)
+                commit.with_commit_condition(lambda snapshot: False)
+                self.assertIs(commit.commit(messages, 2), False)
+
+                read = table.new_read_builder()
+                actual = read.new_read().to_arrow(read.new_scan().plan().splits())
+                self.assertEqual([{'id': 1}], actual.to_pylist())
+            finally:
+                writer.close()
+                commit.close()
+
     def test_retry_after_lost_response_keeps_published_files(self):
         import pyarrow as pa
         from pypaimon import CatalogFactory, Schema

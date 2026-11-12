@@ -68,6 +68,9 @@ class TableCommit:
         if not callable(condition):
             raise TypeError("commit condition must be callable")
         self._commit_condition = condition
+        # StreamTableCommit can reuse a backend created by an earlier checkpoint.
+        if self._python_commit is not None:
+            self._python_commit.file_store_commit.commit_condition = condition
         return self
 
     def _commit(

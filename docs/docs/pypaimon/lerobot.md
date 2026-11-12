@@ -59,15 +59,18 @@ stable UUID from the caller's `dataset_id` (or use it directly if it is a UUID).
 | Field | Paimon type | Meaning |
 | --- | --- | --- |
 | `id` | `STRING` | Source UUID referenced by frame and Episode `dataset_id`. |
-| `source_hash` | `STRING`, nullable | Hash of the import request used to reject a reused identity with different sources. |
-| `coordinated` | `BOOLEAN`, nullable | Whether this source used coordinated append. |
-| `control_counts` | `STRING`, nullable | Source-local task/subtask counts used to rebuild training statistics after concurrent appends. |
+| `__paimon_source_hash` | `STRING`, nullable | Hash of the import request used to reject a reused identity with different sources. |
+| `__paimon_coordinated` | `BOOLEAN`, nullable | Whether this source used coordinated append. |
+| `__paimon_control_counts` | `STRING`, nullable | Source-local task/subtask counts used to rebuild training statistics after concurrent appends. |
 | `name` | `STRING`, nullable | Optional label supplied through `dataset_name`; omitted names are null. |
 | `info` | `STRING` | JSON containing the source's original `meta/info.json`, including `features`, `fps`, robot type, and counts. FPS is not a separate column. |
 | `tasks` | `ARRAY<ROW<task_index BIGINT, task STRING>>` | Source-local task IDs and their text from `meta/tasks.parquet`. |
 | `subtasks` | `ARRAY<ROW<subtask_index BIGINT, subtask STRING>>`, nullable | Optional source-local subtask IDs and text from `meta/subtasks.parquet`. |
 | `stats` | `STRING`, nullable | Source-level feature statistics as JSON; null when `meta/stats.json` is absent. |
 | Extra text columns | `STRING` or `MAP<STRING, STRING>`, nullable | Columns declared by [extra dataset text fields](#extra-dataset-text-fields). |
+
+The `__paimon_*` columns are internal; user text columns named `source_hash`,
+`coordinated`, or `control_counts` remain ordinary extra fields.
 
 Decode `info` and `stats` with `json.loads`. `tasks` and `subtasks` are typed
 arrays of records, not JSON strings. No separate info, task, subtask, or global

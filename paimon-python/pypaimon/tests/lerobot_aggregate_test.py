@@ -529,7 +529,8 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     assert "source_frame_to_index" not in episodes.column_names
     datasets = rows(conn, "merged_datasets").sort_by("id")
     assert datasets.column_names == [
-        "id", "source_hash", "coordinated", "control_counts",
+        "id", "__paimon_source_hash", "__paimon_coordinated",
+        "__paimon_control_counts",
         "name", "info", "tasks", "subtasks", "stats",
     ]
     assert datasets["name"].to_pylist() == [None, None]
@@ -2672,14 +2673,57 @@ def test_ordinary_strict_append_preserves_old_internal_schema(setup):
     for suffix, internal in (
             ("frames", [aggregate._SOURCE_HASH_COLUMN]),
             ("episodes", [aggregate._SOURCE_HASH_COLUMN]),
-            ("datasets", ["source_hash", "coordinated", "control_counts"])):
+            ("datasets", [aggregate._SOURCE_HASH_COLUMN,
+                          aggregate._COORDINATED_COLUMN,
+                          aggregate._CONTROL_COUNTS_COLUMN])):
         conn.catalog.alter_table(
             "default.robot_" + suffix,
             [SchemaChange.drop_column(name) for name in internal])
     conn.append_to_lerobot("robot", sources[1], schema_evolution=False)
     assert [rows(conn, "robot_" + name).num_rows
             for name in ("frames", "episodes", "datasets")] == [10, 4, 2]
-    assert "source_hash" not in rows(conn, "robot_datasets").column_names
+    assert aggregate._SOURCE_HASH_COLUMN not in rows(conn, "robot_datasets").column_names
+
+
+def test_historical_text_columns_do_not_override_coordination_metadata(setup, tmp_path):
+    pytest.importorskip("datasets")
+    conn, sources = setup
+    third = source(tmp_path / "third", value=40)
+    extras = {name: name + ".txt"
+              for name in ("source_hash", "coordinated", "control_counts")}
+    for ordinal, uri in enumerate((*sources, third)):
+        for name, filename in extras.items():
+            (Path(uri[7:]) / filename).write_text("source-%d-%s" % (ordinal, name))
+    conn.load_from_lerobot("robot", sources[0], extra_dataset_fields=extras)
+    for suffix, internal in (
+            ("frames", [aggregate._SOURCE_HASH_COLUMN]),
+            ("episodes", [aggregate._SOURCE_HASH_COLUMN]),
+            ("datasets", [aggregate._SOURCE_HASH_COLUMN,
+                          aggregate._COORDINATED_COLUMN,
+                          aggregate._CONTROL_COUNTS_COLUMN])):
+        conn.catalog.alter_table(
+            "default.robot_" + suffix,
+            [SchemaChange.drop_column(name) for name in internal])
+
+    assert conn.recover_lerobot_append("robot") == []
+    conn.append_to_lerobot("robot", sources[1], schema_evolution=False,
+                           extra_dataset_fields=extras)
+    assert rows(conn, "robot_datasets").schema.field("coordinated").type == pa.string()
+    conn.append_to_lerobot("robot", third, dataset_id="ingest-c",
+                           coordinated=True, extra_dataset_fields=extras)
+    conn.append_to_lerobot("robot", third, dataset_id="ingest-c",
+                           coordinated=True, extra_dataset_fields=extras)
+    datasets = rows(conn, "robot_datasets")
+    assert datasets.num_rows == 3
+    for name in extras:
+        assert set(datasets[name].to_pylist()) == {
+            "source-%d-%s" % (ordinal, name) for ordinal in range(3)}
+    assert datasets[aggregate._COORDINATED_COLUMN].to_pylist().count(True) == 1
+    reader = pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))
+    try:
+        assert len(reader) == 15
+    finally:
+        reader.close()
 
 
 def test_coordinated_append_rejects_tag_before_writing(setup):
@@ -2864,7 +2908,7 @@ def test_coordinated_bootstrap_retains_dataset_id(setup):
                            dataset_id="source-a", coordinated=True)
     first = rows(conn, "robot_datasets").to_pylist()
     assert first[0]["id"] == aggregate._stable_dataset_uuid("source-a")
-    assert first[0]["source_hash"] is not None
+    assert first[0][aggregate._SOURCE_HASH_COLUMN] is not None
     conn.append_to_lerobot("robot", sources[0],
                            dataset_id="source-a", coordinated=True)
     assert rows(conn, "robot_frames").num_rows == 5

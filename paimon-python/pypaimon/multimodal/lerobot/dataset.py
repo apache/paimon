@@ -40,7 +40,8 @@ import pyarrow.compute as pc
 
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.multimodal.lerobot.aggregate import (
-    _CONTROLS, _REBUILT_INFO, _merge_stats,
+    _CONTROLS, _CONTROL_COUNTS_COLUMN, _COORDINATED_COLUMN,
+    _REBUILT_INFO, _merge_stats,
 )
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.lerobot.metadata import (
@@ -1098,10 +1099,10 @@ def _load_dataset(table, tag_name):
     datasets_table = _component_table(
         catalog, catalog.get_table(identifiers["datasets"]), tag_name)
     source_columns = ["id", "name", "info", "tasks", "subtasks", "stats"]
-    if "control_counts" in _target_schema(datasets_table).names:
-        source_columns.append("control_counts")
-    if "coordinated" in _target_schema(datasets_table).names:
-        source_columns.append("coordinated")
+    if _CONTROL_COUNTS_COLUMN in _target_schema(datasets_table).names:
+        source_columns.append(_CONTROL_COUNTS_COLUMN)
+    if _COORDINATED_COLUMN in _target_schema(datasets_table).names:
+        source_columns.append(_COORDINATED_COLUMN)
     source_rows = _read_arrow(datasets_table, source_columns).sort_by("id").to_pylist()
     datasets = ([{key: value for key, value in row.items()
                   if key not in ("tasks", "subtasks", "stats")}
@@ -1121,7 +1122,7 @@ def _load_dataset(table, tag_name):
         feature["shape"] = tuple(feature["shape"])
     if source_local_layout:
         episode_snapshot = episodes_table.snapshot_manager().get_latest_snapshot()
-        recompute_controls = (any(row.get("coordinated") for row in source_rows)
+        recompute_controls = (any(row.get(_COORDINATED_COLUMN) for row in source_rows)
                               or episode_snapshot is not None
                               and episode_snapshot.next_row_id != len(episodes))
         stats = _merged_source_stats(
@@ -1281,8 +1282,8 @@ def _published_control_stats(sources, frames_table, task_maps,
     controls = {"task_index": (task_maps, {}),
                 "subtask_index": (subtask_maps, {})}
     for ordinal, source in enumerate(sources):
-        histograms = (json.loads(source["control_counts"])
-                      if source.get("control_counts") is not None else
+        histograms = (json.loads(source[_CONTROL_COUNTS_COLUMN])
+                      if source.get(_CONTROL_COUNTS_COLUMN) is not None else
                       _frame_control_counts(
                           frames_table, source["id"],
                           [name for name, (maps, unused) in controls.items()
