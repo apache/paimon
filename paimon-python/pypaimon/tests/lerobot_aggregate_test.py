@@ -17,9 +17,11 @@
 import json
 import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from decimal import Decimal
 from pathlib import Path
+from threading import Barrier
 from unittest.mock import patch
 
 import numpy as np
@@ -525,7 +527,10 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     assert "source_frame_from_index" not in episodes.column_names
     assert "source_frame_to_index" not in episodes.column_names
     datasets = rows(conn, "merged_datasets").sort_by("id")
-    assert datasets.column_names == ["id", "name", "info", "tasks", "subtasks", "stats"]
+    assert datasets.column_names == [
+        "id", "source_hash", "coordinated", "control_counts",
+        "name", "info", "tasks", "subtasks", "stats",
+    ]
     assert datasets["name"].to_pylist() == [None, None]
     assert "fps" not in datasets.column_names
     assert [json.loads(value)["fps"] for value in datasets["info"].to_pylist()] == [10, 10]
@@ -2496,3 +2501,328 @@ def test_append_recovery_keeps_new_columns_nullable_and_allows_retry(setup):
     path.write_text(original_info)
     conn.append_to_lerobot("merged", sources[1])
     assert frame_rows(conn, "merged_frames")["humidity"].to_pylist() == [None] * 5 + [1.] * 5
+
+
+def test_coordinated_append_accepts_two_clients_for_one_group(setup, tmp_path):
+    pytest.importorskip("datasets")
+    conn, sources = setup
+    third = source(tmp_path / "third", value=40)
+    conn.load_from_lerobot("robot", [sources[0]])
+    options = {"warehouse": str(tmp_path / "warehouse")}
+
+    def append(uri, dataset_id):
+        client = pm.connect(options=options)
+        client.append_to_lerobot(
+            "robot", uri, dataset_id=dataset_id, coordinated=True)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(append, uri, dataset_id)
+                   for uri, dataset_id in ((sources[1], "ingest-b"),
+                                           (third, "ingest-c"))]
+        for future in futures:
+            future.result()
+
+    assert rows(conn, "robot_datasets").num_rows == 3
+    assert rows(conn, "robot_episodes").num_rows == 6
+    assert rows(conn, "robot_frames").num_rows == 15
+    from pypaimon.multimodal.lerobot.dataset import _load_dataset
+    _, metadata = _load_dataset(conn.get_table("robot_frames"), None)
+    assert len(metadata.episodes) == 6
+    reader = pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))
+    assert len(reader) == 15
+    assert reader[14]["index"].item() == 14
+    append(sources[1], "ingest-b")
+    assert rows(conn, "robot_datasets").num_rows == 3
+
+
+def test_coordinated_append_deduplicates_two_clients(setup, tmp_path):
+    conn, sources = setup
+    add_frame_feature(sources[1], "vendor", "int64", [3] * 5)
+    conn.load_from_lerobot("robot", [sources[0]])
+    options = {"warehouse": str(tmp_path / "warehouse")}
+
+    def append():
+        pm.connect(options=options).append_to_lerobot(
+            "robot", sources[1], dataset_id="ingest-b", coordinated=True)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(append) for unused in range(2)]
+        for future in futures:
+            future.result()
+    assert rows(conn, "robot_frames").num_rows == 10
+    assert rows(conn, "robot_episodes").num_rows == 4
+    assert rows(conn, "robot_datasets").num_rows == 2
+
+
+def test_coordinated_dataset_text_field_named_dataset_index(setup, tmp_path):
+    conn, sources = setup
+    (Path(sources[1][7:]) / "notes.txt").write_text("user metadata")
+    conn.load_from_lerobot("robot", [sources[0]])
+    options = {"warehouse": str(tmp_path / "warehouse")}
+    barrier = Barrier(2)
+    prepare = aggregate._prepare_dataset
+
+    def prepare_together(*args, **kwargs):
+        messages = prepare(*args, **kwargs)
+        barrier.wait(timeout=10)
+        return messages
+
+    def append():
+        pm.connect(options=options).append_to_lerobot(
+            "robot", sources[1], dataset_id="ingest-b", coordinated=True,
+            extra_dataset_fields={"dataset_index": "notes.txt"})
+
+    with patch.object(aggregate, "_prepare_dataset", side_effect=prepare_together):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(append) for unused in range(2)]
+            for future in futures:
+                future.result()
+    assert [rows(conn, "robot_" + name).num_rows
+            for name in ("frames", "episodes", "datasets")] == [10, 4, 2]
+    assert rows(conn, "robot_datasets")["dataset_index"].to_pylist().count(
+        "user metadata") == 1
+    for name in ("frames", "episodes", "datasets"):
+        path = tmp_path / "warehouse/default.db" / ("robot_" + name)
+        assert len(list(path.glob("bucket-*/data-*"))) == 2
+
+
+def test_coordinated_append_resumes_after_frames_commit(setup):
+    pytest.importorskip("datasets")
+    conn, sources = setup
+    conn.load_from_lerobot("robot", [sources[0]])
+    original = aggregate._commit_messages
+    calls = [0]
+
+    def fail_before_episodes(commit, messages):
+        calls[0] += 1
+        if calls[0] == 2:
+            raise RuntimeError("injected Episode failure")
+        return original(commit, messages)
+
+    with patch.object(aggregate, "_commit_messages", side_effect=fail_before_episodes):
+        with pytest.raises(RuntimeError, match="injected Episode failure"):
+            conn.append_to_lerobot(
+                "robot", sources[1], dataset_id="ingest-b", coordinated=True)
+    assert rows(conn, "robot_frames").num_rows == 10
+    assert rows(conn, "robot_datasets").num_rows == 1
+    assert len(pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))) == 5
+    with pytest.raises(ValueError, match="different sources"):
+        conn.append_to_lerobot(
+            "robot", sources[0], dataset_id="ingest-b", coordinated=True)
+
+    with patch.object(aggregate, "_prepare_dataset",
+                      side_effect=AssertionError("completed Frames must not be prepared")):
+        conn.append_to_lerobot("robot", sources[1], dataset_id="ingest-b", coordinated=True)
+    assert rows(conn, "robot_frames").num_rows == 10
+    assert rows(conn, "robot_episodes").num_rows == 4
+    assert rows(conn, "robot_datasets").num_rows == 2
+    assert len(pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))) == 10
+
+
+def test_coordinated_reader_ignores_unpublished_episodes(setup, tmp_path):
+    pytest.importorskip("datasets")
+    conn, sources = setup
+    third = source(tmp_path / "third", frames=7)
+    conn.load_from_lerobot("robot", [sources[0]])
+    with patch.object(aggregate, "_append_arrow",
+                      side_effect=RuntimeError("injected Dataset failure")):
+        with pytest.raises(RuntimeError, match="injected Dataset failure"):
+            conn.append_to_lerobot(
+                "robot", third, dataset_id="ingest-c", coordinated=True)
+
+    assert rows(conn, "robot_frames").num_rows == 12
+    assert rows(conn, "robot_episodes").num_rows == 4
+    assert rows(conn, "robot_datasets").num_rows == 1
+    reader = pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))
+    assert len(reader) == 5
+    np.testing.assert_allclose(reader.reader.meta.stats["index"]["mean"], [2.0])
+
+    with patch.object(aggregate, "_prepare_dataset",
+                      side_effect=AssertionError("completed Frames must not be prepared")):
+        conn.append_to_lerobot("robot", third, dataset_id="ingest-c", coordinated=True)
+    assert len(pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))) == 12
+
+
+def test_coordinated_reader_stats_follow_published_order(setup, tmp_path):
+    pytest.importorskip("datasets")
+    conn, sources = setup
+    high, low = sorted(("order-a", "order-b"),
+                       key=aggregate._stable_dataset_uuid, reverse=True)
+    seven = source(tmp_path / "seven", tasks=("place", "stack"),
+                   subtasks=("grasp", "release"), frames=7)
+    six = source(tmp_path / "six", tasks=("stack", "pick"),
+                 subtasks=("release", "reach"), frames=6)
+    conn.load_from_lerobot("robot", [sources[0]])
+
+    def check():
+        from pypaimon.multimodal.lerobot import dataset as lerobot_dataset
+        with patch.object(lerobot_dataset, "_frame_control_counts",
+                          side_effect=AssertionError("new group must use saved counts")):
+            reader = pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))
+        try:
+            samples = reader.reader.get_items(range(len(reader)))
+            for name in ("index", "episode_index", "task_index", "subtask_index"):
+                values = np.array([int(row[name]) for row in samples
+                                   if row.get(name) is not None])
+                expected = _batch_stats(values)
+                actual = reader.reader.meta.stats[name]
+                for stat in ("min", "max", "mean", "std", "count"):
+                    np.testing.assert_allclose(actual[stat], expected[stat])
+        finally:
+            reader.close()
+
+    conn.append_to_lerobot("robot", seven, dataset_id=high, coordinated=True)
+    check()
+    conn.append_to_lerobot("robot", six, dataset_id=low, coordinated=True)
+    check()
+
+
+def test_coordinated_race_cleans_definite_loser_files(setup, tmp_path):
+    conn, sources = setup
+    conn.load_from_lerobot("robot", [sources[0]])
+    options = {"warehouse": str(tmp_path / "warehouse")}
+    barrier = Barrier(2)
+    prepare = aggregate._prepare_dataset
+
+    def prepare_together(*args, **kwargs):
+        messages = prepare(*args, **kwargs)
+        barrier.wait(timeout=10)
+        return messages
+
+    def append():
+        pm.connect(options=options).append_to_lerobot(
+            "robot", sources[1], dataset_id="ingest-b", coordinated=True)
+
+    with patch.object(aggregate, "_prepare_dataset", side_effect=prepare_together):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(append) for unused in range(2)]
+            for future in futures:
+                future.result()
+    assert [rows(conn, "robot_" + name).num_rows
+            for name in ("frames", "episodes", "datasets")] == [10, 4, 2]
+    for name in ("frames", "episodes", "datasets"):
+        path = tmp_path / "warehouse/default.db" / ("robot_" + name)
+        assert len(list(path.glob("bucket-*/data-*"))) == 2
+
+
+def test_coordinated_conflicting_sources_clean_loser_files(setup, tmp_path):
+    conn, sources = setup
+    other = source(tmp_path / "other", value=40)
+    conn.load_from_lerobot("robot", [sources[0]])
+    options = {"warehouse": str(tmp_path / "warehouse")}
+    barrier = Barrier(2)
+    prepare = aggregate._prepare_dataset
+
+    def prepare_together(*args, **kwargs):
+        messages = prepare(*args, **kwargs)
+        barrier.wait(timeout=10)
+        return messages
+
+    def append(candidate):
+        pm.connect(options=options).append_to_lerobot(
+            "robot", candidate, dataset_id="ingest-b", coordinated=True)
+
+    with patch.object(aggregate, "_prepare_dataset", side_effect=prepare_together):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(append, candidate)
+                       for candidate in (sources[1], other)]
+            outcomes = []
+            for future in futures:
+                try:
+                    future.result()
+                    outcomes.append("committed")
+                except ValueError as error:
+                    assert "used for different sources" in str(error)
+                    outcomes.append("conflict")
+    assert sorted(outcomes) == ["committed", "conflict"]
+    assert [rows(conn, "robot_" + name).num_rows
+            for name in ("frames", "episodes", "datasets")] == [10, 4, 2]
+    for name in ("frames", "episodes", "datasets"):
+        path = tmp_path / "warehouse/default.db" / ("robot_" + name)
+        assert len(list(path.glob("bucket-*/data-*"))) == 2
+
+
+def test_coordinated_lost_response_preserves_committed_files(setup, tmp_path):
+    from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
+
+    conn, sources = setup
+    conn.load_from_lerobot("robot", [sources[0]])
+    commit = RenamingSnapshotCommit.commit
+    lost = [False]
+
+    def lose_first_response(self, *args, **kwargs):
+        result = commit(self, *args, **kwargs)
+        if result and not lost[0]:
+            lost[0] = True
+            raise OSError("lost snapshot response")
+        return result
+
+    with patch.object(RenamingSnapshotCommit, "commit", lose_first_response):
+        conn.append_to_lerobot("robot", sources[1], dataset_id="ingest-b",
+                               coordinated=True)
+    assert lost[0]
+    assert [rows(conn, "robot_" + name).num_rows
+            for name in ("frames", "episodes", "datasets")] == [10, 4, 2]
+    for name in ("frames", "episodes", "datasets"):
+        path = tmp_path / "warehouse/default.db" / ("robot_" + name)
+        assert len(list(path.glob("bucket-*/data-*"))) == 2
+
+
+def test_coordinated_append_evolves_distinct_columns_concurrently(setup, tmp_path):
+    conn, sources = setup
+    third = source(tmp_path / "third", value=40)
+    add_frame_feature(sources[1], "vendor_b", "int64", [3] * 5)
+    add_frame_feature(third, "vendor_c", "int64", [4] * 5)
+    conn.load_from_lerobot("robot", [sources[0]])
+    options = {"warehouse": str(tmp_path / "warehouse")}
+
+    def append(uri, dataset_id):
+        pm.connect(options=options).append_to_lerobot(
+            "robot", uri, dataset_id=dataset_id, coordinated=True)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(append, uri, dataset_id)
+                   for uri, dataset_id in ((sources[1], "ingest-b"),
+                                           (third, "ingest-c"))]
+        for future in futures:
+            future.result()
+    frames = rows(conn, "robot_frames")
+    assert frames.num_rows == 15
+    assert "vendor_b" in frames.column_names
+    assert "vendor_c" in frames.column_names
+    assert rows(conn, "robot_datasets").num_rows == 3
+
+
+def test_coordinated_bootstrap_retains_dataset_id(setup):
+    conn, sources = setup
+    conn.load_from_lerobot("robot", sources[0],
+                           dataset_id="source-a", coordinated=True)
+    first = rows(conn, "robot_datasets").to_pylist()
+    assert first[0]["id"] == aggregate._stable_dataset_uuid("source-a")
+    assert first[0]["source_hash"] is not None
+    conn.append_to_lerobot("robot", sources[0],
+                           dataset_id="source-a", coordinated=True)
+    assert rows(conn, "robot_frames").num_rows == 5
+    assert rows(conn, "robot_datasets").num_rows == 1
+
+
+def test_dataset_id_requires_coordinated_mode(setup):
+    conn, sources = setup
+    conn.load_from_lerobot("robot", sources[0])
+    with pytest.raises(ValueError, match="dataset_id requires coordinated=True"):
+        conn.append_to_lerobot("robot", sources[1], dataset_id="source-b")
+    assert rows(conn, "robot_datasets").num_rows == 1
+
+
+def test_coordinated_ray_workers_keep_dataset_id(setup, ray_cluster):
+    conn, sources = setup
+    conn.load_from_lerobot("robot", [sources[0]])
+    conn.append_to_lerobot("robot", sources[1], dataset_id="source-b",
+                           coordinated=True, parallelism=2)
+    frames = rows(conn, "robot_frames")
+    assert frames["dataset_id"].to_pylist().count(
+        aggregate._stable_dataset_uuid("source-b")) == 5
+    # Changing preparation parallelism must not change the retry identity.
+    conn.append_to_lerobot("robot", sources[1], dataset_id="source-b",
+                           coordinated=True, parallelism=1)
+    assert rows(conn, "robot_frames").num_rows == 10

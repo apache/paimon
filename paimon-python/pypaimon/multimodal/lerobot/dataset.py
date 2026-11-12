@@ -715,7 +715,8 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
     def _open_frame_rows(self, projection):
         rows = _PaimonTableFrameReader(
             self._frames_table, columns=projection)
-        if rows.num_rows != self._total_frames:
+        if (rows.num_rows < self._total_frames if self.meta.datasets is not None
+                else rows.num_rows != self._total_frames):
             raise ValueError(
                 "Paimon table has %d rows but metadata declares %d frames."
                 % (rows.num_rows, self._total_frames))
@@ -753,7 +754,7 @@ class _SourceEpisodeFrameReader:
                 pa.array(offsets, type=pa.int64()),
                 pa.array(counts, type=pa.int64()),
                 pa.array(values, type=pa.int64()))
-        self.num_rows = reader.num_rows
+        self.num_rows = self._frame_ends[-1] if self._frame_ends else 0
         self.file_io = reader.file_io
         self.snapshot_id = reader.snapshot_id
         self._table = reader._table
@@ -1096,9 +1097,12 @@ def _load_dataset(table, tag_name):
     source_local_layout = "dataset_id" in _target_schema(episodes_table).names
     datasets_table = _component_table(
         catalog, catalog.get_table(identifiers["datasets"]), tag_name)
-    source_rows = _read_arrow(datasets_table, [
-        "id", "name", "info", "tasks", "subtasks", "stats",
-    ]).sort_by("id").to_pylist()
+    source_columns = ["id", "name", "info", "tasks", "subtasks", "stats"]
+    if "control_counts" in _target_schema(datasets_table).names:
+        source_columns.append("control_counts")
+    if "coordinated" in _target_schema(datasets_table).names:
+        source_columns.append("coordinated")
+    source_rows = _read_arrow(datasets_table, source_columns).sort_by("id").to_pylist()
     datasets = ([{key: value for key, value in row.items()
                   if key not in ("tasks", "subtasks", "stats")}
                  for row in source_rows] if source_local_layout else None)
@@ -1116,7 +1120,14 @@ def _load_dataset(table, tag_name):
     for feature in info.get("features", {}).values():
         feature["shape"] = tuple(feature["shape"])
     if source_local_layout:
-        stats = _merged_source_stats(source_rows, episodes_table)
+        episode_snapshot = episodes_table.snapshot_manager().get_latest_snapshot()
+        recompute_controls = (any(row.get("coordinated") for row in source_rows)
+                              or episode_snapshot is not None
+                              and episode_snapshot.next_row_id != len(episodes))
+        stats = _merged_source_stats(
+            source_rows, episodes_table,
+            frames if recompute_controls else None,
+            task_maps, subtask_maps, episodes)
     else:
         value = source_rows[0]["stats"]
         stats = _numpy_stats(json.loads(value)) if value is not None else None
@@ -1221,7 +1232,82 @@ def _merged_source_info(sources, tasks, subtasks):
     return merged
 
 
-def _merged_source_stats(sources, episodes_table):
+def _count_stats(counts):
+    total = sum(counts.values())
+    if not total:
+        return None
+    mean = sum(value * count for value, count in counts.items()) / total
+    variance = sum(count * (value - mean) ** 2
+                   for value, count in counts.items()) / total
+    return {"min": [min(counts)], "max": [max(counts)],
+            "mean": [mean], "std": [math.sqrt(variance)], "count": [total]}
+
+
+def _frame_control_counts(frames_table, dataset_id, fields):
+    if not fields:
+        return {}
+    builder = frames_table.new_read_builder().with_projection(fields)
+    from pypaimon.common.predicate_builder import PredicateBuilder
+    builder.with_filter(PredicateBuilder(frames_table.fields).equal(
+        "dataset_id", dataset_id))
+    reader = builder.new_read()
+    counts = {name: {} for name in fields}
+    for split in builder.new_scan().plan().splits():
+        for batch in reader.to_arrow([split]).to_batches():
+            for name in fields:
+                target = counts[name]
+                for value in batch[name].to_pylist():
+                    if value is not None:
+                        key = str(int(value))
+                        target[key] = target.get(key, 0) + 1
+    return counts
+
+
+def _published_control_stats(sources, frames_table, task_maps,
+                             subtask_maps, episodes):
+    ranges = _source_dataset_ranges(sources)
+    total_frames = ranges[-1][4]
+    stats = {"index": {
+        "min": [0], "max": [total_frames - 1],
+        "mean": [(total_frames - 1) / 2],
+        "std": [math.sqrt((total_frames ** 2 - 1) / 12)],
+        "count": [total_frames],
+    }}
+    episode_counts = {index: int(length)
+                      for index, length in enumerate(episodes["length"])}
+    if sum(episode_counts.values()) != total_frames:
+        raise ValueError("LeRobot Episode statistics do not cover published Frames.")
+    stats["episode_index"] = _count_stats(episode_counts)
+    controls = {"task_index": (task_maps, {}),
+                "subtask_index": (subtask_maps, {})}
+    for ordinal, source in enumerate(sources):
+        histograms = (json.loads(source["control_counts"])
+                      if source.get("control_counts") is not None else
+                      _frame_control_counts(
+                          frames_table, source["id"],
+                          [name for name, (maps, unused) in controls.items()
+                           if maps is not None]))
+        for name, (maps, merged) in controls.items():
+            if maps is None:
+                continue
+            local = histograms.get(name, {})
+            if name == "task_index" and sum(local.values()) != (
+                    ranges[ordinal][4] - ranges[ordinal][3]):
+                raise ValueError("LeRobot Dataset has incomplete task_index counts.")
+            for key, count in local.items():
+                index = int(key)
+                if not 0 <= index < len(maps[ordinal]) or count <= 0:
+                    raise ValueError("LeRobot Dataset has invalid %s counts." % name)
+                mapped = maps[ordinal][index]
+                merged[mapped] = merged.get(mapped, 0) + count
+    for name, (maps, counts) in controls.items():
+        if maps is not None and counts:
+            stats[name] = _count_stats(counts)
+    return stats
+
+
+def _merged_source_stats(sources, episodes_table, frames_table=None,
+                         task_maps=None, subtask_maps=None, episodes=None):
     values = [source.get("stats") for source in sources]
     if all(value is None for value in values):
         return None
@@ -1233,6 +1319,10 @@ def _merged_source_stats(sources, episodes_table):
         name: (decoded[0][name] if len(decoded) == 1 else
                _merge_stats([value[name] for value in decoded if name in value]))
         for name in names if name not in _CONTROLS}
+    if frames_table is not None:
+        merged.update(_published_control_stats(
+            sources, frames_table, task_maps, subtask_maps, episodes))
+        return _numpy_stats(merged)
     columns = _target_schema(episodes_table).names
     if "stats" in columns:
         stats_rows = _read_arrow(episodes_table, ["stats"])["stats"].to_pylist()
@@ -1301,6 +1391,8 @@ def _episode_dataset(table, datasets=None):
     data = _read_arrow(table, projection)
     if datasets is not None:
         physical_ids = [dataset["id"] for dataset in datasets]
+        data = data.filter(pc.is_in(
+            data["dataset_id"], value_set=pa.array(physical_ids, type=pa.string())))
         ordinals = pc.index_in(data["dataset_id"],
                                value_set=pa.array(physical_ids, type=pa.string()))
         if ordinals.null_count:
@@ -1436,9 +1528,8 @@ def _source_dataset_ranges(datasets):
     for ordinal, dataset in enumerate(datasets):
         try:
             identifier = dataset["id"]
-            if not isinstance(identifier, str) or str(uuid.UUID(identifier)) != identifier \
-                    or uuid.UUID(identifier).version != 7:
-                raise ValueError("id must be a canonical UUIDv7 string")
+            if not isinstance(identifier, str) or str(uuid.UUID(identifier)) != identifier:
+                raise ValueError("id must be a canonical UUID string")
             if previous_id is not None and identifier <= previous_id:
                 raise ValueError("id must be unique and sorted")
             previous_id = identifier

@@ -53,6 +53,8 @@ def load_from_lerobot(
         extra_dataset_fields: Optional[Mapping[str, str]] = None,
         schema_evolution: bool = True,
         append: bool = False,
+        dataset_id: Optional[str] = None,
+        coordinated: bool = False,
 ) -> None:
     """Import one or more LeRobot v3 sources into a new Paimon table group.
 
@@ -79,6 +81,14 @@ def load_from_lerobot(
         raise ValueError("parallelism must be a positive integer.")
     if not isinstance(schema_evolution, bool):
         raise ValueError("schema_evolution must be a boolean.")
+    if not isinstance(coordinated, bool):
+        raise ValueError("coordinated must be a boolean.")
+    if coordinated and dataset_id is None:
+        raise ValueError("coordinated import requires a dataset_id.")
+    if dataset_id is not None and not coordinated:
+        raise ValueError("dataset_id requires coordinated=True.")
+    if dataset_id is not None and (not isinstance(dataset_id, str) or not dataset_id.strip()):
+        raise ValueError("dataset_id must be a non-empty string.")
     if dataset_name is not None:
         if isinstance(dataset_name, str):
             dataset_name = [dataset_name]
@@ -95,13 +105,16 @@ def load_from_lerobot(
         source = [source]
     if not source:
         raise ValueError("LeRobot sources must not be empty.")
+    if dataset_id is not None and len(source) != 1:
+        raise ValueError("dataset_id requires exactly one source.")
     if tag_name is not None:
         _validate_tag_name(tag_name)
     from pypaimon.multimodal.lerobot.aggregate import _import_sources
     return _import_sources(
         connection, table_name, source, batch_size, options,
         _validated_source_options(source_options), tag_name, parallelism,
-        dataset_name, extra_dataset_fields, schema_evolution, append)
+        dataset_name, extra_dataset_fields, schema_evolution, append,
+        dataset_id, coordinated)
 
 
 def _validated_counts(info, source):
