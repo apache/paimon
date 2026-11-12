@@ -690,9 +690,6 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
             if sources is None or dataset_index >= len(sources):
                 raise ValueError("LeRobot source dataset_index %d does not exist."
                                  % dataset_index)
-            source = sources[dataset_index]
-            if source.get("source_ordinal") != dataset_index:
-                raise ValueError("LeRobot source dataset indices are not contiguous.")
             begin, end = _source_dataset_ranges(sources)[dataset_index][1:3]
             episodes = list(range(begin, end))
         self.tag_name = tag_name
@@ -1100,8 +1097,8 @@ def _load_dataset(table, tag_name):
     datasets_table = _component_table(
         catalog, catalog.get_table(identifiers["datasets"]), tag_name)
     source_rows = _read_arrow(datasets_table, [
-        "index", "source_ordinal", "name", "info", "tasks", "subtasks", "stats",
-    ]).sort_by("source_ordinal").to_pylist()
+        "index", "name", "info", "tasks", "subtasks", "stats",
+    ]).sort_by("index").to_pylist()
     datasets = ([{key: value for key, value in row.items()
                   if key not in ("tasks", "subtasks", "stats")}
                  for row in source_rows] if source_local_layout else None)
@@ -1433,17 +1430,16 @@ def _source_dataset_ranges(datasets):
     """Derive source ranges from the original counts in each source's info."""
     result = []
     episode_offset = frame_offset = 0
-    seen_ids = set()
+    previous_id = None
     for ordinal, dataset in enumerate(datasets):
         try:
-            if operator.index(dataset["source_ordinal"]) != ordinal:
-                raise ValueError("source_ordinal must be contiguous")
             identifier = dataset["index"]
-            if not isinstance(identifier, str) or str(uuid.UUID(identifier)) != identifier:
-                raise ValueError("index must be a canonical UUID string")
-            if identifier in seen_ids:
-                raise ValueError("index must be unique")
-            seen_ids.add(identifier)
+            if not isinstance(identifier, str) or str(uuid.UUID(identifier)) != identifier \
+                    or uuid.UUID(identifier).version != 7:
+                raise ValueError("index must be a canonical UUIDv7 string")
+            if previous_id is not None and identifier <= previous_id:
+                raise ValueError("index must be unique and sorted")
+            previous_id = identifier
             info = json.loads(dataset["info"] if "info" in dataset else dataset["info_json"])
             if not isinstance(info, dict):
                 raise ValueError("info must be a JSON object")

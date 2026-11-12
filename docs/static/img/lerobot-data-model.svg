@@ -42,7 +42,7 @@ under the License.
     <rect x="532" y="132" width="440" height="152" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
     <text x="550" y="165" font-size="23" font-weight="700" fill="#2166b1">robot_data_datasets</text>
     <text x="550" y="195" font-size="18">One row per source</text>
-    <text x="550" y="225" font-size="18">index (UUID), source_ordinal, name, info</text>
+    <text x="550" y="225" font-size="18">index (UUIDv7), name, info</text>
     <text x="550" y="255" font-size="18">tasks, subtasks, stats</text>
 
     <path d="M 554 286 V 354" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>

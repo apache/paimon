@@ -53,13 +53,11 @@ The same three-table schema is used for one source and for a list of sources.
 ### Dataset fields
 
 `robot_data_datasets` has one row for each source, even when multiple sources
-have the same label. Source ordinals follow the input order; appends allocate
-new ordinals after the existing sources.
+have the same label. UUIDv7 values retain the order of serial imports and appends.
 
 | Field | Paimon type | Meaning |
 | --- | --- | --- |
-| `index` | `STRING` | UUID assigned to this source; referenced by frame and Episode `dataset_index`. |
-| `source_ordinal` | `BIGINT` | Source order, starting at 0; later appends use the next ordinal. This is not an association key. |
+| `index` | `STRING` | UUIDv7 assigned to this source; referenced by frame and Episode `dataset_index`. |
 | `name` | `STRING`, nullable | Optional label supplied through `dataset_name`; omitted names are null. |
 | `info` | `STRING` | JSON containing the source's original `meta/info.json`, including `features`, `fps`, robot type, and counts. FPS is not a separate column. |
 | `tasks` | `ARRAY<ROW<task_index BIGINT, task STRING>>` | Source-local task IDs and their text from `meta/tasks.parquet`. |
@@ -209,8 +207,8 @@ source is rejected before creating tables to avoid losing original frame IDs.
 Sources must share robot type and compatible definitions for common features. Each source retains its own
 FPS from `info`; different source frame rates are handled automatically. Use
 `PaimonLeRobotDataset` to train from mixed-FPS groups. Pass `dataset_index=N` to
-that reader to select source ordinal `N`; this reader argument is not the stored
-UUID. Frame-rate handling is automatic and does not
+that reader to select the source at position `N` in UUID order; this reader
+argument is not the stored UUID. Frame-rate handling is automatic and does not
 require an import option.
 
 ### Schema evolution
