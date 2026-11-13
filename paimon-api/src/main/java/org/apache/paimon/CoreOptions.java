@@ -1033,8 +1033,9 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether this writer acquires a REST commit lease only when retrying a conflicting publication "
-                                    + "attempt. The first attempt is optimistic. Can be set dynamically for a writer and requires "
+                            "Whether this writer acquires a REST commit lease when retrying a conflicting publication. "
+                                    + "The first attempt is optimistic for retryable operations. Rollback as latest and "
+                                    + "manifest repair acquire the lease before preparing their single attempt. Can be set dynamically for a writer and requires "
                                     + "rest.commit.lock-enabled on the server-side table.");
 
     public static final ConfigOption<Duration> COMMIT_TIMEOUT =

@@ -1534,7 +1534,7 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td><h5>rest.commit.retry-acquire-lock</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether this writer acquires a REST commit lease only when retrying a conflicting publication attempt. The first attempt is optimistic. Can be set dynamically for a writer and requires rest.commit.lock-enabled on the server-side table.</td>
+            <td>Whether this writer acquires a REST commit lease when retrying a conflicting publication. The first attempt is optimistic for retryable operations. Rollback as latest and manifest repair acquire the lease before preparing their single attempt. Can be set dynamically for a writer and requires rest.commit.lock-enabled on the server-side table.</td>
         </tr>
         <tr>
             <td><h5>row-tracking.enabled</h5></td>

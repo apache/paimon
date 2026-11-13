@@ -751,8 +751,9 @@ paths:
       description: >-
         Requires the server-side table property rest.commit.lock-enabled=true and the same
         permission as committing snapshots. Clients opt into acquisition separately using
-        rest.commit.retry-acquire-lock=true. Their first attempt is optimistic and the
-        client option does not enable the table capability.
+        rest.commit.retry-acquire-lock=true. Retryable operations start optimistically.
+        Rollback as latest and manifest repair acquire the lease before preparing their
+        single attempt. The client option does not enable the table capability.
         Ownership is the exact commitUser: authorized callers that send the same commitUser
         share the lease, so each logical writer must use a unique commitUser. Contention
         returns HTTP 200 with acquired=false. A grant includes the authoritative snapshot head.

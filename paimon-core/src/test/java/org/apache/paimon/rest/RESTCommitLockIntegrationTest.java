@@ -21,9 +21,11 @@ package org.apache.paimon.rest;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.AppendCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.CompactIncrement;
@@ -34,6 +36,7 @@ import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.operation.RemoveUnexistingManifests;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.requests.CommitLockRequest;
@@ -52,6 +55,7 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
@@ -74,6 +78,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -266,6 +271,157 @@ class RESTCommitLockIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    void reassignRetriesWithLeaseAndRefreshesSnapshot(
+            boolean appendBeforeGrant, @TempDir Path directory) throws Exception {
+        String reassignUser = "reassign-writer";
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("pt", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.REST_COMMIT_LOCK_ENABLED.key(), "true")
+                        .option(CoreOptions.REST_COMMIT_RETRY_ACQUIRE_LOCK.key(), "true")
+                        .option(CoreOptions.COMMIT_MAX_RETRIES.key(), "1")
+                        .option(CoreOptions.COMMIT_MIN_RETRY_WAIT.key(), "1 ms")
+                        .option(CoreOptions.COMMIT_MAX_RETRY_WAIT.key(), "1 ms")
+                        .build();
+        GetTableResponse tableResponse =
+                new GetTableResponse(
+                        "table-id",
+                        "db",
+                        "table",
+                        directory.toUri().toString(),
+                        false,
+                        0,
+                        schema,
+                        null,
+                        0,
+                        null,
+                        0,
+                        null);
+        AtomicReference<Snapshot> head = new AtomicReference<>();
+        AtomicReference<FileStoreTable> tableRef = new AtomicReference<>();
+        AtomicBoolean leaseAcquired = new AtomicBoolean();
+        List<String> events = Collections.synchronizedList(new ArrayList<>());
+        try (MockWebServer server = new MockWebServer()) {
+            server.setDispatcher(
+                    new Dispatcher() {
+                        @Override
+                        public MockResponse dispatch(RecordedRequest request) {
+                            String path = request.getPath();
+                            if (path.endsWith("/commit-lock")) {
+                                CommitLockRequest acquire =
+                                        fromJson(request, CommitLockRequest.class);
+                                assertThat(acquire.getCommitUser()).isEqualTo(reassignUser);
+                                if (appendBeforeGrant) {
+                                    // Publish an append before granting the lease.
+                                    try {
+                                        appendRow(tableRef.get().newBatchWriteBuilder(), 3, "c");
+                                    } catch (Exception e) {
+                                        throw new AssertionError("Concurrent append failed", e);
+                                    }
+                                    events.add("append");
+                                }
+                                leaseAcquired.set(true);
+                                events.add("acquire");
+                                return json(
+                                        new CommitLockResponse(
+                                                true, reassignUser, 100000, 60000, head.get()));
+                            }
+                            if (path.endsWith("/snapshot")) {
+                                Snapshot snapshot = head.get();
+                                return json(
+                                        new GetTableSnapshotResponse(
+                                                snapshot == null
+                                                        ? null
+                                                        : new TableSnapshot(snapshot, 0, 0, 0, 0)));
+                            }
+                            if (path.endsWith("/commit")) {
+                                CommitTableRequest commit =
+                                        fromJson(request, CommitTableRequest.class);
+                                Snapshot previous = head.get();
+                                assertThat(commit.getBaseSnapshotUuid())
+                                        .isEqualTo(previous == null ? null : previous.uuid());
+                                if (reassignUser.equals(commit.getSnapshot().commitUser())) {
+                                    if (!leaseAcquired.get()) {
+                                        events.add("reject");
+                                        return json(Collections.singletonMap("success", false));
+                                    }
+                                    events.add("publish");
+                                }
+                                Snapshot snapshot = commit.getSnapshot();
+                                FileStoreTable table = tableRef.get();
+                                try {
+                                    table.fileIO()
+                                            .writeFile(
+                                                    table.snapshotManager()
+                                                            .snapshotPath(snapshot.id()),
+                                                    snapshot.toJson(),
+                                                    false);
+                                } catch (Exception e) {
+                                    throw new AssertionError("Failed to write snapshot", e);
+                                }
+                                head.set(snapshot);
+                                return json(Collections.singletonMap("success", true));
+                            }
+                            if ("GET".equals(request.getMethod()) && !path.contains("/schemas/")) {
+                                return json(tableResponse);
+                            }
+                            return new MockResponse().setResponseCode(400);
+                        }
+                    });
+            server.start();
+            Options catalogOptions = new Options();
+            catalogOptions.set(RESTCatalogOptions.URI, server.url("/").toString());
+            catalogOptions.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
+            catalogOptions.set(RESTCatalogOptions.TOKEN, "token");
+            catalogOptions.set(RESTTokenFileIO.DATA_TOKEN_ENABLED, false);
+            catalogOptions.set(RESTCatalogInternalOptions.PREFIX, "catalog");
+            try (RESTCatalog catalog =
+                    new RESTCatalog(CatalogContext.create(catalogOptions), false)) {
+                FileStoreTable table =
+                        (FileStoreTable) catalog.getTable(new Identifier("db", "table"));
+                new FileSystemSchemaManager(table.fileIO(), table.location()).createTable(schema);
+                tableRef.set(table);
+                BatchWriteBuilder builder = table.newBatchWriteBuilder();
+                for (int i = 0; i < 3; i++) {
+                    appendRow(builder, i, i == 1 ? "b" : "a");
+                }
+
+                Snapshot before = head.get();
+                DataEvolutionRowIdReassigner.Result result =
+                        new DataEvolutionRowIdReassigner(table).reassign(reassignUser);
+
+                if (appendBeforeGrant) {
+                    assertThat(events).containsExactly("reject", "append", "acquire", "publish");
+                } else {
+                    assertThat(events).containsExactly("reject", "acquire", "publish");
+                }
+                int appends = appendBeforeGrant ? 1 : 0;
+                assertThat(result.reassigned).isTrue();
+                assertThat(result.previousSnapshotId).isEqualTo(before.id() + appends);
+                assertThat(result.firstAssignedRowId).isEqualTo(before.nextRowId() + appends);
+                assertThat(head.get().id()).isEqualTo(before.id() + appends + 1);
+
+                List<Integer> values = new ArrayList<>();
+                ReadBuilder read = table.newReadBuilder();
+                try (RecordReader<InternalRow> reader =
+                        read.newRead().createReader(read.newScan().plan())) {
+                    reader.forEachRemaining(row -> values.add(row.getInt(0)));
+                }
+                if (appendBeforeGrant) {
+                    assertThat(values).containsExactlyInAnyOrder(0, 1, 2, 3);
+                } else {
+                    assertThat(values).containsExactlyInAnyOrder(0, 1, 2);
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     void compactionConflictRollsBackWithoutWriterContextAndReacquires(
             boolean locking, @TempDir Path directory) throws Exception {
         Schema schema =
@@ -449,6 +605,165 @@ class RESTCommitLockIntegrationTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void maintenanceWaitsForLeaseBeforeReadingHead(boolean repairManifests, @TempDir Path directory)
+            throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("pt", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .option(CoreOptions.REST_COMMIT_LOCK_ENABLED.key(), "true")
+                        .option(CoreOptions.REST_COMMIT_RETRY_ACQUIRE_LOCK.key(), "true")
+                        .option(CoreOptions.COMMIT_TIMEOUT.key(), "5 s")
+                        .build();
+        GetTableResponse tableResponse =
+                new GetTableResponse(
+                        "table-id",
+                        "db",
+                        "table",
+                        directory.toUri().toString(),
+                        false,
+                        0,
+                        schema,
+                        null,
+                        0,
+                        null,
+                        0,
+                        null);
+        AtomicReference<Snapshot> head = new AtomicReference<>();
+        AtomicReference<FileStoreTable> tableRef = new AtomicReference<>();
+        AtomicReference<String> leaseOwner = new AtomicReference<>();
+        AtomicReference<org.apache.paimon.fs.Path> manifestToDelete = new AtomicReference<>();
+        List<String> events = Collections.synchronizedList(new ArrayList<>());
+        try (MockWebServer server = new MockWebServer()) {
+            server.setDispatcher(
+                    new Dispatcher() {
+                        @Override
+                        public MockResponse dispatch(RecordedRequest request) {
+                            String path = request.getPath();
+                            if (path.endsWith("/commit-lock")) {
+                                CommitLockRequest acquire =
+                                        fromJson(request, CommitLockRequest.class);
+                                if ("append-writer".equals(leaseOwner.get())) {
+                                    events.add("busy");
+                                    FileStoreTable table = tableRef.get();
+                                    try (BatchTableWrite write =
+                                                    table.newBatchWriteBuilder().newWrite();
+                                            TableCommitImpl commit =
+                                                    table.newCommit("append-writer")) {
+                                        write.write(GenericRow.of(2, BinaryString.fromString("b")));
+                                        commit.commit(write.prepareCommit());
+                                        if (repairManifests) {
+                                            boolean deleted =
+                                                    table.fileIO()
+                                                            .delete(manifestToDelete.get(), false);
+                                            assertThat(deleted).isTrue();
+                                        }
+                                    } catch (Exception e) {
+                                        throw new AssertionError("Concurrent append failed", e);
+                                    }
+                                    return json(CommitLockResponse.unavailable());
+                                }
+                                events.add("acquire");
+                                leaseOwner.set(acquire.getCommitUser());
+                                return json(
+                                        new CommitLockResponse(
+                                                true,
+                                                acquire.getCommitUser(),
+                                                100000,
+                                                60000,
+                                                head.get()));
+                            }
+                            if (path.endsWith("/snapshot")) {
+                                events.add("head");
+                                Snapshot snapshot = head.get();
+                                return json(
+                                        new GetTableSnapshotResponse(
+                                                snapshot == null
+                                                        ? null
+                                                        : new TableSnapshot(snapshot, 0, 0, 0, 0)));
+                            }
+                            if (path.endsWith("/commit")) {
+                                CommitTableRequest commit =
+                                        fromJson(request, CommitTableRequest.class);
+                                Snapshot previous = head.get();
+                                String owner = leaseOwner.get();
+                                Snapshot snapshot = commit.getSnapshot();
+                                if ((owner != null && !owner.equals(snapshot.commitUser()))
+                                        || !Objects.equals(
+                                                commit.getBaseSnapshotUuid(),
+                                                previous == null ? null : previous.uuid())) {
+                                    return json(Collections.singletonMap("success", false));
+                                }
+                                events.add(
+                                        snapshot.commitKind() == Snapshot.CommitKind.APPEND
+                                                ? "append"
+                                                : "publish");
+                                head.set(snapshot);
+                                leaseOwner.set(null);
+                                return json(Collections.singletonMap("success", true));
+                            }
+                            if ("GET".equals(request.getMethod()) && !path.contains("/schemas/")) {
+                                return json(tableResponse);
+                            }
+                            return new MockResponse().setResponseCode(400);
+                        }
+                    });
+            server.start();
+            Options catalogOptions = new Options();
+            catalogOptions.set(RESTCatalogOptions.URI, server.url("/").toString());
+            catalogOptions.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
+            catalogOptions.set(RESTCatalogOptions.TOKEN, "token");
+            catalogOptions.set(RESTTokenFileIO.DATA_TOKEN_ENABLED, false);
+            catalogOptions.set(RESTCatalogInternalOptions.PREFIX, "catalog");
+            try (RESTCatalog catalog =
+                    new RESTCatalog(CatalogContext.create(catalogOptions), false)) {
+                FileStoreTable table =
+                        (FileStoreTable) catalog.getTable(new Identifier("db", "table"));
+                tableRef.set(table);
+                new FileSystemSchemaManager(table.fileIO(), table.location()).createTable(schema);
+                appendRow(table.newBatchWriteBuilder(), 1, "a");
+                Snapshot target = head.get();
+                if (repairManifests) {
+                    String manifest =
+                            table.store()
+                                    .manifestListFactory()
+                                    .create()
+                                    .readDeltaManifests(target)
+                                    .get(0)
+                                    .fileName();
+                    manifestToDelete.set(table.store().pathFactory().toManifestFilePath(manifest));
+                }
+
+                events.clear();
+                leaseOwner.set("append-writer");
+                if (repairManifests) {
+                    assertThat(new RemoveUnexistingManifests(table).execute()).isTrue();
+                } else {
+                    try (FileStoreCommit commit =
+                            table.store().newCommit("rollback-writer", table)) {
+                        assertThat(commit.rollbackToAsLatest(target)).isTrue();
+                    }
+                }
+                assertThat(events)
+                        .startsWith("busy")
+                        .containsSubsequence("append", "acquire", "head", "publish");
+                assertThat(head.get().id()).isEqualTo(target.id() + 2);
+                assertThat(head.get().totalRecordCount()).isEqualTo(1L);
+
+                List<Integer> values = new ArrayList<>();
+                ReadBuilder read = table.newReadBuilder();
+                try (RecordReader<InternalRow> reader =
+                        read.newRead().createReader(read.newScan().plan())) {
+                    reader.forEachRemaining(row -> values.add(row.getInt(0)));
+                }
+                assertThat(values).containsExactly(repairManifests ? 2 : 1);
+            }
+        }
+    }
+
     private static List<String> expected(boolean locking, boolean retry) {
         List<String> events = new ArrayList<>();
         for (int attempt = 0; attempt < (retry ? 2 : 1); attempt++) {
@@ -459,6 +774,15 @@ class RESTCommitLockIntegrationTest {
             events.add("publish");
         }
         return events;
+    }
+
+    private static void appendRow(BatchWriteBuilder builder, int id, String partition)
+            throws Exception {
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(id, BinaryString.fromString(partition)));
+            commit.commit(write.prepareCommit());
+        }
     }
 
     private static <T> T fromJson(RecordedRequest request, Class<T> type) {
