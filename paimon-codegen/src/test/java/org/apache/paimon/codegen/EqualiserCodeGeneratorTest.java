@@ -28,6 +28,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
@@ -36,10 +37,12 @@ import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.InternalVectorSerializer;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Pair;
 
@@ -47,6 +50,7 @@ import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -55,6 +59,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.TypeUtils.castFromString;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -419,6 +424,13 @@ public class EqualiserCodeGeneratorTest {
         assertThat(equaliser.equals(toBinaryRow.apply(left), toBinaryRow.apply(right)))
                 .as("equals(binary %s, binary %s)", left, right)
                 .isEqualTo(equal);
+        // Binary field values in generic rows, as aggregators compare collected elements.
+        InternalRow.FieldGetter getter = InternalRow.createFieldGetter(dataType, 0);
+        Function<Object, GenericRow> binaryField =
+                value -> GenericRow.of(getter.getFieldOrNull(toBinaryRow.apply(value)));
+        assertThat(equaliser.equals(binaryField.apply(left), binaryField.apply(right)))
+                .as("equals(binary field %s, binary field %s)", left, right)
+                .isEqualTo(equal);
     }
 
     @Test
@@ -449,8 +461,6 @@ public class EqualiserCodeGeneratorTest {
                 new GenericMap(singletonMap("k1".getBytes(), 2)),
                 false);
 
-        // multiple keys: same insertion order on both sides so that the serialized
-        // BinaryRow bytes are identical for the BinaryRow/BinaryRow fast path
         Map<Object, Object> leftMap = new LinkedHashMap<>();
         leftMap.put("k1".getBytes(), 1);
         leftMap.put("k2".getBytes(), 2);
@@ -460,15 +470,12 @@ public class EqualiserCodeGeneratorTest {
         assertMapEqualiser(
                 equaliser, mapType, new GenericMap(leftMap), new GenericMap(rightMap), true);
 
-        // entry order must not matter for the element-wise comparison
+        // entry order must not matter
         Map<Object, Object> reversedMap = new LinkedHashMap<>();
         reversedMap.put("k2".getBytes(), 2);
         reversedMap.put("k1".getBytes(), 1);
-        assertThat(
-                        equaliser.equals(
-                                GenericRow.of(new GenericMap(leftMap)),
-                                GenericRow.of(new GenericMap(reversedMap))))
-                .isTrue();
+        assertMapEqualiser(
+                equaliser, mapType, new GenericMap(leftMap), new GenericMap(reversedMap), true);
 
         Map<Object, Object> differentValueMap = new LinkedHashMap<>();
         differentValueMap.put("k1".getBytes(), 1);
@@ -552,11 +559,8 @@ public class EqualiserCodeGeneratorTest {
         Map<Object, Object> reversedMap = new LinkedHashMap<>();
         reversedMap.put(2, 20);
         reversedMap.put(1, 10);
-        assertThat(
-                        equaliser.equals(
-                                GenericRow.of(new GenericMap(leftMap)),
-                                GenericRow.of(new GenericMap(reversedMap))))
-                .isTrue();
+        assertMapEqualiser(
+                equaliser, mapType, new GenericMap(leftMap), new GenericMap(reversedMap), true);
         assertMapEqualiser(
                 equaliser, mapType, new GenericMap(leftMap), new GenericMap(leftMap), true);
 
@@ -569,6 +573,54 @@ public class EqualiserCodeGeneratorTest {
                 new GenericMap(leftMap),
                 new GenericMap(differentValueMap),
                 false);
+    }
+
+    private static Stream<DataType> nestedMapTypes() {
+        DataType mapType = DataTypes.MAP(DataTypes.INT(), DataTypes.INT());
+        DataType multisetType = DataTypes.MULTISET(DataTypes.INT());
+        return Stream.of(
+                DataTypes.ARRAY(mapType),
+                DataTypes.ARRAY(DataTypes.ARRAY(mapType)),
+                DataTypes.ROW(mapType),
+                DataTypes.ARRAY(DataTypes.ROW(mapType)),
+                multisetType,
+                DataTypes.ARRAY(multisetType));
+    }
+
+    @ParameterizedTest
+    @MethodSource("nestedMapTypes")
+    public void testNestedMapEqualiserIgnoresEntryOrderInEveryRepresentation(DataType nestedType) {
+        Map<Object, Object> map = new LinkedHashMap<>();
+        map.put(1, 10);
+        map.put(2, 20);
+        Map<Object, Object> reversedMap = new LinkedHashMap<>();
+        reversedMap.put(2, 20);
+        reversedMap.put(1, 10);
+        Map<Object, Object> otherMap = new LinkedHashMap<>();
+        otherMap.put(1, 10);
+        otherMap.put(2, 21);
+
+        RecordEqualiser equaliser =
+                new EqualiserCodeGenerator(new DataType[] {nestedType})
+                        .generateRecordEqualiser("nestedMapFieldEquals")
+                        .newInstance(Thread.currentThread().getContextClassLoader());
+        assertFloatingPointEqualiser(
+                equaliser, nestedType, nest(nestedType, map), nest(nestedType, reversedMap), true);
+        assertFloatingPointEqualiser(
+                equaliser, nestedType, nest(nestedType, map), nest(nestedType, otherMap), false);
+    }
+
+    /** {@code map} wrapped to match {@code type}; for a multiset the values are the counts. */
+    private static Object nest(DataType type, Map<Object, Object> map) {
+        switch (type.getTypeRoot()) {
+            case ARRAY:
+                return new GenericArray(
+                        new Object[] {nest(((ArrayType) type).getElementType(), map)});
+            case ROW:
+                return GenericRow.of(nest(((RowType) type).getTypeAt(0), map));
+            default:
+                return new GenericMap(map);
+        }
     }
 
     @Test
