@@ -200,6 +200,11 @@ public class PaimonEmbeddedHiveServerContext implements HiveServerContext {
         createAndSetFolderProperty(LOCALSCRATCHDIR, "localscratchdir", hiveConf, basedir);
         createAndSetFolderProperty(HIVEHISTORYFILELOC, "tmp", hiveConf, basedir);
 
+        // Isolate Hive 3.1 results caches to avoid racing on the shared default directory.
+        // Use a string key because this runner is also compiled against Hive 2.
+        createAndSetFolderProperty(
+                "hive.query.results.cache.directory", "query-results-cache", hiveConf, basedir);
+
         // HIVE_WAREHOUSE_SUBDIR_INHERIT_PERMS is removed from Hive 3.1.0
         hiveConf.setBoolean("hive.warehouse.subdir.inherit.perms", true);
 
