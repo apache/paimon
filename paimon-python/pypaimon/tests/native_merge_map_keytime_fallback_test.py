@@ -15,11 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Native fallback for merge_map_with_keytime typed timestamps.
+"""Native fallback for every merge_map_with_keytime table.
 
-Rust only downcasts the timestamp column to ``StringArray``. Public
-reads must fall back to the Python aggregator before opening Native
-when the configured timestamp type is outside CHAR/VARCHAR/STRING.
+STRING cannot stay on Native (UTF-8 vs UTF-16). The previous Native gate
+only cleared STRING-family anyway, so all keytime timestamp types fall
+back to Python before Native opens. Non-keytime aggregators keep Native.
 """
 
 from unittest.mock import Mock, patch
@@ -34,11 +34,7 @@ from pypaimon.execution.native.read.table_read import (
     NativeTableRead,
     _native_merge_map_keytime_timestamp_supported,
 )
-from pypaimon.execution.native.runtime import native_runtime_available
 from pypaimon.schema.data_types import AtomicType, DataField, MapType, RowType
-
-requires_native = pytest.mark.skipif(
-    not native_runtime_available(), reason='pypaimon-rust not installed')
 
 
 def _options(**extra):
@@ -124,34 +120,7 @@ def _keytime_options(ts_field='event_time', agg='merge_map_with_keytime'):
     return _options(**options)
 
 
-# -- capability / early fallback (no Rust required) --------------------
-
-
-def test_string_timestamp_keeps_native_path():
-    table = _table(
-        _keytime_fields(_value_row('STRING')),
-        _keytime_options())
-    assert _native_merge_map_keytime_timestamp_supported(table) is True
-    read = _table_read(table)
-    batch = pa.record_batch(
-        [pa.array(['1']), pa.array([None], type=pa.map_(pa.string(), pa.struct([
-            ('value', pa.string()), ('event_time', pa.string())])))],
-        names=['id', 'updates'])
-    with patch('pypaimon.execution.native.read.table_read.native_read',
-               return_value=[batch]) as native:
-        result = list(NativeTableRead(read).read_batches(
-            [_split()], batch.schema))
-    native.assert_called_once()
-    assert len(result) == 1
-
-
-@pytest.mark.parametrize('ts_type', [
-    'DOUBLE', 'FLOAT', 'TIMESTAMP(9)', 'TIMESTAMP_LTZ(9)', 'TIMESTAMP',
-])
-def test_typed_timestamp_falls_back_before_opening_native(ts_type):
-    table = _table(
-        _keytime_fields(_value_row(ts_type)),
-        _keytime_options())
+def _assert_falls_back_before_native(table):
     assert _native_merge_map_keytime_timestamp_supported(table) is False
     read = _table_read(table)
     with patch('pypaimon.execution.native.read.table_read.native_read') as native:
@@ -160,8 +129,34 @@ def test_typed_timestamp_falls_back_before_opening_native(ts_type):
     native.assert_not_called()
 
 
-def test_default_ts_field_checks_last_row_field():
-    # No ts-field option: last ROW field is the timestamp.
+def _assert_stays_on_native(table, batch):
+    assert _native_merge_map_keytime_timestamp_supported(table) is True
+    read = _table_read(table)
+    with patch('pypaimon.execution.native.read.table_read.native_read',
+               return_value=[batch]) as native:
+        assert list(NativeTableRead(read).read_batches(
+            [_split()], batch.schema))
+    native.assert_called_once()
+
+
+# -- capability / early fallback (no Rust required) --------------------
+
+
+@pytest.mark.parametrize('ts_type', [
+    'STRING', 'CHAR(8)', 'VARCHAR(16)',
+    'BOOLEAN', 'BINARY(4)', 'VARBINARY(8)', 'BYTES',
+    'TINYINT', 'SMALLINT', 'INT', 'INTEGER', 'BIGINT',
+    'FLOAT', 'DOUBLE',
+    'DATE', 'TIME', 'DECIMAL(10, 2)',
+    'TIMESTAMP(9)', 'TIMESTAMP_LTZ(9)', 'TIMESTAMP',
+])
+def test_keytime_falls_back_before_opening_native(ts_type):
+    _assert_falls_back_before_native(_table(
+        _keytime_fields(_value_row(ts_type)),
+        _keytime_options()))
+
+
+def test_default_ts_field_also_falls_back():
     double_last = _table(
         _keytime_fields(_value_row('DOUBLE')),
         _keytime_options(ts_field=None))
@@ -173,45 +168,11 @@ def test_default_ts_field_checks_last_row_field():
             DataField(3, 'ts', AtomicType('STRING')),
         ])),
         _keytime_options(ts_field=None))
-    assert _native_merge_map_keytime_timestamp_supported(string_last) is True
-
-
-def test_missing_ts_field_falls_back_to_python():
-    table = _table(
-        _keytime_fields(_value_row('STRING')),
-        _keytime_options(ts_field='missing'))
-    assert _native_merge_map_keytime_timestamp_supported(table) is False
-    read = _table_read(table)
-    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
-        assert NativeTableRead(read).read_batches(
-            [_split()], pa.schema([('id', pa.string())])) is None
-    native.assert_not_called()
-
-
-def test_non_map_or_empty_row_falls_back_to_python():
-    non_map = _table(
-        [DataField(0, 'id', AtomicType('STRING')),
-         DataField(1, 'updates', AtomicType('STRING'))],
-        _keytime_options())
-    empty_row = _table(
-        _keytime_fields(RowType(True, [])),
-        _keytime_options())
-    non_row_value = _table(
-        [DataField(0, 'id', AtomicType('STRING')),
-         DataField(1, 'updates', MapType(
-             True, AtomicType('STRING'), AtomicType('STRING')))],
-        _keytime_options())
-    for table in (non_map, empty_row, non_row_value):
-        assert _native_merge_map_keytime_timestamp_supported(table) is False
-        read = _table_read(table)
-        with patch('pypaimon.execution.native.read.table_read.native_read') as native:
-            assert NativeTableRead(read).read_batches(
-                [_split()], pa.schema([('id', pa.string())])) is None
-        native.assert_not_called()
+    assert _native_merge_map_keytime_timestamp_supported(string_last) is False
 
 
 def test_non_pk_non_aggregate_and_other_aggs_stay_on_native():
-    fields = _keytime_fields(_value_row('DOUBLE'))
+    fields = _keytime_fields(_value_row('STRING'))
     cases = (
         _table(fields, _keytime_options(), primary_keys=()),
         _table(fields, _options(
@@ -221,28 +182,21 @@ def test_non_pk_non_aggregate_and_other_aggs_stay_on_native():
         _table(fields, _options(
             **{'fields.updates.aggregate-function': 'merge_map'})),
     )
+    batch = pa.record_batch(
+        [pa.array(['1']), pa.array([None], type=pa.map_(
+            pa.string(), pa.struct([
+                ('value', pa.string()), ('event_time', pa.string())])))],
+        names=['id', 'updates'])
     for table in cases:
-        assert _native_merge_map_keytime_timestamp_supported(table) is True
-        read = _table_read(table)
-        batch = pa.record_batch(
-            [pa.array(['1']), pa.array([None], type=pa.map_(
-                pa.string(), pa.struct([
-                    ('value', pa.string()), ('event_time', pa.float64())])))],
-            names=['id', 'updates'])
-        with patch('pypaimon.execution.native.read.table_read.native_read',
-                   return_value=[batch]) as native:
-            assert list(NativeTableRead(read).read_batches(
-                [_split()], batch.schema))
-        native.assert_called_once()
+        _assert_stays_on_native(table, batch)
 
 
-# -- real FileStore public-read fallback / Native path ------------------
+# -- real FileStore public-read fallback --------------------------------
 
 
 def _create_keytime_table(tmp_path, name, ts_pa_type, ts_field='event_time'):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
     catalog.create_database('default', True)
-    # Default-last-field case uses name 'ts' and omits fields.updates.ts-field.
     ts_name = 'ts' if ts_field is None else ts_field
     value_type = pa.struct([
         pa.field('value', pa.string()),
@@ -292,87 +246,63 @@ def _public_read(table):
     return rb.new_read().to_arrow(splits)
 
 
-def test_catalog_double_falls_back_before_native_without_rust(tmp_path):
-    # Works without pypaimon_rust: capability probe + early native_read skip.
+def test_catalog_string_utf16_order_falls_back_and_keeps_python_winner(tmp_path):
     table, pa_schema, ts_name = _create_keytime_table(
-        tmp_path, 'double_probe', pa.float64())
+        tmp_path, 'string_utf16', pa.string())
     assert _native_merge_map_keytime_timestamp_supported(table) is False
-    _write_two_versions(table, pa_schema, ts_name, 9.5, 10.25)
+    older = '\uE000'
+    newer_under_utf8 = '\U00010000'
+    _write_two_versions(table, pa_schema, ts_name, older, newer_under_utf8)
+
     read = table.new_read_builder().new_read()
     splits = table.new_read_builder().new_scan().plan().splits()
     schema = read._output_arrow_schema(splits)
     with patch('pypaimon.execution.native.read.table_read.native_read') as native:
         assert NativeTableRead(read).read_batches(splits, schema) is None
     native.assert_not_called()
+
     rows = _public_read(table).to_pylist()
     assert len(rows) == 1
     updates = dict(rows[0]['updates'])
-    assert updates['k']['value'] == 'new'
-    assert updates['k']['event_time'] == 10.25
+    assert updates['k']['value'] == 'old'
+    assert updates['k'][ts_name] == older
 
 
-@requires_native
-def test_real_native_string_timestamp_not_blocked_by_keytime_gate(tmp_path):
+def test_catalog_ascii_string_still_prefers_lexically_newer(tmp_path):
     table, pa_schema, ts_name = _create_keytime_table(
-        tmp_path, 'string_native', pa.string())
-    assert _native_merge_map_keytime_timestamp_supported(table) is True
+        tmp_path, 'string_ascii', pa.string())
+    assert _native_merge_map_keytime_timestamp_supported(table) is False
     _write_two_versions(table, pa_schema, ts_name, '100', '200')
 
-    keytime_fallback = []
-    original = NativeTableRead._fallback
+    read = table.new_read_builder().new_read()
+    splits = table.new_read_builder().new_scan().plan().splits()
+    schema = read._output_arrow_schema(splits)
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
+        assert NativeTableRead(read).read_batches(splits, schema) is None
+    native.assert_not_called()
 
-    def _track(self, reason, error=None, log=False):
-        if 'merge_map_with_keytime timestamp is not STRING' in reason:
-            keytime_fallback.append(reason)
-        return original(self, reason, error, log)
-
-    with patch.object(NativeTableRead, '_fallback', _track):
-        rows = _public_read(table).to_pylist()
-    # STRING timestamps must clear the keytime gate. Native may still fall
-    # back for unrelated runtime reasons; that is outside this fix's scope.
-    assert keytime_fallback == []
+    rows = _public_read(table).to_pylist()
     assert len(rows) == 1
     updates = dict(rows[0]['updates'])
     assert updates['k']['value'] == 'new'
     assert updates['k'][ts_name] == '200'
 
 
-@requires_native
-@pytest.mark.parametrize('name,ts_type,older,newer', [
-    ('double', pa.float64(), 9.5, 10.25),
-    ('float', pa.float32(), 1.5, 2.5),
-    ('ts_us', pa.timestamp('us'),
-     pa.scalar(1_000_001, type=pa.timestamp('us')).as_py(),
-     pa.scalar(1_000_002, type=pa.timestamp('us')).as_py()),
-    ('tsltz_ns', pa.timestamp('ns', tz='UTC'),
-     pa.scalar(1_000_000_001, type=pa.timestamp('ns', tz='UTC')).as_py(),
-     pa.scalar(1_000_000_002, type=pa.timestamp('ns', tz='UTC')).as_py()),
-])
-def test_real_native_typed_timestamp_falls_back_once(tmp_path, name, ts_type, older, newer):
+def test_catalog_double_falls_back_before_native(tmp_path):
     table, pa_schema, ts_name = _create_keytime_table(
-        tmp_path, 'typed_{}'.format(name), ts_type)
+        tmp_path, 'double_fallback', pa.float64())
     assert _native_merge_map_keytime_timestamp_supported(table) is False
-    _write_two_versions(table, pa_schema, ts_name, older, newer)
+    _write_two_versions(table, pa_schema, ts_name, 9.5, 10.25)
 
+    read = table.new_read_builder().new_read()
+    splits = table.new_read_builder().new_scan().plan().splits()
+    schema = read._output_arrow_schema(splits)
     with patch('pypaimon.execution.native.read.table_read.native_read') as native:
-        arrow = _public_read(table)
+        assert NativeTableRead(read).read_batches(splits, schema) is None
     native.assert_not_called()
-    rows = arrow.to_pylist()
+
+    rows = _public_read(table).to_pylist()
     assert len(rows) == 1
     updates = dict(rows[0]['updates'])
     assert updates['k']['value'] == 'new'
-    assert updates['k'][ts_name] == newer
-
-
-@requires_native
-def test_real_native_default_ts_field_double_falls_back(tmp_path):
-    table, pa_schema, ts_name = _create_keytime_table(
-        tmp_path, 'default_ts_double', pa.float64(), ts_field=None)
-    assert ts_name == 'ts'
-    assert _native_merge_map_keytime_timestamp_supported(table) is False
-    _write_two_versions(table, pa_schema, ts_name, 1.0, 2.0)
-    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
-        rows = _public_read(table).to_pylist()
-    native.assert_not_called()
-    assert len(rows) == 1
-    assert dict(rows[0]['updates'])['k']['value'] == 'new'
+    assert updates['k']['event_time'] == 10.25

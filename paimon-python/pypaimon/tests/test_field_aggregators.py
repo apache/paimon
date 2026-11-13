@@ -2772,12 +2772,16 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
             self.row("A1", "other_a1", "2026-07-19 11:00:00", "2026-07-19 10:00:00"),
         )
 
-    def test_supported_and_unsupported_timestamp_types(self):
+    def test_historical_comparable_timestamp_types_construct(self):
+        # No support whitelist: any atomic type that historically ordered
+        # with Python ``>`` must construct. NUMERIC/DEC/BLOB are aliases /
+        # historical binary that a Java-mirrored allow-list would miss.
         supported = (
             "CHAR(8)", "VARCHAR(16)", "STRING",
             "TINYINT", "SMALLINT", "INT", "INTEGER", "BIGINT",
             "FLOAT", "DOUBLE",
-            "DATE", "TIME", "DECIMAL(10, 2)",
+            "BOOLEAN", "BINARY(4)", "VARBINARY(8)", "BYTES", "BLOB",
+            "DATE", "TIME", "DECIMAL(10, 2)", "NUMERIC(10, 2)", "DEC(10, 2)",
             "TIMESTAMP(3)", "TIMESTAMP(9)", "TIMESTAMP_LTZ(6)",
         )
         for sql_type in supported:
@@ -2788,15 +2792,18 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
             agg = self._make(row_type=RowType(True, fields))
             self.assertIsInstance(agg, FieldMergeMapWithKeyTimeAgg)
 
-        # Keep rejecting types that historical PyPaimon never used for
-        # keytime ordering. FLOAT/DOUBLE stay accepted for compatibility.
-        for sql_type in ("BOOLEAN", "BINARY(4)"):
-            fields = [
-                DataField(0, "actual_value", AtomicType("STRING")),
-                DataField(1, "dbsync_ts", AtomicType(sql_type)),
-            ]
-            with self.assertRaises(ValueError):
-                self._make(row_type=RowType(True, fields))
+        # Nested MAP values are not ordered by ``>``; construction still
+        # succeeds (historical) and compare fails at agg time.
+        fields = [
+            DataField(0, "actual_value", AtomicType("STRING")),
+            DataField(1, "dbsync_ts", MapType(True, AtomicType("STRING"), AtomicType("INT"))),
+        ]
+        agg = self._make(row_type=RowType(True, fields))
+        with self.assertRaises(TypeError):
+            agg.agg(
+                {"k": {"actual_value": "a", "dbsync_ts": {"x": 1}}},
+                {"k": {"actual_value": "b", "dbsync_ts": {"x": 2}}},
+            )
 
     def test_supplementary_plane_string_order(self):
         # U+10000 encodes as UTF-16 surrogates D800 DC00, which sort before
@@ -2848,13 +2855,16 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
 
     def test_ordered_timestamp_types_replace_only_when_newer(self):
         # 9 then 10 is numeric order. Lexicographic string order would keep 9.
-        # FLOAT/DOUBLE match the historical PyPaimon native-order path.
+        # FLOAT/DOUBLE/BINARY/BOOLEAN match historical PyPaimon native ``>``.
         cases = (
             ("TINYINT", 9, 10),
             ("SMALLINT", 9, 10),
             ("INT", 9, 10),
             ("FLOAT", 9.5, 10.25),
             ("DOUBLE", 9.5, 10.25),
+            ("BOOLEAN", False, True),
+            ("BINARY(4)", b"\x00\x00\x00\x09", b"\x00\x00\x00\x0a"),
+            ("VARBINARY(8)", b"\x00\x00\x00\x09", b"\x00\x00\x00\x0a"),
             ("DATE", datetime.date(2024, 1, 1), datetime.date(2024, 1, 2)),
             ("TIME", datetime.time(1, 2, 3), datetime.time(1, 2, 4)),
             ("DECIMAL(10, 2)", BigDecimal("9.00"), BigDecimal("10.00")),

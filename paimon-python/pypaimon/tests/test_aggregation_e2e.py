@@ -601,6 +601,74 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
         self.assertEqual(updates['k']['value'], 'new')
         self.assertEqual(updates['k']['event_time'], newer)
 
+    def test_merge_map_with_keytime_binary_varbinary_boolean_reopen(self):
+        # Historical PyPaimon compared BINARY / VARBINARY / BOOLEAN with
+        # native ``>``. Persist two versions, reopen, and confirm the
+        # public reader keeps the historically newer entry.
+        # Create BINARY(4) from fixed_size_binary so the table type is
+        # BINARY(n); writes still use pa.binary() because Paimon's Arrow
+        # encoding for BINARY/VARBINARY is variable binary.
+        import struct
+
+        cases = (
+            ('agg_keytime_binary4', pa.binary(4), pa.binary(),
+             struct.pack('>I', 9), struct.pack('>I', 10)),
+            ('agg_keytime_varbinary', pa.binary(), pa.binary(),
+             struct.pack('>I', 9), struct.pack('>I', 10)),
+            ('agg_keytime_boolean', pa.bool_(), pa.bool_(), False, True),
+        )
+        for table_name, create_ts_type, write_ts_type, older, newer in cases:
+            with self.subTest(table=table_name):
+                create_value = pa.struct([
+                    pa.field('value', pa.string()),
+                    pa.field('event_time', create_ts_type),
+                ])
+                create_schema = pa.schema([
+                    pa.field('id', pa.string(), nullable=False),
+                    pa.field('updates', pa.map_(pa.string(), create_value)),
+                ])
+                write_value = pa.struct([
+                    pa.field('value', pa.string()),
+                    pa.field('event_time', write_ts_type),
+                ])
+                write_schema = pa.schema([
+                    pa.field('id', pa.string(), nullable=False),
+                    pa.field('updates', pa.map_(pa.string(), write_value)),
+                ])
+                schema = Schema.from_pyarrow_schema(
+                    create_schema,
+                    primary_keys=['id'],
+                    options={
+                        'bucket': '1',
+                        'merge-engine': 'aggregation',
+                        'fields.updates.aggregate-function':
+                            'merge_map_with_keytime',
+                        'fields.updates.ts-field': 'event_time',
+                    },
+                )
+                self.catalog.create_table(
+                    'default.{}'.format(table_name), schema, False)
+                table = self.catalog.get_table(
+                    'default.{}'.format(table_name))
+                self._write_map_table(table, write_schema, [{
+                    'id': '1',
+                    'updates': [('k', {
+                        'value': 'old', 'event_time': older})],
+                }])
+                self._write_map_table(table, write_schema, [{
+                    'id': '1',
+                    'updates': [('k', {
+                        'value': 'new', 'event_time': newer})],
+                }])
+
+                reopened = self.catalog.get_table(
+                    'default.{}'.format(table_name))
+                rows = self._read_map_table(reopened)
+                self.assertEqual(len(rows), 1)
+                updates = dict(rows[0]['updates'])
+                self.assertEqual(updates['k']['value'], 'new')
+                self.assertEqual(updates['k']['event_time'], newer)
+
 
 if __name__ == '__main__':
     unittest.main()
