@@ -245,17 +245,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
 
-    private boolean requiresCommitLock(boolean retry) {
-        return retry || !snapshotCommit.supportsOptimisticCommit();
-    }
-
-    private <T> T runMaintenanceCommit(Callable<T> attempt, boolean lockRequired) {
+    private <T> T runWithLock(Callable<T> callable) {
         try {
-            return lockRequired ? snapshotCommit.runWithLock(attempt) : attempt.call();
+            return snapshotCommit.runWithLock(callable);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to run commit attempt.", e);
+            throw new RuntimeException("Failed to run commit with table lock.", e);
         }
     }
 
@@ -1180,7 +1176,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean detectConflicts,
             @Nullable String newStatsFileName)
             throws Lock.AcquisitionException {
-        boolean lockRequired = requiresCommitLock(retryResult != null);
+        boolean lockRequired = retryResult != null || !snapshotCommit.supportsOptimisticCommit();
         Callable<CommitResult> attempt =
                 () ->
                         tryCommitOnceInternal(
@@ -1197,7 +1193,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 newStatsFileName,
                                 lockRequired);
         try {
-            return lockRequired ? snapshotCommit.runWithLock(attempt) : attempt.call();
+            if (lockRequired) {
+                return snapshotCommit.runWithLock(attempt);
+            }
+            return attempt.call();
         } catch (Lock.AcquisitionException | RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -1707,69 +1706,54 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long nextRowId,
             @Nullable Map<String, String> properties,
             boolean retry) {
-        boolean lockRequired = requiresCommitLock(retry);
-        return runMaintenanceCommit(
-                () ->
-                        replaceManifestListOnce(
-                                latest,
-                                totalRecordCount,
-                                baseManifestList,
-                                deltaManifestList,
-                                indexManifest,
-                                nextRowId,
-                                properties,
-                                lockRequired),
-                lockRequired);
-    }
+        boolean lockRequired = retry || !snapshotCommit.supportsOptimisticCommit();
+        Supplier<Boolean> attempt =
+                () -> {
+                    Snapshot head = snapshotManager.latestSnapshot();
+                    if (head == null || !head.equals(latest)) {
+                        return false;
+                    }
+                    Snapshot newSnapshot =
+                            new Snapshot(
+                                    latest.id() + 1,
+                                    latest.schemaId(),
+                                    baseManifestList.getLeft(),
+                                    baseManifestList.getRight(),
+                                    deltaManifestList.getKey(),
+                                    deltaManifestList.getRight(),
+                                    null,
+                                    null,
+                                    indexManifest,
+                                    commitUser,
+                                    CoreFullVersion.get(),
+                                    Long.MAX_VALUE,
+                                    CommitKind.OVERWRITE,
+                                    System.currentTimeMillis(),
+                                    totalRecordCount,
+                                    0L,
+                                    null,
+                                    latest.watermark(),
+                                    latest.statistics(),
+                                    properties == null || properties.isEmpty() ? null : properties,
+                                    nextRowId,
+                                    null);
 
-    private boolean replaceManifestListOnce(
-            Snapshot latest,
-            long totalRecordCount,
-            Pair<String, Long> baseManifestList,
-            Pair<String, Long> deltaManifestList,
-            @Nullable String indexManifest,
-            @Nullable Long nextRowId,
-            @Nullable Map<String, String> properties,
-            boolean lockRequired) {
-        Snapshot head = snapshotManager.latestSnapshot();
-        if (head == null || !head.equals(latest)) {
-            return false;
+                    return commitSnapshotImpl(latest, newSnapshot, emptyList(), lockRequired);
+                };
+        if (lockRequired) {
+            return runWithLock(attempt::get);
         }
-        Snapshot newSnapshot =
-                new Snapshot(
-                        latest.id() + 1,
-                        latest.schemaId(),
-                        baseManifestList.getLeft(),
-                        baseManifestList.getRight(),
-                        deltaManifestList.getKey(),
-                        deltaManifestList.getRight(),
-                        null,
-                        null,
-                        indexManifest,
-                        commitUser,
-                        CoreFullVersion.get(),
-                        Long.MAX_VALUE,
-                        CommitKind.OVERWRITE,
-                        System.currentTimeMillis(),
-                        totalRecordCount,
-                        0L,
-                        null,
-                        latest.watermark(),
-                        latest.statistics(),
-                        // if empty properties, just set to null
-                        properties == null || properties.isEmpty() ? null : properties,
-                        nextRowId,
-                        null);
-
-        return commitSnapshotImpl(latest, newSnapshot, emptyList(), lockRequired);
+        return attempt.get();
     }
 
     @Override
     public boolean rollbackToAsLatest(Snapshot targetSnapshot) {
-        boolean lockRequired = requiresCommitLock(false);
-        Pair<Boolean, CommitCallback.Context> result =
-                runMaintenanceCommit(
-                        () -> rollbackToAsLatestOnce(targetSnapshot, lockRequired), lockRequired);
+        Pair<Boolean, CommitCallback.Context> result;
+        if (snapshotCommit.supportsOptimisticCommit()) {
+            result = rollbackToAsLatestOnce(targetSnapshot, false);
+        } else {
+            result = runWithLock(() -> rollbackToAsLatestOnce(targetSnapshot, true));
+        }
         if (result.getRight() != null) {
             commitCallbacks.forEach(callback -> callback.call(result.getRight()));
         }
@@ -1940,7 +1924,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int retryCount = 0;
         long startMillis = System.currentTimeMillis();
         while (true) {
-            boolean success = compactManifestOnce(retryCount > 0);
+            boolean success;
+            if (retryCount > 0 || !snapshotCommit.supportsOptimisticCommit()) {
+                success = runWithLock(() -> compactManifestOnce(true));
+            } else {
+                success = compactManifestOnce(false);
+            }
             if (success) {
                 break;
             }
@@ -1958,12 +1947,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private boolean compactManifestOnce(boolean retry) {
-        boolean lockRequired = requiresCommitLock(retry);
-        return runMaintenanceCommit(() -> compactManifestOnceInternal(lockRequired), lockRequired);
-    }
-
-    private boolean compactManifestOnceInternal(boolean lockRequired) {
+    private boolean compactManifestOnce(boolean lockRequired) {
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
         if (latestSnapshot == null) {
