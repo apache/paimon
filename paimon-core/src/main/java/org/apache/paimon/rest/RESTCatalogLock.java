@@ -39,10 +39,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongSupplier;
 
+import static java.util.UUID.randomUUID;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
-
-import static java.util.UUID.randomUUID;
 
 /** A renewable REST commit lease bound to a table, branch and writer. */
 public class RESTCatalogLock implements Lock {
