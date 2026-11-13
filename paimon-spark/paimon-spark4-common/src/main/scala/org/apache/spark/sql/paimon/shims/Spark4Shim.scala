@@ -373,19 +373,37 @@ class Spark4Shim extends SparkShim {
     o.asInstanceOf[Geometry].getBytes
 
   override def toPaimonGeometry(row: InternalRow, pos: Int): Array[Byte] =
-    STUtils.stAsBinary(row.getGeometry(pos))
+    readSpatial(row, pos, geography = false)
 
   override def toPaimonGeometry(array: ArrayData, pos: Int): Array[Byte] =
-    STUtils.stAsBinary(array.getGeometry(pos))
+    readSpatial(array, pos, geography = false)
 
   override def toPaimonGeography(o: Object): Array[Byte] =
     o.asInstanceOf[Geography].getBytes
 
   override def toPaimonGeography(row: InternalRow, pos: Int): Array[Byte] =
-    STUtils.stAsBinary(row.getGeography(pos))
+    readSpatial(row, pos, geography = true)
 
   override def toPaimonGeography(array: ArrayData, pos: Int): Array[Byte] =
-    STUtils.stAsBinary(array.getGeography(pos))
+    readSpatial(array, pos, geography = true)
+
+  private def readSpatial(value: AnyRef, pos: Int, geography: Boolean): Array[Byte] = {
+    val modern = org.apache.spark.SPARK_VERSION.startsWith("4.2.")
+    val getter = if (modern) "getBinaryView" else if (geography) "getGeography" else "getGeometry"
+    val raw = value.getClass
+      .getMethod(getter, java.lang.Integer.TYPE)
+      .invoke(value, java.lang.Integer.valueOf(pos))
+    val name = if (!modern) "stAsBinary" else if (geography) "stGeogAsBinary" else "stGeomAsBinary"
+    val method = Class
+      .forName("org.apache.spark.sql.catalyst.util.STUtils")
+      .getMethods
+      .find(
+        m =>
+          m.getName == name && m.getParameterTypes.length == 1 &&
+            m.getParameterTypes.head.isInstance(raw))
+      .get
+    method.invoke(null, raw).asInstanceOf[Array[Byte]]
+  }
 
   override def toSparkGeometry(wkb: Array[Byte], crs: String): Object = {
     val geometryType = sparkGeometryType(crs)
@@ -394,7 +412,18 @@ class Spark4Shim extends SparkShim {
 
   override def toSparkGeography(wkb: Array[Byte], crs: String, algorithm: String): Object = {
     val geographyType = sparkGeographyType(crs, algorithm)
-    STUtils.stSetSrid(STUtils.stGeogFromWKB(wkb), geographyType.srid)
+    val name =
+      if (org.apache.spark.SPARK_VERSION.startsWith("4.2.")) "stGeogSetSrid" else "stSetSrid"
+    val raw = STUtils.stGeogFromWKB(wkb)
+    val method = Class
+      .forName("org.apache.spark.sql.catalyst.util.STUtils")
+      .getMethods
+      .find(
+        m =>
+          m.getName == name && m.getParameterTypes.length == 2 &&
+            m.getParameterTypes.head.isInstance(raw))
+      .get
+    method.invoke(null, raw, java.lang.Integer.valueOf(geographyType.srid))
   }
 
   override def isSparkGeometryType(dataType: org.apache.spark.sql.types.DataType): Boolean =

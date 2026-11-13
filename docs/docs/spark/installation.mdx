@@ -34,6 +34,10 @@ may require a newer Java runtime. Check its runtime requirements before starting
 
 - Spark 3.x (including 3.5, 3.4, 3.3, 3.2) : Pre-built with Java 8 and Scala 2.12/2.13
 
+Spark 4.2 is available as an experimental source build with Java 17 and Scala 2.13.
+Its independent `spark42` profile recompiles the shared connector modules against Spark 4.2;
+the `spark4` profile continues to build the Spark 4.0 and 4.1 connectors.
+
 ## Download the Connector
 
 Choose the JAR matching your Spark and Scala versions:
@@ -82,7 +86,13 @@ mvn clean package -DskipTests -pl paimon-spark/paimon-spark-4.0 -am -Pspark4
 
 # build paimon spark 4.1
 mvn clean package -DskipTests -pl paimon-spark/paimon-spark-4.1 -am -Pspark4
+
+# build paimon spark 4.2
+mvn clean package -DskipTests -pl paimon-spark/paimon-spark-4.2 -am -Pspark42
 ```
+
+Use `clean` when switching between Spark profiles: the shared modules produce artifacts with
+the same names, but Spark 4.2 changes internal binary interfaces such as `CatalogManager`.
 
 For Spark 3.5, you can find the bundled jar in `./paimon-spark/paimon-spark-3.5/target/paimon-spark-3.5_2.12-@@VERSION@@.jar`.
 

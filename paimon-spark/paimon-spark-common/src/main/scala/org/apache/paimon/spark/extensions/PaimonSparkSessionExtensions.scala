@@ -41,6 +41,12 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     extensions.injectResolutionRule(spark => new PaimonAnalysis(spark))
     extensions.injectResolutionRule(spark => PaimonProcedureResolver(spark))
     extensions.injectResolutionRule(spark => PaimonViewResolver(spark))
+    if (org.apache.spark.SPARK_VERSION.startsWith("4.2.")) {
+      val module =
+        Class.forName("org.apache.spark.sql.catalyst.analysis.Spark42RowLevelCommandRewrite$")
+      val rule = module.getField("MODULE$").get(null).asInstanceOf[Rule[LogicalPlan]]
+      extensions.injectResolutionRule(_ => rule)
+    }
     extensions.injectResolutionRule(spark => PaimonFunctionResolver(spark))
     extensions.injectResolutionRule(spark => SparkShimLoader.shim.createCustomResolution(spark))
     extensions.injectResolutionRule(spark => PaimonIncompatibleResolutionRules(spark))
@@ -75,7 +81,8 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     //     `MergeRows.Keep(Copy, ...)`, ...), so they must not be statically referenced from
     //     `paimon-spark-common` or they'd fail to link when `paimon-spark-4.0` loads this
     //     extension.
-    // The `SPARK_VERSION >= "4.1"` gate ensures we only look them up on 4.1+; the
+    // The `SPARK_VERSION.startsWith("4.1.")` gate keeps these binary-version-specific rules
+    // on 4.1; Spark 4.2 changed the RewriteRowLevelCommand trait. The
     // `ClassNotFoundException` catch handles the spark3 case silently.
     loadSpark41Rule("Spark41UpdateTableRewrite").foreach(
       rule => extensions.injectResolutionRule(_ => rule))
@@ -125,11 +132,11 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
 
   /**
    * Reflectively loads a Spark 4.1-only rewrite rule object from `paimon-spark4-common` by its
-   * simple class name. Returns `None` under Spark < 4.1 (gate avoids touching 4.1-only types in the
+   * simple class name. Returns `None` outside Spark 4.1 (gate avoids touching 4.1-only types in the
    * rule class bodies) or when the class is not on the classpath (e.g. the `spark3` build).
    */
   private def loadSpark41Rule(simpleName: String): Option[Rule[LogicalPlan]] = {
-    if (org.apache.spark.SPARK_VERSION < "4.1") {
+    if (!org.apache.spark.SPARK_VERSION.startsWith("4.1.")) {
       None
     } else {
       try {
