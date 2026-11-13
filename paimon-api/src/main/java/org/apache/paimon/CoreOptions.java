@@ -1566,7 +1566,11 @@ public class CoreOptions implements Serializable {
                                                             + " you can use '$year-$month-$day $hour:00:00'."),
                                             text(
                                                     "If the timestamp is in fields dt and hour, you can use '$dt "
-                                                            + "$hour:00:00'."))
+                                                            + "$hour:00:00'."),
+                                            text(
+                                                    "If dt is a DATE field, whose value is the number of days since "
+                                                            + "1970-01-01, you can use '$dt::epoch_day $hour:00:00'. "
+                                                            + "'::epoch_day' turns the number into yyyy-MM-dd."))
                                     .build());
 
     public static final ConfigOption<Boolean> PARTITION_TIMESTAMP_FORMAT_STRICT =

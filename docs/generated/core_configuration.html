@@ -1432,7 +1432,7 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td><h5>partition.timestamp-pattern</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>You can specify a pattern to get a timestamp from partitions. The formatter pattern is defined by 'partition.timestamp-formatter'.<ul><li>By default, read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:00:00'.</li></ul></td>
+            <td>You can specify a pattern to get a timestamp from partitions. The formatter pattern is defined by 'partition.timestamp-formatter'.<ul><li>By default, read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:00:00'.</li><li>If dt is a DATE field, whose value is the number of days since 1970-01-01, you can use '$dt::epoch_day $hour:00:00'. '::epoch_day' turns the number into yyyy-MM-dd.</li></ul></td>
         </tr>
         <tr>
             <td><h5>pk-clustering-override</h5></td>
