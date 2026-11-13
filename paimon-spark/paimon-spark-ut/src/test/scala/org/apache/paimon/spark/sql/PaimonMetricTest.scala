@@ -20,6 +20,7 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.{InternalRow => PaimonRow}
 import org.apache.paimon.disk.IOManager
+import org.apache.paimon.operation.metrics.{ScanMetrics, ScanStats}
 import org.apache.paimon.reader.RecordReader
 import org.apache.paimon.reader.RecordReader.RecordIterator
 import org.apache.paimon.spark.{PaimonInputPartition, PaimonPartitionReader, PaimonRecordReaderIterator, PaimonSparkTestBase}
@@ -172,6 +173,61 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
     val nextGroup = registry.createTableMetricGroup("commit", tableName)
     nextGroup.gauge("lastCommitDuration", () => 99L)
     assert(server.getAttribute(metricName.get, "Value") == 99L)
+    assert(PaimonMetricsSource.metricRegistry.getMetrics.size() == metricCount)
+  }
+
+  test("Paimon Metric: runtime file counts agree in Spark and JMX without accumulating") {
+    val tableName = "runtime-file-counts-" + System.nanoTime()
+    val registry = SparkMetricRegistry()
+    val scanMetrics = new ScanMetrics(registry, tableName)
+    scanMetrics.reportScan(new ScanStats(10, 1, 1, 3, 2))
+    val metricCount = PaimonMetricsSource.metricRegistry.getMetrics.size()
+    val server = ManagementFactory.getPlatformMBeanServer
+
+    def jmxValue(name: String): Long = {
+      val path = s"scan.table.$tableName.$name"
+      val objectName = server
+        .queryNames(new ObjectName("paimon:*"), null)
+        .toArray
+        .collectFirst {
+          case name: ObjectName if name.toString.contains(path) => name
+        }
+        .get
+      server.getAttribute(objectName, "Value").asInstanceOf[Long]
+    }
+
+    def checkCounts(remaining: Long, skipped: Long): Unit = {
+      for (_ <- 0 until 2) {
+        // Scraping JMX before Spark reports must already see the current counts.
+        assert(jmxValue(ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES) == remaining)
+        assert(jmxValue(ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES) == skipped)
+        val metrics = registry.buildSparkScanMetrics()
+        assert(metric(metrics, RESULTED_TABLE_FILES) == remaining)
+        assert(metric(metrics, SKIPPED_TABLE_FILES) == skipped)
+        assert(PaimonMetricsSource.metricRegistry.getMetrics.size() == metricCount)
+      }
+    }
+
+    checkCounts(2, 3)
+    registry.updateRuntimeFileCounts(1, 1)
+    checkCounts(1, 4)
+    registry.updateRuntimeFileCounts(0, 2)
+    checkCounts(0, 5)
+
+    // A new plan on this registry must start from its own core statistics.
+    val nextScan = new ScanMetrics(registry, tableName)
+    nextScan.reportScan(new ScanStats(20, 2, 2, 1, 4))
+    checkCounts(4, 1)
+
+    // A later query on the same table owns the exported gauges, even if the old query
+    // continues pruning and reporting its driver metrics.
+    val nextRegistry = SparkMetricRegistry()
+    val nextQuery = new ScanMetrics(nextRegistry, tableName)
+    nextQuery.reportScan(new ScanStats(30, 3, 3, 2, 6))
+    registry.updateRuntimeFileCounts(0, 4)
+    assert(metric(registry.buildSparkScanMetrics(), RESULTED_TABLE_FILES) == 0)
+    assert(jmxValue(ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES) == 6)
+    assert(jmxValue(ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES) == 2)
     assert(PaimonMetricsSource.metricRegistry.getMetrics.size() == metricCount)
   }
 

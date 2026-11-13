@@ -31,24 +31,35 @@ import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
+import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.RowFactory;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.Table;
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import javax.management.JMException;
+import javax.management.MBeanServer;
+import javax.management.ObjectName;
+
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.nio.file.Path;
 import java.sql.Date;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -227,6 +238,272 @@ public class SparkPartitionMetadataAuthTest {
                             ? Collections.emptyList()
                             : Arrays.asList(RowFactory.create(1), RowFactory.create(2)));
         }
+    }
+
+    @Test
+    public void testJoinOnMaskedPartitionKeyWithoutBroadcastHint(@TempDir Path warehouse)
+            throws IOException {
+        try (SparkSession spark = createSession(warehouse)) {
+            // Keep AQE and the other DPP settings at their defaults, without a join hint.
+            spark.conf().set("spark.sql.optimizer.dynamicPartitionPruning.enabled", "true");
+            spark.sql(
+                    "CREATE TABLE spark_test.default.T (id INT, dt STRING) "
+                            + "USING paimon PARTITIONED BY (dt) TBLPROPERTIES "
+                            + "('primary-key'='dt,id', 'bucket-key'='id', 'bucket'='1')");
+            spark.sql(
+                    "INSERT INTO spark_test.default.T VALUES "
+                            + "(1,'20250810'),(2,'20250811'),(3,'20250810')");
+            spark.sql(
+                    "CREATE TABLE spark_test.default.D (dt STRING, k INT) "
+                            + "USING paimon TBLPROPERTIES ('bucket'='-1')");
+            spark.sql("INSERT INTO spark_test.default.D VALUES ('***',1),('other',0)");
+            setPolicy(spark, false, "constant", "id,dt");
+
+            assertThat(
+                            spark.sql(
+                                            "SELECT l.id FROM spark_test.default.T l "
+                                                    + "JOIN spark_test.default.D r ON l.dt = r.dt "
+                                                    + "WHERE r.k = 1 ORDER BY l.id")
+                                    .collectAsList())
+                    .containsExactly(RowFactory.create(1), RowFactory.create(2));
+        }
+    }
+
+    @ParameterizedTest(name = "chain={0}, policy={1}")
+    @CsvSource({
+        "false,disabled", "false,no-rules", "false,row-filter", "false,constant", "false,field",
+                "false,null", "false,other-column",
+        "true,disabled", "true,no-rules", "true,row-filter", "true,constant", "true,field",
+                "true,null", "true,other-column"
+    })
+    public void testDynamicPartitionPruningWithAuthorization(
+            boolean chain, String mode, @TempDir Path warehouse) throws IOException {
+        try (SparkSession spark = createSession(warehouse)) {
+            createTable(spark, chain);
+            assertDynamicPartitionPruning(spark, chain, mode);
+        }
+    }
+
+    @ParameterizedTest(name = "dataEvolution={0}, policy={1}")
+    @CsvSource({
+        "false,no-rules", "false,row-filter", "false,constant", "false,field", "false,null",
+                "false,other-column",
+        "true,no-rules", "true,row-filter", "true,constant", "true,field", "true,null",
+                "true,other-column"
+    })
+    public void testDynamicPartitionPruningForAppendTables(
+            boolean dataEvolution, String mode, @TempDir Path warehouse) throws IOException {
+        try (SparkSession spark = createSession(warehouse)) {
+            spark.sql(
+                    "CREATE TABLE spark_test.default.T "
+                            + "(id INT, payload STRING, seq BIGINT, region STRING, dt STRING) "
+                            + "USING paimon PARTITIONED BY (region,dt) TBLPROPERTIES ('bucket'='-1'"
+                            + (dataEvolution
+                                    ? ", 'row-tracking.enabled'='true', 'data-evolution.enabled'='true'"
+                                    : "")
+                            + ")");
+            spark.sql(
+                    "INSERT INTO spark_test.default.T VALUES "
+                            + "(1,'old',1,'CN','20250810'),(2,'new',1,'US','20250811'),(3,'hidden',1,'CN','20250810')");
+            assertDynamicPartitionPruning(spark, false, mode);
+        }
+    }
+
+    @Test
+    public void testDynamicPartitionPruningWithPartiallyMaskedJoinKeys(@TempDir Path warehouse)
+            throws IOException {
+        try (SparkSession spark = createSession(warehouse)) {
+            createTable(spark, false);
+            spark.sql("INSERT INTO spark_test.default.T VALUES (1,'old',1,'EU','20250810')");
+            setPolicy(spark, false, "constant", "id,dt,region");
+            spark.sql(
+                    "CREATE TABLE spark_test.default.D (region STRING, dt STRING, keep INT) "
+                            + "USING paimon TBLPROPERTIES ('bucket'='-1')");
+            spark.sql("INSERT INTO spark_test.default.D VALUES ('CN','***',1),('US','other',0)");
+            String query =
+                    "SELECT /*+ BROADCAST(r) */ l.id, l.dt FROM spark_test.default.T l "
+                            + "JOIN spark_test.default.D r ON l.region = r.region AND l.dt = r.dt "
+                            + "WHERE r.keep = 1 AND l.region <> 'EU'";
+            for (boolean dpp : new boolean[] {false, true}) {
+                spark.conf().set("spark.sql.optimizer.dynamicPartitionPruning.enabled", dpp);
+                for (boolean adaptive : new boolean[] {false, true}) {
+                    spark.conf().set("spark.sql.adaptive.enabled", adaptive);
+                    Dataset<Row> result = spark.sql(query);
+                    PaimonBaseScan scan = dataScan(result);
+                    assertThat(scan.filterAttributes())
+                            .extracting(reference -> reference.fieldNames()[0])
+                            .containsExactly("region");
+                    // The static predicate removes EU; runtime pruning can still remove US
+                    // using region, while the join must compare the visible masked dt values.
+                    assertThat(scan.inputSplits()).hasSize(2);
+                    assertThat(result.collectAsList()).containsExactly(RowFactory.create(1, "***"));
+                    assertThat(scan.inputSplits()).hasSize(dpp ? 1 : 2);
+                    assertFileMetrics(scan, dpp ? 1 : 2, dpp ? 2 : 1);
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testDynamicPartitionPruningWithBucketedScan(@TempDir Path warehouse)
+            throws IOException {
+        try (SparkSession spark = createSession(warehouse)) {
+            createTable(spark, false);
+            setPolicy(spark, false, "no-rules", "id,dt,region");
+            spark.conf().set("spark.paimon.scan.preserve-data-grouping", "true");
+            spark.conf().set("spark.sql.sources.v2.bucketing.enabled", "true");
+            spark.conf().set("spark.sql.optimizer.dynamicPartitionPruning.enabled", "true");
+            spark.sql(
+                    "CREATE TABLE spark_test.default.D (dt STRING, keep INT) "
+                            + "USING paimon TBLPROPERTIES ('bucket'='-1')");
+            spark.sql("INSERT INTO spark_test.default.D VALUES ('20250810',1),('absent',2)");
+            for (boolean adaptive : new boolean[] {false, true}) {
+                spark.conf().set("spark.sql.adaptive.enabled", adaptive);
+                for (int keep : new int[] {1, 2}) {
+                    Dataset<Row> result =
+                            spark.sql(
+                                    "SELECT /*+ BROADCAST(r) */ l.id, l.dt FROM spark_test.default.T l "
+                                            + "JOIN spark_test.default.D r ON l.dt = r.dt WHERE r.keep = "
+                                            + keep);
+                    PaimonBaseScan scan = dataScan(result);
+                    assertThat(scan.inputSplits()).hasSize(2);
+                    // Spark 3.2 does not support reporting grouped V2 partitions.
+                    assertThat(scan.inputPartitions().head().bucketed())
+                            .isEqualTo(!spark.version().startsWith("3.2."));
+                    assertThat(result.collectAsList())
+                            .containsExactlyInAnyOrderElementsOf(
+                                    keep == 1
+                                            ? Arrays.asList(
+                                                    RowFactory.create(1, "20250810"),
+                                                    RowFactory.create(3, "20250810"))
+                                            : Collections.emptyList());
+                    assertThat(scan.inputSplits()).hasSize(keep == 1 ? 1 : 0);
+                    assertThat(scan.inputPartitions().size()).isEqualTo(keep == 1 ? 1 : 0);
+                    assertFileMetrics(scan, keep == 1 ? 1 : 0, keep == 1 ? 1 : 2);
+                }
+            }
+        }
+    }
+
+    private static void assertDynamicPartitionPruning(
+            SparkSession spark, boolean chain, String mode) {
+        setPolicy(spark, chain, mode, "id,dt,region");
+        String joinKey =
+                "constant".equals(mode) ? "***" : "field".equals(mode) ? "new" : "20250810";
+        spark.sql(
+                "CREATE TABLE spark_test.default.D (dt STRING, keep INT) "
+                        + "USING paimon TBLPROPERTIES ('bucket'='-1')");
+        spark.sql("INSERT INTO spark_test.default.D VALUES ('" + joinKey + "',1),('other',0)");
+        String query =
+                "SELECT /*+ BROADCAST(r) */ l.id, l.dt FROM spark_test.default.T l "
+                        + "JOIN spark_test.default.D r ON l.dt = r.dt WHERE r.keep = 1";
+        List<Row> expected =
+                expectedRows(chain, mode).stream()
+                        .filter(row -> Objects.equals(row.get(1), joinKey))
+                        .collect(Collectors.toList());
+
+        for (boolean dpp : new boolean[] {false, true}) {
+            spark.conf()
+                    .set(
+                            "spark.sql.optimizer.dynamicPartitionPruning.enabled",
+                            String.valueOf(dpp));
+            for (boolean adaptive : new boolean[] {false, true}) {
+                spark.conf().set("spark.sql.adaptive.enabled", String.valueOf(adaptive));
+                Dataset<Row> result = spark.sql(query);
+                PaimonBaseScan scan = dataScan(result);
+                int plannedSplits = scan.inputSplits().length;
+                assertThat(result.collectAsList())
+                        .as("DPP=%s, AQE=%s", dpp, adaptive)
+                        .containsExactlyInAnyOrderElementsOf(expected);
+                boolean canPrune = !Arrays.asList("constant", "field", "null").contains(mode);
+                if (dpp && canPrune) {
+                    assertThat(scan.inputSplits().length)
+                            .as("DPP must prune splits, AQE=%s, policy=%s", adaptive, mode)
+                            .isLessThan(plannedSplits);
+                    if (!"disabled".equals(mode)) {
+                        // An append split can contain files from multiple writers.
+                        long remainingFiles =
+                                chain
+                                        ? 1
+                                        : Arrays.stream(scan.inputSplits())
+                                                .map(Splits::underlying)
+                                                .map(DataSplit.class::cast)
+                                                .mapToLong(split -> split.dataFiles().size())
+                                                .sum();
+                        // The newer chain split also reads the older snapshot file.
+                        assertFileMetrics(scan, remainingFiles, chain ? 2 : 1);
+                    }
+                }
+                // Only a mask on the join key prevents runtime partition pruning.
+                assertThat(
+                                result.queryExecution()
+                                        .optimizedPlan()
+                                        .toString()
+                                        .contains("dynamicpruning"))
+                        .as("DPP=%s, AQE=%s", dpp, adaptive)
+                        .isEqualTo(
+                                dpp && !Arrays.asList("constant", "field", "null").contains(mode));
+            }
+        }
+
+        if (!"disabled".equals(mode)) {
+            setPolicy(spark, chain, mode, "id");
+            assertDenied(spark, query);
+        }
+    }
+
+    private static void assertFileMetrics(PaimonBaseScan scan, long resulted, long skipped) {
+        // Reporting again must not count the runtime-pruned files a second time.
+        for (int i = 0; i < 2; i++) {
+            // JMX must already reflect pruning without depending on Spark's driver reporting.
+            assertJmxFileMetric(scan.table().name(), "lastScanResultedTableFiles", resulted);
+            assertJmxFileMetric(scan.table().name(), "lastScanSkippedTableFiles", skipped);
+            Map<String, Long> metrics =
+                    Arrays.stream(scan.reportDriverMetrics())
+                            .collect(
+                                    Collectors.toMap(
+                                            metric -> metric.name(), metric -> metric.value()));
+            assertThat(metrics)
+                    .containsEntry("resultedTableFiles", resulted)
+                    .containsEntry("skippedTableFiles", skipped);
+        }
+    }
+
+    private static void assertJmxFileMetric(String table, String metric, long expected) {
+        try {
+            MBeanServer server = ManagementFactory.getPlatformMBeanServer();
+            String path = "scan.table." + table + "." + metric;
+            ObjectName name =
+                    server.queryNames(new ObjectName("paimon:*"), null).stream()
+                            .filter(candidate -> candidate.toString().contains(path))
+                            .findFirst()
+                            .orElseThrow(() -> new AssertionError("Missing JMX metric: " + path));
+            assertThat(server.getAttribute(name, "Value")).as(path).isEqualTo(expected);
+        } catch (JMException e) {
+            throw new AssertionError("Cannot read JMX file metric", e);
+        }
+    }
+
+    private static PaimonBaseScan dataScan(Dataset<Row> result) {
+        ArrayDeque<LogicalPlan> pending = new ArrayDeque<>();
+        pending.add(result.queryExecution().optimizedPlan());
+        while (!pending.isEmpty()) {
+            LogicalPlan plan = pending.removeFirst();
+            if (plan instanceof DataSourceV2ScanRelation) {
+                org.apache.spark.sql.connector.read.Scan scan =
+                        ((DataSourceV2ScanRelation) plan).scan();
+                if (scan instanceof PaimonBaseScan
+                        && "T".equals(((PaimonBaseScan) scan).table().name())) {
+                    return (PaimonBaseScan) scan;
+                }
+            }
+            scala.collection.Iterator<LogicalPlan> children = plan.children().iterator();
+            while (children.hasNext()) {
+                pending.add(children.next());
+            }
+        }
+        throw new AssertionError(
+                "Missing Paimon scan for T: " + result.queryExecution().optimizedPlan());
     }
 
     @ParameterizedTest(name = "chain={0}, nestedPruning={1}")
@@ -614,7 +891,9 @@ public class SparkPartitionMetadataAuthTest {
             Transform mask = null;
             if ("field".equals(mode)) {
                 mask = new FieldTransform(new FieldRef(1, "payload", DataTypes.STRING()));
-            } else if ("constant".equals(mode) || "null".equals(mode)) {
+            } else if ("constant".equals(mode)
+                    || "null".equals(mode)
+                    || "other-column".equals(mode)) {
                 mask =
                         new ConcatTransform(
                                 Collections.singletonList(
@@ -628,7 +907,8 @@ public class SparkPartitionMetadataAuthTest {
                             mask == null
                                     ? null
                                     : Collections.singletonMap(
-                                            "dt", JsonSerdeUtil.toFlatJson(mask)));
+                                            "other-column".equals(mode) ? "payload" : "dt",
+                                            JsonSerdeUtil.toFlatJson(mask)));
             CatalogEnvironment env = table.catalogEnvironment();
             CatalogEnvironment authorized =
                     new CatalogEnvironment(
