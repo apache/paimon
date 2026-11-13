@@ -672,6 +672,58 @@ public class FileStoreCommitTest {
         }
     }
 
+    @Test
+    public void testFilterHalfCommittedIdentifierWithConcurrentlyDroppedIndex() throws Exception {
+        TestFileStore store = createStore(false);
+        BinaryRow partition = gen.getPartition(gen.nextInsert("20211110", 8, 1L, null, "a"));
+        IndexFileMeta index =
+                new IndexFileMeta(
+                        "btree",
+                        "recovery-index",
+                        1,
+                        1,
+                        new GlobalIndexMeta(0, 0, 0, null, null),
+                        null);
+        // An index-only compact increment, like the one written by a global index dropper.
+        ManifestCommittable pending =
+                new ManifestCommittable(
+                        2,
+                        null,
+                        Collections.singletonList(
+                                new CommitMessageImpl(
+                                        partition,
+                                        0,
+                                        null,
+                                        DataIncrement.emptyIncrement(),
+                                        new CompactIncrement(
+                                                Collections.emptyList(),
+                                                Collections.emptyList(),
+                                                Collections.emptyList(),
+                                                Collections.emptyList(),
+                                                Collections.singletonList(index)))));
+        try (FileStoreCommit other = store.newCommit("other", null)) {
+            other.commit(indexCommittable(partition, "recovery-index", 0, 0), false);
+        }
+        try (FileStoreCommit commit = store.newCommit("writer", null)) {
+            // The first phase of identifier 2 is published as an empty APPEND snapshot.
+            commit.ignoreEmptyCommit(false);
+            commit.commit(new ManifestCommittable(2), false);
+            assertThat(commit.filterCommitted(Collections.singletonList(pending))).hasSize(1);
+
+            // Another job drops the global index before the writer restarts.
+            try (FileStoreCommit other = store.newCommit("other", null)) {
+                other.commit(deleteIndexCommittable(partition, "recovery-index", 0, 0), false);
+            }
+            Snapshot dropped = store.snapshotManager().latestSnapshot();
+
+            // Replaying the deletion would fail in the index manifest combiner on every restart,
+            // so recovery must discard it.
+            ManifestCommittable next = new ManifestCommittable(3);
+            assertThat(commit.filterCommitted(Arrays.asList(pending, next))).containsExactly(next);
+            assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(dropped.id());
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"data", "auxiliary", "changelog", "index", "io"})
     public void testFilterHalfCommittedIdentifierWithUnavailableOutput(String unavailable)
@@ -752,8 +804,20 @@ public class FileStoreCommitTest {
         FileIO fileIO = spy(store.fileIO());
         FileStoreTable table = FileStoreTableFactory.create(fileIO, store.options().path());
         try (FileStoreCommit commit = table.store().newCommit("writer", table)) {
-            commit.ignoreEmptyCommit(false);
-            commit.commit(new ManifestCommittable(2), false);
+            // The first phase of identifier 2 publishes the index the first bucket deletes.
+            commit.commit(
+                    new ManifestCommittable(
+                            2,
+                            null,
+                            Collections.singletonList(
+                                    new CommitMessageImpl(
+                                            partition,
+                                            1,
+                                            2,
+                                            DataIncrement.indexIncrement(
+                                                    Collections.singletonList(index)),
+                                            CompactIncrement.emptyIncrement()))),
+                    false);
             assertThat(commit.filterCommitted(Collections.singletonList(pending))).hasSize(1);
             if (unavailable.equals("io")) {
                 doThrow(new IOException("Output lookup failed"))

@@ -397,7 +397,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 throw new UncheckedIOException(e);
             }
         }
-        if (!compactInputsStillLive(committable)) {
+        if (!compactInputsStillLive(committable) || !compactIndexDeletionsStillLive(committable)) {
             return null;
         }
         return new CompactRecoveryCommittable(committable, messages);
@@ -452,6 +452,50 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         commitUser,
                         committable.identifier(),
                         input);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * A compact increment can also delete index files, even without any compact-before file. A
+     * concurrent commit such as DROP GLOBAL INDEX may already have removed such an index, and the
+     * index manifest combiners reject deleting a missing or changed entry on every restart. Only
+     * recover the increment when each deleted index file is still live in the latest snapshot.
+     */
+    private boolean compactIndexDeletionsStillLive(ManifestCommittable committable) {
+        List<IndexManifestEntry> deletions = new ArrayList<>();
+        for (CommitMessage message : committable.fileCommittables()) {
+            for (IndexFileMeta file :
+                    ((CommitMessageImpl) message).compactIncrement().deletedIndexFiles()) {
+                deletions.add(
+                        new IndexManifestEntry(
+                                FileKind.DELETE, message.partition(), message.bucket(), file));
+            }
+        }
+        if (deletions.isEmpty()) {
+            return true;
+        }
+        Snapshot latest = snapshotManager.latestSnapshot();
+        Map<String, IndexManifestEntry> live = new HashMap<>();
+        if (latest != null && latest.indexManifest() != null) {
+            for (IndexManifestEntry entry : indexManifestFile.read(latest.indexManifest())) {
+                live.put(entry.indexFile().fileName(), entry);
+            }
+        }
+        for (IndexManifestEntry deletion : deletions) {
+            IndexManifestEntry current = live.get(deletion.indexFile().fileName());
+            if (current == null
+                    || !current.partition().equals(deletion.partition())
+                    || current.bucket() != deletion.bucket()
+                    || !current.indexFile().equals(deletion.indexFile())) {
+                LOG.warn(
+                        "Skipping compaction recovery for table {}, user {}, identifier {}: deleted index file {} was removed or changed by a concurrent commit",
+                        tableName,
+                        commitUser,
+                        committable.identifier(),
+                        deletion.indexFile().fileName());
                 return false;
             }
         }
