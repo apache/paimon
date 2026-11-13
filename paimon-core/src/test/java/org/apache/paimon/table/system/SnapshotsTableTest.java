@@ -32,6 +32,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.LowerTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -55,6 +57,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -164,6 +167,42 @@ public class SnapshotsTableTest extends TableTestBase {
                 .forEachRemaining(row -> result.add(serializer.copy(row)));
 
         assertThat(result).containsExactlyInAnyOrderElementsOf(getExpectedResult(new long[] {1}));
+    }
+
+    @Test
+    public void testReadSnapshotsWithTransformFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
+        int snapshotIdIdx = snapshotsTable.rowType().getFieldNames().indexOf("snapshot_id");
+        int commitKindIdx = snapshotsTable.rowType().getFieldNames().indexOf("commit_kind");
+        LowerTransform lowerCommitKind =
+                new LowerTransform(
+                        Collections.singletonList(
+                                new FieldRef(
+                                        commitKindIdx,
+                                        "commit_kind",
+                                        snapshotsTable.rowType().getTypeAt(commitKindIdx))));
+
+        assertThat(
+                        readWithFilter(
+                                PredicateBuilder.and(
+                                        builder.greaterOrEqual(snapshotIdIdx, 2L),
+                                        builder.equal(
+                                                lowerCommitKind,
+                                                BinaryString.fromString("append")))))
+                .containsExactlyInAnyOrderElementsOf(getExpectedResult(new long[] {2}));
+        assertThat(
+                        readWithFilter(
+                                builder.equal(lowerCommitKind, BinaryString.fromString("compact"))))
+                .isEmpty();
+
+        int schemaIdIdx = snapshotsTable.rowType().getFieldNames().indexOf("schema_id");
+        assertThat(
+                        readWithFilter(
+                                PredicateBuilder.and(
+                                        builder.equal(
+                                                lowerCommitKind, BinaryString.fromString("append")),
+                                        builder.equal(schemaIdIdx, 999L))))
+                .isEmpty();
     }
 
     @Test

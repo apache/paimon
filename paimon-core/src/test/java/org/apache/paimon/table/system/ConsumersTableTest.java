@@ -26,14 +26,17 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -42,6 +45,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -97,6 +101,21 @@ public class ConsumersTableTest extends TableTestBase {
         Predicate predicate = consumerIdEqual("id999");
         List<InternalRow> result = readWithFilter(consumersTable, predicate);
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testFilterByConsumerIdTransform() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ConsumersTable.TABLE_TYPE);
+        DataField consumerIdField = ConsumersTable.TABLE_TYPE.getFields().get(0);
+        UpperTransform upperConsumerId =
+                new UpperTransform(
+                        Collections.singletonList(
+                                new FieldRef(0, consumerIdField.name(), consumerIdField.type())));
+        Predicate predicate = builder.equal(upperConsumerId, BinaryString.fromString("ID1"));
+        List<InternalRow> expectedRow =
+                Arrays.asList(GenericRow.of(BinaryString.fromString("id1"), 5L));
+        List<InternalRow> result = readWithFilter(consumersTable, predicate);
+        assertThat(result).containsExactlyElementsOf(expectedRow);
     }
 
     @Test

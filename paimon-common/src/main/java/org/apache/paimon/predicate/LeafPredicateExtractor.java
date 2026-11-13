@@ -18,10 +18,11 @@
 
 package org.apache.paimon.predicate;
 
+import javax.annotation.Nullable;
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 
 /** Extract leaf predicate for field names. */
 public class LeafPredicateExtractor implements PredicateVisitor<Map<String, LeafPredicate>> {
@@ -30,11 +31,11 @@ public class LeafPredicateExtractor implements PredicateVisitor<Map<String, Leaf
 
     @Override
     public Map<String, LeafPredicate> visit(LeafPredicate predicate) {
-        Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
-        if (!fieldRefOptional.isPresent()) {
-            throw new UnsupportedOperationException();
-        }
-        return Collections.singletonMap(fieldRefOptional.get().name(), predicate);
+        // A leaf on a transform such as UPPER(name) does not constrain the field itself.
+        return predicate
+                .fieldRefOptional()
+                .map(fieldRef -> Collections.singletonMap(fieldRef.name(), predicate))
+                .orElse(Collections.emptyMap());
     }
 
     @Override
@@ -45,5 +46,22 @@ public class LeafPredicateExtractor implements PredicateVisitor<Map<String, Leaf
             return leafPredicates;
         }
         return Collections.emptyMap();
+    }
+
+    /**
+     * Returns the complete predicate when it contains a transform leaf, which this extractor skips,
+     * so that callers evaluate every condition on rows; returns null otherwise.
+     */
+    @Nullable
+    public static Predicate rowFilterForTransforms(@Nullable Predicate predicate) {
+        return predicate != null && containsTransform(predicate) ? predicate : null;
+    }
+
+    private static boolean containsTransform(Predicate predicate) {
+        if (predicate instanceof CompoundPredicate) {
+            return ((CompoundPredicate) predicate)
+                    .children().stream().anyMatch(LeafPredicateExtractor::containsTransform);
+        }
+        return !((LeafPredicate) predicate).fieldRefOptional().isPresent();
     }
 }

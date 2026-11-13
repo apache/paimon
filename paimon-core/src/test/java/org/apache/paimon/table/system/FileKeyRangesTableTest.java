@@ -21,10 +21,12 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
@@ -38,6 +40,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
@@ -100,6 +103,22 @@ public class FileKeyRangesTableTest extends TableTestBase {
     public void testPartitionFilter() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(FileKeyRangesTable.TABLE_TYPE);
         List<String> rows = readPartBucketLevel(builder.equal(0, BinaryString.fromString("{1}")));
+        assertThat(rows).isNotEmpty();
+        for (String row : rows) {
+            assertThat(row).startsWith("{1}-");
+        }
+    }
+
+    @Test
+    public void testPartitionTransformFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(FileKeyRangesTable.TABLE_TYPE);
+        DataField partitionField = FileKeyRangesTable.TABLE_TYPE.getFields().get(0);
+        UpperTransform upperPartition =
+                new UpperTransform(
+                        Collections.singletonList(
+                                new FieldRef(0, partitionField.name(), partitionField.type())));
+        List<String> rows =
+                readPartBucketLevel(builder.equal(upperPartition, BinaryString.fromString("{1}")));
         assertThat(rows).isNotEmpty();
         for (String row : rows) {
             assertThat(row).startsWith("{1}-");
