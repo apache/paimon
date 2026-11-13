@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Java TypeUtils conversions for private overwrite and truncate specs."""
+"""Java partition value conversions."""
 
 import re
 import struct
@@ -27,7 +27,20 @@ _UNREPRESENTABLE_PARTITION_VALUE = object()
 _JAVA_WHITESPACE = ''.join(chr(value) for value in range(33))
 
 
-def _partition_spec_value(value, data_type):
+def _partition_value_to_string(value, data_type, legacy):
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.utils.file_store_path_factory import _format_partition_value
+
+    name = str(data_type).upper().split('(', 1)[0].split()[0]
+    if not isinstance(data_type, AtomicType) or name not in (
+            'BOOLEAN', 'TINYINT', 'SMALLINT', 'INT', 'INTEGER', 'BIGINT', 'FLOAT', 'DOUBLE',
+            'DECIMAL', 'CHAR', 'VARCHAR', 'STRING', 'BINARY', 'VARBINARY', 'BYTES',
+            'DATE', 'TIME', 'TIMESTAMP', 'TIMESTAMP_LTZ'):
+        raise NotImplementedError('Unsupported format table partition type: %s' % data_type)
+    return _format_partition_value(value, data_type, legacy, None)
+
+
+def _partition_spec_value(value, data_type, legacy_ltz=False):
     """TypeUtils.castFromString for the scalar types accepted as partitions.
 
     Partition specs are not SQL casts: integer text must be integral and
@@ -219,7 +232,7 @@ def _partition_spec_value(value, data_type):
         nanos = nanos // 10 ** (9 - precision) * 10 ** (9 - precision)
         epoch = whole - datetime(1970, 1, 1)
         seconds = epoch.days * 86400 + epoch.seconds
-        if target.tz is not None:
+        if target.tz is not None and not legacy_ltz:
             seconds = _local_to_utc_seconds(seconds)
         ticks_per_second = {'s': 1, 'ms': 1000, 'us': 1000000, 'ns': 1000000000}[target.unit]
         return pa.scalar(seconds * ticks_per_second + nanos // (1000000000 // ticks_per_second), type=target).as_py()

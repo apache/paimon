@@ -23,6 +23,8 @@ from typing import Dict, List, Optional
 import pyarrow
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.execution.python.write.partition_spec import (
+    _UNREPRESENTABLE_PARTITION_VALUE, _partition_spec_value, _partition_value_to_string)
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.format.format_commit_message import (
     FormatTableCommitMessage,
@@ -32,17 +34,32 @@ from pypaimon.table.format.format_table import (
     FormatTable,
 )
 from pypaimon.execution.python.write.writer.parquet_writer_options import create_parquet_writer_options
+from pypaimon.utils.file_store_path_factory import _escape_partition_component, _is_null_or_whitespace_only
+
+
+def _partition_component(value: Optional[str], default_part_value: str) -> Optional[str]:
+    """The unescaped name of a partition directory."""
+    return default_part_value if _is_null_or_whitespace_only(value) else value
 
 
 def _partition_path(
-    partition_spec: dict, partition_keys: List[str], only_value: bool
+    partition_spec: dict, partition_keys: List[str], only_value: bool, default_part_value: str
 ) -> str:
     parts = []
     for k in partition_keys:
-        v = partition_spec.get(k)
-        if v is None:
-            break
-        parts.append(str(v) if only_value else f"{k}={v}")
+        v = _partition_component(partition_spec.get(k), default_part_value)
+        if not v or (only_value and v in ('.', '..')):
+            raise ValueError(f"Partition value '{v}' cannot be used as a partition path component.")
+        if only_value and v != default_part_value and v.startswith(('_', '.')):
+            raise ValueError(
+                f"Partition value '{v}' cannot be written in a value-only partition "
+                "layout: scans treat a directory whose name starts with '_' or "
+                "'.' as hidden and would silently drop this partition and all "
+                "of its data. Use a partition value that does not start with "
+                "'_' or '.', or switch to the key-value partition layout."
+            )
+        value = _escape_partition_component(v)
+        parts.append(value if only_value else f"{_escape_partition_component(k)}={value}")
     return "/".join(parts)
 
 
@@ -114,6 +131,24 @@ class PythonFormatTableWrite:
         self._partition_only_value = opt.lower() == "true"
         self._file_format = table.format()
         options = CoreOptions.from_dict(table.options())
+        self._default_part_value = options.options.get(CoreOptions.PARTITION_DEFAULT_NAME)
+        self._legacy_partition_name = options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)
+        self._partition_types = {f.name: f.type for f in table.fields if f.name in table.partition_keys}
+        for data_type in self._partition_types.values():
+            _partition_value_to_string(None, data_type, self._legacy_partition_name)
+        # A static partition names directories, so it is compared by the directory names: 'true' names the
+        # directory of True, NaN names the directory of NaN, and 0.0 and -0.0 name different directories.
+        self._static_partition_components = {
+            key: self._static_partition_component(key, value) for key, value in self._static_partitions.items()
+        }
+        # Files leave the partition columns out, as Java's do. A table whose columns are all partition columns
+        # would then write files without columns, which lose their rows: CSV and JSON files keep its partition
+        # columns instead, and the other formats refuse it.
+        only_partitions = bool(table.fields) and all(f.name in table.partition_keys for f in table.fields)
+        if only_partitions and self._file_format not in (Format.CSV, Format.JSON):
+            raise ValueError(
+                f"Format table writes of {self._file_format.value} require at least one non-partition column")
+        self._files_keep_partition_columns = only_partitions
         self._parquet_writer_options = (
             create_parquet_writer_options(options)
             if self._file_format == Format.PARQUET else {}
@@ -141,6 +176,17 @@ class PythonFormatTableWrite:
             "text": ".txt",
         }.get(self._file_format.value, ".parquet")
 
+    def _static_partition_component(self, key, value):
+        data_type = self._partition_types.get(key)
+        if data_type is not None and value is not None and value != self._default_part_value:
+            parsed = _partition_spec_value(value, data_type, legacy_ltz=self._legacy_partition_name)
+            # A value that does not convert, such as a DECIMAL overflow, names no partition. It must not
+            # select the null partition, whose files the overwrite would delete.
+            if parsed is None or parsed is _UNREPRESENTABLE_PARTITION_VALUE:
+                raise ValueError(f"Static partition value '{value}' cannot be represented as {data_type}")
+            value = _partition_value_to_string(parsed, data_type, self._legacy_partition_name)
+        return _partition_component(value, self._default_part_value)
+
     def write_arrow(self, data: pyarrow.Table) -> None:
         return _write_arrow(self, data)
 
@@ -154,10 +200,11 @@ class PythonFormatTableWrite:
         # Group rows by partition
         parts_to_indices = defaultdict(list)
         for i in range(data.num_rows):
-            part = _partition_from_row(data, partition_keys, i)
+            part = tuple(_partition_value_to_string(value, self._partition_types[key], self._legacy_partition_name)
+                         for key, value in zip(partition_keys, _partition_from_row(data, partition_keys, i)))
             parts_to_indices[part].append(i)
-        for part_tuple, indices in parts_to_indices.items():
-            part_spec = dict(zip(partition_keys, part_tuple))
+        for indices in parts_to_indices.values():
+            part_spec = dict(zip(partition_keys, _partition_from_row(data, partition_keys, indices[0])))
             sub = data.take(pyarrow.array(indices))
             self._write_single_batch(sub, part_spec)
 
@@ -173,12 +220,21 @@ class PythonFormatTableWrite:
             return
         location = self.table.location()
         partition_only_value = self._partition_only_value
+        components = {
+            key: _partition_component(
+                _partition_value_to_string(value, self._partition_types[key], self._legacy_partition_name),
+                self._default_part_value)
+            for key, value in partition_spec.items()
+        }
         part_path = _partition_path(
-            partition_spec,
+            components,
             self.table.partition_keys,
             partition_only_value,
+            self._default_part_value,
         )
         if part_path:
+            if location.startswith('file:'):
+                location = self.table.file_io.to_filesystem_path(location)
             dir_path = f"{location}/{part_path}"
         else:
             dir_path = location
@@ -191,8 +247,8 @@ class PythonFormatTableWrite:
             should_delete = (
                 not self._static_partitions
                 or all(
-                    str(partition_spec.get(k)) == str(v)
-                    for k, v in self._static_partitions.items()
+                    components.get(k) == v
+                    for k, v in self._static_partition_components.items()
                 )
             )
             if should_delete:
@@ -225,6 +281,8 @@ class PythonFormatTableWrite:
 
         fmt = self._file_format
         tbl = pyarrow.Table.from_batches([data])
+        if not self._files_keep_partition_columns:
+            tbl = tbl.select([name for name in tbl.column_names if name not in self.table.partition_keys])
         if fmt == Format.PARQUET:
             import pyarrow.parquet as pq
             buf = io.BytesIO()
@@ -251,12 +309,6 @@ class PythonFormatTableWrite:
             orc.write_table(tbl, buf)
             raw = buf.getvalue()
         elif fmt == Format.TEXT:
-            partition_keys = self.table.partition_keys
-            if partition_keys:
-                data_cols = [
-                    c for c in tbl.column_names if c not in partition_keys
-                ]
-                tbl = tbl.select(data_cols)
             pa_f0 = tbl.schema.field(0).type
             if tbl.num_columns != 1 or not pyarrow.types.is_string(pa_f0):
                 raise ValueError(

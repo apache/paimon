@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -31,20 +31,23 @@ _UNSAFE_ARROW_FILTER_METHODS = frozenset([
 # Large boolean trees can overflow or crash native Dataset scanners even when
 # balanced. Keep complex predicates on Paimon's exact row-filter path instead.
 _MAX_ARROW_FILTER_LEAVES = 256
+_NULL_PARTITION_LITERAL = object()
 
 
 def extract_partition_spec_from_predicate(
     predicate: Predicate, partition_keys: List[str]
-) -> Optional[Dict[str, str]]:
+) -> Optional[Dict[str, Any]]:
     if not predicate or not partition_keys:
         return None
     parts = _split_and(predicate)
-    spec: Dict[str, str] = {}
+    spec: Dict[str, Any] = {}
     for p in parts:
         if p.method != "equal" or p.field is None or p.literals is None or len(p.literals) != 1:
             continue
         if p.field in partition_keys:
-            spec[p.field] = str(p.literals[0])
+            if p.literals[0] is None:
+                return {p.field: _NULL_PARTITION_LITERAL}
+            spec[p.field] = p.literals[0]
     if set(spec.keys()) == set(partition_keys):
         return spec
     return None
