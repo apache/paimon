@@ -105,6 +105,12 @@ under the License.
             <td>The number of old metadata files to keep after each table commit. For rest-catalog, it will keep 1 old metadata at least.</td>
         </tr>
         <tr>
+            <td><h5>metadata.iceberg.rest-auto-recreate</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>When the Iceberg REST catalog state does not match the expected base metadata, automatically drop and recreate the catalog table (legacy recovery). This requires table-delete permission in the catalog (e.g. glue:DeleteTable) and replaces the catalog table's identity, breaking consumers that track it. When set to false, the committer instead reconciles the catalog table in place by replaying the snapshots it is missing from the locally generated metadata, and fails with a precise error when non-destructive reconciliation is impossible; it never drops the catalog table.</td>
+        </tr>
+        <tr>
             <td><h5>metadata.iceberg.storage</h5></td>
             <td style="word-wrap: break-word;">disabled</td>
             <td><p>Enum</p></td>
@@ -115,6 +121,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td><p>Enum</p></td>
             <td>To store Iceberg metadata in a separate directory or under table location<br /><br />Possible values:<ul><li>"table-location": Store Iceberg metadata in each table's directory. Useful for standalone Iceberg tables or Java API access. Can also be used with Hive Catalog</li><li>"catalog-location": Store Iceberg metadata in a separate directory. Allows integration with Hive Catalog or Hadoop Catalog.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.sync-full-history</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>When Iceberg metadata has to be created from scratch (for example, Iceberg compatibility is enabled on a table that already has snapshots, or the previous Iceberg metadata is unusable), rebuild it from all Paimon snapshots that are still retained instead of only the latest one, so Iceberg readers keep time travel and tags. The rebuild cost is proportional to the number of retained snapshots. Readers that resolve Iceberg metadata files (table-location, hadoop-catalog, hive-catalog) see the full replayed history; a rest-catalog only receives the final state.</td>
         </tr>
         <tr>
             <td><h5>metadata.iceberg.table</h5></td>
