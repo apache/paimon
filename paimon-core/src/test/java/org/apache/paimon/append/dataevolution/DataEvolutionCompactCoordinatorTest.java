@@ -79,6 +79,74 @@ import static org.mockito.Mockito.when;
 public class DataEvolutionCompactCoordinatorTest {
 
     @Test
+    public void testIncrementalSelectionKeepsAContinuousNewestPrefix() {
+        DataFileMeta base = createDataFileMeta("base.parquet", 0, 10, 1, 10000);
+        DataFileMeta old = createDataFileMeta("old.parquet", 0, 10, 2, 1000);
+        DataFileMeta middle = createDataFileMeta("middle.parquet", 0, 10, 3, 10);
+        DataFileMeta latest = createDataFileMeta("latest.parquet", 0, 10, 4, 10);
+        List<DataFileMeta> files = Arrays.asList(middle, base, latest, old);
+        assertThat(DataEvolutionCompactCoordinator.CompactPlanner.pickIncrementalFiles(files, 3, 1))
+                .containsExactly(latest, middle);
+        // A lower file-count limit must include the intervening large version, not skip it.
+        assertThat(DataEvolutionCompactCoordinator.CompactPlanner.pickIncrementalFiles(files, 2, 1))
+                .containsExactly(latest, middle, old);
+    }
+
+    @Test
+    public void testIncrementalSelectionPreservesSameVersionFilesAndRatioBoundary() {
+        DataFileMeta base = createDataFileMeta("base.parquet", 0, 10, 1, 10000);
+        DataFileMeta sameVersion = createDataFileMeta("same.parquet", 0, 10, 2, 1000);
+        DataFileMeta small = createDataFileMeta("small.parquet", 0, 10, 2, 1);
+        DataFileMeta latest = createDataFileMeta("latest.parquet", 0, 10, 3, 100);
+        assertThat(
+                        DataEvolutionCompactCoordinator.CompactPlanner.pickIncrementalFiles(
+                                Arrays.asList(base, sameVersion, small, latest), 3, 0))
+                .containsExactly(latest, sameVersion, small);
+        DataFileMeta boundary = createDataFileMeta("boundary.parquet", 0, 10, 2, 101);
+        assertThat(
+                        DataEvolutionCompactCoordinator.CompactPlanner.pickIncrementalFiles(
+                                Arrays.asList(base, boundary, latest), 3, 1))
+                .containsExactly(latest, boundary);
+        assertThat(
+                        DataEvolutionCompactCoordinator.CompactPlanner.pickIncrementalFiles(
+                                Arrays.asList(base, boundary, latest), 3, 0))
+                .isEmpty();
+    }
+
+    @Test
+    public void testIncrementalSelectionSkipsSingleOutputsAndAvoidsSizeOverflow() {
+        DataFileMeta base = createDataFileMeta("base.parquet", 0, 10, 1, Long.MAX_VALUE);
+        DataFileMeta latest = createDataFileMeta("latest.parquet", 0, 10, 2, 10);
+        assertThat(
+                        DataEvolutionCompactCoordinator.CompactPlanner.pickIncrementalFiles(
+                                Arrays.asList(base, latest), 2, 1))
+                .isEmpty();
+        assertThat(
+                        DataEvolutionCompactCoordinator.CompactPlanner.pickIncrementalFiles(
+                                Arrays.asList(base, latest), 3, 1))
+                .isEmpty();
+        DataFileMeta middle = createDataFileMeta("middle.parquet", 0, 10, 2, Long.MAX_VALUE);
+        latest = createDataFileMeta("latest.parquet", 0, 10, 3, Long.MAX_VALUE);
+        assertThat(
+                        DataEvolutionCompactCoordinator.CompactPlanner.pickIncrementalFiles(
+                                Arrays.asList(base, middle, latest), 3, 1))
+                .containsExactly(latest, middle, base);
+    }
+
+    @Test
+    public void testIncrementalTaskRejectsAdjacentNormalRanges() {
+        assertThatThrownBy(
+                        () ->
+                                new DataEvolutionIncrementalCompactTask(
+                                        BinaryRow.EMPTY_ROW,
+                                        Arrays.asList(
+                                                createDataFileMeta("a.parquet", 0, 10, 1, 100),
+                                                createDataFileMeta("b.parquet", 10, 10, 2, 100))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("identical normal-file row-ID ranges");
+    }
+
+    @Test
     public void testRejectsRewriteRowIdsOption() {
         FileStoreTable table = mock(FileStoreTable.class);
         Options options = new Options();

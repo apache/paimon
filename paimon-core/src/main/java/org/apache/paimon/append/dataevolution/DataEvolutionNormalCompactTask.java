@@ -103,23 +103,16 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
                 "Vector-store files are compacted by %s.",
                 DataEvolutionVectorCompactTask.class.getSimpleName());
 
-        Set<String> fieldsInDedicatedFile =
-                SetUtils.union(
-                        fieldNamesInBlobFile(table.rowType(), options.blobInlineField()),
-                        fieldNamesInVectorFile(table.rowType(), options.withVectorFormat()));
-
+        boolean splitLargeFiles =
+                type() == TaskType.NORMAL && options.dataEvolutionCompactionSplitLargeFiles();
         Map<String, String> writeOptions = new HashMap<>(DYNAMIC_WRITE_OPTIONS);
-        if (options.dataEvolutionCompactionSplitLargeFiles()) {
+        if (splitLargeFiles) {
             writeOptions.put(CoreOptions.TARGET_FILE_SIZE.key(), Long.MAX_VALUE + " b");
         }
         table = table.copy(writeOptions);
         long firstRowId = compactBefore.get(0).nonNullFirstRowId();
 
-        RowType readWriteType =
-                new RowType(
-                        table.rowType().getFields().stream()
-                                .filter(f -> !fieldsInDedicatedFile.contains(f.name()))
-                                .collect(Collectors.toList()));
+        RowType readWriteType = readWriteType(table);
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
 
@@ -138,7 +131,7 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         storeWrite.withFileSource(FileSource.COMPACT);
         RecordWriter<InternalRow> writer = storeWrite.createWriter(partition, 0);
         List<Range> outputRanges =
-                options.dataEvolutionCompactionSplitLargeFiles()
+                splitLargeFiles
                         ? planOutputRanges(options.targetFileSize(false))
                         : Collections.singletonList(checkContiguousRowRange(compactBefore));
         List<DataFileMeta> writeResult = new ArrayList<>();
@@ -188,6 +181,18 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         checkSameRowRange("Normal file", compactBefore, compactAfter);
 
         return commitMessage(compactBefore, compactAfter);
+    }
+
+    protected RowType readWriteType(FileStoreTable table) {
+        CoreOptions options = table.coreOptions();
+        Set<String> fieldsInDedicatedFile =
+                SetUtils.union(
+                        fieldNamesInBlobFile(table.rowType(), options.blobInlineField()),
+                        fieldNamesInVectorFile(table.rowType(), options.withVectorFormat()));
+        return new RowType(
+                table.rowType().getFields().stream()
+                        .filter(f -> !fieldsInDedicatedFile.contains(f.name()))
+                        .collect(Collectors.toList()));
     }
 
     @VisibleForTesting

@@ -1076,7 +1076,9 @@ public class CoreOptions implements Serializable {
                     .defaultValue(200)
                     .withDescription(
                             "The size amplification is defined as the amount (in percentage) of additional storage "
-                                    + "needed to store a single byte of data in the merge tree for changelog mode table.");
+                                    + "needed to store a single byte of data in the merge tree for changelog mode table. "
+                                    + "For incremental data-evolution compaction, this limits fully superseded "
+                                    + "normal-file bytes relative to files still supplying current columns.");
 
     public static final ConfigOption<Boolean> COMPACTION_FORCE_UP_LEVEL_0 =
             key("compaction.force-up-level-0")
@@ -1092,7 +1094,8 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) "
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
-                                    + "into this candidate set.");
+                                    + "into this candidate set. Also applies to newest-first normal column-file "
+                                    + "version selection in incremental data-evolution compaction.");
 
     public static final ConfigOption<Integer> COMPACT_OFFPEAK_START_HOUR =
             key("compaction.offpeak.start.hour")
@@ -2802,6 +2805,19 @@ public class CoreOptions implements Serializable {
                                     + "BLOB or VECTOR file range. Actual output sizes may differ from the target. "
                                     + "Row IDs and logical deletions are preserved, and associated "
                                     + "BLOB and VECTOR files are not rewritten by this option.");
+
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_INCREMENTAL_ENABLED =
+            key("data-evolution.compaction.incremental.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Compact a newest-first prefix of normal column-file versions within "
+                                    + "one row-ID range, writing only their columns and retaining "
+                                    + "older files. Uses compaction.min.file-num, compaction.size-ratio "
+                                    + "and compaction.max-size-amplification-percent for selection. "
+                                    + "Nested ROW columns are projected by written leaf field IDs. "
+                                    + "Partial rewrites keep their complete row-ID range. Eligible "
+                                    + "oversized files select all column versions for splitting.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_DISCARD_CONFLICTING_TASKS =
             key("data-evolution.compaction.discard-conflicting-tasks")
@@ -4663,6 +4679,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionCompactionSplitLargeFiles() {
         return options.get(DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES);
+    }
+
+    public boolean dataEvolutionCompactionIncrementalEnabled() {
+        return options.get(DATA_EVOLUTION_COMPACTION_INCREMENTAL_ENABLED);
     }
 
     public double dataEvolutionCompactionLargeFileRatio() {
