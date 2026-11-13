@@ -72,8 +72,8 @@ class PaimonMicroBatchStream(
   // It will be reset when there is non-empty PaimonSourceOffset returned by calling "latestOffset".
   var lastTriggerMillis = 0L
 
-  // the latest offset when call "prepareForTriggerAvailableNow"
-  // the query will be terminated when data is consumed to this offset in "TriggerAvailableNow" mode.
+  // The snapshot upper bound captured by prepareForTriggerAvailableNow. Only actual split
+  // offsets within this bound are returned to Spark.
   private var offsetForTriggerAvailableNow: Option[PaimonSourceOffset] = None
 
   private lazy val defaultReadLimit: ReadLimit = {
@@ -123,7 +123,17 @@ class PaimonMicroBatchStream(
   override def getDefaultReadLimit: ReadLimit = defaultReadLimit
 
   override def prepareForTriggerAvailableNow(): Unit = {
-    offsetForTriggerAvailableNow = getLatestOffset(initOffset, None, ReadLimit.allAvailable())
+    coreOptions.startupMode() match {
+      case CoreOptions.StartupMode.FROM_TIMESTAMP |
+          CoreOptions.StartupMode.FROM_CREATION_TIMESTAMP =>
+        // Timestamp startup may refer to expired history when restoring a checkpoint.
+        // Capture the bound now and plan actual offsets from Spark's supplied start offset.
+        val latestSnapshotId = Option(table.snapshotManager().latestSnapshotId()).map(_.longValue())
+        offsetForTriggerAvailableNow = Some(
+          PaimonSourceOffset(latestSnapshotId.getOrElse(0L), Long.MaxValue, scanSnapshot = false))
+      case _ =>
+        offsetForTriggerAvailableNow = getLatestOffset(initOffset, None, ReadLimit.allAvailable())
+    }
   }
 
   override def latestOffset(): Offset = {
@@ -272,7 +282,9 @@ class PaimonMicroBatchStream(
 
   private def earliestReadableId(scanSnapshot: Boolean): Long = {
     val earliestId: JLong =
-      if (!scanSnapshot && coreOptions.changelogLifecycleDecoupled()) {
+      if (
+        !scanSnapshot && (coreOptions.changelogLifecycleDecoupled() || canReadRetainedChangelog)
+      ) {
         val earliestChangelogId = table.changelogManager().earliestLongLivedChangelogId()
         if (earliestChangelogId == null) {
           table.snapshotManager().earliestSnapshotId()

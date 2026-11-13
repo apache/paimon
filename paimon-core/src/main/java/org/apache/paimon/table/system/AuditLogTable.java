@@ -660,6 +660,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public boolean readRetainedChangelog() {
+            return streamScan.readRetainedChangelog();
+        }
+
+        @Override
         public StartingContext startingContext() {
             return streamScan.startingContext();
         }

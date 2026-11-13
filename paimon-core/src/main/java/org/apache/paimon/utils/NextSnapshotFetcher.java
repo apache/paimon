@@ -35,7 +35,9 @@ public class NextSnapshotFetcher {
 
     private final SnapshotManager snapshotManager;
     private final ChangelogManager changelogManager;
+    // Keep the configured missing-history policy separate from changelog discovery.
     private final boolean changelogDecoupled;
+    private final boolean readRetainedChangelog;
 
     private int rangeCheckCnt = 0;
 
@@ -43,9 +45,18 @@ public class NextSnapshotFetcher {
             SnapshotManager snapshotManager,
             ChangelogManager changelogManager,
             boolean changelogDecoupled) {
+        this(snapshotManager, changelogManager, changelogDecoupled, changelogDecoupled);
+    }
+
+    public NextSnapshotFetcher(
+            SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
+            boolean changelogDecoupled,
+            boolean readRetainedChangelog) {
         this.snapshotManager = snapshotManager;
         this.changelogManager = changelogManager;
         this.changelogDecoupled = changelogDecoupled;
+        this.readRetainedChangelog = readRetainedChangelog;
     }
 
     @Nullable
@@ -55,7 +66,7 @@ public class NextSnapshotFetcher {
             return snapshotManager.snapshot(nextSnapshotId);
         }
 
-        if (changelogDecoupled && changelogManager.longLivedChangelogExists(nextSnapshotId)) {
+        if (readRetainedChangelog && changelogManager.longLivedChangelogExists(nextSnapshotId)) {
             return changelogManager.changelog(nextSnapshotId);
         }
 

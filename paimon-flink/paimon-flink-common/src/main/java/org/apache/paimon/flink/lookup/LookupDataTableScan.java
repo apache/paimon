@@ -84,6 +84,13 @@ public class LookupDataTableScan extends DataTableStreamScan {
         }
     }
 
+    @Override
+    public boolean readRetainedChangelog() {
+        // Lookup scans may need data manifests for file monitoring or overwrite detection.
+        // Keep their existing discovery rule instead of enabling automatic changelog discovery.
+        return options().changelogLifecycleDecoupled();
+    }
+
     public void setScanPartitions(List<BinaryRow> scanPartitions) {
         this.scanPartitions = scanPartitions;
     }

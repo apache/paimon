@@ -82,6 +82,8 @@ private[spark] trait StreamHelper {
   // Used to get the initial offset.
   lazy val streamScanStartingContext: StartingContext = streamScan.startingContext()
 
+  protected def canReadRetainedChangelog: Boolean = streamScan.readRetainedChangelog()
+
   protected def notifyConsumerCheckpointComplete(nextSnapshot: Long): Unit =
     streamScan.notifyCheckpointComplete(nextSnapshot)
 

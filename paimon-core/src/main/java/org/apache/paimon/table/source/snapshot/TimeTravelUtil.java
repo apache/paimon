@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.SnapshotManager;
@@ -36,6 +37,8 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -43,6 +46,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TimeZone;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
@@ -50,6 +54,7 @@ import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.utils.DateTimeUtils.parseTimestampData;
+import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.SnapshotManager.retryEarliestSnapshot;
 
@@ -191,17 +196,34 @@ public class TimeTravelUtil {
             return latest - 1;
         }
 
-        if (earliestSnapshot.timeMillis() >= timestampMills) {
+        if (earliestSnapshot.timeMillis() > timestampMills) {
             return returnNullIfTooEarly ? null : earliestSnapshot.id() - 1;
+        }
+        if (earliestSnapshot.timeMillis() == timestampMills) {
+            return earliestSnapshot.id() - 1;
         }
 
         long earliest = earliestSnapshot.id();
+        long latestRetainedId = latest;
         while (earliest < latest) {
             long mid = (earliest + latest + 1) / 2;
-            Snapshot snapshot =
-                    startFromChangelog
-                            ? changelogOrSnapshot(snapshotManager, changelogManager, mid)
-                            : snapshotManager.snapshot(mid);
+            Snapshot snapshot;
+            if (startFromChangelog) {
+                try {
+                    snapshot = tryGetChangelogOrSnapshot(snapshotManager, changelogManager, mid);
+                } catch (FileNotFoundException e) {
+                    // Operation-local retention can leave disjoint ranges of changelogs and
+                    // snapshots. Search their actual IDs instead of assuming a continuous range.
+                    return earlierThanTimeMillsWithGaps(
+                            snapshotManager,
+                            changelogManager,
+                            timestampMills,
+                            earliestSnapshot.id(),
+                            latestRetainedId);
+                }
+            } else {
+                snapshot = snapshotManager.snapshot(mid);
+            }
             if (snapshot.timeMillis() < timestampMills) {
                 earliest = mid;
             } else {
@@ -209,6 +231,56 @@ public class TimeTravelUtil {
             }
         }
         return earliest;
+    }
+
+    private static @Nullable Long earlierThanTimeMillsWithGaps(
+            SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
+            long timestampMills,
+            long earliestId,
+            long latestId) {
+        List<Long> ids;
+        try (Stream<Long> snapshots = snapshotManager.snapshotIdStream();
+                Stream<Long> changelogs =
+                        listVersionedFiles(
+                                changelogManager.fileIO(),
+                                changelogManager.changelogDirectory(),
+                                ChangelogManager.CHANGELOG_PREFIX)) {
+            ids =
+                    Stream.concat(snapshots, changelogs)
+                            .filter(id -> id >= earliestId && id <= latestId)
+                            .distinct()
+                            .sorted()
+                            .collect(Collectors.toList());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to list retained snapshot and changelog IDs", e);
+        }
+        if (ids.isEmpty()) {
+            return null;
+        }
+        int left = 0;
+        int right = ids.size();
+        while (left < right) {
+            int mid = (left + right) / 2;
+            Snapshot snapshot =
+                    changelogOrSnapshot(snapshotManager, changelogManager, ids.get(mid));
+            if (snapshot.timeMillis() < timestampMills) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        long previousId = left == 0 ? ids.get(0) - 1 : ids.get(left - 1);
+        if (left < ids.size() && ids.get(left) > previousId + 1) {
+            // Missing commits may have the same timestamp as the next retained commit.
+            // Without their metadata, we cannot safely choose a starting point across the gap.
+            throw new OutOfRangeException(
+                    String.format(
+                            "Cannot determine the starting snapshot for timestamp %d: "
+                                    + "snapshot and changelog metadata are missing for IDs %d to %d.",
+                            timestampMills, previousId + 1, ids.get(left) - 1));
+        }
+        return previousId;
     }
 
     private static @Nullable Snapshot earliestSnapshot(
