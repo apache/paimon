@@ -1,7 +1,7 @@
 ---
 title: "CLI: Query and Inspect"
 sidebar_label: "Query and Inspect"
-description: "Inspect schemas, snapshots, partitions, scan plans, and table rows from the terminal."
+description: "Inspect schemas, snapshots, manifests, partitions, scan plans, and table rows from the terminal."
 ---
 
 <!--
@@ -25,7 +25,7 @@ under the License.
 
 # CLI: Query and Inspect
 
-Inspect schemas, snapshots, partitions, scan plans, and table rows from the terminal. Configure a catalog with the [CLI quick start](./cli#basic-usage) first. The examples use existing tables and illustrative output; replace table and column names with your own.
+Inspect schemas, snapshots, manifests, partitions, scan plans, and table rows from the terminal. Configure a catalog with the [CLI quick start](./cli#basic-usage) first. The examples use existing tables and illustrative output; replace table and column names with your own.
 
 ## Table Read
 
@@ -343,6 +343,88 @@ An empty table returns an empty JSON array or a `No snapshots found` message, wi
 exit status. Expired snapshots are not reconstructed. If a snapshot disappears during listing,
 it is skipped; other metadata read errors fail the command. These commands read snapshot metadata
 without opening manifest or data files or modifying the table.
+
+## Table List Manifests
+
+List the manifests referenced by the latest or a specific retained snapshot. By default, the
+command includes base, delta, and changelog manifest lists, in that order.
+
+```shell
+paimon table list-manifests mydb.orders
+
+# Inspect one manifest-list type in a historical snapshot
+paimon table list-manifests mydb.orders --snapshot-id 42 --type delta
+
+# Limit the total number of manifests and export structured JSON
+paimon table list-manifests mydb.orders --limit 20 --format json
+```
+
+**Options:**
+
+- `--snapshot-id`: Positive snapshot ID. Omit it to use the latest snapshot.
+- `--type`: `all` (default), `base`, `delta`, or `changelog`.
+- `--limit, -l`: Positive maximum number of manifests across all selected lists. Omit it to show all.
+- `--format, -f`: Output format: `table` (default) or `json`.
+
+Table output groups manifests by type and manifest-list file, showing file names, sizes in bytes,
+added/deleted file counts, schema IDs, partition statistics, and row-ID bounds. Missing values are
+displayed as `-`. JSON output contains `table`, `snapshot_id`, and a `manifests` array.
+
+Output:
+```text
+Table: mydb.orders
+Snapshot: 6
+
+base (manifest-list-example):
+       file_name file_size num_added_files num_deleted_files schema_id min_partition_stats max_partition_stats min_row_id max_row_id
+manifest-example      2317               1                 0         0                  {}                  {}          -          -
+```
+
+## Table Manifest
+
+Read a manifest file and display its original `ADD` and `DELETE` entries, including file metadata
+and statistics. JSON is the default output format. Use the `file_name` returned by `list-manifests`:
+
+```shell
+paimon table manifest mydb.orders --file manifest-example
+
+# Display complete metadata as a readable table
+paimon table manifest mydb.orders --file manifest-example --format table
+```
+
+**Options:**
+
+- `--file`: Manifest file name within the table's `manifest/` directory, not a path. **Required**.
+- `--format, -f`: Output format: `json` (default) or `table`.
+
+Output contains `table`, `manifest_file`, `manifest_path`, and `entries`. Table output displays
+the complete `entries` array as JSON in a single field. Historical manifests can be inspected
+while their files remain available.
+
+Output:
+```json
+{
+  "table": "mydb.orders",
+  "manifest_file": "manifest-example",
+  "manifest_path": "/warehouse/mydb.db/orders/manifest/manifest-example",
+  "entries": [
+    {
+      "kind": "ADD",
+      "partition": {},
+      "bucket": 0,
+      "total_buckets": -1,
+      "file": {
+        "file_name": "data-example.parquet",
+        "file_size": 803,
+        "row_count": 2,
+        "schema_id": 0,
+        "value_stats": {"min_values": {}, "max_values": {}, "null_counts": {}},
+        "first_row_id": null
+      }
+    }
+  ]
+}
+```
 
 ## Table List Partitions
 
