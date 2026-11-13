@@ -36,25 +36,15 @@ public interface Lock extends AutoCloseable {
      */
     AutoCloseable acquire() throws Exception;
 
-    /** Acquire the scope for a publication attempt. */
-    default AutoCloseable acquire(boolean retry) throws Exception {
-        return acquire();
-    }
-
     /**
      * Run an operation under the lock. Acquisition failures are distinguished from operation
      * failures; interruption stops acquisition. Releasing a scope must not replace the operation's
      * result or exception.
      */
     default <T> T runWithLock(Callable<T> callable) throws Exception {
-        return runWithLock(callable, true);
-    }
-
-    /** Run a publication attempt with the scope required by the lock. */
-    default <T> T runWithLock(Callable<T> callable, boolean retry) throws Exception {
         AutoCloseable scope;
         try {
-            scope = acquire(retry);
+            scope = acquire();
         } catch (Exception e) {
             if (ExceptionUtils.findThrowable(e, InterruptedException.class).isPresent()) {
                 Thread.currentThread().interrupt();
@@ -111,7 +101,7 @@ public interface Lock extends AutoCloseable {
         }
 
         @Override
-        public <T> T runWithLock(Callable<T> callable, boolean retry) throws Exception {
+        public <T> T runWithLock(Callable<T> callable) throws Exception {
             return callable.call();
         }
 
@@ -137,16 +127,11 @@ public interface Lock extends AutoCloseable {
 
         @Override
         public AutoCloseable acquire() throws Exception {
-            return acquire(true);
-        }
-
-        @Override
-        public AutoCloseable acquire(boolean retry) throws Exception {
             if (held.get()) {
                 delegate.ensureValid();
                 return () -> {};
             }
-            AutoCloseable scope = delegate.acquire(retry);
+            AutoCloseable scope = delegate.acquire();
             try {
                 delegate.ensureValid();
                 held.set(true);
@@ -161,12 +146,12 @@ public interface Lock extends AutoCloseable {
         }
 
         @Override
-        public <T> T runWithLock(Callable<T> callable, boolean retry) throws Exception {
+        public <T> T runWithLock(Callable<T> callable) throws Exception {
             if (held.get()) {
                 delegate.ensureValid();
                 return callable.call();
             }
-            return Lock.super.runWithLock(callable, retry);
+            return Lock.super.runWithLock(callable);
         }
 
         @Override

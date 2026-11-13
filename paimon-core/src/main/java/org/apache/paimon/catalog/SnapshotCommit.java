@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.concurrent.Callable;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** A snapshot publisher bound to the lock protecting its preparation and publication. */
 public abstract class SnapshotCommit implements Lock {
@@ -46,7 +47,23 @@ public abstract class SnapshotCommit implements Lock {
             String branch,
             List<PartitionStatistics> statistics)
             throws Exception {
-        return runWithLock(() -> commitImpl(baseSnapshotUuid, snapshot, branch, statistics), false);
+        return runWithLock(() -> commitImpl(baseSnapshotUuid, snapshot, branch, statistics));
+    }
+
+    /** Whether this publisher can attempt publication before acquiring its bound lock. */
+    public boolean supportsOptimisticCommit() {
+        return false;
+    }
+
+    /** Publish using the catalog's atomic comparison with the expected head. */
+    public final boolean commitOptimistically(
+            @Nullable String baseSnapshotUuid,
+            Snapshot snapshot,
+            String branch,
+            List<PartitionStatistics> statistics)
+            throws Exception {
+        checkState(supportsOptimisticCommit(), "This snapshot publisher requires its bound lock.");
+        return commitImpl(baseSnapshotUuid, snapshot, branch, statistics);
     }
 
     @Override
@@ -57,11 +74,6 @@ public abstract class SnapshotCommit implements Lock {
     @Override
     public final <T> T runWithLock(Callable<T> callable) throws Exception {
         return lock.runWithLock(callable);
-    }
-
-    @Override
-    public final <T> T runWithLock(Callable<T> callable, boolean retry) throws Exception {
-        return lock.runWithLock(callable, retry);
     }
 
     @Override
@@ -78,7 +90,7 @@ public abstract class SnapshotCommit implements Lock {
         }
     }
 
-    /** Backend publication, invoked only after acquiring and validating the bound lock. */
+    /** Backend publication for both the locked and optimistic paths. */
     protected abstract boolean commitImpl(
             @Nullable String baseSnapshotUuid,
             Snapshot snapshot,

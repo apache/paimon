@@ -58,7 +58,6 @@ public class RESTCatalogLock implements Lock {
     private final LongSupplier nanoTime;
     private final long acquireTimeoutMillis;
     private final ThreadLocal<Lease> currentLease = new ThreadLocal<>();
-    private final ThreadLocal<Boolean> optimistic = ThreadLocal.withInitial(() -> false);
 
     public RESTCatalogLock(
             RESTApi api,
@@ -165,26 +164,7 @@ public class RESTCatalogLock implements Lock {
     }
 
     @Override
-    public AutoCloseable acquire(boolean retry) throws Exception {
-        if (optimistic.get()) {
-            return () -> {};
-        }
-        if (currentLease.get() != null) {
-            ensureValid();
-            return () -> {};
-        }
-        if (retry) {
-            return acquire();
-        }
-        optimistic.set(true);
-        return optimistic::remove;
-    }
-
-    @Override
     public void ensureValid() {
-        if (optimistic.get()) {
-            return;
-        }
         Lease lease = currentLease.get();
         if (lease == null) {
             throw new IllegalStateException("No commit lease is held by this thread.");
