@@ -342,6 +342,7 @@ def test_incremental_rejects_manifest_delete_before_reconciliation(catalog, nati
     table.file_io.write_file(path, json.dumps(data), overwrite=True)
     # Allow fallback here: both implementations must reject the malformed input.
     table = table.copy({'scan.native-plan.enabled': str(native).lower(),
+                        'read.native.enabled': str(native).lower(),
                         'incremental-between-timestamp': '0,200'})
     with pytest.raises(ValueError, match='only ADD'):
         table.new_read_builder().new_scan().plan()

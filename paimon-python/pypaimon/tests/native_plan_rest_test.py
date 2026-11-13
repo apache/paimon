@@ -91,7 +91,8 @@ def test_catalog_snapshot_failure_never_reads_disk(rest_source, code):
         with pytest.raises(Exception, match='snapshot unavailable|does not exist|permission'):
             native_plan(table)
         with pytest.raises(Exception):
-            table.copy({'scan.native-plan.enabled': 'false'}).new_read_builder().new_scan().plan()
+            table.copy({'scan.native-plan.enabled': 'false',
+                        'read.native.enabled': 'false'}).new_read_builder().new_scan().plan()
 
 
 @pytest.mark.parametrize('from_tag', [False, True], ids=['empty-branch', 'tagged-branch'])
