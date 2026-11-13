@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactRangePlanner.RangeBatch;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactRangePlanner.RangeBatchIterator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -45,7 +46,6 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -211,12 +211,17 @@ public class DataEvolutionCompactCoordinator {
         return scanner.snapshot();
     }
 
+    /** Returns the known scan-completion state without scanning additional manifest groups. */
+    public boolean isScanFinished() {
+        return scanner.rangeBatches.isScanFinished();
+    }
+
     /** Scanner to generate sorted ManifestEntries. */
     static class CompactScanner {
 
         private final FileStoreScan scan;
         private final Snapshot snapshot;
-        private final Iterator<RangeBatch> rangeBatches;
+        private final RangeBatchIterator rangeBatches;
         private boolean nonEmptyResultReturned;
         private boolean emptyResultReturned;
 
