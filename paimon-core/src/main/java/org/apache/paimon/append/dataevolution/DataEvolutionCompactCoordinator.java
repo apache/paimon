@@ -211,6 +211,11 @@ public class DataEvolutionCompactCoordinator {
         return scanner.snapshot();
     }
 
+    /** Whether the current snapshot has no candidate batches left after planning. */
+    public boolean isScanFinished() {
+        return !scanner.rangeBatches.hasNext();
+    }
+
     /** Scanner to generate sorted ManifestEntries. */
     static class CompactScanner {
 

@@ -103,6 +103,11 @@ public class DataEvolutionDeletionVectorMaterializeCoordinator {
         return scanner.snapshot;
     }
 
+    /** Whether all deletion files in the current snapshot have been planned. */
+    public boolean isScanFinished() {
+        return scanner.remainingDeletionFiles.isEmpty();
+    }
+
     private static class MaterializeScanner {
 
         @Nullable private final FileStoreScan anchorScan;
