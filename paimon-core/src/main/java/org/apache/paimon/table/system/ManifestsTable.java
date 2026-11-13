@@ -187,6 +187,7 @@ public class ManifestsTable implements ReadonlyTable {
         private static final String LEAF_NAME = "schema_id";
 
         private RowType readType;
+        @Nullable private Predicate rowFilter;
 
         private final FileStoreTable dataTable;
 
@@ -200,6 +201,7 @@ public class ManifestsTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
+            this.rowFilter = LeafPredicateExtractor.rowFilterForTransforms(predicate);
             if (predicate == null) {
                 return this;
             }
@@ -297,6 +299,9 @@ public class ManifestsTable implements ReadonlyTable {
                     Iterators.transform(
                             manifestFileMetas.iterator(),
                             meta -> toRow(meta, partitionCastExecutor));
+            if (rowFilter != null) {
+                rows = Iterators.filter(rows, rowFilter::test);
+            }
             if (readType != null) {
                 rows =
                         Iterators.transform(

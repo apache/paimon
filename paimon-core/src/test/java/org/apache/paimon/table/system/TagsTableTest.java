@@ -24,8 +24,10 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -45,6 +47,7 @@ import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -149,6 +152,24 @@ class TagsTableTest extends TableTestBase {
                 tagManager.tagObjects().stream().mapToLong(p -> p.getKey().id()).max().orElse(0L);
         assertThat(readTagNames(builder.greaterOrEqual(1, maxSnapshotId))).isNotEmpty();
         assertThat(readTagNames(builder.greaterThan(1, maxSnapshotId))).isEmpty();
+    }
+
+    @Test
+    void testReadWithTransformFilter() throws Exception {
+        table.createTag("tag-a");
+        table.createTag("tag-b");
+
+        PredicateBuilder builder = new PredicateBuilder(TagsTable.TABLE_TYPE);
+        UpperTransform upperTagName =
+                new UpperTransform(
+                        Collections.singletonList(
+                                new FieldRef(0, "tag_name", DataTypes.STRING().notNull())));
+        Predicate upperEqual = builder.equal(upperTagName, BinaryString.fromString("TAG-A"));
+        assertThat(readTagNames(upperEqual)).containsExactly("tag-a");
+
+        Predicate orPredicate =
+                PredicateBuilder.or(builder.equal(0, BinaryString.fromString("tag-b")), upperEqual);
+        assertThat(readTagNames(orPredicate)).containsExactlyInAnyOrder("tag-a", "tag-b");
     }
 
     @Test

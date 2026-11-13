@@ -61,6 +61,8 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -219,6 +221,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
         private final FileIO fileIO;
         private RowType readType;
+        @Nullable private Predicate rowFilter;
         private Optional<Long> optionalFilterSnapshotIdMax = Optional.empty();
         private Optional<Long> optionalFilterSnapshotIdMin = Optional.empty();
         private final List<Long> snapshotIds = new ArrayList<>();
@@ -229,6 +232,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
+            this.rowFilter = LeafPredicateExtractor.rowFilterForTransforms(predicate);
             if (predicate == null) {
                 return this;
             }
@@ -322,6 +326,9 @@ public class SnapshotsTable implements ReadonlyTable {
             }
 
             Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
+            if (rowFilter != null) {
+                rows = Iterators.filter(rows, rowFilter::test);
+            }
             if (readType != null) {
                 rows =
                         Iterators.transform(
