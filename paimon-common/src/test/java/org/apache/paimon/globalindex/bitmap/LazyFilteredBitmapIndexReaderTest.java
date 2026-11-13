@@ -42,6 +42,8 @@ import org.apache.paimon.utils.Pair;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -255,8 +257,11 @@ public class LazyFilteredBitmapIndexReaderTest {
                 org.apache.paimon.options.MemorySize.ofBytes(1));
         BitmapGlobalIndexer intIndexer = new BitmapGlobalIndexer(intField, options);
         GlobalIndexSingleColumnWriter writer = intIndexer.createWriter(fileWriter);
-        writer.write(-1, 0);
-        writer.write(0, 1);
+        int[] keys = {-1000, -256, -1, 0, 1, 255, 256, 1000};
+        for (int i = 0; i < keys.length; i++) {
+            writer.write(keys[i], i);
+        }
+        writer.write(null, keys.length);
         ResultEntry result = writer.finish().get(0);
         Path filePath = new Path(basePath, result.fileName());
         GlobalIndexIOMeta meta =
@@ -266,10 +271,65 @@ public class LazyFilteredBitmapIndexReaderTest {
                 intIndexer.createReader(
                         fileReader,
                         Collections.singletonList(meta),
-                        2,
+                        keys.length + 1,
                         null,
                         newDirectExecutorService())) {
-            assertRows(reader.visitEqual(intFieldRef, 0).join(), 1L);
+            assertRows(reader.visitEqual(intFieldRef, 0).join(), 3L);
+            assertRows(reader.visitLessThan(intFieldRef, -256).join(), 0L);
+            assertRows(reader.visitLessOrEqual(intFieldRef, -256).join(), 0L, 1L);
+            assertRows(reader.visitGreaterThan(intFieldRef, 255).join(), 6L, 7L);
+            assertRows(reader.visitGreaterOrEqual(intFieldRef, 255).join(), 5L, 6L, 7L);
+            assertRows(reader.visitBetween(intFieldRef, -256, 255).join(), 1L, 2L, 3L, 4L, 5L);
+            assertRows(reader.visitBetween(intFieldRef, -255, 254).join(), 2L, 3L, 4L);
+            assertRows(
+                    reader.visitBetween(intFieldRef, -2000, 2000).join(),
+                    0L,
+                    1L,
+                    2L,
+                    3L,
+                    4L,
+                    5L,
+                    6L,
+                    7L);
+            assertRows(reader.visitBetween(intFieldRef, 2, 254).join());
+            assertRows(reader.visitBetween(intFieldRef, 1001, 2000).join());
+            assertRows(reader.visitBetween(intFieldRef, -2000, -1001).join());
+            assertRows(reader.visitBetween(intFieldRef, 1, -1).join());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "lz4", "zstd", "lzo"})
+    public void testRangeLookupSkipsUnrelatedDictionaryBlocks(String compression) throws Exception {
+        Options options = new Options();
+        options.set(BitmapGlobalIndexOptions.BITMAP_INDEX_COMPRESSION, compression);
+        options.set(
+                BitmapGlobalIndexOptions.BITMAP_INDEX_DICTIONARY_BLOCK_SIZE,
+                org.apache.paimon.options.MemorySize.ofBytes(256));
+        globalIndexer = new BitmapGlobalIndexer(dataField, options);
+        List<Pair<BinaryString, Long>> rows = new ArrayList<>();
+        for (int i = 0; i < 2000; i++) {
+            rows.add(Pair.of(str(String.format("key-%04d", i)), (long) i));
+        }
+        GlobalIndexIOMeta meta = writeData(rows);
+        CountingGlobalIndexFileReader countingReader = new CountingGlobalIndexFileReader();
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        countingReader,
+                        Collections.singletonList(meta),
+                        rows.size(),
+                        null,
+                        newDirectExecutorService())) {
+            assertRows(
+                    reader.visitBetween(fieldRef, str("key-0998"), str("key-1002")).join(),
+                    998L,
+                    999L,
+                    1000L,
+                    1001L,
+                    1002L);
+            assertThat(countingReader.seekCount())
+                    .as("footer, index, boundary dictionary blocks and matching bitmaps")
+                    .isLessThanOrEqualTo(12);
         }
     }
 
