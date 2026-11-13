@@ -35,6 +35,8 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -44,6 +46,11 @@ import java.util.List;
 import java.util.Queue;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 
 /** Tests for {@link DataEvolutionCompactRangePlanner}. */
 class DataEvolutionCompactRangePlannerTest extends TableTestBase {
@@ -92,6 +99,70 @@ class DataEvolutionCompactRangePlannerTest extends TableTestBase {
         DataEvolutionCompactRangePlanner.RangeBatch second = batches.poll();
         assertThat(second.fileCount()).isEqualTo(2);
         assertThat(second.toRanges()).containsExactly(new Range(30L, 49L));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void testScanCompletionDoesNotReadNextManifestGroup(int candidateFilesPerBatch)
+            throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        ManifestFile manifestFile = spy(table.store().manifestFileFactory().create());
+        List<ManifestFileMeta> firstManifest =
+                manifestFile.write(
+                        Arrays.asList(
+                                add("normal-0.parquet", 0L, 10L, 200L),
+                                add("updated-0.parquet", 0L, 10L, 200L)));
+        List<ManifestFileMeta> secondManifest =
+                manifestFile.write(
+                        Arrays.asList(
+                                add("normal-2.parquet", 20L, 10L, 200L),
+                                add("updated-2.parquet", 20L, 10L, 200L)));
+        List<ManifestFileMeta> manifests = new ArrayList<>(firstManifest);
+        manifests.addAll(secondManifest);
+        DataEvolutionCompactRangePlanner.RangeBatchIterator batches =
+                new DataEvolutionCompactRangePlanner(
+                                manifestFile,
+                                null,
+                                candidateFilesPerBatch,
+                                candidateOptions(table, false, false))
+                        .plan(manifests);
+
+        assertThat(batches.next().toRanges()).containsExactly(new Range(0L, 9L));
+        assertThat(batches.isScanFinished()).isFalse();
+        assertThat(batches.isScanFinished()).isFalse();
+        for (ManifestFileMeta manifest : secondManifest) {
+            verify(manifestFile, never()).scan(eq(manifest.fileName()), any());
+        }
+
+        assertThat(batches.next().toRanges()).containsExactly(new Range(20L, 29L));
+        assertThat(batches.isScanFinished()).isTrue();
+        assertThat(batches.hasNext()).isFalse();
+    }
+
+    @Test
+    void testScanCompletionWaitsForUnvisitedManifestGroups() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+        List<ManifestFileMeta> manifests =
+                new ArrayList<>(
+                        manifestFile.write(
+                                Arrays.asList(
+                                        add("normal-0.parquet", 0L, 10L, 200L),
+                                        add("updated-0.parquet", 0L, 10L, 200L))));
+        manifests.addAll(
+                manifestFile.write(
+                        Collections.singletonList(add("large-2.parquet", 20L, 10L, 200L))));
+        DataEvolutionCompactRangePlanner.RangeBatchIterator batches =
+                new DataEvolutionCompactRangePlanner(
+                                manifestFile, null, 2, candidateOptions(table, false, false))
+                        .plan(manifests);
+
+        assertThat(batches.next().toRanges()).containsExactly(new Range(0L, 9L));
+        assertThat(batches.isScanFinished()).isFalse();
+        assertThat(batches.hasNext()).isFalse();
+        assertThat(batches.isScanFinished()).isTrue();
     }
 
     @Test
