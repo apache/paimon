@@ -65,6 +65,7 @@ dependencies = [
     "pyarrow>=6,<7; python_version < '3.7'",
     "pyarrow>=7,<13; python_version >= '3.7' and python_version < '3.8'",
     "pyarrow>=16,!=19.0.0,<23; python_version >= '3.8'",
+    "pypaimon-rust>=0.5.0; python_version >= '3.10'",
     "pyroaring<=0.3.3; python_version < '3.7'",
     "pyroaring<=0.4.5; python_version == '3.7'",
     "pyroaring>=1.0.0,<=1.0.3; python_version == '3.8'",
@@ -162,7 +163,6 @@ datafusion = [
 ]
 sql = [
     "pypaimon[datafusion]; python_version >= '3.10'",
-    "pypaimon-rust>=0.3.0; python_version >= '3.10'",
 ]
 hdfs = [
     "hdfs-native>=0.13,<1; python_version >= '3.10' and platform_system != 'Windows'",
@@ -183,8 +183,7 @@ lint = [
     "flake8>=4,<5; python_version < '3.8'",
     "flake8>=7,<8; python_version >= '3.8'",
 ]
-# Ordinary Python and Torch CI must not install the released Rust wheel via SQL.
-# Native CI builds the companion Rust main and uses the complete dev group.
+# Shared integration dependencies; Native CI also installs the SQL extra via dev.
 python-tests = [
     {include-group = "test"},
     {include-group = "lint"},
@@ -199,7 +198,7 @@ dev = [
     "pypaimon[sql]",
 ]
 torch = [
-    {include-group = "python-tests"},
+    {include-group = "dev"},
     "pypaimon[torch,lerobot]",
     "torchdata>=0.11,<0.12; python_version >= '3.10'",
 ]

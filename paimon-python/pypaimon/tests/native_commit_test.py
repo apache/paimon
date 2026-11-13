@@ -101,10 +101,10 @@ def _seed(table):
         commit.close()
 
 
-@pytest.mark.python_commit
-def test_native_commit_is_opt_in():
-    assert not CoreOptions(Options({})).native_commit_enabled()
-    assert CoreOptions(Options({'commit.native.enabled': 'true'})).native_commit_enabled()
+@pytest.mark.execution_defaults
+def test_native_commit_is_default_and_can_be_disabled():
+    assert CoreOptions(Options({})).native_commit_enabled()
+    assert not CoreOptions(Options({'commit.native.enabled': 'false'})).native_commit_enabled()
 
 
 @pytest.mark.parametrize('backend', ['filesystem', 'path', 'jdbc'])

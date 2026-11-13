@@ -25,6 +25,7 @@ _NATIVE_READ_ENV = "PYPAIMON_TEST_NATIVE_READ"
 _NATIVE_WRITE_ENV = "PYPAIMON_TEST_NATIVE_WRITE"
 _NATIVE_UPDATE_ENV = "PYPAIMON_TEST_NATIVE_UPDATE"
 _NATIVE_COMMIT_ENV = "PYPAIMON_TEST_NATIVE_COMMIT"
+_EXECUTION_ENV = "PYPAIMON_TEST_EXECUTION"
 _native_plan_count = 0
 _native_read_count = 0
 _native_write_count = 0
@@ -62,24 +63,28 @@ def native_rest_catalog(tmp_path):
         server.shutdown()
 
 
+def _native_enabled(key):
+    return os.environ.get(key, "1" if os.environ.get(_EXECUTION_ENV) == "native" else "0") == "1"
+
+
 def _native_plan_enabled():
-    return os.environ.get(_NATIVE_PLAN_ENV) == "1"
+    return _native_enabled(_NATIVE_PLAN_ENV)
 
 
 def _native_read_enabled():
-    return os.environ.get(_NATIVE_READ_ENV) == "1"
+    return _native_enabled(_NATIVE_READ_ENV)
 
 
 def _native_write_enabled():
-    return os.environ.get(_NATIVE_WRITE_ENV) == "1"
+    return _native_enabled(_NATIVE_WRITE_ENV)
 
 
 def _native_commit_enabled():
-    return os.environ.get(_NATIVE_COMMIT_ENV) == "1"
+    return _native_enabled(_NATIVE_COMMIT_ENV)
 
 
 def _native_update_enabled():
-    return os.environ.get(_NATIVE_UPDATE_ENV) == "1"
+    return _native_enabled(_NATIVE_UPDATE_ENV)
 
 
 def pytest_configure(config):
@@ -88,7 +93,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "python_read: keep Python reader assertions on the Python lane")
     config.addinivalue_line(
-        "markers", "native_plan: exercise the real Rust planner in the Rust main CI job")
+        "markers", "native_plan: exercise the released Rust runtime in Native CI")
+    config.addinivalue_line(
+        "markers", "execution_defaults: exercise product defaults without CI backend overrides")
     config.addinivalue_line(
         "markers", "python_write: keep Python writer assertions on the Python lane")
     config.addinivalue_line(
@@ -198,7 +205,7 @@ def pytest_configure(config):
 def pytest_collection_modifyitems(items):
     if _native_plan_enabled():
         return
-    skip_native = pytest.mark.skip(reason="native plan tests run in the Rust Plan job")
+    skip_native = pytest.mark.skip(reason="native plan tests run in Native CI")
     for item in items:
         if item.get_closest_marker("native_plan") is not None:
             item.add_marker(skip_native)
@@ -209,6 +216,9 @@ def enable_native_backends(request, monkeypatch):
     global _force_native_for_test, _force_native_read_for_test
     global _force_native_write_for_test, _force_native_commit_for_test
     global _force_native_update_for_test
+    if request.node.get_closest_marker("execution_defaults") is not None:
+        yield
+        return
     python_plan = request.node.get_closest_marker("python_plan") is not None
     python_read = request.node.get_closest_marker("python_read") is not None
     python_write = request.node.get_closest_marker("python_write") is not None
@@ -223,38 +233,35 @@ def enable_native_backends(request, monkeypatch):
     force_write = _native_write_enabled() and not python_write
     force_commit = _native_commit_enabled() and not python_commit
     force_update = _native_update_enabled() and not python_write
-    if not (force_plan or force_read or force_write or force_commit or force_update):
-        yield
-        return
-
     from pypaimon.common.options.core_options import CoreOptions
 
-    if force_plan:
+    python_execution = os.environ.get(_EXECUTION_ENV) == "python"
+    if python_execution or python_plan:
         original_plan = CoreOptions.native_plan_enabled
 
         def plan_enabled(self, default=None):
-            return original_plan(self, True if default is None else default)
+            return original_plan(self, False if default is None else default)
 
         monkeypatch.setattr(CoreOptions, "native_plan_enabled", plan_enabled)
-    if force_read:
+    if python_execution or python_plan or python_read:
         original_read = CoreOptions.native_read_enabled
 
         def read_enabled(self, default=None):
-            return original_read(self, True if default is None else default)
+            return original_read(self, False if default is None else default)
 
         monkeypatch.setattr(CoreOptions, "native_read_enabled", read_enabled)
-    if force_write or force_update:
+    if python_execution or python_write:
         original_write = CoreOptions.native_write_enabled
 
         def write_enabled(self, default=None):
-            return original_write(self, True if default is None else default)
+            return original_write(self, False if default is None else default)
 
         monkeypatch.setattr(CoreOptions, "native_write_enabled", write_enabled)
-    if force_commit:
+    if python_execution or python_commit:
         original_commit = CoreOptions.native_commit_enabled
 
         def commit_enabled(self, default=None):
-            return original_commit(self, True if default is None else default)
+            return original_commit(self, False if default is None else default)
 
         monkeypatch.setattr(CoreOptions, "native_commit_enabled", commit_enabled)
     _force_native_for_test = force_plan
