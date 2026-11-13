@@ -45,6 +45,9 @@ import org.apache.spark.util.{Utils => SparkUtils}
 object PaimonUtils {
 
   /**
+   * Create a new [[DataFrame]] from the planned input, so writer-side transformations do not
+   * reanalyze optimized logical plans containing dynamic pruning subqueries.
+   *
    * In the streaming write case, An "Queries with streaming sources must be executed with
    * writeStream.start()" error will occur if we transform [[DataFrame]] first and then use it.
    *
