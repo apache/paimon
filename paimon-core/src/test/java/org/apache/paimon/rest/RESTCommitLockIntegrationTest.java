@@ -118,7 +118,7 @@ class RESTCommitLockIntegrationTest {
     @Test
     void acquisitionRequiresTheTableCapabilityBeforeRestRequests() {
         Options options = new Options();
-        options.set("rest.commit.acquire-lock", "true");
+        options.set("rest.commit.retry-acquire-lock", "true");
         assertThatThrownBy(
                         () ->
                                 new RESTCatalogLockFactory()
@@ -137,7 +137,7 @@ class RESTCommitLockIntegrationTest {
         "false,false,false", "false,false,true", "true,false,false",
         "true,false,true", "true,true,false", "true,true,true"
     })
-    void commitsAcquireBeforeHeadAndReacquireAfterConflict(
+    void commitsAcquireOnlyAfterPublicationConflicts(
             boolean capability,
             boolean locking,
             boolean firstPublicationConflicts,
@@ -145,7 +145,7 @@ class RESTCommitLockIntegrationTest {
             throws Exception {
         Options tableOptions = new Options();
         tableOptions.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, capability);
-        tableOptions.set(CoreOptions.REST_COMMIT_ACQUIRE_LOCK, locking);
+        tableOptions.set(CoreOptions.REST_COMMIT_RETRY_ACQUIRE_LOCK, locking);
         tableOptions.set(CoreOptions.COMMIT_MAX_RETRIES, 2);
         tableOptions.set(CoreOptions.COMMIT_MIN_RETRY_WAIT, Duration.ofMillis(1));
         tableOptions.set(CoreOptions.COMMIT_MAX_RETRY_WAIT, Duration.ofMillis(1));
@@ -193,9 +193,11 @@ class RESTCommitLockIntegrationTest {
                                                 true, "morax-job", 100000, 60000, head.get()));
                             }
                             if (path.endsWith("/snapshot")) {
-                                if (locking) {
-                                    assertThat(lease.get()).isTrue();
-                                }
+                                assertThat(lease.get())
+                                        .isEqualTo(
+                                                locking
+                                                        && firstPublicationConflicts
+                                                        && publications.get() == 1);
                                 events.add("head");
                                 Snapshot snapshot = head.get();
                                 return json(
@@ -205,9 +207,11 @@ class RESTCommitLockIntegrationTest {
                                                         : new TableSnapshot(snapshot, 0, 0, 0, 0)));
                             }
                             if (path.endsWith("/commit")) {
-                                if (locking) {
-                                    assertThat(lease.get()).isTrue();
-                                }
+                                assertThat(lease.get())
+                                        .isEqualTo(
+                                                locking
+                                                        && firstPublicationConflicts
+                                                        && publications.get() == 1);
                                 CommitTableRequest commit =
                                         fromJson(request, CommitTableRequest.class);
                                 assertThat(commit.getTableId()).isEqualTo("table-id");
@@ -269,7 +273,9 @@ class RESTCommitLockIntegrationTest {
                         .column("id", DataTypes.INT())
                         .option(CoreOptions.COMMIT_AUTO_ROLLBACK_ENABLED.key(), "true")
                         .option(CoreOptions.REST_COMMIT_LOCK_ENABLED.key(), "true")
-                        .option(CoreOptions.REST_COMMIT_ACQUIRE_LOCK.key(), String.valueOf(locking))
+                        .option(
+                                CoreOptions.REST_COMMIT_RETRY_ACQUIRE_LOCK.key(),
+                                String.valueOf(locking))
                         .option(CoreOptions.COMMIT_MIN_RETRY_WAIT.key(), "1 ms")
                         .option(CoreOptions.COMMIT_MAX_RETRY_WAIT.key(), "1 ms")
                         .build();
@@ -326,9 +332,7 @@ class RESTCommitLockIntegrationTest {
                                 assertThat(requestBody.getTableId()).isEqualTo("branch-id");
                                 assertThat(requestBody.getFromSnapshot())
                                         .isEqualTo(head.get().id());
-                                if (locking) {
-                                    assertThat(owner.get()).isNotNull();
-                                }
+                                assertThat(owner.get()).isNull();
                                 head.set(
                                         snapshots.get(
                                                 ((Instant.SnapshotInstant) requestBody.getInstant())
@@ -342,7 +346,7 @@ class RESTCommitLockIntegrationTest {
                                 CommitTableRequest commit =
                                         fromJson(request, CommitTableRequest.class);
                                 assertThat(commit.getTableId()).isEqualTo("branch-id");
-                                if (locking) {
+                                if (owner.get() != null) {
                                     assertThat(commit.getSnapshot().commitUser())
                                             .isEqualTo(owner.get());
                                 }
@@ -428,8 +432,7 @@ class RESTCommitLockIntegrationTest {
                         .isEqualTo(5L);
                 if (locking) {
                     assertThat(events)
-                            .containsSubsequence(
-                                    "acquire", "head", "rollback", "acquire", "head", "publish");
+                            .containsSubsequence("head", "rollback", "acquire", "head", "publish");
                 } else {
                     assertThat(events)
                             .containsSubsequence("head", "rollback", "head", "publish")
@@ -449,7 +452,7 @@ class RESTCommitLockIntegrationTest {
     private static List<String> expected(boolean locking, boolean retry) {
         List<String> events = new ArrayList<>();
         for (int attempt = 0; attempt < (retry ? 2 : 1); attempt++) {
-            if (locking) {
+            if (locking && attempt > 0) {
                 events.add("acquire");
             }
             events.add("head");

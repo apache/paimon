@@ -29,6 +29,7 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
@@ -58,6 +59,7 @@ public class RESTCatalogLock implements Lock {
     private final LongSupplier nanoTime;
     private final long acquireTimeoutMillis;
     private final ThreadLocal<Lease> currentLease = new ThreadLocal<>();
+    private final ThreadLocal<Boolean> optimistic = ThreadLocal.withInitial(() -> false);
 
     public RESTCatalogLock(
             RESTApi api,
@@ -164,7 +166,32 @@ public class RESTCatalogLock implements Lock {
     }
 
     @Override
+    public <T> T runWithLock(Callable<T> callable) throws Exception {
+        return optimistic.get() ? callable.call() : Lock.super.runWithLock(callable);
+    }
+
+    @Override
+    public <T> T runWithLock(Callable<T> callable, boolean retry) throws Exception {
+        if (currentLease.get() != null) {
+            ensureValid();
+            return callable.call();
+        }
+        if (retry || optimistic.get()) {
+            return runWithLock(callable);
+        }
+        optimistic.set(true);
+        try {
+            return callable.call();
+        } finally {
+            optimistic.remove();
+        }
+    }
+
+    @Override
     public void ensureValid() {
+        if (optimistic.get()) {
+            return;
+        }
         Lease lease = currentLease.get();
         if (lease == null) {
             throw new IllegalStateException("No commit lease is held by this thread.");

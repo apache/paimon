@@ -64,6 +64,10 @@ public interface Lock extends AutoCloseable {
         }
     }
 
+    default <T> T runWithLock(Callable<T> callable, boolean retry) throws Exception {
+        return runWithLock(callable);
+    }
+
     /** Release a scope without losing the outcome of its operation or partial acquisition. */
     static void release(AutoCloseable scope, @Nullable Throwable failure) {
         try {
@@ -152,6 +156,25 @@ public interface Lock extends AutoCloseable {
                 return callable.call();
             }
             return Lock.super.runWithLock(callable);
+        }
+
+        @Override
+        public <T> T runWithLock(Callable<T> callable, boolean retry) throws Exception {
+            if (held.get()) {
+                delegate.ensureValid();
+                return callable.call();
+            }
+            return delegate.runWithLock(
+                    () -> {
+                        delegate.ensureValid();
+                        held.set(true);
+                        try {
+                            return callable.call();
+                        } finally {
+                            held.remove();
+                        }
+                    },
+                    retry);
         }
 
         @Override

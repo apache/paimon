@@ -47,12 +47,12 @@ public class RESTCatalogLockFactory implements CatalogLockFactory {
             @Nullable String commitUser,
             Options tableOptions) {
         CoreOptions options = new CoreOptions(tableOptions);
-        if (!options.restCommitAcquireLock()) {
+        if (!options.restCommitRetryAcquireLock()) {
             return Lock.empty();
         }
         checkArgument(
                 options.restCommitLockEnabled(),
-                "rest.commit.acquire-lock requires rest.commit.lock-enabled on the table.");
+                "rest.commit.retry-acquire-lock requires rest.commit.lock-enabled on the table.");
         return new RESTCatalogLock(
                 new RESTApi(context.options(), false),
                 identifier,

@@ -790,6 +790,43 @@ class RESTCatalogLockTest {
         verifyNoInteractions(renewer);
     }
 
+    @Test
+    void acquiresOnlyOnRetryAndNextCommitStartsOptimistically() throws Exception {
+        Lock publication = Lock.reentrant(lock);
+        assertThat(
+                        publication.runWithLock(
+                                () ->
+                                        publication.runWithLock(
+                                                () -> {
+                                                    publication.ensureValid();
+                                                    return "optimistic";
+                                                }),
+                                false))
+                .isEqualTo("optimistic");
+        verifyNoInteractions(api, renewer);
+        grant("morax-job", 60000);
+        assertThat(publication.runWithLock(() -> publication.runWithLock(() -> "retried"), true))
+                .isEqualTo("retried");
+        assertThat(publication.runWithLock(() -> "next optimistic commit", false))
+                .isEqualTo("next optimistic commit");
+        renewal();
+    }
+
+    @Test
+    void optimisticFailureClearsTheScope() {
+        RuntimeException failure = new RuntimeException("Preparation failed before a retry");
+        assertThatThrownBy(
+                        () ->
+                                lock.runWithLock(
+                                        () -> {
+                                            throw failure;
+                                        },
+                                        false))
+                .isSameAs(failure);
+        verifyNoInteractions(api, renewer);
+        assertThatThrownBy(lock::ensureValid).hasMessageContaining("No commit lease");
+    }
+
     private <T> T run(Callable<T> callable) throws Exception {
         return lock.runWithLock(callable);
     }

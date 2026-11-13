@@ -382,7 +382,8 @@ public class DataEvolutionRowIdReassigner {
 
             Assignment assignment = assignmentPlan.createAssignment(latest);
             CommitAssignmentResult commitResult =
-                    commitAssignment(assignment, manifestFile, manifestList, commitUser);
+                    commitAssignment(
+                            assignment, manifestFile, manifestList, commitUser, retryCount > 0);
             if (commitResult.success) {
                 return new CommittedAssignment(assignment, commitResult);
             }
@@ -417,7 +418,8 @@ public class DataEvolutionRowIdReassigner {
             Assignment assignment,
             ManifestFile manifestFile,
             ManifestList manifestList,
-            String commitUser) {
+            String commitUser,
+            boolean retry) {
         RewrittenDataManifests rewrittenDataManifests =
                 writeManifestReplacements(assignment, manifestFile);
         Pair<String, Long> baseManifestList =
@@ -448,7 +450,8 @@ public class DataEvolutionRowIdReassigner {
                             deltaManifestList,
                             rewrittenIndexManifest.indexManifest,
                             assignment.nextRowId,
-                            properties);
+                            properties,
+                            retry);
         }
         return new CommitAssignmentResult(
                 success, rewrittenDataManifests.fileCount, rewrittenIndexManifest.indexFileCount);

@@ -46,7 +46,7 @@ public abstract class SnapshotCommit implements Lock {
             String branch,
             List<PartitionStatistics> statistics)
             throws Exception {
-        return runWithLock(() -> commitImpl(baseSnapshotUuid, snapshot, branch, statistics));
+        return runWithLock(() -> commitImpl(baseSnapshotUuid, snapshot, branch, statistics), false);
     }
 
     @Override
@@ -57,6 +57,11 @@ public abstract class SnapshotCommit implements Lock {
     @Override
     public final <T> T runWithLock(Callable<T> callable) throws Exception {
         return lock.runWithLock(callable);
+    }
+
+    @Override
+    public final <T> T runWithLock(Callable<T> callable, boolean retry) throws Exception {
+        return lock.runWithLock(callable, retry);
     }
 
     @Override
