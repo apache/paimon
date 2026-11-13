@@ -81,22 +81,22 @@ public class ForceSingleBatchReader implements RecordReader<InternalRow> {
         @Nullable
         @Override
         public InternalRow next() throws IOException {
-            if (currentBatch == null) {
-                currentBatch = reader.readBatch();
+            while (true) {
                 if (currentBatch == null) {
-                    return null;
+                    currentBatch = reader.readBatch();
+                    if (currentBatch == null) {
+                        return null;
+                    }
                 }
-            }
 
-            InternalRow next = currentBatch.next();
+                InternalRow next = currentBatch.next();
+                if (next != null) {
+                    return next;
+                }
 
-            if (next == null) {
                 currentBatch.releaseBatch();
                 currentBatch = null;
-                return next();
             }
-
-            return next;
         }
 
         @Override

@@ -111,6 +111,30 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                     new DvSpec(new Range(10, 14), 10, 12));
 
     @Test
+    public void testMergedReadAfterManyDeletedBatches() throws Exception {
+        int rowCount = 20000;
+        write(rowCount);
+        FileStoreTable table = getTableDefault();
+        long[] deleted = new long[rowCount - 1];
+        for (int i = 0; i < deleted.length; i++) {
+            deleted[i] = i;
+        }
+        commitDeletionVectors(
+                table, Collections.singletonList(new DvSpec(new Range(0, rowCount - 1), deleted)));
+
+        table =
+                getTableDefault()
+                        .copy(Collections.singletonMap(CoreOptions.READ_BATCH_SIZE.key(), "1"));
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0, 2});
+        List<String> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(row -> rows.add(row.getInt(0) + "|" + row.getString(1)));
+        }
+        assertThat(rows).containsExactly("19999|b19999");
+    }
+
+    @Test
     public void testReadAfterDeletionVectors() throws Exception {
         // basic read
         createTableDefault();
