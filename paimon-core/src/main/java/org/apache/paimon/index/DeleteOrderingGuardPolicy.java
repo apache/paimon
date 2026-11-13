@@ -23,15 +23,21 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.operation.commit.DeleteOrderingGuardGeneration;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.SnapshotManager;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -57,6 +63,55 @@ public class DeleteOrderingGuardPolicy {
                                         .scan(snapshot, DELETE_ORDERING_GUARD)
                                         .isEmpty()),
                 "Rescaling tables with delete ordering guards is not supported.");
+    }
+
+    /** Rewinding snapshot metadata must not revive writes fenced by an ordering-history reset. */
+    public static void validateHistoryRewrite(
+            CoreOptions options, SnapshotManager snapshotManager, String operation) {
+        Snapshot latest;
+        try {
+            latest = snapshotManager.latestSnapshot();
+        } catch (RuntimeException e) {
+            if (!(e.getCause() instanceof FileNotFoundException)) {
+                throw e;
+            }
+            // A missing latest hint can be recovered, but retained history still fences writes.
+            try {
+                latest =
+                        snapshotManager.safelyGetAllSnapshots().stream()
+                                .max(Comparator.comparingLong(Snapshot::id))
+                                .orElse(null);
+            } catch (IOException ex) {
+                throw new UncheckedIOException(ex);
+            }
+        }
+        if (options.deleteOrderingGuardsEnabled()
+                || DeleteOrderingGuardGeneration.isTracked(latest)
+                || DeleteOrderingGuardFile.mayContainGuards(latest)) {
+            throw new UnsupportedOperationException(
+                    operation
+                            + " is not supported for delete ordering guard histories. "
+                            + "Use rollbackToAsLatest or sys.rollback_to_as_latest to restore a snapshot "
+                            + "while preserving writer fencing.");
+        }
+    }
+
+    public static void validateFastForward(
+            CoreOptions options,
+            SnapshotManager snapshotManager,
+            SchemaManager schemaManager,
+            String branchName) {
+        BranchManager.fastForwardValidate(branchName, snapshotManager.branch());
+        validateHistoryRewrite(options, snapshotManager, "Fast-forward");
+        schemaManager
+                .copyWithBranch(branchName)
+                .latest()
+                .ifPresent(
+                        schema ->
+                                validateHistoryRewrite(
+                                        new CoreOptions(schema.options()),
+                                        snapshotManager.copyWithBranch(branchName),
+                                        "Fast-forward"));
     }
 
     /** Payload schema evolution and capture toggles do not change the interpretation of a bound. */

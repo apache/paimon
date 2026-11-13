@@ -25,6 +25,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
 from pypaimon.read.streaming_table_scan import StreamTableScan
+from pypaimon.schema.schema_change import SchemaChange
 
 
 def _table(tmp_path, extra=None):
@@ -204,6 +205,36 @@ def test_guarded_histories_reject_destructive_rollback(
     assert manager.list_snapshot_ids() == snapshot_ids
     assert sorted(tag_manager.list_tags()) == tags
     assert {path: table.file_io.read_file_utf8(path) for path in metadata_paths} == metadata
+
+
+@pytest.mark.parametrize('guarded_branch', ['main', 'old-history'])
+@pytest.mark.parametrize('enabled', [False, True])
+def test_guarded_histories_reject_fast_forward(tmp_path, guarded_branch, enabled):
+    table = _table(tmp_path)
+    _append(table, 1)
+    table.create_tag('base')
+    table.branch_manager().create_branch('old-history', 'base')
+    _append(table, 2)
+    guarded = table if guarded_branch == 'main' else table.copy({'branch': 'old-history'})
+    if enabled:
+        guarded.schema_manager.commit_changes([
+            SchemaChange.set_option('delete-ordering-guards.enabled', 'true'),
+        ])
+    else:
+        _guard_snapshot(guarded, {'delete-ordering-guards.generations': '{"version":"1","*":"reset"}'})
+    manager = table.snapshot_manager()
+    latest = manager.get_latest_snapshot()
+    snapshot_ids = manager.list_snapshot_ids()
+    metadata = {snapshot_id: table.file_io.read_file_utf8(manager.get_snapshot_path(snapshot_id))
+                for snapshot_id in snapshot_ids}
+
+    with pytest.raises(NotImplementedError, match='does not support delete ordering guards'):
+        table.branch_manager().fast_forward('old-history')
+
+    assert manager.get_latest_snapshot().id == latest.id
+    assert manager.list_snapshot_ids() == snapshot_ids
+    assert {snapshot_id: table.file_io.read_file_utf8(manager.get_snapshot_path(snapshot_id))
+            for snapshot_id in snapshot_ids} == metadata
 
 
 @pytest.mark.python_plan

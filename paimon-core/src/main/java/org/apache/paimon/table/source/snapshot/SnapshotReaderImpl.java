@@ -601,8 +601,13 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 groupByPartFiles(plan.files(FileKind.DELETE));
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
+        // Empty before sides do not need predecessor metadata, which may already be expired.
         LazyField<Snapshot> beforeSnapshot =
-                new LazyField<>(() -> snapshotManager.snapshot(plan.snapshot().id() - 1));
+                new LazyField<>(
+                        () ->
+                                beforeFiles.isEmpty()
+                                        ? null
+                                        : snapshotManager.snapshot(plan.snapshot().id() - 1));
         return toIncrementalPlan(
                 true, beforeSnapshot, beforeFiles, plan.snapshot(), plan.watermark(), afterFiles);
     }
