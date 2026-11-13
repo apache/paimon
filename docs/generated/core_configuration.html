@@ -420,7 +420,7 @@ under the License.
             <td><h5>compaction.max-size-amplification-percent</h5></td>
             <td style="word-wrap: break-word;">200</td>
             <td>Integer</td>
-            <td>The size amplification is defined as the amount (in percentage) of additional storage needed to store a single byte of data in the merge tree for changelog mode table.</td>
+            <td>The size amplification is defined as the amount (in percentage) of additional storage needed to store a single byte of data in the merge tree for changelog mode table. For incremental data-evolution compaction, this limits fully superseded normal-file bytes relative to files still supplying current columns.</td>
         </tr>
         <tr>
             <td><h5>compaction.min.file-num</h5></td>
@@ -456,7 +456,7 @@ under the License.
             <td><h5>compaction.size-ratio</h5></td>
             <td style="word-wrap: break-word;">1</td>
             <td>Integer</td>
-            <td>Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) size is 1% smaller than the next sorted run's size, then include next sorted run into this candidate set.</td>
+            <td>Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) size is 1% smaller than the next sorted run's size, then include next sorted run into this candidate set. Also applies to newest-first normal column-file version selection in incremental data-evolution compaction.</td>
         </tr>
         <tr>
             <td><h5>compaction.skip-expired-partitions</h5></td>
@@ -529,6 +529,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Skip complete data-evolution compaction tasks with row-range conflicts. Skipped inputs remain live for later compaction. Applies only to data-only compaction messages without row-id validation baselines.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.compaction.incremental.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Compact a newest-first prefix of normal column-file versions within one row-ID range, writing only their columns and retaining older files. Uses compaction.min.file-num, compaction.size-ratio and compaction.max-size-amplification-percent for selection. Nested ROW columns are projected by written leaf field IDs. Partial rewrites keep their complete row-ID range. Eligible oversized files select all column versions for splitting.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.compaction.large-file-ratio</h5></td>
