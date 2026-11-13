@@ -42,6 +42,7 @@ import org.apache.paimon.mergetree.compact.KvCompactionManagerFactory;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -254,7 +255,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
 
     @Override
     protected boolean requiresCompactionBaseline() {
-        return options.deletionVectorsEnabled() && !options.writeOnly();
+        return !options.writeOnly()
+                && (options.deletionVectorsEnabled()
+                        || !VectorIndexOptions.columns(options.toConfiguration()).isEmpty());
     }
 
     @Override

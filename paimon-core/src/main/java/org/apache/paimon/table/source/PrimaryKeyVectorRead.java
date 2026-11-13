@@ -29,11 +29,11 @@ import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.VectorSearchMetric;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
 import org.apache.paimon.index.pkvector.PkVectorAnnSegmentSearcher;
 import org.apache.paimon.index.pkvector.PkVectorBucketIndexState;
 import org.apache.paimon.index.pkvector.PkVectorDataFileReader;
 import org.apache.paimon.index.pkvector.PkVectorSearchResult;
+import org.apache.paimon.index.pkvector.PkVectorSourceFiles;
 import org.apache.paimon.index.pkvector.PrimaryKeyVectorBucketSearch;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
@@ -71,7 +71,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -188,10 +187,11 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
             }
             for (String payloadType : payloadTypes) {
                 PkVectorBucketIndexState state =
-                        PkVectorBucketIndexState.fromActiveDataFiles(
+                        PkVectorBucketIndexState.fromEligibleDataFiles(
                                 vectorField.id(),
                                 payloadType,
-                                split.dataSplit().dataFiles(),
+                                PkVectorSourceFiles.eligible(
+                                        split.dataSplit().dataFiles(), table.coreOptions()),
                                 split.payloadFiles());
                 if (state.annSegments().isEmpty()) {
                     continue;
@@ -320,11 +320,9 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         DataSplit dataSplit = split.dataSplit();
         SearchParameters parameters = context.parameters;
         List<DataFileMeta> activeFiles =
-                dataSplit.dataFiles().stream()
-                        .filter(PrimaryKeyIndexSourcePolicy::shouldRead)
-                        .collect(Collectors.toList());
+                PkVectorSourceFiles.eligible(dataSplit.dataFiles(), table.coreOptions());
         PkVectorBucketIndexState state =
-                PkVectorBucketIndexState.fromActiveDataFiles(
+                PkVectorBucketIndexState.fromEligibleDataFiles(
                         vectorField.id(),
                         parameters.vectorOptions.type(),
                         activeFiles,

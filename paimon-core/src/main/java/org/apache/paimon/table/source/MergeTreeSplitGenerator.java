@@ -67,12 +67,7 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
 
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> files) {
-        boolean rawConvertible =
-                files.stream().allMatch(file -> file.level() != 0 && withoutDeleteRow(file));
-        boolean oneLevel =
-                files.stream().map(DataFileMeta::level).collect(Collectors.toSet()).size() == 1;
-
-        if (rawConvertible && (deletionVectorsEnabled || mergeEngine == FIRST_ROW || oneLevel)) {
+        if (canReadBucketWithoutMerge(files, deletionVectorsEnabled, mergeEngine)) {
             Function<DataFileMeta, Long> weightFunc =
                     file -> Math.max(file.fileSize(), openFileCost);
             return BinPacking.packForOrdered(files, weightFunc, targetSplitSize).stream()
@@ -148,7 +143,17 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
         return files;
     }
 
-    private boolean withoutDeleteRow(DataFileMeta dataFileMeta) {
+    /** Whether a batch-visible bucket can be read without a merge, before split packing. */
+    public static boolean canReadBucketWithoutMerge(
+            List<DataFileMeta> files, boolean deletionVectorsEnabled, MergeEngine mergeEngine) {
+        return !files.isEmpty()
+                && files.stream().allMatch(file -> file.level() != 0 && withoutDeleteRow(file))
+                && (deletionVectorsEnabled
+                        || mergeEngine == FIRST_ROW
+                        || files.stream().allMatch(file -> file.level() == files.get(0).level()));
+    }
+
+    private static boolean withoutDeleteRow(DataFileMeta dataFileMeta) {
         // null to true to be compatible with old version
         return dataFileMeta.deleteRowCount().map(count -> count == 0L).orElse(true);
     }

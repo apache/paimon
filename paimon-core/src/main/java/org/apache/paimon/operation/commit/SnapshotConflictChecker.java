@@ -22,9 +22,11 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.Pair;
@@ -33,7 +35,6 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -77,18 +78,22 @@ public class SnapshotConflictChecker {
     /** Collects the writer baselines before publishing any part of the commit. */
     public Map<Pair<BinaryRow, Integer>, Long> prepareCompactionBaselines(
             List<CommitMessage> messages) {
-        if (!bucketCompactionCheckEnabled) {
-            return Collections.emptyMap();
-        }
         Map<Pair<BinaryRow, Integer>, Long> baseSnapshots = new HashMap<>();
         for (CommitMessage message : messages) {
-            if (!changesDataOrDeletionVectors(((CommitMessageImpl) message).compactIncrement())) {
+            CompactIncrement compact = ((CommitMessageImpl) message).compactIncrement();
+            boolean vectorBackfill =
+                    compact.compactBefore().isEmpty()
+                            && compact.compactAfter().isEmpty()
+                            && compact.newIndexFiles().stream()
+                                    .anyMatch(SnapshotConflictChecker::isSourceBackedVector);
+            if (!vectorBackfill
+                    && (!bucketCompactionCheckEnabled || !changesDataOrDeletionVectors(compact))) {
                 continue;
             }
             Long snapshotId = message.checkFromSnapshot();
             checkArgument(
                     snapshotId != null && snapshotId >= 0,
-                    "A primary-key deletion-vector compaction message is missing its "
+                    "A primary-key compaction or vector backfill message is missing its "
                             + "restored snapshot. Reload the bucket and recompute compaction.");
             baseSnapshots.merge(
                     Pair.of(message.partition(), message.bucket()), snapshotId, Math::min);
@@ -103,9 +108,26 @@ public class SnapshotConflictChecker {
             CommitKind newCommitKind,
             CommitChanges changes,
             Set<Long> rebasedReassignments,
-            Map<Pair<BinaryRow, Integer>, Long> compactionBaselines) {
+            Map<Pair<BinaryRow, Integer>, Long> compactionBaselines,
+            Runnable checkVectorBackfillSchema) {
         if (newCommitKind == CommitKind.COMPACT && !compactionBaselines.isEmpty()) {
-            checkBucketCompaction(newSnapshotId, compactionBaselines);
+            Set<Pair<BinaryRow, Integer>> dataBuckets =
+                    changes.tableFiles.stream()
+                            .map(entry -> Pair.of(entry.partition(), entry.bucket()))
+                            .collect(Collectors.toSet());
+            Set<Pair<BinaryRow, Integer>> vectorBackfills =
+                    changes.indexFiles.stream()
+                            .filter(
+                                    entry ->
+                                            entry.kind() == FileKind.ADD
+                                                    && isSourceBackedVector(entry.indexFile()))
+                            .map(entry -> Pair.of(entry.partition(), entry.bucket()))
+                            .filter(bucket -> !dataBuckets.contains(bucket))
+                            .collect(Collectors.toSet());
+            if (!vectorBackfills.isEmpty()) {
+                checkVectorBackfillSchema.run();
+            }
+            checkBucketCompaction(newSnapshotId, compactionBaselines, vectorBackfills);
         }
         if (lastSafeSnapshot == null) {
             return null;
@@ -180,11 +202,18 @@ public class SnapshotConflictChecker {
     }
 
     private void checkBucketCompaction(
-            long newSnapshotId, Map<Pair<BinaryRow, Integer>, Long> baseSnapshots) {
+            long newSnapshotId,
+            Map<Pair<BinaryRow, Integer>, Long> baseSnapshots,
+            Set<Pair<BinaryRow, Integer>> vectorBackfills) {
         Map<Pair<BinaryRow, Integer>, Range> ranges = new HashMap<>();
         for (Map.Entry<Pair<BinaryRow, Integer>, Long> entry : baseSnapshots.entrySet()) {
             long base = entry.getValue();
-            Range checked = checkedCompactionSnapshots.get(entry.getKey());
+            // Ordinary compaction checks skip APPEND snapshots. A backfill must also
+            // consider appends that can change its active source set or its index coverage.
+            Range checked =
+                    vectorBackfills.contains(entry.getKey())
+                            ? null
+                            : checkedCompactionSnapshots.get(entry.getKey());
             // A newer writer may have skipped an earlier conflicting COMPACT. Its checked
             // interval cannot be reused for a subsequently received older writer state.
             ranges.put(
@@ -197,14 +226,19 @@ public class SnapshotConflictChecker {
                 ranges.values().stream().mapToLong(range -> range.to).min().getAsLong() + 1;
         for (long id = firstSnapshot; id < newSnapshotId; id++) {
             Snapshot snapshot = snapshotManager.snapshot(id);
+            boolean compactOrOverwrite =
+                    snapshot.commitKind() == CommitKind.COMPACT
+                            || snapshot.commitKind() == CommitKind.OVERWRITE;
             if (snapshot.commitUser().equals(commitUser)
-                    || (snapshot.commitKind() != CommitKind.COMPACT
-                            && snapshot.commitKind() != CommitKind.OVERWRITE)) {
+                    || (!compactOrOverwrite
+                            && (snapshot.commitKind() != CommitKind.APPEND
+                                    || vectorBackfills.isEmpty()))) {
                 continue;
             }
             Set<Pair<BinaryRow, Integer>> buckets = new HashSet<>();
             for (Map.Entry<Pair<BinaryRow, Integer>, Range> entry : ranges.entrySet()) {
-                if (entry.getValue().to < id) {
+                if (entry.getValue().to < id
+                        && (compactOrOverwrite || vectorBackfills.contains(entry.getKey()))) {
                     buckets.add(entry.getKey());
                 }
             }
@@ -226,6 +260,12 @@ public class SnapshotConflictChecker {
                         checkedCompactionSnapshots.put(
                                 Pair.of(bucket.getLeft().copy(), bucket.getRight()),
                                 new Range(range.from, newSnapshotId - 1)));
+    }
+
+    private static boolean isSourceBackedVector(IndexFileMeta file) {
+        return CoreOptions.isVectorIndexType(file.indexType())
+                && file.globalIndexMeta() != null
+                && file.globalIndexMeta().sourceMeta() != null;
     }
 
     private static boolean changesDataOrDeletionVectors(CompactIncrement compact) {

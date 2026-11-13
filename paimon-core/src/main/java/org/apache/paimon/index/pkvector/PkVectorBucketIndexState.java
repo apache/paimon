@@ -43,24 +43,29 @@ public final class PkVectorBucketIndexState {
     private final List<IndexFileMeta> staleSegments;
     private final Map<String, IndexFileMeta> sourceFileToAnnSegment;
 
-    public static PkVectorBucketIndexState fromActiveDataFiles(
+    public static PkVectorBucketIndexState fromEligibleDataFiles(
             int vectorFieldId,
             String indexType,
             List<DataFileMeta> activeDataFiles,
             List<IndexFileMeta> activePayloads) {
         Map<Integer, List<PrimaryKeyIndexSourceFile>> sourcesByLevel = new TreeMap<>();
+        Map<Integer, List<PrimaryKeyIndexSourceFile>> legacySourcesByLevel = new TreeMap<>();
         for (DataFileMeta dataFile : activeDataFiles) {
+            PrimaryKeyIndexSourceFile source =
+                    new PrimaryKeyIndexSourceFile(dataFile.fileName(), dataFile.rowCount());
+            sourcesByLevel
+                    .computeIfAbsent(dataFile.level(), ignored -> new ArrayList<>())
+                    .add(source);
             if (PrimaryKeyIndexSourcePolicy.shouldRead(dataFile)) {
-                sourcesByLevel
+                legacySourcesByLevel
                         .computeIfAbsent(dataFile.level(), ignored -> new ArrayList<>())
-                        .add(
-                                new PrimaryKeyIndexSourceFile(
-                                        dataFile.fileName(), dataFile.rowCount()));
+                        .add(source);
             }
         }
-        for (List<PrimaryKeyIndexSourceFile> sources : sourcesByLevel.values()) {
-            sources.sort(Comparator.comparing(PrimaryKeyIndexSourceFile::fileName));
-        }
+        Comparator<PrimaryKeyIndexSourceFile> byName =
+                Comparator.comparing(PrimaryKeyIndexSourceFile::fileName);
+        sourcesByLevel.values().forEach(sources -> sources.sort(byName));
+        legacySourcesByLevel.values().forEach(sources -> sources.sort(byName));
 
         Map<Integer, List<IndexFileMeta>> segmentsByLevel = new TreeMap<>();
         List<IndexFileMeta> stale = new ArrayList<>();
@@ -73,9 +78,12 @@ public final class PkVectorBucketIndexState {
                         PrimaryKeyIndexSourceMeta.fromIndexFile(segment);
                 List<PrimaryKeyIndexSourceFile> desired =
                         sourcesByLevel.get(sourceMeta.dataLevel());
+                List<PrimaryKeyIndexSourceFile> legacy =
+                        legacySourcesByLevel.get(sourceMeta.dataLevel());
+                List<PrimaryKeyIndexSourceFile> sources = sourceMeta.sourceFiles();
+                // Keep a complete legacy group usable while its expanded replacement is built.
                 if (singleton.annSegments().size() != 1
-                        || desired == null
-                        || !desired.equals(sourceMeta.sourceFiles())) {
+                        || (!sources.equals(desired) && !sources.equals(legacy))) {
                     stale.add(segment);
                 } else {
                     segmentsByLevel

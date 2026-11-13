@@ -231,6 +231,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
         if (snapshotId > writerContainer.baseSnapshotId) {
             writerContainer.writer.addNewFiles(files);
+            if (writerContainer.primaryKeyIndexMaintainer != null) {
+                writerContainer.primaryKeyIndexMaintainer.notifyNewFiles(files);
+            }
         }
     }
 

@@ -27,6 +27,17 @@ from pypaimon.execution.python.read.scanner.split_generator import AbstractSplit
 from pypaimon.read.split import Split
 
 
+def can_read_bucket_without_merge(data_files, deletion_vectors_enabled, merge_engine):
+    return bool(data_files) and all(
+        file.level != 0 and AbstractSplitGenerator._without_delete_row(file)
+        for file in data_files
+    ) and (
+        deletion_vectors_enabled
+        or merge_engine == MergeEngine.FIRST_ROW
+        or all(file.level == data_files[0].level for file in data_files)
+    )
+
+
 class PrimaryKeyTableSplitGenerator(AbstractSplitGenerator):
     """
     Split generator for primary key tables.
@@ -70,8 +81,6 @@ class PrimaryKeyTableSplitGenerator(AbstractSplitGenerator):
         def weight_func(fl: List[DataFileMeta]) -> int:
             return max(sum(f.file_size for f in fl), self.open_file_cost)
 
-        merge_engine_first_row = self.merge_engine == MergeEngine.FIRST_ROW
-
         splits = []
         for key, file_entries_list in partitioned_files.items():
             if not file_entries_list:
@@ -79,17 +88,8 @@ class PrimaryKeyTableSplitGenerator(AbstractSplitGenerator):
 
             data_files: List[DataFileMeta] = [e.file for e in file_entries_list]
 
-            raw_convertible = all(
-                f.level != 0 and self._without_delete_row(f)
-                for f in data_files
-            )
-
-            levels = {f.level for f in data_files}
-            one_level = len(levels) == 1
-
-            use_optimized_path = raw_convertible and (
-                self.deletion_vectors_enabled or merge_engine_first_row or one_level
-            )
+            use_optimized_path = can_read_bucket_without_merge(
+                data_files, self.deletion_vectors_enabled, self.merge_engine)
 
             if use_optimized_path:
                 packed_files: List[List[DataFileMeta]] = self._pack_for_ordered(
