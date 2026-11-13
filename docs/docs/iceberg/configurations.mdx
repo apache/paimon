@@ -40,6 +40,7 @@ Iceberg catalog properties are configured separately.
 | Publish deletion vectors | `metadata.iceberg.format-version` plus `deletion-vectors.*`; [primary key tables](./primary-key-table.mdx#deletion-vector-support) |
 | Adjust manifest compatibility | `metadata.iceberg.manifest-compression`, `metadata.iceberg.manifest-legacy-version`; [query engines](./ecosystem.mdx) |
 | Control metadata cleanup | `metadata.iceberg.delete-after-commit.enabled`, `metadata.iceberg.previous-versions-max` |
+| Recover missing metadata versions | `metadata.iceberg.missing-base-strategy`, `metadata.iceberg.replay.*`; [replaying missing metadata](#replaying-missing-metadata) |
 
 Metadata retention options control generated metadata files, not Paimon data-file retention.
 Use Paimon's [snapshot management](../maintenance/manage-snapshots.mdx) and
@@ -48,6 +49,58 @@ Use Paimon's [snapshot management](../maintenance/manage-snapshots.mdx) and
 ## Iceberg Table Options
 
 <ConfigTable html={icebergConfigurationHtml} />
+
+## Replaying Missing Metadata
+
+Paimon builds the Iceberg metadata of a snapshot on top of the metadata of the snapshot before it.
+When that metadata file is missing, for example because publication was off for a while,
+`metadata.iceberg.missing-base-strategy = rebuild` (the default) rebuilds the metadata from every
+data file of the table. A rebuild keeps all of those files in memory, so it can run out of memory on
+a large table.
+
+With `metadata.iceberg.missing-base-strategy = replay`, Paimon instead looks for the newest older
+metadata version that was built from the matching Paimon snapshot, and replays the snapshots after
+it one by one from their delta manifests.
+
+- Replay applies to tables without primary keys, deletion vectors and Data Evolution, with Iceberg
+  format version 2 and the `table-location`, `hive-catalog` or `hadoop-catalog` storage. Every
+  other table keeps the rebuild.
+- Replay copies the manifest lists and manifests of the retained Iceberg history, so the result
+  does not depend on files that another cleanup may delete. It decodes every copy and checks it
+  against its manifest list, and a base with a damaged manifest is not used. Until retention drops
+  the copies, they add to the size of the metadata. The original lists of the snapshots that stay
+  are left in place, because readers of older metadata may still use them. Each of those snapshots
+  records its originals, and they are deleted when retention drops it or when a rebuild cleans up
+  the older versions. A snapshot of the base that Paimon already expired is not kept.
+- Replay checks the live rows of every snapshot it keeps against Paimon. What the base records about
+  each data file, and its other totals, are taken as they are, as a commit on top of its base does.
+- Paimon tries the older versions newest first. It skips the versions that a rollback left on
+  another timeline, and stops after five versions that cannot be used for any other reason.
+- When replay cannot be used, Paimon rebuilds. That happens when no valid base is within
+  `metadata.iceberg.replay.max-snapshots`, when one of the `metadata.iceberg.replay.*` limits is
+  exceeded, when a file of the base is missing, or when the replayed row count differs from
+  Paimon's. A snapshot that is no longer the latest one is not rebuilt after a failed replay. The
+  rebuild keeps the table uuid of the newest older version.
+- The limits bound the amount of work. They do not bound the heap that a step uses or how long
+  one step takes.
+- Replay needs a lock that the catalog provides, and fails with an error when the table has none,
+  because nothing else keeps a rollback out of the publication. Every publication of Iceberg
+  metadata, whether it is a replay, a rebuild or an incremental commit, writes the metadata file,
+  the version hint and the external catalog entry under that lock, after it checked that the
+  Paimon snapshot is still the one the metadata was built from. A rollback of the table takes the
+  same lock through any handle of the table, whether Iceberg metadata is on for the handle or not.
+  The history is copied and checked outside the lock. The cleanup that follows a publication, such
+  as the removal of old metadata files, expired manifest lists and abandoned versions, chooses its
+  files outside the lock and deletes them under it, a batch of files for each hold. It checks again
+  before every batch that the publication still stands, and it is abandoned when a rollback
+  replaced the snapshot in the meantime. Two callbacks can build metadata from the same snapshot,
+  with different files, and only the file that was written first stays. A callback whose write lost
+  deletes nothing that only its own metadata made unneeded, such as the files of the older versions
+  after a rebuild or the manifest lists that retention dropped, because the metadata that stayed
+  may still list them. It gives the catalog the metadata that stayed, and every batch of a cleanup
+  is also checked against the metadata file the cleanup was chosen for. The files it leaves stay
+  on storage, because the cleaning of orphan files does not look at the Iceberg metadata. A
+  rollback that the catalog performs itself is not coordinated.
 
 ## Prefixed Properties
 

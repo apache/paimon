@@ -198,6 +198,26 @@ public class IcebergManifestFileMeta {
                 firstRowId);
     }
 
+    /** The same entry pointing at another copy of the manifest file. */
+    public IcebergManifestFileMeta withManifestPath(String newManifestPath) {
+        return new IcebergManifestFileMeta(
+                newManifestPath,
+                manifestLength,
+                partitionSpecId,
+                content,
+                sequenceNumber,
+                minSequenceNumber,
+                addedSnapshotId,
+                addedFilesCount,
+                existingFilesCount,
+                deletedFilesCount,
+                addedRowsCount,
+                existingRowsCount,
+                deletedRowsCount,
+                partitions,
+                firstRowId);
+    }
+
     public static RowType schema(boolean legacyVersion) {
         return schema(legacyVersion, false);
     }
