@@ -1668,7 +1668,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaManifestList,
                 indexManifest,
                 nextRowId,
-                latest.properties());
+                latest.properties(),
+                false);
     }
 
     public boolean replaceManifestList(
@@ -1678,7 +1679,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Pair<String, Long> deltaManifestList,
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
-            @Nullable Map<String, String> properties) {
+            @Nullable Map<String, String> properties,
+            boolean retry) {
         return replaceManifestListOnce(
                 latest,
                 totalRecordCount,
@@ -1687,10 +1689,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 indexManifest,
                 nextRowId,
                 properties,
-                false);
+                retry);
     }
 
-    public boolean replaceManifestListOnce(
+    private boolean replaceManifestListOnce(
             Snapshot latest,
             long totalRecordCount,
             Pair<String, Long> baseManifestList,

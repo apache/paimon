@@ -443,7 +443,7 @@ public class DataEvolutionRowIdReassigner {
                 (FileStoreCommitImpl) table.store().newCommit(commitUser, table)) {
             beforeCommit.run();
             success =
-                    commit.replaceManifestListOnce(
+                    commit.replaceManifestList(
                             assignment.snapshot,
                             assignment.snapshot.totalRecordCount(),
                             baseManifestList,
