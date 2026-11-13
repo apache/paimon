@@ -51,10 +51,11 @@ class BinaryRowTest(unittest.TestCase):
             ('f2', pa.int64()),
         ])
         cls.catalog.create_table('default.test_append', Schema.from_pyarrow_schema(
-            pa_schema, partition_keys=['f0'], options={'file.format': _random_format()}), False)
+            pa_schema, partition_keys=['f0'], options={
+                'file.format': _random_format(), 'write.native.enabled': 'false'}), False)
         cls.catalog.create_table('default.test_pk', Schema.from_pyarrow_schema(
             pa_schema, partition_keys=['f2'], primary_keys=['f0'],
-            options={'bucket': '1', 'file.format': _random_format()}), False)
+            options={'bucket': '1', 'file.format': _random_format(), 'write.native.enabled': 'false'}), False)
         cls.data = pa.Table.from_pydict({
             'f0': [1, 2, 3, 4, 5],
             'f1': ['abc', 'abbc', 'bc', 'd', None],

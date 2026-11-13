@@ -683,6 +683,8 @@ class TorchReadTest(unittest.TestCase):
             dataset,
             batch_size=2,
             num_workers=2,
+            # Native row reads use Polars pools, which cannot be inherited through fork.
+            multiprocessing_context='spawn',
             shuffle=False
         )
 
@@ -799,6 +801,7 @@ class TorchReadTest(unittest.TestCase):
             dataset,
             batch_size=3,
             num_workers=2,
+            multiprocessing_context='spawn',
             shuffle=True,
             generator=torch.Generator().manual_seed(7),
         )
@@ -1038,6 +1041,7 @@ class TorchReadTest(unittest.TestCase):
             dataset,
             batch_size=None,
             num_workers=2,
+            multiprocessing_context='spawn',
             shuffle=False,
         )
 
@@ -1145,7 +1149,7 @@ class TorchReadTest(unittest.TestCase):
             [],
         )
         batches = list(DataLoader(
-            dataset, batch_size=None, num_workers=2
+            dataset, batch_size=None, num_workers=2, multiprocessing_context='spawn'
         ))
         user_ids = [
             value
@@ -1549,7 +1553,7 @@ class TorchReadTest(unittest.TestCase):
         ]).to_torch(streaming=True)
         rows = []
         for batch in DataLoader(
-                dataset, batch_size=2, num_workers=2, shuffle=False):
+                dataset, batch_size=2, num_workers=2, shuffle=False, multiprocessing_context='spawn'):
             rows.extend(zip(
                 batch['episode_id'].tolist(),
                 batch['video'],
@@ -1590,6 +1594,7 @@ class TorchReadTest(unittest.TestCase):
             dataset,
             batch_size=2,
             num_workers=3,
+            multiprocessing_context='spawn',
             shuffle=False
         )
 
@@ -1673,6 +1678,7 @@ class TorchReadTest(unittest.TestCase):
             dataset,
             batch_size=1000,
             num_workers=4,
+            multiprocessing_context='spawn',
             shuffle=False
         )
 
@@ -1765,6 +1771,7 @@ class TorchReadTest(unittest.TestCase):
             dataset,
             batch_size=1000,
             num_workers=8,
+            multiprocessing_context='spawn',
             shuffle=False
         )
 
@@ -2140,6 +2147,7 @@ class TorchReadTest(unittest.TestCase):
             dataset,
             batch_size=8,
             num_workers=2,
+            multiprocessing_context='spawn',
             persistent_workers=True,
             shuffle=False,
         )
@@ -2316,6 +2324,7 @@ class TorchReadTest(unittest.TestCase):
             dataset,
             batch_size=8,
             num_workers=num_workers,
+            multiprocessing_context='spawn' if num_workers else None,
             shuffle=False,
         )
         all_user_ids = []

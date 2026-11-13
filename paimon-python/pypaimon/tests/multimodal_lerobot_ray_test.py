@@ -387,20 +387,19 @@ class LeRobotRayImportTest(unittest.TestCase):
                 def prepare(*args):
                     from pypaimon.multimodal.lerobot.ray_loader import _prepare_merged_source
                     from pypaimon.write.table_write import BatchTableWrite
+                    from pypaimon.write.write_dispatch import NativeBatchTableWrite
 
-                    original_close = BatchTableWrite.close
+                    def failing_close(original):
+                        def fail_close(write):
+                            original(write)
+                            trace.write_text(json.dumps(
+                                [path.name for path in _bucket_files(args[0])]))
+                            raise error_type("injected writer close")
+                        return fail_close
 
-                    def fail_close(write):
-                        original_close(write)
-                        trace.write_text(json.dumps(
-                            [path.name for path in _bucket_files(args[0])]))
-                        raise error_type("injected writer close")
-
-                    BatchTableWrite.close = fail_close
-                    try:
+                    with patch.object(BatchTableWrite, 'close', failing_close(BatchTableWrite.close)), \
+                            patch.object(NativeBatchTableWrite, 'close', failing_close(NativeBatchTableWrite.close)):
                         return _prepare_merged_source(*args)
-                    finally:
-                        BatchTableWrite.close = original_close
 
                 with patch("pypaimon.multimodal.lerobot.ray_loader._prepare_merged_source",
                            prepare):

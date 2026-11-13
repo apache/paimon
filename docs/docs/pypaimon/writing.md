@@ -94,6 +94,10 @@ On Python 3.10+, `pypaimon-rust>=0.5.0` is installed by default.
 `write.native.enabled` and `commit.native.enabled` both default to `true`,
 selecting Rust for supported Parquet/BLOB writes and REST snapshot publication.
 Set either option to `false` to select its Python execution path.
+With the 0.5.0 Native runtime, Data Evolution commits containing retained row-ID
+files use Python publication so each snapshot attempt validates the written
+field IDs against its current schema. Native writes and update preparation
+remain available; this selection happens before any snapshot mutation.
 Batch and stream writers retain the same
 prepare-and-commit lifecycle. Native commits also support overwrite,
 `truncate_table()`, `truncate_partitions()` and commit callbacks.

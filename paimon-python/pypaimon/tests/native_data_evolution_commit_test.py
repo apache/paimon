@@ -60,13 +60,24 @@ def _prepare(builder, ids, partition='a', identifier=None):
 def _commit(builder, messages, identifier=None, overwrite=False):
     commit = builder.new_commit()
     try:
-        with patch('pypaimon.execution.python.write.file_store_commit.'
-                   'FileStoreCommit.' + ('overwrite' if overwrite else 'commit'),
-                   side_effect=AssertionError('Python commit fallback')):
+        row_id_update = any(file.first_row_id is not None for message in messages for file in message.new_files)
+        with ExitStack() as stack:
+            if row_id_update:
+                stack.enter_context(patch(
+                    'pypaimon.execution.native.write.native_commit.create_native_commit',
+                    side_effect=AssertionError('Row-ID publication requires Python validation')))
+            else:
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.write.file_store_commit.'
+                    'FileStoreCommit.' + ('overwrite' if overwrite else 'commit'),
+                    side_effect=AssertionError('Python commit fallback')))
             if identifier is None:
                 commit.commit(messages)
             else:
                 commit.commit(messages, identifier)
+        if row_id_update:
+            assert commit._native_commit is None
+            assert commit._python_commit is not None
     finally:
         commit.close()
 
@@ -147,7 +158,7 @@ def test_partial_column_update_keeps_row_ids_and_checks_conflicts(native_rest_ca
     _commit(builder, first, 7 if stream else None)
     # Give each logical transaction a separate commit identity.
     other = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
-    with pytest.raises(Exception, match='multiple MERGE INTO.*conflicts'):
+    with pytest.raises(Exception, match='multiple.*MERGE INTO.*conflicts'):
         _commit(other, conflicting, 8 if stream else None)
     assert table.snapshot_manager().get_latest_snapshot().id == 2
     other = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
@@ -202,7 +213,7 @@ def test_deletion_vector_commit_preserves_row_id_high_watermark(native_rest_cata
 
 
 @pytest.mark.parametrize('rewrite_size', [None, '0 B', '256 MB'])
-def test_preassigned_row_id_updates_use_native_java_validation(native_rest_catalog, rewrite_size):
+def test_preassigned_row_id_updates_retain_python_publication_validation(native_rest_catalog, rewrite_size):
     options = {} if rewrite_size is None else {
         'data-evolution.row-id-conflict-rewrite.max-size': rewrite_size}
     table = _table(native_rest_catalog, options)
@@ -347,7 +358,8 @@ def test_native_blob_update_rejects_stale_range_before_publication(native_rest_c
     stale = [CommitMessage(source.partition, source.bucket, [blob], check_from_snapshot=1)]
     assert native_messages_supported(table, stale)
     before = table.snapshot_manager().get_latest_snapshot()
-    with pytest.raises(Exception, match='Row ID existence conflict|not covered by one data file range'):
+    with pytest.raises(Exception, match=(
+            'Row ID existence conflict|not covered by one data file range|spans multiple data file ranges')):
         _commit(table.new_batch_write_builder(), stale)
     assert table.snapshot_manager().get_latest_snapshot().id == before.id
     assert table.snapshot_manager().get_latest_snapshot().next_row_id == 10

@@ -455,8 +455,10 @@ not installed, commits use Python. The current native route supports main-branch
 tables using filesystem/JDBC catalogs or `FileStoreTable.from_path()` with
 standard FileIO. Truncate, REST/catalog-managed publication, custom
 FileIO/environments, commit callbacks, and snapshot properties use Python.
-Data-evolution updates that need Python's row-id conflict rewriting also retain
-the Python path. Compact increments remain unsupported by both committers.
+With Native 0.5.0, Data Evolution commits containing retained row-ID files use
+Python publication to validate written field IDs against the schema of each
+snapshot attempt. Native write and update preparation remain available.
+Compact increments remain unsupported by both committers.
 
 Fallback is limited to runtime availability, table construction and message
 conversion before a native mutation starts. A native commit error propagates;
