@@ -1191,7 +1191,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     latestSnapshotSupplier.get(),
                                     detectConflicts,
                                     newStatsFileName);
-            if (retryResult == null && snapshotCommit.lockOnRetry) {
+            if (retryResult == null) {
                 return attempt.call();
             }
             return snapshotCommit.runWithLock(attempt);
@@ -1358,9 +1358,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         && rollback != null
                         && options.toConfiguration()
                                 .get(CoreOptions.COMMIT_AUTO_ROLLBACK_ENABLED)) {
-                    if (retryResult != null || !snapshotCommit.lockOnRetry) {
-                        snapshotCommit.ensureValid();
-                    }
+                    snapshotCommit.ensureValid();
                     if (rollback.tryToRollback(latestSnapshot)) {
                         return RetryCommitResult.forRollback(exception.get());
                     }
@@ -1711,7 +1709,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 indexManifest,
                                 nextRowId,
                                 properties);
-        if (snapshotCommit.lockOnRetry && !retry) {
+        if (!retry) {
             return attempt.get();
         }
         return runWithLock(attempt::get);
@@ -1768,10 +1766,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private Pair<Boolean, CommitCallback.Context> rollbackToAsLatestOnce(Snapshot targetSnapshot) {
-        if (snapshotCommit.lockOnRetry) {
-            return rollbackToAsLatestOnceWithoutLock(targetSnapshot);
-        }
-        return runWithLock(() -> rollbackToAsLatestOnceWithoutLock(targetSnapshot));
+        return rollbackToAsLatestOnceWithoutLock(targetSnapshot);
     }
 
     private Pair<Boolean, CommitCallback.Context> rollbackToAsLatestOnceWithoutLock(
@@ -1954,7 +1949,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private boolean compactManifestOnce(boolean retry) {
-        if (snapshotCommit.lockOnRetry && !retry) {
+        if (!retry) {
             return compactManifestOnceWithoutLock();
         }
         return runWithLock(this::compactManifestOnceWithoutLock);

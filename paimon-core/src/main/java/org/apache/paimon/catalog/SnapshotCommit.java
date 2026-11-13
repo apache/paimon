@@ -21,7 +21,6 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.partition.PartitionStatistics;
-import org.apache.paimon.rest.RESTCatalogLock;
 
 import javax.annotation.Nullable;
 
@@ -34,25 +33,21 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public abstract class SnapshotCommit implements Lock {
 
     private final Lock lock;
-    public final boolean lockOnRetry;
 
     protected SnapshotCommit(Lock lock) {
         this.lock =
                 Lock.reentrant(checkNotNull(lock, "Snapshot publication requires a bound lock."));
-        this.lockOnRetry = this instanceof CatalogSnapshotCommit && lock instanceof RESTCatalogLock;
     }
 
-    /** Publish using the bound lock or the REST catalog's expected-head check. */
+    /** Publish, validating the lock when the caller holds it. */
     public final boolean commit(
             @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             String branch,
             List<PartitionStatistics> statistics)
             throws Exception {
-        if (lockOnRetry && !((Lock.ReentrantLock) lock).isHeldByCurrentThread()) {
-            return commitImpl(baseSnapshotUuid, snapshot, branch, statistics);
-        }
-        return runWithLock(() -> commitImpl(baseSnapshotUuid, snapshot, branch, statistics));
+        ensureValid();
+        return commitImpl(baseSnapshotUuid, snapshot, branch, statistics);
     }
 
     @Override
@@ -67,7 +62,10 @@ public abstract class SnapshotCommit implements Lock {
 
     @Override
     public final void ensureValid() {
-        lock.ensureValid();
+        if (lock instanceof Lock.ReentrantLock
+                && ((Lock.ReentrantLock) lock).isHeldByCurrentThread()) {
+            lock.ensureValid();
+        }
     }
 
     @Override
