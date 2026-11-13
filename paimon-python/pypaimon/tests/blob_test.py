@@ -2785,6 +2785,9 @@ class BlobTest(unittest.TestCase):
         class _CatalogEnvironment:
             catalog_loader = _CatalogLoader()
 
+            def catalog_context(self):
+                return self.catalog_loader
+
         class _Table:
             options = CoreOptions(Options({
                 "blob-as-descriptor": "true",

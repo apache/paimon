@@ -159,7 +159,7 @@ def _blob_reference_columns(table, fields, splits, materialized):
     video_fields = table.options.video_frame_fields()
     unresolved_views = (table.options.blob_view_fields()
                         if (not table.options.blob_view_resolve_enabled()
-                            or table.catalog_environment.catalog_loader is None) else set())
+                            or table.catalog_environment.catalog_context() is None) else set())
     # Plans normally share one captured policy. Compare provenance if a
     # planner returns multiple policies rather than guessing from masked bytes.
     policies = {id(getattr(split, "auth_result", None)): getattr(split, "auth_result", None) for split in splits}

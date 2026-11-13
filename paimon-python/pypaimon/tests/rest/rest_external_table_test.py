@@ -185,7 +185,7 @@ def test_external_native_writer_uses_resolved_filesystem_schema(external_table):
     with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}):
         assert create_native_write_table(table) is module.Table.from_resolved_schema.return_value
     args, kwargs = module.Table.from_resolved_schema.call_args
-    assert args[0] == filesystem.table_path
+    assert args[0] == table.table_path
     assert json.loads(args[1])['fields'] == json.loads(
         table.catalog_environment.rest_table_response)['schema']['fields']
     assert kwargs['options']['opaque.file-io.option'] == 'preserved'
