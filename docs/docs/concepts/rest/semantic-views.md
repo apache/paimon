@@ -27,7 +27,8 @@ This experimental REST Catalog extension manages the object and its definition. 
 preserves the original document text. Servers validate the model formats, syntax versions,
 and features they support; consumers provide query execution.
 
-Registration does not imply Spark/Flink execution support or grant access to source data.
+Registration alone does not grant access to source data or guarantee engine support.
+The Spark 4.2 connector supports the [Ossie query profile](#spark-42-ossie-queries) below.
 This implementation supplies Java clients, wire models, and the
 [Catalog OpenAPI contract](/rest-catalog-open-api.yaml). REST server providers must implement
 persistence, validation, authorization, and the atomic operations described below.
@@ -143,9 +144,9 @@ upsert/get/list/paged-list/delete operations; its read and upsert methods return
   deletion cleans up direct labels and permissions without deleting referenced sources.
 - Semantic views count when determining whether a database is empty. Database cascade deletion
   follows existing catalog rules and cleans up semantic metadata and its direct bindings.
-- Unsupported model semantics must be rejected without side effects or dropping fields. SQL
-  analysis, source validation, dependencies, and execution authorization belong to the server's
-  model format adapter. The client exposes no generic executable-validation status.
+- Servers validate the model formats and metadata they accept without dropping fields. Execution
+  adapters additionally validate supported model semantics, expressions, and source access when
+  querying an object. The management client exposes no generic executable-validation status.
 
 The HTTP client tests verify wire behavior and error propagation. They do not prove a provider's
 storage atomicity, permission enforcement, namespace isolation, or database lifecycle behavior.
@@ -164,5 +165,74 @@ Errors use `ErrorResponse`; semantic view errors use `resourceType=SEMANTIC_VIEW
 | 501 | Server does not implement semantic views | `NotImplementedException` |
 
 Client-side invalid input throws `IllegalArgumentException` before HTTP. An unsupported endpoint
-never falls back to SQL views, labels, or table options. Query compilation, measure rewriting,
-materialization, rename, and per-measure or per-field REST resources are outside this version.
+never falls back to SQL views, labels, or table options. Materialization, rename, and per-measure
+or per-field REST resources are outside this version.
+
+## Spark 4.2 Ossie queries
+
+The `paimon-spark-4.2_2.13` connector can query an `ossie-yaml` definition through the configured
+Paimon REST Catalog. Enable `PaimonSparkSessionExtensions` as described in the
+[Spark installation guide](../../spark/installation.mdx). The REST server must implement semantic
+view management; the connector does not provide production REST persistence or validation.
+
+Register a definition whose content is a flat Ossie document, for example:
+
+```yaml
+version: 0.3.0.dev0
+name: order_metrics
+datasets:
+  - name: orders
+    source: orders
+    fields:
+      - name: region
+        expression:
+          sql: region_code
+      - name: net_amount
+        expression:
+          sql: amount - discount
+    metrics:
+      - name: revenue
+        expression:
+          sql: SUM(net_amount)
+```
+
+For a definition registered as `sales.order_metrics` in Spark catalog `paimon`, query it with:
+
+```sql
+SELECT region, MEASURE(revenue) AS revenue
+FROM paimon.sales.order_metrics
+WHERE region = 'CN'
+GROUP BY region;
+```
+
+The connector reads the definition at analysis time, compiles it into a Spark Metric View, and
+uses Spark's native `MEASURE` rewrite and execution. It does not persist a converted copy or cache
+definitions across queries. Reanalyzing a query sees the current committed definition; an already
+analyzed DataFrame keeps its existing plan.
+
+This experimental execution profile supports:
+
+- Exactly one dataset backed by a physical Paimon table in the same Spark catalog. A one-part
+  source resolves in the semantic view's database; two parts specify database and table;
+  three parts specify catalog, database and table. SQL queries as sources are not supported.
+- Declared scalar fields and dataset-scoped metrics. A dataset metric's unqualified reference
+  resolves to a declared field; `source.column` reaches the original source column. A field
+  named `source` prevents that source-column qualification, following Ossie's scoping rule.
+- Model-scoped metrics referencing that dataset's qualified fields. Field and metric names must
+  be unique, ignoring case, in the resulting Spark relation.
+- Portable `expression.sql` or an `OSSIE_SQL_2026` dialect expression; arithmetic, comparisons,
+  boolean logic, `CASE`, `IN`, numeric/string/boolean/date casts, `SUM`, `COUNT` (including
+  distinct), `AVG`, `MIN`, `MAX`, `ABS`, `ROUND`, `FLOOR`, `CEIL`, `CEILING`, and `COALESCE`.
+
+Other expressions, relationships, multiple datasets, external joins, streaming reads and writes
+are rejected. SQL Semantic View DDL and SQL discovery are not added; use the management API to
+register and list definitions. Ordinary tables and SQL views retain their existing lookup paths.
+Source table authorization is required independently of permission to read the semantic definition.
+
+The bundled schema is pinned to Ossie commit
+[`2692b1cc4708fdcf6a91e597ca928a9bc9d0da60`](https://github.com/apache/ossie/tree/2692b1cc4708fdcf6a91e597ca928a9bc9d0da60).
+The `0.3.0.dev0` version string is a development version and does not imply compatibility with
+future changes under that same string. `ai_context` and `nonportable_extensions` remain in the
+original document and do not alter query execution.
+Extension data must contain JSON values with string keys. Quote date and timestamp strings;
+unquoted dates, timestamps, non-finite numbers, and recursive YAML aliases are rejected.

@@ -96,6 +96,9 @@ the same names, but Spark 4.2 changes internal binary interfaces such as `Catalo
 
 For Spark 3.5, you can find the bundled jar in `./paimon-spark/paimon-spark-3.5/target/paimon-spark-3.5_2.12-@@VERSION@@.jar`.
 
+The Spark 4.2 connector can also query [Ossie Semantic Views](../concepts/rest/semantic-views.md#spark-42-ossie-queries)
+registered in a Paimon REST Catalog.
+
 ## Add the Connector to Spark
 
 Pass `--jars /path/to/paimon-connector.jar` when starting `spark-sql` or `spark-shell`, or put the

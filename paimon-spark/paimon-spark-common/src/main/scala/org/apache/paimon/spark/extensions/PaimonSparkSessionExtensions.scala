@@ -42,6 +42,11 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     extensions.injectResolutionRule(spark => PaimonProcedureResolver(spark))
     extensions.injectResolutionRule(spark => PaimonViewResolver(spark))
     if (org.apache.spark.SPARK_VERSION.startsWith("4.2.")) {
+      val resolver = Class
+        .forName("org.apache.spark.sql.paimon.PaimonSemanticViewResolver")
+        .getConstructor(classOf[org.apache.spark.sql.SparkSession])
+      extensions.injectResolutionRule(
+        spark => resolver.newInstance(spark).asInstanceOf[Rule[LogicalPlan]])
       val module =
         Class.forName("org.apache.spark.sql.catalyst.analysis.Spark42RowLevelCommandRewrite$")
       val rule = module.getField("MODULE$").get(null).asInstanceOf[Rule[LogicalPlan]]
