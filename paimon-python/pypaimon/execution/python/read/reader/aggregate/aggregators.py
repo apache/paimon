@@ -143,20 +143,12 @@ _COLLECT_SET_DEDUPE_TYPES = frozenset({
     "TIMESTAMP", "TIMESTAMP_LTZ",
 })
 
-# Timestamp field types accepted by merge_map_with_keytime. Mirrors
-# FieldMergeMapWithKeyTimeAggFactory.isSupportedTimestampType, plus FLOAT/
-# DOUBLE which historical PyPaimon accepted via native ordering and must
-# remain readable. STRING is the Python spelling of VARCHAR used by the
-# schema parser. Java continues to reject FLOAT/DOUBLE.
+# CHAR/VARCHAR/STRING select the UTF-16 compare path (Java String.compareTo).
+# This is a comparison-routing set only — not a support whitelist. Historical
+# PyPaimon accepted any timestamp value that Python can order with ``>``
+# (FLOAT/DOUBLE/BOOLEAN/BINARY/VARBINARY/BYTES, integers, decimals, ...).
+# Java continues to enforce its own factory allow-list independently.
 _KEYTIME_STRING_TYPES = frozenset({"CHAR", "VARCHAR", "STRING"})
-_KEYTIME_TIMESTAMP_TYPES = frozenset({
-    "CHAR", "VARCHAR", "STRING",
-    "TINYINT", "SMALLINT", "INT", "INTEGER", "BIGINT",
-    "FLOAT", "DOUBLE",
-    "DATE", "TIME",
-    "DECIMAL",
-    "TIMESTAMP", "TIMESTAMP_LTZ",
-})
 
 
 def _utf16_code_unit_greater(left: str, right: str) -> bool:
@@ -1326,15 +1318,11 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
                 )
 
         ts_type = row_type.fields[ts_field_index].type
+        # No support whitelist: historical PyPaimon compared with native ``>``
+        # for any runtime-ordered value. CHAR/VARCHAR/STRING still use UTF-16
+        # so Python stays aligned with Java String.compareTo. Non-atomic or
+        # unordered values fail at compare time the same way they used to.
         ts_base = _atomic_base_name(ts_type)
-        if ts_base not in _KEYTIME_TIMESTAMP_TYPES:
-            raise ValueError(
-                "Timestamp field '{}' for field '{}' must be CHAR/VARCHAR, "
-                "TINYINT/SMALLINT/INT/BIGINT, FLOAT/DOUBLE, DATE, TIME, "
-                "DECIMAL, TIMESTAMP or TIMESTAMP_LTZ, but was '{}'.".format(
-                    ts_field_name, field_name, ts_type)
-            )
-
         self.ts_field_name = ts_field_name
         self.ts_field_index = ts_field_index
         self._string_timestamp = ts_base in _KEYTIME_STRING_TYPES

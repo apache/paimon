@@ -40,19 +40,14 @@ _NATIVE_READ_FILE_FORMATS = frozenset({
 _NATIVE_READ_FILE_SUFFIXES = tuple('.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
 _NATIVE_BLOB_FILE_SUFFIXES = ('.blob', '.video')
 
-# Must stay aligned with Rust StringArray downcast and Python
-# ``_KEYTIME_STRING_TYPES``. Kept local so Native does not import the
-# Python execution backend.
-_NATIVE_KEYTIME_STRING_TYPES = frozenset({"CHAR", "VARCHAR", "STRING"})
+# merge_map_with_keytime always uses the Python aggregator for now:
+# * STRING/CHAR/VARCHAR: Rust UTF-8 ``&str`` order diverges from
+#   Java/Python UTF-16 (e.g. U+E000 vs U+10000).
+# * Every other timestamp type historically fell back already (the old
+#   Native gate only cleared STRING-family via StringArray), and there
+#   is no end-to-end-correct Native replacement without a Rust compare
+#   fix. Fall back before Native opens; do not catch mid-read.
 _MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
-
-
-def _atomic_type_base_name(field_type):
-    from pypaimon.schema.data_types import AtomicType
-    if not isinstance(field_type, AtomicType):
-        return None
-    raw = field_type.type
-    return raw.split('(', 1)[0].split(' ', 1)[0].upper()
 
 
 def _field_agg_func_name(field_name, primary_keys, options_map, sequence_fields):
@@ -73,19 +68,9 @@ def _field_agg_func_name(field_name, primary_keys, options_map, sequence_fields)
 def _native_merge_map_keytime_timestamp_supported(table) -> bool:
     """Whether Native can run ``merge_map_with_keytime`` for this table.
 
-    Rust resolves the timestamp column at merge time by downcasting to
-    ``StringArray`` and raises ``DataInvalid`` (``requires STRING``,
-    ``source: None``) for any other Arrow type. Only CHAR / VARCHAR /
-    STRING clear that check.
-
-    The failure happens while iterating batches after setup, which
-    bypasses the usual setup-time fallback. Typed timestamps that
-    Python already accepts (TIMESTAMP, DOUBLE, ...) must take the
-    Python aggregator path before Native is opened.
-
-    A non-atomic / unresolvable timestamp type returns ``False`` so
-    Python can raise the precise schema validation error; that is not
-    treated as "unsupported but known".
+    Always ``False`` when any field uses ``merge_map_with_keytime`` on a
+    PK aggregation table. Non-PK / non-AGGREGATE / other aggregators are
+    unchanged and still clear this gate.
     """
     if not getattr(table, 'is_primary_key_table', False):
         return True
@@ -93,35 +78,13 @@ def _native_merge_map_keytime_timestamp_supported(table) -> bool:
     if options.merge_engine() != MergeEngine.AGGREGATE:
         return True
 
-    from pypaimon.schema.data_types import MapType, RowType
-
     options_map = options.options.to_map()
     pk_set = set(table.primary_keys)
     sequence_fields = set(options.sequence_field())
     for field in table.fields:
         if _field_agg_func_name(
                 field.name, pk_set, options_map, sequence_fields
-        ) != _MERGE_MAP_WITH_KEYTIME:
-            continue
-        field_type = field.type
-        if (not isinstance(field_type, MapType)
-                or not isinstance(field_type.value, RowType)
-                or not field_type.value.fields):
-            return False
-        row_type = field_type.value
-        ts_field_name = options.field_merge_map_ts_field(field.name)
-        if ts_field_name is None:
-            ts_type = row_type.fields[-1].type
-        else:
-            try:
-                ts_index = row_type.get_field_index(ts_field_name)
-            except ValueError:
-                return False
-            if ts_index < 0:
-                return False
-            ts_type = row_type.fields[ts_index].type
-        # None => type parse / non-atomic failure; not a supported native type.
-        if _atomic_type_base_name(ts_type) not in _NATIVE_KEYTIME_STRING_TYPES:
+        ) == _MERGE_MAP_WITH_KEYTIME:
             return False
     return True
 
@@ -199,13 +162,11 @@ class NativeTableRead:
         if not self._blob_view_supported():
             return self._fallback(
                 "the table uses an unsupported BLOB view")
-        # Native still requires STRING timestamps for merge_map_with_keytime
-        # and fails lazily while iterating batches. Fall back before setup so
-        # typed timestamps (TIMESTAMP / DOUBLE / ...) use the Python aggregator.
+        # Fall back before setup for every merge_map_with_keytime table.
         if not _native_merge_map_keytime_timestamp_supported(read.table):
             return self._fallback(
-                "merge_map_with_keytime timestamp is not STRING; "
-                "native reader requires STRING")
+                "merge_map_with_keytime is not supported by the native "
+                "reader; falling back to Python")
         try:
             from pypaimon.execution.native.read.split_adapter import native_split_from_python
         except Exception as e:
