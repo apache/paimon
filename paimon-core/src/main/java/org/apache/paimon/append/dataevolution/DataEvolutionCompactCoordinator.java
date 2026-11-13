@@ -295,6 +295,7 @@ public class DataEvolutionCompactCoordinator {
         private Set<String> completedVectorFiles = Collections.emptySet();
         @Nullable private CoreOptions incrementalOptions;
         @Nullable private Set<Integer> currentFieldIds;
+        @Nullable private RowType incrementalRowType;
         @Nullable private LongFunction<TableSchema> incrementalSchemaFetcher;
 
         @VisibleForTesting
@@ -379,6 +380,7 @@ public class DataEvolutionCompactCoordinator {
             CoreOptions options = table.coreOptions();
             if (options.dataEvolutionCompactionIncrementalEnabled()) {
                 this.incrementalOptions = options;
+                this.incrementalRowType = table.rowType();
                 Set<String> dedicatedFields =
                         fieldNamesInBlobFile(table.rowType(), options.blobInlineField());
                 dedicatedFields.addAll(
@@ -679,11 +681,44 @@ public class DataEvolutionCompactCoordinator {
             List<DataFileMeta> selected =
                     pickIncrementalFiles(
                             sorted, compactMinFileNum, incrementalOptions.sortedRunSizeRatio());
-            // A dropped-column-only prefix cannot produce a normal file in the current schema.
-            return !selected.isEmpty()
-                            && selected.stream().allMatch(file -> currentFields(file).isEmpty())
-                    ? files
-                    : selected;
+            if (selected.isEmpty() || selected.size() == files.size()) {
+                return selected;
+            }
+            Set<Integer> writtenFields = new HashSet<>();
+            for (DataFileMeta file : selected) {
+                writtenFields.addAll(currentFields(file));
+                if (incrementalOptions.dataEvolutionNestedFieldEnabled()) {
+                    for (DataField field :
+                            fileFields(incrementalSchemaFetcher.apply(file.schemaId()), file)) {
+                        if (field.type() instanceof RowType
+                                && incrementalRowType.containsField(field.id())
+                                && !currentFieldIds.containsAll(
+                                        DataEvolutionIncrementalCompactTask.fieldIds(
+                                                Collections.singletonList(field), true))) {
+                            // Dropped leaves can still be hidden parent-nullness providers.
+                            // Reading the whole group preserves those parents without replacing
+                            // untouched siblings with newly manufactured NULLs.
+                            return files;
+                        }
+                    }
+                }
+            }
+            if (writtenFields.isEmpty()) {
+                return files;
+            }
+            if (incrementalOptions.dataEvolutionNestedFieldEnabled()) {
+                RowType projected =
+                        DataEvolutionIncrementalCompactTask.project(
+                                incrementalRowType, writtenFields, true);
+                try {
+                    projected.collectLeafPaths(incrementalRowType);
+                } catch (UnsupportedOperationException e) {
+                    // Schema evolution can make an old whole struct a deep partial struct, or
+                    // introduce an ambiguous dotted path. Such projections need a full rewrite.
+                    return files;
+                }
+            }
+            return selected;
         }
 
         private Set<Integer> currentFields(DataFileMeta file) {

@@ -116,6 +116,10 @@ Column renames are resolved through historical field IDs, and explicit NULLs
 and parent-struct nullness keep the existing nested-read semantics. `ARRAY` and
 `MAP` columns remain whole-column units; the existing
 [nested-field read limitations](./data-evolution#nested-fields) still apply.
+After schema evolution, a partial projection can be unsafe if dropped nested
+fields still determine a parent's nullness, or if the remaining shape cannot
+be encoded by the nested-write rules. Such groups use a complete normal-file
+rewrite to preserve the current values and parent nullness.
 
 Selection uses these existing options:
 

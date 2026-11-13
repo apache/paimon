@@ -29,6 +29,8 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -38,6 +40,8 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -48,11 +52,13 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -69,6 +75,202 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class DataEvolutionIncrementalCompactionTest extends TableTestBase {
 
     private static final int ROW_COUNT = 128;
+
+    @Test
+    public void testDroppedNestedLeafPreservesParentNullness() throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT().notNull())
+                        .column("cold", DataTypes.STRING().notNull())
+                        .column("x", DataTypes.INT())
+                        .column(
+                                "nest",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "a", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "b", DataTypes.INT())))
+                        .options(schemaDefault().options())
+                        .option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2")
+                        .option(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = incrementalTable();
+        Random random = new Random(42);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < ROW_COUNT; i++) {
+                write.write(
+                        GenericRow.of(
+                                i, coldValue(random), i, i % 2 == 0 ? null : GenericRow.of(i, i)));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        writeNestedUpdate(table, "nest.b", i -> GenericRow.of(i + 100));
+        update(table, "x", 200);
+        catalog.alterTable(
+                identifier(), SchemaChange.dropColumn(new String[] {"nest", "b"}), false);
+        table = incrementalTable();
+        List<InternalRow> expected = read(table);
+        assertThat(expected)
+                .allSatisfy(
+                        row -> {
+                            assertThat(row.isNullAt(3)).isFalse();
+                            if (row.getInt(0) % 2 == 0) {
+                                assertThat(row.getRow(3, 1).isNullAt(0)).isTrue();
+                            } else {
+                                assertThat(row.getRow(3, 1).getInt(0)).isEqualTo(row.getInt(0));
+                            }
+                        });
+        DataEvolutionCompactTask task = plan(table);
+        compact(table, task);
+        assertThat(read(table)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    public void testDeepAddedLeafAllowsCompactionOfOlderWholeStruct() throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT().notNull())
+                        .column("cold", DataTypes.STRING().notNull())
+                        .column("x", DataTypes.INT())
+                        .column(
+                                "nest",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(
+                                                0,
+                                                "sub",
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD(1, "a", DataTypes.INT()))),
+                                        DataTypes.FIELD(2, "kept", DataTypes.STRING())))
+                        .options(schemaDefault().options())
+                        .option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2")
+                        .option(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = incrementalTable();
+        Random random = new Random(42);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < ROW_COUNT; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                coldValue(random),
+                                i,
+                                GenericRow.of(
+                                        GenericRow.of(i), BinaryString.fromString("kept_" + i))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        writeNestedUpdate(table, "nest.sub", i -> GenericRow.of(GenericRow.of(i + 100)));
+        update(table, "x", 200);
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.addColumn(
+                        new String[] {"nest", "sub", "b"}, DataTypes.INT(), null, null),
+                false);
+        table = incrementalTable();
+        List<InternalRow> expected = read(table);
+        DataEvolutionCompactTask task = plan(table);
+        compact(table, task);
+        assertThat(read(table)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testProjectionReadsEachSchemaVersionOnce(boolean renameColumn) throws Exception {
+        FileStoreTable table = writeVersions(true);
+        if (renameColumn) {
+            catalog.alterTable(identifier(), SchemaChange.renameColumn("b", "renamed_b"), false);
+            table = incrementalTable();
+            update(table, "c", 400);
+        }
+        DataEvolutionNormalCompactTask task = (DataEvolutionNormalCompactTask) plan(table);
+        SchemaCountingFileIO fileIO = new SchemaCountingFileIO();
+        FileStoreTable countingTable =
+                new AppendOnlyFileStoreTable(
+                        fileIO, table.location(), table.schema(), CatalogEnvironment.empty());
+        assertThat(task.readWriteType(countingTable).getFieldNames())
+                .containsExactly(renameColumn ? "renamed_b" : "b", "c");
+        assertThat(fileIO.schemaReads)
+                .isEqualTo(
+                        (int)
+                                task.compactBefore().stream()
+                                        .map(DataFileMeta::schemaId)
+                                        .distinct()
+                                        .count());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testWholeStructWithDottedNamesAfterAddedLeaf(boolean topLevelCollision)
+            throws Exception {
+        Schema.Builder schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT().notNull())
+                        .column("cold", DataTypes.STRING().notNull())
+                        .column("x", DataTypes.INT());
+        if (topLevelCollision) {
+            schema.column("nest.a", DataTypes.INT());
+        }
+        schema.column(
+                        "nest",
+                        DataTypes.ROW(
+                                DataTypes.FIELD(
+                                        0, topLevelCollision ? "a" : "a.b", DataTypes.INT()),
+                                DataTypes.FIELD(1, "kept", DataTypes.STRING())))
+                .options(schemaDefault().options())
+                .option(CoreOptions.METADATA_STATS_MODE.key(), "none")
+                .option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2")
+                .option(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
+        catalog.createTable(identifier(), schema.build(), false);
+        FileStoreTable table = incrementalTable();
+        Random random = new Random(42);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < ROW_COUNT; i++) {
+                GenericRow nested = GenericRow.of(i, BinaryString.fromString("kept_" + i));
+                write.write(
+                        topLevelCollision
+                                ? GenericRow.of(i, coldValue(random), i, i + 1000, nested)
+                                : GenericRow.of(i, coldValue(random), i, nested));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        writeNestedUpdate(
+                table,
+                "nest",
+                i -> GenericRow.of(i + 100, BinaryString.fromString("updated_" + i)));
+        update(table, "x", 200);
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.addColumn(new String[] {"nest", "added"}, DataTypes.INT(), null, null),
+                false);
+        table = incrementalTable();
+        List<InternalRow> expected = read(table);
+        DataEvolutionCompactTask task = plan(table);
+        compact(table, task);
+        assertThat(read(table)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    private static class SchemaCountingFileIO extends TraceableFileIO {
+
+        private static final long serialVersionUID = 1L;
+
+        private int schemaReads;
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            if (path.getName().startsWith("schema-")) {
+                schemaReads++;
+            }
+            return super.newInputStream(path);
+        }
+    }
 
     @Override
     public Schema schemaDefault() {

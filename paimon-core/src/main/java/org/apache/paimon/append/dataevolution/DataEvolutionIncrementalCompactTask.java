@@ -20,13 +20,17 @@ package org.apache.paimon.append.dataevolution;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
@@ -54,20 +58,28 @@ public class DataEvolutionIncrementalCompactTask extends DataEvolutionNormalComp
     @Override
     protected RowType readWriteType(FileStoreTable table) {
         boolean nestedFieldEnabled = table.coreOptions().dataEvolutionNestedFieldEnabled();
+        SchemaManager schemaManager = table.schemaManager();
+        Map<Long, TableSchema> schemas = new HashMap<>();
         Set<Integer> fieldIds = new HashSet<>();
         for (DataFileMeta file : compactBefore) {
             fieldIds.addAll(
                     fieldIds(
-                            fileFields(table.schemaManager().schema(file.schemaId()), file),
+                            fileFields(
+                                    schemas.computeIfAbsent(file.schemaId(), schemaManager::schema),
+                                    file),
                             nestedFieldEnabled));
         }
         for (String partitionKey : table.partitionKeys()) {
             fieldIds.add(table.rowType().getField(partitionKey).id());
         }
         RowType normalType = super.readWriteType(table);
+        return project(normalType, fieldIds, nestedFieldEnabled);
+    }
+
+    static RowType project(RowType rowType, Set<Integer> fieldIds, boolean nestedFieldEnabled) {
         return new RowType(
-                normalType.isNullable(),
-                projectFields(normalType.getFields(), fieldIds, nestedFieldEnabled));
+                rowType.isNullable(),
+                projectFields(rowType.getFields(), fieldIds, nestedFieldEnabled));
     }
 
     /** ROW leaves are merge units in nested mode; ARRAY and MAP fields remain whole units. */
