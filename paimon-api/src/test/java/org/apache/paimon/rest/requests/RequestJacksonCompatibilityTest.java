@@ -74,13 +74,15 @@ public class RequestJacksonCompatibilityTest {
                             "select"),
                     requestCase(
                             CommitLockRequest.class,
-                            "{\"tableId\":\"table-id\",\"commitUser\":\"morax-job\"}",
+                            "{\"tableId\":\"table-id\",\"commitUser\":\"morax-job\",\"leaseId\":\"scope-id\"}",
                             request -> {
                                 assertThat(request.getTableId()).isEqualTo("table-id");
                                 assertThat(request.getCommitUser()).isEqualTo("morax-job");
+                                assertThat(request.getLeaseId()).isEqualTo("scope-id");
                             },
                             "tableId",
-                            "commitUser"),
+                            "commitUser",
+                            "leaseId"),
                     requestCase(
                             CreateBranchRequest.class,
                             "{\"branch\":\"audit\",\"fromTag\":\"v1\"}",

@@ -29,6 +29,7 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
@@ -116,12 +117,25 @@ public class RESTCatalogLock implements Lock {
     public AutoCloseable acquire() throws Exception {
         checkArgument(currentLease.get() == null, "This thread already holds a commit lease.");
         long startedAt = nanoTime.getAsLong();
+        String leaseId = UUID.randomUUID().toString();
         while (true) {
             long requestedAt = nanoTime.getAsLong();
-            CommitLockResponse response = acquireLease();
+            CommitLockResponse response;
+            try {
+                response = acquireLease(leaseId);
+            } catch (Exception | Error e) {
+                Lock.release(() -> releaseLease(leaseId), e);
+                throw e;
+            }
             if (response.isAcquired()) {
-                validateGrant(response);
-                Lease lease = new Lease(response.getLeaseMillis(), requestedAt);
+                Lease lease;
+                try {
+                    validateGrant(response);
+                    lease = new Lease(leaseId, response.getLeaseMillis(), requestedAt);
+                } catch (Exception | Error e) {
+                    Lock.release(() -> releaseLease(leaseId), e);
+                    throw e;
+                }
                 try {
                     lease.checkValid();
                     currentLease.set(lease);
@@ -145,15 +159,26 @@ public class RESTCatalogLock implements Lock {
         }
     }
 
-    private CommitLockResponse acquireLease() throws Catalog.TableNotExistException {
+    private CommitLockResponse acquireLease(String leaseId) throws Catalog.TableNotExistException {
         try {
-            return api.acquireCommitLock(identifier, tableUuid, commitUser);
+            return api.acquireCommitLock(identifier, tableUuid, commitUser, leaseId);
         } catch (NoSuchResourceException e) {
             throw new Catalog.TableNotExistException(identifier, e);
         } catch (ForbiddenException e) {
             throw new Catalog.TableNoPermissionException(identifier, e);
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage(), e);
+        }
+    }
+
+    private void releaseLease(String leaseId) {
+        boolean interrupted = Thread.interrupted();
+        try {
+            api.releaseCommitLock(identifier, tableUuid, commitUser, leaseId);
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -173,6 +198,7 @@ public class RESTCatalogLock implements Lock {
     }
 
     private class Lease implements AutoCloseable {
+        private final String leaseId;
         private final ScheduledFuture<?> renewal;
         private final AtomicBoolean closed = new AtomicBoolean();
         private final AtomicBoolean renewing = new AtomicBoolean();
@@ -181,7 +207,8 @@ public class RESTCatalogLock implements Lock {
         @Nullable private volatile Throwable renewalFailure;
         @Nullable private volatile FutureTask<Void> renewalRequest;
 
-        private Lease(long leaseMillis, long requestedAt) {
+        private Lease(String leaseId, long leaseMillis, long requestedAt) {
+            this.leaseId = leaseId;
             this.leaseMillis = leaseMillis;
             this.renewedAt = requestedAt;
             long interval = Math.max(1, leaseMillis / 3);
@@ -230,7 +257,7 @@ public class RESTCatalogLock implements Lock {
                 checkValid();
                 long requestedAt = nanoTime.getAsLong();
                 CommitLockResponse response =
-                        api.renewCommitLock(identifier, tableUuid, commitUser);
+                        api.renewCommitLock(identifier, tableUuid, commitUser, leaseId);
                 if (!response.isAcquired()) {
                     throw new IllegalStateException("The commit lease has expired.");
                 }
@@ -261,12 +288,16 @@ public class RESTCatalogLock implements Lock {
         public void close() {
             if (closed.compareAndSet(false, true)) {
                 try {
-                    renewal.cancel(false);
-                } finally {
-                    FutureTask<Void> request = renewalRequest;
-                    if (request != null) {
-                        request.cancel(true);
+                    try {
+                        renewal.cancel(false);
+                    } finally {
+                        FutureTask<Void> request = renewalRequest;
+                        if (request != null) {
+                            request.cancel(true);
+                        }
                     }
+                } finally {
+                    releaseLease(leaseId);
                 }
             }
         }
