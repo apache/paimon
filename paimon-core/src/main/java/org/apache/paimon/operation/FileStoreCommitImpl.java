@@ -149,6 +149,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
 
+    private static final String MANIFEST_REPLACEMENT_SNAPSHOT_ID =
+            "manifest-replacement.snapshot-id";
+
     private final SnapshotCommit snapshotCommit;
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
@@ -1676,23 +1679,89 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long nextRowId,
             @Nullable Map<String, String> properties) {
         return replaceManifestListOnce(
+                        latest,
+                        totalRecordCount,
+                        baseManifestList,
+                        deltaManifestList,
+                        indexManifest,
+                        nextRowId,
+                        properties,
+                        false)
+                != null;
+    }
+
+    /**
+     * Replaces the manifest lists to repair the table, marking the new snapshot as a manifest
+     * replacement and notifying {@link CommitCallback#onManifestReplacement} after the commit.
+     *
+     * <p>Only repairs use this path. Other metadata-only replacements (such as row-id reassignment)
+     * use {@link #replaceManifestList} and do not notify callbacks.
+     */
+    public boolean replaceManifestListForRepair(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList) {
+        return replaceManifestListForRepair(
                 latest,
                 totalRecordCount,
                 baseManifestList,
                 deltaManifestList,
-                indexManifest,
-                nextRowId,
-                properties);
+                latest.indexManifest(),
+                latest.nextRowId());
     }
 
-    private boolean replaceManifestListOnce(
+    /**
+     * Like {@link #replaceManifestListForRepair(Snapshot, long, Pair, Pair)} with explicit index.
+     */
+    public boolean replaceManifestListForRepair(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList,
+            @Nullable String indexManifest,
+            @Nullable Long nextRowId) {
+        Snapshot snapshot =
+                replaceManifestListOnce(
+                        latest,
+                        totalRecordCount,
+                        baseManifestList,
+                        deltaManifestList,
+                        indexManifest,
+                        nextRowId,
+                        latest.properties(),
+                        true);
+        if (snapshot == null) {
+            return false;
+        }
+        // Like regular commits, run post-commit callbacks after releasing the commit lock.
+        notifyManifestReplacement(snapshot);
+        return true;
+    }
+
+    /** Identifies the replacement itself, ignoring properties inherited by later snapshots. */
+    public static boolean isManifestReplacement(Snapshot snapshot) {
+        Map<String, String> properties = snapshot.properties();
+        return properties != null
+                && Long.toString(snapshot.id())
+                        .equals(properties.get(MANIFEST_REPLACEMENT_SNAPSHOT_ID));
+    }
+
+    /** Also used to replay callbacks after recovering an already-committed replacement. */
+    void notifyManifestReplacement(Snapshot snapshot) {
+        commitCallbacks.forEach(callback -> callback.onManifestReplacement(snapshot));
+    }
+
+    @Nullable
+    private Snapshot replaceManifestListOnce(
             Snapshot latest,
             long totalRecordCount,
             Pair<String, Long> baseManifestList,
             Pair<String, Long> deltaManifestList,
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
-            @Nullable Map<String, String> properties) {
+            @Nullable Map<String, String> properties,
+            boolean repair) {
         return runWithLock(
                 () ->
                         replaceManifestListOnceWithoutLock(
@@ -1702,20 +1771,33 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 deltaManifestList,
                                 indexManifest,
                                 nextRowId,
-                                properties));
+                                properties,
+                                repair));
     }
 
-    private boolean replaceManifestListOnceWithoutLock(
+    @Nullable
+    private Snapshot replaceManifestListOnceWithoutLock(
             Snapshot latest,
             long totalRecordCount,
             Pair<String, Long> baseManifestList,
             Pair<String, Long> deltaManifestList,
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
-            @Nullable Map<String, String> properties) {
+            @Nullable Map<String, String> properties,
+            boolean repair) {
         Snapshot head = snapshotManager.latestSnapshot();
         if (head == null || !head.equals(latest)) {
-            return false;
+            return null;
+        }
+        Map<String, String> replacementProperties;
+        if (repair) {
+            replacementProperties =
+                    properties == null ? new HashMap<>() : new HashMap<>(properties);
+            replacementProperties.put(
+                    MANIFEST_REPLACEMENT_SNAPSHOT_ID, Long.toString(latest.id() + 1));
+        } else {
+            // if empty properties, just set to null
+            replacementProperties = properties == null || properties.isEmpty() ? null : properties;
         }
         Snapshot newSnapshot =
                 new Snapshot(
@@ -1738,12 +1820,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         latest.watermark(),
                         latest.statistics(),
-                        // if empty properties, just set to null
-                        properties == null || properties.isEmpty() ? null : properties,
+                        replacementProperties,
                         nextRowId,
                         null);
 
-        return commitSnapshotImpl(latest, newSnapshot, emptyList());
+        return commitSnapshotImpl(latest, newSnapshot, emptyList()) ? newSnapshot : null;
     }
 
     @Override

@@ -795,24 +795,25 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         // the same numeric id can belong to a rolled-back timeline; extending from it would
         // keep the abandoned history in the catalog
         IcebergSnapshot baseCurrent = baseIcebergMetadata.currentSnapshot();
-        if (baseCurrent != null
-                && currentMetadata.currentSnapshot().snapshotId() == baseCurrent.snapshotId()) {
-            String catalogIdentity =
-                    currentMetadata.currentSnapshot().summary().get(PAIMON_COMMIT_IDENTITY);
-            String baseIdentity = baseCurrent.summary().get(PAIMON_COMMIT_IDENTITY);
-            if (catalogIdentity != null
-                    && baseIdentity != null
-                    && !catalogIdentity.equals(baseIdentity)) {
-                return false;
-            }
+        if (baseCurrent == null
+                || currentMetadata.currentSnapshot().snapshotId() != baseCurrent.snapshotId()) {
+            return false;
+        }
+        String catalogIdentity =
+                currentMetadata.currentSnapshot().summary().get(PAIMON_COMMIT_IDENTITY);
+        String baseIdentity = baseCurrent.summary().get(PAIMON_COMMIT_IDENTITY);
+        if (catalogIdentity != null
+                && baseIdentity != null
+                && !catalogIdentity.equals(baseIdentity)) {
+            return false;
         }
 
-        // if the iceberg table is existed, check whether the current metadata of the table is the
-        // base of the new table metadata, we use current snapshot id to check.
+        // Repairs may skip Paimon snapshots whose Iceberg publication failed. Check the actual
+        // parent instead of assuming adjacent snapshot IDs.
         // Note: callers must ensure currentMetadata.currentSnapshot() is non-null before calling
         // this method (guarded in commitMetadataImpl).
-        return currentMetadata.currentSnapshot().snapshotId()
-                == newMetadata.currentSnapshot().snapshotId() - 1;
+        return Long.valueOf(baseCurrent.snapshotId())
+                .equals(newMetadata.currentSnapshot().parentId());
     }
 
     private IcebergMetadata adjustMetadataForRest(IcebergMetadata newIcebergMetadata) {

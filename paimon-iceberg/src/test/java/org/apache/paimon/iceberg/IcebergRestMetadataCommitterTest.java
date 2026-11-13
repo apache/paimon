@@ -19,6 +19,7 @@
 package org.apache.paimon.iceberg;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
@@ -32,6 +33,8 @@ import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.RemoveUnexistingManifests;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -1694,6 +1697,91 @@ public class IcebergRestMetadataCommitterTest {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testRepairAcrossMissingPublicationWithoutRegisterTableEndpoint() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "v"});
+        Map<String, String> options = new HashMap<>();
+        options.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.MANIFEST_MERGE_MIN_COUNT.key(), "1000");
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Collections.emptyList(),
+                        -1,
+                        "avro",
+                        options);
+        FileStoreTable localTable =
+                table.copy(
+                        Collections.singletonMap(
+                                IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location"));
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = localTable.newWrite(commitUser);
+                TableCommitImpl commit = localTable.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 10));
+            commit.commit(1, write.prepareCommit(false, 1));
+            write.write(GenericRow.of(2, 20));
+            commit.commit(2, write.prepareCommit(false, 2));
+        }
+        IcebergMetadata v1 = localMetadata(localTable, 1);
+        IcebergMetadata v2 = localMetadata(localTable, 2);
+        IcebergRestMetadataCommitter committer = new IcebergRestMetadataCommitter(table);
+        removeRegisterTableEndpoint(committer);
+        committer.commitMetadata(v1, null);
+        committer.commitMetadata(v2, v1);
+        TableIdentifier identifier = TableIdentifier.of("mydb", "t");
+        Table published = restCatalog.loadTable(identifier);
+        published.updateProperties().set("user-custom-prop", "kept").commit();
+        String uuid = ((BaseTable) published).operations().current().uuid();
+
+        // Leave the next Paimon snapshot unpublished, then lose its partition manifest.
+        FileStoreTable disabledTable =
+                localTable.copy(
+                        Collections.singletonMap(
+                                IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "disabled"));
+        try (TableWriteImpl<?> write = disabledTable.newWrite(commitUser);
+                TableCommitImpl commit = disabledTable.newCommit(commitUser)) {
+            write.write(GenericRow.of(3, 30));
+            commit.commit(3, write.prepareCommit(false, 3));
+        }
+        Snapshot unpublished = localTable.snapshotManager().latestSnapshot();
+        assertThat(unpublished.id()).isEqualTo(3);
+        List<ManifestFileMeta> lostManifests =
+                localTable.store().manifestListFactory().create().readDeltaManifests(unpublished);
+        assertThat(lostManifests).hasSize(1);
+        assertThat(
+                        localTable
+                                .fileIO()
+                                .delete(
+                                        localTable
+                                                .store()
+                                                .pathFactory()
+                                                .toManifestFilePath(
+                                                        lostManifests.get(0).fileName()),
+                                        false))
+                .isTrue();
+        assertThat(new RemoveUnexistingManifests(localTable).execute()).isTrue();
+        IcebergMetadata repaired = localMetadata(localTable, 4);
+        assertThat(repaired.currentSnapshot().parentSnapshotId()).isEqualTo(2);
+
+        // The catalog still points at snapshot 2, the actual base of repaired snapshot 4.
+        committer.commitMetadata(repaired, v2);
+        Table reloaded = restCatalog.loadTable(identifier);
+        assertThat(reloaded.currentSnapshot().snapshotId()).isEqualTo(4);
+        assertThat(reloaded.currentSnapshot().parentId()).isEqualTo(2);
+        assertThat(((BaseTable) reloaded).operations().current().uuid()).isEqualTo(uuid);
+        assertThat(reloaded.properties()).containsEntry("user-custom-prop", "kept");
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+        assertThat(registerFiles(localTable)).isEmpty();
+        committer.commitMetadata(repaired, v2);
+        assertThat(restCatalog.loadTable(identifier).properties())
+                .containsEntry("user-custom-prop", "kept");
     }
 
     @Test
