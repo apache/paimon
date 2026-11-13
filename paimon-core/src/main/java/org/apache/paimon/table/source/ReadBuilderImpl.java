@@ -361,6 +361,11 @@ public class ReadBuilderImpl implements ReadBuilder {
             return limit(delegate.createReader(plan));
         }
 
+        @Override
+        public void close() throws IOException {
+            delegate.close();
+        }
+
         private RecordReader<InternalRow> limit(RecordReader<InternalRow> reader) {
             if (filterPresent && !filterExecutedByReader) {
                 return reader;

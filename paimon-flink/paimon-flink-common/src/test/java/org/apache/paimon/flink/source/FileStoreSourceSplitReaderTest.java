@@ -75,6 +75,9 @@ import static org.apache.paimon.flink.source.FileStoreSourceSplitSerializerTest.
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 /** Test for {@link FileStoreSourceSplitReader}. */
 public class FileStoreSourceSplitReaderTest {
@@ -428,6 +431,13 @@ public class FileStoreSourceSplitReaderTest {
             reader.close();
         }
         assertThat(iterator.released()).isTrue();
+    }
+
+    @Test
+    public void testCloseDoesNotCloseTableRead() throws Exception {
+        TableRead tableRead = mock(TableRead.class);
+        createReader(tableRead, null).close();
+        verify(tableRead, never()).close();
     }
 
     @Test

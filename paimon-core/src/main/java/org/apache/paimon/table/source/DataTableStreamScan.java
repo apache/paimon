@@ -276,6 +276,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             case NONE:
                 followUpScanner = new DeltaFollowUpScanner();
                 break;
+            case ON_READ:
+                followUpScanner = new DeltaFollowUpScanner(true);
+                break;
             case INPUT:
             case FULL_COMPACTION:
             case LOOKUP:

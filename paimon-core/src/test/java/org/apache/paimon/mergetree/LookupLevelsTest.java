@@ -60,6 +60,8 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Remo
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.File;
 import java.io.IOException;
@@ -281,6 +283,48 @@ public class LookupLevelsTest {
         assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
         assertThat(kv.level()).isEqualTo(1);
         assertThat(kv.value().getInt(1)).isEqualTo(11);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0,2", "2,3"})
+    public void testCachedFileLevelAfterUpgrade(int initialLevel, int upgradedLevel)
+            throws IOException {
+        DataFileMeta file = newFile(initialLevel, kv(1, 11, 7));
+        DataFileMeta upgraded = file.upgrade(upgradedLevel);
+        Levels levels = new Levels(comparator, Collections.singletonList(file), upgradedLevel + 1);
+        try (LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10))) {
+            lookupLevels.prepareLookupFiles(Collections.singletonList(file));
+            LookupFile cached = lookupLevels.lookupFiles().getIfPresent(file.fileName());
+            assertThat(cached).isNotNull();
+
+            // Revisit the old view after upgrading, as when reading an older on-read split.
+            for (DataFileMeta current : Arrays.asList(file, upgraded, file)) {
+                levels.update(levels.allFiles(), Collections.singletonList(current));
+                assertThat(lookupLevels.lookup(row(1), 0).level()).isEqualTo(current.level());
+                assertThat(lookupLevels.lookupAll(row(1)))
+                        .extracting(KeyValue::level)
+                        .containsExactly(current.level());
+                assertThat(lookupLevels.lookupFiles().getIfPresent(file.fileName()))
+                        .isSameAs(cached);
+            }
+        }
+    }
+
+    @Test
+    public void testPrepareLookupFiles() throws Exception {
+        DataFileMeta first = newFile(1, kv(1, 11));
+        DataFileMeta second = newFile(1, kv(2, 22));
+        Levels levels = new Levels(comparator, Arrays.asList(first, second), 1);
+        try (LookupLevels<KeyValue> lookup =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10))) {
+            lookup.prepareLookupFiles(Collections.singletonList(first));
+            LookupFile cached = lookup.lookupFiles().getIfPresent(first.fileName());
+            assertThat(cached).isNotNull();
+            lookup.prepareLookupFiles(Arrays.asList(first, second));
+            assertThat(lookup.lookupFiles().getIfPresent(first.fileName())).isSameAs(cached);
+            assertThat(lookup.lookupFiles().getIfPresent(second.fileName())).isNotNull();
+        }
     }
 
     @Test

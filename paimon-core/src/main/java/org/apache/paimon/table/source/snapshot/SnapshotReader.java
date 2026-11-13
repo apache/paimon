@@ -143,6 +143,11 @@ public interface SnapshotReader {
     /** Get splits plan from file changes. */
     Plan readChanges();
 
+    /** Get delta files and their complete historical state for changelog-on-read. */
+    default Plan readChangelogOnRead() {
+        throw new UnsupportedOperationException("Changelog-on-read is not supported.");
+    }
+
     Plan readIncrementalDiff(Snapshot before);
 
     /** List partitions. */

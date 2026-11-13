@@ -33,6 +33,36 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test Lookup changelog producer with aggregation tables. */
 public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
 
+    @Test
+    public void testChangelogOnRead() throws Exception {
+        sql(
+                "CREATE TABLE T (k INT PRIMARY KEY NOT ENFORCED, seq INT, v INT) WITH ("
+                        + "'bucket'='1', "
+                        + "'write-only'='true', "
+                        + "'changelog-producer'='on-read', "
+                        + "'merge-engine'='aggregation', "
+                        + "'sequence.field'='seq', "
+                        + "'fields.v.aggregate-function'='sum')");
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter(
+                        "SELECT v FROM T /*+ OPTIONS('consumer-id'='on-read', "
+                                + "'consumer.expiration-time'='3h') */");
+
+        sql("INSERT INTO T VALUES (1, 1, 1)");
+        assertThat(iterator.collect(1)).containsExactly(Row.of(1));
+
+        sql("INSERT INTO T VALUES (1, 2, 2)");
+        assertThat(iterator.collect(2))
+                .containsExactly(
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1), Row.ofKind(RowKind.UPDATE_AFTER, 3));
+
+        sql("INSERT INTO T VALUES (1, 0, 3)");
+        assertThat(iterator.collect(2))
+                .containsExactly(
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 3), Row.ofKind(RowKind.UPDATE_AFTER, 6));
+        iterator.close();
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testMultipleCompaction(boolean changelogRowDeduplicate) throws Exception {

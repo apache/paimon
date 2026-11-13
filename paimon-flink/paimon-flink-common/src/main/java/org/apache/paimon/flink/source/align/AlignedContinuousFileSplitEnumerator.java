@@ -23,10 +23,9 @@ import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.PendingSplitsCheckpoint;
 import org.apache.paimon.flink.source.assigners.AlignedSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
-import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.Preconditions;
@@ -124,7 +123,12 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
         Map<Long, List<FileStoreSourceSplit>> splitsBySnapshot = new TreeMap<>();
 
         for (FileStoreSourceSplit split : splits) {
-            long snapshotId = ((DataSplit) Splits.underlying(split.split())).snapshotId();
+            long snapshotId =
+                    TableScanUtils.getSnapshotId(split)
+                            .orElseThrow(
+                                    () ->
+                                            new IllegalArgumentException(
+                                                    "Snapshot id is required in aligned mode."));
             splitsBySnapshot.computeIfAbsent(snapshotId, snapshot -> new ArrayList<>()).add(split);
         }
 
