@@ -365,6 +365,82 @@ class DeleteOrderingGuardCommitTest {
     }
 
     @ParameterizedTest
+    @CsvSource({"false, false", "false, true", "true, false", "true, true"})
+    void testFastForwardCannotReviveFencedWrites(boolean disableCapture, boolean directManager)
+            throws Exception {
+        PrimaryKeyFileStoreTable table = createLifecycleTable(Collections.emptyMap());
+        append(table, 0, row(RowKind.INSERT, 1, 1, 1));
+        table.createTag("before-reset");
+        table.createBranch("old-history", "before-reset");
+        List<CommitMessage> pending;
+        try (TableWriteImpl<KeyValue> write = newWrite(table)) {
+            write.write(row(RowKind.INSERT, 1, 2, 2));
+            pending = write.prepareCommit(true, 9);
+        }
+        try (FileStoreCommit reset = table.store().newCommit(USER, null)) {
+            reset.truncateTable(2);
+        }
+        if (disableCapture) {
+            TableSchema disabled =
+                    table.schemaManager()
+                            .commitChanges(
+                                    SchemaChange.setOption(
+                                            DELETE_ORDERING_GUARDS_ENABLED.key(), "false"));
+            table =
+                    (PrimaryKeyFileStoreTable)
+                            FileStoreTableFactory.create(
+                                    table.fileIO(), table.location(), disabled);
+        }
+        PrimaryKeyFileStoreTable retained = table;
+        Snapshot latest = table.snapshotManager().latestSnapshot();
+        assertThatThrownBy(() -> commit(retained, 9, pending))
+                .hasMessageContaining("generation changed");
+        assertThatThrownBy(
+                        () -> {
+                            if (directManager) {
+                                retained.branchManager().fastForward("old-history");
+                            } else {
+                                retained.fastForward("old-history");
+                            }
+                        })
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Fast-forward");
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(latest.id());
+        assertThat(table.snapshotManager().latestSnapshot().properties())
+                .isEqualTo(latest.properties());
+        assertThatThrownBy(() -> commit(retained, 9, pending))
+                .hasMessageContaining("generation changed");
+        assertThat(readRows(table)).isEmpty();
+    }
+
+    @Test
+    void testFastForwardRejectsGuardedSourceBranch() throws Exception {
+        PrimaryKeyFileStoreTable table = createTable(Collections.emptyMap());
+        append(table, 0, row(RowKind.INSERT, 1, 1, 1));
+        table.createTag("base");
+        table.createBranch("guarded", "base");
+        table.schemaManager()
+                .copyWithBranch("guarded")
+                .commitChanges(
+                        SchemaChange.setOption(DELETE_ORDERING_GUARDS_ENABLED.key(), "true"));
+        PrimaryKeyFileStoreTable guarded =
+                (PrimaryKeyFileStoreTable) table.switchToBranch("guarded");
+        append(guarded, 1, row(RowKind.INSERT, 1, 2, 2));
+        long latest = table.snapshotManager().latestSnapshotId();
+
+        assertThatThrownBy(() -> table.fastForward("guarded"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Fast-forward");
+        assertThatThrownBy(() -> table.branchManager().fastForward("guarded"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Fast-forward");
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(latest);
+        assertThat(readRows(table))
+                .singleElement()
+                .satisfies(r -> assertThat(r.getInt(1)).isEqualTo(1));
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"partition", "table", "disabled"})
     void testResetFencesStaleOrdinaryAppendsAfterSnapshotExpiration(String reset) throws Exception {
         PrimaryKeyFileStoreTable table =
@@ -732,6 +808,49 @@ class DeleteOrderingGuardCommitTest {
         assertThat(readRows(table))
                 .singleElement()
                 .satisfies(r -> assertThat(r.getInt(2)).isEqualTo(2));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"ascending, false", "ascending, true", "descending, false", "descending, true"})
+    void testRollbackValidatesRestoredGuardPolicy(String order, boolean disableCapture)
+            throws Exception {
+        PrimaryKeyFileStoreTable table = createLifecycleTable(Collections.emptyMap());
+        append(table, 0, row(RowKind.DELETE, 1, 1, 4));
+        commit(table, 1, compactNatively(table, 1, PARTITION));
+        append(table, 2, row(RowKind.INSERT, 1, 1, 2));
+        Snapshot target = table.snapshotManager().latestSnapshot();
+        table.createTag("old-policy", target.id());
+        try (FileStoreCommit reset = table.store().newCommit(USER, null)) {
+            reset.truncateTable(3);
+        }
+        TableSchema schema =
+                table.schemaManager()
+                        .commitChanges(
+                                SchemaChange.setOption("sequence.field.sort-order", order),
+                                SchemaChange.setOption(
+                                        DELETE_ORDERING_GUARDS_ENABLED.key(),
+                                        Boolean.toString(!disableCapture)),
+                                SchemaChange.addColumn("added", DataTypes.INT()));
+        PrimaryKeyFileStoreTable reopened =
+                (PrimaryKeyFileStoreTable)
+                        FileStoreTableFactory.create(table.fileIO(), table.location(), schema);
+        append(reopened, 4, GenericRow.of(1, 2, 5, BinaryString.fromString("fresh"), 42));
+        long latest = reopened.snapshotManager().latestSnapshotId();
+        try (FileStoreCommit rollback = reopened.store().newCommit(USER, null)) {
+            if (order.equals("descending")) {
+                assertThatThrownBy(() -> rollback.rollbackToAsLatest(target))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("ordering/deletion policy changed");
+                assertThat(reopened.snapshotManager().latestSnapshotId()).isEqualTo(latest);
+                assertThat(readRows(reopened))
+                        .singleElement()
+                        .satisfies(r -> assertThat(r.getInt(1)).isEqualTo(2));
+            } else {
+                assertThat(rollback.rollbackToAsLatest(target)).isTrue();
+                assertThat(guards(reopened)).hasSize(1);
+                assertThat(readRows(reopened)).isEmpty();
+            }
+        }
     }
 
     @Test

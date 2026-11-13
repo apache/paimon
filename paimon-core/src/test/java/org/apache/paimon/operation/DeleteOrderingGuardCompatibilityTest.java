@@ -39,6 +39,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -47,6 +48,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -374,6 +376,41 @@ class DeleteOrderingGuardCompatibilityTest {
         assertThat(read(table, table.newSnapshotReader().readChanges().splits(), true))
                 .singleElement()
                 .satisfies(row -> assertThat(row.getInt(2)).isEqualTo(5));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testStreamingAppendAfterPredecessorExpiration(boolean disableCapture) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("stream-scan-mode", "file-monitor");
+        PrimaryKeyFileStoreTable table = createTable(options);
+        append(table, 0, row(RowKind.DELETE, 1, 4));
+        compact(table, 1);
+        if (disableCapture) {
+            table = setOption(table, "delete-ordering-guards.enabled", "false");
+        }
+        append(table, 2, row(RowKind.INSERT, 1, 2), row(RowKind.INSERT, 2, 5));
+        long latest = table.snapshotManager().latestSnapshotId();
+        assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.APPEND);
+        ((ExpireSnapshotsImpl) table.newExpireSnapshots())
+                .expireUntil(table.snapshotManager().earliestSnapshotId(), latest);
+        assertThat(table.snapshotManager().snapshotExists(latest - 1)).isFalse();
+        assertThat(read(table, table.newScan().plan().splits(), false))
+                .singleElement()
+                .satisfies(r -> assertThat(r.getInt(1)).isEqualTo(2));
+
+        StreamDataTableScan scan = table.newStreamScan();
+        scan.restore(latest);
+        List<Split> splits = scan.plan().splits();
+        assertThat(read(table, splits, true))
+                .singleElement()
+                .satisfies(
+                        r -> {
+                            assertThat(r.getRowKind()).isEqualTo(RowKind.INSERT);
+                            assertThat(r.getInt(1)).isEqualTo(2);
+                            assertThat(r.getInt(2)).isEqualTo(5);
+                        });
     }
 
     @Test

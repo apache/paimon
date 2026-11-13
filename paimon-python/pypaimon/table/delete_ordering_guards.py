@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Reject guarded histories before selecting an unsupported execution backend."""
+"""Reject guarded histories in unsupported clients."""
 
 _UNSET = object()
 _ENABLED = 'delete-ordering-guards.enabled'
@@ -31,10 +31,15 @@ def validate_delete_ordering_guards(table, snapshot=_UNSET):
     if not table.is_primary_key_table:
         return
     options = table.options.options.to_map()
-    if str(options.get(_ENABLED, 'false')).lower() == 'true':
-        raise NotImplementedError(_ERROR)
+    validate_delete_ordering_guard_history(options, None)
     if snapshot is _UNSET:
         snapshot = table.snapshot_manager().get_latest_snapshot()
+    validate_delete_ordering_guard_history(options, snapshot)
+
+
+def validate_delete_ordering_guard_history(options, snapshot):
+    if str(options.get(_ENABLED, 'false')).lower() == 'true':
+        raise NotImplementedError(_ERROR)
     properties = snapshot.properties if snapshot is not None else None
     if properties and any(key.startswith(_PREFIX) for key in properties):
         raise NotImplementedError(_ERROR)

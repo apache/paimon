@@ -1938,6 +1938,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        long validatedGuardSchemaId =
+                validateDeleteOrderingGuardPolicy(targetSnapshot, deltaFiles, emptyList());
         Pair<String, Long> baseManifestList =
                 manifestList.write(manifestFile.write(new ArrayList<>(latestEntries.values())));
         Pair<String, Long> deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
@@ -1995,6 +1997,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<SimpleFileEntry> baseFiles =
                 SimpleFileEntry.from(new ArrayList<>(latestEntries.values()));
         List<IndexManifestEntry> indexChanges = rollbackIndexChanges(latest, targetSnapshot);
+
+        if (validatedGuardSchemaId >= 0
+                && validatedGuardSchemaId
+                        != schemaManager
+                                .latestOrThrow("Cannot get latest schema for table " + tableName)
+                                .id()) {
+            validateDeleteOrderingGuardPolicy(targetSnapshot, deltaFiles, emptyList());
+        }
 
         // Like a regular commit, run the pre-commit callbacks before the snapshot becomes visible.
         // They may veto the rollback by throwing (e.g. a chain-table snapshot branch rejects a

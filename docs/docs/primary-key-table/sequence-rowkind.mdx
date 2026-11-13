@@ -146,6 +146,10 @@ can continue after a scoped reset. Affected writers must reopen from current sta
 checkpoint does not bypass this check. Generation state stays in the current snapshot, so expiration
 of older snapshots cannot let a stale write cross a reset.
 
+Fast-forward through `fastForward` or `sys.fast_forward` is rejected when either branch has capture
+enabled or guard history, including after capture is disabled or the table is truncated. Copying
+branch snapshots could otherwise restore an older generation and revive fenced writes.
+
 Compactions also validate the guard files observed by their bucket writer. If another writer publishes
 or consolidates guards in that bucket, reopen the writer and recompute its compaction and changelog
 output before retrying. Reusing output built from the previous guard set is rejected.
