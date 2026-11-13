@@ -34,9 +34,19 @@ public class SortedIndexFileMeta {
     @Nullable private final byte[] firstKey;
     @Nullable private final byte[] lastKey;
     private final boolean hasNulls;
+    private final boolean ambiguousNullBounds;
 
     public SortedIndexFileMeta(
             @Nullable byte[] firstKey, @Nullable byte[] lastKey, boolean hasNulls) {
+        this(firstKey, lastKey, hasNulls, false);
+    }
+
+    private SortedIndexFileMeta(
+            @Nullable byte[] firstKey,
+            @Nullable byte[] lastKey,
+            boolean hasNulls,
+            boolean ambiguousNullBounds) {
+        this.ambiguousNullBounds = ambiguousNullBounds;
         this.firstKey = firstKey;
         this.lastKey = lastKey;
         this.hasNulls = hasNulls;
@@ -67,13 +77,18 @@ public class SortedIndexFileMeta {
     }
 
     public boolean onlyNulls() {
-        return firstKey() == null && lastKey() == null;
+        return !ambiguousNullBounds && firstKey() == null && lastKey() == null;
+    }
+
+    /** Legacy zero-length bounds cannot distinguish all-null files from empty keys plus nulls. */
+    public boolean hasAmbiguousNullBounds() {
+        return ambiguousNullBounds;
     }
 
     private int memorySize() {
         return (firstKey == null ? 0 : firstKey.length)
                 + (lastKey == null ? 0 : lastKey.length)
-                + 11;
+                + (ambiguousNullBounds ? 9 : 11);
     }
 
     public byte[] serialize() {
@@ -94,8 +109,11 @@ public class SortedIndexFileMeta {
             nullKeyFlags |= LAST_KEY_IS_NULL;
         }
         sliceOutput.writeByte(hasNulls ? 1 : 0);
-        sliceOutput.writeByte(FORMAT_VERSION_WITH_NULL_FLAGS);
-        sliceOutput.writeByte(nullKeyFlags);
+        // Preserve unknown legacy bounds when metadata is serialized again.
+        if (!ambiguousNullBounds) {
+            sliceOutput.writeByte(FORMAT_VERSION_WITH_NULL_FLAGS);
+            sliceOutput.writeByte(nullKeyFlags);
+        }
         return sliceOutput.toSlice().getHeapMemory();
     }
 
@@ -115,12 +133,9 @@ public class SortedIndexFileMeta {
                 lastKey = (nullKeyFlags & LAST_KEY_IS_NULL) != 0 ? null : lastKey;
             }
         } else if (firstKeyLength == 0 && lastKeyLength == 0 && hasNulls) {
-            // Compatibility with old metadata which used zero length to represent null keys.
-            // A legacy all-null index file can be identified by both key lengths being zero with
-            // null bitmap. When only one length is zero, the zero-length key is a valid serialized
-            // key, for example an empty string.
-            firstKey = null;
-            lastKey = null;
+            // These bytes also represent empty non-null keys together with nulls. Readers must
+            // inspect the index file instead of treating this metadata as proof of all-null data.
+            return new SortedIndexFileMeta(null, null, true, true);
         }
         return new SortedIndexFileMeta(firstKey, lastKey, hasNulls);
     }

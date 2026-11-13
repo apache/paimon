@@ -151,15 +151,8 @@ public class BTreeIndexReader implements Closeable {
         this.rowIdFilter = rowIdFilter;
         SortedIndexFileMeta indexMeta =
                 SortedIndexFileMeta.deserialize(globalIndexIOMeta.metadata());
-        if (indexMeta.getFirstKey() != null) {
-            this.minKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getFirstKey()));
-            this.maxKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getLastKey()));
-        } else {
-            // this is possible if this btree index file only stores nulls.
-            this.minKey = null;
-            this.maxKey = null;
-        }
         this.input = fileReader.getInputStream(globalIndexIOMeta);
+        SstFileReader openedReader = null;
         try {
             // prepare file footer
             long fileSize = globalIndexIOMeta.fileSize();
@@ -185,8 +178,27 @@ public class BTreeIndexReader implements Closeable {
                             blockCache,
                             footer.getIndexBlockHandle(),
                             bloomFilter);
-        } catch (RuntimeException e) {
-            // nothing else holds a reference to input yet, so this is the only chance to release it
+            openedReader = this.reader;
+            if (indexMeta.hasAmbiguousNullBounds()) {
+                // Both legacy bounds have zero length. If the SST has a non-null key, it is the
+                // empty key and is both bounds; otherwise this really is an all-null file.
+                BlockIterator firstBlock = reader.createIterator().readBatch();
+                this.minKey =
+                        firstBlock == null
+                                ? null
+                                : keySerializer.deserialize(firstBlock.next().getKey());
+                this.maxKey = minKey;
+            } else if (indexMeta.getFirstKey() != null) {
+                this.minKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getFirstKey()));
+                this.maxKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getLastKey()));
+            } else {
+                // this is possible if this btree index file only stores nulls.
+                this.minKey = null;
+                this.maxKey = null;
+            }
+        } catch (IOException | RuntimeException e) {
+            // Bound recovery can fail after the SST reader has been opened.
+            IOUtils.closeQuietly(openedReader);
             IOUtils.closeQuietly(input);
             throw e;
         }
@@ -549,6 +561,9 @@ public class BTreeIndexReader implements Closeable {
      */
     private RoaringNavigableMap64 rangeQuery(
             Object from, Object to, boolean fromInclusive, boolean toInclusive) throws IOException {
+        if (minKey == null) {
+            return new RoaringNavigableMap64();
+        }
         SstFileReader.SstFileIterator fileIter = reader.createIterator();
         fileIter.seekTo(keySerializer.serialize(from));
 
