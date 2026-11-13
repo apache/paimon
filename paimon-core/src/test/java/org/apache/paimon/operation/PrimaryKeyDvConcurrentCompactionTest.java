@@ -445,8 +445,7 @@ class PrimaryKeyDvConcurrentCompactionTest {
                             int bucket,
                             boolean scanDynamicBucketIndex,
                             boolean scanDeleteVectorsIndex,
-                            boolean scanSourceIndexPayloads,
-                            boolean scanDataFileMetas) {
+                            boolean scanSourceIndexPayloads) {
                         return RestoreFiles.empty();
                     }
                 });

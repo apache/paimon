@@ -90,6 +90,22 @@ public class FileSystemWriteRestore implements WriteRestore {
             int bucket,
             boolean scanDynamicBucketIndex,
             boolean scanDeleteVectorsIndex,
+            boolean scanSourceIndexPayloads) {
+        return restoreFiles(
+                partition,
+                bucket,
+                scanDynamicBucketIndex,
+                scanDeleteVectorsIndex,
+                scanSourceIndexPayloads,
+                true);
+    }
+
+    @Override
+    public RestoreFiles restoreFiles(
+            BinaryRow partition,
+            int bucket,
+            boolean scanDynamicBucketIndex,
+            boolean scanDeleteVectorsIndex,
             boolean scanSourceIndexPayloads,
             boolean scanDataFileMetas) {
         // NOTE: don't use snapshotManager.latestSnapshot() here,

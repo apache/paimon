@@ -31,19 +31,38 @@ public interface WriteRestore {
 
     long latestCommittedIdentifier(String user);
 
-    /**
-     * Restores the requested metadata for a partition and bucket.
-     *
-     * @param scanDataFileMetas whether to scan data manifests for data file metadata and the total
-     *     bucket count. Index restoration is independent of this flag.
-     */
+    /** Restores data file metadata and the requested indexes for a partition and bucket. */
     RestoreFiles restoreFiles(
             BinaryRow partition,
             int bucket,
             boolean scanDynamicBucketIndex,
             boolean scanDeleteVectorsIndex,
+            boolean scanSourceIndexPayloads);
+
+    /**
+     * Restores data file metadata and selected indexes for a partition and bucket.
+     *
+     * <p>When {@code scanDataFileMetas} is false, implementations may omit data file metadata and
+     * the total bucket count. Index restoration is controlled independently by the index scan
+     * flags.
+     *
+     * <p>The default implementation delegates to {@link #restoreFiles(BinaryRow, int, boolean,
+     * boolean, boolean)}, regardless of {@code scanDataFileMetas}.
+     */
+    default RestoreFiles restoreFiles(
+            BinaryRow partition,
+            int bucket,
+            boolean scanDynamicBucketIndex,
+            boolean scanDeleteVectorsIndex,
             boolean scanSourceIndexPayloads,
-            boolean scanDataFileMetas);
+            boolean scanDataFileMetas) {
+        return restoreFiles(
+                partition,
+                bucket,
+                scanDynamicBucketIndex,
+                scanDeleteVectorsIndex,
+                scanSourceIndexPayloads);
+    }
 
     @Nullable
     static Integer extractDataFiles(List<ManifestEntry> entries, List<DataFileMeta> dataFiles) {

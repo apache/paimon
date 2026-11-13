@@ -50,6 +50,7 @@ import org.apache.flink.runtime.operators.coordination.CoordinationRequest;
 import org.apache.flink.util.SerializedValue;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Field;
@@ -79,8 +80,9 @@ import static org.mockito.Mockito.when;
 class TableWriteCoordinatorTest extends TableTestBase {
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testCoordinatedRestoreHashIndex(boolean scanDataFileMetas) throws Exception {
+    @CsvSource({"false, false", "true, false", "true, true"})
+    public void testCoordinatedRestoreHashIndex(boolean scanDataFileMetas, boolean legacyEntryPoint)
+            throws Exception {
         Identifier identifier = new Identifier("db", "table");
         Schema schema =
                 Schema.newBuilder()
@@ -119,7 +121,9 @@ class TableWriteCoordinatorTest extends TableTestBase {
         CoordinatedWriteRestore restore = new CoordinatedWriteRestore(gateway, operatorID);
 
         RestoreFiles restored =
-                restore.restoreFiles(EMPTY_ROW, 0, true, false, false, scanDataFileMetas);
+                legacyEntryPoint
+                        ? restore.restoreFiles(EMPTY_ROW, 0, true, false, false)
+                        : restore.restoreFiles(EMPTY_ROW, 0, true, false, false, scanDataFileMetas);
         assertThat(restored.snapshot().id()).isEqualTo(snapshot.id());
         assertThat(restored.dynamicBucketIndex()).isEqualTo(hash);
         assertThat(restored.dynamicBucketIndex().rowCount()).isEqualTo(2);

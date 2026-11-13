@@ -72,6 +72,22 @@ public class CoordinatedWriteRestore implements WriteRestore {
             int bucket,
             boolean scanDynamicBucketIndex,
             boolean scanDeleteVectorsIndex,
+            boolean scanVectorIndexPayloads) {
+        return restoreFiles(
+                partition,
+                bucket,
+                scanDynamicBucketIndex,
+                scanDeleteVectorsIndex,
+                scanVectorIndexPayloads,
+                true);
+    }
+
+    @Override
+    public RestoreFiles restoreFiles(
+            BinaryRow partition,
+            int bucket,
+            boolean scanDynamicBucketIndex,
+            boolean scanDeleteVectorsIndex,
             boolean scanVectorIndexPayloads,
             boolean scanDataFileMetas) {
         ScanCoordinationRequest coordinationRequest =
