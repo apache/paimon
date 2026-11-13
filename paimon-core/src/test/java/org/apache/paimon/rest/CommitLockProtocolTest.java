@@ -242,10 +242,10 @@ class CommitLockProtocolTest {
                             RESTApi.toJson(
                                     new CommitLockResponse(
                                             true, "morax-job", 100000, 60000, snapshot(1)))));
+            server.enqueue(new MockResponse().setResponseCode(204));
             Options tableOptions = Options.fromMap(table.options());
             tableOptions.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, true);
             tableOptions.set(CoreOptions.REST_COMMIT_ACQUIRE_LOCK, true);
-            server.enqueue(new MockResponse().setResponseCode(204));
             try (Catalog writerCatalog = environment.catalogLoader().load();
                     Lock lock =
                             writerCatalog.createLock(

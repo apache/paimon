@@ -29,7 +29,6 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
@@ -42,6 +41,8 @@ import java.util.function.LongSupplier;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
+import static java.util.UUID.randomUUID;
 
 /** A renewable REST commit lease bound to a table, branch and writer. */
 public class RESTCatalogLock implements Lock {
@@ -117,7 +118,7 @@ public class RESTCatalogLock implements Lock {
     public AutoCloseable acquire() throws Exception {
         checkArgument(currentLease.get() == null, "This thread already holds a commit lease.");
         long startedAt = nanoTime.getAsLong();
-        String leaseId = UUID.randomUUID().toString();
+        String leaseId = randomUUID().toString();
         while (true) {
             long requestedAt = nanoTime.getAsLong();
             CommitLockResponse response;
