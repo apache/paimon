@@ -29,7 +29,6 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
@@ -166,25 +165,19 @@ public class RESTCatalogLock implements Lock {
     }
 
     @Override
-    public <T> T runWithLock(Callable<T> callable) throws Exception {
-        return optimistic.get() ? callable.call() : Lock.super.runWithLock(callable);
-    }
-
-    @Override
-    public <T> T runWithLock(Callable<T> callable, boolean retry) throws Exception {
+    public AutoCloseable acquire(boolean retry) throws Exception {
+        if (optimistic.get()) {
+            return () -> {};
+        }
         if (currentLease.get() != null) {
             ensureValid();
-            return callable.call();
+            return () -> {};
         }
-        if (retry || optimistic.get()) {
-            return runWithLock(callable);
+        if (retry) {
+            return acquire();
         }
         optimistic.set(true);
-        try {
-            return callable.call();
-        } finally {
-            optimistic.remove();
-        }
+        return optimistic::remove;
     }
 
     @Override
