@@ -36,15 +36,25 @@ public interface Lock extends AutoCloseable {
      */
     AutoCloseable acquire() throws Exception;
 
+    /** Acquire the scope for the given commit attempt. */
+    default AutoCloseable acquire(boolean firstCommit) throws Exception {
+        return acquire();
+    }
+
     /**
      * Run an operation under the lock. Acquisition failures are distinguished from operation
      * failures; interruption stops acquisition. Releasing a scope must not replace the operation's
      * result or exception.
      */
     default <T> T runWithLock(Callable<T> callable) throws Exception {
+        return runWithLock(callable, false);
+    }
+
+    /** Run a commit attempt with the scope required by this lock. */
+    default <T> T runWithLock(Callable<T> callable, boolean firstCommit) throws Exception {
         AutoCloseable scope;
         try {
-            scope = acquire();
+            scope = acquire(firstCommit);
         } catch (Exception e) {
             if (ExceptionUtils.findThrowable(e, InterruptedException.class).isPresent()) {
                 Thread.currentThread().interrupt();
@@ -101,7 +111,7 @@ public interface Lock extends AutoCloseable {
         }
 
         @Override
-        public <T> T runWithLock(Callable<T> callable) throws Exception {
+        public <T> T runWithLock(Callable<T> callable, boolean firstCommit) throws Exception {
             return callable.call();
         }
 
@@ -125,17 +135,18 @@ public interface Lock extends AutoCloseable {
             this.delegate = delegate;
         }
 
-        public boolean isHeldByCurrentThread() {
-            return held.get();
+        @Override
+        public AutoCloseable acquire() throws Exception {
+            return acquire(false);
         }
 
         @Override
-        public AutoCloseable acquire() throws Exception {
+        public AutoCloseable acquire(boolean firstCommit) throws Exception {
             if (held.get()) {
                 delegate.ensureValid();
                 return () -> {};
             }
-            AutoCloseable scope = delegate.acquire();
+            AutoCloseable scope = delegate.acquire(firstCommit);
             try {
                 delegate.ensureValid();
                 held.set(true);
@@ -150,12 +161,12 @@ public interface Lock extends AutoCloseable {
         }
 
         @Override
-        public <T> T runWithLock(Callable<T> callable) throws Exception {
+        public <T> T runWithLock(Callable<T> callable, boolean firstCommit) throws Exception {
             if (held.get()) {
                 delegate.ensureValid();
                 return callable.call();
             }
-            return Lock.super.runWithLock(callable);
+            return Lock.super.runWithLock(callable, firstCommit);
         }
 
         @Override

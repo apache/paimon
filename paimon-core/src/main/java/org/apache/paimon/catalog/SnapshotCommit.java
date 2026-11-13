@@ -39,15 +39,14 @@ public abstract class SnapshotCommit implements Lock {
                 Lock.reentrant(checkNotNull(lock, "Snapshot publication requires a bound lock."));
     }
 
-    /** Publish, validating the lock when the caller holds it. */
+    /** Publish with the bound lock, reusing an enclosing preparation scope when present. */
     public final boolean commit(
             @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             String branch,
             List<PartitionStatistics> statistics)
             throws Exception {
-        ensureValid();
-        return commitImpl(baseSnapshotUuid, snapshot, branch, statistics);
+        return runWithLock(() -> commitImpl(baseSnapshotUuid, snapshot, branch, statistics));
     }
 
     @Override
@@ -56,16 +55,13 @@ public abstract class SnapshotCommit implements Lock {
     }
 
     @Override
-    public final <T> T runWithLock(Callable<T> callable) throws Exception {
-        return lock.runWithLock(callable);
+    public final <T> T runWithLock(Callable<T> callable, boolean firstCommit) throws Exception {
+        return lock.runWithLock(callable, firstCommit);
     }
 
     @Override
     public final void ensureValid() {
-        if (lock instanceof Lock.ReentrantLock
-                && ((Lock.ReentrantLock) lock).isHeldByCurrentThread()) {
-            lock.ensureValid();
-        }
+        lock.ensureValid();
     }
 
     @Override
@@ -77,7 +73,7 @@ public abstract class SnapshotCommit implements Lock {
         }
     }
 
-    /** Backend publication, after any required lock validation. */
+    /** Backend publication after entering and validating the bound lock scope. */
     protected abstract boolean commitImpl(
             @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
