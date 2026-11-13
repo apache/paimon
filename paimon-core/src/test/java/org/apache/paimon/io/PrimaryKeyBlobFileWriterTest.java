@@ -33,6 +33,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -91,10 +92,19 @@ class PrimaryKeyBlobFileWriterTest {
         Options options = new Options();
         options.set(CoreOptions.BLOB_FIELD, "payload");
         options.set(CoreOptions.BLOB_DESCRIPTOR_FIELD, "descriptor");
+        TableSchema schema =
+                new TableSchema(
+                        0,
+                        valueType.getFields(),
+                        2,
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options.toMap(),
+                        "");
         KeyValueFileWriterFactory factory =
                 KeyValueFileWriterFactory.builder(
                                 fileIO,
-                                0,
+                                schema,
                                 keyType,
                                 valueType,
                                 new FlushingFileFormat("avro"),
@@ -117,10 +127,12 @@ class PrimaryKeyBlobFileWriterTest {
                 factory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
 
         writer.write(new KeyValue().replace(GenericRow.of(1), 0, RowKind.INSERT, externalized));
+        writer.write(new KeyValue().replace(GenericRow.of(1), 1, RowKind.DELETE, externalized));
         writer.close();
         factory.prepareCommit();
 
         DataFileMeta meta = writer.result().get(0);
+        assertThat(meta.deleteRowCount()).hasValue(1L);
         assertThat(meta.extraFiles()).singleElement().asString().endsWith(".blobref");
         Path sidecar = pathFactory.toAlignedPath(meta.extraFiles().get(0), meta);
         assertThat(ManagedBlobReferenceFile.read(fileIO, sidecar))
