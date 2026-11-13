@@ -52,6 +52,8 @@ import org.apache.paimon.utils.DecimalUtils;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TimeZone;
@@ -62,6 +64,34 @@ import static org.assertj.core.api.Assertions.fail;
 
 /** Test for {@link CastExecutor}. */
 public class CastExecutorTest {
+
+    @Test
+    public void testNullLiteralsWithEvolution() {
+        assertThat(
+                        CastExecutors.castLiteralsWithEvolution(
+                                Arrays.asList(1L, null, 3L), DataTypes.BIGINT(), DataTypes.INT()))
+                .isEmpty();
+        assertThat(
+                        CastExecutors.castLiteralsWithEvolution(
+                                Collections.singletonList(null),
+                                DataTypes.BIGINT(),
+                                DataTypes.INT()))
+                .isEmpty();
+        assertThat(
+                        CastExecutors.castLiteralsWithEvolution(
+                                Arrays.asList(1L, 3L), DataTypes.BIGINT(), DataTypes.INT()))
+                .hasValue(Arrays.asList(1, 3));
+        assertThat(
+                        CastExecutors.castLiteralsWithEvolution(
+                                Arrays.asList(1L, Long.MAX_VALUE),
+                                DataTypes.BIGINT(),
+                                DataTypes.INT()))
+                .isEmpty();
+        assertThat(
+                        CastExecutors.castLiteralsWithEvolution(
+                                Collections.emptyList(), DataTypes.BIGINT(), DataTypes.INT()))
+                .hasValue(Collections.emptyList());
+    }
 
     @Test
     public void testNumericToNumeric() {
