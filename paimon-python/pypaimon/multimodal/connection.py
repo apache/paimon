@@ -43,10 +43,7 @@ def connect(
         database: str = _DEFAULT_DATABASE,
         options: Optional[Dict[str, str]] = None):
     """Connect to a Paimon catalog through the multimodal facade."""
-    return MultimodalConnection(
-        _resolve_catalog(options),
-        database=database,
-    )
+    return MultimodalConnection(_resolve_catalog(options), database=database)
 
 
 class MultimodalConnection:
@@ -144,7 +141,9 @@ class MultimodalConnection:
             parallelism=1,
             dataset_name=None,
             extra_dataset_fields=None,
-            schema_evolution=True) -> None:
+            schema_evolution=True,
+            dataset_id=None,
+            coordinated=False) -> None:
         """Import LeRobot v3 sources using table_name as the group prefix.
 
         Creates <table_name>_frames, <table_name>_episodes, and
@@ -163,6 +162,8 @@ class MultimodalConnection:
             dataset_name=dataset_name,
             extra_dataset_fields=extra_dataset_fields,
             schema_evolution=schema_evolution,
+            dataset_id=dataset_id,
+            coordinated=coordinated,
         )
 
     def append_to_lerobot(
@@ -176,13 +177,17 @@ class MultimodalConnection:
             parallelism=1,
             dataset_name=None,
             extra_dataset_fields=None,
-            schema_evolution=True) -> None:
+            schema_evolution=True,
+            dataset_id=None,
+            coordinated=False) -> None:
         """Append LeRobot v3 datasets to a source-local three-table group.
 
-        Pass multiple sources in one call for Ray-parallel preparation. Only
-        one append call may commit to a given group at a time; its three tables
-        do not share a transaction.
+        Pass multiple sources in one call for Ray-parallel preparation. Use
+        coordinated=True and a stable dataset_id when independent Ray jobs
+        append to the same group. dataset_id requires coordinated=True.
         """
+        if not isinstance(coordinated, bool):
+            raise ValueError("coordinated must be a boolean.")
         from pypaimon.multimodal.lerobot import load_from_lerobot
         load_from_lerobot(
             self, table_name, source, batch_size=batch_size,
@@ -190,6 +195,8 @@ class MultimodalConnection:
             parallelism=parallelism, dataset_name=dataset_name,
             extra_dataset_fields=extra_dataset_fields,
             schema_evolution=schema_evolution,
+            dataset_id=dataset_id,
+            coordinated=coordinated,
             append=True,
         )
 

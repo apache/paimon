@@ -17,6 +17,7 @@
 """Merge source coordinates at the write boundary of a new table group."""
 
 import copy
+import hashlib
 import json
 import secrets
 import time
@@ -70,6 +71,9 @@ _REBUILT_INFO = {
     "data_files_size_in_mb", "video_files_size_in_mb", "features",
 }
 _DATASET_ID_COLUMN = "dataset_id"
+_SOURCE_HASH_COLUMN = "__paimon_source_hash"
+_COORDINATED_COLUMN = "__paimon_coordinated"
+_CONTROL_COUNTS_COLUMN = "__paimon_control_counts"
 _EPISODE_VARIANT_GROUPS = ("meta", "data", "videos", "stats")
 _EPISODE_EXTRA_VARIANT_GROUP_DESCRIPTION = "pypaimon.lerobot.episode-variant-group"
 _VARIANT_TYPE = pa.struct([
@@ -86,12 +90,150 @@ _SOURCE_SUBTASKS_TYPE = pa.list_(pa.struct([
 ]))
 _DATASETS_SCHEMA = pa.schema([
     pa.field("id", pa.string(), nullable=False),
+    pa.field(_SOURCE_HASH_COLUMN, pa.string()),
+    pa.field(_COORDINATED_COLUMN, pa.bool_()),
+    pa.field(_CONTROL_COUNTS_COLUMN, pa.string()),
     pa.field("name", pa.string()),
     pa.field("info", pa.string(), nullable=False),
     pa.field("tasks", _SOURCE_TASKS_TYPE, nullable=False),
     pa.field("subtasks", _SOURCE_SUBTASKS_TYPE),
     pa.field("stats", pa.string()),
 ])
+
+
+def _stable_dataset_uuid(dataset_id):
+    """Use a caller UUID directly, or derive one from a stable caller key."""
+    try:
+        return str(uuid.UUID(dataset_id))
+    except ValueError:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, "paimon:lerobot:" + dataset_id))
+
+
+def _source_hash(sources, names, extra_fields):
+    request = {"sources": [str(source) for source in sources],
+               "names": names, "extra_dataset_fields": extra_fields}
+    return hashlib.sha256(json.dumps(
+        request, sort_keys=True, ensure_ascii=False,
+        separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _dataset_absent(table, physical_id, source_hash, count, dataset_table=False):
+    """Check the same pinned snapshot the optimistic commit will use."""
+    key = "id" if dataset_table else _DATASET_ID_COLUMN
+    hash_key = _SOURCE_HASH_COLUMN
+
+    def condition(snapshot):
+        if snapshot is None:
+            return True
+        pinned = table._copy_with_snapshot(snapshot)
+        builder = pinned.new_read_builder().with_projection([key, hash_key])
+        from pypaimon.common.predicate_builder import PredicateBuilder
+        builder.with_filter(PredicateBuilder(pinned.fields).equal(key, physical_id))
+        row_count = 0
+        read = builder.new_read()
+        for split in builder.new_scan().plan().splits():
+            with read.to_arrow_batch_reader([split]) as batches:
+                for batch in batches:
+                    row_count += batch.num_rows
+                    ids = batch.column(batch.schema.get_field_index(key))
+                    if pc.any(pc.fill_null(pc.not_equal(ids, physical_id), True)).as_py():
+                        raise ValueError("LeRobot Dataset %r has conflicting %s rows."
+                                         % (physical_id, table.identifier))
+                    hashes = batch.column(batch.schema.get_field_index(hash_key))
+                    if pc.any(pc.fill_null(pc.not_equal(hashes, source_hash), True)).as_py():
+                        raise ValueError("LeRobot Dataset %r was used for different sources."
+                                         % physical_id)
+        if not row_count:
+            return True
+        if row_count != count:
+            raise ValueError("LeRobot Dataset %r has conflicting %s rows."
+                             % (physical_id, table.identifier))
+        return False
+
+    return condition
+
+
+def _published_dataset(connection, table_name, physical_id, source_hash):
+    """Short-circuit complete retries before opening an expensive source."""
+    frames_name = _companion_identifier(connection._identifier(table_name), "_frames")
+    frames = connection.get_table(frames_name).raw_table
+    identifiers = _companion_table_identifiers(frames)
+    datasets = connection.catalog.get_table(identifiers["datasets"])
+    if _SOURCE_HASH_COLUMN not in _target_schema(datasets).names:
+        return False
+    builder = datasets.new_read_builder().with_projection(["id", _SOURCE_HASH_COLUMN])
+    from pypaimon.common.predicate_builder import PredicateBuilder
+    builder.with_filter(PredicateBuilder(datasets.fields).equal("id", physical_id))
+    rows = builder.new_read().to_arrow(builder.new_scan().plan().splits()).to_pylist()
+    if not rows:
+        return False
+    if len(rows) != 1 or rows[0][_SOURCE_HASH_COLUMN] != source_hash:
+        raise ValueError("LeRobot Dataset %r was used for different sources."
+                         % physical_id)
+    return True
+
+
+def _check_source_compatibility(source_rows, incoming_info, incoming_stats):
+    new_features = _feature_contract(incoming_info["features"])
+    for source in source_rows:
+        old_info = json.loads(source["info"])
+        for key in ("codebase_version", "robot_type"):
+            if old_info.get(key) != incoming_info.get(key):
+                raise ValueError("LeRobot source has incompatible info.%s." % key)
+        old_features = _feature_contract(old_info["features"])
+        for name in old_features.keys() & new_features.keys():
+            if old_features[name] != new_features[name]:
+                raise ValueError("LeRobot source has incompatible features.%s." % name)
+        if (source["stats"] is None) != (incoming_stats is None):
+            raise ValueError("LeRobot append has incompatible statistics.")
+
+
+def _dataset_publish_condition(table, physical_id, source_hash,
+                               incoming_info, incoming_stats):
+    absent = _dataset_absent(table, physical_id, source_hash, 1, dataset_table=True)
+
+    def condition(snapshot):
+        if not absent(snapshot):
+            return False
+        if snapshot is not None:
+            from pypaimon.multimodal.lerobot.dataset import _read_arrow
+            rows = _read_arrow(table._copy_with_snapshot(snapshot),
+                               ["info", "stats"]).to_pylist()
+            _check_source_compatibility(rows, incoming_info, incoming_stats)
+        return True
+
+    return condition
+
+
+def _evolve_component(connection, component, schema, schema_evolution, required,
+                      video_fields=()):
+    """Replan add-column after another writer changes the schema."""
+    for attempt in range(8):
+        latest = connection.catalog.get_table(component.identifier)
+        latest_schema = _target_schema(latest)
+        changes = _plan_schema_evolution(
+            latest_schema, schema, schema_evolution, required, video_fields)
+        if not changes:
+            return
+        try:
+            connection.catalog.alter_table(component.identifier, changes)
+            return
+        except Exception:
+            refreshed = connection.catalog.get_table(component.identifier)
+            if _target_schema(refreshed).equals(latest_schema) or attempt == 7:
+                raise
+
+
+def _refresh_global_index(connection, identifier, column):
+    """Retry an index build if another appender indexed the same row range."""
+    for attempt in range(8):
+        table = connection.catalog.get_table(identifier)
+        try:
+            table.create_global_index(column, index_type="btree")
+            return
+        except RuntimeError as error:
+            if "overlapping row range" not in str(error) or attempt == 7:
+                raise
 
 
 def _next_dataset_uuid(previous=None):
@@ -120,9 +262,15 @@ def _recover_incomplete_append(connection, table_name):
     identifiers = _companion_table_identifiers(frames)
     datasets = connection.catalog.get_table(identifiers["datasets"])
     episodes = connection.catalog.get_table(identifiers["episodes"])
-    source_rows = _read_arrow(datasets, ["id", "info"]).sort_by("id").to_pylist()
+    source_columns = ["id", "info"]
+    if _COORDINATED_COLUMN in _target_schema(datasets).names:
+        source_columns.append(_COORDINATED_COLUMN)
+    source_rows = _read_arrow(datasets, source_columns).sort_by("id").to_pylist()
     if not source_rows:
         raise ValueError("LeRobot append recovery requires Dataset metadata.")
+    if any(row.get(_COORDINATED_COLUMN) for row in source_rows):
+        raise ValueError("Count-based LeRobot recovery cannot run on a group with "
+                         "coordinated Datasets; retry the same dataset_id instead.")
     ranges = _source_dataset_ranges(source_rows)
     expected = {"frames": ranges[-1][4], "episodes": ranges[-1][2]}
     restored = []
@@ -354,7 +502,7 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
                 existing_sources=None):
     first = plans[0]
     mixed_fps = len({plan["metadata"]["fps"] for plan in plans}) > 1
-    reserved_frame_fields = {_DATASET_ID_COLUMN}
+    reserved_frame_fields = {_DATASET_ID_COLUMN, _SOURCE_HASH_COLUMN}
     for plan in plans:
         if reserved_frame_fields.intersection(plan["schema"].names):
             raise ValueError("LeRobot source frame features use reserved dataset_id column.")
@@ -381,7 +529,7 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
                                      plan["metadata"]["episodes_schema"])))
     if _DATASET_ID_COLUMN in groups:
         raise ValueError("LeRobot Episode VARIANT group uses reserved column dataset_id.")
-    reserved_episode_fields = {_DATASET_ID_COLUMN, *groups}
+    reserved_episode_fields = {_DATASET_ID_COLUMN, _SOURCE_HASH_COLUMN, *groups}
     for ordinal, plan in enumerate(plans):
         conflicts = reserved_episode_fields.intersection(
             plan["metadata"]["episodes_schema"].names)
@@ -418,6 +566,7 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
         plan["frame_offset"] = frame_offset
         plan["episode_offset"] = episode_offset
         plan["control_stats"] = {}
+        plan["control_counts"] = {}
         frame_offset += other["total_frames"]
         episode_offset += other["total_episodes"]
     for key in list(info):
@@ -428,6 +577,7 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
     metadata["subtasks_table"] = _vocabulary(plans, "subtasks", existing_sources)
     for field in (
             pa.field(_DATASET_ID_COLUMN, pa.string(), nullable=False),
+            pa.field(_SOURCE_HASH_COLUMN, pa.string()),
             pa.field("meta", _VARIANT_TYPE, nullable=False),
             pa.field("data", _VARIANT_TYPE, nullable=False),
             pa.field("videos", _VARIANT_TYPE, nullable=False),
@@ -443,6 +593,9 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
     metadata["datasets_table"] = pa.Table.from_pylist([
         {
             "id": plan[_DATASET_ID_COLUMN],
+            _SOURCE_HASH_COLUMN: plan.get("source_hash"),
+            _COORDINATED_COLUMN: plan.get("coordinated"),
+            _CONTROL_COUNTS_COLUMN: None,
             "name": plan["dataset_name"],
             "info": json.dumps(_json_value(plan["info"]),
                                ensure_ascii=False, separators=(",", ":")),
@@ -452,7 +605,8 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
             **plan.get("extra_dataset_fields", {}),
         }
         for ordinal, plan in enumerate(plans)
-    ], schema=pa.schema(list(_DATASETS_SCHEMA) + _text_fields_schema(extra_dataset_fields or {})))
+    ], schema=pa.schema(list(_DATASETS_SCHEMA)
+                        + _text_fields_schema(extra_dataset_fields or {})))
     info.update(total_frames=frame_offset, total_episodes=episode_offset,
                 total_tasks=metadata["tasks_table"].num_rows,
                 splits={"train": "0:%d" % episode_offset})
@@ -501,10 +655,19 @@ def _transform_frames(plan, batch, episode):
     batch = batch.append_column(
         pa.field(_DATASET_ID_COLUMN, pa.string(), nullable=False),
         pa.array([plan[_DATASET_ID_COLUMN]] * batch.num_rows, type=pa.string()))
+    batch = batch.append_column(
+        pa.field(_SOURCE_HASH_COLUMN, pa.string()),
+        pa.array([plan.get("source_hash")] * batch.num_rows, type=pa.string()))
     for name in _CONTROLS:
         if name not in batch.column_names:
             continue
         column = batch[name]
+        if name in ("task_index", "subtask_index"):
+            counts = plan.setdefault("control_counts", {}).setdefault(name, {})
+            for value in column.to_pylist():
+                if value is not None:
+                    key = str(int(value))
+                    counts[key] = counts.get(key, 0) + 1
         if name == "index":
             offset = plan["frame_offset"]
             values = column
@@ -533,6 +696,22 @@ def _transform_frames(plan, batch, episode):
         episode_stats[name] = (_merge_stats([episode_stats[name], stats])
                                if name in episode_stats else stats)
     return batch
+
+
+def _control_stats_from_frames(table, plan, batch_size):
+    """Rebuild Episode stats from committed Frames during a partial retry."""
+    controls = [name for name in _CONTROLS if name in _target_schema(table).names]
+    builder = table.new_read_builder().with_projection(controls)
+    from pypaimon.common.predicate_builder import PredicateBuilder
+    builder.with_filter(PredicateBuilder(table.fields).equal(
+        _DATASET_ID_COLUMN, plan[_DATASET_ID_COLUMN]))
+    reader = builder.new_read()
+    for split in builder.new_scan().plan().splits():
+        for batch in reader.to_arrow([split]).to_batches(max_chunksize=batch_size):
+            for episode in set(batch["episode_index"].to_pylist()):
+                selected = pa.Table.from_batches([batch]).filter(
+                    pc.equal(batch["episode_index"], episode))
+                _transform_frames(plan, selected, episode)
 
 
 def _merged_episodes(plans, schema):
@@ -578,6 +757,7 @@ def _merged_episodes(plans, schema):
                         if feature not in _CONTROLS or not statistic.startswith("q"):
                             stats.setdefault(feature, {})[statistic] = value
                 row[_DATASET_ID_COLUMN] = plan[_DATASET_ID_COLUMN]
+                row[_SOURCE_HASH_COLUMN] = plan.get("source_hash")
                 episode = row["episode_index"]
                 if "subtask_index" not in plan["control_stats"][episode]:
                     if "subtask_index" in stats:
@@ -596,9 +776,20 @@ def _merged_episodes(plans, schema):
 def _import_sources(connection, table_name, sources, batch_size, options,
                     source_options, tag_name, parallelism=1,
                     dataset_name=None, extra_dataset_fields=None,
-                    schema_evolution=True, append=False):
+                    schema_evolution=True, append=False, dataset_id=None,
+                    coordinated=False):
     from functools import partial
     from pypaimon.multimodal.lerobot.api import _create_target_table, _validated_counts
+
+    physical_id = _stable_dataset_uuid(dataset_id) if dataset_id is not None else None
+    source_hash = _source_hash(sources, dataset_name, extra_dataset_fields) \
+        if dataset_id is not None else None
+    if coordinated and tag_name is not None:
+        raise ValueError("Coordinated LeRobot append cannot create a tag; "
+                         "call create_lerobot_tag after publication.")
+    if append and physical_id is not None and _published_dataset(
+            connection, table_name, physical_id, source_hash):
+        return
 
     if parallelism > 1:
         from pypaimon.multimodal.lerobot.ray_loader import _require_ray, _ray_source_uri
@@ -631,6 +822,8 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                                            else None),
                           "schema": schema, "videos": videos,
                           "extra_dataset_fields": _read_text_fields(resolved, extra_dataset_fields),
+                          "source_hash": source_hash,
+                          "coordinated": coordinated,
                           "metadata": _load_dataset_metadata(dataset, info, resolved)})
         existing = None
         if append:
@@ -653,27 +846,33 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                                          % (tag_name, component.identifier))
             if _DATASET_ID_COLUMN not in _target_schema(tables["episodes"]).names:
                 raise ValueError("LeRobot append requires a source-local table group.")
-            source_rows = _read_arrow(tables["datasets"], [
-                "id", "info", "tasks", "subtasks", "stats",
-            ]).sort_by("id").to_pylist()
+            source_columns = [name for name in (
+                "id", "info", "tasks", "subtasks", "stats", _SOURCE_HASH_COLUMN,
+                _COORDINATED_COLUMN, _CONTROL_COUNTS_COLUMN)
+                if name in _target_schema(tables["datasets"]).names]
+            source_rows = _read_arrow(tables["datasets"], source_columns).sort_by("id").to_pylist()
             if not source_rows:
                 raise ValueError("LeRobot append requires an initialized table group.")
             ranges = _source_dataset_ranges(source_rows)
             expected_counts = {"frames": ranges[-1][4],
                                "episodes": ranges[-1][2],
                                "datasets": len(source_rows)}
-            for name, component in (("frames", table.raw_table),
-                                    ("episodes", tables["episodes"]),
-                                    ("datasets", tables["datasets"])):
-                snapshot = component.snapshot_manager().get_latest_snapshot()
-                if snapshot is None or snapshot.next_row_id != expected_counts[name]:
-                    raise ValueError(
-                        "LeRobot group has incomplete %s data; call "
-                        "recover_lerobot_append before appending." % name)
+            if not coordinated:
+                for name, component in (("frames", table.raw_table),
+                                        ("episodes", tables["episodes"]),
+                                        ("datasets", tables["datasets"])):
+                    snapshot = component.snapshot_manager().get_latest_snapshot()
+                    if snapshot is None or snapshot.next_row_id != expected_counts[name]:
+                        raise ValueError(
+                            "LeRobot group has incomplete %s data; call "
+                            "recover_lerobot_append before appending." % name)
+                if any(row.get(_COORDINATED_COLUMN) for row in source_rows):
+                    raise ValueError("LeRobot group has coordinated Datasets; "
+                                     "append with coordinated=True.")
             existing = (table, tables, source_rows, ranges)
         previous = source_rows[-1]["id"] if existing is not None else None
         for plan in plans:
-            previous = _next_dataset_uuid(previous)
+            previous = physical_id or _next_dataset_uuid(previous)
             plan[_DATASET_ID_COLUMN] = previous
         metadata, stats = _plan_merge(
             plans, extra_dataset_fields, schema_evolution if existing is None else True,
@@ -681,6 +880,7 @@ def _import_sources(connection, table_name, sources, batch_size, options,
         target_schema = metadata["frame_schema"]
         target_schema = target_schema.append(
             pa.field(_DATASET_ID_COLUMN, pa.string(), nullable=False))
+        target_schema = target_schema.append(pa.field(_SOURCE_HASH_COLUMN, pa.string()))
         if existing is None:
             table = _create_target_table(connection, table_name, target_schema,
                                          options, metadata,
@@ -724,6 +924,27 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             if (old_stats is None) != (new_stats is None):
                 raise ValueError("LeRobot append has incompatible statistics.")
             _validate_lerobot_schema(target_schema, _target_schema(table.raw_table), "append")
+            if not coordinated:
+                # Internal coordination columns are optional for ordinary appends to
+                # groups created before those columns existed. The business schema
+                # evolution switch must not require adding them.
+                target_schema = pa.schema([
+                    field for field in target_schema
+                    if field.name != _SOURCE_HASH_COLUMN or
+                    field.name in _target_schema(table.raw_table).names],
+                    metadata=target_schema.metadata)
+                metadata["episodes_schema"] = pa.schema([
+                    field for field in metadata["episodes_schema"]
+                    if field.name != _SOURCE_HASH_COLUMN or
+                    field.name in existing_episode_schema.names],
+                    metadata=metadata["episodes_schema"].metadata)
+                dataset_schema = _target_schema(tables["datasets"])
+                missing_internal = {_SOURCE_HASH_COLUMN, _COORDINATED_COLUMN,
+                                    _CONTROL_COUNTS_COLUMN} - \
+                    set(dataset_schema.names)
+                if missing_internal:
+                    metadata["datasets_table"] = metadata["datasets_table"].drop(
+                        sorted(missing_internal))
             # Validate every component before making any catalog changes.
             requests = [
                 (table.raw_table, target_schema, (*_V3_REQUIRED_FEATURE_DTYPES, _DATASET_ID_COLUMN)),
@@ -737,63 +958,98 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                 _target_schema(component), schema, schema_evolution, required,
                 video_fields if ordinal == 0 else ())
                 for ordinal, (component, schema, required) in enumerate(requests)]
-            for (component, _, _), component_changes in zip(requests, changes):
+            for (component, schema, required), component_changes in zip(requests, changes):
                 if component_changes:
-                    connection.catalog.alter_table(component.identifier, component_changes)
+                    _evolve_component(connection, component, schema, schema_evolution,
+                                      required, video_fields if component is table.raw_table else ())
             # Writers and Ray workers must use the reloaded schema, including new field IDs.
             table = connection.get_table(table.identifier)
             tables = {name: connection.catalog.get_table(component.identifier)
                       for name, component in tables.items()}
-            frame_offset = ranges[-1][4]
-            for plan in plans:
-                plan["frame_offset"] += frame_offset
+            if not coordinated:
+                frame_offset = ranges[-1][4]
+                for plan in plans:
+                    plan["frame_offset"] += frame_offset
             metadata["datasets_table"] = pa.Table.from_pylist(
                 metadata["datasets_table"].to_pylist(),
                 schema=_target_schema(tables["datasets"]))
-        if existing is not None:
+        if existing is not None and not coordinated:
             stack.enter_context(_recover_failed_append(connection, table_name))
         episode_schema = _target_schema(tables["episodes"])
-        commit = table.raw_table.new_batch_write_builder().new_commit()
-        stack.callback(commit.close)
-        episode_builder = tables["episodes"].new_batch_write_builder()
-        episode_commit = episode_builder.new_commit()
-        stack.callback(episode_commit.close)
-        episode_write = episode_builder.new_write()
-        stack.callback(episode_write.close)
+        frames_needed = episodes_needed = True
+        if coordinated:
+            frames_condition = _dataset_absent(
+                table.raw_table, physical_id, source_hash, plans[0]["info"]["total_frames"])
+            episodes_condition = _dataset_absent(
+                tables["episodes"], physical_id, source_hash,
+                plans[0]["info"]["total_episodes"])
+            frames_needed = frames_condition(
+                table.raw_table.snapshot_manager().get_latest_snapshot())
+            episodes_needed = episodes_condition(
+                tables["episodes"].snapshot_manager().get_latest_snapshot())
+        commit = None
+        if frames_needed:
+            commit = table.raw_table.new_batch_write_builder().new_commit()
+            if coordinated:
+                commit.with_commit_condition(frames_condition)
+            stack.callback(commit.close)
+        episode_commit = episode_write = None
+        if episodes_needed:
+            episode_builder = tables["episodes"].new_batch_write_builder()
+            episode_commit = episode_builder.new_commit()
+            if coordinated:
+                episode_commit.with_commit_condition(episodes_condition)
+            stack.callback(episode_commit.close)
+            episode_write = episode_builder.new_write()
+            stack.callback(episode_write.close)
         episode_commit_started = False
         episode_messages = None
         try:
             messages = []
             try:
-                if parallelism > 1:
+                if frames_needed and parallelism > 1:
                     from pypaimon.multimodal.lerobot.ray_loader import _prepare_sources_ray
                     messages = _prepare_sources_ray(
                         table.raw_table, plans, source_options, batch_size, parallelism)
                 for plan in plans:
-                    if parallelism == 1:
+                    if frames_needed and parallelism == 1:
                         messages.extend(_prepare_dataset(
                             table.raw_table, plan["dataset"], plan["info"], plan["source"],
                             plan["schema"], batch_size, plan["metadata"], plan["videos"],
                             transform=partial(_transform_frames, plan)))
+                    elif not frames_needed:
+                        _control_stats_from_frames(table.raw_table, plan, batch_size)
                     plan["dataset_resources"].close()
                     plan["dataset"] = None
-                for episodes in _merged_episodes(plans, episode_schema):
-                    strict_arrow_table(episodes, episode_schema,
-                                       "merged Episodes", 0, "LeRobot")
-                    episode_write.write_arrow(episodes)
-                episode_messages = episode_write.prepare_commit()
+                if episodes_needed:
+                    for episodes in _merged_episodes(plans, episode_schema):
+                        strict_arrow_table(episodes, episode_schema,
+                                           "merged Episodes", 0, "LeRobot")
+                        episode_write.write_arrow(episodes)
+                    episode_messages = episode_write.prepare_commit()
             except BaseException:
-                commit.abort(messages)
+                if commit is not None:
+                    commit.abort(messages)
                 raise
-            frames_snapshot = _commit_messages(commit, messages)
-            episode_commit_started = True
-            episodes_snapshot = _commit_messages(episode_commit, episode_messages)
+            frames_snapshot = (_commit_messages(commit, messages)
+                               if commit is not None else None)
+            if episode_commit is not None:
+                episode_commit_started = True
+                episodes_snapshot = _commit_messages(episode_commit, episode_messages)
+            else:
+                episodes_snapshot = None
         finally:
-            if not episode_commit_started:
+            if episode_write is not None and not episode_commit_started:
                 if episode_messages is None:
                     episode_write.abort()
                 else:
                     episode_commit.abort(episode_messages)
+        rows = metadata["datasets_table"].to_pylist()
+        for row, plan in zip(rows, plans):
+            row[_CONTROL_COUNTS_COLUMN] = json.dumps(
+                plan["control_counts"], sort_keys=True, separators=(",", ":"))
+        metadata["datasets_table"] = pa.Table.from_pylist(
+            rows, schema=metadata["datasets_table"].schema)
         if existing is None and stats is not None:
             for name in _CONTROLS:
                 parts = [s[name] for p in plans for s in p["control_stats"].values() if name in s]
@@ -807,10 +1063,17 @@ def _import_sources(connection, table_name, sources, batch_size, options,
                              frames_snapshot, episodes_snapshot)
         else:
             for column in ("dataset_id", "index"):
-                if table.raw_table.create_global_index(column, index_type="btree") <= 0:
+                if coordinated:
+                    _refresh_global_index(connection, table.identifier, column)
+                elif table.raw_table.create_global_index(column, index_type="btree") <= 0:
                     raise RuntimeError("LeRobot append did not refresh %s index."
                                        % column)
-            if _append_arrow(tables["datasets"], metadata["datasets_table"]) is None:
+            condition = (_dataset_publish_condition(
+                tables["datasets"], physical_id, source_hash,
+                plans[0]["info"], rows[0]["stats"])
+                if coordinated else None)
+            if _append_arrow(tables["datasets"], metadata["datasets_table"],
+                             commit_condition=condition) is None:
                 raise RuntimeError("LeRobot append did not commit Dataset metadata.")
             if tag_name is not None:
                 from pypaimon.multimodal.lerobot.metadata import create_lerobot_tag

@@ -53,17 +53,24 @@ The same three-table schema is used for one source and for a list of sources.
 ### Dataset fields
 
 `robot_data_datasets` has one row for each source, even when multiple sources
-have the same label. UUIDv7 values retain the order of serial imports and appends.
+have the same label. Serial imports use UUIDv7; coordinated imports derive a
+stable UUID from the caller's `dataset_id` (or use it directly if it is a UUID).
 
 | Field | Paimon type | Meaning |
 | --- | --- | --- |
-| `id` | `STRING` | UUIDv7 assigned to this source; referenced by frame and Episode `dataset_id`. |
+| `id` | `STRING` | Source UUID referenced by frame and Episode `dataset_id`. |
+| `__paimon_source_hash` | `STRING`, nullable | Hash of the import request used to reject a reused identity with different sources. |
+| `__paimon_coordinated` | `BOOLEAN`, nullable | Whether this source used coordinated append. |
+| `__paimon_control_counts` | `STRING`, nullable | Source-local task/subtask counts used to rebuild training statistics after concurrent appends. |
 | `name` | `STRING`, nullable | Optional label supplied through `dataset_name`; omitted names are null. |
 | `info` | `STRING` | JSON containing the source's original `meta/info.json`, including `features`, `fps`, robot type, and counts. FPS is not a separate column. |
 | `tasks` | `ARRAY<ROW<task_index BIGINT, task STRING>>` | Source-local task IDs and their text from `meta/tasks.parquet`. |
 | `subtasks` | `ARRAY<ROW<subtask_index BIGINT, subtask STRING>>`, nullable | Optional source-local subtask IDs and text from `meta/subtasks.parquet`. |
 | `stats` | `STRING`, nullable | Source-level feature statistics as JSON; null when `meta/stats.json` is absent. |
 | Extra text columns | `STRING` or `MAP<STRING, STRING>`, nullable | Columns declared by [extra dataset text fields](#extra-dataset-text-fields). |
+
+The `__paimon_*` columns are internal; user text columns named `source_hash`,
+`coordinated`, or `control_counts` remain ordinary extra fields.
 
 Decode `info` and `stats` with `json.loads`. `tasks` and `subtasks` are typed
 arrays of records, not JSON strings. No separate info, task, subtask, or global
@@ -299,12 +306,21 @@ conn.load_from_lerobot("robot_merged", ["/data/source_a", "/data/source_b"])
 conn.append_to_lerobot("robot_merged", "/data/source_c", tag_name="after-append")
 ```
 
-One driver submits and commits the entire append; Ray workers can prepare its
-sources concurrently. Do not run separate `append_to_lerobot` calls against the
-same table group at the same time. The three component tables do not share a
-transaction, so interleaved appends can leave the group inconsistent. Queue
-additional appends through the same driver. To append multiple sources with
-Ray-parallel preparation:
+By default, one driver submits and commits an append; Ray workers can prepare
+its sources concurrently. To append independent sources from separate jobs,
+give each source a stable unique `dataset_id` and use `coordinated=True`:
+
+```python
+conn.append_to_lerobot("robot_merged", "/data/source_c",
+                       dataset_id="ingest-c", coordinated=True)
+```
+
+Repeat the same call to resume after a partial failure. The Dataset row is
+published last; readers ignore Frames and Episodes whose Dataset row has not
+been published. Reusing an ID for a different source is rejected. Keep source
+content immutable while retrying; the request hash does not hash source bytes.
+Ordinary appends after a coordinated append are rejected. To append multiple
+sources within one job with Ray-parallel preparation:
 
 ```python
 import ray
@@ -314,16 +330,21 @@ conn.append_to_lerobot("robot_merged", ["/data/source_d", "/data/source_e"],
                        parallelism=2)
 ```
 
+Create a tag separately with `conn.create_lerobot_tag("robot_merged", "tag")`
+after a coordinated append succeeds; `tag_name` is not accepted on that append.
+
 If source C adds `humidity`, the append adds that column to `_frames`, keeps A
 and B, and reads their humidity values as null. New `extra_dataset_fields` columns
 are added to `_datasets` in the same way; omitted extra fields receive nulls.
 Pass `schema_evolution=False` to `append_to_lerobot` to reject new columns.
 
-If the sole writer stops between component commits, call
+For a non-coordinated append, if the sole writer stops between component commits, call
 `conn.recover_lerobot_append("robot_merged")` before retrying. This rolls
 unfinished Frame and Episode commits back to the Dataset metadata boundary.
 Nullable columns added before a failed append remain in the schema and are
 reused on retry. This recovery is not a repair mechanism for concurrent appends.
+It rejects groups containing published coordinated Datasets; retry those with
+the same `dataset_id` instead.
 
 For FileIO URIs, pass credentials through `source_options`:
 
