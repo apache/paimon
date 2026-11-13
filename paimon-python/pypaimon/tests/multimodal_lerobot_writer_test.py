@@ -125,7 +125,8 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual([dataset_id], self.connection.get_table(
             "table_group").scan().select(["dataset_id"]).to_arrow()[
                 "dataset_id"].to_pylist())
-        self.assertEqual([dataset_id], [row["dataset_id"] for row in
+        self.assertEqual([dataset_id], [
+            row["dataset_id"] for row in
             _catalog_rows(self.connection, "table_group_episodes")])
         info = json.loads(_dataset_row(self.connection, "table_group")["info"])
         self.assertEqual(10, info["fps"])

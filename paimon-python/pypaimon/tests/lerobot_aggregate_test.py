@@ -227,6 +227,8 @@ def test_single_source_accepts_string_episode_tasks(setup, source_as_list):
 
 
 def test_single_source_preserves_feature_quantiles(setup):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
     conn, sources = setup
     source_path = Path(sources[0][7:])
     stats_path = source_path / "meta/stats.json"
