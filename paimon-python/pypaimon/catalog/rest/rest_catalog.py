@@ -875,9 +875,10 @@ class RESTCatalog(Catalog):
         catalog_env = CatalogEnvironment(
             identifier=identifier,
             uuid=metadata.uuid,
-            catalog_loader=self.catalog_loader(),
+            catalog_loader=None if metadata.is_external else self.catalog_loader(),
             supports_version_management=True,
-            rest_table_response=getattr(metadata, 'rest_table_response', None)
+            rest_table_response=getattr(metadata, 'rest_table_response', None),
+            catalog_context=self.context
         )
         # Use the path from server response directly (do not trim scheme)
         table_path = schema.options.get(CoreOptions.PATH.key())

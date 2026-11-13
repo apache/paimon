@@ -40,13 +40,15 @@ class CatalogEnvironment:
             uuid: Optional[str] = None,
             catalog_loader: Optional[CatalogLoader] = None,
             supports_version_management: bool = False,
-            rest_table_response: Optional[str] = None
+            rest_table_response: Optional[str] = None,
+            catalog_context: Optional[CatalogContext] = None
     ):
         self.identifier = identifier
         self.uuid = uuid
         self.catalog_loader = catalog_loader
         self.supports_version_management = supports_version_management
         self.rest_table_response = rest_table_response
+        self._catalog_context = catalog_context
 
     def snapshot_commit(self, snapshot_manager) -> Optional[SnapshotCommit]:
         """
@@ -96,6 +98,8 @@ class CatalogEnvironment:
         return None
 
     def catalog_context(self) -> Optional[CatalogContext]:
+        if self._catalog_context is not None:
+            return self._catalog_context
         if self.catalog_loader is None:
             return None
         context = getattr(self.catalog_loader, "context", None)
@@ -111,8 +115,13 @@ class CatalogEnvironment:
 
         from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
 
+        # External REST tables intentionally have no snapshot loader, and a directly
+        # constructed RESTCatalog may omit `metastore=rest` from CatalogContext.
+        # For those cases, the resolved GetTable response is the remaining
+        # provenance proving that dependency reads must still use the REST transport.
         rest_catalog = (
             isinstance(self.catalog_loader, RESTCatalogLoader)
+            or self.rest_table_response is not None
             or context.options.get(CatalogOptions.METASTORE) == "rest"
         )
         if not rest_catalog:
@@ -143,7 +152,8 @@ class CatalogEnvironment:
             uuid=self.uuid if identifier == self.identifier else None,
             catalog_loader=self.catalog_loader,
             supports_version_management=self.supports_version_management,
-            rest_table_response=getattr(self, 'rest_table_response', None)
+            rest_table_response=getattr(self, 'rest_table_response', None),
+            catalog_context=self._catalog_context
         )
 
     @staticmethod

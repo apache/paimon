@@ -160,15 +160,35 @@ class CatalogEnvironmentTest(unittest.TestCase):
         self.assertFalse(context.options.contains_key(self._READ_VIA_OPTION))
 
     def test_dependency_read_context_for_external_rest_table(self):
+        # Direct RESTCatalog construction is allowed without `metastore=rest` in
+        # CatalogContext; URI and warehouse are the options RESTCatalog itself requires.
         context = CatalogContext.create_from_options(Options({
-            CatalogOptions.METASTORE.key(): "rest",
+            CatalogOptions.URI.key(): "http://127.0.0.1:1",
+            CatalogOptions.WAREHOUSE.key(): "warehouse",
         }))
         environment = CatalogEnvironment(
             identifier=Identifier.create("db", "external"),
-            catalog_loader=FileSystemCatalogLoader(context),
+            catalog_context=context,
+            rest_table_response="{}",
         )
 
-        self.assertIsNot(environment.dependency_read_context(), context)
+        copied = environment.copy(environment.identifier)
+        self.assertIsNone(copied.catalog_loader)
+        self.assertIs(copied.catalog_context(), context)
+        self.assertIs(copied.blob_index_cache(), context.blob_index_cache)
+        dependency_context = copied.dependency_read_context()
+        self.assertIsNot(dependency_context, context)
+        self.assertIs(dependency_context.blob_index_cache, context.blob_index_cache)
+        self.assertEqual(dependency_context.options.get(CatalogOptions.METASTORE), "rest")
+        self.assertFalse(context.options.contains(CatalogOptions.METASTORE))
+        self.assertEqual(
+            context.options.get(CatalogOptions.METASTORE), "filesystem")
+        self.assertFalse(context.options.contains_key(self._READ_VIA_OPTION))
+        self.assertEqual(
+            JSON.from_json(RESTUtil.decode_string(
+                dependency_context.options.to_map()[self._READ_VIA_OPTION]), Identifier),
+            environment.identifier,
+        )
 
     def test_filesystem_catalog_loader_preserves_context_cache(self):
         context = CatalogContext.create_from_options(Options({

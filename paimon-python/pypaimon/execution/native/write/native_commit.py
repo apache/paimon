@@ -165,7 +165,7 @@ def create_native_write_table(table):
         table.options.data_evolution_row_sidecar_enabled())
     options['query-auth.enabled'] = _option_value_to_string(table.options.query_auth_enabled)
     schema_json = JSON.to_json(table.table_schema.copy(new_options=options))
-    if environment.supports_version_management:
+    if environment.catalog_loader is not None and environment.supports_version_management:
         if not _rest_catalog_supported(table):
             return None
         return _native_rest_table(table, schema_json)
