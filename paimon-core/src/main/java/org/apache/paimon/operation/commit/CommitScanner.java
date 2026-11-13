@@ -67,9 +67,6 @@ public class CommitScanner {
         this.indexManifestFile = indexManifestFile;
         // Stats in DELETE Manifest Entries is useless
         this.dropStats = options.manifestDeleteFileDropStats();
-        if (dropStats) {
-            this.scan.dropStats();
-        }
     }
 
     public List<SimpleFileEntry> readIncrementalChanges(
@@ -253,9 +250,6 @@ public class CommitScanner {
             Set<BinaryRow> remainingPartitions = new HashSet<>(changedPartitions);
             Map<BinaryRow, Integer> totalBuckets = new HashMap<>();
             FileStoreScan freshScan = scanSupplier.get();
-            if (dropStats) {
-                freshScan.dropStats();
-            }
             Iterator<ManifestEntry> iterator =
                     freshScan
                             .withSnapshot(snapshot)
