@@ -53,6 +53,39 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testDefaultValueInFixedBucketKey() throws Exception {
+        sql(
+                "CREATE TABLE T (a INT, b INT) WITH ("
+                        + "'bucket' = '4', "
+                        + "'bucket-key' = 'b', "
+                        + "'bucket-function.type' = 'mod')");
+        sql("CALL sys.alter_column_default_value('default.T', 'b', '5')");
+        sql("INSERT INTO T (a) VALUES (1)");
+
+        assertThat(collectResult("SELECT * FROM T")).containsExactly("+I[1, 5]");
+        assertThat(collectResult("SELECT * FROM T WHERE b = 5")).containsExactly("+I[1, 5]");
+    }
+
+    @Test
+    public void testDefaultPartitionValueInBucketMapping() throws Exception {
+        sql(
+                "CREATE TABLE T (a INT, b INT, pt INT) PARTITIONED BY (pt) WITH ("
+                        + "'bucket' = '2', "
+                        + "'bucket-key' = 'b', "
+                        + "'bucket-function.type' = 'mod', "
+                        + "'bucket.per-partition-count-enabled' = 'true')");
+        sql("CALL sys.alter_column_default_value('default.T', 'b', '5')");
+        sql("CALL sys.alter_column_default_value('default.T', 'pt', '7')");
+        sql("INSERT INTO T (a) VALUES (1)");
+
+        sql("ALTER TABLE T SET ('bucket' = '4')");
+        sql("INSERT INTO T (a) VALUES (2)");
+
+        assertThat(collectResult("SELECT * FROM T WHERE pt = 7 AND b = 5"))
+                .containsExactlyInAnyOrder("+I[1, 5, 7]", "+I[2, 5, 7]");
+    }
+
+    @Test
     public void testUnsupportedDefaultValue() {
         sql("CREATE TABLE T (a INT, b INT)");
         assertThatThrownBy(

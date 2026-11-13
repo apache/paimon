@@ -98,6 +98,15 @@ public class ManifestsReader {
         return this;
     }
 
+    /** Clears the partition and bucket selectors used when filtering manifest files. */
+    ManifestsReader clearPartitionAndBucketFilters() {
+        partitionFilter = null;
+        specifiedBucket = null;
+        bucketFilter = null;
+        totalAwareBucketFilter = null;
+        return this;
+    }
+
     public ManifestsReader withLevel(int level) {
         this.specifiedLevel = level;
         return this;

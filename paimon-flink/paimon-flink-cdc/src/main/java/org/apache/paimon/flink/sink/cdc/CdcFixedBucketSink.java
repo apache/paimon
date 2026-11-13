@@ -23,7 +23,9 @@ import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.sink.FlinkWriteSink;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
@@ -37,8 +39,32 @@ public class CdcFixedBucketSink extends FlinkWriteSink<CdcRecord> {
 
     private static final long serialVersionUID = 1L;
 
+    private final PartitionBucketMapping partitionBucketMapping;
+
     public CdcFixedBucketSink(FileStoreTable table) {
+        this(table, PartitionBucketMapping.loadFromTable(table));
+    }
+
+    public CdcFixedBucketSink(FileStoreTable table, PartitionBucketMapping partitionBucketMapping) {
         super(table, null);
+        this.partitionBucketMapping = partitionBucketMapping;
+    }
+
+    @Override
+    protected StoreSinkWrite.Provider createWriteProvider(
+            org.apache.flink.streaming.api.environment.CheckpointConfig checkpointConfig,
+            boolean isStreaming,
+            boolean hasSinkMaterializer) {
+        if (table.bucketMode() != BucketMode.HASH_FIXED) {
+            return super.createWriteProvider(checkpointConfig, isStreaming, hasSinkMaterializer);
+        }
+        return StoreSinkWrite.createWriteProvider(
+                table,
+                checkpointConfig,
+                isStreaming,
+                ignorePreviousFiles(),
+                hasSinkMaterializer,
+                partitionBucketMapping);
     }
 
     @Override
