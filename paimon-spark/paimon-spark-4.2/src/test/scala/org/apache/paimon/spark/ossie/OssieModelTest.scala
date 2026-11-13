@@ -115,4 +115,22 @@ class OssieModelTest extends AnyFunSuite {
     assert(parse(model +
       "nonportable_extensions:\n  - vendor_name: test\n    data: {date: '2026-11-13', nested: [null, true, 1]}\n").dataset == "orders")
   }
+
+  test("bound expanded alias graphs and repeated scalar aliases") {
+    val graph = "      p0: &p0 [0]\n" + (1 to 20).map {
+      i => s"      p$i: &p$i [*p${i - 1}, *p${i - 1}]\n"
+    }.mkString
+    val scalar = "      text: &text '" + ("x" * 4096) + "'\n      copies: [" +
+      Seq.fill(300)("*text").mkString(", ") + "]\n"
+    Seq(graph, scalar).foreach {
+      data =>
+        val text = model + "nonportable_extensions:\n  - vendor_name: test\n    data:\n" + data
+        assert(text.length < SemanticViewDefinition.MAX_CONTENT_BYTES)
+        val error = intercept[IllegalArgumentException](parse(text))
+        assert(error.getMessage.contains("expanded YAML"))
+    }
+    val ordinaryAlias = model +
+      "nonportable_extensions:\n  - vendor_name: test\n    data: {original: &value [1, null], copy: *value}\n"
+    assert(parse(ordinaryAlias).dataset == "orders")
+  }
 }

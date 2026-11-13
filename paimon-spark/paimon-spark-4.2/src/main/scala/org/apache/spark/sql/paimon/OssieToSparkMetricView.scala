@@ -19,6 +19,7 @@
 package org.apache.spark.sql.paimon
 
 import org.apache.paimon.spark.ossie.OssieModel
+import org.apache.paimon.utils.StringUtils
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.apache.spark.sql.SparkSession
@@ -27,6 +28,7 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
+import org.apache.spark.unsafe.types.UTF8String
 
 import scala.collection.mutable
 
@@ -122,7 +124,9 @@ private[paimon] object OssieToSparkMetricView {
     spark.sessionState.conf.getAllConfs.foreach { case (k, v) => conf.setConfString(k, v) }
     conf.setConf(SQLConf.ANSI_ENABLED, true)
     conf.setConf(SQLConf.DOUBLE_QUOTED_IDENTIFIERS, true)
-    val expr = SQLConf.withExistingConf(conf)(CatalystSqlParser.parseExpression(sql))
+    conf.setConf(SQLConf.ESCAPED_STRING_LITERALS, false)
+    val expr =
+      SQLConf.withExistingConf(conf)(CatalystSqlParser.parseExpression(normalizeStrings(sql)))
     var aggregate = false
     expr.foreach {
       case f: UnresolvedFunction =>
@@ -159,11 +163,81 @@ private[paimon] object OssieToSparkMetricView {
     expr
   }
 
+  // Ossie strings use ANSI doubled quotes and literal backslashes. Normalize only string tokens
+  // into Spark's escape syntax, leaving typed literals, identifiers and comment boundaries intact.
+  private def normalizeStrings(sql: String): String = {
+    val result = new StringBuilder
+    var pos = 0
+    def quoted(delimiter: Char): String = {
+      val value = new StringBuilder
+      var closed = false
+      pos += 1
+      while (pos < sql.length && !closed) {
+        val c = sql.charAt(pos)
+        pos += 1
+        if (c == delimiter) {
+          if (pos < sql.length && sql.charAt(pos) == delimiter) {
+            value.append(c)
+            pos += 1
+          } else { closed = true }
+        } else { value.append(c) }
+      }
+      require(closed, "Unterminated quoted Ossie expression")
+      value.toString
+    }
+    while (pos < sql.length) {
+      val c = sql.charAt(pos)
+      if (sql.startsWith("--", pos)) {
+        while (pos < sql.length && sql.charAt(pos) != '\n' && sql.charAt(pos) != '\r') {
+          pos += 1
+        }
+        result.append(' ')
+      } else if (sql.startsWith("/*", pos)) {
+        var depth = 1
+        pos += 2
+        while (pos < sql.length && depth > 0) {
+          if (sql.startsWith("/*", pos)) { depth += 1; pos += 2 }
+          else if (sql.startsWith("*/", pos)) { depth -= 1; pos += 2 }
+          else { pos += 1 }
+        }
+        require(depth == 0, "Unterminated Ossie SQL comment")
+        result.append(' ')
+      } else if (c == '"') {
+        result.append(quote(quoted(c)))
+      } else if (c == '`') {
+        val start = pos
+        quoted(c)
+        result.append(sql.substring(start, pos))
+      } else if (c == '\'') {
+        val rawPrefix = pos > 0 && (sql.charAt(pos - 1) == 'r' || sql.charAt(pos - 1) == 'R') &&
+          (pos == 1 || !Character.isJavaIdentifierPart(sql.charAt(pos - 2)))
+        require(!rawPrefix, "Ossie requires ANSI string literals")
+        val value = quoted(c)
+        result.append('\'')
+        value.foreach {
+          case '\\' => result.append("\\\\")
+          case '\'' => result.append("\\'")
+          case other => result.append(other)
+        }
+        result.append('\'')
+      } else {
+        result.append(c)
+        pos += 1
+      }
+    }
+    result.toString
+  }
+
   private def quote(name: String): String = "`" + name.replace("`", "``") + "`"
 
   // UnresolvedFunction inherits Expression.sql, which drops DISTINCT and FILTER. Render those
   // explicitly before asking the surrounding scalar expressions to render their own syntax.
   private def render(expr: Expression): String = expr.transformUp {
+    case l: Literal if l.value != null && l.dataType.isInstanceOf[StringType] =>
+      val hex = StringUtils.byteToHexString(l.value.asInstanceOf[UTF8String].getBytes)
+      // Native Metric View parsing uses session settings; binary literals avoid a second round
+      // of string escaping regardless of escapedStringLiterals.
+      RenderedSQL(s"CAST(X'$hex' AS STRING)")
     case f: UnresolvedFunction =>
       val distinct = if (f.isDistinct) "DISTINCT " else ""
       val filter = f.filter.map(p => s" FILTER (WHERE ${p.sql})").getOrElse("")

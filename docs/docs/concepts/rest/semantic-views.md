@@ -228,6 +228,10 @@ Other expressions, relationships, multiple datasets, external joins, streaming r
 are rejected. SQL Semantic View DDL and SQL discovery are not added; use the management API to
 register and list definitions. Ordinary tables and SQL views retain their existing lookup paths.
 Source table authorization is required independently of permission to read the semantic definition.
+When using a CTE, evaluate measures inside its definition (for example,
+`WITH m AS (SELECT MEASURE(revenue) AS revenue FROM paimon.sales.order_metrics) SELECT revenue FROM m`).
+Forwarding raw measure columns through a CTE or temporary view is not supported by Spark 4.2's
+Metric View resolver; evaluate measures inside the defining query block before reusing its results.
 
 The bundled schema is pinned to Ossie commit
 [`2692b1cc4708fdcf6a91e597ca928a9bc9d0da60`](https://github.com/apache/ossie/tree/2692b1cc4708fdcf6a91e597ca928a9bc9d0da60).
@@ -236,3 +240,6 @@ future changes under that same string. `ai_context` and `nonportable_extensions`
 original document and do not alter query execution.
 Extension data must contain JSON values with string keys. Quote date and timestamp strings;
 unquoted dates, timestamps, non-finite numbers, and recursive YAML aliases are rejected.
+Alias expansion is also bounded before JSON validation to prevent small documents from expanding
+into unbounded in-memory models. Portable SQL string literals follow ANSI quoting, independently
+of Spark's `spark.sql.parser.escapedStringLiterals` setting.

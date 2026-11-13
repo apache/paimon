@@ -170,6 +170,135 @@ class OssieSemanticViewTest extends QueryTest with SharedSparkSession {
     checkAnswer(spark.sql("SELECT paimon.sales.add_one(4)"), Seq(Row(5)))
   }
 
+  test("portable string literals keep backslashes and apostrophes under either Spark setting") {
+    Seq(false, true).foreach {
+      escaped =>
+        withSQLConf("spark.sql.parser.escapedStringLiterals" -> escaped.toString) {
+          Seq("C:\\new\\tab\\%\\path's", "O'Brien", "", "路径\\new").foreach {
+            value =>
+              val literal = "'" + value.replace("'", "''") + "'"
+              register(
+                model
+                  .replace("sql: region_code", s"sql: |-\n            $literal")
+                  .replace(
+                    "sql: COUNT(DISTINCT source.amount)",
+                    s"sql: COUNT(*) FILTER (WHERE region = $literal)"))
+              checkAnswer(
+                spark.sql("SELECT region, MEASURE(revenue), MEASURE(distinct_amounts) " +
+                  "FROM paimon.sales.order_metrics GROUP BY region"),
+                Seq(Row(value, BigDecimal(230), 3L))
+              )
+          }
+          register(model
+            .replace("sql: region_code", "sql: |-\n            CAST(DATE '2026-11-13' AS STRING)"))
+          checkAnswer(
+            spark.sql(
+              "SELECT region, MEASURE(revenue) FROM paimon.sales.order_metrics GROUP BY region"),
+            Seq(Row("2026-11-13", BigDecimal(230))))
+          register(
+            model.replace(
+              "sql: region_code",
+              "sql: |-\n            CASE WHEN \"region_code\" = 'CN' /* ' ignored */ " +
+                "THEN 'O''Brien' -- ' ignored\n            ELSE '路径\\new' END"
+            ))
+          checkAnswer(
+            spark.sql(
+              "SELECT region, MEASURE(revenue) FROM paimon.sales.order_metrics GROUP BY region"),
+            Seq(Row("O'Brien", BigDecimal(170)), Row("路径\\new", BigDecimal(60)))
+          )
+        }
+    }
+  }
+
+  test("CTE aliases and lateral syntax cannot hide unsupported semantic joins") {
+    register()
+    Seq(
+      "SELECT m.region, MEASURE(m.revenue) FROM paimon.sales.order_metrics m " +
+        "JOIN LATERAL (SELECT 1 AS x) t ON true GROUP BY m.region",
+      "WITH m AS (SELECT * FROM paimon.sales.order_metrics) " +
+        "SELECT MEASURE(m.revenue) FROM m JOIN paimon.sales.orders o " +
+        "ON m.region=o.region_code GROUP BY m.region",
+      "WITH m AS (SELECT * FROM paimon.sales.order_metrics), n AS (SELECT * FROM m) " +
+        "SELECT MEASURE(n.revenue) FROM n JOIN paimon.sales.orders o " +
+        "ON n.region=o.region_code GROUP BY n.region",
+      "WITH m AS (SELECT * FROM paimon.sales.order_metrics) " +
+        "SELECT (SELECT MEASURE(m.revenue) FROM m JOIN paimon.sales.orders o " +
+        "ON m.region=o.region_code) AS revenue"
+    ).foreach {
+      query =>
+        val error = intercept[Exception](spark.sql(query).collect())
+        assert(error.toString.contains("Joins against Ossie"), error.toString)
+    }
+    checkAnswer(
+      spark.sql(
+        "WITH m AS (SELECT MEASURE(revenue) AS revenue " +
+          "FROM paimon.sales.order_metrics) SELECT revenue FROM m"),
+      Seq(Row(BigDecimal(230))))
+    checkAnswer(
+      spark.sql(
+        "WITH ordinary AS (SELECT o.region_code FROM paimon.sales.orders o " +
+          "JOIN paimon.sales.orders p ON o.region_code=p.region_code) " +
+          "SELECT MEASURE(revenue) FROM paimon.sales.order_metrics"),
+      Seq(Row(BigDecimal(230)))
+    )
+  }
+
+  test("portable SQL line comments end at CR, LF and CRLF") {
+    Seq("\r", "\n", "\r\n").foreach {
+      newline =>
+        val expression = RESTApi.toJson("SUM(amount) -- a comment" + newline + " + COUNT(*)")
+        register(model.replace("sql: SUM(amount)", "sql: " + expression))
+        checkAnswer(
+          spark.sql("SELECT MEASURE(revenue) FROM paimon.sales.order_metrics"),
+          Seq(Row(BigDecimal(233))))
+    }
+  }
+
+  test("ANSI quoted source columns retain backslashes and embedded double quotes") {
+    val columns = Seq("tail\\", "back\\\"quote", "apostrophe'name")
+    def quoted(name: String): String = "`" + name.replace("`", "``") + "`"
+    val schema = columns.map(name => quoted(name) + " STRING").mkString(", ")
+    spark.sql(
+      "CREATE TABLE paimon.sales.quoted_columns (" + schema +
+        ", amount DECIMAL(12, 2), discount DECIMAL(12, 2)) " +
+        "TBLPROPERTIES ('bucket'='-1', 'file.format'='parquet')")
+    spark.sql("INSERT INTO paimon.sales.quoted_columns VALUES ('v0', 'v1', 'v2', 100, 10)")
+    Seq(false, true).foreach {
+      escaped =>
+        withSQLConf("spark.sql.parser.escapedStringLiterals" -> escaped.toString) {
+          columns.zipWithIndex.foreach {
+            case (column, index) =>
+              val expression = RESTApi.toJson("\"" + column.replace("\"", "\"\"") + "\"")
+              register(
+                model
+                  .replace("source: orders", "source: quoted_columns")
+                  .replace("sql: region_code", "sql: " + expression))
+              checkAnswer(
+                spark.sql(
+                  "SELECT region, MEASURE(revenue) FROM paimon.sales.order_metrics GROUP BY region"),
+                Seq(Row("v" + index, BigDecimal(90))))
+          }
+        }
+    }
+  }
+
+  test("all semantic view write targets fail without changing the source") {
+    register()
+    val statements = Seq(
+      "DELETE FROM paimon.sales.order_metrics",
+      "UPDATE paimon.sales.order_metrics SET region='changed'",
+      "MERGE INTO paimon.sales.order_metrics m USING (SELECT 'CN' AS region) s " +
+        "ON m.region=s.region WHEN MATCHED THEN DELETE"
+    )
+    statements.foreach {
+      statement =>
+        intercept[Exception](spark.sql(statement).collect())
+        checkAnswer(
+          spark.sql("SELECT SUM(amount), COUNT(*) FROM paimon.sales.orders"),
+          Seq(Row(BigDecimal(280), 3L)))
+    }
+  }
+
   test("preserve REST and source authorization errors") {
     register()
     Seq(403, 501).foreach {
@@ -206,6 +335,7 @@ class OssieSemanticViewTest extends QueryTest with SharedSparkSession {
       model.replace("sql: SUM(amount)", "sql: SUM(gross)") -> "Unknown Ossie dataset field",
       model.replace("sql: SUM(amount)", "sql: MEDIAN(amount)") -> "Unsupported OSSIE_SQL_2026",
       model.replace("sql: SUM(amount)", "sql: SUM(amount) OVER ()") -> "Unsupported OSSIE_SQL_2026",
+      model.replace("sql: region_code", "sql: |-\n            r'raw'") -> "ANSI string literals",
       model.replace("source: orders", "source: other.sales.orders") -> "same Paimon catalog",
       model.replace("source: orders", "source: order_metrics") -> "order_metrics"
     ).foreach {

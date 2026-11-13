@@ -25,6 +25,7 @@ import com.networknt.schema.{SchemaRegistry, SpecificationVersion}
 import org.yaml.snakeyaml.{LoaderOptions, Yaml}
 import org.yaml.snakeyaml.constructor.SafeConstructor
 
+import java.nio.charset.StandardCharsets.UTF_8
 import java.util.{Collections, IdentityHashMap, Locale}
 
 import scala.collection.JavaConverters._
@@ -60,7 +61,7 @@ object OssieModel {
     options.setAllowDuplicateKeys(false)
     val document = new Yaml(new SafeConstructor(options)).load[AnyRef](definition.getContent)
     require(document != null, "Empty Ossie document")
-    checkJson(document, Collections.newSetFromMap(new IdentityHashMap[AnyRef, java.lang.Boolean]()))
+    checkJson(document)
     val root = mapper.valueToTree[JsonNode](document)
     val errors = schema.validate(root).asScala
     require(errors.isEmpty, "Invalid Ossie 0.3.0.dev0 model: " + errors.take(5).mkString("; "))
@@ -106,26 +107,46 @@ object OssieModel {
 
   // Preserve YAML scalar types until validation: Jackson's YAML reader turns timestamps into
   // strings and map keys into strings, hiding values that Ossie forbids in extension data.
-  private def checkJson(value: AnyRef, ancestors: java.util.Set[AnyRef]): Unit = value match {
-    case null | _: String | _: java.lang.Boolean =>
-    case n: java.lang.Double =>
-      require(java.lang.Double.isFinite(n), "Ossie values must be finite JSON numbers")
-    case n: java.lang.Float =>
-      require(java.lang.Float.isFinite(n), "Ossie values must be finite JSON numbers")
-    case _: java.lang.Number =>
-    case map: java.util.Map[_, _] =>
-      require(ancestors.add(map), "Ossie YAML cannot contain recursive aliases")
-      try {
-        map.asScala.foreach {
-          case (key, item) =>
-            require(key.isInstanceOf[String], "Ossie JSON object keys must be strings")
-            checkJson(item.asInstanceOf[AnyRef], ancestors)
-        }
-      } finally { ancestors.remove(map) }
-    case list: java.util.List[_] =>
-      require(ancestors.add(list), "Ossie YAML cannot contain recursive aliases")
-      try { list.asScala.foreach(item => checkJson(item.asInstanceOf[AnyRef], ancestors)) }
-      finally { ancestors.remove(list) }
-    case _ => throw new IllegalArgumentException("Ossie YAML values must be representable as JSON")
+  private def checkJson(root: AnyRef): Unit = {
+    val ancestors = Collections.newSetFromMap(new IdentityHashMap[AnyRef, java.lang.Boolean]())
+    // Charge every occurrence, including aliases: a small YAML graph can expand exponentially.
+    // The budget bounds JSON node count plus UTF-8 scalar/key content before valueToTree allocates.
+    var remaining = SemanticViewDefinition.MAX_CONTENT_BYTES
+    def charge(size: Int): Unit = {
+      require(size <= remaining, "Ossie expanded YAML exceeds the supported size")
+      remaining -= size
+    }
+    def text(value: String): Unit = charge(value.getBytes(UTF_8).length)
+    def visit(value: AnyRef): Unit = {
+      charge(1)
+      value match {
+        case null | _: java.lang.Boolean =>
+        case s: String => text(s)
+        case n: java.lang.Double =>
+          require(java.lang.Double.isFinite(n), "Ossie values must be finite JSON numbers")
+          text(n.toString)
+        case n: java.lang.Float =>
+          require(java.lang.Float.isFinite(n), "Ossie values must be finite JSON numbers")
+          text(n.toString)
+        case n: java.lang.Number => text(n.toString)
+        case map: java.util.Map[_, _] =>
+          require(ancestors.add(map), "Ossie YAML cannot contain recursive aliases")
+          try {
+            map.asScala.foreach {
+              case (key, item) =>
+                require(key.isInstanceOf[String], "Ossie JSON object keys must be strings")
+                text(key.asInstanceOf[String])
+                visit(item.asInstanceOf[AnyRef])
+            }
+          } finally { ancestors.remove(map) }
+        case list: java.util.List[_] =>
+          require(ancestors.add(list), "Ossie YAML cannot contain recursive aliases")
+          try { list.asScala.foreach(item => visit(item.asInstanceOf[AnyRef])) }
+          finally { ancestors.remove(list) }
+        case _ =>
+          throw new IllegalArgumentException("Ossie YAML values must be representable as JSON")
+      }
+    }
+    visit(root)
   }
 }

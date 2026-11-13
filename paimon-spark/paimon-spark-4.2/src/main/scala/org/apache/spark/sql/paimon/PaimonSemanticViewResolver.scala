@@ -30,7 +30,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.analysis.UnresolvedRelation
 import org.apache.spark.sql.catalyst.catalog.{CatalogStorageFormat, CatalogTable, CatalogTableType}
-import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan, SubqueryAlias}
+import org.apache.spark.sql.catalyst.plans.logical.{CTERelationDef, CTERelationRef, Join, LateralJoin, LogicalPlan, SubqueryAlias}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.connector.catalog.PaimonLookupCatalog
 import org.apache.spark.sql.execution.command.MetricViewHelper
@@ -77,10 +77,7 @@ class PaimonSemanticViewResolver(spark: SparkSession)
                     u.options.get(UnresolvedRelation.REQUIRED_WRITE_PRIVILEGES) == null,
                     "Ossie Semantic Views are read-only")
                   require(
-                    !plan.exists {
-                      case j: Join => j.exists(_ eq u)
-                      case _ => false
-                    },
+                    !isJoined(plan, u),
                     "Joins against Ossie Semantic Views are not supported yet")
                   val model = OssieModel.parse(definition)
                   val source =
@@ -122,5 +119,28 @@ class PaimonSemanticViewResolver(spark: SparkSession)
           case _ => u
         }
     }
+  }
+
+  private def isJoined(plan: LogicalPlan, relation: UnresolvedRelation): Boolean = {
+    val ctes = plan.collectWithSubqueries { case cte: CTERelationDef => cte }
+    val semanticCtes = mutable.Set.empty[Long]
+    def dependsOnSemantic(node: LogicalPlan): Boolean =
+      node.collectFirstWithSubqueries {
+        case n if n eq relation => true
+        case ref: CTERelationRef if semanticCtes.contains(ref.cteId) => true
+      }.isDefined
+
+    // CTE definitions are siblings of their consumers, and can reference other CTEs. Resolve
+    // those dependencies before inspecting joins, including joins inside scalar subqueries.
+    var changed = true
+    while (changed) {
+      val previousSize = semanticCtes.size
+      ctes.foreach(cte => if (dependsOnSemantic(cte.child)) { semanticCtes += cte.id })
+      changed = semanticCtes.size != previousSize
+    }
+    plan.collectFirstWithSubqueries {
+      case join: Join if dependsOnSemantic(join) => true
+      case join: LateralJoin if dependsOnSemantic(join) => true
+    }.isDefined
   }
 }
