@@ -28,13 +28,20 @@ from pypaimon.common.options.options_utils import OptionsUtils
 
 
 def _native_blob_view_supported(table, read_names) -> bool:
-    """Resolve Blob views natively only with the REST catalog environment."""
+    """Resolve Blob views natively only when Python itself can resolve them."""
     if (not (table.options.blob_view_fields() & set(read_names))
             or not table.options.blob_view_resolve_enabled()):
         return True
-    loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
-    # Python also leaves view structs unresolved without a loader.
-    return loader is None or _catalog_metastore(loader) == 'rest'
+    environment = getattr(table, 'catalog_environment', None)
+    loader = getattr(environment, 'catalog_loader', None)
+    if loader is not None:
+        return _catalog_metastore(loader) == 'rest'
+    # A catalogless resolved table has no context to resolve views, so native and
+    # Python both retain the view struct values. If a catalog context is retained
+    # without a loader, Python can resolve through it but Rust from_resolved_schema
+    # cannot, so fall back.
+    catalog_context = getattr(environment, 'catalog_context', None)
+    return catalog_context() is None if callable(catalog_context) else True
 
 
 def _partition_fields(table):

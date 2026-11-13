@@ -855,6 +855,44 @@ def test_native_read_blob_view_keeps_filesystem_fallback(limit):
     native.assert_not_called()
 
 
+def test_native_blob_view_support_keeps_catalogless_tables_native():
+    from pypaimon.catalog.catalog_environment import CatalogEnvironment
+    from pypaimon.execution.native.table import _native_blob_view_supported
+    options = Mock()
+    options.blob_view_fields.return_value = {'payload'}
+    options.blob_view_resolve_enabled.return_value = True
+    table = Mock(
+        options=options,
+        catalog_environment=CatalogEnvironment.empty())
+    assert _native_blob_view_supported(table, ['payload'])
+
+
+def test_native_read_blob_view_falls_back_without_rest_loader():
+    from pypaimon.catalog.catalog_context import CatalogContext
+    from pypaimon.catalog.catalog_environment import CatalogEnvironment
+    from pypaimon.common.identifier import Identifier
+    from pypaimon.common.options import Options
+    read = _blob_table_read()
+    read.table.catalog_environment = CatalogEnvironment(
+        identifier=Identifier.create('default', 'view'),
+        catalog_context=CatalogContext.create_from_options(Options({
+            'metastore': 'rest',
+        })),
+        rest_table_response='{}')
+    read.table.options.blob_view_fields.return_value = {'payload'}
+    read.table.options.blob_view_resolve_enabled.return_value = True
+    split = _Split('payload.parquet')
+    split._native_split = object()
+    split.merged_row_count = Mock(return_value=2)
+
+    with patch(
+            'pypaimon.execution.native.read.table_read.native_read') as native:
+        assert NativeTableRead(read).read_batches(
+            [split], pa.schema([('payload', pa.large_binary())])) is None
+
+    native.assert_not_called()
+
+
 def test_native_read_pruning_descriptor_limit_allows_non_blob_predicate():
     read = _blob_table_read(limit=1)
     read.table.options.data_evolution_enabled.return_value = True
