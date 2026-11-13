@@ -160,15 +160,35 @@ class CatalogEnvironmentTest(unittest.TestCase):
         self.assertFalse(context.options.contains_key(self._READ_VIA_OPTION))
 
     def test_dependency_read_context_for_external_rest_table(self):
+        # Direct RESTCatalog construction is allowed without `metastore=rest` in
+        # CatalogContext; URI and warehouse are the options RESTCatalog itself requires.
         context = CatalogContext.create_from_options(Options({
-            CatalogOptions.METASTORE.key(): "rest",
+            CatalogOptions.URI.key(): "http://127.0.0.1:1",
+            CatalogOptions.WAREHOUSE.key(): "warehouse",
         }))
         environment = CatalogEnvironment(
             identifier=Identifier.create("db", "external"),
-            catalog_loader=FileSystemCatalogLoader(context),
+            catalog_context=context,
+            rest_table_response="{}",
         )
 
-        self.assertIsNot(environment.dependency_read_context(), context)
+        copied = environment.copy(environment.identifier)
+        self.assertIsNone(copied.catalog_loader)
+        self.assertIs(copied.catalog_context(), context)
+        self.assertIs(copied.blob_index_cache(), context.blob_index_cache)
+        dependency_context = copied.dependency_read_context()
+        self.assertIsNot(dependency_context, context)
+        self.assertIs(dependency_context.blob_index_cache, context.blob_index_cache)
+        self.assertEqual(dependency_context.options.get(CatalogOptions.METASTORE), "rest")
+        self.assertFalse(context.options.contains(CatalogOptions.METASTORE))
+        self.assertEqual(
+            context.options.get(CatalogOptions.METASTORE), "filesystem")
+        self.assertFalse(context.options.contains_key(self._READ_VIA_OPTION))
+        self.assertEqual(
+            JSON.from_json(RESTUtil.decode_string(
+                dependency_context.options.to_map()[self._READ_VIA_OPTION]), Identifier),
+            environment.identifier,
+        )
 
     def test_filesystem_catalog_loader_preserves_context_cache(self):
         context = CatalogContext.create_from_options(Options({
@@ -262,6 +282,95 @@ class CatalogEnvironmentTest(unittest.TestCase):
             dependency_context.options.contains_key(self._READ_VIA_OPTION))
         dependency_catalog.get_table.assert_called_once_with(target)
         self.assertIs(result, dependency_table)
+
+    def test_blob_view_lookup_reconstructs_nested_external_rest_catalog(self):
+        target = Identifier.create("db", "target")
+        outermost = Identifier.create("db", "outermost")
+        read_via = RESTUtil.encode_string(
+            JSON.to_json(outermost, separators=(",", ":")))
+        context = CatalogContext.create_from_options(Options({
+            CatalogOptions.URI.key(): "http://127.0.0.1:1",
+            CatalogOptions.WAREHOUSE.key(): "warehouse",
+            self._READ_VIA_OPTION: read_via,
+        }))
+        environment = CatalogEnvironment(
+            identifier=Identifier.create("db", "intermediate"),
+            catalog_context=context,
+            rest_table_response="{}",
+        )
+        table = SimpleNamespace(catalog_environment=environment)
+        dependency_catalog = mock.MagicMock()
+        dependency_table = mock.sentinel.dependency_table
+        dependency_catalog.get_table.return_value = dependency_table
+
+        with mock.patch.object(
+                CatalogFactory,
+                "create_from_context",
+                return_value=dependency_catalog) as create_catalog:
+            result = BlobViewLookup(table)._load_table(target)
+
+        dependency_context = create_catalog.call_args.args[0]
+        create_catalog.assert_called_once_with(
+            dependency_context, config_required=False)
+        self.assertEqual(
+            dependency_context.options.get(CatalogOptions.METASTORE), "rest")
+        self.assertEqual(
+            dependency_context.options.to_map()[self._READ_VIA_OPTION], read_via)
+        dependency_catalog.get_table.assert_called_once_with(target)
+        self.assertIs(result, dependency_table)
+
+    def test_blob_view_lookup_does_not_default_unproven_context_to_rest(self):
+        target = Identifier.create("db", "target")
+        context = CatalogContext.create_from_options(Options({
+            CatalogOptions.WAREHOUSE.key(): "warehouse",
+        }))
+        environment = CatalogEnvironment(
+            identifier=Identifier.create("db", "table"),
+            catalog_context=context,
+        )
+        table = SimpleNamespace(catalog_environment=environment)
+        dependency_catalog = mock.MagicMock()
+        dependency_table = mock.sentinel.dependency_table
+        dependency_catalog.get_table.return_value = dependency_table
+
+        with mock.patch.object(
+                CatalogFactory,
+                "create_from_context",
+                return_value=dependency_catalog) as create_catalog:
+            result = BlobViewLookup(table)._load_table(target)
+
+        dependency_context = create_catalog.call_args.args[0]
+        create_catalog.assert_called_once_with(
+            dependency_context, config_required=False)
+        self.assertIs(dependency_context, context)
+        self.assertEqual(dependency_context.options.get(CatalogOptions.METASTORE), "filesystem")
+        dependency_catalog.get_table.assert_called_once_with(target)
+        self.assertIs(result, dependency_table)
+
+    def test_blob_inline_reader_resolves_views_with_external_context(self):
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.execution.python.read.reader.blob_descriptor_convert_reader import (
+            BlobInlineConvertReader)
+        from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
+
+        class ExternalEnvironment:
+            catalog_loader = None
+
+            def catalog_context(self):
+                return mock.sentinel.catalog_context
+
+        table = SimpleNamespace(
+            options=CoreOptions(Options({
+                "blob-view-field": "picture",
+                "blob-as-descriptor": "true",
+            })),
+            catalog_environment=ExternalEnvironment(),
+        )
+
+        reader = BlobInlineConvertReader(EmptyRecordBatchReader(), table)
+
+        self.assertEqual(reader._view_fields, {"picture"})
+        reader.close()
 
     def test_blob_view_lookup_preserves_custom_rest_catalog(self):
         target = Identifier.create("db", "target")
