@@ -1176,35 +1176,33 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean detectConflicts,
             @Nullable String newStatsFileName)
             throws Lock.AcquisitionException {
-        boolean lockRequired = retryResult != null || !snapshotCommit.supportsOptimisticCommit();
-        Callable<CommitResult> attempt =
-                () ->
-                        tryCommitOnceInternal(
-                                retryResult,
-                                changesProvider,
-                                compactionBaselines,
-                                identifier,
-                                watermark,
-                                properties,
-                                commitKind,
-                                allowRollback,
-                                latestSnapshotSupplier.get(),
-                                detectConflicts,
-                                newStatsFileName,
-                                lockRequired);
         try {
-            if (lockRequired) {
-                return snapshotCommit.runWithLock(attempt);
+            Callable<CommitResult> attempt =
+                    () ->
+                            tryCommitOnceWithoutLock(
+                                    retryResult,
+                                    changesProvider,
+                                    compactionBaselines,
+                                    identifier,
+                                    watermark,
+                                    properties,
+                                    commitKind,
+                                    allowRollback,
+                                    latestSnapshotSupplier.get(),
+                                    detectConflicts,
+                                    newStatsFileName);
+            if (retryResult == null && snapshotCommit.lockOnRetry) {
+                return attempt.call();
             }
-            return attempt.call();
+            return snapshotCommit.runWithLock(attempt);
         } catch (Lock.AcquisitionException | RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to run commit attempt.", e);
+            throw new RuntimeException("Failed to run commit with table lock.", e);
         }
     }
 
-    private CommitResult tryCommitOnceInternal(
+    private CommitResult tryCommitOnceWithoutLock(
             @Nullable RetryCommitResult retryResult,
             CommitChangesProvider changesProvider,
             Map<Pair<BinaryRow, Integer>, Long> compactionBaselines,
@@ -1215,8 +1213,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean allowRollback,
             @Nullable Snapshot latestSnapshot,
             boolean detectConflicts,
-            @Nullable String newStatsFileName,
-            boolean lockRequired) {
+            @Nullable String newStatsFileName) {
         long startMillis = System.currentTimeMillis();
 
         // Resolve an uncertain successful commit before preparing changes, which may refer
@@ -1361,7 +1358,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         && rollback != null
                         && options.toConfiguration()
                                 .get(CoreOptions.COMMIT_AUTO_ROLLBACK_ENABLED)) {
-                    if (lockRequired) {
+                    if (retryResult != null || !snapshotCommit.lockOnRetry) {
                         snapshotCommit.ensureValid();
                     }
                     if (rollback.tryToRollback(latestSnapshot)) {
@@ -1547,9 +1544,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 callback ->
                         callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
         try {
-            success =
-                    commitSnapshotImpl(
-                            latestSnapshot, newSnapshot, deltaPartitionEntries, lockRequired);
+            success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaPartitionEntries);
         } catch (Exception e) {
             // commit exception, not sure about the situation and should not clean up the files
             LOG.warn(
@@ -1686,7 +1681,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
             @Nullable Map<String, String> properties) {
-        return replaceManifestList(
+        return replaceManifestListOnce(
                 latest,
                 totalRecordCount,
                 baseManifestList,
@@ -1697,7 +1692,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 false);
     }
 
-    public boolean replaceManifestList(
+    public boolean replaceManifestListOnce(
             Snapshot latest,
             long totalRecordCount,
             Pair<String, Long> baseManifestList,
@@ -1706,62 +1701,81 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long nextRowId,
             @Nullable Map<String, String> properties,
             boolean retry) {
-        boolean lockRequired = retry || !snapshotCommit.supportsOptimisticCommit();
         Supplier<Boolean> attempt =
-                () -> {
-                    Snapshot head = snapshotManager.latestSnapshot();
-                    if (head == null || !head.equals(latest)) {
-                        return false;
-                    }
-                    Snapshot newSnapshot =
-                            new Snapshot(
-                                    latest.id() + 1,
-                                    latest.schemaId(),
-                                    baseManifestList.getLeft(),
-                                    baseManifestList.getRight(),
-                                    deltaManifestList.getKey(),
-                                    deltaManifestList.getRight(),
-                                    null,
-                                    null,
-                                    indexManifest,
-                                    commitUser,
-                                    CoreFullVersion.get(),
-                                    Long.MAX_VALUE,
-                                    CommitKind.OVERWRITE,
-                                    System.currentTimeMillis(),
-                                    totalRecordCount,
-                                    0L,
-                                    null,
-                                    latest.watermark(),
-                                    latest.statistics(),
-                                    properties == null || properties.isEmpty() ? null : properties,
-                                    nextRowId,
-                                    null);
-
-                    return commitSnapshotImpl(latest, newSnapshot, emptyList(), lockRequired);
-                };
-        if (lockRequired) {
-            return runWithLock(attempt::get);
+                () ->
+                        replaceManifestListOnceWithoutLock(
+                                latest,
+                                totalRecordCount,
+                                baseManifestList,
+                                deltaManifestList,
+                                indexManifest,
+                                nextRowId,
+                                properties);
+        if (snapshotCommit.lockOnRetry && !retry) {
+            return attempt.get();
         }
-        return attempt.get();
+        return runWithLock(attempt::get);
+    }
+
+    private boolean replaceManifestListOnceWithoutLock(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList,
+            @Nullable String indexManifest,
+            @Nullable Long nextRowId,
+            @Nullable Map<String, String> properties) {
+        Snapshot head = snapshotManager.latestSnapshot();
+        if (head == null || !head.equals(latest)) {
+            return false;
+        }
+        Snapshot newSnapshot =
+                new Snapshot(
+                        latest.id() + 1,
+                        latest.schemaId(),
+                        baseManifestList.getLeft(),
+                        baseManifestList.getRight(),
+                        deltaManifestList.getKey(),
+                        deltaManifestList.getRight(),
+                        null,
+                        null,
+                        indexManifest,
+                        commitUser,
+                        CoreFullVersion.get(),
+                        Long.MAX_VALUE,
+                        CommitKind.OVERWRITE,
+                        System.currentTimeMillis(),
+                        totalRecordCount,
+                        0L,
+                        null,
+                        latest.watermark(),
+                        latest.statistics(),
+                        // if empty properties, just set to null
+                        properties == null || properties.isEmpty() ? null : properties,
+                        nextRowId,
+                        null);
+
+        return commitSnapshotImpl(latest, newSnapshot, emptyList());
     }
 
     @Override
     public boolean rollbackToAsLatest(Snapshot targetSnapshot) {
-        Pair<Boolean, CommitCallback.Context> result;
-        if (snapshotCommit.supportsOptimisticCommit()) {
-            result = rollbackToAsLatestOnce(targetSnapshot, false);
-        } else {
-            result = runWithLock(() -> rollbackToAsLatestOnce(targetSnapshot, true));
-        }
+        Pair<Boolean, CommitCallback.Context> result = rollbackToAsLatestOnce(targetSnapshot);
         if (result.getRight() != null) {
             commitCallbacks.forEach(callback -> callback.call(result.getRight()));
         }
         return result.getLeft();
     }
 
-    private Pair<Boolean, CommitCallback.Context> rollbackToAsLatestOnce(
-            Snapshot targetSnapshot, boolean lockRequired) {
+    private Pair<Boolean, CommitCallback.Context> rollbackToAsLatestOnce(Snapshot targetSnapshot) {
+        if (snapshotCommit.lockOnRetry) {
+            return rollbackToAsLatestOnceWithoutLock(targetSnapshot);
+        }
+        return runWithLock(() -> rollbackToAsLatestOnceWithoutLock(targetSnapshot));
+    }
+
+    private Pair<Boolean, CommitCallback.Context> rollbackToAsLatestOnceWithoutLock(
+            Snapshot targetSnapshot) {
         Snapshot latest =
                 checkNotNull(
                         snapshotManager.latestSnapshot(),
@@ -1859,10 +1873,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         boolean success =
                 commitSnapshotImpl(
-                        latest,
-                        newSnapshot,
-                        new ArrayList<>(PartitionEntry.merge(deltaFiles)),
-                        lockRequired);
+                        latest, newSnapshot, new ArrayList<>(PartitionEntry.merge(deltaFiles)));
         if (success) {
             // Notify the post-commit callbacks so external views stay in sync with the rolled-back
             // state (e.g. Iceberg compatibility metadata and chain-table overwrite handling).
@@ -1924,12 +1935,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int retryCount = 0;
         long startMillis = System.currentTimeMillis();
         while (true) {
-            boolean success;
-            if (retryCount > 0 || !snapshotCommit.supportsOptimisticCommit()) {
-                success = runWithLock(() -> compactManifestOnce(true));
-            } else {
-                success = compactManifestOnce(false);
-            }
+            boolean success = compactManifestOnce(retryCount > 0);
             if (success) {
                 break;
             }
@@ -1947,7 +1953,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private boolean compactManifestOnce(boolean lockRequired) {
+    private boolean compactManifestOnce(boolean retry) {
+        if (snapshotCommit.lockOnRetry && !retry) {
+            return compactManifestOnceWithoutLock();
+        }
+        return runWithLock(this::compactManifestOnceWithoutLock);
+    }
+
+    private boolean compactManifestOnceWithoutLock() {
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
         if (latestSnapshot == null) {
@@ -2001,7 +2014,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.nextRowId(),
                         null);
 
-        return commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList(), lockRequired);
+        return commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList());
     }
 
     static CoreOptions manifestCompactionOptions(CoreOptions options) {
@@ -2016,19 +2029,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean commitSnapshotImpl(
             @Nullable Snapshot baseSnapshot,
             Snapshot newSnapshot,
-            List<PartitionEntry> deltaPartitionEntries,
-            boolean lockRequired) {
+            List<PartitionEntry> deltaPartitionEntries) {
         try {
             List<PartitionStatistics> statistics = new ArrayList<>(deltaPartitionEntries.size());
             for (PartitionEntry entry : deltaPartitionEntries) {
                 statistics.add(entry.toPartitionStatistics(partitionComputer));
             }
-            String baseSnapshotUuid = baseSnapshot == null ? null : baseSnapshot.uuid();
-            return lockRequired
-                    ? snapshotCommit.commit(
-                            baseSnapshotUuid, newSnapshot, options.branch(), statistics)
-                    : snapshotCommit.commitOptimistically(
-                            baseSnapshotUuid, newSnapshot, options.branch(), statistics);
+            return snapshotCommit.commit(
+                    baseSnapshot == null ? null : baseSnapshot.uuid(),
+                    newSnapshot,
+                    options.branch(),
+                    statistics);
         } catch (Throwable e) {
             // exception when performing the atomic rename,
             // we cannot clean up because we can't determine the success

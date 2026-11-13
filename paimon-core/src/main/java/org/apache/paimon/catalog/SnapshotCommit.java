@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.rest.RESTCatalogLock;
 
 import javax.annotation.Nullable;
 
@@ -28,42 +29,30 @@ import java.util.List;
 import java.util.concurrent.Callable;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
-import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** A snapshot publisher bound to the lock protecting its preparation and publication. */
 public abstract class SnapshotCommit implements Lock {
 
     private final Lock lock;
+    public final boolean lockOnRetry;
 
     protected SnapshotCommit(Lock lock) {
         this.lock =
                 Lock.reentrant(checkNotNull(lock, "Snapshot publication requires a bound lock."));
+        this.lockOnRetry = this instanceof CatalogSnapshotCommit && lock instanceof RESTCatalogLock;
     }
 
-    /** Publish with the bound lock, reusing an enclosing preparation scope when present. */
+    /** Publish using the bound lock or the REST catalog's expected-head check. */
     public final boolean commit(
             @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             String branch,
             List<PartitionStatistics> statistics)
             throws Exception {
+        if (lockOnRetry && !((Lock.ReentrantLock) lock).isHeldByCurrentThread()) {
+            return commitImpl(baseSnapshotUuid, snapshot, branch, statistics);
+        }
         return runWithLock(() -> commitImpl(baseSnapshotUuid, snapshot, branch, statistics));
-    }
-
-    /** Whether this publisher can attempt publication before acquiring its bound lock. */
-    public boolean supportsOptimisticCommit() {
-        return false;
-    }
-
-    /** Publish using the catalog's atomic comparison with the expected head. */
-    public final boolean commitOptimistically(
-            @Nullable String baseSnapshotUuid,
-            Snapshot snapshot,
-            String branch,
-            List<PartitionStatistics> statistics)
-            throws Exception {
-        checkState(supportsOptimisticCommit(), "This snapshot publisher requires its bound lock.");
-        return commitImpl(baseSnapshotUuid, snapshot, branch, statistics);
     }
 
     @Override
@@ -90,7 +79,7 @@ public abstract class SnapshotCommit implements Lock {
         }
     }
 
-    /** Backend publication for both the locked and optimistic paths. */
+    /** Backend publication, after any required lock validation. */
     protected abstract boolean commitImpl(
             @Nullable String baseSnapshotUuid,
             Snapshot snapshot,

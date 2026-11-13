@@ -21,7 +21,6 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.partition.PartitionStatistics;
-import org.apache.paimon.rest.RESTCatalogLock;
 
 import javax.annotation.Nullable;
 
@@ -33,7 +32,6 @@ public class CatalogSnapshotCommit extends SnapshotCommit {
     private final Catalog catalog;
     private final Identifier identifier;
     @Nullable private final String uuid;
-    private final boolean supportsOptimisticCommit;
 
     public CatalogSnapshotCommit(
             Catalog catalog, Identifier identifier, @Nullable String uuid, Lock lock) {
@@ -41,12 +39,6 @@ public class CatalogSnapshotCommit extends SnapshotCommit {
         this.catalog = catalog;
         this.identifier = identifier;
         this.uuid = uuid;
-        this.supportsOptimisticCommit = lock instanceof RESTCatalogLock;
-    }
-
-    @Override
-    public boolean supportsOptimisticCommit() {
-        return supportsOptimisticCommit;
     }
 
     @Override

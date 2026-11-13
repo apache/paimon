@@ -125,6 +125,10 @@ public interface Lock extends AutoCloseable {
             this.delegate = delegate;
         }
 
+        public boolean isHeldByCurrentThread() {
+            return held.get();
+        }
+
         @Override
         public AutoCloseable acquire() throws Exception {
             if (held.get()) {
