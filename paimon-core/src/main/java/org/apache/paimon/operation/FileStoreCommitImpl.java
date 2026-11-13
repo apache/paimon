@@ -100,7 +100,6 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -405,18 +404,28 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     /**
-     * A concurrent compaction may already have removed some compact-before files. Replaying such an
-     * increment would fail conflict detection on every restart, so only recover it when all of its
-     * inputs are still live in the latest snapshot.
+     * A concurrent compaction may already have removed or upgraded some compact-before files.
+     * Replaying such an increment would fail conflict detection on every restart, so only recover
+     * it when all of its inputs are still live in the latest snapshot with the same {@link
+     * FileEntry.Identifier}. Conflict detection compares the full identifier, so an in-place level
+     * upgrade that keeps the file name still makes the recovery stale.
      */
     private boolean compactInputsStillLive(ManifestCommittable committable) {
-        Set<List<Object>> inputs = new HashSet<>();
+        Set<FileEntry.Identifier> inputs = new HashSet<>();
         Set<String> inputNames = new HashSet<>();
         Set<BinaryRow> partitions = new HashSet<>();
         for (CommitMessage message : committable.fileCommittables()) {
+            Integer totalBuckets = message.totalBuckets();
             for (DataFileMeta file :
                     ((CommitMessageImpl) message).compactIncrement().compactBefore()) {
-                inputs.add(Arrays.asList(message.partition(), message.bucket(), file.fileName()));
+                inputs.add(
+                        ManifestEntry.create(
+                                        FileKind.DELETE,
+                                        message.partition(),
+                                        message.bucket(),
+                                        totalBuckets == null ? 0 : totalBuckets,
+                                        file)
+                                .identifier());
                 inputNames.add(file.fileName());
                 partitions.add(message.partition());
             }
@@ -425,24 +434,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             return true;
         }
         Snapshot latest = snapshotManager.latestSnapshot();
-        Set<List<Object>> live = new HashSet<>();
+        Set<FileEntry.Identifier> live = new HashSet<>();
         if (latest != null) {
             for (SimpleFileEntry entry :
                     scanner.readAllEntriesFromDataFiles(
                             latest, new ArrayList<>(partitions), inputNames)) {
                 if (entry.kind() == FileKind.ADD) {
-                    live.add(Arrays.asList(entry.partition(), entry.bucket(), entry.fileName()));
+                    live.add(entry.identifier());
                 }
             }
         }
-        for (List<Object> input : inputs) {
+        for (FileEntry.Identifier input : inputs) {
             if (!live.contains(input)) {
                 LOG.warn(
-                        "Skipping compaction recovery for table {}, user {}, identifier {}: input {} was removed by a concurrent commit",
+                        "Skipping compaction recovery for table {}, user {}, identifier {}: input {} was removed or changed by a concurrent commit",
                         tableName,
                         commitUser,
                         committable.identifier(),
-                        input.get(2));
+                        input);
                 return false;
             }
         }

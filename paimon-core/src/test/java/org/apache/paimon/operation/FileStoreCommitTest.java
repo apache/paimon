@@ -598,6 +598,80 @@ public class FileStoreCommitTest {
         }
     }
 
+    @Test
+    public void testFilterHalfCommittedIdentifierWithConcurrentlyUpgradedInput() throws Exception {
+        TestFileStore store = createStore(false);
+        KeyValue row = gen.nextInsert("20211110", 8, 1L, null, "replacement");
+        List<ManifestCommittable> prepared = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            store.commitDataImpl(
+                    Collections.singletonList(row),
+                    gen::getPartition,
+                    value -> 0,
+                    false,
+                    2L,
+                    123L,
+                    Collections.emptyList(),
+                    (commit, committable) -> prepared.add(committable));
+        }
+        CommitMessageImpl append = (CommitMessageImpl) prepared.get(0).fileCommittables().get(0);
+        CommitMessageImpl ours = (CommitMessageImpl) prepared.get(1).fileCommittables().get(0);
+        List<DataFileMeta> inputs = append.newFilesIncrement().newFiles();
+        assertThat(inputs).allMatch(file -> file.level() == 0);
+        ManifestCommittable pending =
+                new ManifestCommittable(
+                        2,
+                        123L,
+                        Collections.singletonList(
+                                new CommitMessageImpl(
+                                        append.partition(),
+                                        append.bucket(),
+                                        append.totalBuckets(),
+                                        append.newFilesIncrement(),
+                                        new CompactIncrement(
+                                                inputs,
+                                                ours.newFilesIncrement().newFiles(),
+                                                Collections.emptyList()))));
+        try (FileStoreCommit commit = store.newCommit("writer", null)) {
+            // The first phase of identifier 2 publishes the append files.
+            commit.commit(prepared.get(0), false);
+            assertThat(commit.filterCommitted(Collections.singletonList(pending))).hasSize(1);
+
+            // Another job upgrades the same input in place: same file name, new level.
+            List<DataFileMeta> upgraded = new ArrayList<>();
+            for (DataFileMeta file : inputs) {
+                upgraded.add(file.upgrade(1));
+            }
+            try (FileStoreCommit other = store.newCommit("other", null)) {
+                other.commit(
+                        new ManifestCommittable(
+                                1,
+                                null,
+                                Collections.singletonList(
+                                        new CommitMessageImpl(
+                                                append.partition(),
+                                                append.bucket(),
+                                                append.totalBuckets(),
+                                                DataIncrement.emptyIncrement(),
+                                                new CompactIncrement(
+                                                        inputs,
+                                                        upgraded,
+                                                        Collections.emptyList())))),
+                        false);
+            }
+            Snapshot compacted = store.snapshotManager().latestSnapshot();
+            assertThat(compacted.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+
+            // The level 0 deletion no longer matches the live level 1 entry, so replaying it
+            // would fail conflict detection. Recovery must discard it.
+            ManifestCommittable next = new ManifestCommittable(3);
+            assertThat(commit.filterCommitted(Arrays.asList(pending, next))).containsExactly(next);
+            assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(compacted.id());
+            assertThat(store.toKvMap(store.readKvsFromSnapshot(compacted.id())))
+                    .isEqualTo(store.toKvMap(Collections.singletonList(row)));
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"data", "auxiliary", "changelog", "index", "io"})
     public void testFilterHalfCommittedIdentifierWithUnavailableOutput(String unavailable)
