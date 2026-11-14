@@ -69,15 +69,6 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
     private final List<Range> protectedRanges;
     private final boolean partialRewrite;
 
-    public DataEvolutionNormalCompactTask(BinaryRow partition, List<DataFileMeta> files) {
-        this(partition, files, Collections.emptyList());
-    }
-
-    public DataEvolutionNormalCompactTask(
-            BinaryRow partition, List<DataFileMeta> files, List<Range> protectedRanges) {
-        this(partition, files, protectedRanges, false);
-    }
-
     public DataEvolutionNormalCompactTask(
             BinaryRow partition,
             List<DataFileMeta> files,

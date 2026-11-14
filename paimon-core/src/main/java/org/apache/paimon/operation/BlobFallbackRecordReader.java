@@ -75,44 +75,6 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             List<DataFileMeta> files,
             BlobFileReaderFactory readerFactory,
             ReaderWrapper readerWrapper,
-            List<Range> rowRanges,
-            RowType readRowType,
-            int blobIndex)
-            throws IOException {
-        this(
-                files,
-                readerFactory,
-                readerWrapper,
-                enclosingRange(files),
-                rowRanges,
-                readRowType,
-                blobIndex);
-    }
-
-    BlobFallbackRecordReader(
-            List<DataFileMeta> files,
-            BlobFileReaderFactory readerFactory,
-            ReaderWrapper readerWrapper,
-            Range logicalRange,
-            List<Range> rowRanges,
-            RowType readRowType,
-            int blobIndex)
-            throws IOException {
-        this(
-                files,
-                readerFactory,
-                readerWrapper,
-                logicalRange,
-                rowRanges,
-                readRowType,
-                blobIndex,
-                false);
-    }
-
-    BlobFallbackRecordReader(
-            List<DataFileMeta> files,
-            BlobFileReaderFactory readerFactory,
-            ReaderWrapper readerWrapper,
             Range logicalRange,
             List<Range> rowRanges,
             RowType readRowType,
@@ -186,18 +148,6 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                                     firstRowId,
                                     lastRowId)));
         }
-    }
-
-    private static Range enclosingRange(List<DataFileMeta> files) {
-        checkArgument(!files.isEmpty(), "Blob bunch should not be empty.");
-        long firstRowId = Long.MAX_VALUE;
-        long lastRowId = Long.MIN_VALUE;
-        for (DataFileMeta file : files) {
-            Range range = file.nonNullRowIdRange();
-            firstRowId = Math.min(firstRowId, range.from);
-            lastRowId = Math.max(lastRowId, range.to);
-        }
-        return new Range(firstRowId, lastRowId);
     }
 
     @Nullable
