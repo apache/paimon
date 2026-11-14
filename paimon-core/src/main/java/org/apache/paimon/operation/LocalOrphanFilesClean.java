@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileStatus;
@@ -54,6 +55,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.SensitiveConfigUtils.sanitizeUri;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
@@ -95,51 +97,80 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
     public CleanOrphanFilesResult clean()
             throws IOException, ExecutionException, InterruptedException {
-        List<String> branches = validBranches();
+        try (MaintenanceProgress progress =
+                new MaintenanceProgress(
+                        "operation=remove-orphans table="
+                                + sanitizeUri(location.toUri().toString())
+                                + " mode=local dry_run="
+                                + dryRun,
+                        "validate-branches")) {
+            List<String> branches = validBranches();
+            progress.add("branches_total", branches.size());
 
-        // specially handle to clear snapshot dir
-        cleanSnapshotDir(branches, deleteFiles::add, deletedFilesLenInBytes::addAndGet);
+            // specially handle to clear snapshot dir
+            progress.phase("clean-snapshot-and-changelog-directories");
+            cleanSnapshotDir(branches, deleteFiles::add, deletedFilesLenInBytes::addAndGet);
 
-        // get candidate files
-        Map<String, Pair<Path, Long>> candidates = getCandidateDeletingFiles();
-        if (candidates.isEmpty()) {
-            return new CleanOrphanFilesResult(
-                    deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
+            // get candidate files
+            progress.phase("list-candidate-files");
+            Map<String, Pair<Path, Long>> candidates = getCandidateDeletingFiles(progress);
+            progress.add("candidate_files", candidates.size());
+            if (candidates.isEmpty()) {
+                progress.complete();
+                return result();
+            }
+            candidateDeletes = new HashSet<>(candidates.keySet());
+
+            // find used files
+            progress.phase("read-referenced-files");
+            Set<String> usedFiles =
+                    branches.stream()
+                            .flatMap(branch -> getUsedFiles(branch, progress).stream())
+                            .collect(Collectors.toSet());
+            progress.add("referenced_files", usedFiles.size());
+
+            // delete unused files
+            candidateDeletes.removeAll(usedFiles);
+            progress.add("orphan_files", candidateDeletes.size());
+            progress.phase("delete-orphan-files");
+            for (String candidate : candidateDeletes) {
+                Pair<Path, Long> deleteFileInfo = candidates.get(candidate);
+                long item =
+                        progress.startItem(
+                                "delete-file "
+                                        + sanitizeUri(deleteFileInfo.getLeft().toUri().toString()));
+                try {
+                    deletedFilesLenInBytes.addAndGet(deleteFileInfo.getRight());
+                    cleanFile(deleteFileInfo.getLeft());
+                } finally {
+                    progress.finishItem(item);
+                    progress.add("delete_calls_completed", 1);
+                }
+            }
+            deleteFiles.addAll(
+                    candidateDeletes.stream()
+                            .map(candidates::get)
+                            .map(Pair::getLeft)
+                            .collect(Collectors.toList()));
+            candidateDeletes.clear();
+
+            // clean empty directory
+            if (!dryRun) {
+                progress.phase("clean-empty-directories");
+                cleanEmptyDataDirectory(deleteFiles, progress);
+            }
+
+            progress.complete();
+            return result();
         }
-        candidateDeletes = new HashSet<>(candidates.keySet());
+    }
 
-        // find used files
-        Set<String> usedFiles =
-                branches.stream()
-                        .flatMap(branch -> getUsedFiles(branch).stream())
-                        .collect(Collectors.toSet());
-
-        // delete unused files
-        candidateDeletes.removeAll(usedFiles);
-        candidateDeletes.stream()
-                .map(candidates::get)
-                .forEach(
-                        deleteFileInfo -> {
-                            deletedFilesLenInBytes.addAndGet(deleteFileInfo.getRight());
-                            cleanFile(deleteFileInfo.getLeft());
-                        });
-        deleteFiles.addAll(
-                candidateDeletes.stream()
-                        .map(candidates::get)
-                        .map(Pair::getLeft)
-                        .collect(Collectors.toList()));
-        candidateDeletes.clear();
-
-        // clean empty directory
-        if (!dryRun) {
-            cleanEmptyDataDirectory(deleteFiles);
-        }
-
+    private CleanOrphanFilesResult result() {
         return new CleanOrphanFilesResult(
                 deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
     }
 
-    private void cleanEmptyDataDirectory(List<Path> deleteFiles) {
+    private void cleanEmptyDataDirectory(List<Path> deleteFiles, MaintenanceProgress progress) {
         if (deleteFiles.isEmpty()) {
             return;
         }
@@ -148,7 +179,21 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         .map(Path::getParent)
                         .filter(path -> path.toString().contains(BUCKET_PATH_PREFIX))
                         .collect(Collectors.toSet());
-        randomlyOnlyExecute(executor, this::tryDeleteEmptyDirectory, bucketDirs);
+        randomlyOnlyExecute(
+                executor,
+                path -> {
+                    long item =
+                            progress.startItem(
+                                    "delete-empty-directory "
+                                            + sanitizeUri(path.toUri().toString()));
+                    try {
+                        tryDeleteEmptyDirectory(path);
+                    } finally {
+                        progress.finishItem(item);
+                        progress.add("empty_directory_delete_calls_completed", 1);
+                    }
+                },
+                bucketDirs);
 
         // Clean partition directory individually to avoiding conflicts
         Set<Path> partitionDirs =
@@ -157,31 +202,46 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
     }
 
     private void collectWithoutDataFile(
-            String branch, Consumer<String> usedFileConsumer, Consumer<String> manifestConsumer)
+            String branch,
+            Consumer<String> usedFileConsumer,
+            Consumer<String> manifestConsumer,
+            MaintenanceProgress progress)
             throws IOException {
+        Set<Snapshot> snapshots = safelyGetAllSnapshots(branch);
+        progress.add("snapshots_total", snapshots.size());
         randomlyOnlyExecute(
                 executor,
                 snapshot -> {
+                    long item =
+                            progress.startItem(
+                                    "read-snapshot branch=" + branch + " id=" + snapshot.id());
                     try {
                         collectWithoutDataFile(
                                 branch, snapshot, usedFileConsumer, manifestConsumer);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
+                    } finally {
+                        progress.finishItem(item);
+                        progress.add("snapshots_read", 1);
                     }
                 },
-                safelyGetAllSnapshots(branch));
+                snapshots);
     }
 
-    private Set<String> getUsedFiles(String branch) {
+    private Set<String> getUsedFiles(String branch, MaintenanceProgress progress) {
         Set<String> usedFiles = ConcurrentHashMap.newKeySet();
         ManifestFile manifestFile =
                 table.switchToBranch(branch).store().manifestFileFactory().create();
         try {
             Set<String> manifests = ConcurrentHashMap.newKeySet();
-            collectWithoutDataFile(branch, usedFiles::add, manifests::add);
+            collectWithoutDataFile(branch, usedFiles::add, manifests::add, progress);
+            progress.add("manifests_total", manifests.size());
             randomlyOnlyExecute(
                     executor,
                     manifestName -> {
+                        long item =
+                                progress.startItem(
+                                        "read-manifest branch=" + branch + " file=" + manifestName);
                         try {
                             retryReadingFiles(
                                             () -> manifestFile.readWithIOException(manifestName),
@@ -199,6 +259,9 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                                             });
                         } catch (IOException e) {
                             throw new RuntimeException(e);
+                        } finally {
+                            progress.finishItem(item);
+                            progress.add("manifests_read", 1);
                         }
                     },
                     manifests);
@@ -212,11 +275,12 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
      * Get all the candidate deleting files in the specified directories and filter them by
      * olderThanMillis.
      */
-    private Map<String, Pair<Path, Long>> getCandidateDeletingFiles() {
+    private Map<String, Pair<Path, Long>> getCandidateDeletingFiles(MaintenanceProgress progress) {
         List<Path> fileDirs = listPaimonFileDirs();
         Set<Path> emptyDirs = Collections.synchronizedSet(new HashSet<>());
         Iterator<Pair<Path, Long>> allFilesInfo =
-                randomlyExecuteSequentialReturn(executor, pathProcessor(emptyDirs), fileDirs);
+                randomlyExecuteSequentialReturn(
+                        executor, pathProcessor(emptyDirs, progress), fileDirs);
         Map<String, Pair<Path, Long>> result = new HashMap<>();
         while (allFilesInfo.hasNext()) {
             Pair<Path, Long> fileInfo = allFilesInfo.next();
@@ -241,28 +305,39 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         return result;
     }
 
-    private Function<Path, List<Pair<Path, Long>>> pathProcessor(Set<Path> emptyDirs) {
+    private Function<Path, List<Pair<Path, Long>>> pathProcessor(
+            Set<Path> emptyDirs, MaintenanceProgress progress) {
         return path -> {
-            List<FileStatus> files = tryBestListingDirs(path);
+            long item =
+                    progress.startItem("list-candidates " + sanitizeUri(path.toUri().toString()));
+            try {
+                List<FileStatus> files = tryBestListingDirs(path);
 
-            if (files.isEmpty()) {
-                try {
-                    FileStatus dirStatus = fileIO.getFileStatus(path);
-                    if (oldEnough(dirStatus)) {
-                        emptyDirs.add(path);
+                if (files.isEmpty()) {
+                    try {
+                        FileStatus dirStatus = fileIO.getFileStatus(path);
+                        if (oldEnough(dirStatus)) {
+                            emptyDirs.add(path);
+                        }
+                    } catch (IOException e) {
+                        LOG.warn(
+                                "IOException during check dirStatus for {}, ignore it",
+                                sanitizeUri(path.toUri().toString()),
+                                e);
                     }
-                } catch (IOException e) {
-                    LOG.warn("IOException during check dirStatus for {}, ignore it", path, e);
+                    return Collections.emptyList();
                 }
-                return Collections.emptyList();
-            }
 
-            return files.stream()
-                    .filter(status -> !status.isDir())
-                    .filter(status -> !isManagedBlobPack(status.getPath()))
-                    .filter(this::oldEnough)
-                    .map(status -> Pair.of(status.getPath(), status.getLen()))
-                    .collect(Collectors.toList());
+                return files.stream()
+                        .filter(status -> !status.isDir())
+                        .filter(status -> !isManagedBlobPack(status.getPath()))
+                        .filter(this::oldEnough)
+                        .map(status -> Pair.of(status.getPath(), status.getLen()))
+                        .collect(Collectors.toList());
+            } finally {
+                progress.finishItem(item);
+                progress.add("candidate_directories_scanned", 1);
+            }
         };
     }
 

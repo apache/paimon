@@ -67,6 +67,7 @@ import static org.apache.paimon.utils.ChangelogManager.CHANGELOG_PREFIX;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
+import static org.apache.paimon.utils.SensitiveConfigUtils.sanitizeUri;
 import static org.apache.paimon.utils.SnapshotManager.SNAPSHOT_PREFIX;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
@@ -142,31 +143,44 @@ public abstract class OrphanFilesClean implements Serializable {
             String branch,
             Consumer<Path> deletedFilesConsumer,
             Consumer<Long> deletedFilesLenInBytesConsumer) {
-        LOG.info("Start to clean snapshot directory of branch {}.", branch);
-        FileStoreTable branchTable = table.switchToBranch(branch);
-        SnapshotManager snapshotManager = branchTable.snapshotManager();
-        ChangelogManager changelogManager = branchTable.changelogManager();
+        try (MaintenanceProgress progress =
+                new MaintenanceProgress(
+                        "operation=remove-orphans table="
+                                + sanitizeUri(location.toUri().toString())
+                                + " branch="
+                                + branch
+                                + " dry_run="
+                                + dryRun,
+                        "clean-snapshot-and-changelog-directories")) {
+            LOG.info("Start to clean snapshot directory of branch {}.", branch);
+            FileStoreTable branchTable = table.switchToBranch(branch);
+            SnapshotManager snapshotManager = branchTable.snapshotManager();
+            ChangelogManager changelogManager = branchTable.changelogManager();
 
-        // specially handle the snapshot directory
-        List<Pair<Path, Long>> nonSnapshotFiles =
-                tryGetNonSnapshotFiles(snapshotManager.snapshotDirectory(), this::oldEnough);
-        nonSnapshotFiles.forEach(
-                nonSnapshotFile ->
-                        cleanFile(
-                                nonSnapshotFile,
-                                deletedFilesConsumer,
-                                deletedFilesLenInBytesConsumer));
+            // specially handle the snapshot directory
+            List<Pair<Path, Long>> nonSnapshotFiles =
+                    tryGetNonSnapshotFiles(snapshotManager.snapshotDirectory(), this::oldEnough);
+            progress.add("snapshot_directory_candidates", nonSnapshotFiles.size());
+            nonSnapshotFiles.forEach(
+                    nonSnapshotFile ->
+                            cleanFile(
+                                    nonSnapshotFile,
+                                    deletedFilesConsumer,
+                                    deletedFilesLenInBytesConsumer));
 
-        // specially handle the changelog directory
-        List<Pair<Path, Long>> nonChangelogFiles =
-                tryGetNonChangelogFiles(changelogManager.changelogDirectory(), this::oldEnough);
-        nonChangelogFiles.forEach(
-                nonChangelogFile ->
-                        cleanFile(
-                                nonChangelogFile,
-                                deletedFilesConsumer,
-                                deletedFilesLenInBytesConsumer));
-        LOG.info("End to clean snapshot directory of branch {}.", branch);
+            // specially handle the changelog directory
+            List<Pair<Path, Long>> nonChangelogFiles =
+                    tryGetNonChangelogFiles(changelogManager.changelogDirectory(), this::oldEnough);
+            progress.add("changelog_directory_candidates", nonChangelogFiles.size());
+            nonChangelogFiles.forEach(
+                    nonChangelogFile ->
+                            cleanFile(
+                                    nonChangelogFile,
+                                    deletedFilesConsumer,
+                                    deletedFilesLenInBytesConsumer));
+            LOG.info("End to clean snapshot directory of branch {}.", branch);
+            progress.complete();
+        }
     }
 
     private List<Pair<Path, Long>> tryGetNonSnapshotFiles(
@@ -362,35 +376,51 @@ public abstract class OrphanFilesClean implements Serializable {
             String dataFilePath,
             int partitionKeysNum,
             String dataFileExternalPaths) {
-        LOG.info("Start: listing paimon file directories for table [{}]", tableName);
-        long start = System.currentTimeMillis();
-        List<Path> paimonFileDirs = new ArrayList<>();
+        try (MaintenanceProgress progress =
+                new MaintenanceProgress(
+                        "operation=remove-orphans table="
+                                + sanitizeUri(location.toUri().toString()),
+                        "discover-partition-and-bucket-directories")) {
+            LOG.info("Start: listing paimon file directories for table [{}]", tableName);
+            long start = System.currentTimeMillis();
+            List<Path> paimonFileDirs = new ArrayList<>();
 
-        paimonFileDirs.add(new Path(manifestPath));
-        paimonFileDirs.add(new Path(indexPath));
-        paimonFileDirs.add(new Path(statisticsPath));
-        paimonFileDirs.addAll(listFileDirs(new Path(dataFilePath), partitionKeysNum));
+            paimonFileDirs.add(new Path(manifestPath));
+            paimonFileDirs.add(new Path(indexPath));
+            paimonFileDirs.add(new Path(statisticsPath));
+            paimonFileDirs.addAll(listFileDirs(new Path(dataFilePath), partitionKeysNum, progress));
 
-        // add external data paths
-        if (dataFileExternalPaths != null) {
-            String[] externalPathArr = dataFileExternalPaths.split(",");
-            for (String externalPath : externalPathArr) {
-                paimonFileDirs.addAll(listFileDirs(new Path(externalPath), partitionKeysNum));
+            // add external data paths
+            if (dataFileExternalPaths != null) {
+                String[] externalPathArr = dataFileExternalPaths.split(",");
+                for (String externalPath : externalPathArr) {
+                    paimonFileDirs.addAll(
+                            listFileDirs(new Path(externalPath), partitionKeysNum, progress));
+                }
             }
+            LOG.info(
+                    "End list paimon file directories for table [{}] spend [{}] ms",
+                    tableName,
+                    System.currentTimeMillis() - start);
+            progress.add("directories_found", paimonFileDirs.size());
+            progress.complete();
+            return paimonFileDirs;
         }
-        LOG.info(
-                "End list paimon file directories for table [{}] spend [{}] ms",
-                tableName,
-                System.currentTimeMillis() - start);
-        return paimonFileDirs;
     }
 
     /**
      * List directories that contains data files. The argument level is used to control recursive
      * depth.
      */
-    private List<Path> listFileDirs(Path dir, int level) {
-        List<FileStatus> dirs = tryBestListingDirs(dir);
+    private List<Path> listFileDirs(Path dir, int level, MaintenanceProgress progress) {
+        long item = progress.startItem(sanitizeUri(dir.toUri().toString()));
+        List<FileStatus> dirs;
+        try {
+            dirs = tryBestListingDirs(dir);
+        } finally {
+            progress.finishItem(item);
+        }
+        progress.add("directory_list_calls_completed", 1);
 
         if (level == 0) {
             // return bucket paths
@@ -401,7 +431,7 @@ public abstract class OrphanFilesClean implements Serializable {
 
         List<Path> result = new ArrayList<>();
         for (Path partitionPath : partitionPaths) {
-            List<Path> sub = listFileDirs(partitionPath, level - 1);
+            List<Path> sub = listFileDirs(partitionPath, level - 1, progress);
             if (sub.isEmpty()) {
                 // Empty partition (no bucket subdirs), include for empty-dir cleanup
                 LOG.info("Found empty partition directory for cleanup: {}", partitionPath);
@@ -443,7 +473,10 @@ public abstract class OrphanFilesClean implements Serializable {
                     },
                     emptyList());
         } catch (IOException e) {
-            LOG.debug("Failed to list directory {}, skip it.", dir, e);
+            LOG.warn(
+                    "Failed to list directory {}, skip it; orphan cleanup may be incomplete.",
+                    sanitizeUri(dir.toUri().toString()),
+                    e);
             return emptyList();
         }
     }

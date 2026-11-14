@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
@@ -50,6 +51,7 @@ class ExpireSnapshotsInterruptStatusTest {
         CountDownLatch releaseRead = new CountDownLatch(1);
 
         when(snapshotManager.branch()).thenReturn("main");
+        when(snapshotManager.tablePath()).thenReturn(new Path("file:///tmp/table"));
         when(snapshotDeletion.fileExecutor()).thenReturn(executor);
         when(snapshotManager.tryGetSnapshot(anyLong()))
                 .thenAnswer(
