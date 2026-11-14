@@ -29,6 +29,7 @@ import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -95,6 +96,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -125,10 +127,14 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -381,6 +387,455 @@ public class FileStoreCommitTest {
                                             .map(ManifestCommittable::new)
                                             .collect(Collectors.toList())))
                     .isEmpty();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testFilterHalfCommittedIdentifier(boolean overwrite) throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        Collections.singletonMap(CoreOptions.OVERWRITE_UPGRADE.key(), "false"));
+        KeyValue row = gen.nextInsert("20211110", 8, 1L, null, "replacement");
+        List<ManifestCommittable> prepared = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            store.commitDataImpl(
+                    Collections.singletonList(row),
+                    gen::getPartition,
+                    value -> 0,
+                    false,
+                    2L,
+                    123L,
+                    Collections.emptyList(),
+                    (commit, committable) -> prepared.add(committable));
+        }
+        CommitMessageImpl append = (CommitMessageImpl) prepared.get(0).fileCommittables().get(0);
+        CommitMessageImpl replacement =
+                (CommitMessageImpl) prepared.get(1).fileCommittables().get(0);
+        IndexPathFactory indexFactory = store.pathFactory().indexFileFactory(append.partition(), 0);
+        IndexFileMeta oldIndex = new IndexFileMeta(HASH_INDEX, "old-index", 0, 0, null, null, null);
+        IndexFileMeta newIndex = new IndexFileMeta(HASH_INDEX, "new-index", 0, 0, null, null, null);
+        store.fileIO().newOutputStream(indexFactory.toPath(newIndex), false).close();
+        append.newFilesIncrement().newIndexFiles().add(oldIndex);
+        CompactIncrement compact =
+                new CompactIncrement(
+                        append.newFilesIncrement().newFiles(),
+                        replacement.newFilesIncrement().newFiles(),
+                        Collections.emptyList(),
+                        Collections.singletonList(newIndex),
+                        Collections.singletonList(oldIndex));
+        CommitMessageImpl message =
+                new CommitMessageImpl(
+                        append.partition(),
+                        append.bucket(),
+                        append.totalBuckets(),
+                        append.newFilesIncrement(),
+                        compact,
+                        1L);
+        ManifestCommittable pending =
+                new ManifestCommittable(2, 123L, Collections.singletonList(message));
+        pending.addProperty("recovery-test", "preserved");
+        ManifestCommittable next = new ManifestCommittable(3);
+        CommitCallback callback = mock(CommitCallback.class);
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store,
+                        "writer",
+                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                        store.options(),
+                        false,
+                        Collections.singletonList(callback))) {
+            commit.ignoreEmptyCommit(false);
+            assertThat(commit.filterCommitted(Collections.singletonList(pending)))
+                    .containsExactly(pending);
+            if (overwrite) {
+                commit.overwritePartition(Collections.emptyMap(), prepared.get(0));
+            } else {
+                commit.commit(prepared.get(0), false);
+            }
+            assertThat(store.snapshotManager().latestSnapshot().commitKind())
+                    .isEqualTo(
+                            overwrite ? Snapshot.CommitKind.OVERWRITE : Snapshot.CommitKind.APPEND);
+            assertThat(commit.filterCommitted(Collections.singletonList(prepared.get(0))))
+                    .isEmpty();
+            // A newer snapshot from another user must not hide the interrupted first phase.
+            try (FileStoreCommit other = store.newCommit("other", null)) {
+                other.ignoreEmptyCommit(false);
+                other.commit(new ManifestCommittable(100), false);
+            }
+            List<ManifestCommittable> filtered =
+                    commit.filterCommitted(
+                            Arrays.asList(
+                                    new ManifestCommittable(1, null, pending.fileCommittables()),
+                                    pending,
+                                    next));
+            assertThat(filtered).hasSize(2);
+            assertThat(filtered.get(1)).isSameAs(next);
+            ManifestCommittable recovered = filtered.get(0);
+            assertThat(recovered).isNotSameAs(pending);
+            assertThat(recovered.identifier()).isEqualTo(2);
+            assertThat(recovered.watermark()).isEqualTo(123L);
+            assertThat(recovered.properties())
+                    .isEqualTo(pending.properties())
+                    .isNotSameAs(pending.properties());
+            assertThat(recovered.fileCommittables()).hasSize(1);
+            CommitMessageImpl recoveredMessage =
+                    (CommitMessageImpl) recovered.fileCommittables().get(0);
+            assertThat(recoveredMessage.partition()).isEqualTo(message.partition());
+            assertThat(recoveredMessage.bucket()).isEqualTo(message.bucket());
+            assertThat(recoveredMessage.totalBuckets()).isEqualTo(message.totalBuckets());
+            assertThat(recoveredMessage.checkFromSnapshot()).isEqualTo(1L);
+            assertThat(recoveredMessage.newFilesIncrement().isEmpty()).isTrue();
+            assertThat(recoveredMessage.compactIncrement()).isSameAs(compact);
+            assertThat(message.newFilesIncrement()).isSameAs(append.newFilesIncrement());
+            verify(callback).retry(same(pending));
+            assertThat(
+                            overwrite
+                                    ? commit.overwritePartition(Collections.emptyMap(), recovered)
+                                    : commit.commit(recovered, false))
+                    .isEqualTo(1);
+            Snapshot snapshot = store.snapshotManager().latestSnapshot();
+            assertThat(snapshot.id()).isEqualTo(3L);
+            assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+            verify(callback)
+                    .call(
+                            argThat(
+                                    context ->
+                                            context.snapshot.commitKind()
+                                                    == Snapshot.CommitKind.COMPACT));
+            assertThat(store.toKvMap(store.readKvsFromSnapshot(snapshot.id())))
+                    .isEqualTo(store.toKvMap(Collections.singletonList(row)));
+            assertThat(
+                            store.newIndexFileHandler()
+                                    .scanEntries(snapshot, HASH_INDEX, append.partition()))
+                    .extracting(IndexManifestEntry::indexFile)
+                    .containsExactly(newIndex);
+            assertThat(commit.filterCommitted(Arrays.asList(pending, next))).containsExactly(next);
+
+            // The recovery marker must not change ordinary empty-commit behavior.
+            assertThat(commit.commit(next, false)).isEqualTo(1);
+            assertThat(store.snapshotManager().latestSnapshot().commitKind())
+                    .isEqualTo(Snapshot.CommitKind.APPEND);
+            commit.commitStatistics(new Statistics(4, 0, 1L, 1L), 4);
+            assertThat(store.snapshotManager().latestSnapshot().commitKind())
+                    .isEqualTo(Snapshot.CommitKind.ANALYZE);
+            assertThat(
+                            commit.filterCommitted(
+                                    Collections.singletonList(
+                                            new ManifestCommittable(
+                                                    4, null, pending.fileCommittables()))))
+                    .isEmpty();
+        }
+    }
+
+    @Test
+    public void testFilterHalfCommittedIdentifierWithConcurrentlyCompactedInput() throws Exception {
+        TestFileStore store = createStore(false);
+        KeyValue row = gen.nextInsert("20211110", 8, 1L, null, "replacement");
+        List<ManifestCommittable> prepared = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            store.commitDataImpl(
+                    Collections.singletonList(row),
+                    gen::getPartition,
+                    value -> 0,
+                    false,
+                    2L,
+                    123L,
+                    Collections.emptyList(),
+                    (commit, committable) -> prepared.add(committable));
+        }
+        CommitMessageImpl append = (CommitMessageImpl) prepared.get(0).fileCommittables().get(0);
+        CommitMessageImpl ours = (CommitMessageImpl) prepared.get(1).fileCommittables().get(0);
+        CommitMessageImpl theirs = (CommitMessageImpl) prepared.get(2).fileCommittables().get(0);
+        ManifestCommittable pending =
+                new ManifestCommittable(
+                        2,
+                        123L,
+                        Collections.singletonList(
+                                new CommitMessageImpl(
+                                        append.partition(),
+                                        append.bucket(),
+                                        append.totalBuckets(),
+                                        append.newFilesIncrement(),
+                                        new CompactIncrement(
+                                                append.newFilesIncrement().newFiles(),
+                                                ours.newFilesIncrement().newFiles(),
+                                                Collections.emptyList()))));
+        try (FileStoreCommit commit = store.newCommit("writer", null)) {
+            // The first phase of identifier 2 publishes the append files.
+            commit.commit(prepared.get(0), false);
+            assertThat(commit.filterCommitted(Collections.singletonList(pending))).hasSize(1);
+
+            // Another job compacts the same input away before the writer restarts.
+            try (FileStoreCommit other = store.newCommit("other", null)) {
+                other.commit(
+                        new ManifestCommittable(
+                                1,
+                                null,
+                                Collections.singletonList(
+                                        new CommitMessageImpl(
+                                                append.partition(),
+                                                append.bucket(),
+                                                append.totalBuckets(),
+                                                DataIncrement.emptyIncrement(),
+                                                new CompactIncrement(
+                                                        append.newFilesIncrement().newFiles(),
+                                                        theirs.newFilesIncrement().newFiles(),
+                                                        Collections.emptyList())))),
+                        false);
+            }
+            Snapshot compacted = store.snapshotManager().latestSnapshot();
+            assertThat(compacted.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+
+            // The stale compaction cannot be replayed, so recovery must discard it instead of
+            // rebuilding a committable that fails conflict detection on every restart.
+            ManifestCommittable next = new ManifestCommittable(3);
+            assertThat(commit.filterCommitted(Arrays.asList(pending, next))).containsExactly(next);
+            assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(compacted.id());
+            assertThat(store.toKvMap(store.readKvsFromSnapshot(compacted.id())))
+                    .isEqualTo(store.toKvMap(Collections.singletonList(row)));
+        }
+    }
+
+    @Test
+    public void testFilterHalfCommittedIdentifierWithConcurrentlyUpgradedInput() throws Exception {
+        TestFileStore store = createStore(false);
+        KeyValue row = gen.nextInsert("20211110", 8, 1L, null, "replacement");
+        List<ManifestCommittable> prepared = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            store.commitDataImpl(
+                    Collections.singletonList(row),
+                    gen::getPartition,
+                    value -> 0,
+                    false,
+                    2L,
+                    123L,
+                    Collections.emptyList(),
+                    (commit, committable) -> prepared.add(committable));
+        }
+        CommitMessageImpl append = (CommitMessageImpl) prepared.get(0).fileCommittables().get(0);
+        CommitMessageImpl ours = (CommitMessageImpl) prepared.get(1).fileCommittables().get(0);
+        List<DataFileMeta> inputs = append.newFilesIncrement().newFiles();
+        assertThat(inputs).allMatch(file -> file.level() == 0);
+        ManifestCommittable pending =
+                new ManifestCommittable(
+                        2,
+                        123L,
+                        Collections.singletonList(
+                                new CommitMessageImpl(
+                                        append.partition(),
+                                        append.bucket(),
+                                        append.totalBuckets(),
+                                        append.newFilesIncrement(),
+                                        new CompactIncrement(
+                                                inputs,
+                                                ours.newFilesIncrement().newFiles(),
+                                                Collections.emptyList()))));
+        try (FileStoreCommit commit = store.newCommit("writer", null)) {
+            // The first phase of identifier 2 publishes the append files.
+            commit.commit(prepared.get(0), false);
+            assertThat(commit.filterCommitted(Collections.singletonList(pending))).hasSize(1);
+
+            // Another job upgrades the same input in place: same file name, new level.
+            List<DataFileMeta> upgraded = new ArrayList<>();
+            for (DataFileMeta file : inputs) {
+                upgraded.add(file.upgrade(1));
+            }
+            try (FileStoreCommit other = store.newCommit("other", null)) {
+                other.commit(
+                        new ManifestCommittable(
+                                1,
+                                null,
+                                Collections.singletonList(
+                                        new CommitMessageImpl(
+                                                append.partition(),
+                                                append.bucket(),
+                                                append.totalBuckets(),
+                                                DataIncrement.emptyIncrement(),
+                                                new CompactIncrement(
+                                                        inputs,
+                                                        upgraded,
+                                                        Collections.emptyList())))),
+                        false);
+            }
+            Snapshot compacted = store.snapshotManager().latestSnapshot();
+            assertThat(compacted.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+
+            // The level 0 deletion no longer matches the live level 1 entry, so replaying it
+            // would fail conflict detection. Recovery must discard it.
+            ManifestCommittable next = new ManifestCommittable(3);
+            assertThat(commit.filterCommitted(Arrays.asList(pending, next))).containsExactly(next);
+            assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(compacted.id());
+            assertThat(store.toKvMap(store.readKvsFromSnapshot(compacted.id())))
+                    .isEqualTo(store.toKvMap(Collections.singletonList(row)));
+        }
+    }
+
+    @Test
+    public void testFilterHalfCommittedIdentifierWithConcurrentlyDroppedIndex() throws Exception {
+        TestFileStore store = createStore(false);
+        BinaryRow partition = gen.getPartition(gen.nextInsert("20211110", 8, 1L, null, "a"));
+        IndexFileMeta index =
+                new IndexFileMeta(
+                        "btree",
+                        "recovery-index",
+                        1,
+                        1,
+                        new GlobalIndexMeta(0, 0, 0, null, null),
+                        null);
+        // An index-only compact increment, like the one written by a global index dropper.
+        ManifestCommittable pending =
+                new ManifestCommittable(
+                        2,
+                        null,
+                        Collections.singletonList(
+                                new CommitMessageImpl(
+                                        partition,
+                                        0,
+                                        null,
+                                        DataIncrement.emptyIncrement(),
+                                        new CompactIncrement(
+                                                Collections.emptyList(),
+                                                Collections.emptyList(),
+                                                Collections.emptyList(),
+                                                Collections.emptyList(),
+                                                Collections.singletonList(index)))));
+        try (FileStoreCommit other = store.newCommit("other", null)) {
+            other.commit(indexCommittable(partition, "recovery-index", 0, 0), false);
+        }
+        try (FileStoreCommit commit = store.newCommit("writer", null)) {
+            // The first phase of identifier 2 is published as an empty APPEND snapshot.
+            commit.ignoreEmptyCommit(false);
+            commit.commit(new ManifestCommittable(2), false);
+            assertThat(commit.filterCommitted(Collections.singletonList(pending))).hasSize(1);
+
+            // Another job drops the global index before the writer restarts.
+            try (FileStoreCommit other = store.newCommit("other", null)) {
+                other.commit(deleteIndexCommittable(partition, "recovery-index", 0, 0), false);
+            }
+            Snapshot dropped = store.snapshotManager().latestSnapshot();
+
+            // Replaying the deletion would fail in the index manifest combiner on every restart,
+            // so recovery must discard it.
+            ManifestCommittable next = new ManifestCommittable(3);
+            assertThat(commit.filterCommitted(Arrays.asList(pending, next))).containsExactly(next);
+            assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(dropped.id());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"data", "auxiliary", "changelog", "index", "io"})
+    public void testFilterHalfCommittedIdentifierWithUnavailableOutput(String unavailable)
+            throws Exception {
+        TestFileStore store = createStore(false);
+        BinaryRow partition = gen.getPartition(gen.nextInsert("20211110", 8, 1L, null, "a"));
+        DataFilePathFactory dataFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+        Path external = new Path(tempDir.toString(), "external.avro");
+        DataFileMeta data =
+                DataFileMeta.forAppend(
+                        external.getName(),
+                        0,
+                        0,
+                        EMPTY_STATS,
+                        0,
+                        0,
+                        0,
+                        Collections.singletonList("external.avro.index"),
+                        null,
+                        null,
+                        null,
+                        external.toString(),
+                        null,
+                        null);
+        DataFileMeta changelog =
+                DataFileMeta.forAppend(
+                        "changelog.avro",
+                        0,
+                        0,
+                        EMPTY_STATS,
+                        0,
+                        0,
+                        0,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        IndexFileMeta index =
+                new IndexFileMeta(HASH_INDEX, "compact-index", 0, 0, null, null, null);
+        Map<String, Path> paths = new HashMap<>();
+        paths.put("data", data.collectFiles(dataFactory).get(0));
+        paths.put("auxiliary", data.collectFiles(dataFactory).get(1));
+        paths.put("changelog", changelog.collectFiles(dataFactory).get(0));
+        paths.put("index", store.pathFactory().indexFileFactory(partition, 0).toPath(index));
+        for (Path output : paths.values()) {
+            store.fileIO().newOutputStream(output, false).close();
+        }
+        ManifestCommittable pending = new ManifestCommittable(2);
+        // The first bucket can be replayed, but failure in the second must skip both buckets.
+        pending.addFileCommittable(
+                new CommitMessageImpl(
+                        partition,
+                        1,
+                        2,
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(index))));
+        pending.addFileCommittable(
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        2,
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.singletonList(data),
+                                Collections.singletonList(changelog),
+                                Collections.singletonList(index),
+                                Collections.emptyList())));
+        FileIO fileIO = spy(store.fileIO());
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, store.options().path());
+        try (FileStoreCommit commit = table.store().newCommit("writer", table)) {
+            // The first phase of identifier 2 publishes the index the first bucket deletes.
+            commit.commit(
+                    new ManifestCommittable(
+                            2,
+                            null,
+                            Collections.singletonList(
+                                    new CommitMessageImpl(
+                                            partition,
+                                            1,
+                                            2,
+                                            DataIncrement.indexIncrement(
+                                                    Collections.singletonList(index)),
+                                            CompactIncrement.emptyIncrement()))),
+                    false);
+            assertThat(commit.filterCommitted(Collections.singletonList(pending))).hasSize(1);
+            if (unavailable.equals("io")) {
+                doThrow(new IOException("Output lookup failed"))
+                        .when(fileIO)
+                        .exists(paths.get("data"));
+                assertThatThrownBy(() -> commit.filterCommitted(Collections.singletonList(pending)))
+                        .isInstanceOf(UncheckedIOException.class)
+                        .hasCauseInstanceOf(IOException.class)
+                        .hasMessageContaining("Output lookup failed");
+            } else {
+                fileIO.delete(paths.get(unavailable), false);
+                ManifestCommittable next =
+                        new ManifestCommittable(3, null, pending.fileCommittables());
+                assertThat(commit.filterCommitted(Arrays.asList(pending, next)))
+                        .containsExactly(next);
+                assertThat(commit.filterCommitted(Collections.singletonList(pending))).isEmpty();
+            }
+            assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(1L);
         }
     }
 

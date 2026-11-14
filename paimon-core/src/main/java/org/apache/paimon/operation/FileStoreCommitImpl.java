@@ -30,8 +30,10 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -79,6 +81,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CompactedChangelogPathResolver;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
@@ -94,6 +97,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -172,6 +177,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final SnapshotConflictChecker snapshotConflictChecker;
     private final ConflictDetection conflictDetection;
     private final CommitCleaner commitCleaner;
+
+    /** True while the compact phase of a recovered compaction is being committed. */
+    private boolean committingCompactRecovery = false;
 
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
@@ -324,12 +332,200 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     result.add(committable);
                 } else {
                     commitCallbacks.forEach(callback -> callback.retry(committable));
+                    Snapshot snapshot = latestSnapshot.get();
+                    if (committable.identifier() == snapshot.commitIdentifier()
+                            && (snapshot.commitKind() == CommitKind.APPEND
+                                    || snapshot.commitKind() == CommitKind.OVERWRITE)) {
+                        ManifestCommittable recovery = recoverCompact(committable);
+                        if (recovery != null) {
+                            result.add(recovery);
+                        }
+                    }
                 }
             }
             return result;
         } else {
             // if there is no previous snapshots then nothing should be filtered
             return committables;
+        }
+    }
+
+    @Nullable
+    private ManifestCommittable recoverCompact(ManifestCommittable committable) {
+        List<CommitMessage> messages = new ArrayList<>();
+        Set<Path> outputs = new HashSet<>();
+        DataFilePathFactories dataFactories = new DataFilePathFactories(pathFactory);
+        IndexFilePathFactories indexFactories = new IndexFilePathFactories(pathFactory);
+        for (CommitMessage message : committable.fileCommittables()) {
+            CompactIncrement compact = ((CommitMessageImpl) message).compactIncrement();
+            if (compact.isEmpty()) {
+                continue;
+            }
+            messages.add(
+                    new CommitMessageImpl(
+                            message.partition(),
+                            message.bucket(),
+                            message.totalBuckets(),
+                            DataIncrement.emptyIncrement(),
+                            compact,
+                            message.checkFromSnapshot()));
+            DataFilePathFactory dataFactory =
+                    dataFactories.get(message.partition(), message.bucket());
+            compact.compactAfter().forEach(file -> outputs.addAll(file.collectFiles(dataFactory)));
+            compact.changelogFiles()
+                    .forEach(file -> outputs.addAll(file.collectFiles(dataFactory)));
+            IndexPathFactory indexFactory =
+                    indexFactories.get(message.partition(), message.bucket());
+            compact.newIndexFiles().forEach(file -> outputs.add(indexFactory.toPath(file)));
+        }
+        if (messages.isEmpty()) {
+            return null;
+        }
+        // An expired or orphan-cleaned output cannot be replayed. Skip the whole identifier,
+        // rather than publishing only some of its buckets. I/O failures must still fail recovery.
+        for (Path output : outputs) {
+            Path physicalPath =
+                    CompactedChangelogPathResolver.resolveCompactedChangelogPath(output);
+            try {
+                if (!fileIO.exists(physicalPath)) {
+                    LOG.warn(
+                            "Skipping compaction recovery for table {}, user {}, identifier {}: output {} is missing",
+                            tableName,
+                            commitUser,
+                            committable.identifier(),
+                            physicalPath);
+                    return null;
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+        if (!compactInputsStillLive(committable) || !compactIndexDeletionsStillLive(committable)) {
+            return null;
+        }
+        return new CompactRecoveryCommittable(committable, messages);
+    }
+
+    /**
+     * A concurrent compaction may already have removed or upgraded some compact-before files.
+     * Replaying such an increment would fail conflict detection on every restart, so only recover
+     * it when all of its inputs are still live in the latest snapshot with the same {@link
+     * FileEntry.Identifier}. Conflict detection compares the full identifier, so an in-place level
+     * upgrade that keeps the file name still makes the recovery stale.
+     */
+    private boolean compactInputsStillLive(ManifestCommittable committable) {
+        Set<FileEntry.Identifier> inputs = new HashSet<>();
+        Set<String> inputNames = new HashSet<>();
+        Set<BinaryRow> partitions = new HashSet<>();
+        for (CommitMessage message : committable.fileCommittables()) {
+            Integer totalBuckets = message.totalBuckets();
+            for (DataFileMeta file :
+                    ((CommitMessageImpl) message).compactIncrement().compactBefore()) {
+                inputs.add(
+                        ManifestEntry.create(
+                                        FileKind.DELETE,
+                                        message.partition(),
+                                        message.bucket(),
+                                        totalBuckets == null ? 0 : totalBuckets,
+                                        file)
+                                .identifier());
+                inputNames.add(file.fileName());
+                partitions.add(message.partition());
+            }
+        }
+        if (inputs.isEmpty()) {
+            return true;
+        }
+        Snapshot latest = snapshotManager.latestSnapshot();
+        Set<FileEntry.Identifier> live = new HashSet<>();
+        if (latest != null) {
+            for (SimpleFileEntry entry :
+                    scanner.readAllEntriesFromDataFiles(
+                            latest, new ArrayList<>(partitions), inputNames)) {
+                if (entry.kind() == FileKind.ADD) {
+                    live.add(entry.identifier());
+                }
+            }
+        }
+        for (FileEntry.Identifier input : inputs) {
+            if (!live.contains(input)) {
+                LOG.warn(
+                        "Skipping compaction recovery for table {}, user {}, identifier {}: input {} was removed or changed by a concurrent commit",
+                        tableName,
+                        commitUser,
+                        committable.identifier(),
+                        input);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * A compact increment can also delete index files, even without any compact-before file. A
+     * concurrent commit such as DROP GLOBAL INDEX may already have removed such an index, and the
+     * index manifest combiners reject deleting a missing or changed entry on every restart. Only
+     * recover the increment when each deleted index file is still live in the latest snapshot.
+     */
+    private boolean compactIndexDeletionsStillLive(ManifestCommittable committable) {
+        List<IndexManifestEntry> deletions = new ArrayList<>();
+        for (CommitMessage message : committable.fileCommittables()) {
+            for (IndexFileMeta file :
+                    ((CommitMessageImpl) message).compactIncrement().deletedIndexFiles()) {
+                deletions.add(
+                        new IndexManifestEntry(
+                                FileKind.DELETE, message.partition(), message.bucket(), file));
+            }
+        }
+        if (deletions.isEmpty()) {
+            return true;
+        }
+        Snapshot latest = snapshotManager.latestSnapshot();
+        Map<String, IndexManifestEntry> live = new HashMap<>();
+        if (latest != null && latest.indexManifest() != null) {
+            for (IndexManifestEntry entry : indexManifestFile.read(latest.indexManifest())) {
+                live.put(entry.indexFile().fileName(), entry);
+            }
+        }
+        for (IndexManifestEntry deletion : deletions) {
+            IndexManifestEntry current = live.get(deletion.indexFile().fileName());
+            if (current == null
+                    || !current.partition().equals(deletion.partition())
+                    || current.bucket() != deletion.bucket()
+                    || !current.indexFile().equals(deletion.indexFile())) {
+                LOG.warn(
+                        "Skipping compaction recovery for table {}, user {}, identifier {}: deleted index file {} was removed or changed by a concurrent commit",
+                        tableName,
+                        commitUser,
+                        committable.identifier(),
+                        deletion.indexFile().fileName());
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Runtime-only marker: the first phase was published, even if empty commits are enabled. */
+    /**
+     * Conflict detection rejected a recovered compaction. A concurrent commit changed the files it
+     * would replace, so replaying it would fail the same way after every restart.
+     */
+    private static class StaleCompactRecoveryException extends RuntimeException {
+
+        private StaleCompactRecoveryException(RuntimeException conflict) {
+            super(conflict.getMessage(), conflict);
+        }
+    }
+
+    private static class CompactRecoveryCommittable extends ManifestCommittable {
+
+        private CompactRecoveryCommittable(
+                ManifestCommittable original, List<CommitMessage> messages) {
+            super(
+                    original.identifier(),
+                    original.watermark(),
+                    messages,
+                    new HashMap<>(original.properties()));
         }
     }
 
@@ -356,10 +552,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         try {
             List<SimpleFileEntry> appendSimpleEntries =
                     SimpleFileEntry.from(changes.appendTableFiles);
-            if (!ignoreEmptyCommit
-                    || !changes.appendTableFiles.isEmpty()
-                    || !changes.appendChangelog.isEmpty()
-                    || !changes.appendIndexFiles.isEmpty()) {
+            if (!(committable instanceof CompactRecoveryCommittable)
+                    && (!ignoreEmptyCommit
+                            || !changes.appendTableFiles.isEmpty()
+                            || !changes.appendChangelog.isEmpty()
+                            || !changes.appendIndexFiles.isEmpty())) {
                 CommitKind commitKind = CommitKind.APPEND;
                 if (appendCommitCheckConflict) {
                     checkAppendFiles = true;
@@ -409,23 +606,39 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.compactIndexFiles.isEmpty()) {
                 CommitChangesProvider compactProvider =
                         compactChangesProvider(changes, materializedBuckets, commitMessages);
-                attempts +=
-                        tryCommit(
-                                compactProvider,
-                                compactionBaselines,
-                                committable.identifier(),
-                                committable.watermark(),
-                                committable.properties(),
-                                CommitKind.COMPACT,
-                                false,
-                                true,
-                                null);
-                if (compactProvider instanceof DiscardingCompactChangesProvider) {
-                    committedCompactFiles =
-                            ((DiscardingCompactChangesProvider) compactProvider)
-                                    .retainedOriginalFiles();
+                boolean recovery = committable instanceof CompactRecoveryCommittable;
+                committingCompactRecovery = recovery;
+                try {
+                    attempts +=
+                            tryCommit(
+                                    compactProvider,
+                                    compactionBaselines,
+                                    committable.identifier(),
+                                    committable.watermark(),
+                                    committable.properties(),
+                                    CommitKind.COMPACT,
+                                    false,
+                                    true,
+                                    null);
+                    if (compactProvider instanceof DiscardingCompactChangesProvider) {
+                        committedCompactFiles =
+                                ((DiscardingCompactChangesProvider) compactProvider)
+                                        .retainedOriginalFiles();
+                    }
+                    generatedSnapshot += 1;
+                } catch (StaleCompactRecoveryException e) {
+                    // The compaction is optional work: drop it so the job can make progress.
+                    // Its output files are left for orphan file cleanup.
+                    LOG.warn(
+                            "Skipping compaction recovery for table {}, user {}, identifier {}: {}",
+                            tableName,
+                            commitUser,
+                            committable.identifier(),
+                            e.getMessage());
+                    committedCompactFiles = Collections.emptyList();
+                } finally {
+                    committingCompactRecovery = false;
                 }
-                generatedSnapshot += 1;
             }
         } finally {
             long commitDuration = (System.nanoTime() - started) / 1_000_000;
@@ -549,7 +762,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         try {
-            boolean skipOverwrite = false;
+            boolean skipOverwrite = committable instanceof CompactRecoveryCommittable;
             // partition filter is built from static or dynamic partitions
             PartitionPredicate partitionFilter = null;
             if (partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite()) {
@@ -1358,6 +1571,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     if (rollback.tryToRollback(latestSnapshot)) {
                         return RetryCommitResult.forRollback(exception.get());
                     }
+                }
+                if (committingCompactRecovery) {
+                    throw new StaleCompactRecoveryException(exception.get());
                 }
                 throw exception.get();
             }

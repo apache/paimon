@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
@@ -35,8 +36,10 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaUtils;
@@ -45,6 +48,7 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -59,6 +63,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -209,6 +214,156 @@ public class TableCommitTest {
 
         @Override
         public void close() throws Exception {}
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,true", "false,true", "true,false", "false,false"})
+    public void testRecoverCompactOfHalfCommittedIdentifier(
+            boolean ignoreEmptyCommit, boolean recoverTogether) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tempDir.toString());
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.FULL_COMPACTION);
+        Path path = new Path(tempDir.toString());
+        TableSchema schema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), path),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(), path, schema, CatalogEnvironment.empty());
+        String user = "writer";
+        Map<Long, List<CommitMessage>> pending = new HashMap<>();
+        CommitMessageSerializer serializer = new CommitMessageSerializer();
+        List<byte[]> originalMessages = new ArrayList<>();
+        try (StreamTableWrite write = table.newWrite(user);
+                TableCommitImpl commit =
+                        table.newCommit(user).ignoreEmptyCommit(ignoreEmptyCommit)) {
+            write.write(GenericRow.of(1, 1L));
+            commit.commit(1, write.prepareCommit(true, 1));
+            write.write(GenericRow.of(2, 2L));
+            write.compact(BinaryRow.EMPTY_ROW, 0, true);
+            List<CommitMessage> messages2 = write.prepareCommit(true, 2);
+            pending.put(2L, messages2);
+            List<CommitMessage> appendOnly =
+                    messages2.stream()
+                            .map(message -> (CommitMessageImpl) message)
+                            .map(
+                                    message ->
+                                            new CommitMessageImpl(
+                                                    message.partition(),
+                                                    message.bucket(),
+                                                    message.totalBuckets(),
+                                                    message.newFilesIncrement(),
+                                                    CompactIncrement.emptyIncrement(),
+                                                    message.checkFromSnapshot()))
+                            .collect(Collectors.toList());
+            commit.commit(2, appendOnly);
+
+            write.write(GenericRow.of(3, 3L));
+            write.compact(BinaryRow.EMPTY_ROW, 0, true);
+            List<CommitMessage> messages3 = write.prepareCommit(true, 3);
+            pending.put(3L, messages3);
+            CompactIncrement compact2 = ((CommitMessageImpl) messages2.get(0)).compactIncrement();
+            CompactIncrement compact3 = ((CommitMessageImpl) messages3.get(0)).compactIncrement();
+            assertThat(compact2.compactAfter()).isNotEmpty();
+            assertThat(compact2.changelogFiles()).isNotEmpty();
+            assertThat(compact3.compactBefore()).containsAll(compact2.compactAfter());
+            for (long identifier = 2; identifier <= 3; identifier++) {
+                for (CommitMessage message : pending.get(identifier)) {
+                    originalMessages.add(serializer.serialize(message));
+                }
+            }
+        }
+
+        if (!recoverTogether) {
+            try (TableCommitImpl commit =
+                    table.newCommit(user).ignoreEmptyCommit(ignoreEmptyCommit)) {
+                assertThat(commit.filterAndCommit(singletonMap(2L, pending.get(2L)))).isEqualTo(1);
+            }
+            try (TableCommitImpl commit =
+                    table.newCommit(user).ignoreEmptyCommit(ignoreEmptyCommit)) {
+                assertThat(commit.filterAndCommit(singletonMap(2L, pending.get(2L)))).isZero();
+                assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(3L);
+            }
+        }
+        try (TableCommitImpl commit = table.newCommit(user).ignoreEmptyCommit(ignoreEmptyCommit)) {
+            assertThat(commit.filterAndCommit(pending)).isEqualTo(recoverTogether ? 2 : 1);
+        }
+
+        // Both the first recovery and a repeated recovery must expose the same rows and changelog.
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try (TableCommitImpl commit =
+                    table.newCommit(user).ignoreEmptyCommit(ignoreEmptyCommit)) {
+                assertThat(commit.filterAndCommit(pending)).isZero();
+            }
+            SnapshotManager snapshots = table.snapshotManager();
+            assertThat(snapshots.latestSnapshotId()).isEqualTo(5L);
+            assertThat(
+                            LongStream.rangeClosed(1, 5)
+                                    .mapToObj(snapshots::snapshot)
+                                    .map(
+                                            snapshot ->
+                                                    snapshot.commitIdentifier()
+                                                            + ":"
+                                                            + snapshot.commitKind()))
+                    .containsExactly("1:APPEND", "2:APPEND", "2:COMPACT", "3:APPEND", "3:COMPACT");
+            List<String> rows = new ArrayList<>();
+            try (RecordReaderIterator<InternalRow> reader =
+                    new RecordReaderIterator<>(
+                            table.newRead().createReader(table.newScan().plan()))) {
+                while (reader.hasNext()) {
+                    InternalRow row = reader.next();
+                    rows.add(row.getInt(0) + ":" + row.getLong(1));
+                }
+            }
+            assertThat(rows).containsExactlyInAnyOrder("1:1", "2:2", "3:3");
+            List<String> changelog = new ArrayList<>();
+            for (long snapshotId = 1; snapshotId <= 5; snapshotId++) {
+                List<DataFileMeta> files =
+                        table.store().newScan().withSnapshot(snapshotId)
+                                .withKind(ScanMode.CHANGELOG).plan().files().stream()
+                                .map(ManifestEntry::file)
+                                .collect(Collectors.toList());
+                if (files.isEmpty()) {
+                    continue;
+                }
+                DataSplit split =
+                        DataSplit.builder()
+                                .withPartition(BinaryRow.EMPTY_ROW)
+                                .withBucket(0)
+                                .withBucketPath(new Path(path, "bucket-0").toString())
+                                .withDataFiles(files)
+                                .isStreaming(true)
+                                .build();
+                try (RecordReaderIterator<InternalRow> reader =
+                        new RecordReaderIterator<>(table.newRead().createReader(split))) {
+                    while (reader.hasNext()) {
+                        InternalRow row = reader.next();
+                        changelog.add(
+                                row.getRowKind() + ":" + row.getInt(0) + ":" + row.getLong(1));
+                    }
+                }
+            }
+            assertThat(changelog)
+                    .containsExactlyInAnyOrder("INSERT:1:1", "INSERT:2:2", "INSERT:3:3");
+        }
+        int index = 0;
+        for (long identifier = 2; identifier <= 3; identifier++) {
+            for (CommitMessage message : pending.get(identifier)) {
+                assertThat(serializer.serialize(message)).isEqualTo(originalMessages.get(index++));
+            }
+        }
     }
 
     @Test
@@ -1374,8 +1529,9 @@ public class TableCommitTest {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(6);
     }
 
-    @Test
-    public void testRecoverCompactedChangelogFiles() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRecoverCompactedChangelogFiles(boolean halfCommitted) throws Exception {
         String path = tempDir.toString();
         RowType rowType =
                 RowType.of(
@@ -1517,14 +1673,39 @@ public class TableCommitTest {
                                 Collections.emptyList()));
 
         ManifestCommittable committable = new ManifestCommittable(1L);
-        committable.addFileCommittable(commitMessage0);
-        committable.addFileCommittable(commitMessage1);
-        committable.addFileCommittable(commitMessage2);
+        for (CommitMessageImpl message :
+                Arrays.asList(commitMessage0, commitMessage1, commitMessage2)) {
+            committable.addFileCommittable(
+                    halfCommitted
+                            ? new CommitMessageImpl(
+                                    message.partition(),
+                                    message.bucket(),
+                                    message.totalBuckets(),
+                                    DataIncrement.emptyIncrement(),
+                                    new CompactIncrement(
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            message.newFilesIncrement().changelogFiles()))
+                            : message);
+        }
 
         String commitUser = UUID.randomUUID().toString();
-        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+        try (TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            if (halfCommitted) {
+                commit.commit(1, Collections.emptyList());
+            }
             // This should succeed because fake files resolve to the existing real file
-            commit.filterAndCommitMultiple(Collections.singletonList(committable), false);
+            assertThat(
+                            commit.filterAndCommitMultiple(
+                                    Collections.singletonList(committable), false))
+                    .isEqualTo(1);
+            assertThat(table.snapshotManager().latestSnapshotId())
+                    .isEqualTo(halfCommitted ? 2L : 1L);
+            assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                    .isEqualTo(
+                            halfCommitted
+                                    ? Snapshot.CommitKind.COMPACT
+                                    : Snapshot.CommitKind.APPEND);
         }
 
         // Now delete the real file and test that the check fails
