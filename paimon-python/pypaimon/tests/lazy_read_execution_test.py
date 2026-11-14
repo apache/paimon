@@ -148,10 +148,10 @@ def test_native_read_never_initializes_or_replays_python_read(table, end):
     assert events == ['closed']
 
 
-@pytest.mark.parametrize('native_plan,native_read', [(True, False), (False, True), (True, True)])
+@pytest.mark.parametrize('native_plan,native_read', [(True, False), (None, True), (True, True)])
 def test_native_stream_scan_does_not_construct_python_executors(table, native_plan, native_read):
     table = table.copy({
-        'scan.native-plan.enabled': str(native_plan).lower(),
+        'scan.native-plan.enabled': None if native_plan is None else str(native_plan).lower(),
         'read.native.enabled': str(native_read).lower(),
     })
     with ExitStack() as stack:
@@ -172,11 +172,12 @@ def test_native_stream_scan_does_not_construct_python_executors(table, native_pl
         core.plan.assert_called_once()
 
 
+@pytest.mark.python_plan
 @pytest.mark.parametrize('runtime_available', [False, True])
 def test_native_read_stream_falls_back_before_planning(table, runtime_available):
     from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
 
-    table = table.copy({'scan.native-plan.enabled': 'false', 'read.native.enabled': 'true'})
+    table = table.copy({'scan.native-plan.enabled': None, 'read.native.enabled': 'true'})
     with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=runtime_available), \
             patch('pypaimon.execution.native.read.streaming_table_scan.native_stream_scan',
                   side_effect=RuntimeError('prepare')) as native:
