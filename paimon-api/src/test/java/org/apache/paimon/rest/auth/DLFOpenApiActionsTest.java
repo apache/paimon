@@ -49,7 +49,7 @@ public class DLFOpenApiActionsTest {
             assertEquals(operation[2], DLFOpenApiActions.resolve(operation[0], path), path);
             actions.add(operation[2]);
         }
-        assertEquals(78, actions.size());
+        assertEquals(79, actions.size());
     }
 
     /** The table and docs/static/rest-*-open-api.yaml must list the same operations. */
@@ -102,6 +102,7 @@ public class DLFOpenApiActionsTest {
         assertAction("CommitTable", "POST", paths.commitTable("db", "t"));
         assertAction("AcquireCommitLock", "POST", paths.commitLock("db", "t"));
         assertAction("RenewCommitLock", "POST", paths.commitLock("db", "t") + "/renew");
+        assertAction("ReleaseCommitLock", "POST", paths.commitLock("db", "t") + "/release");
         assertAction("ReplaceTable", "POST", paths.replaceTable("db", "t"));
         assertAction("GetTableToken", "GET", paths.tableToken("db", "t"));
         assertAction("RollbackToSnapshot", "POST", paths.rollbackTable("db", "t"));

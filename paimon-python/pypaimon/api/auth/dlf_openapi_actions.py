@@ -42,6 +42,8 @@ OPERATIONS: Tuple[Tuple[str, str, str], ...] = (
     ("POST", "/v1/{prefix}/databases/{database}/tables/{table}/commit-lock", "AcquireCommitLock"),
     ("POST", "/v1/{prefix}/databases/{database}/tables/{table}/commit-lock/renew",
      "RenewCommitLock"),
+    ("POST", "/v1/{prefix}/databases/{database}/tables/{table}/commit-lock/release",
+     "ReleaseCommitLock"),
     ("POST", "/v1/{prefix}/databases/{database}/tables/{table}/replace", "ReplaceTable"),
     ("GET", "/v1/{prefix}/databases/{database}/tables/{table}/token", "GetTableToken"),
     ("POST", "/v1/{prefix}/databases/{database}/tables/{table}/rollback", "RollbackToSnapshot"),

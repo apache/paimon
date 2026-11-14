@@ -758,7 +758,9 @@ paths:
         Renewal never revives an expired lease. Publication retains snapshot CAS validation
         and atomically releases the lease on a new successful commit. A rejected publication
         does not release the lease. A replay of an already-published snapshot must not release
-        a newer lease. The lease duration is fixed for each scope. There is no unlock RPC.
+        a newer lease. The lease duration is fixed for each scope. A lease acquired with a
+        leaseId additionally requires that same ID on reacquisition, renewal and release.
+        Clients use a fresh leaseId for each acquisition scope.
       requestBody:
         required: true
         content:
@@ -806,7 +808,7 @@ paths:
             type: string
       description: >-
         Requires the same permission as committing snapshots. Validate the table incarnation,
-        branch and exact commitUser against the unexpired lease.
+        branch, exact commitUser and leaseId (when present) against the unexpired lease.
         Return acquired=false when ownership is lost or the lease has expired; renewal must
         never acquire a new lease or revive an expired one. Keep leaseMillis fixed within
         the scope. Each successful new snapshot publication ends its lease.
@@ -823,6 +825,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommitLockResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/commit-lock/release:
+    post:
+      tags:
+        - table
+      summary: Release a table commit lease
+      operationId: releaseCommitLock
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      description: >-
+        Requires the same permission as committing snapshots. Match the table incarnation,
+        branch, commitUser and leaseId exactly. The request is idempotent: an expired, consumed,
+        already released or superseded lease is a successful no-op. A late release must not
+        clear a subsequent acquisition, including one by the same commitUser. Clients attempt
+        release after both successful and failed protected operations. Expiry remains the
+        fallback for process termination, network partitions and failed cleanup requests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommitLockRequest'
+                - type: object
+                  required: [leaseId]
+      responses:
+        "200":
+          description: Released or no longer owned by this scope.
         "400":
           $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
@@ -3849,6 +3902,11 @@ components:
           minLength: 1
           maxLength: 255
           description: Exact commitUser that will appear in the submitted snapshot.
+        leaseId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Fresh identity per acquisition scope; required for release and reused on renewal.
     CommitLockResponse:
       type: object
       required: [acquired, expiresAtMillis, leaseMillis]

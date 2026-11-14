@@ -228,6 +228,10 @@ class RESTCommitLockIntegrationTest {
                             if ("GET".equals(request.getMethod()) && !path.contains("/schemas/")) {
                                 return json(tableResponse);
                             }
+                            if (path.endsWith("/commit-lock/release")) {
+                                lease.set(false);
+                                return new MockResponse().setResponseCode(204);
+                            }
                             return new MockResponse().setResponseCode(400);
                         }
                     });
@@ -357,6 +361,10 @@ class RESTCommitLockIntegrationTest {
                             }
                             if ("GET".equals(request.getMethod()) && !path.contains("/schemas/")) {
                                 return json(tableResponse);
+                            }
+                            if (path.endsWith("/commit-lock/release")) {
+                                owner.set(null);
+                                return new MockResponse().setResponseCode(204);
                             }
                             return new MockResponse().setResponseCode(400);
                         }
