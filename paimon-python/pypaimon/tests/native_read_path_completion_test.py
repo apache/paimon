@@ -204,6 +204,48 @@ def test_native_catalog_preserves_a_reconstructible_fuse_binding(tmp_path, mode,
     assert module.PaimonCatalog.call_args[0][0]['fuse.enabled'] == 'true'
 
 
+def test_native_catalog_fallback_uses_origin_for_catalog_only_io_cache(tmp_path):
+    """A REST catalog without a data token must not hand a cache endpoint to Rust."""
+    from pypaimon.catalog.catalog_context import CatalogContext
+    from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+    from pypaimon.common.identifier import Identifier
+    from pypaimon.common.options.options import Options
+    from pypaimon.execution.native.table import _native_table
+    from pypaimon.schema.table_schema import TableSchema
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    options = Options({
+        'warehouse': 'oss://bucket/warehouse',
+        'fs.oss.endpoint': 'http://cache.example.com',
+        'io-cache.enabled': 'true',
+        'io-cache.endpoint': 'http://cache.example.com',
+        'io-cache.origin.endpoint': 'https://origin.example.com',
+        'io-cache.policy': 'meta,read',
+    })
+    loader = RESTCatalogLoader(CatalogContext.create_from_options(options))
+    identifier = Identifier.create('default', 't')
+    environment = CatalogEnvironment(identifier=identifier, catalog_loader=loader)
+    file_io = Mock()
+    file_io.for_table.return_value = file_io
+    table = FileStoreTable(
+        file_io, identifier, 'oss://bucket/warehouse/default/t', TableSchema(), environment)
+
+    module = ModuleType('pypaimon_rust.datafusion')
+    module.PaimonCatalog = Mock()
+    native_table = module.PaimonCatalog.return_value.get_table.return_value
+    native_table.location.return_value = table.table_path
+    with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}), \
+            patch('pypaimon.execution.native.table._with_native_resolved_schema',
+                  return_value=native_table):
+        assert _native_table(table) is native_table
+
+    native_options = module.PaimonCatalog.call_args.args[0]
+    assert native_options['fs.oss.endpoint'] == 'https://origin.example.com'
+    assert native_options['fs.oss.https.enable'] == 'true'
+    assert 'io-cache.enabled' not in native_options
+    assert 'io-cache.endpoint' not in native_options
+
+
 @pytest.mark.parametrize('transport', ['same-view', 'copy-before', 'copy', 'pickle'])
 def test_pinned_rest_view_reuses_core_snapshot_validation(guarded_table, transport):
     import pickle

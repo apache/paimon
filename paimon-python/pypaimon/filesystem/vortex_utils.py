@@ -54,9 +54,13 @@ def to_vortex_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[
     if scheme == 'oss' and properties:
         parsed = urlparse(file_path)
         bucket = parsed.netloc
+        endpoint = properties.get(OssOptions.OSS_ENDPOINT)
+        if endpoint and '://' in endpoint:
+            # The origin endpoint of io-cache routing can be a URL; the bucket goes before its host.
+            endpoint = endpoint.split('://', 1)[1].rstrip('/')
 
         store_kwargs = {
-            'endpoint': f"https://{bucket}.{properties.get(OssOptions.OSS_ENDPOINT)}",
+            'endpoint': f"https://{bucket}.{endpoint}",
             'access_key_id': properties.get(OssOptions.OSS_ACCESS_KEY_ID),
             'secret_access_key': properties.get(OssOptions.OSS_ACCESS_KEY_SECRET),
             'virtual_hosted_style_request': 'true',

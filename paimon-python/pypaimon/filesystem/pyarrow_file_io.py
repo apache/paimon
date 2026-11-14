@@ -56,11 +56,18 @@ class LegacyOssDirectoryListingError(RuntimeError):
 
 
 class PyArrowFileIO(FileIO):
+    # False on an io-cache target, whose writes get their parent directories on origin.
+    creates_parent_dirs = True
+    # False on an io-cache target, whose failed writes are cleaned up on origin.
+    cleans_up_failed_writes = True
+
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
-        self._set_pyarrow_version()
         scheme, netloc, _ = self.parse_location(path)
+        # Path-style addressing sends bucket/key to the endpoint itself, so the bucket stays out of it.
+        self._oss_path_style = scheme == "oss" and self.properties.get(OssOptions.OSS_SECOND_LEVEL_DOMAIN_ENABLE)
+        self._set_pyarrow_version()
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
         self._is_s3 = scheme in {"s3", "s3a", "s3n"}
@@ -113,7 +120,7 @@ class PyArrowFileIO(FileIO):
         # goes into endpoint_override, so keys must omit it (init + path share
         # this flag so they can't drift).
         self._pyarrow_gte_16 = parse(pyarrow.__version__) >= parse("16.0.0")
-        self._oss_bucket_in_endpoint = not self._pyarrow_gte_16
+        self._oss_bucket_in_endpoint = not self._pyarrow_gte_16 and not getattr(self, "_oss_path_style", False)
 
     def _uses_s3_compatibility(self) -> bool:
         return (not self._use_jindo
@@ -264,12 +271,18 @@ class PyArrowFileIO(FileIO):
             "region": self.properties.get(OssOptions.OSS_REGION),
         }
 
+        endpoint = self.properties.get(OssOptions.OSS_ENDPOINT)
+        if endpoint and '://' in endpoint:
+            # endpoint_override takes host[:port]; a URL endpoint carries its scheme separately
+            scheme, _, endpoint = endpoint.partition('://')
+            client_kwargs['scheme'] = scheme.lower()
+            endpoint = endpoint.rstrip('/')
         if not self._oss_bucket_in_endpoint:
-            client_kwargs['force_virtual_addressing'] = True
-            client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
+            if self._pyarrow_gte_16:
+                client_kwargs['force_virtual_addressing'] = not self._oss_path_style
+            client_kwargs['endpoint_override'] = endpoint
         else:
-            client_kwargs['endpoint_override'] = (self._oss_bucket + "." +
-                                                  self.properties.get(OssOptions.OSS_ENDPOINT))
+            client_kwargs['endpoint_override'] = self._oss_bucket + "." + endpoint
 
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
@@ -441,6 +454,11 @@ class PyArrowFileIO(FileIO):
         return self.filesystem.open_input_file(path_str)
 
     def new_output_stream(self, path: str):
+        if self.creates_parent_dirs:
+            self.create_parent_dirs(path)
+        return self.filesystem.open_output_stream(self.to_filesystem_path(path))
+
+    def create_parent_dirs(self, path: str):
         path_str = self.to_filesystem_path(path)
 
         if self._use_jindo:
@@ -458,8 +476,6 @@ class PyArrowFileIO(FileIO):
             parent_dir = PurePosixPath(path_str).parent
             if str(parent_dir) and not self.exists(str(parent_dir)):
                 self.mkdirs(str(parent_dir))
-
-        return self.filesystem.open_output_stream(path_str)
 
     def _get_file_info(self, path_str: str):
         try:
@@ -906,7 +922,8 @@ class PyArrowFileIO(FileIO):
                 pq.write_table(data, output_stream, compression=compression, **kwargs)
 
         except Exception as e:
-            self.delete_quietly(path)
+            if self.cleans_up_failed_writes:
+                self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Parquet file {path}: {e}") from e
 
     def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd',
@@ -936,7 +953,8 @@ class PyArrowFileIO(FileIO):
                     )
 
         except Exception as e:
-            self.delete_quietly(path)
+            if self.cleans_up_failed_writes:
+                self.delete_quietly(path)
             raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
 
     def write_avro(

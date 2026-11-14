@@ -54,7 +54,8 @@ class FormatTable(Table):
         options: Optional[Dict[str, str]] = None,
         comment: Optional[str] = None,
     ):
-        self.file_io = file_io
+        # Other writers may replace Format Table files in place.
+        self.file_io = file_io.origin_only()
         self.identifier = identifier
         self._table_schema = table_schema
         self._location = location.rstrip("/")
