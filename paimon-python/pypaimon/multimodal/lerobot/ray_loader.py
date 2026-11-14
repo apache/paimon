@@ -177,11 +177,11 @@ def _prepare_merged_source(table, source_path, source_options, info, schema,
     from functools import partial
     from pypaimon.multimodal.lerobot.aggregate import _transform_frames
 
-    mapping = dict(mapping, control_stats={})
+    mapping = dict(mapping, control_stats={}, control_counts={})
     messages = _prepare_group(
         table, source_path, source_options, info, schema, batch_size,
         metadata, video_fields, episode_indices, partial(_transform_frames, mapping))
-    return messages, mapping["control_stats"]
+    return messages, mapping["control_stats"], mapping["control_counts"]
 
 
 def _prepare_sources_ray(table, plans, source_options, batch_size, parallelism):
@@ -198,7 +198,8 @@ def _prepare_sources_ray(table, plans, source_options, batch_size, parallelism):
             })
             mapping_ref = ray.put({key: plan[key] for key in (
                 "dataset_id", "frame_offset", "episode_offset",
-                "task_index", "subtask_index") if key in plan})
+                "task_index", "subtask_index", "source_hash", "coordinated")
+                if key in plan})
             for group in _task_groups(plan["info"], plan["dataset"]._episodes,
                                       plan["videos"], parallelism):
                 yield ordinal, (table_ref, plan["source"].path, source_options,
@@ -222,10 +223,14 @@ def _prepare_sources_ray(table, plans, source_options, batch_size, parallelism):
                 break
             ready, _ = ray.wait(list(pending), num_returns=1)
             task = ready[0]
-            prepared, stats = ray.get(task)
+            prepared, stats, counts = ray.get(task)
             messages.extend(prepared)
             ordinal = pending.pop(task)
             plans[ordinal]["control_stats"].update(stats)
+            for name, values in counts.items():
+                target = plans[ordinal]["control_counts"].setdefault(name, {})
+                for value, count in values.items():
+                    target[value] = target.get(value, 0) + count
         return messages
     except BaseException:
         for task in pending:
@@ -238,7 +243,7 @@ def _prepare_sources_ray(table, plans, source_options, batch_size, parallelism):
                 ready, _ = ray.wait(list(pending), num_returns=len(pending), timeout=_CANCEL_DRAIN_SECONDS)
                 for task in ready:
                     try:
-                        prepared, _ = ray.get(task, timeout=0)
+                        prepared, _, _ = ray.get(task, timeout=0)
                         messages.extend(prepared)
                     except Exception:
                         pass
