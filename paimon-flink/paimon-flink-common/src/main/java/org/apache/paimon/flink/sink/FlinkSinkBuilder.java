@@ -36,6 +36,7 @@ import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.table.BlobDescriptorReaderFactory;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.OverwriteFileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
@@ -360,9 +361,15 @@ public class FlinkSinkBuilder {
                             + " then the parallelism of writerOperator will be set to bucketNums.");
             parallelism = bucketNums;
         }
+        FileStoreTable sinkTable =
+                overwritePartition == null ? table : new OverwriteFileStoreTable(table);
         DataStream<InternalRow> partitioned =
-                partition(input, new RowDataChannelComputer(table.schema()), parallelism);
-        return configureBlobDescriptorReaderFactory(new FixedBucketSink(table, overwritePartition))
+                partition(
+                        input,
+                        new RowDataChannelComputer(sinkTable.createRowKeyExtractor()),
+                        parallelism);
+        return configureBlobDescriptorReaderFactory(
+                        new FixedBucketSink(sinkTable, overwritePartition))
                 .sinkFrom(partitioned);
     }
 
