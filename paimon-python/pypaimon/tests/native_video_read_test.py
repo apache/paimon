@@ -133,8 +133,12 @@ def test_native_update_of_normal_columns_keeps_packed_video_frames(tmp_path, nat
             pa.table({'_ROW_ID': [0], 'id': [20]}, schema=pa.schema([('_ROW_ID', pa.int64()), ('id', pa.int32())]))]))
     commit = builder.new_commit()
     try:
-        commit.commit(messages)
-        assert commit._native_commit is not None
+        assert any(file.first_row_id is not None for message in messages for file in message.new_files)
+        with patch('pypaimon.execution.native.write.commit.NativeTableCommit.commit',
+                   side_effect=AssertionError('Retained row IDs require Python publication')):
+            commit.commit(messages)
+        assert commit._native_commit is None
+        assert commit._python_commit is not None
     finally:
         commit.close()
     after = _read(table, True)[0].to_pylist()

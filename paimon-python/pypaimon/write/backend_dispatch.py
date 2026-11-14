@@ -350,8 +350,7 @@ def create_shard_update_execution(table, projection, columns, commit_user, shard
 
 def create_row_id_plan_execution(table, plan):
     """Select pure routing once; execution errors never replay another backend."""
-    if (table.options.native_write_enabled() or table.options.native_read_enabled()
-            or table.options.native_plan_enabled()):
+    if table.options.native_write_enabled():
         from pypaimon.execution.native.write.row_id_plan import create_native_row_id_plan, NativeRowIdPlan
         native = create_native_row_id_plan(table, plan)
         if native is not None:
@@ -459,13 +458,7 @@ def commit_table_messages(
             "Committing table %s, %d non-empty messages",
             owner.table.identifier, len(non_empty_messages)
         )
-    # Native 0.5.0 does not validate retained row-ID field identities against
-    # the schema used by each publication attempt. Python performs that check
-    # inside its CAS retry loop, including updates without a conflict baseline.
-    row_id_update = owner.table.options.data_evolution_enabled() and any(
-        file.first_row_id is not None
-        for message in non_empty_messages for file in message.new_files)
-    prepared = None if row_id_update else owner._prepare_native_commit(non_empty_messages)
+    prepared = owner._prepare_native_commit(non_empty_messages)
     if prepared is None:
         execution, messages = python_commit(owner), non_empty_messages
     else:

@@ -590,15 +590,20 @@ def test_missing_runtime_falls_back_without_reconstructing_table(
         resolve.assert_not_called()
 
 
-def test_preassigned_row_id_messages_use_native_validation(
-        tmp_path, native_rest_catalog):
+@pytest.mark.parametrize('write_cols', [None, ['id']])
+def test_preassigned_row_id_messages_keep_native_probes_but_use_python_publication(
+        tmp_path, native_rest_catalog, write_cols):
     table = _table(tmp_path, 'de', catalog=native_rest_catalog)
     assert native_messages_supported(table, [CommitMessage((), 0, [])])
     assert native_messages_supported(table, [CommitMessage((), 0, [], check_from_snapshot=7)])
     messages = _prepare(table.new_batch_write_builder(), [{'id': 1, 'pt': 'a'}])
     messages[0].new_files[0].first_row_id = 1
+    messages[0].new_files[0].write_cols = write_cols
     messages[0].check_from_snapshot = 7
     assert native_messages_supported(table, messages)
+    assert not native_messages_supported(table, messages, for_commit=True)
+    messages[0].check_from_snapshot = None
+    assert not native_messages_supported(table, messages, for_commit=True)
     assert not native_messages_supported(table, [CommitMessage((), 0, [], compact_after=[Mock()])])
 
 

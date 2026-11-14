@@ -52,13 +52,15 @@ def _evolved(catalog, native):
 
 def _commit(table, messages, native):
     commit = table.new_batch_write_builder().new_commit()
+    retained_row_ids = any(file.first_row_id is not None for message in messages for file in message.new_files)
+    native_publication = native and not retained_row_ids
     try:
-        guard = (patch('pypaimon.execution.python.write.file_store_commit.'
-                       'FileStoreCommit.commit',
-                       side_effect=AssertionError('Python commit fallback'))
-                 if native else ExitStack())
-        with guard:
+        forbidden = ('pypaimon.execution.python.write.file_store_commit.FileStoreCommit.commit'
+                     if native_publication else 'pypaimon.execution.native.write.commit.NativeTableCommit.commit')
+        with patch(forbidden, side_effect=AssertionError('Unexpected publication backend')):
             commit.commit(messages)
+        assert (commit._native_commit is not None) == native_publication
+        assert (commit._python_commit is None) == native_publication
     finally:
         commit.close()
 

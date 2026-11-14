@@ -734,7 +734,7 @@ class CoreOptions:
         .boolean_type()
         .default_value(True)
         .with_description("Read data via pypaimon_rust and return PyArrow batches. "
-                          "This also enables native split planning; unsupported "
+                          "This also requests native split planning unless explicitly disabled; unsupported "
                           "routes fall back to pypaimon.")
     )
 

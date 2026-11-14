@@ -60,6 +60,7 @@ def reader(table, **options):
 
 
 @pytest.mark.skipif(not native_runtime_available(), reason="native reader required")
+@pytest.mark.execution_defaults
 @pytest.mark.parametrize("option", [None, "read.native.enabled", "scan.native-plan.enabled"])
 def test_native_frame_lookup_keeps_residual_and_snapshot(frames, option):
     # The index covers the original rows, not this append.
@@ -184,17 +185,16 @@ def test_explicit_python_lookup_is_preserved(frames, options):
 @pytest.mark.python_plan
 @pytest.mark.python_read
 @pytest.mark.parametrize("available", [False, True])
-def test_auto_native_uses_private_table_copy(frames, available):
+def test_indexed_reader_preserves_python_default_and_table_options(frames, available):
     original = dict(frames.raw_table.options.options.to_map())
     with patch("pypaimon.execution.native.runtime.native_runtime_available", return_value=available):
         current = reader(frames)
     try:
-        assert current._table.options.native_read_enabled() == available
+        assert not current._table.options.native_read_enabled()
         assert frames.raw_table.options.options.to_map() == original
-        if not available:
-            with patch.object(current._locator, "locate", wraps=current._locator.locate) as locate:
-                assert current.read_indices([30], ["value"])["value"].to_pylist() == [3]
-                locate.assert_called_once_with([30])
+        with patch.object(current._locator, "locate", wraps=current._locator.locate) as locate:
+            assert current.read_indices([30], ["value"])["value"].to_pylist() == [3]
+            locate.assert_called_once_with([30])
     finally:
         current.close()
 
@@ -204,7 +204,8 @@ def test_unsupported_native_plan_reuses_python_index_scanner(frames):
         DataEvolutionGlobalIndexScanner)
     frames.add(pa.table({"index": [40], "value": [4]}))
     with patch("pypaimon.execution.native.runtime.native_runtime_available", return_value=True):
-        current = reader(frames)
+        current = reader(frames, **{
+            "scan.native-plan.enabled": "true", "read.native.enabled": "true"})
     try:
         assert current._table.options.native_read_enabled()
         with patch("pypaimon.execution.native.runtime.native_runtime_available", return_value=True), \
@@ -230,7 +231,8 @@ def test_unsupported_native_plan_reuses_python_index_scanner(frames):
 @pytest.mark.parametrize("denied", [False, True])
 def test_native_lookup_preserves_query_authorization(frames, denied):
     from pypaimon.read.table_scan import TableScan
-    current = reader(frames)
+    current = reader(frames, **{
+        "scan.native-plan.enabled": "true", "read.native.enabled": "true"})
     calls = []
 
     def authorize(*args, **kwargs):

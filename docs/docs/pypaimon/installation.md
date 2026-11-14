@@ -61,7 +61,10 @@ table = table.copy({
 ```
 
 The options are independent; disabling only native reads does not disable native
-split planning or writes. REST catalog management continues to use the Python
+split planning or writes. Explicit `scan.native-plan.enabled=false` selects the
+Python planner even when native reads are enabled. Explicit
+`write.native.enabled=false` also selects Python row-ID update routing.
+REST catalog management continues to use the Python
 REST client.
 
 ## Optional dependencies

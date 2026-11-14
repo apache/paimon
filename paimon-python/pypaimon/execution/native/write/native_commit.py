@@ -30,11 +30,17 @@ from pypaimon.write.commit_message_serializer import (
 )
 
 
-def native_messages_supported(table, messages) -> bool:
+def native_messages_supported(table, messages, *, for_commit=False) -> bool:
     for message in messages:
         if (message.compact_before or message.compact_after
                 or message.compact_changelog_files
                 or message.compact_index_adds or message.compact_index_deletes):
+            return False
+        # Native 0.5.0 cannot validate retained field IDs against the schema of
+        # each publication attempt. Full-row updates also retain field IDs;
+        # write_cols=None does not exempt them. Pure conflict probes are safe.
+        if (for_commit and table.options.data_evolution_enabled()
+                and any(file.first_row_id is not None for file in message.new_files)):
             return False
         partition = tuple(message.partition)
         for file in message.new_files + message.changelog_files:
