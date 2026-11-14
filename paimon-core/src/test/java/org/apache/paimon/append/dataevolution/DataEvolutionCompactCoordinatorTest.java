@@ -25,6 +25,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.io.ProjectedDataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
@@ -134,16 +136,18 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
-    public void testIncrementalTaskRejectsAdjacentNormalRanges() {
+    public void testPartialNormalTaskRejectsAdjacentNormalRanges() {
         assertThatThrownBy(
                         () ->
-                                new DataEvolutionIncrementalCompactTask(
+                                new DataEvolutionNormalCompactTask(
                                         BinaryRow.EMPTY_ROW,
                                         Arrays.asList(
                                                 createDataFileMeta("a.parquet", 0, 10, 1, 100),
-                                                createDataFileMeta("b.parquet", 10, 10, 2, 100))))
+                                                createDataFileMeta("b.parquet", 10, 10, 2, 100)),
+                                        Collections.emptyList(),
+                                        true))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("identical normal-file row-ID ranges");
+                .hasMessageContaining("identical row-ID ranges");
     }
 
     @Test
@@ -1265,27 +1269,82 @@ public class DataEvolutionCompactCoordinatorTest {
         return fieldIds;
     }
 
-    @Test
-    public void testSerializerBasic() throws IOException {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSerializerBasic(boolean partialRewrite) throws IOException {
         DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
 
         List<DataFileMeta> files =
                 Arrays.asList(
                         createDataFileMeta("file1.parquet", 0L, 100L, 0, 1024),
-                        createDataFileMeta("file2.parquet", 100L, 100L, 0, 1024));
+                        createDataFileMeta(
+                                "file2.parquet", partialRewrite ? 0L : 100L, 100L, 1, 1024));
 
-        DataEvolutionCompactTask task =
+        DataEvolutionNormalCompactTask task =
                 new DataEvolutionNormalCompactTask(
                         BinaryRow.EMPTY_ROW,
                         files,
-                        Arrays.asList(
-                                new Range(0L, 49L), new Range(50L, 149L), new Range(150L, 199L)));
+                        Arrays.asList(new Range(0L, 49L), new Range(50L, 99L)),
+                        partialRewrite);
 
         byte[] bytes = serializer.serialize(task);
         DataEvolutionCompactTask deserialized =
                 serializer.deserialize(serializer.getVersion(), bytes);
 
         assertThat(deserialized).isEqualTo(task);
+        assertThat(deserialized.type()).isEqualTo(DataEvolutionCompactTask.TaskType.NORMAL);
+        assertThat(((DataEvolutionNormalCompactTask) deserialized).partialRewrite())
+                .isEqualTo(partialRewrite);
+    }
+
+    @Test
+    public void testSerializerMixedTaskModes() throws IOException {
+        List<DataFileMeta> normalFiles =
+                Arrays.asList(
+                        createDataFileMeta("first.parquet", 0, 10, 1, 100),
+                        createDataFileMeta("second.parquet", 0, 10, 2, 100));
+        List<DataEvolutionCompactTask> tasks =
+                Arrays.asList(
+                        new DataEvolutionNormalCompactTask(
+                                BinaryRow.EMPTY_ROW,
+                                normalFiles,
+                                Collections.singletonList(new Range(0, 4)),
+                                false),
+                        new DataEvolutionNormalCompactTask(
+                                BinaryRow.EMPTY_ROW, normalFiles, Collections.emptyList(), true),
+                        new DataEvolutionBlobCompactTask(
+                                BinaryRow.EMPTY_ROW,
+                                Arrays.asList(
+                                        createDataFileMeta("first.blob", 0, 10, 1, 100),
+                                        createDataFileMeta("second.blob", 0, 10, 2, 100))),
+                        new DataEvolutionVectorCompactTask(
+                                BinaryRow.EMPTY_ROW,
+                                Arrays.asList(
+                                        createDataFileMeta("first.vector.json", 0, 10, 1, 100),
+                                        createDataFileMeta("second.vector.json", 0, 10, 2, 100))));
+        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
+        DataOutputSerializer output = new DataOutputSerializer(128);
+        serializer.serializeList(tasks, output);
+        List<DataEvolutionCompactTask> restored =
+                serializer.deserializeList(
+                        serializer.getVersion(),
+                        new DataInputDeserializer(output.getCopyOfBuffer()));
+        assertThat(restored).containsExactlyElementsOf(tasks);
+    }
+
+    @Test
+    public void testPartialRewriteIsPartOfNormalTaskIdentity() {
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        createDataFileMeta("base.parquet", 0, 10, 1, 100),
+                        createDataFileMeta("update.parquet", 0, 10, 2, 100));
+        DataEvolutionNormalCompactTask full =
+                new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, files);
+        DataEvolutionNormalCompactTask partial =
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW, files, Collections.emptyList(), true);
+        assertThat(full).isNotEqualTo(partial);
+        assertThat(partial).isNotEqualTo(full);
     }
 
     @Test

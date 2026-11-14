@@ -648,11 +648,11 @@ public class DataEvolutionCompactCoordinator {
                                                             file.fileName()))) {
                         tasks.add(
                                 0,
-                                selected.size() < dataFiles.size()
-                                        ? new DataEvolutionIncrementalCompactTask(
-                                                partition, selected)
-                                        : new DataEvolutionNormalCompactTask(
-                                                partition, selected, protectedRanges));
+                                new DataEvolutionNormalCompactTask(
+                                        partition,
+                                        selected,
+                                        protectedRanges,
+                                        selected.size() < dataFiles.size()));
                     }
                 }
             }

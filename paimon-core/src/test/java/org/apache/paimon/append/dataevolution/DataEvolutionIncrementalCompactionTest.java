@@ -385,6 +385,7 @@ public class DataEvolutionIncrementalCompactionTest extends TableTestBase {
         options.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 b");
         options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), "1");
         options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_INCREMENTAL_ENABLED.key(), "false");
         compact(table.copy(options), task);
         assertThat(task.compactAfter()).hasSize(1);
         assertThat(task.compactAfter().get(0).rowCount()).isEqualTo(ROW_COUNT);
@@ -760,6 +761,8 @@ public class DataEvolutionIncrementalCompactionTest extends TableTestBase {
         List<InternalRow> expected = read(table);
         long historicalSnapshot = table.snapshotManager().latestSnapshotId();
         DataEvolutionCompactTask task = plan(table);
+        assertThat(task.type()).isEqualTo(DataEvolutionCompactTask.TaskType.NORMAL);
+        assertThat(((DataEvolutionNormalCompactTask) task).partialRewrite()).isEqualTo(incremental);
         if (incremental) {
             assertThat(task.compactBefore()).hasSize(3).doesNotContain(base);
             assertThat(task.compactBefore().stream().mapToLong(DataFileMeta::fileSize).sum())

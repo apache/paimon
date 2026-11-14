@@ -230,8 +230,7 @@ public abstract class DataEvolutionCompactTask {
         NORMAL(0),
         BLOB(1),
         MATERIALIZE_DELETION(2),
-        VECTOR(3),
-        INCREMENTAL_NORMAL(4);
+        VECTOR(3);
 
         private final int code;
 
