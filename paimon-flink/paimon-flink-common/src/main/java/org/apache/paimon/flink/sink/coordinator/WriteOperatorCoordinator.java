@@ -37,6 +37,7 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_CACHE_EXPIRE_AFTER_ACCESS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_CACHE_MEMORY;
@@ -50,6 +51,11 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 public class WriteOperatorCoordinator implements OperatorCoordinator, CoordinationRequestHandler {
 
     private final FileStoreTable table;
+
+    private final AtomicLong recoveryGeneration = new AtomicLong();
+
+    // Updated only on the request executor, after a successful metadata refresh.
+    private long refreshedRecoveryGeneration;
 
     private ThreadPoolExecutor executor;
     private TableWriteCoordinator coordinator;
@@ -98,6 +104,11 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
         executor.execute(
                 () -> {
                     try {
+                        long generation = recoveryGeneration.get();
+                        if (generation != refreshedRecoveryGeneration) {
+                            coordinator.checkpoint();
+                            refreshedRecoveryGeneration = generation;
+                        }
                         CoordinationResponse response;
                         if (request instanceof PagedCoordinationRequest) {
                             response = coordinator.scan((PagedCoordinationRequest) request);
@@ -138,10 +149,16 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
     public void notifyCheckpointComplete(long checkpointId) {}
 
     @Override
-    public void resetToCheckpoint(long checkpointId, byte[] checkpointData) {}
+    public void resetToCheckpoint(long checkpointId, byte[] checkpointData) {
+        // The checkpoint's snapshot may have been committed after the cached view was refreshed.
+        // Defer I/O to the request executor; this callback can also run before start().
+        recoveryGeneration.incrementAndGet();
+    }
 
     @Override
-    public void subtaskReset(int subtask, long checkpointId) {}
+    public void subtaskReset(int subtask, long checkpointId) {
+        recoveryGeneration.incrementAndGet();
+    }
 
     @Override
     public void executionAttemptFailed(int subtask, int attemptNumber, Throwable reason) {}
