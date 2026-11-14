@@ -178,6 +178,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final ConflictDetection conflictDetection;
     private final CommitCleaner commitCleaner;
 
+    /** True while the compact phase of a recovered compaction is being committed. */
+    private boolean committingCompactRecovery = false;
+
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
     private boolean appendCommitCheckConflict = false;
@@ -503,6 +506,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     /** Runtime-only marker: the first phase was published, even if empty commits are enabled. */
+    /**
+     * Conflict detection rejected a recovered compaction. A concurrent commit changed the files it
+     * would replace, so replaying it would fail the same way after every restart.
+     */
+    private static class StaleCompactRecoveryException extends RuntimeException {
+
+        private StaleCompactRecoveryException(RuntimeException conflict) {
+            super(conflict.getMessage(), conflict);
+        }
+    }
+
     private static class CompactRecoveryCommittable extends ManifestCommittable {
 
         private CompactRecoveryCommittable(
@@ -592,23 +606,39 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.compactIndexFiles.isEmpty()) {
                 CommitChangesProvider compactProvider =
                         compactChangesProvider(changes, materializedBuckets, commitMessages);
-                attempts +=
-                        tryCommit(
-                                compactProvider,
-                                compactionBaselines,
-                                committable.identifier(),
-                                committable.watermark(),
-                                committable.properties(),
-                                CommitKind.COMPACT,
-                                false,
-                                true,
-                                null);
-                if (compactProvider instanceof DiscardingCompactChangesProvider) {
-                    committedCompactFiles =
-                            ((DiscardingCompactChangesProvider) compactProvider)
-                                    .retainedOriginalFiles();
+                boolean recovery = committable instanceof CompactRecoveryCommittable;
+                committingCompactRecovery = recovery;
+                try {
+                    attempts +=
+                            tryCommit(
+                                    compactProvider,
+                                    compactionBaselines,
+                                    committable.identifier(),
+                                    committable.watermark(),
+                                    committable.properties(),
+                                    CommitKind.COMPACT,
+                                    false,
+                                    true,
+                                    null);
+                    if (compactProvider instanceof DiscardingCompactChangesProvider) {
+                        committedCompactFiles =
+                                ((DiscardingCompactChangesProvider) compactProvider)
+                                        .retainedOriginalFiles();
+                    }
+                    generatedSnapshot += 1;
+                } catch (StaleCompactRecoveryException e) {
+                    // The compaction is optional work: drop it so the job can make progress.
+                    // Its output files are left for orphan file cleanup.
+                    LOG.warn(
+                            "Skipping compaction recovery for table {}, user {}, identifier {}: {}",
+                            tableName,
+                            commitUser,
+                            committable.identifier(),
+                            e.getMessage());
+                    committedCompactFiles = Collections.emptyList();
+                } finally {
+                    committingCompactRecovery = false;
                 }
-                generatedSnapshot += 1;
             }
         } finally {
             long commitDuration = (System.nanoTime() - started) / 1_000_000;
@@ -1541,6 +1571,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     if (rollback.tryToRollback(latestSnapshot)) {
                         return RetryCommitResult.forRollback(exception.get());
                     }
+                }
+                if (committingCompactRecovery) {
+                    throw new StaleCompactRecoveryException(exception.get());
                 }
                 throw exception.get();
             }

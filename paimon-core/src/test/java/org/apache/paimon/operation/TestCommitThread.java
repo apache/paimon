@@ -42,6 +42,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.TestFileStore.PAGE_SIZE;
@@ -151,7 +152,7 @@ public class TestCommitThread extends Thread {
                             inc.compactIncrement()));
         }
 
-        runWithRetry(committable, () -> commit.commit(committable, false));
+        runWithRetry(committable, c -> commit.commit(c, false));
     }
 
     private void doOverwrite() throws Exception {
@@ -168,10 +169,10 @@ public class TestCommitThread extends Thread {
 
         runWithRetry(
                 committable,
-                () ->
+                c ->
                         commit.overwritePartition(
                                 TestKeyValueGenerator.toPartitionMap(partition, MULTI_PARTITIONED),
-                                committable));
+                                c));
     }
 
     private void doFinalCompact() {
@@ -203,16 +204,24 @@ public class TestCommitThread extends Thread {
         }
     }
 
-    private void runWithRetry(ManifestCommittable committable, Runnable runnable) {
+    private void runWithRetry(
+            ManifestCommittable committable, Consumer<ManifestCommittable> committer) {
         boolean shouldCheckFilter = false;
         while (true) {
             try {
+                ManifestCommittable toCommit = committable;
                 if (shouldCheckFilter) {
-                    if (commit.filterCommitted(Collections.singletonList(committable)).isEmpty()) {
+                    // Like TableCommitImpl#filterAndCommit, commit what filterCommitted returns: a
+                    // partially committed identifier comes back as its compaction recovery, and
+                    // committing the original again would conflict on every retry.
+                    List<ManifestCommittable> remaining =
+                            commit.filterCommitted(Collections.singletonList(committable));
+                    if (remaining.isEmpty()) {
                         break;
                     }
+                    toCommit = remaining.get(0);
                 }
-                runnable.run();
+                committer.accept(toCommit);
                 break;
             } catch (Throwable e) {
                 if (LOG.isDebugEnabled()) {
