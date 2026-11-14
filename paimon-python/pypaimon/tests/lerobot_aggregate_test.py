@@ -398,6 +398,27 @@ def test_legacy_user_read_control_stats_remains_text(setup, monkeypatch):
         reader.close()
 
 
+def test_append_rejects_legacy_user_column_named_internal_stats(setup, monkeypatch):
+    conn, sources = setup
+    path = Path(sources[0][7:]) / "notes.txt"
+    path.write_text("ordinary text")
+    name = aggregate._READ_CONTROL_STATS_COLUMN
+    with monkeypatch.context() as old_writer:
+        schema = aggregate._DATASETS_SCHEMA
+        old_writer.setattr(aggregate, "_DATASETS_SCHEMA", schema.remove(
+            schema.get_field_index(name)))
+        old_writer.setattr(aggregate, "_store_read_control_stats", lambda metadata, plans: None)
+        conn.load_from_lerobot("robot", sources[0], extra_dataset_fields={name: "notes.txt"})
+
+    with pytest.raises(ValueError, match="existing column is user-defined"):
+        conn.append_to_lerobot("robot", sources[1])
+    assert rows(conn, "robot_frames").num_rows == 5
+    assert rows(conn, "robot_episodes").num_rows == 2
+    datasets = rows(conn, "robot_datasets")
+    assert datasets.num_rows == 1
+    assert datasets[name].to_pylist() == ["ordinary text"]
+
+
 @pytest.mark.parametrize("setup", [20], indirect=True)
 def test_append_mixed_fps_group_remains_readable(setup):
     pytest.importorskip("datasets")

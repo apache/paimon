@@ -657,6 +657,15 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             identifiers = _companion_table_identifiers(table.raw_table)
             tables = {name: connection.catalog.get_table(identifier)
                       for name, identifier in identifiers.items()}
+            datasets_schema = _target_schema(tables["datasets"])
+            if _READ_CONTROL_STATS_COLUMN in datasets_schema.names:
+                field = datasets_schema.field(_READ_CONTROL_STATS_COLUMN)
+                if (field.metadata or {}).get(b"description") != \
+                        _READ_CONTROL_STATS_DESCRIPTION.encode("utf-8"):
+                    raise ValueError(
+                        "LeRobot append cannot use internal Dataset column %s: "
+                        "the existing column is user-defined."
+                        % _READ_CONTROL_STATS_COLUMN)
             if tag_name is not None:
                 for component in (table.raw_table, *tables.values()):
                     if _tag_snapshot_id(connection.catalog, component.identifier,
