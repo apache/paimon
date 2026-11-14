@@ -595,12 +595,175 @@ def cmd_table_manifest(args):
         sys.exit(1)
 
 
+def cmd_table_list_files(args):
+    """
+    Execute the 'table list-files' command.
+
+    Lists the live data files referenced by the latest or a specified snapshot.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.table.file_store_table import FileStoreTable
+    from pypaimon.table.system.files_table import FilesTable
+
+    table = _open_schema_table(args)
+    try:
+        if not isinstance(table, FileStoreTable):
+            raise ValueError('File listing is not supported for this table type; expected a FileStoreTable.')
+        if table.options.query_auth_enabled:
+            raise NotImplementedError('Raw file metadata is not supported on a query-auth table.')
+        manager = table.snapshot_manager()
+        snapshot = (manager.get_latest_snapshot() if args.snapshot_id is None
+                    else manager.get_snapshot_by_id(args.snapshot_id))
+        if snapshot is None and args.snapshot_id is not None:
+            raise ValueError(f"Snapshot {args.snapshot_id} not found for table '{args.table}'.")
+
+        if args.snapshot_id is not None and snapshot.schema_id != table.table_schema.id:
+            if snapshot.schema_id is None:
+                raise ValueError(f"Snapshot {snapshot.id} does not contain a schema ID.")
+            schema = table.schema_manager.get_schema(snapshot.schema_id)
+            if schema is None:
+                raise ValueError(f"Schema {snapshot.schema_id} not found for snapshot {snapshot.id}.")
+            dynamic_options = getattr(table, '_applied_dynamic_options', {})
+            options = table._exclude_current_schema_field_options(schema, table.options.options, set(dynamic_options))
+            table = FileStoreTable(table.file_io, table.identifier, table.table_path,
+                                   schema.copy(new_options=options), table.catalog_environment)
+            table._applied_dynamic_options = dict(dynamic_options)
+
+        # Pin the resolved snapshot, including an empty table, before reading its live files.
+        files = FilesTable(table._copy_with_snapshot(snapshot))._build_arrow_table()
+        if args.bucket is not None:
+            import pyarrow.compute as pc
+            files = files.filter(pc.equal(files.column('bucket'), args.bucket))
+        if args.limit is not None:
+            files = files.slice(0, args.limit)
+        files = files.rename_columns(['delete_row_count' if name == 'deleteRowCount' else name
+                                      for name in files.column_names])
+        snapshot_id = snapshot.id if snapshot is not None else None
+        # Table.to_pylist is unavailable in the supported PyArrow 6 release.
+        columns = files.to_pydict()
+        rows = [dict(snapshot_id=snapshot_id, **dict(zip(columns, values))) for values in zip(*columns.values())]
+        if args.format == 'json':
+            result = _manifest_json_value({'table': args.table, 'snapshot_id': snapshot_id, 'files': rows})
+            print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+        elif not rows:
+            print(f"No files found for table '{args.table}' (snapshot {_snapshot_display_value(snapshot_id)}).")
+        else:
+            import pandas as pd
+            for row in rows:
+                if row['creation_time'] is not None:
+                    row['creation_time'] = row['creation_time'].isoformat()
+            # Convert before Pandas can coerce nullable integers to floats.
+            values = [[_snapshot_display_value(value) for value in row.values()] for row in rows]
+            print(pd.DataFrame(values, columns=['snapshot_id'] + files.column_names).to_string(index=False))
+    except Exception as e:
+        print(f"Error: Failed to list files for table '{args.table}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_table_file(args):
+    """
+    Execute the 'table file' command.
+
+    Displays a Parquet file's schema and footer metadata without reading data records.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    import errno
+    from os.path import basename, samefile
+
+    import pyarrow.fs as pafs
+    import pyarrow.parquet as pq
+
+    from pypaimon.table.file_store_table import FileStoreTable
+    from pypaimon.table.system.files_table import _data_file_format
+    from pypaimon.table.system.system_table import SystemTable
+
+    table = _open_schema_table(args)
+    try:
+        base_table = table.base_table if isinstance(table, SystemTable) else table
+        if isinstance(base_table, FileStoreTable) and base_table.options.query_auth_enabled:
+            raise NotImplementedError('Raw file metadata is not supported on a query-auth table.')
+        status = None
+        missing = None
+        non_file_found = False
+        # Check both literal Paimon paths and encoded file URIs without guessing their meaning.
+        for path in dict.fromkeys(_table_file_paths(table, args.file)):
+            try:
+                candidate = table.file_io.get_file_status(path)
+            except OSError as e:
+                if not isinstance(e, FileNotFoundError) and e.errno != errno.ENAMETOOLONG:
+                    raise
+                missing = e
+                continue
+            if candidate.type != pafs.FileType.File:
+                non_file_found = True
+                continue
+            if status is not None and not samefile(status.path, candidate.path):
+                raise ValueError(
+                    f"Ambiguous --file: '{status.path}' and '{candidate.path}' both exist. "
+                    "Use a plain filesystem path without the 'file:' prefix.")
+            io_path, status = path, candidate
+        if status is None:
+            if non_file_found:
+                raise ValueError('--file must point to a regular file.')
+            raise missing
+        file_format = _data_file_format(basename(status.path)).lower()
+        if file_format != 'parquet':
+            raise ValueError('Unsupported file format. Only Parquet files are supported.')
+        with table.file_io.new_input_stream(io_path) as stream:
+            parquet_file = pq.ParquetFile(stream)
+            metadata = parquet_file.metadata.to_dict()
+            columns = []
+            for i in range(parquet_file.metadata.num_columns):
+                column = parquet_file.schema.column(i)
+                columns.append({
+                    'name': column.name,
+                    'path': column.path,
+                    'physical_type': column.physical_type,
+                    'logical_type': str(column.logical_type),
+                    'converted_type': column.converted_type,
+                    'max_definition_level': column.max_definition_level,
+                    'max_repetition_level': column.max_repetition_level,
+                    'length': column.length,
+                    'precision': column.precision,
+                    'scale': column.scale,
+                })
+            result = _manifest_json_value({
+                'table': args.table,
+                'file_path': args.file,
+                'file_format': file_format,
+                'file_size_in_bytes': status.size,
+                'schema': {'arrow': str(parquet_file.schema_arrow), 'parquet': columns},
+                'metadata': metadata,
+            })
+        if args.format == 'json':
+            print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+        else:
+            field_width = max(len(key) for key in result)
+            print(f'{"Field":<{field_width}}  Value')
+            for key, value in result.items():
+                if isinstance(value, (dict, list)):
+                    # Only LF separates indented JSON lines; Unicode separators may be string data.
+                    lines = json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False).split('\n')
+                else:
+                    lines = _snapshot_display_value(value).split('\n')
+                for i, line in enumerate(lines or ['']):
+                    field = key if i == 0 else ''
+                    print(f'{field:<{field_width}}  {line}')
+    except Exception as e:
+        print(f"Error: Failed to inspect file '{args.file}' for table '{args.table}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_table_rollback(args):
     """
     Execute the 'table rollback' command.
 
     Rolls a table back to an earlier snapshot, tag, or timestamp using the
-    table's existing rollback API. Exactly one of --snapshot / --tag /
+    table's existing rollback API. Exactly one of --snapshot-id / --tag /
     --timestamp must be provided.
 
     Args:
@@ -632,9 +795,9 @@ def cmd_table_rollback(args):
         sys.exit(1)
 
     try:
-        if args.snapshot is not None:
-            table.rollback_to(args.snapshot)
-            target_desc = f"snapshot {args.snapshot}"
+        if args.snapshot_id is not None:
+            table.rollback_to(args.snapshot_id)
+            target_desc = f"snapshot {args.snapshot_id}"
         elif args.tag is not None:
             table.rollback_to(args.tag)
             target_desc = f"tag '{args.tag}'"
@@ -1252,6 +1415,33 @@ def _manifest_json_value(value, field_names=None):
     return value
 
 
+def _table_file_paths(table, path):
+    """Yield the FileIO paths a CLI file argument can refer to."""
+    from pathlib import Path
+
+    from pypaimon.utils.path import to_file_io_path
+
+    def file_uri(value):
+        scheme, separator, rest = str(value).partition(':')
+        return 'file:' + rest if separator and scheme.lower() == 'file' else None
+
+    uri = file_uri(path) or path
+    literal = to_file_io_path(uri)
+    yield literal
+    if literal == uri:
+        return
+
+    table_uri = file_uri(getattr(table, 'table_path', None))
+    if table_uri and '%' in table_uri:
+        # Metadata paths have a URI-encoded table root and literal partition directories.
+        logical_root = Path(to_file_io_path(table_uri))
+        logical_file = Path(literal)
+        if logical_root in logical_file.parents:
+            physical_root = Path(table.file_io.to_filesystem_path(table_uri))
+            yield str(physical_root / logical_file.relative_to(logical_root))
+    yield uri
+
+
 def add_table_subcommands(table_parser):
     """
     Add table subcommands to the parser.
@@ -1436,6 +1626,34 @@ def add_table_subcommands(table_parser):
     )
     manifest_parser.set_defaults(func=cmd_table_manifest)
 
+    # table list-files command
+    list_files_parser = table_subparsers.add_parser('list-files', help='List the live data files of a snapshot')
+    list_files_parser.add_argument('table', help='Table identifier in format: database.table')
+    list_files_parser.add_argument(
+        '--snapshot-id', type=_positive_int, default=None,
+        help='Snapshot ID to inspect (default: the latest snapshot)'
+    )
+    list_files_parser.add_argument('--bucket', type=int, default=None, help='Only display files in this bucket')
+    list_files_parser.add_argument(
+        '--limit', '-l', type=_positive_int, default=None,
+        help='Maximum number of live files to display after filtering (default: all)'
+    )
+    list_files_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='table',
+        help='Output format: table (default) or json'
+    )
+    list_files_parser.set_defaults(func=cmd_table_list_files)
+
+    # table file command
+    file_parser = table_subparsers.add_parser('file', help="Inspect a Parquet file's schema and footer metadata")
+    file_parser.add_argument('table', help='Table identifier in format: database.table (provides FileIO context)')
+    file_parser.add_argument('--file', required=True, help='Actual Parquet file path or filesystem URI')
+    file_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='json',
+        help='Output format: json (default) or table'
+    )
+    file_parser.set_defaults(func=cmd_table_file)
+
     # table rollback command
     rollback_parser = table_subparsers.add_parser(
         'rollback',
@@ -1445,9 +1663,10 @@ def add_table_subcommands(table_parser):
         help='Table identifier in format: database.table'
     )
     rollback_target = rollback_parser.add_mutually_exclusive_group(required=True)
+    # Keep the prefixes unambiguous for scripts using --snapshot or --snap.
     rollback_target.add_argument(
-        '--snapshot', type=int, default=None,
-        help='Snapshot ID to roll back to'
+        '--snapshot-id', type=_positive_int, default=None,
+        help='Snapshot ID to roll back to (also accepts --snapshot and --snap)'
     )
     rollback_target.add_argument(
         '--tag', type=str, default=None,
