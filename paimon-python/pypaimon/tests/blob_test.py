@@ -1940,6 +1940,9 @@ class BlobTest(unittest.TestCase):
                 self.uri_reader_factory = FailingFactory()
                 self.opened_paths = []
 
+            def read_blobs_concurrent(self, blobs, parallelism):
+                return [blob.to_data() if blob is not None else None for blob in blobs]
+
             def new_input_stream(self, path):
                 self.opened_paths.append(path)
                 return io.BytesIO(data)
