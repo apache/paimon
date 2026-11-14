@@ -32,6 +32,40 @@ pytestmark = [pytest.mark.python_plan, pytest.mark.python_read,
               pytest.mark.python_write, pytest.mark.python_commit]
 
 
+@pytest.mark.execution_defaults
+@pytest.mark.parametrize('execution', ['python', 'native', ''])
+@pytest.mark.parametrize('python_markers', [False, True])
+def test_execution_lane_preserves_explicit_table_options(monkeypatch, execution, python_markers):
+    from pypaimon.common.options.core_options import CoreOptions
+    from pypaimon.common.options.options import Options
+
+    path = Path(__file__).resolve().parents[2] / 'conftest.py'
+    spec = importlib.util.spec_from_file_location('execution_instrumentation', str(path))
+    instrumentation = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(instrumentation)
+    monkeypatch.setenv('PYPAIMON_TEST_EXECUTION', execution)
+    for key in ('PLAN', 'READ', 'WRITE', 'COMMIT', 'UPDATE'):
+        monkeypatch.delenv('PYPAIMON_TEST_NATIVE_' + key, raising=False)
+    request = SimpleNamespace(
+        node=SimpleNamespace(
+            get_closest_marker=lambda name: True if python_markers and name.startswith('python_') else None,
+            location=('table_read_test.py', 0, 'test_roundtrip')))
+    fixture = instrumentation.enable_native_backends.__wrapped__(request, monkeypatch)
+    next(fixture)
+    try:
+        for key, accessor in (
+                ('scan.native-plan.enabled', 'native_plan_enabled'),
+                ('read.native.enabled', 'native_read_enabled'),
+                ('write.native.enabled', 'native_write_enabled'),
+                ('commit.native.enabled', 'native_commit_enabled')):
+            assert getattr(CoreOptions(Options({})), accessor)() == (execution != 'python' and not python_markers)
+            for value in (True, False):
+                assert getattr(CoreOptions(Options({key: str(value).lower()})), accessor)() == value
+    finally:
+        with pytest.raises(StopIteration):
+            next(fixture)
+
+
 def test_native_write_tracking_preserves_signature_and_forwards_bucket(monkeypatch):
     from pypaimon.execution.native.write.native_write import NativeTableWrite
 

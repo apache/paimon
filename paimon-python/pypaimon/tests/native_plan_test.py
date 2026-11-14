@@ -22,6 +22,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 import pyarrow
+import pytest
 from pypaimon.execution.native.read.plan import NativeTableScan
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
@@ -296,14 +297,15 @@ class NativePlanTest(unittest.TestCase):
                 table.catalog_environment.catalog_loader = loader_type(context)
                 self.assertEqual(_resolved_schema_file_io_options(table), {})
 
-    def test_switch_defaults_off(self):
+    @pytest.mark.execution_defaults
+    def test_switch_defaults_on_and_can_be_disabled(self):
         defaults = CoreOptions(Options({}))
-        self.assertFalse(defaults.native_plan_enabled())
-        self.assertFalse(defaults.native_read_enabled())
-        self.assertTrue(
-            CoreOptions(Options({"scan.native-plan.enabled": "true"})).native_plan_enabled())
-        self.assertTrue(
-            CoreOptions(Options({"read.native.enabled": "true"})).native_read_enabled())
+        self.assertTrue(defaults.native_plan_enabled())
+        self.assertTrue(defaults.native_read_enabled())
+        self.assertFalse(
+            CoreOptions(Options({"scan.native-plan.enabled": "false"})).native_plan_enabled())
+        self.assertFalse(
+            CoreOptions(Options({"read.native.enabled": "false"})).native_read_enabled())
 
     def test_catalogless_standard_file_io_options_are_preserved(self):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment

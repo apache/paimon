@@ -58,19 +58,26 @@ def _prepare(builder, rows, checkpoint=None):
 
 def _commit(builder, messages, checkpoint=None, overwrite=False):
     commit = builder.new_commit()
+    retained_row_ids = builder.table.options.data_evolution_enabled() and any(
+        file.first_row_id is not None for message in messages for file in message.new_files)
+    native_publication = builder.table.catalog_environment.supports_version_management and not retained_row_ids
     try:
         def publish():
             if checkpoint is None:
                 commit.commit(messages)
             else:
                 commit.commit(messages, checkpoint)
-        if builder.table.catalog_environment.supports_version_management:
+        if native_publication:
             with patch('pypaimon.execution.python.write.file_store_commit.'
                        'FileStoreCommit.' + ('overwrite' if overwrite else 'commit'),
                        side_effect=AssertionError('Python commit fallback')):
                 publish()
         else:
-            publish()
+            with patch('pypaimon.execution.native.write.commit.NativeTableCommit.commit',
+                       side_effect=AssertionError('Unexpected Native publication')):
+                publish()
+        assert (commit._native_commit is not None) == native_publication
+        assert (commit._python_commit is None) == native_publication
     finally:
         commit.close()
 

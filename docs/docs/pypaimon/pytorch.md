@@ -29,6 +29,13 @@ under the License.
 
 This requires `torch` to be installed.
 
+For multi-worker loading, set `multiprocessing_context="spawn"` and create and
+iterate the DataLoader inside an `if __name__ == "__main__":` guarded entry
+point. Native row iteration uses multithreaded Polars; forking after a read can
+inherit locked worker state and hang. See the
+[Polars multiprocessing guide](https://docs.pola.rs/user-guide/misc/multiprocessing/).
+Define custom transforms and collators at module scope so workers can import them.
+
 You can read all the data into a `torch.utils.data.Dataset` or `torch.utils.data.IterableDataset`:
 
 ```python
@@ -40,6 +47,7 @@ dataloader = DataLoader(
     dataset,
     batch_size=2,
     num_workers=2,  # Concurrency to read data
+    multiprocessing_context="spawn",
     shuffle=False
 )
 
@@ -176,7 +184,8 @@ dataset = table_read.to_torch(
     batch_format="torch",
     batch_size=1024,
 )
-dataloader = DataLoader(dataset, batch_size=None, num_workers=2)
+dataloader = DataLoader(dataset, batch_size=None, num_workers=2,
+                        multiprocessing_context="spawn")
 
 for batch in dataloader:
     train(batch["features"], batch["label"])
@@ -210,7 +219,8 @@ dataset = table_read.to_torch(
     buffer_size=4096,
     max_buffer_input_splits=4,
 )
-loader = DataLoader(dataset, batch_size=None, num_workers=2)
+loader = DataLoader(dataset, batch_size=None, num_workers=2,
+                    multiprocessing_context="spawn")
 
 for epoch in range(10):
     dataset.set_epoch(epoch)
@@ -289,7 +299,8 @@ dataset = (
     )
 )
 
-loader = DataLoader(dataset, batch_size=32, num_workers=4, shuffle=True)
+loader = DataLoader(dataset, batch_size=32, num_workers=4, shuffle=True,
+                    multiprocessing_context="spawn")
 ```
 
 Each raw item contains scalar group/order keys, a list for every selected column,
@@ -463,6 +474,7 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 
 loader_config = dict(batch_size=32, shuffle=True, drop_last=False,
                      num_workers=4, prefetch_factor=2,
+                     multiprocessing_context="spawn",
                      persistent_workers=True, in_order=True)
 # Include the application's preprocessing/normalization version in this contract.
 run_config = dict(loader=loader_config, preprocessing="train-v1", world_size=1,
@@ -608,6 +620,7 @@ dataloader = DataLoader(
     dataset,
     batch_size=32,
     num_workers=2,
+    multiprocessing_context="spawn",
     shuffle=False,
 )
 ```
@@ -648,6 +661,7 @@ dataloader = DataLoader(
     dataset,
     batch_size=32,
     num_workers=2,
+    multiprocessing_context="spawn",
     shuffle=False,
 )
 ```

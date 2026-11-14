@@ -350,8 +350,7 @@ def create_shard_update_execution(table, projection, columns, commit_user, shard
 
 def create_row_id_plan_execution(table, plan):
     """Select pure routing once; execution errors never replay another backend."""
-    if (table.options.native_write_enabled() or table.options.native_read_enabled()
-            or table.options.native_plan_enabled()):
+    if table.options.native_write_enabled():
         from pypaimon.execution.native.write.row_id_plan import create_native_row_id_plan, NativeRowIdPlan
         native = create_native_row_id_plan(table, plan)
         if native is not None:

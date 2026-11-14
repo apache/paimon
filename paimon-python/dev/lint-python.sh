@@ -247,9 +247,13 @@ function pytest_torch_check() {
 }
 # Mixed tests check - runs Java-Python interoperability tests
 function mixed_check() {
-    # Native plan/read coverage is asserted only by the main pytest session.
-    unset PYPAIMON_TEST_NATIVE_PLAN
-    unset PYPAIMON_TEST_NATIVE_READ
+    # Each mixed-test pytest session covers only one interoperability scenario.
+    # Keep its execution backend, but assert full Native coverage only in the main suite.
+    export PYPAIMON_TEST_NATIVE_PLAN=0
+    export PYPAIMON_TEST_NATIVE_READ=0
+    export PYPAIMON_TEST_NATIVE_WRITE=0
+    export PYPAIMON_TEST_NATIVE_UPDATE=0
+    export PYPAIMON_TEST_NATIVE_COMMIT=0
 
     # Get Python version
     PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")

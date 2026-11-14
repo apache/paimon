@@ -90,9 +90,20 @@ the same method. Changing a builder affects only operations created afterward.
 
 ### Native Write and Commit
 
-With the `pypaimon-rust` extension installed, set `write.native.enabled=true`
-to use Rust for Parquet/BLOB writes and `commit.native.enabled=true` to use
-Rust for REST snapshot publication. Batch and stream writers retain the same
+On Python 3.10+, `pypaimon-rust>=0.5.0` is installed by default.
+`write.native.enabled` and `commit.native.enabled` both default to `true`,
+selecting Rust for supported Parquet/BLOB writes and REST snapshot publication.
+Set either option to `false` to select its Python execution path.
+With the 0.5.0 Native runtime, ordinary fixed-bucket append tables use Python
+writers to retain advancing file sequence ranges for Java compaction.
+Configured shredded VARIANT columns use Python writes and updates to retain the
+nested Parquet field IDs required by Java readers. Direct updates that write only
+ordinary columns can still use Native execution.
+Data Evolution commits containing retained row-ID
+files use Python publication so each snapshot attempt validates the written
+field IDs against its current schema. Native writes and update preparation
+remain available; this selection happens before any snapshot mutation.
+Batch and stream writers retain the same
 prepare-and-commit lifecycle. Native commits also support overwrite,
 `truncate_table()`, `truncate_partitions()` and commit callbacks.
 Overwrite and truncate record an OVERWRITE snapshot even when no files match,

@@ -63,10 +63,10 @@ def _append(table, rows):
         commit.close()
 
 
-@pytest.mark.parametrize('native_plan,native_read', [(True, False), (False, True), (True, True)])
+@pytest.mark.parametrize('native_plan,native_read', [(True, False), (None, True), (True, True)])
 @pytest.mark.parametrize('method', ['scan', 'scan_with_stats', 'plan_files'])
 def test_public_file_scanner_does_not_initialize_python(table, method, native_plan, native_read):
-    table = table.copy({'scan.native-plan.enabled': str(native_plan).lower(),
+    table = table.copy({'scan.native-plan.enabled': None if native_plan is None else str(native_plan).lower(),
                         'read.native.enabled': str(native_read).lower()})
     with ExitStack() as stack:
         for target in ('FileScanner', 'ManifestListManager'):
@@ -88,6 +88,23 @@ def test_public_file_scanner_does_not_initialize_python(table, method, native_pl
         assert (result[0] if method == 'scan_with_stats' else result).snapshot_id == 7
         native.assert_called_once()
         files.assert_not_called()
+
+
+@pytest.mark.parametrize('method', ['scan', 'scan_with_stats', 'plan_files'])
+def test_file_scanner_respects_explicit_python_planning_with_native_reads(table, method):
+    table = table.copy({'scan.native-plan.enabled': 'false', 'read.native.enabled': 'true'})
+    with patch('pypaimon.execution.native.runtime.native_runtime_available',
+               side_effect=AssertionError('Disabled planner probed Native runtime')), \
+            patch.object(NativeTableScan, 'plan_files',
+                         side_effect=AssertionError('Disabled planner used Native files')), \
+            patch('pypaimon.execution.native.read.plan.native_plan',
+                  side_effect=AssertionError('Disabled planner used Native planning')):
+        result = getattr(table.new_read_builder().new_scan().file_scanner, method)()
+    if method == 'plan_files':
+        assert result == []
+    else:
+        plan = result[0] if method == 'scan_with_stats' else result
+        assert plan.splits() == []
 
 
 @pytest.mark.parametrize('skip_level0,only_real', [(False, False), (False, True), (True, False), (True, True)])

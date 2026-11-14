@@ -65,10 +65,10 @@ def test_standard_constructor_arguments_and_defaults_remain_stable(public, execu
 
 
 @pytest.mark.parametrize('entrypoint', [AsyncStreamingTableScan, StreamTableScan, 'builder'])
-@pytest.mark.parametrize('native_plan,native_read', [(True, False), (False, True), (True, True)])
+@pytest.mark.parametrize('native_plan,native_read', [(True, False), (None, True), (True, True)])
 def test_all_streaming_entrypoints_select_native_without_python_resources(
         table, entrypoint, native_plan, native_read):
-    selected = table.copy({'scan.native-plan.enabled': str(native_plan).lower(),
+    selected = table.copy({'scan.native-plan.enabled': None if native_plan is None else str(native_plan).lower(),
                            'read.native.enabled': str(native_read).lower()})
     core = Mock()
     expected = Plan([], 7)
@@ -91,10 +91,12 @@ def test_all_streaming_entrypoints_select_native_without_python_resources(
     core.plan.assert_called_once()
 
 
+@pytest.mark.python_plan
 @pytest.mark.parametrize('entrypoint', [AsyncStreamingTableScan, StreamTableScan, 'builder'])
 @pytest.mark.parametrize('failure', ['disabled', 'unavailable', 'preparation'])
 def test_streaming_fallback_is_selected_before_planning(table, entrypoint, failure):
-    selected = table.copy({'read.native.enabled': str(failure != 'disabled').lower()})
+    selected = table.copy({'scan.native-plan.enabled': 'false' if failure == 'disabled' else None,
+                           'read.native.enabled': 'true'})
     with patch('pypaimon.execution.native.runtime.native_runtime_available',
                return_value=failure == 'preparation') as runtime, patch(
             'pypaimon.execution.native.read.streaming_table_scan.native_stream_scan',
