@@ -227,7 +227,7 @@ An equality or `IN` predicate on the complete bucket key can prune unrelated buc
 not guarantee reading exactly one eighth of the bytes: bucket sizes can be skewed, and matching
 buckets still contain other keys. A composite bucket key requires constraints on every key column.
 
-Spark can exploit compatible bucket distributions in joins with V2 bucketing enabled. Confirm
+Spark can exploit compatible bucket distributions in joins with `scan.preserve-data-grouping` and V2 bucketing enabled. Confirm
 shuffle removal with `EXPLAIN`; see [Bucketed Join](../append-table/bucketed#bucketed-join).
 
 ### Ordered Streaming {#scenario-7-queue-like-ordered-streaming-bucketed-append}

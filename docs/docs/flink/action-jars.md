@@ -44,7 +44,9 @@ The following command is used to compact a table.
 <FLINK_HOME>/bin/flink run \
  /path/to/paimon-flink-action-@@VERSION@@.jar \
  compact \
- --path <TABLE_PATH>
+ --warehouse <warehouse-path> \
+ --database <database-name> \
+ --table <table-name>
 ```
 
 Use `<action> --help` to inspect its arguments. Partition specifications use comma-separated

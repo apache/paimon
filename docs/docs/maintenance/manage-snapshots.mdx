@@ -286,9 +286,9 @@ Run the following command:
     /path/to/paimon-flink-action-@@VERSION@@.jar \
     expire_snapshots \
     --warehouse <warehouse-path> \
-    --identifier <identifier> \
+    --database <database-name> \
+    --table <table-name> \
     --older_than <timestamp> \
-    --version <snapshot-id> \
     --max_deletes <max-deletes> \
     --retain_max <retain-max> \
     --retain_min <retain-min> \
