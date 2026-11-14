@@ -698,6 +698,7 @@ under the License.
                         <!-- Binary compatibility fixtures -->
                         <exclude>paimon-common/src/test/resources/fmindex-v1-golden.base64</exclude>
                         <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
+                        <exclude>paimon-flink/paimon-flink-common/src/test/resources/compatibility/pending-splits-incremental-v1-chain-v2</exclude>
                         <exclude>paimon-python/pypaimon/tests/resources/calendar_extract_java.jsonl</exclude>
                         <exclude>**/*.proto</exclude>
                         <exclude>**/Cargo*</exclude>
