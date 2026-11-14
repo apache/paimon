@@ -40,7 +40,8 @@ import pyarrow.compute as pc
 
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.multimodal.lerobot.aggregate import (
-    _CONTROLS, _REBUILT_INFO, _merge_stats,
+    _CONTROLS, _READ_CONTROL_STATS_COLUMN, _READ_CONTROL_STATS_DESCRIPTION,
+    _REBUILT_INFO, _merge_stats,
 )
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.lerobot.metadata import (
@@ -1097,11 +1098,15 @@ def _load_dataset(table, tag_name):
     datasets_table = _component_table(
         catalog, catalog.get_table(identifiers["datasets"]), tag_name)
     source_columns = ["id", "name", "info", "tasks", "subtasks", "stats"]
-    if "read_control_stats" in _target_schema(datasets_table).names:
-        source_columns.append("read_control_stats")
+    datasets_schema = _target_schema(datasets_table)
+    if _READ_CONTROL_STATS_COLUMN in datasets_schema.names:
+        field = datasets_schema.field(_READ_CONTROL_STATS_COLUMN)
+        if (field.metadata or {}).get(b"description") == \
+                _READ_CONTROL_STATS_DESCRIPTION.encode("utf-8"):
+            source_columns.append(_READ_CONTROL_STATS_COLUMN)
     source_rows = _read_arrow(datasets_table, source_columns).sort_by("id").to_pylist()
     datasets = ([{key: value for key, value in row.items()
-                  if key not in ("tasks", "subtasks", "stats", "read_control_stats")}
+                  if key not in ("tasks", "subtasks", "stats", _READ_CONTROL_STATS_COLUMN)}
                  for row in source_rows] if source_local_layout else None)
     episodes = _episode_dataset(episodes_table, datasets)
     tasks, task_maps = _source_vocabulary(source_rows, "task")
@@ -1238,18 +1243,31 @@ def _merged_source_stats(sources, episodes_table):
     if "stats" in columns:
         decoded_rows = []
         legacy_ids = {source["id"] for source in sources
-                      if not source.get("read_control_stats")}
+                      if not source.get(_READ_CONTROL_STATS_COLUMN)}
+        legacy_stats = {}
         if legacy_ids:
             legacy_rows = _read_arrow(episodes_table, ["dataset_id", "stats"]).to_pylist()
-            decoded_rows.extend(
-                GenericVariant.from_arrow_struct(row["stats"]).to_python()
-                if isinstance(row["stats"], dict) else json.loads(row["stats"])
-                for row in legacy_rows
-                if row["dataset_id"] in legacy_ids and row["stats"])
-        for source in sources:
-            raw = source.get("read_control_stats")
+            for row in legacy_rows:
+                if row["dataset_id"] not in legacy_ids or not row["stats"]:
+                    continue
+                raw = row["stats"]
+                stats = (GenericVariant.from_arrow_struct(raw).to_python()
+                         if isinstance(raw, dict) else json.loads(raw))
+                legacy_stats.setdefault(row["dataset_id"], []).append(stats)
+        for source, (_, episode_offset, _, _, _) in zip(
+                sources, _source_dataset_ranges(sources)):
+            raw = source.get(_READ_CONTROL_STATS_COLUMN)
             if raw:
                 decoded_rows.append(json.loads(raw))
+            else:
+                for stats in legacy_stats.get(source["id"], []):
+                    episode = stats.get("episode_index")
+                    if episode:
+                        for name in ("min", "max", "mean"):
+                            if episode.get(name) is not None:
+                                episode[name] = [value + episode_offset
+                                                 for value in episode[name]]
+                    decoded_rows.append(stats)
         for name in _CONTROLS:
             parts = [row[name] for row in decoded_rows if name in row
                      and row[name].get("count") is not None]

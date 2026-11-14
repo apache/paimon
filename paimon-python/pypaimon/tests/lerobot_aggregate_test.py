@@ -360,8 +360,42 @@ def test_append_preserves_source_episode_stats(setup):
         frames = dataset.reader.get_items(range(10))
         assert [int(row["task_index"]) for row in frames] == [0] * 2 + [1] * 5 + [2] * 3
         assert dataset.reader.meta.stats["task_index"]["mean"] == pytest.approx([1.1])
+        assert dataset.reader.meta.stats["episode_index"]["mean"] == pytest.approx([1.6])
     finally:
         dataset.close()
+
+
+def test_legacy_user_read_control_stats_remains_text(setup, monkeypatch):
+    pytest.importorskip("datasets")
+    pytest.importorskip("torch")
+    conn, sources = setup
+    for uri in sources:
+        (Path(uri[7:]) / "notes.txt").write_text("ordinary text")
+    extra = {"read_control_stats": "notes.txt"}
+    with monkeypatch.context() as old_writer:
+        schema = aggregate._DATASETS_SCHEMA
+        old_writer.setattr(aggregate, "_DATASETS_SCHEMA", schema.remove(
+            schema.get_field_index(aggregate._READ_CONTROL_STATS_COLUMN)))
+        old_writer.setattr(aggregate, "_store_read_control_stats", lambda metadata, plans: None)
+        conn.load_from_lerobot("robot", sources[0], extra_dataset_fields=extra)
+
+    conn.append_to_lerobot("robot", sources[1], extra_dataset_fields=extra)
+    datasets = rows(conn, "robot_datasets")
+    assert datasets["read_control_stats"].to_pylist() == ["ordinary text"] * 2
+    assert aggregate._READ_CONTROL_STATS_COLUMN in datasets.column_names
+    assert sum(value is not None for value in
+               datasets[aggregate._READ_CONTROL_STATS_COLUMN].to_pylist()) == 1
+    from pypaimon.multimodal.table import _target_schema
+    field = _target_schema(conn.get_table("robot_datasets").raw_table).field(
+        aggregate._READ_CONTROL_STATS_COLUMN)
+    assert (field.metadata or {}).get(b"description") == \
+        aggregate._READ_CONTROL_STATS_DESCRIPTION.encode("utf-8")
+    reader = pm.PaimonLeRobotDataset(conn.get_table("robot_frames"))
+    try:
+        assert reader.reader.meta.stats["index"]["mean"] == pytest.approx([4.5])
+        assert reader.reader.meta.stats["episode_index"]["mean"] == pytest.approx([1.6])
+    finally:
+        reader.close()
 
 
 @pytest.mark.parametrize("setup", [20], indirect=True)
@@ -482,6 +516,7 @@ def test_transform_frames_preserves_unlabelled_subtasks():
     assert "source_index" not in converted.column_names
     assert converted["task_index"].to_pylist() == [0, 0]
     assert converted["subtask_index"].to_pylist() == [0, None]
+    assert plan["control_stats"][0]["episode_index"]["mean"] == [2.0]
     assert plan["control_stats"][0]["subtask_index"]["count"] == [1]
 
 
@@ -529,7 +564,8 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     assert "source_frame_to_index" not in episodes.column_names
     datasets = rows(conn, "merged_datasets").sort_by("id")
     assert datasets.column_names == [
-        "id", "name", "info", "tasks", "subtasks", "stats", "read_control_stats"]
+        "id", "name", "info", "tasks", "subtasks", "stats",
+        aggregate._READ_CONTROL_STATS_COLUMN]
     assert datasets["name"].to_pylist() == [None, None]
     assert "fps" not in datasets.column_names
     assert [json.loads(value)["fps"] for value in datasets["info"].to_pylist()] == [10, 10]
@@ -564,6 +600,8 @@ def test_merge_numbering_stats_and_training(setup, import_parallelism):
     for name in ("index", "episode_index", "task_index", "subtask_index", "observation.state", "action"):
         values = np.array(([0, 0, 1, 1, 1, 1, 1, 2, 2, 2] if name == "task_index"
                            else [0, 1, 0, 1, 0, 1, 2, 1, 2, 1] if name == "subtask_index"
+                           else [0, 0, 1, 1, 1, 2, 2, 3, 3, 3]
+                           if name == "episode_index"
                            else list(range(10)) if name == "index"
                            else data[name].to_pylist()))
         np.testing.assert_allclose(stats[name]["mean"], np.atleast_1d(values.mean(0)))

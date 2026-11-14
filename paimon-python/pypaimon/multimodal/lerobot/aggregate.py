@@ -70,6 +70,8 @@ _REBUILT_INFO = {
     "data_files_size_in_mb", "video_files_size_in_mb", "features",
 }
 _DATASET_ID_COLUMN = "dataset_id"
+_READ_CONTROL_STATS_COLUMN = "__paimon_lerobot_read_control_stats"
+_READ_CONTROL_STATS_DESCRIPTION = "pypaimon.lerobot.read-control-stats"
 _EPISODE_VARIANT_GROUPS = ("meta", "data", "videos", "stats")
 _EPISODE_EXTRA_VARIANT_GROUP_DESCRIPTION = "pypaimon.lerobot.episode-variant-group"
 _VARIANT_TYPE = pa.struct([
@@ -91,8 +93,8 @@ _DATASETS_SCHEMA = pa.schema([
     pa.field("tasks", _SOURCE_TASKS_TYPE, nullable=False),
     pa.field("subtasks", _SOURCE_SUBTASKS_TYPE),
     pa.field("stats", pa.string()),
-    # The combined reader needs derived control statistics; Episode stats stay source-local.
-    pa.field("read_control_stats", pa.string()),
+    pa.field(_READ_CONTROL_STATS_COLUMN, pa.string(),
+             metadata={b"description": _READ_CONTROL_STATS_DESCRIPTION.encode("utf-8")}),
 ])
 
 
@@ -451,7 +453,7 @@ def _plan_merge(plans, extra_dataset_fields=None, schema_evolution=True,
             "tasks": _vocabulary_rows(plan["metadata"]["source_tasks_table"], "task"),
             "subtasks": _vocabulary_rows(plan["metadata"]["source_subtasks_table"], "subtask"),
             "stats": _stats_json(plan["metadata"]["stats_table"]),
-            "read_control_stats": None,
+            _READ_CONTROL_STATS_COLUMN: None,
             **plan.get("extra_dataset_fields", {}),
         }
         for ordinal, plan in enumerate(plans)
@@ -515,6 +517,8 @@ def _transform_frames(plan, batch, episode):
                 column, pa.scalar(offset, type=column.type))
         elif name == "episode_index":
             values = column
+            stat_column = pc.add_checked(
+                column, pa.scalar(plan["episode_offset"], type=column.type))
         else:
             mapping = plan[name]
             mapped = pa.array([
@@ -524,8 +528,8 @@ def _transform_frames(plan, batch, episode):
             ], type=column.type)
             values = column
         batch = batch.set_column(batch.schema.get_field_index(name), batch.schema.field(name), values)
-        if name != "index":
-            stat_column = mapped if name in ("task_index", "subtask_index") else values
+        if name in ("task_index", "subtask_index"):
+            stat_column = mapped
         stat_values = ([value for value in stat_column.to_pylist()
                         if value is not None]
                        if stat_column.null_count else stat_column.to_numpy())
@@ -595,7 +599,7 @@ def _store_read_control_stats(metadata, plans):
                      if name in values]
             if parts:
                 stats[name] = _merge_stats(parts)
-        row["read_control_stats"] = json.dumps(
+        row[_READ_CONTROL_STATS_COLUMN] = json.dumps(
             _json_value(stats), ensure_ascii=False, separators=(",", ":"))
     metadata["datasets_table"] = pa.Table.from_pylist(
         rows, schema=metadata["datasets_table"].schema)
@@ -753,8 +757,10 @@ def _import_sources(connection, table_name, sources, batch_size, options,
             tables = {name: connection.catalog.get_table(component.identifier)
                       for name, component in tables.items()}
             frame_offset = ranges[-1][4]
+            episode_offset = ranges[-1][2]
             for plan in plans:
                 plan["frame_offset"] += frame_offset
+                plan["episode_offset"] += episode_offset
             metadata["datasets_table"] = pa.Table.from_pylist(
                 metadata["datasets_table"].to_pylist(),
                 schema=_target_schema(tables["datasets"]))

@@ -190,7 +190,7 @@ conn.load_from_lerobot(
 ```
 
 Each source has one row in `_datasets`. Episode `stats` preserves the source
-values; `_datasets.read_control_stats` stores derived statistics for the
+values; `_datasets.__paimon_lerobot_read_control_stats` stores derived statistics for the
 combined training reader.
 `dataset_name` accepts a string for one source or a list/tuple with one label per
 source in input order. Omitted names are null, and duplicate labels do not merge
