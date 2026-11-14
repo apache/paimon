@@ -163,8 +163,7 @@ throughput and resource utilization without rescaling the table:
 
 For a primary-key table, records that share a primary key still land on the same writer, so each
 writer produces sorted runs over a hash-partitioned subset of the bucket's keys. For an append-only
-table, the bucket key is hashed to one of the bucket's writers, so records that share a bucket key
-stay together.
+table, records are distributed round-robin across the bucket's writers.
 
 :::warning Requirements and costs
 
