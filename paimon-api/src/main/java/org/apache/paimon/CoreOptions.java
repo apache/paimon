@@ -1026,15 +1026,16 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Enable the REST catalog's server-side table commit lease capability. "
-                                    + "Writers acquire a lease only when rest.commit.acquire-lock is enabled.");
+                                    + "Writers acquire a lease only when rest.commit.retry-acquire-lock is enabled.");
 
-    public static final ConfigOption<Boolean> REST_COMMIT_ACQUIRE_LOCK =
-            key("rest.commit.acquire-lock")
+    public static final ConfigOption<Boolean> REST_COMMIT_RETRY_ACQUIRE_LOCK =
+            key("rest.commit.retry-acquire-lock")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether this writer acquires a REST commit lease for each publication "
-                                    + "attempt. Can be set dynamically for a writer and requires "
+                            "Whether this writer acquires a REST commit lease when retrying a conflicting publication. "
+                                    + "The first attempt is optimistic for retryable operations. Rollback as latest and "
+                                    + "manifest repair acquire the lease before preparing their single attempt. Can be set dynamically for a writer and requires "
                                     + "rest.commit.lock-enabled on the server-side table.");
 
     public static final ConfigOption<Duration> COMMIT_TIMEOUT =
@@ -4057,8 +4058,8 @@ public class CoreOptions implements Serializable {
         return options.get(REST_COMMIT_LOCK_ENABLED);
     }
 
-    public boolean restCommitAcquireLock() {
-        return options.get(REST_COMMIT_ACQUIRE_LOCK);
+    public boolean restCommitRetryAcquireLock() {
+        return options.get(REST_COMMIT_RETRY_ACQUIRE_LOCK);
     }
 
     public long commitTimeout() {

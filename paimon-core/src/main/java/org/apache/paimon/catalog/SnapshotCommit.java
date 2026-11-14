@@ -55,8 +55,8 @@ public abstract class SnapshotCommit implements Lock {
     }
 
     @Override
-    public final <T> T runWithLock(Callable<T> callable) throws Exception {
-        return lock.runWithLock(callable);
+    public final <T> T runWithLock(Callable<T> callable, boolean firstCommit) throws Exception {
+        return lock.runWithLock(callable, firstCommit);
     }
 
     @Override
@@ -73,7 +73,7 @@ public abstract class SnapshotCommit implements Lock {
         }
     }
 
-    /** Backend publication, invoked only after acquiring and validating the bound lock. */
+    /** Backend publication after entering and validating the bound lock scope. */
     protected abstract boolean commitImpl(
             @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
