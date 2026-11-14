@@ -61,9 +61,10 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /**
  * Compacts the dedicated vector-store files of one normal row-ID range of a data evolution table.
  *
- * <p>The task must receive every vector-store file of that range. The rewritten files take the
- * highest sequence number of the inputs, so a vector-store file left out of the task could start or
- * stop winning rows against them.
+ * <p>The task receives either every vector-store file of the range, or a newest-first version
+ * prefix whose files all cover that same range. The prefix must include every file at its boundary
+ * version. Otherwise an omitted file could start or stop winning rows against the rewritten files,
+ * which take the highest sequence number of the inputs.
  */
 public class DataEvolutionVectorCompactTask extends DataEvolutionCompactTask {
 

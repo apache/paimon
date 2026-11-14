@@ -31,6 +31,7 @@ have different effects on row IDs and dependent indexes.
 | Goal | Operation | Row IDs |
 | --- | --- | --- |
 | Reduce column-file fragmentation | [Ordinary compaction](#ordinary-compaction) | Preserved |
+| Reduce rewrites of column versions | [Incremental compaction](#incremental-column-version-compaction) | Preserved |
 | Resize large normal files | [Split during compaction](#splitting-large-files-during-compaction) | Preserved |
 | Remove logically deleted positions | [Materialize deletion vectors](#materialize-deletion-vectors) | Reassigned in rewritten ranges |
 
@@ -88,6 +89,81 @@ Ordinary compaction **does not physically remove rows hidden by deletion
 vectors**. Removing their positions would change the alignment with untouched
 column files.
 
+### Incremental Column-Version Compaction
+
+To reduce repeated rewrites of large base files when only a few columns
+change, enable `data-evolution.compaction.incremental.enabled` (default: `false`):
+
+```sql
+ALTER TABLE default.target_table SET TBLPROPERTIES (
+    'data-evolution.compaction.incremental.enabled' = 'true'
+);
+CALL sys.compact('default.target_table');
+```
+
+For normal, BLOB and VECTOR files with the same complete row-ID range, the planner selects a
+continuous prefix of versions from newest to oldest. Files with the same
+`maxSequenceNumber` are selected together. The output contains only the selected
+files' current columns, resolved by field ID through their historical schemas.
+Older files remain live to supply the other columns. For example, updates of
+`b`, `c`, then `b` can become one `b,c` file while the original `id,a,b,c` file
+continues to supply `id,a` without being rewritten.
+
+With `data-evolution.nested-field.enabled=true`, selection and output projection
+use leaf field IDs for `ROW` columns. Updating `nest.a` and `nest.b` can produce
+one file containing just those paths while `nest.kept` stays in an older file.
+Column renames are resolved through historical field IDs, and explicit NULLs
+and parent-struct nullness keep the existing nested-read semantics. `ARRAY` and
+`MAP` columns remain whole-column units; the existing
+[nested-field read limitations](./data-evolution#nested-fields) still apply.
+After schema evolution, a partial projection can be unsafe if dropped nested
+fields still determine a parent's nullness, or if the remaining shape cannot
+be encoded by the nested-write rules. Such groups use a complete normal-file
+rewrite to preserve the current values and parent nullness.
+
+Selection uses these existing options:
+
+- `compaction.min.file-num` triggers selection when a group reaches that file
+  count. Above the threshold, the planner selects enough newest files to reduce
+  the count toward the threshold. A single selected file is left unchanged.
+  BLOB groups retain their existing two-file trigger.
+- `compaction.size-ratio` is the percentage allowance when comparing the
+  selected files' accumulated size with the next older version's size. A much
+  larger older version stops size-based selection.
+- `compaction.max-size-amplification-percent` can trigger a full-group rewrite.
+  For Data Evolution, the planner estimates redundant space as the bytes of
+  files that no longer supply any current column or nested leaf, relative
+  to the bytes of files that still supply at least one. This is a conservative file-level
+  estimate: a file supplying any current column counts in full, and files
+  supplying different columns are not treated as redundant versions. BLOB files
+  can contain placeholders which fall back to older rows, so their older
+  providers conservatively count as live.
+
+Version groups are compacted independently. A partial normal-file rewrite preserves the
+original complete row-ID range and never splits it or merges it with a
+neighbouring group while older normal files remain. Row IDs, deleted positions,
+the retained deletion-vector anchor, and column sequence metadata are preserved.
+Dedicated BLOB and VECTOR compaction must still be enabled separately with
+`blob-compaction.enabled` and `vector-compaction.enabled`. They use the same
+version-selection policy while keeping their own grouping and output-size rules.
+BLOB groups are scoped to a field ID, and unresolved placeholders survive partial
+rewrites so they can still fall back to retained older files. VECTOR output
+contains only the selected versions' current columns and may roll by
+`vector.target-file-size`. Groups with different file row-ID ranges use a complete
+rewrite under the existing range-coverage rules.
+
+Selection can include every normal version, producing a full-group rewrite.
+With `data-evolution.compaction.split-large-files=true`, an individually oversized
+normal file still triggers splitting below `compaction.min.file-num` when its
+dedicated-file boundaries allow a split. That task selects **all** normal versions
+of the affected range before splitting, so no retained normal file overlaps a
+smaller output range. Other groups continue to use incremental selection; a
+partial rewrite always retains its complete range, including when dedicated files
+prevent splitting an oversized base. Disable incremental compaction when all
+normal versions should be consolidated without the incremental size policy.
+Files retained by older snapshots or tags still require snapshot expiration
+before their storage can be reclaimed.
+
 ### Splitting Large Files During Compaction
 
 To resize existing large normal data files, enable
@@ -108,7 +184,7 @@ The example uses Spark SQL and selects normal files strictly larger than 384 MB.
 including fractional values such as `1.5`. Files strictly exceeding the threshold
 qualify for compaction below `compaction.min.file-num` when their dedicated-file
 ranges allow splitting.
-Changing the ratio does not change the output target size. Compaction includes all
+Changing the ratio does not change the output target size. This splitting path includes all
 column updates for the same row-ID range. Before writing, it estimates rows per output
 from the total normal input file size, the logical row count, and `target-file-size`.
 It then adjusts the estimated cut points to safe dedicated-file boundaries.

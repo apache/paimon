@@ -153,7 +153,8 @@ public class CompactReassignReuseTest extends TableTestBase {
         DataEvolutionCompactTask task =
                 blob
                         ? new DataEvolutionBlobCompactTask(entries.get(0).partition(), files)
-                        : new DataEvolutionNormalCompactTask(entries.get(0).partition(), files);
+                        : new DataEvolutionNormalCompactTask(
+                                entries.get(0).partition(), files, Collections.emptyList(), false);
         CommitMessageImpl message = (CommitMessageImpl) task.doCompact(table, "compact-worker");
         assertThat(message.checkFromSnapshot()).isNull();
         lastSafeSnapshots.put(message, table.snapshotManager().latestSnapshotId());
