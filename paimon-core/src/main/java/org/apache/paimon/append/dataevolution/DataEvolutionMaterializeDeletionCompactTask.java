@@ -82,11 +82,6 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
 
     @Override
     public CommitMessage doCompact(FileStoreTable table, String commitUser) throws Exception {
-        if (compactBefore.stream().anyMatch(file -> isVectorStoreFile(file.fileName()))) {
-            // TODO: support vector-store file compaction
-            throw new UnsupportedOperationException("Vector-store task is not supported");
-        }
-
         table = table.copy(DYNAMIC_WRITE_OPTIONS);
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();

@@ -472,9 +472,6 @@ public class DataEvolutionDeletionVectorMaterializeCoordinator {
             }
 
             List<DataFileMeta> files = bin.files();
-            checkArgument(
-                    files.stream().noneMatch(file -> isVectorStoreFile(file.fileName())),
-                    "Materializing deletion vectors for vector-store files is not supported.");
             List<DeletionFile> alignedDeletionFiles =
                     files.stream()
                             .map(file -> deletionFiles.get(file.fileName()))
