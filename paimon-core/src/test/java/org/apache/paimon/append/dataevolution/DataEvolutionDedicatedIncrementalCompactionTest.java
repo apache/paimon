@@ -131,9 +131,7 @@ public class DataEvolutionDedicatedIncrementalCompactionTest extends TableTestBa
         assertThat(task.type())
                 .isEqualTo(
                         blob
-                                ? incremental
-                                        ? DataEvolutionCompactTask.TaskType.INCREMENTAL_BLOB
-                                        : DataEvolutionCompactTask.TaskType.BLOB
+                                ? DataEvolutionCompactTask.TaskType.BLOB
                                 : DataEvolutionCompactTask.TaskType.VECTOR);
         assertThat(task.compactBefore()).hasSize(incremental ? 3 : 4);
         if (incremental) {

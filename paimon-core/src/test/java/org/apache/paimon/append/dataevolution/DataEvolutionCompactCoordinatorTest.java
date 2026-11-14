@@ -1309,24 +1309,6 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
-    public void testSerializerIncrementalBlobTask() throws IOException {
-        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
-        List<DataFileMeta> files =
-                Arrays.asList(
-                        createDataFileMeta("latest.blob", 0, 10, 3, 100),
-                        createDataFileMeta("middle.blob", 0, 10, 2, 100));
-        DataEvolutionCompactTask task =
-                new DataEvolutionIncrementalBlobCompactTask(BinaryRow.EMPTY_ROW, files);
-        DataEvolutionCompactTask restored =
-                serializer.deserialize(serializer.getVersion(), serializer.serialize(task));
-        assertThat(serializer.getVersion()).isEqualTo(4);
-        assertThat(restored).isEqualTo(task);
-        assertThat(restored.type()).isEqualTo(DataEvolutionCompactTask.TaskType.INCREMENTAL_BLOB);
-        assertThat(restored.type().code()).isEqualTo(5);
-        assertThat(DataEvolutionCompactTask.TaskType.BLOB.code()).isEqualTo(1);
-    }
-
-    @Test
     public void testSerializerVectorTask() throws IOException {
         DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
 

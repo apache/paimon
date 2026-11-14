@@ -582,7 +582,7 @@ public class DataEvolutionCompactCoordinator {
                     }
                     for (List<DataFileMeta> blobFilesToCompact :
                             blobFileGroupsToCompact(blobFiles)) {
-                        tasks.add(blobTask(partition, blobFilesToCompact));
+                        tasks.add(new DataEvolutionBlobCompactTask(partition, blobFilesToCompact));
                     }
                 } else {
                     for (DataFileMeta dataFile : dataFiles) {
@@ -590,7 +590,9 @@ public class DataEvolutionCompactCoordinator {
                                 blobFileGroupsToCompact(
                                         dataFileToBlobFiles.getOrDefault(
                                                 dataFile, Collections.emptyList()))) {
-                            tasks.add(blobTask(partition, blobFilesToCompact));
+                            tasks.add(
+                                    new DataEvolutionBlobCompactTask(
+                                            partition, blobFilesToCompact));
                         }
                     }
                 }
@@ -655,13 +657,6 @@ public class DataEvolutionCompactCoordinator {
                 }
             }
             return tasks;
-        }
-
-        private DataEvolutionBlobCompactTask blobTask(
-                BinaryRow partition, List<DataFileMeta> files) {
-            return incrementalPlanner == null
-                    ? new DataEvolutionBlobCompactTask(partition, files)
-                    : new DataEvolutionIncrementalBlobCompactTask(partition, files);
         }
 
         private List<DataFileMeta> vectorStoreFilesToCompact(List<DataFileMeta> vectorStoreFiles) {

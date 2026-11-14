@@ -164,10 +164,6 @@ normal versions should be consolidated without the incremental size policy.
 Files retained by older snapshots or tags still require snapshot expiration
 before their storage can be reclaimed.
 
-The new incremental normal and BLOB task types are understood by upgraded Spark and Flink jobs.
-New binaries can restore existing compaction tasks; older binaries cannot read
-an in-flight incremental task. Finish those tasks before rolling back a job.
-
 ### Splitting Large Files During Compaction
 
 To resize existing large normal data files, enable
