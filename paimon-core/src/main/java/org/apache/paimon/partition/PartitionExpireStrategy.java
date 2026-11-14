@@ -22,10 +22,13 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.UnsignedBytes;
@@ -51,11 +54,20 @@ public abstract class PartitionExpireStrategy implements Serializable {
     protected final List<String> partitionKeys;
     protected final String partitionDefaultName;
     private final RowDataToObjectArrayConverter toObjectArrayConverter;
+    @Nullable private final String timestampFormatter;
 
     public PartitionExpireStrategy(RowType partitionType, String partitionDefaultName) {
+        this(partitionType, partitionDefaultName, null);
+    }
+
+    public PartitionExpireStrategy(
+            RowType partitionType,
+            String partitionDefaultName,
+            @Nullable String timestampFormatter) {
         this.toObjectArrayConverter = new RowDataToObjectArrayConverter(partitionType);
         this.partitionKeys = partitionType.getFieldNames();
         this.partitionDefaultName = partitionDefaultName;
+        this.timestampFormatter = timestampFormatter;
     }
 
     public Map<String, String> toPartitionString(Object[] array) {
@@ -78,16 +90,51 @@ public abstract class PartitionExpireStrategy implements Serializable {
         return list;
     }
 
+    /**
+     * Whether {@link #convertPartition} renders the value at this index in a form meant for time
+     * extraction that can differ from the stored partition name.
+     */
+    public boolean isNormalizedForTimeExtraction(int index) {
+        switch (toObjectArrayConverter.rowType().getTypeAt(index).getTypeRoot()) {
+            case DATE:
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     public Object[] convertPartition(BinaryRow partition) {
         Object[] values = toObjectArrayConverter.convert(partition);
         RowType partitionType = toObjectArrayConverter.rowType();
         for (int index = 0; index < values.length; index++) {
-            if (values[index] != null
-                    && partitionType.getTypeAt(index).getTypeRoot() == DataTypeRoot.DATE) {
-                values[index] = LocalDate.ofEpochDay((Integer) values[index]);
+            if (values[index] == null) {
+                continue;
+            }
+            DataType type = partitionType.getTypeAt(index);
+            switch (type.getTypeRoot()) {
+                case DATE:
+                    values[index] = LocalDate.ofEpochDay((Integer) values[index]);
+                    break;
+                case TIMESTAMP_WITHOUT_TIME_ZONE:
+                    values[index] =
+                            formatTimestampForTimeExtraction((Timestamp) values[index], type);
+                    break;
+                default:
+                    break;
             }
         }
         return values;
+    }
+
+    private String formatTimestampForTimeExtraction(Timestamp timestamp, DataType type) {
+        if (timestampFormatter != null) {
+            // Keep the Timestamp#toString input an explicitly configured formatter expects.
+            return timestamp.toString();
+        }
+        // Timestamp#toString uses the ISO 'T' separator, which the default partition time
+        // formatter cannot parse. Render it as the SQL timestamp string.
+        return DateTimeUtils.formatTimestamp(timestamp, DataTypeChecks.getPrecision(type));
     }
 
     public abstract List<PartitionEntry> selectExpiredPartitions(

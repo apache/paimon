@@ -74,6 +74,17 @@ public interface FileStoreCommit extends AutoCloseable {
      */
     void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier);
 
+    /**
+     * Drop multiple partitions given by their exact partition values. Unlike {@link
+     * #dropPartitions}, the partitions are not parsed back from their names, so a name that is
+     * ambiguous (e.g. equal to the default partition name) or time-zone dependent still drops
+     * exactly the given partition. The {@link Snapshot.CommitKind} of generated snapshot is {@link
+     * Snapshot.CommitKind#OVERWRITE}.
+     *
+     * @param partitions A list of partitions. NOTE: cannot be empty!
+     */
+    void dropBinaryPartitions(List<BinaryRow> partitions, long commitIdentifier);
+
     void truncateTable(long commitIdentifier);
 
     /** Compact the manifest entries only. */
