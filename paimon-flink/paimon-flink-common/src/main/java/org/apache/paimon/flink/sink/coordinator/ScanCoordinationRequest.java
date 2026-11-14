@@ -30,6 +30,8 @@ public class ScanCoordinationRequest implements CoordinationRequest {
     private final boolean scanDynamicBucketIndex;
     private final boolean scanDeleteVectorsIndex;
     private final boolean scanVectorIndexPayloads;
+    // Keep scanning data file metadata for older serialized requests without this field.
+    private final boolean skipDataFileMetas;
 
     public ScanCoordinationRequest(
             byte[] partition,
@@ -37,11 +39,28 @@ public class ScanCoordinationRequest implements CoordinationRequest {
             boolean scanDynamicBucketIndex,
             boolean scanDeleteVectorsIndex,
             boolean scanVectorIndexPayloads) {
+        this(
+                partition,
+                bucket,
+                scanDynamicBucketIndex,
+                scanDeleteVectorsIndex,
+                scanVectorIndexPayloads,
+                true);
+    }
+
+    public ScanCoordinationRequest(
+            byte[] partition,
+            int bucket,
+            boolean scanDynamicBucketIndex,
+            boolean scanDeleteVectorsIndex,
+            boolean scanVectorIndexPayloads,
+            boolean scanDataFileMetas) {
         this.partition = partition;
         this.bucket = bucket;
         this.scanDynamicBucketIndex = scanDynamicBucketIndex;
         this.scanDeleteVectorsIndex = scanDeleteVectorsIndex;
         this.scanVectorIndexPayloads = scanVectorIndexPayloads;
+        this.skipDataFileMetas = !scanDataFileMetas;
     }
 
     public byte[] partition() {
@@ -62,5 +81,9 @@ public class ScanCoordinationRequest implements CoordinationRequest {
 
     public boolean scanVectorIndexPayloads() {
         return scanVectorIndexPayloads;
+    }
+
+    public boolean scanDataFileMetas() {
+        return !skipDataFileMetas;
     }
 }

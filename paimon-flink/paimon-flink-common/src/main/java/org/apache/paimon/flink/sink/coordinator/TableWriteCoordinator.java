@@ -169,8 +169,12 @@ public class TableWriteCoordinator {
         int bucket = request.bucket();
 
         List<DataFileMeta> restoreFiles = new ArrayList<>();
-        List<ManifestEntry> entries = scan.withPartitionBucket(partition, bucket).plan().files();
-        Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
+        Integer totalBuckets = null;
+        if (request.scanDataFileMetas()) {
+            List<ManifestEntry> entries =
+                    scan.withPartitionBucket(partition, bucket).plan().files();
+            totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
+        }
 
         IndexFileMeta dynamicBucketIndex = null;
         if (request.scanDynamicBucketIndex()) {
