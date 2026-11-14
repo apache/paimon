@@ -96,6 +96,9 @@ selecting Rust for supported Parquet/BLOB writes and REST snapshot publication.
 Set either option to `false` to select its Python execution path.
 With the 0.5.0 Native runtime, ordinary fixed-bucket append tables use Python
 writers to retain advancing file sequence ranges for Java compaction.
+Configured shredded VARIANT columns use Python writes and updates to retain the
+nested Parquet field IDs required by Java readers. Direct updates that write only
+ordinary columns can still use Native execution.
 Data Evolution commits containing retained row-ID
 files use Python publication so each snapshot attempt validates the written
 field IDs against its current schema. Native writes and update preparation

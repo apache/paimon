@@ -27,6 +27,17 @@ from pypaimon.common.options.config import CatalogOptions, FuseOptions, OssOptio
 from pypaimon.common.options.options_utils import OptionsUtils
 
 
+def _native_variant_write_supported(table, columns=None):
+    """Rust 0.5.0 omits Java-required field IDs inside shredded VARIANTs."""
+    if not table.options.variant_shredding_schema():
+        return True
+    from pypaimon.schema.data_types import AtomicType
+
+    names = set(table.field_names if columns is None else columns)
+    return not any(field.name in names and isinstance(field.type, AtomicType) and field.type.type == 'VARIANT'
+                   for field in table.fields)
+
+
 def _native_blob_view_supported(table, read_names) -> bool:
     """Resolve Blob views natively only with the REST catalog environment."""
     if (not (table.options.blob_view_fields() & set(read_names))

@@ -17,6 +17,7 @@
 
 """Native defaults preserve the physical contracts shared with Java."""
 
+import json
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -26,6 +27,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.data.map_shared_shredding import is_shared_shredding
+from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.execution.native.read.table_read import NativeTableRead, native_read
 from pypaimon.execution.native.runtime import native_runtime_available
 
@@ -174,3 +176,42 @@ def test_orc_schema_probe_selects_fallback_but_propagates_fork_errors(tmp_path, 
             with pytest.raises(ForkSafetyError):
                 read.read_batches([split], _SCHEMA)
     native.assert_not_called()
+
+
+@pytest.mark.parametrize('option', ['variant.shreddingSchema', 'parquet.variant.shreddingSchema'])
+def test_native_default_shredded_variant_retains_java_field_ids(tmp_path, option):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    values = [GenericVariant.from_python({'age': 30, 'city': 'Beijing'}),
+              GenericVariant.from_python([1, 2, 3]), None]
+    payload = GenericVariant.to_arrow_array(values)
+    schema = pa.schema([('id', pa.int32()), ('payload', payload.type)])
+    shredding = json.dumps({'type': 'ROW', 'fields': [
+        {'name': 'payload', 'type': {'type': 'ROW', 'fields': [
+            {'name': 'age', 'type': 'BIGINT'}, {'name': 'city', 'type': 'STRING'}]}}]})
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        option: shredding, 'variant.shredding.enabled': 'false'}), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(pa.Table.from_arrays([pa.array([1, 2, 3], type=pa.int32()), payload], schema=schema))
+        messages = writer.prepare_commit()
+        commit.commit(messages)
+    finally:
+        writer.close()
+        commit.close()
+
+    def check_ids(fields):
+        for field in fields:
+            assert field.metadata and b'PARQUET:field_id' in field.metadata
+            if pa.types.is_struct(field.type):
+                check_ids(field.type)
+
+    physical = pq.read_schema(messages[0].new_files[0].file_path).field('payload')
+    assert 'typed_value' in physical.type.names
+    check_ids(physical.type)
+    reader = table.new_read_builder()
+    actual = reader.new_read().to_arrow(reader.new_scan().plan().splits()).sort_by('id')['payload'].to_pylist()
+    assert [None if value is None else GenericVariant.from_arrow_struct(value).to_python()
+            for value in actual] == [{'age': 30, 'city': 'Beijing'}, [1, 2, 3], None]

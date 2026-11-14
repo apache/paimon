@@ -256,7 +256,8 @@ def test_sidecars_store_logical_nested_map_and_variant_values(tmp_path, layout):
     data = pa.table(values, schema=schema)
     builder = table.new_batch_write_builder()
     writer = builder.new_write()
-    assert isinstance(writer, NativeTableWrite)
+    assert table.options.native_write_enabled()
+    assert isinstance(writer, NativeTableWrite) == (layout != 'variant')
     try:
         writer.write_arrow(data)
         messages = writer.prepare_commit()
