@@ -32,8 +32,8 @@ public class RowDataChannelComputer implements ChannelComputer<InternalRow> {
 
     private final TableSchema schema;
 
-    private transient int numChannels;
-    private transient KeyAndBucketExtractor<InternalRow> extractor;
+    protected transient int numChannels;
+    protected transient KeyAndBucketExtractor<InternalRow> extractor;
 
     public RowDataChannelComputer(TableSchema schema) {
         this.schema = schema;

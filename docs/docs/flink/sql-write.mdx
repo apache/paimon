@@ -146,6 +146,52 @@ keys remain supported aliases. To reduce sampling or sorting work, tune
 See [Append-table Query Performance](../append-table/query-performance) and
 [FlinkConnectorOptions](../maintenance/configurations#flinkconnectoroptions) for tuning details.
 
+### Write Parallelism Beyond Bucket Count
+
+For a fixed-bucket table, the sink shuffles records by bucket, so each bucket is written by a single
+writer subtask. When the bucket count is small, this limits write parallelism and leaves writer
+subtasks idle.
+
+When the bucket count cannot be changed easily, `sink.striped-bucket-write.enabled` lets a
+fixed-bucket table stripe each bucket's writes across multiple writer subtasks, improving write
+throughput and resource utilization without rescaling the table:
+
+| Option | Effect |
+| --- | --- |
+| `sink.striped-bucket-write.enabled` | Stripe each bucket's writes across multiple writer subtasks to raise write parallelism beyond the bucket count |
+| `sink.striped-bucket-write.writers-per-bucket` | Number of writer subtasks per bucket; the writer parallelism becomes this number times the bucket count. Set to -1 to let every writer subtask write every bucket. Only takes effect when enabled |
+
+For a primary-key table, records that share a primary key still land on the same writer, so each
+writer produces sorted runs over a hash-partitioned subset of the bucket's keys. For an append-only
+table, records are distributed round-robin across the bucket's writers.
+
+:::warning Requirements and costs
+
+Striped write requires `write-only = true` together with a
+[dedicated compaction job](../maintenance/dedicated-compaction): multiple writers per bucket cannot
+run inline compaction without conflicting commits.
+
+Striped write does not support `deletion-vectors.enabled`: each writer would maintain a conflicting
+deletion-vector index for the same bucket.
+
+Striped write of an append-only table requires `bucket-append-ordered = false`. Striping spreads
+successive rows across independent writers whose files are read whole, so it cannot preserve the
+append order within a bucket that ordered reads rely on.
+
+These misconfigurations are rejected when the sink is built.
+
+Compaction still merges each bucket as a single task, now handling proportionally more sorted runs.
+Striped write trades extra compaction work and more small files for higher write parallelism; it does not
+raise compaction parallelism, which stays bounded by the bucket count. Prefer increasing the bucket
+count when a [rescale](../maintenance/rescale-bucket) is acceptable.
+
+You can change the writer parallelism or the number of writers per bucket when restoring from a
+savepoint. A striped writer is write-only and keeps no per-bucket state in the savepoint: records are
+committed at the checkpoint barrier and each writer rebuilds from the table on restore, so committed
+rows survive the rescale.
+
+:::
+
 ## Overwriting the Whole Table
 
 Use `INSERT OVERWRITE` to replace the contents of an unpartitioned table. For example, continuing
