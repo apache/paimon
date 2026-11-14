@@ -21,6 +21,7 @@ package org.apache.paimon.fs;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.hadoop.HadoopFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 
@@ -39,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -55,6 +57,35 @@ public class ResolvingFileIOTest {
         Options options = new Options();
         CatalogContext catalogContext = CatalogContext.create(options);
         resolvingFileIO.configure(catalogContext);
+    }
+
+    @Test
+    public void testTableViewsApplyToEachResolvedFileIO() throws IOException {
+        IoCacheViewableFileIO oss = mock(IoCacheViewableFileIO.class);
+        FileIO originOnly = mock(FileIO.class);
+        when(oss.originOnly()).thenReturn(originOnly);
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.getScheme()).thenReturn("oss");
+        when(loader.load(any())).thenReturn(oss);
+        ResolvingFileIO fileIO = new ResolvingFileIO();
+        fileIO.configure(CatalogContext.create(new Options(), loader, null));
+        Path data = new Path("oss://bucket/table/bucket-0/data-1.orc");
+
+        FileIO view = fileIO.originOnly();
+        assertInstanceOf(ResolvingFileIO.class, view);
+        assertSame(view, IoCacheViewableFileIO.originOnly(view));
+        assertSame(originOnly, ((ResolvingFileIO) view).fileIO(data));
+        assertSame(oss, fileIO.fileIO(data));
+        // loading a FileIO checks access with exists
+        clearInvocations(oss);
+        view.exists(data);
+        verify(originOnly).exists(data);
+        verify(oss, never()).exists(any());
+        // a FileIO without io-cache routing is its own view
+        Path local = new Path("file:///tmp/x");
+        assertSame(
+                resolvingFileIO.fileIO(local),
+                ((ResolvingFileIO) resolvingFileIO.originOnly()).fileIO(local));
     }
 
     @Test
