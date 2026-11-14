@@ -355,7 +355,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table_read = read_builder.new_read()
         result = table_read.to_pandas(table_scan.plan().splits())
         print(f"Format: {file_format}, Result:\n{result}")
-        self.assertEqual(initial_data.to_dict(), result.to_dict())
+        # Primary-key scans across partitions and buckets have no global row order.
+        self.assertEqual(initial_data.to_dict(), result.sort_values('id').reset_index(drop=True).to_dict())
 
         from pypaimon.execution.python.write.row_key_extractor import FixedBucketRowKeyExtractor
         expected_bucket_first_row = 2

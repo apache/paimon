@@ -51,6 +51,10 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
             or table.options.file_format() != 'parquet'
             or table.options.video_frame_fields()):
         return None
+    # Rust 0.5.0 emits zero sequence bounds for ordinary bucketed append files.
+    # Java compaction needs advancing ranges to preserve their append order.
+    if not table.is_primary_key_table and table.bucket_mode() == BucketMode.HASH_FIXED:
+        return None
     native_table = create_native_write_table(table)
     if native_table is None:
         return None
