@@ -138,6 +138,8 @@ public class RowTrackingCommitUtils {
                     rowIdAssigned.add(entry.assignFirstRowId(start));
                     blobStartDefault = start;
                     blobStarts.clear();
+                    // Copied vector files may already extend past this normal file's start.
+                    vectorStoreStart = Math.max(vectorStoreStart, start);
                     start += rowCount;
                 }
             } else {
