@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.List;
 
 /**
  * Commit message for partition and bucket.
@@ -49,6 +50,18 @@ public interface CommitMessage extends Serializable {
      */
     @Nullable
     default Long checkFromSnapshot() {
+        return null;
+    }
+
+    /** Ordering-history generation observed when the bucket writer restored its inputs. */
+    @Nullable
+    default String deleteOrderingGuardGeneration() {
+        return null;
+    }
+
+    /** Guard file names observed by the bucket writer before its pending compactions. */
+    @Nullable
+    default List<String> deleteOrderingGuardSources() {
         return null;
     }
 }

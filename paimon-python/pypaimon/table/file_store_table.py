@@ -226,12 +226,15 @@ class FileStoreTable(Table):
 
         Raises:
             ValueError: If the target doesn't exist or type is unsupported.
+            NotImplementedError: If delete ordering guards are enabled or guard history is retained.
         """
+        from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guards
         from pypaimon.table.instant import Instant
 
         if not isinstance(target, (int, str)):
             raise ValueError("Unsupported rollback target type: {}".format(type(target)))
 
+        validate_delete_ordering_guards(self)
         table_rollback = self.catalog_environment.catalog_table_rollback()
         if table_rollback is not None:
             instant = Instant.snapshot(target) if isinstance(target, int) else Instant.tag(target)

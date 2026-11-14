@@ -19,12 +19,17 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
+import org.apache.paimon.index.DeleteOrderingGuardPolicy;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.table.SchemaModification;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
@@ -280,8 +285,28 @@ public class FileSystemSchemaManager implements SchemaManager {
         SchemaValidation.validateHistoricalIcebergTypes(
                 this::listAll, new CoreOptions(newSchema.options()));
         SchemaValidation.validateFallbackBranch(this, newSchema);
+        validateRetainedDeleteOrderingGuards(newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
         return fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());
+    }
+
+    private void validateRetainedDeleteOrderingGuards(TableSchema newSchema) throws IOException {
+        Snapshot snapshot =
+                new SnapshotManager(fileIO, tableRoot, branch, null, null).latestSnapshot();
+        if (!DeleteOrderingGuardFile.mayContainGuards(snapshot)) {
+            return;
+        }
+        PrimaryKeyFileStoreTable source =
+                (PrimaryKeyFileStoreTable)
+                        FileStoreTableFactory.create(
+                                fileIO, tableRoot, schema(snapshot.schemaId()));
+        IndexFileHandler indexes = source.store().newIndexFileHandler();
+        DeleteOrderingGuardPolicy.validateGuards(
+                fileIO,
+                this,
+                indexes.scan(snapshot, DeleteOrderingGuardFile.DELETE_ORDERING_GUARD),
+                indexes::filePath,
+                newSchema);
     }
 
     /** Read schema for schema id. */

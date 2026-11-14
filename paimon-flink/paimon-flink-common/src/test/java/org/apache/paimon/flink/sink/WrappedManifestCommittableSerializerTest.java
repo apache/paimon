@@ -22,14 +22,18 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.utils.IOUtils;
 
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -38,6 +42,7 @@ import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomCompactIncrement;
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomNewFilesIncrement;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class WrappedManifestCommittableSerializerTest {
 
@@ -62,6 +67,36 @@ class WrappedManifestCommittableSerializerTest {
 
         assertThat(manifestCommittables.size()).isEqualTo(2);
         assertThat(deserialize).isEqualTo(wrappedManifestCommittable);
+        assertThat(serializer.getVersion()).isEqualTo(2);
+        assertThatThrownBy(() -> serializer.deserialize(VERSION + 1, serialized))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("version");
+    }
+
+    @Test
+    void testRestoresVersion1WithLegacyManifestMessages() throws IOException {
+        byte[] manifest =
+                IOUtils.readFully(
+                        getClass()
+                                .getClassLoader()
+                                .getResourceAsStream("compatibility/manifest-committable-v14-v5"),
+                        true);
+        Identifier table = Identifier.create("db", "legacy");
+        byte[] identifier = table.getFullName().getBytes(StandardCharsets.UTF_8);
+        DataOutputSerializer legacy = new DataOutputSerializer(256);
+        legacy.writeLong(9L);
+        legacy.writeLong(42L);
+        legacy.writeInt(1);
+        legacy.writeInt(identifier.length);
+        legacy.write(identifier);
+        legacy.writeInt(manifest.length);
+        legacy.write(manifest);
+
+        WrappedManifestCommittable restored = serializer().deserialize(1, legacy.getCopyOfBuffer());
+        WrappedManifestCommittable expected = new WrappedManifestCommittable(9L, 42L);
+        expected.putManifestCommittable(
+                table, new ManifestCommittableSerializer().deserialize(5, manifest));
+        assertThat(restored).isEqualTo(expected);
     }
 
     public static WrappedManifestCommittableSerializer serializer() {

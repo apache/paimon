@@ -33,6 +33,34 @@ import scala.collection.JavaConverters._
 /** Tests for the rescale procedure. See [[RescaleProcedure]]. */
 class RescaleProcedureTest extends PaimonSparkTestBase {
 
+  test("Paimon Procedure: rescale rejects delete ordering guards") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, seq INT, op STRING)
+                  |TBLPROPERTIES (
+                  |  'primary-key' = 'id', 'bucket' = '1',
+                  |  'sequence.field' = 'seq', 'rowkind.field' = 'op',
+                  |  'write-only' = 'true', 'delete-ordering-guards.enabled' = 'true')
+                  |""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (1, 4, '-D')")
+      spark.sql(
+        "CALL sys.compact(table => 'T', compact_strategy => 'full', options => 'write-only=false')")
+      Seq(true, false).foreach {
+        capture =>
+          spark.sql(
+            s"ALTER TABLE T SET TBLPROPERTIES ('delete-ordering-guards.enabled' = '$capture')")
+          val error = intercept[IllegalArgumentException] {
+            spark.sql("CALL sys.rescale(table => 'T', bucket_num => 2)")
+          }
+          assert(
+            error.getMessage.contains(
+              "Rescaling tables with delete ordering guards is not supported"))
+      }
+      spark.sql("INSERT INTO T VALUES (1, 2, '+I')")
+      checkAnswer(spark.sql("SELECT * FROM T"), Seq.empty)
+    }
+  }
+
   test("Paimon Procedure: rescale basic functionality") {
     withTable("T") {
       spark.sql(s"""

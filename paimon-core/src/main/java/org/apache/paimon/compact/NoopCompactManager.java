@@ -19,10 +19,12 @@
 package org.apache.paimon.compact;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -31,7 +33,20 @@ import java.util.concurrent.ExecutionException;
 /** A {@link CompactManager} which never compacts. */
 public class NoopCompactManager implements CompactManager {
 
-    public NoopCompactManager() {}
+    private final List<IndexFileMeta> deleteOrderingGuards;
+
+    public NoopCompactManager() {
+        this(Collections.emptyList());
+    }
+
+    public NoopCompactManager(List<IndexFileMeta> deleteOrderingGuards) {
+        this.deleteOrderingGuards = new ArrayList<>(deleteOrderingGuards);
+    }
+
+    @Override
+    public List<IndexFileMeta> deleteOrderingGuards() {
+        return new ArrayList<>(deleteOrderingGuards);
+    }
 
     @Override
     public boolean shouldWaitForLatestCompaction() {

@@ -267,6 +267,9 @@ public class PrimaryKeyFullTextScan implements FullTextScan {
 
         private void add(DataSplit split) {
             checkArgument(
+                    split.deleteOrderingGuards().isEmpty(),
+                    "Full-text search with delete ordering guards requires guard-aware index visibility.");
+            checkArgument(
                     snapshotId == split.snapshotId()
                             && partition.equals(split.partition())
                             && bucket == split.bucket()

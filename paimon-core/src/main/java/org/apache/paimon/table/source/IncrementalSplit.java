@@ -19,6 +19,8 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
@@ -35,6 +37,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.OptionalLong;
@@ -49,7 +52,7 @@ public class IncrementalSplit implements Split {
 
     private static final long serialVersionUID = 1L;
 
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
 
     private long snapshotId;
     private BinaryRow partition;
@@ -61,6 +64,9 @@ public class IncrementalSplit implements Split {
 
     private List<DataFileMeta> afterFiles;
     private @Nullable List<DeletionFile> afterDeletionFiles;
+
+    private List<IndexFileMeta> beforeDeleteOrderingGuards;
+    private List<IndexFileMeta> afterDeleteOrderingGuards;
 
     private boolean isStreaming;
 
@@ -74,6 +80,32 @@ public class IncrementalSplit implements Split {
             List<DataFileMeta> afterFiles,
             @Nullable List<DeletionFile> afterDeletionFiles,
             boolean isStreaming) {
+        this(
+                snapshotId,
+                partition,
+                bucket,
+                totalBuckets,
+                beforeFiles,
+                beforeDeletionFiles,
+                afterFiles,
+                afterDeletionFiles,
+                isStreaming,
+                Collections.emptyList(),
+                Collections.emptyList());
+    }
+
+    public IncrementalSplit(
+            long snapshotId,
+            BinaryRow partition,
+            int bucket,
+            int totalBuckets,
+            List<DataFileMeta> beforeFiles,
+            @Nullable List<DeletionFile> beforeDeletionFiles,
+            List<DataFileMeta> afterFiles,
+            @Nullable List<DeletionFile> afterDeletionFiles,
+            boolean isStreaming,
+            List<IndexFileMeta> beforeDeleteOrderingGuards,
+            List<IndexFileMeta> afterDeleteOrderingGuards) {
         this.snapshotId = snapshotId;
         this.partition = partition;
         this.bucket = bucket;
@@ -83,6 +115,10 @@ public class IncrementalSplit implements Split {
         this.afterFiles = afterFiles;
         this.afterDeletionFiles = afterDeletionFiles;
         this.isStreaming = isStreaming;
+        this.beforeDeleteOrderingGuards =
+                Collections.unmodifiableList(new ArrayList<>(beforeDeleteOrderingGuards));
+        this.afterDeleteOrderingGuards =
+                Collections.unmodifiableList(new ArrayList<>(afterDeleteOrderingGuards));
     }
 
     public long snapshotId() {
@@ -123,6 +159,14 @@ public class IncrementalSplit implements Split {
         return isStreaming;
     }
 
+    public List<IndexFileMeta> beforeDeleteOrderingGuards() {
+        return beforeDeleteOrderingGuards;
+    }
+
+    public List<IndexFileMeta> afterDeleteOrderingGuards() {
+        return afterDeleteOrderingGuards;
+    }
+
     @Override
     public long rowCount() {
         long rowCount = 0;
@@ -154,7 +198,9 @@ public class IncrementalSplit implements Split {
                 && Objects.equals(beforeFiles, that.beforeFiles)
                 && Objects.equals(beforeDeletionFiles, that.beforeDeletionFiles)
                 && Objects.equals(afterFiles, that.afterFiles)
-                && Objects.equals(afterDeletionFiles, that.afterDeletionFiles);
+                && Objects.equals(afterDeletionFiles, that.afterDeletionFiles)
+                && Objects.equals(beforeDeleteOrderingGuards, that.beforeDeleteOrderingGuards)
+                && Objects.equals(afterDeleteOrderingGuards, that.afterDeleteOrderingGuards);
     }
 
     @Override
@@ -168,7 +214,9 @@ public class IncrementalSplit implements Split {
                 beforeDeletionFiles,
                 afterFiles,
                 afterDeletionFiles,
-                isStreaming);
+                isStreaming,
+                beforeDeleteOrderingGuards,
+                afterDeleteOrderingGuards);
     }
 
     @Override
@@ -190,6 +238,10 @@ public class IncrementalSplit implements Split {
                 + afterFiles
                 + ", afterDeletionFiles="
                 + afterDeletionFiles
+                + ", beforeDeleteOrderingGuards="
+                + beforeDeleteOrderingGuards
+                + ", afterDeleteOrderingGuards="
+                + afterDeleteOrderingGuards
                 + ", isStreaming="
                 + isStreaming
                 + '}';
@@ -214,10 +266,15 @@ public class IncrementalSplit implements Split {
         afterFiles = other.afterFiles;
         afterDeletionFiles = other.afterDeletionFiles;
         isStreaming = other.isStreaming;
+        beforeDeleteOrderingGuards = other.beforeDeleteOrderingGuards;
+        afterDeleteOrderingGuards = other.afterDeleteOrderingGuards;
     }
 
     public void serialize(DataOutputView out) throws IOException {
-        out.writeInt(VERSION);
+        boolean guarded =
+                !beforeDeleteOrderingGuards.isEmpty() || !afterDeleteOrderingGuards.isEmpty();
+        // Keep ordinary splits readable by older workers.
+        out.writeInt(guarded ? VERSION : 2);
         out.writeLong(snapshotId);
         serializeBinaryRow(partition, out);
         out.writeInt(bucket);
@@ -239,6 +296,29 @@ public class IncrementalSplit implements Split {
         DeletionFile.serializeList(out, afterDeletionFiles);
 
         out.writeBoolean(isStreaming);
+        if (guarded) {
+            writeGuards(beforeDeleteOrderingGuards, out);
+            writeGuards(afterDeleteOrderingGuards, out);
+        }
+    }
+
+    private static void writeGuards(List<IndexFileMeta> guards, DataOutputView out)
+            throws IOException {
+        out.writeInt(guards.size());
+        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
+        for (IndexFileMeta guard : guards) {
+            serializer.serialize(guard, out);
+        }
+    }
+
+    private static List<IndexFileMeta> readGuards(DataInputView in) throws IOException {
+        int count = readCount(in, "IncrementalSplit delete ordering guards");
+        List<IndexFileMeta> guards = new ArrayList<>(presizedCapacity(count));
+        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
+        for (int i = 0; i < count; i++) {
+            guards.add(serializer.deserialize(in));
+        }
+        return guards;
     }
 
     public static IncrementalSplit deserialize(DataInputView in) throws IOException {
@@ -278,6 +358,8 @@ public class IncrementalSplit implements Split {
                 DeletionFile.deserializeList(in, deletionFileSerializer);
 
         boolean isStreaming = in.readBoolean();
+        List<IndexFileMeta> beforeGuards = version >= 3 ? readGuards(in) : Collections.emptyList();
+        List<IndexFileMeta> afterGuards = version >= 3 ? readGuards(in) : Collections.emptyList();
         return new IncrementalSplit(
                 snapshotId,
                 partition,
@@ -287,6 +369,8 @@ public class IncrementalSplit implements Split {
                 beforeDeletionFiles,
                 afterFiles,
                 afterDeletionFiles,
-                isStreaming);
+                isStreaming,
+                beforeGuards,
+                afterGuards);
     }
 }

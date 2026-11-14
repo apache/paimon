@@ -66,6 +66,34 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testRescaleRejectsDeleteOrderingGuards() {
+        batchSql("USE CATALOG fs_catalog");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        batchSql(
+                "CREATE TABLE guarded_rescale (id INT PRIMARY KEY NOT ENFORCED, seq INT, op STRING) "
+                        + "WITH ('bucket' = '1', 'sequence.field' = 'seq', 'rowkind.field' = 'op', "
+                        + "'write-only' = 'true', 'delete-ordering-guards.enabled' = 'true')");
+        batchSql("INSERT INTO guarded_rescale VALUES (1, 4, '-D')");
+        batchSql(
+                "CALL sys.compact(`table` => 'default.guarded_rescale', "
+                        + "compact_strategy => 'full', options => 'write-only=false')");
+        for (boolean capture : new boolean[] {true, false}) {
+            batchSql(
+                    "ALTER TABLE guarded_rescale SET ('delete-ordering-guards.enabled' = '"
+                            + capture
+                            + "')");
+            assertThatThrownBy(
+                            () ->
+                                    batchSql(
+                                            "CALL sys.rescale(`table` => 'default.guarded_rescale', bucket_num => 2)"))
+                    .hasStackTraceContaining(
+                            "Rescaling tables with delete ordering guards is not supported");
+        }
+        batchSql("INSERT INTO guarded_rescale VALUES (1, 2, '+I')");
+        assertThat(batchSql("SELECT * FROM guarded_rescale")).isEmpty();
+    }
+
+    @Test
     public void testSuspendAndRecoverAfterRescaleOverwrite() throws Exception {
         // register a companion table T4 for T3
         executeBoth(

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.compact;
 
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 
 import javax.annotation.Nullable;
@@ -32,6 +33,8 @@ public class CompactResult {
     private final List<DataFileMeta> before;
     private final List<DataFileMeta> after;
     private final List<DataFileMeta> changelog;
+    private final List<IndexFileMeta> newIndexFiles;
+    private final List<IndexFileMeta> deletedIndexFiles;
 
     @Nullable private CompactDeletionFile deletionFile;
 
@@ -52,6 +55,8 @@ public class CompactResult {
         this.before = new ArrayList<>(before);
         this.after = new ArrayList<>(after);
         this.changelog = new ArrayList<>(changelog);
+        this.newIndexFiles = new ArrayList<>();
+        this.deletedIndexFiles = new ArrayList<>();
     }
 
     public List<DataFileMeta> before() {
@@ -64,6 +69,14 @@ public class CompactResult {
 
     public List<DataFileMeta> changelog() {
         return changelog;
+    }
+
+    public List<IndexFileMeta> newIndexFiles() {
+        return newIndexFiles;
+    }
+
+    public List<IndexFileMeta> deletedIndexFiles() {
+        return deletedIndexFiles;
     }
 
     public void setDeletionFile(@Nullable CompactDeletionFile deletionFile) {
@@ -79,6 +92,8 @@ public class CompactResult {
         before.addAll(that.before);
         after.addAll(that.after);
         changelog.addAll(that.changelog);
+        newIndexFiles.addAll(that.newIndexFiles);
+        deletedIndexFiles.addAll(that.deletedIndexFiles);
 
         if (deletionFile != null || that.deletionFile != null) {
             throw new UnsupportedOperationException(

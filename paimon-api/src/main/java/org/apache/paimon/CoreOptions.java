@@ -795,6 +795,28 @@ public class CoreOptions implements Serializable {
                             "partial-update.ignore-delete")
                     .withDescription("Whether to ignore delete records.");
 
+    public static final ConfigOption<Boolean> DELETE_ORDERING_GUARDS_ENABLED =
+            key("delete-ordering-guards.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether compaction preserves keys and ordering metadata from explicit deletes "
+                                    + "to reject stale updates after delete records are pruned. "
+                                    + "Supported for fixed-bucket primary-key tables using the deduplicate "
+                                    + "merge engine without field aggregate functions, deletion vectors, "
+                                    + "primary-key indexes, chain tables or Iceberg compatibility. "
+                                    + "Disabling this option stops capturing new guards; existing guards "
+                                    + "continue to protect reads and compaction. Record TTL expiry creates no guards.");
+
+    public static final ConfigOption<Integer> DELETE_ORDERING_GUARDS_COMPACTION_MIN_FILE_NUM =
+            key("delete-ordering-guards.compaction.min-file-num")
+                    .intType()
+                    .defaultValue(4)
+                    .withDescription(
+                            "Minimum number of delete ordering guard segments to trigger periodic consolidation. "
+                                    + "Must be at least 2. Full compaction consolidates two or more segments. "
+                                    + "Existing guards can be consolidated after capture is disabled.");
+
     public static final ConfigOption<Boolean> IGNORE_UPDATE_BEFORE =
             key("ignore-update-before")
                     .booleanType()
@@ -3800,6 +3822,17 @@ public class CoreOptions implements Serializable {
 
     public boolean ignoreDelete() {
         return options.get(IGNORE_DELETE);
+    }
+
+    public boolean deleteOrderingGuardsEnabled() {
+        return options.get(DELETE_ORDERING_GUARDS_ENABLED);
+    }
+
+    public int deleteOrderingGuardsCompactionMinFileNum() {
+        int minFileNum = options.get(DELETE_ORDERING_GUARDS_COMPACTION_MIN_FILE_NUM);
+        checkArgument(
+                minFileNum >= 2, "Delete ordering guard compaction requires at least 2 files.");
+        return minFileNum;
     }
 
     public boolean ignoreUpdateBefore() {

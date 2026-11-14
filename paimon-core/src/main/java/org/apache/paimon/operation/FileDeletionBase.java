@@ -94,6 +94,9 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
     protected boolean changelogDecoupled;
 
+    private List<Snapshot> protectedSnapshots = Collections.emptyList();
+    private Set<Path> protectedDataFiles = Collections.emptySet();
+
     /** Used to record which tag is cached. */
     private long cachedTag = 0;
 
@@ -298,7 +301,31 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     public void cleanDataFiles(Collection<Path> dataFiles) {
-        executeAll(new LinkedHashSet<>(dataFiles), fileIO::deleteQuietly);
+        Set<Path> toDelete = new LinkedHashSet<>(dataFiles);
+        toDelete.removeAll(protectedDataFiles);
+        executeAll(toDelete, fileIO::deleteQuietly);
+    }
+
+    /** Protect complete retained views, including payloads alongside their hidden bounds. */
+    public void protectSnapshots(List<Snapshot> snapshots) {
+        Set<Path> protectedFiles = new HashSet<>();
+        DataFilePathFactories factories = new DataFilePathFactories(pathFactory);
+        try {
+            for (Snapshot snapshot : snapshots) {
+                for (ExpireFileEntry entry :
+                        readMergedDataFiles(manifestList.readDataManifests(snapshot))) {
+                    DataFilePathFactory paths = factories.get(entry.partition(), entry.bucket());
+                    protectedFiles.add(paths.toPath(entry));
+                    for (String extra : entry.extraFiles()) {
+                        protectedFiles.add(paths.toAlignedPath(extra, entry));
+                    }
+                }
+            }
+        } catch (IOException failure) {
+            throw new UncheckedIOException("Failed to protect retained branch files.", failure);
+        }
+        protectedSnapshots = new ArrayList<>(snapshots);
+        protectedDataFiles = protectedFiles;
     }
 
     private void collectUnusedStatisticsManifests(
@@ -584,6 +611,9 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     public Set<String> manifestSkippingSet(List<Snapshot> skippingSnapshots) {
+        List<Snapshot> retained = new ArrayList<>(skippingSnapshots);
+        retained.addAll(protectedSnapshots);
+        skippingSnapshots = retained;
         if (skippingSnapshots.size() <= 1) {
             Set<String> skippingSet = new HashSet<>();
             for (Snapshot skippingSnapshot : skippingSnapshots) {

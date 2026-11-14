@@ -33,6 +33,11 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.DeleteOrderingGuardConsolidator;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
+import org.apache.paimon.index.DeleteOrderingGuardReaderFactory;
+import org.apache.paimon.index.DeleteOrderingGuardSerializer;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
@@ -66,6 +71,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -162,10 +168,34 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
             List<DataFileMeta> restoreFiles,
             @Nullable BucketedDvMaintainer dvMaintainer,
             boolean ignorePreviousFiles) {
+        return create(
+                partition,
+                bucket,
+                compactExecutor,
+                restoreFiles,
+                dvMaintainer,
+                ignorePreviousFiles,
+                Collections.emptyList());
+    }
+
+    @Override
+    public CompactManager create(
+            BinaryRow partition,
+            int bucket,
+            ExecutorService compactExecutor,
+            List<DataFileMeta> restoreFiles,
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            boolean ignorePreviousFiles,
+            List<IndexFileMeta> deleteOrderingGuards) {
         initialized = true;
         if (options.writeOnly()) {
-            return new NoopCompactManager();
+            return new NoopCompactManager(deleteOrderingGuards);
         }
+        DeleteOrderingGuardSerializer guardSerializer =
+                options.deleteOrderingGuardsEnabled() || !deleteOrderingGuards.isEmpty()
+                        ? new DeleteOrderingGuardSerializer(
+                                schema.id(), keyType, schema.logicalRowType(), options)
+                        : null;
 
         CompactStrategy compactStrategy = createCompactStrategy(options, restoreFiles);
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
@@ -180,8 +210,40 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                         levels,
                         dvMaintainer,
                         ignorePreviousFiles);
+        DeleteOrderingGuardState guardState =
+                new DeleteOrderingGuardState(
+                        new DeleteOrderingGuardReaderFactory(
+                                fileIO,
+                                schemaManager,
+                                options,
+                                keyType,
+                                valueType,
+                                readerFactoryBuilder.pathFactory(),
+                                cacheManager),
+                        partition,
+                        bucket,
+                        valueType,
+                        keyComparator,
+                        deleteOrderingGuards);
+        defaultRewriter.withDeleteOrderingGuardState(guardState);
+        DeleteOrderingGuardFile guardFile =
+                guardSerializer == null
+                        ? null
+                        : new DeleteOrderingGuardFile(
+                                fileIO,
+                                readerFactoryBuilder
+                                        .pathFactory()
+                                        .indexFileFactory(partition, bucket),
+                                guardSerializer,
+                                cacheManager,
+                                4096);
         CompactRewriter rewriter =
                 wrapRewriter(compactRewriterFactory, partition, bucket, defaultRewriter);
+        if (options.deleteOrderingGuardsEnabled()) {
+            rewriter =
+                    defaultRewriter.ensureDeleteOrderingGuards(
+                            rewriter, guardSerializer, guardFile);
+        }
         CompactionMetrics.Reporter metricsReporter =
                 compactionMetrics == null
                         ? null
@@ -196,21 +258,31 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
             bucketInfo = String.format("partition=%s, ", partitionString) + bucketInfo;
         }
         return new MergeTreeCompactManager(
-                compactExecutor,
-                levels,
-                compactStrategy,
-                keyComparator,
-                options.compactionFileSize(true),
-                options.numSortedRunStopTrigger(),
-                rewriter,
-                metricsReporter,
-                dvMaintainer,
-                options.prepareCommitWaitCompaction(),
-                options.needLookup(),
-                recordLevelExpire,
-                options.forceRewriteAllFiles(),
-                options.isChainTable(),
-                bucketInfo);
+                        compactExecutor,
+                        levels,
+                        compactStrategy,
+                        keyComparator,
+                        options.compactionFileSize(true),
+                        options.numSortedRunStopTrigger(),
+                        rewriter,
+                        metricsReporter,
+                        dvMaintainer,
+                        options.prepareCommitWaitCompaction(),
+                        options.needLookup(),
+                        recordLevelExpire,
+                        options.forceRewriteAllFiles(),
+                        options.isChainTable(),
+                        bucketInfo)
+                .withDeleteOrderingGuardState(guardState)
+                .withDeleteOrderingGuardConsolidator(
+                        guardSerializer == null
+                                ? null
+                                : new DeleteOrderingGuardConsolidator(
+                                        guardState,
+                                        guardSerializer,
+                                        guardFile,
+                                        userDefinedSeqComparator,
+                                        options.deleteOrderingGuardsCompactionMinFileNum()));
     }
 
     private CompactStrategy createCompactStrategy(

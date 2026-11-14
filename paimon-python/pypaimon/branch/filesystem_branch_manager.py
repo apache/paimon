@@ -24,6 +24,7 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import JSON
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.table.delete_ordering_guards import validate_delete_ordering_guard_history
 from pypaimon.tag.tag_manager import TagManager
 
 logger = logging.getLogger(__name__)
@@ -272,6 +273,12 @@ class FileSystemBranchManager(BranchManager):
         
         if not self.branch_exists(branch_name):
             raise ValueError(f"Branch name '{branch_name}' doesn't exist.")
+
+        for branch in (self.current_branch, branch_name):
+            schema = self._copy_with_branch(self.schema_manager, branch).latest()
+            if schema is not None:
+                snapshot = self._copy_with_branch(self.snapshot_manager, branch).get_latest_snapshot()
+                validate_delete_ordering_guard_history(schema.options, snapshot)
         
         try:
             branch_snapshot_manager = self._copy_with_branch(

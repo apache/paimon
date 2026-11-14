@@ -68,6 +68,14 @@ public interface SnapshotReader {
 
     SplitGenerator splitGenerator();
 
+    default SnapshotReader withDeleteOrderingGuardBuckets() {
+        throw new UnsupportedOperationException("Guard bucket planning is not supported.");
+    }
+
+    default boolean includesDeleteOrderingGuardBuckets() {
+        return false;
+    }
+
     FileStorePathFactory pathFactory();
 
     @Nullable
