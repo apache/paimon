@@ -77,6 +77,40 @@ def _polars_arrow_table(batch):
     return Table.from_batches([batch]) if schema == batch.schema else Table.from_arrays(arrays, schema=schema)
 
 
+def _iter_arrow_table_rows(table: Table) -> Iterator[tuple]:
+    """Yield row tuples from an Arrow table without Polars ``iter_rows``.
+
+    Polars converts ``Datetime(time_unit='ns')`` values to microsecond
+    ``datetime.datetime``, collapsing distinct TIMESTAMP(9) /
+    TIMESTAMP_LTZ(9) tails. Prefer Arrow ``Table.to_pylist()`` when
+    present so field order and nested conversions stay unchanged.
+    Older PyArrow builds without table-level ``to_pylist`` fall back to
+    per-column ``to_pylist`` over ``table.to_batches()`` — never to
+    Polars row iteration.
+    """
+    to_pylist = getattr(table, "to_pylist", None)
+    if callable(to_pylist):
+        names = table.column_names
+        for row in to_pylist():
+            yield tuple(row[name] for name in names)
+        return
+
+    num_columns = table.num_columns
+    if num_columns == 0:
+        for _ in range(table.num_rows):
+            yield ()
+        return
+
+    for batch in table.to_batches():
+        if batch.num_columns == 0:
+            for _ in range(batch.num_rows):
+                yield ()
+            continue
+        columns = [batch.column(i).to_pylist() for i in range(batch.num_columns)]
+        for row in zip(*columns):
+            yield tuple(row)
+
+
 class RecordBatchReader(RecordReader):
     """
     The reader that reads the pyarrow batches of records.
@@ -115,17 +149,20 @@ class RecordBatchReader(RecordReader):
         return polars.from_arrow(_polars_arrow_table(arrow_batch))
 
     def tuple_iterator(self) -> Optional[Iterator[tuple]]:
-        df = self.read_next_df()
-        if df is None:
+        arrow_batch = self.read_arrow_batch()
+        if arrow_batch is None:
             return None
-        return self._iter_df_rows(df)
+        # InternalRow / KeyValue paths must not round-trip through Polars
+        # iter_rows(), which drops nanosecond tails from TIMESTAMP(9).
+        return _iter_arrow_table_rows(_polars_arrow_table(arrow_batch))
 
     def read_batch(self) -> Optional[RecordIterator[InternalRow]]:
-        df = self.read_next_df()
-        if df is None:
+        arrow_batch = self.read_arrow_batch()
+        if arrow_batch is None:
             return None
+        table = _polars_arrow_table(arrow_batch)
         return InternalRowWrapperIterator(
-            self._iter_df_rows(df), df.width, self.file_io,
+            _iter_arrow_table_rows(table), table.num_columns, self.file_io,
             self.blob_field_indices, self.vector_field_indices,
             self.descriptor_field_indices, self.blob_view_lookup)
 

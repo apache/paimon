@@ -21,7 +21,7 @@ package org.apache.paimon.mergetree.compact.aggregate.factory;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldMergeMapWithKeyTimeAgg;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeFamily;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
@@ -60,8 +60,13 @@ public class FieldMergeMapWithKeyTimeAggFactory implements FieldAggregatorFactor
                 rowType.getFieldCount());
 
         int tsFieldIndex = resolveTsFieldIndex(rowType, options, field);
+        DataType tsFieldType = rowType.getTypeAt(tsFieldIndex);
         return new FieldMergeMapWithKeyTimeAgg(
-                NAME, mapType, tsFieldIndex, options.fieldMergeMapOverwriteOnEqualTs(field));
+                NAME,
+                mapType,
+                tsFieldIndex,
+                tsFieldType,
+                options.fieldMergeMapOverwriteOnEqualTs(field));
     }
 
     private int resolveTsFieldIndex(RowType rowType, CoreOptions options, @Nullable String field) {
@@ -82,16 +87,34 @@ public class FieldMergeMapWithKeyTimeAggFactory implements FieldAggregatorFactor
 
         DataType tsFieldType = rowType.getTypeAt(tsFieldIndex);
         checkArgument(
-                tsFieldType.isAnyOf(
-                        DataTypeFamily.CHARACTER_STRING,
-                        DataTypeFamily.INTEGER_NUMERIC,
-                        DataTypeFamily.DATETIME),
-                "Timestamp field '%s' for field '%s' must be CHAR/VARCHAR/STRING, TINYINT/SMALLINT/INT/BIGINT or "
-                        + "DATE/TIME/TIMESTAMP/TIMESTAMP_LTZ but was '%s'.",
+                isSupportedTimestampType(tsFieldType),
+                "Timestamp field '%s' for field '%s' must be CHAR/VARCHAR, "
+                        + "TINYINT/SMALLINT/INT/BIGINT, DATE, TIME, DECIMAL, "
+                        + "TIMESTAMP or TIMESTAMP_LTZ, but was '%s'.",
                 rowType.getFieldNames().get(tsFieldIndex),
                 field,
                 tsFieldType);
         return tsFieldIndex;
+    }
+
+    static boolean isSupportedTimestampType(DataType type) {
+        DataTypeRoot root = type.getTypeRoot();
+        switch (root) {
+            case CHAR:
+            case VARCHAR:
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+            case DECIMAL:
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return true;
+            default:
+                return false;
+        }
     }
 
     @Override

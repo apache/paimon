@@ -23,7 +23,7 @@ import pyarrow
 
 from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.read.read_support import close_read_source
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.common.predicate import Predicate
 from pypaimon.execution.native import runtime
 from pypaimon.execution.native import table as native_table
@@ -39,6 +39,54 @@ _NATIVE_READ_FILE_FORMATS = frozenset({
 })
 _NATIVE_READ_FILE_SUFFIXES = tuple('.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
 _NATIVE_BLOB_FILE_SUFFIXES = ('.blob', '.video')
+
+# merge_map_with_keytime always uses the Python aggregator for now:
+# * STRING/CHAR/VARCHAR: Rust UTF-8 ``&str`` order diverges from
+#   Java/Python UTF-16 (e.g. U+E000 vs U+10000).
+# * Every other timestamp type historically fell back already (the old
+#   Native gate only cleared STRING-family via StringArray), and there
+#   is no end-to-end-correct Native replacement without a Rust compare
+#   fix. Fall back before Native opens; do not catch mid-read.
+_MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
+
+
+def _field_agg_func_name(field_name, primary_keys, options_map, sequence_fields):
+    # Same precedence as Python ``resolve_agg_func_name`` / Java
+    # ``AggregateMergeFunction.getAggFuncName``, inlined to avoid a
+    # Native → Python execution import.
+    if field_name in sequence_fields:
+        return "last_value"
+    if field_name in primary_keys:
+        return "primary_key"
+    return (
+        options_map.get("fields.{}.aggregate-function".format(field_name))
+        or options_map.get("fields.default-aggregate-function")
+        or "last_non_null_value"
+    )
+
+
+def _native_merge_map_keytime_timestamp_supported(table) -> bool:
+    """Whether Native can run ``merge_map_with_keytime`` for this table.
+
+    Always ``False`` when any field uses ``merge_map_with_keytime`` on a
+    PK aggregation table. Non-PK / non-AGGREGATE / other aggregators are
+    unchanged and still clear this gate.
+    """
+    if not getattr(table, 'is_primary_key_table', False):
+        return True
+    options = table.options
+    if options.merge_engine() != MergeEngine.AGGREGATE:
+        return True
+
+    options_map = options.options.to_map()
+    pk_set = set(table.primary_keys)
+    sequence_fields = set(options.sequence_field())
+    for field in table.fields:
+        if _field_agg_func_name(
+                field.name, pk_set, options_map, sequence_fields
+        ) == _MERGE_MAP_WITH_KEYTIME:
+            return False
+    return True
 
 
 def _prepare_native_read(table, predicate: Optional[Predicate] = None,
@@ -114,6 +162,11 @@ class NativeTableRead:
         if not self._blob_view_supported():
             return self._fallback(
                 "the table uses an unsupported BLOB view")
+        # Fall back before setup for every merge_map_with_keytime table.
+        if not _native_merge_map_keytime_timestamp_supported(read.table):
+            return self._fallback(
+                "merge_map_with_keytime is not supported by the native "
+                "reader; falling back to Python")
         try:
             from pypaimon.execution.native.read.split_adapter import native_split_from_python
         except Exception as e:

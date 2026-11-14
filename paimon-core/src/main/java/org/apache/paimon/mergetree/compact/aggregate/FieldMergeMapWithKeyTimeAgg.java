@@ -21,9 +21,10 @@ package org.apache.paimon.mergetree.compact.aggregate;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.MapType;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
 
 import java.util.HashMap;
@@ -37,29 +38,34 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
     private final InternalArray.ElementGetter keyGetter;
     private final InternalArray.ElementGetter valueGetter;
     private final int timestampFieldIndex;
-    private final InternalRow.FieldGetter timestampFieldGetter;
-    private final DataTypeRoot timestampFieldTypeRoot;
     private final boolean overwriteOnEqualTs;
+    private final boolean stringTimestamp;
+    private final DataTypeRoot timestampTypeRoot;
+    private final InternalRow.FieldGetter timestampGetter;
 
     /** See {@link BinaryMapKeys}: a binary key has no value equality of its own. */
     private final boolean binaryKey;
 
-    public FieldMergeMapWithKeyTimeAgg(String name, MapType dataType, int timestampFieldIndex) {
-        this(name, dataType, timestampFieldIndex, false);
+    public FieldMergeMapWithKeyTimeAgg(
+            String name, MapType dataType, int timestampFieldIndex, DataType timestampType) {
+        this(name, dataType, timestampFieldIndex, timestampType, false);
     }
 
     public FieldMergeMapWithKeyTimeAgg(
-            String name, MapType dataType, int timestampFieldIndex, boolean overwriteOnEqualTs) {
+            String name,
+            MapType dataType,
+            int timestampFieldIndex,
+            DataType timestampType,
+            boolean overwriteOnEqualTs) {
         super(name, dataType);
         this.keyGetter = InternalArray.createElementGetter(dataType.getKeyType());
         this.valueGetter = InternalArray.createElementGetter(dataType.getValueType());
         this.timestampFieldIndex = timestampFieldIndex;
-        RowType rowType = (RowType) dataType.getValueType();
-        this.timestampFieldGetter =
-                InternalRow.createFieldGetter(
-                        rowType.getTypeAt(timestampFieldIndex), timestampFieldIndex);
-        this.timestampFieldTypeRoot = rowType.getTypeAt(timestampFieldIndex).getTypeRoot();
         this.overwriteOnEqualTs = overwriteOnEqualTs;
+        this.stringTimestamp =
+                timestampType.getTypeRoot().getFamilies().contains(DataTypeFamily.CHARACTER_STRING);
+        this.timestampTypeRoot = timestampType.getTypeRoot();
+        this.timestampGetter = InternalRow.createFieldGetter(timestampType, timestampFieldIndex);
         this.binaryKey = BinaryMapKeys.isBinary(dataType.getKeyType());
     }
 
@@ -119,18 +125,30 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
                 resultMap.put(key, newRow);
             } else {
                 InternalRow existingRow = (InternalRow) existingValue;
-                if (existingRow.isNullAt(timestampFieldIndex)) {
+                if (existingRow.isNullAt(timestampFieldIndex)
+                        || shouldReplaceByTimestamp(newRow, existingRow)) {
                     resultMap.put(key, newRow);
-                } else {
-                    Object newTs = timestampFieldGetter.getFieldOrNull(newRow);
-                    Object existingTs = timestampFieldGetter.getFieldOrNull(existingRow);
-                    int comparison =
-                            InternalRowUtils.compare(newTs, existingTs, timestampFieldTypeRoot);
-                    if (comparison > 0 || (comparison == 0 && overwriteOnEqualTs)) {
-                        resultMap.put(key, newRow);
-                    }
                 }
             }
         }
+    }
+
+    /**
+     * Returns true when {@code newRow}'s timestamp should replace {@code existingRow}'s: strictly
+     * greater, or equal when {@code overwriteOnEqualTs} is enabled. CHAR/VARCHAR keeps the
+     * historical Java {@link String#compareTo} path; other supported types reuse {@link
+     * InternalRowUtils#compare}.
+     */
+    private boolean shouldReplaceByTimestamp(InternalRow newRow, InternalRow existingRow) {
+        if (stringTimestamp) {
+            String newTs = newRow.getString(timestampFieldIndex).toString();
+            String existingTs = existingRow.getString(timestampFieldIndex).toString();
+            int comparison = newTs.compareTo(existingTs);
+            return comparison > 0 || (comparison == 0 && overwriteOnEqualTs);
+        }
+        Object newTs = timestampGetter.getFieldOrNull(newRow);
+        Object existingTs = timestampGetter.getFieldOrNull(existingRow);
+        int comparison = InternalRowUtils.compare(newTs, existingTs, timestampTypeRoot);
+        return comparison > 0 || (comparison == 0 && overwriteOnEqualTs);
     }
 }

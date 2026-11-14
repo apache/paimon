@@ -59,7 +59,8 @@ from pypaimon.execution.python.read.reader.aggregate.aggregators import (
     FieldRoaringBitmap32Agg,
 )
 from pypaimon.schema.data_types import AtomicType, DataField, RowType, ArrayType, MapType
-from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.utils.roaring_bitmap import RoaringBitmap
 
@@ -2650,21 +2651,42 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
         )
 
     def test_overwrite_on_equal_ts(self):
-        for setting in (None, "false", "true"):
-            with self.subTest(setting=setting):
-                settings = {} if setting is None else {
-                    "fields.field0." + CoreOptions.MERGE_MAP_OVERWRITE_ON_EQUAL_TS: setting}
-                agg = self._make(options=CoreOptions(Options(settings)))
-                old = {"k": self.row("old", "100")}
-                new = {"k": self.row("new", "100")}
-                self.assertEqual(agg.agg(old, new), new if setting == "true" else old)
-                self.assertEqual(agg.agg(new, old), old if setting == "true" else new)
-                self.assertEqual(agg.agg(old, {"k": self.row("older", "090")}), old)
-                self.assertEqual(agg.agg(old, {"k": self.row("newer", "110")}),
-                                 {"k": self.row("newer", "110")})
-                self.assertEqual(agg.agg(old, {"k": self.row("no-time", None)}), old)
-                self.assertEqual(agg.agg(old, None), old)
-                self.assertEqual(agg.agg(old, {"k": None}), {})
+        # Cover the string (UTF-16) path, a typed BIGINT path, and the
+        # historical PyPaimon FLOAT/DOUBLE native-order path.
+        bigint_fields = [
+            DataField(0, "actual_value", AtomicType("STRING")),
+            DataField(1, "dbsync_ts", AtomicType("BIGINT")),
+        ]
+        double_fields = [
+            DataField(0, "actual_value", AtomicType("STRING")),
+            DataField(1, "dbsync_ts", AtomicType("DOUBLE")),
+        ]
+        cases = (
+            (None, self.DEFAULT_FIELDS, "100", "090", "110"),
+            (RowType(True, bigint_fields), bigint_fields, 100, 90, 110),
+            (RowType(True, double_fields), double_fields, 10.25, 9.5, 11.0),
+        )
+        for row_type, fields, equal_ts, older_ts, newer_ts in cases:
+            for setting in (None, "false", "true"):
+                with self.subTest(ts_fields=fields[1].type.type, setting=setting):
+                    settings = {} if setting is None else {
+                        "fields.field0." + CoreOptions.MERGE_MAP_OVERWRITE_ON_EQUAL_TS: setting}
+                    agg = self._make(
+                        row_type=row_type,
+                        options=CoreOptions(Options(settings)),
+                    )
+                    old = {"k": self.row("old", equal_ts, fields=fields)}
+                    new = {"k": self.row("new", equal_ts, fields=fields)}
+                    older = {"k": self.row("older", older_ts, fields=fields)}
+                    newer = {"k": self.row("newer", newer_ts, fields=fields)}
+                    no_time = {"k": self.row("no-time", None, fields=fields)}
+                    self.assertEqual(agg.agg(old, new), new if setting == "true" else old)
+                    self.assertEqual(agg.agg(new, old), old if setting == "true" else new)
+                    self.assertEqual(agg.agg(old, older), old)
+                    self.assertEqual(agg.agg(old, newer), newer)
+                    self.assertEqual(agg.agg(old, no_time), old)
+                    self.assertEqual(agg.agg(old, None), old)
+                    self.assertEqual(agg.agg(old, {"k": None}), {})
 
     def test_field_merge_map_with_key_time_agg_using_default_ts(self):
         agg = self._make()
@@ -2749,6 +2771,174 @@ class FieldMergeMapWithKeyTimeAggTest(unittest.TestCase):
             acc["key1"],
             self.row("A1", "other_a1", "2026-07-19 11:00:00", "2026-07-19 10:00:00"),
         )
+
+    def test_historical_comparable_timestamp_types_construct(self):
+        # No support whitelist: any atomic type that historically ordered
+        # with Python ``>`` must construct. NUMERIC/DEC/BLOB are aliases /
+        # historical binary that a Java-mirrored allow-list would miss.
+        supported = (
+            "CHAR(8)", "VARCHAR(16)", "STRING",
+            "TINYINT", "SMALLINT", "INT", "INTEGER", "BIGINT",
+            "FLOAT", "DOUBLE",
+            "BOOLEAN", "BINARY(4)", "VARBINARY(8)", "BYTES", "BLOB",
+            "DATE", "TIME", "DECIMAL(10, 2)", "NUMERIC(10, 2)", "DEC(10, 2)",
+            "TIMESTAMP(3)", "TIMESTAMP(9)", "TIMESTAMP_LTZ(6)",
+        )
+        for sql_type in supported:
+            fields = [
+                DataField(0, "actual_value", AtomicType("STRING")),
+                DataField(1, "dbsync_ts", AtomicType(sql_type)),
+            ]
+            agg = self._make(row_type=RowType(True, fields))
+            self.assertIsInstance(agg, FieldMergeMapWithKeyTimeAgg)
+
+        # Nested MAP values are not ordered by ``>``; construction still
+        # succeeds (historical) and compare fails at agg time.
+        fields = [
+            DataField(0, "actual_value", AtomicType("STRING")),
+            DataField(1, "dbsync_ts", MapType(True, AtomicType("STRING"), AtomicType("INT"))),
+        ]
+        agg = self._make(row_type=RowType(True, fields))
+        with self.assertRaises(TypeError):
+            agg.agg(
+                {"k": {"actual_value": "a", "dbsync_ts": {"x": 1}}},
+                {"k": {"actual_value": "b", "dbsync_ts": {"x": 2}}},
+            )
+
+    def test_supplementary_plane_string_order(self):
+        # U+10000 encodes as UTF-16 surrogates D800 DC00, which sort before
+        # U+E000. Python's code-point order is the opposite.
+        low = "\U00010000"
+        high = "\uE000"
+        agg = self._make()
+
+        acc = agg.agg(None, {"k": {"actual_value": "old", "dbsync_ts": high}})
+        acc = agg.agg(acc, {"k": {"actual_value": "low", "dbsync_ts": low}})
+        self.assertEqual(acc["k"]["actual_value"], "old")
+
+        acc = agg.agg(None, {"k": {"actual_value": "old", "dbsync_ts": low}})
+        acc = agg.agg(acc, {"k": {"actual_value": "high", "dbsync_ts": high}})
+        self.assertEqual(acc["k"]["actual_value"], "high")
+
+    def test_equal_smaller_and_greater_timestamp(self):
+        fields = [
+            DataField(0, "actual_value", AtomicType("STRING")),
+            DataField(1, "dbsync_ts", AtomicType("BIGINT")),
+        ]
+        agg = self._make(row_type=RowType(True, fields))
+
+        acc = agg.agg(None, {"k": self.row("old", 10, fields=fields)})
+        acc = agg.agg(acc, {"k": self.row("equal", 10, fields=fields)})
+        self.assertEqual(acc["k"].get_field(0), "old")
+
+        acc = agg.agg(acc, {"k": self.row("smaller", 9, fields=fields)})
+        self.assertEqual(acc["k"].get_field(0), "old")
+
+        acc = agg.agg(acc, {"k": self.row("greater", 11, fields=fields)})
+        self.assertEqual(acc["k"].get_field(0), "greater")
+
+    def _assert_newer_replaces_and_equal_keeps(self, sql_type, low, high):
+        fields = [
+            DataField(0, "actual_value", AtomicType("STRING")),
+            DataField(1, "dbsync_ts", AtomicType(sql_type)),
+        ]
+        agg = self._make(row_type=RowType(True, fields))
+
+        acc = agg.agg(None, {"k": self.row("low", low, fields=fields)})
+        acc = agg.agg(acc, {"k": self.row("high", high, fields=fields)})
+        self.assertEqual(acc["k"].get_field(0), "high")
+        self.assertEqual(acc["k"].get_field(1), high)
+
+        acc = agg.agg(acc, {"k": self.row("equal", high, fields=fields)})
+        self.assertEqual(acc["k"].get_field(0), "high")
+        self.assertEqual(acc["k"].get_field(1), high)
+
+    def test_ordered_timestamp_types_replace_only_when_newer(self):
+        # 9 then 10 is numeric order. Lexicographic string order would keep 9.
+        # FLOAT/DOUBLE/BINARY/BOOLEAN match historical PyPaimon native ``>``.
+        cases = (
+            ("TINYINT", 9, 10),
+            ("SMALLINT", 9, 10),
+            ("INT", 9, 10),
+            ("FLOAT", 9.5, 10.25),
+            ("DOUBLE", 9.5, 10.25),
+            ("BOOLEAN", False, True),
+            ("BINARY(4)", b"\x00\x00\x00\x09", b"\x00\x00\x00\x0a"),
+            ("VARBINARY(8)", b"\x00\x00\x00\x09", b"\x00\x00\x00\x0a"),
+            ("DATE", datetime.date(2024, 1, 1), datetime.date(2024, 1, 2)),
+            ("TIME", datetime.time(1, 2, 3), datetime.time(1, 2, 4)),
+            ("DECIMAL(10, 2)", BigDecimal("9.00"), BigDecimal("10.00")),
+            (
+                "TIMESTAMP(3)",
+                datetime.datetime(2024, 1, 1, 0, 0, 0, 1000),
+                datetime.datetime(2024, 1, 1, 0, 0, 0, 2000),
+            ),
+            (
+                "TIMESTAMP(6)",
+                datetime.datetime(2024, 1, 1, 0, 0, 0, 100001),
+                datetime.datetime(2024, 1, 1, 0, 0, 0, 100002),
+            ),
+            (
+                "TIMESTAMP_LTZ(6)",
+                datetime.datetime(2024, 1, 1, 0, 0, 1, tzinfo=datetime.timezone.utc),
+                datetime.datetime(2024, 1, 1, 0, 0, 2, tzinfo=datetime.timezone.utc),
+            ),
+        )
+        for sql_type, low, high in cases:
+            with self.subTest(sql_type=sql_type):
+                self._assert_newer_replaces_and_equal_keeps(sql_type, low, high)
+
+    def test_null_timestamp_and_null_map_value(self):
+        agg = self._make()
+
+        acc = agg.agg(None, {
+            "k": {"actual_value": "old", "dbsync_ts": "10"},
+            "keep": {"actual_value": "stay", "dbsync_ts": "1"},
+        })
+        acc = agg.agg(acc, {"k": {"actual_value": "skip", "dbsync_ts": None}})
+        self.assertEqual(acc["k"]["actual_value"], "old")
+
+        acc = agg.agg(acc, {"k": None})
+        self.assertNotIn("k", acc)
+        self.assertEqual(acc["keep"]["actual_value"], "stay")
+
+        acc = agg.agg(None, {"k": {"actual_value": "old", "dbsync_ts": None}})
+        acc = agg.agg(acc, {"k": {"actual_value": "replaced", "dbsync_ts": "1"}})
+        self.assertEqual(acc["k"]["actual_value"], "replaced")
+
+    def test_timestamp9_nano_tail_comparison(self):
+        """BinaryRow comparator keeps nanosecond tails for TIMESTAMP(9)."""
+        import pandas as pd
+
+        fields = [
+            DataField(0, "actual_value", AtomicType("STRING")),
+            DataField(1, "dbsync_ts", AtomicType("TIMESTAMP(9)")),
+        ]
+        agg = self._make(row_type=RowType(True, fields))
+        older = pd.Timestamp(1_000_000_000 + 100_001, unit="ns")
+        newer = pd.Timestamp(1_000_000_000 + 100_002, unit="ns")
+
+        def binary_row(value, ts):
+            raw = GenericRowSerializer.to_bytes(GenericRow([value, ts], fields))
+            return BinaryRow(raw, fields)
+
+        # 100_000 ns is an exact microsecond, so the reader returns datetime.
+        # 100_001 ns keeps a 1ns tail as pandas.Timestamp. The later value
+        # must still win on this BinaryRow path.
+        on_microsecond = pd.Timestamp(1_000_000_000 + 100_000, unit="ns")
+        acc = agg.agg(None, {"k": binary_row("old", on_microsecond)})
+        acc = agg.agg(acc, {"k": binary_row("plus_one_ns", older)})
+        self.assertEqual(acc["k"].get_field(0), "plus_one_ns")
+
+        acc = agg.agg(acc, {"k": binary_row("equal", older)})
+        self.assertEqual(acc["k"].get_field(0), "plus_one_ns")
+
+        acc = agg.agg(acc, {"k": binary_row("smaller", on_microsecond)})
+        self.assertEqual(acc["k"].get_field(0), "plus_one_ns")
+
+        acc = agg.agg(acc, {"k": binary_row("newer", newer)})
+        self.assertEqual(acc["k"].get_field(0), "newer")
+        self.assertEqual(acc["k"].get_field(1), newer)
 
     def test_field_merge_map_with_key_time_agg_retract(self):
         agg = self._make()
