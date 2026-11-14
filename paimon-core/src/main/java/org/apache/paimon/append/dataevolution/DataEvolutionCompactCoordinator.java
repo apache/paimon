@@ -30,7 +30,6 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
@@ -46,7 +45,6 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,13 +56,10 @@ import java.util.stream.Collectors;
 
 import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
-import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.BlobType.isBlobFileField;
-import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
-import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -154,18 +149,20 @@ public class DataEvolutionCompactCoordinator {
                         candidateFilesPerBatch);
         this.planner =
                 new CompactPlanner(
-                                compactBlob,
-                                compactVector,
-                                largeFileThreshold,
-                                targetFileSize,
-                                options.blobTargetFileSize(),
-                                openFileCost,
-                                compactMinFileNum,
-                                schemaFetcher,
-                                currentBlobFieldIds,
-                                options.vectorTargetFileSize(),
-                                currentVectorFieldIds)
-                        .withIncrementalCompaction(table);
+                        compactBlob,
+                        compactVector,
+                        largeFileThreshold,
+                        targetFileSize,
+                        options.blobTargetFileSize(),
+                        openFileCost,
+                        compactMinFileNum,
+                        schemaFetcher,
+                        currentBlobFieldIds,
+                        options.vectorTargetFileSize(),
+                        currentVectorFieldIds,
+                        options.dataEvolutionCompactionIncrementalEnabled()
+                                ? new DataEvolutionIncrementalCompactPlanner(table)
+                                : null);
     }
 
     static long largeFileThreshold(long targetFileSize, double ratio) {
@@ -293,10 +290,7 @@ public class DataEvolutionCompactCoordinator {
         @Nullable private final Set<Integer> currentVectorFieldIds;
         private Set<String> completedNormalFiles = Collections.emptySet();
         private Set<String> completedVectorFiles = Collections.emptySet();
-        @Nullable private CoreOptions incrementalOptions;
-        @Nullable private Set<Integer> currentFieldIds;
-        @Nullable private RowType incrementalRowType;
-        @Nullable private LongFunction<TableSchema> incrementalSchemaFetcher;
+        @Nullable private final DataEvolutionIncrementalCompactPlanner incrementalPlanner;
 
         @VisibleForTesting
         CompactPlanner(
@@ -356,6 +350,34 @@ public class DataEvolutionCompactCoordinator {
                 @Nullable Set<Integer> currentBlobFieldIds,
                 long vectorTargetFileSize,
                 @Nullable Set<Integer> currentVectorFieldIds) {
+            this(
+                    compactBlob,
+                    compactVector,
+                    largeFileThreshold,
+                    targetFileSize,
+                    blobTargetFileSize,
+                    openFileCost,
+                    compactMinFileNum,
+                    schemaFetcher,
+                    currentBlobFieldIds,
+                    vectorTargetFileSize,
+                    currentVectorFieldIds,
+                    null);
+        }
+
+        private CompactPlanner(
+                boolean compactBlob,
+                boolean compactVector,
+                long largeFileThreshold,
+                long targetFileSize,
+                long blobTargetFileSize,
+                long openFileCost,
+                long compactMinFileNum,
+                LongFunction<RowType> schemaFetcher,
+                @Nullable Set<Integer> currentBlobFieldIds,
+                long vectorTargetFileSize,
+                @Nullable Set<Integer> currentVectorFieldIds,
+                @Nullable DataEvolutionIncrementalCompactPlanner incrementalPlanner) {
             this.compactBlob = compactBlob;
             this.compactVector = compactVector;
             this.largeFileThreshold = largeFileThreshold;
@@ -369,36 +391,11 @@ public class DataEvolutionCompactCoordinator {
             this.currentBlobFieldIds = currentBlobFieldIds;
             this.vectorTargetFileSize = vectorTargetFileSize;
             this.currentVectorFieldIds = currentVectorFieldIds;
+            this.incrementalPlanner = incrementalPlanner;
         }
 
         CompactPlanner withCompletedVectorFiles(Set<String> fileNames) {
             this.completedVectorFiles = checkNotNull(fileNames);
-            return this;
-        }
-
-        private CompactPlanner withIncrementalCompaction(FileStoreTable table) {
-            CoreOptions options = table.coreOptions();
-            if (options.dataEvolutionCompactionIncrementalEnabled()) {
-                this.incrementalOptions = options;
-                this.incrementalRowType = table.rowType();
-                Set<String> dedicatedFields =
-                        fieldNamesInBlobFile(table.rowType(), options.blobInlineField());
-                dedicatedFields.addAll(
-                        fieldNamesInVectorFile(table.rowType(), options.withVectorFormat()));
-                this.currentFieldIds =
-                        DataEvolutionIncrementalCompactTask.fieldIds(
-                                table.rowType().getFields().stream()
-                                        .filter(
-                                                field ->
-                                                        !table.partitionKeys()
-                                                                .contains(field.name()))
-                                        .filter(field -> !dedicatedFields.contains(field.name()))
-                                        .collect(Collectors.toList()),
-                                options.dataEvolutionNestedFieldEnabled());
-                Map<Long, TableSchema> schemas = new HashMap<>();
-                this.incrementalSchemaFetcher =
-                        id -> schemas.computeIfAbsent(id, table.schemaManager()::schema);
-            }
             return this;
         }
 
@@ -459,7 +456,7 @@ public class DataEvolutionCompactCoordinator {
                                 "Data files %s should be all row id ranges same.",
                                 continuousDataFiles);
                         long groupWeight = groupWeight(fileGroup);
-                        if (incrementalOptions != null && fileGroup.size() > 1) {
+                        if (incrementalPlanner != null && fileGroup.size() > 1) {
                             tasks.addAll(
                                     triggerTask(
                                             compactBin.drain(),
@@ -627,10 +624,13 @@ public class DataEvolutionCompactCoordinator {
                 if (dataFiles.size() >= compactMinFileNum
                         || canSplit(normalRange, protectedRanges)) {
                     List<DataFileMeta> selected =
-                            normalFilesToCompact(
-                                    dataFiles,
-                                    normalRange,
-                                    splitLargeFile && canSplit(normalRange, protectedRanges));
+                            incrementalPlanner == null
+                                    ? dataFiles
+                                    : incrementalPlanner.selectFiles(
+                                            dataFiles,
+                                            normalRange,
+                                            splitLargeFile
+                                                    && canSplit(normalRange, protectedRanges));
                     if (!selected.isEmpty()
                             && selected.stream()
                                     .anyMatch(
@@ -648,114 +648,6 @@ public class DataEvolutionCompactCoordinator {
                 }
             }
             return tasks;
-        }
-
-        private List<DataFileMeta> normalFilesToCompact(
-                List<DataFileMeta> files, Range range, boolean splitLargeFile) {
-            // Smaller output ranges cannot coexist with a retained normal version of this range.
-            if (incrementalOptions == null
-                    || splitLargeFile
-                    || files.stream().anyMatch(file -> !file.nonNullRowIdRange().equals(range))) {
-                return files;
-            }
-            if (files.size() < compactMinFileNum) {
-                return Collections.emptyList();
-            }
-            List<DataFileMeta> sorted = new ArrayList<>(files);
-            sorted.sort(comparingLong(DataFileMeta::maxSequenceNumber).reversed());
-            Set<Integer> suppliedFields = new HashSet<>();
-            double totalSize = 0;
-            double liveSize = 0;
-            for (DataFileMeta file : sorted) {
-                totalSize += file.fileSize();
-                if (suppliedFields.addAll(currentFields(file))) {
-                    // Count the entire file when any current column still needs it. Different
-                    // columns are useful data, not redundant versions of the oldest file.
-                    liveSize += file.fileSize();
-                }
-            }
-            if ((totalSize - liveSize) * 100
-                    > incrementalOptions.maxSizeAmplificationPercent() * liveSize) {
-                return files;
-            }
-            List<DataFileMeta> selected =
-                    pickIncrementalFiles(
-                            sorted, compactMinFileNum, incrementalOptions.sortedRunSizeRatio());
-            if (selected.isEmpty() || selected.size() == files.size()) {
-                return selected;
-            }
-            Set<Integer> writtenFields = new HashSet<>();
-            for (DataFileMeta file : selected) {
-                writtenFields.addAll(currentFields(file));
-                if (incrementalOptions.dataEvolutionNestedFieldEnabled()) {
-                    for (DataField field :
-                            fileFields(incrementalSchemaFetcher.apply(file.schemaId()), file)) {
-                        if (field.type() instanceof RowType
-                                && incrementalRowType.containsField(field.id())
-                                && !currentFieldIds.containsAll(
-                                        DataEvolutionIncrementalCompactTask.fieldIds(
-                                                Collections.singletonList(field), true))) {
-                            // Dropped leaves can still be hidden parent-nullness providers.
-                            // Reading the whole group preserves those parents without replacing
-                            // untouched siblings with newly manufactured NULLs.
-                            return files;
-                        }
-                    }
-                }
-            }
-            if (writtenFields.isEmpty()) {
-                return files;
-            }
-            if (incrementalOptions.dataEvolutionNestedFieldEnabled()) {
-                RowType projected =
-                        DataEvolutionIncrementalCompactTask.project(
-                                incrementalRowType, writtenFields, true);
-                try {
-                    projected.collectLeafPaths(incrementalRowType);
-                } catch (UnsupportedOperationException e) {
-                    // Schema evolution can make an old whole struct a deep partial struct, or
-                    // introduce an ambiguous dotted path. Such projections need a full rewrite.
-                    return files;
-                }
-            }
-            return selected;
-        }
-
-        private Set<Integer> currentFields(DataFileMeta file) {
-            Set<Integer> fields =
-                    DataEvolutionIncrementalCompactTask.fieldIds(
-                            fileFields(incrementalSchemaFetcher.apply(file.schemaId()), file),
-                            incrementalOptions.dataEvolutionNestedFieldEnabled());
-            fields.retainAll(currentFieldIds);
-            return fields;
-        }
-
-        @VisibleForTesting
-        static List<DataFileMeta> pickIncrementalFiles(
-                List<DataFileMeta> files, long minFileNum, int sizeRatio) {
-            if (files.size() < minFileNum || files.size() < 2) {
-                return Collections.emptyList();
-            }
-            List<DataFileMeta> sorted = new ArrayList<>(files);
-            sorted.sort(comparingLong(DataFileMeta::maxSequenceNumber).reversed());
-            long minCandidates = Math.max(1L, sorted.size() - minFileNum + 1L);
-            int count = 0;
-            double size = 0;
-            while (count < sorted.size()) {
-                int end = count + 1;
-                long sequence = sorted.get(count).maxSequenceNumber();
-                double runSize = sorted.get(count).fileSize();
-                // Never split files committed at the same version at the selection boundary.
-                while (end < sorted.size() && sorted.get(end).maxSequenceNumber() == sequence) {
-                    runSize += sorted.get(end++).fileSize();
-                }
-                if (count >= minCandidates && size * (100.0 + sizeRatio) / 100.0 < runSize) {
-                    break;
-                }
-                size += runSize;
-                count = end;
-            }
-            return count < 2 ? Collections.emptyList() : new ArrayList<>(sorted.subList(0, count));
         }
 
         private boolean vectorStoreFilesCompactable(List<DataFileMeta> vectorStoreFiles) {
