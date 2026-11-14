@@ -420,6 +420,97 @@ Lookup metrics are available for local partial lookup. They are reported at look
     </tbody>
 </table>
 
+### Blob Payload Transfer Metrics
+
+Payload transfer metrics are **disabled by default**. To enable them for an append writer
+with a metric registry, set the following table option when creating a table or before
+creating a new writer:
+
+```sql
+ALTER TABLE my_table SET ('blob-transfer-metrics.enabled' = 'true');
+```
+
+Existing writers keep their original setting; create a new writer from the updated table
+configuration for the change to take effect.
+
+The option controls only the additional `blobTransfer` group. The existing `blobFetch`
+counters, including fetch outcomes and successful payload bytes, remain enabled whenever
+the writer has a metric registry. With the option disabled, writers skip transfer timing,
+source classification and per-copy transfer-byte accounting. Enabling the option adds
+per-payload instrumentation overhead; it does not change the fetch or write policy.
+
+Instrumented append paths for raw, array and map BLOB fields record the following metrics,
+scoped by `table` and `sourceKind`. This includes Data Evolution append writes; it does not
+enable instrumentation in primary-key BLOB externalization or Data Evolution BLOB compaction,
+which do not attach this reporter. Exported series and histogram statistics depend on the
+metric backend; see the Spark limitations below.
+
+| Metric | Type | Description |
+| --- | --- | --- |
+| `blobTransferReadBytes` | Counter | Payload bytes returned by source reads, including partial attempts that later fail. |
+| `blobTransferWrittenBytes` | Counter | Payload bytes passed to destination writes that returned successfully, including partial attempts. |
+| `blobTransferDurationNanos` | Counter | Cumulative elapsed nanoseconds for reported transfer outcomes. |
+| `blobTransferCompleted` | Counter | Payload copies that completed, before record-footer writing, descriptor callbacks, flushing or snapshot commit. |
+| `blobTransferFailed` | Counter | Failures obtaining or opening a source, or copying its payload. |
+| `blobTransferLatencyMillis` | Histogram | Elapsed milliseconds for every reported completed and failed transfer, with a fixed 1024-sample window per source kind. |
+
+`sourceKind` describes the reader API used by the writer: `inline` for an in-memory BLOB,
+`http` for the standard HTTP reader, `file` for the standard FileIO reader, and `custom`
+for a custom URI reader. Unrecognized or transforming BLOB subclasses use `unknown`.
+Classification does not parse or expose URIs, object paths, hostnames or credentials.
+These five values bound the number of source groups. They do not identify a storage
+provider, content owner, physical serving location or network route.
+
+Elapsed time starts when obtaining the BLOB value and ends when its payload copy completes
+or fails. It includes source opening, intervening prefix framing, the copy, and per-payload
+stream close where applicable. When switching reused sources, cleanup of the previous source
+is excluded from the next source's sample. Final closure of a reused underlying source is
+also outside this interval. Record-footer writing, descriptor callbacks, flush and snapshot
+commit are excluded.
+Errors in surrounding record framing are outside these payload-copy outcome counters. User NULLs,
+placeholders and prechecked missing resources do not attempt a payload copy and are excluded.
+The video writer's shared full-payload copy path also respects the option, but its separate
+keyframe-index reads are not included in these transfer metrics and retain their existing
+fetch counters. A reused physical video payload is counted when copied, rather than once
+per logical frame reference. No transfer outcomes are sampled: the histogram retains the
+latest 1024 elapsed-time observations for each reporter and source-kind group.
+
+Byte counts exclude file framing, checksums, protocol headers and lower-layer retries or
+transport overhead. A failed write may have changed the destination before throwing; those
+unknown partial bytes are not claimed as successfully written. These metrics describe
+application payload processing, not physical network bandwidth or committed snapshot size.
+Failure of the optional transfer reporter does not replace the data-processing outcome.
+
+#### Backend scope and aggregation
+
+Only when the backend exposes independently identifiable writer series should payload B/s
+or copies/s be computed as reset-aware nonnegative rates per writer before aggregation.
+Computing a rate after summing counters can hide a reset in one writer behind an increase in
+another. Where the backend exports per-writer histogram quantiles, averaging them does not
+produce a global quantile. Keep the writer dimension or label an aggregate such as the maximum
+of per-writer quantiles explicitly. These calculations require the corresponding exported
+series; the reporter's in-memory counters and histogram alone do not guarantee their presence.
+
+The current Spark adapter uses a shared Dropwizard/JMX registry within each JVM. It keys
+transfer exports by metric group, table, source kind and metric name, without a writer
+identifier. Registering another reporter with the same key replaces that metric's exported
+gauge: the series reflects the **reporter that most recently registered that metric name**,
+not a sum of concurrent writers. Transfer groups register lazily on the first observed copy
+of each source kind. For example, after writer A reports three completed copies, writer B
+registers the same completed-copy metric and records one copy. The exported count becomes one;
+a subsequent copy by A does not update B's exported series. Such a change is not a counter reset
+of one continuous writer. Do not use this series to derive concurrent-writer totals, aggregate
+throughput or reset-aware per-writer rates. The restriction applies to overlapping reporters
+with the same key, even if they use separate `SparkMetricRegistry` instances in the same JVM.
+
+Spark also exports only the histogram **mean** as a gauge under the histogram's metric name.
+`blobTransferLatencyMillis` in Spark is the mean in milliseconds of the retained samples
+(up to the latest 1024 per reporter/source kind), not a lifetime mean, P95/P99 or mergeable
+distribution. A single-writer diagnostic can use the exported count and mean,
+but must retain its known writer lifetime; concurrent-writer attribution or latency quantiles
+require a backend that exports those identities and statistics. This option does not change
+Spark's existing registration or histogram-export behavior.
+
 ### Compaction Metrics
 
 <table class="table table-bordered">

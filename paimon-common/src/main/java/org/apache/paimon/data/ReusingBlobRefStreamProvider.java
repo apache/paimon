@@ -50,16 +50,33 @@ public final class ReusingBlobRefStreamProvider implements Closeable {
      * {@code openBounded}.
      */
     public void prepareFor(BlobRef ref) throws IOException {
+        prepareFor(ref, false);
+    }
+
+    /**
+     * Prepares the source and returns time spent closing the previous underlying stream, in
+     * nanoseconds. A caller timing the new reference can exclude this cleanup without excluding a
+     * seek needed by the new reference. Only cleanup is timed; callers not collecting latency
+     * should use {@link #prepareFor(BlobRef)}.
+     */
+    public long prepareForWithCleanupTiming(BlobRef ref) throws IOException {
+        return prepareFor(ref, true);
+    }
+
+    private long prepareFor(BlobRef ref, boolean measureCleanupTime) throws IOException {
         epoch++; // invalidate any view handed out for the previous reference
         if (underlying == null) {
-            return;
+            return 0;
         }
         long offset = ref.toDescriptor().offset();
         boolean sameSource = reader == ref.uriReader() && ref.toDescriptor().uri().equals(uri);
         // Different file, or same file that can't rewind: drop it so openBounded reopens fresh.
         if (!sameSource || (position != offset && !trySeek(offset))) {
+            long closeStart = measureCleanupTime ? System.nanoTime() : 0;
             close();
+            return measureCleanupTime ? System.nanoTime() - closeStart : 0;
         }
+        return 0;
     }
 
     /**

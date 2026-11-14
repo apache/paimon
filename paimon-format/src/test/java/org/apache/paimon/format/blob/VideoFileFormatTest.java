@@ -162,6 +162,44 @@ public class VideoFileFormatTest {
     }
 
     @Test
+    public void testWriteVideoWithNullFetchMetricReporter() throws IOException {
+        byte[] bytes = "video-payload".getBytes(StandardCharsets.UTF_8);
+        Blob frame = sourceFrame("source.mp4", bytes, 7);
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            VideoFormatWriter writer =
+                    new VideoFormatWriter(
+                            out,
+                            rowType,
+                            false,
+                            false,
+                            null,
+                            BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+            writer.setFile(file);
+            writer.addElement(GenericRow.of(frame));
+            writer.close();
+        }
+
+        try (SeekableInputStream in = fileIO.newInputStream(file)) {
+            VideoFileMeta meta = new VideoFileMeta(in, fileIO.getFileSize(file), null);
+            assertThat(meta.recordNumber()).isEqualTo(1);
+            assertThat(meta.physicalVideoNumber()).isEqualTo(1);
+            assertThat(meta.videoLength(0)).isEqualTo(bytes.length);
+        }
+
+        List<InternalRow> rows = read(null);
+        assertThat(rows).hasSize(1);
+        VideoFrameDescriptor restored = descriptor(rows.get(0));
+        assertThat(restored.frameIndex()).isEqualTo(7);
+        assertThat(
+                        Blob.fromDescriptor(
+                                        org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                                        restored.payloadDescriptor())
+                                .toData())
+                .isEqualTo(bytes);
+    }
+
+    @Test
     public void testCrossLanguageV1Fixture() throws IOException {
         byte[] fixture =
                 fromHex(

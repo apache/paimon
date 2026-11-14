@@ -3055,6 +3055,16 @@ public class CoreOptions implements Serializable {
                                     + "HTTP 404 is handled by 'blob-write-null-on-missing-file'. "
                                     + "When false, the write fails when the descriptor is read.");
 
+    public static final ConfigOption<Boolean> BLOB_TRANSFER_METRICS_ENABLED =
+            key("blob-transfer-metrics.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to collect payload byte counts and elapsed-time metrics in "
+                                    + "the blobTransfer group for instrumented BLOB append writers. "
+                                    + "Existing blobFetch metrics are unaffected. Enabling this "
+                                    + "option adds per-payload instrumentation overhead.");
+
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
             key("commit.discard-duplicate-files")
                     .booleanType()
@@ -4982,6 +4992,10 @@ public class CoreOptions implements Serializable {
 
     public boolean blobWriteNullOnFetchFailure() {
         return options.get(BLOB_WRITE_NULL_ON_FETCH_FAILURE);
+    }
+
+    public boolean blobTransferMetricsEnabled() {
+        return options.get(BLOB_TRANSFER_METRICS_ENABLED);
     }
 
     public boolean postponeBatchWriteFixedBucket() {
