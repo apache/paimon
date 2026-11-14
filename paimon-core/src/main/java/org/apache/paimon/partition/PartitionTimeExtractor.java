@@ -35,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 import static java.time.temporal.ChronoField.DAY_OF_MONTH;
 import static java.time.temporal.ChronoField.HOUR_OF_DAY;
@@ -47,6 +48,16 @@ import static java.time.temporal.ChronoField.YEAR;
 public class PartitionTimeExtractor implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    /**
+     * Cast marker after a variable of the pattern, e.g. {@code $dt::epoch_day $hour:00:00}. The
+     * value of a DATE partition column is the number of days since 1970-01-01, which no {@link
+     * DateTimeFormatter} can parse, so such a value is converted to {@code yyyy-MM-dd} first. A
+     * value that is not a whole number, such as a formatted date, is used as it is.
+     */
+    public static final String EPOCH_DAY_CAST = "::epoch_day";
+
+    private static final Pattern EPOCH_DAY = Pattern.compile("-?\\d{1,9}");
 
     private static final DateTimeFormatter TIMESTAMP_FORMATTER =
             new DateTimeFormatterBuilder()
@@ -124,6 +135,10 @@ public class PartitionTimeExtractor implements Serializable {
                     if (pattern.regionMatches(i + 1, key, 0, key.length())) {
                         matchedValue = partitionValues.get(idx).toString();
                         i += 1 + key.length();
+                        if (pattern.startsWith(EPOCH_DAY_CAST, i)) {
+                            matchedValue = fromEpochDay(matchedValue);
+                            i += EPOCH_DAY_CAST.length();
+                        }
                         break;
                     }
                 }
@@ -136,6 +151,13 @@ public class PartitionTimeExtractor implements Serializable {
             i++;
         }
         return builder.toString();
+    }
+
+    private static String fromEpochDay(String value) {
+        if (!EPOCH_DAY.matcher(value).matches()) {
+            return value;
+        }
+        return LocalDate.ofEpochDay(Long.parseLong(value)).toString();
     }
 
     private static LocalDateTime toLocalDateTime(

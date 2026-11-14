@@ -127,4 +127,66 @@ public class PartitionTimeExtractorTest {
                                 DateTimeParseException.class,
                                 "Text 'unknown' could not be parsed at index 0"));
     }
+
+    @Test
+    public void testEpochDayCastWithHourAndFormatter() {
+        PartitionTimeExtractor extractor =
+                new PartitionTimeExtractor("$pd::epoch_day $ph:00:00", "yyyy-MM-dd H:mm:ss");
+        assertThat(extractor.extract(Arrays.asList("pd", "ph"), Arrays.asList(20477, 0)))
+                .isEqualTo(LocalDateTime.parse("2026-01-24T00:00:00"));
+        assertThat(extractor.extract(Arrays.asList("pd", "ph"), Arrays.asList(20477L, "00")))
+                .isEqualTo(LocalDateTime.parse("2026-01-24T00:00:00"));
+        assertThat(extractor.extract(Arrays.asList("pd", "ph"), Arrays.asList(20478, 23)))
+                .isEqualTo(LocalDateTime.parse("2026-01-25T23:00:00"));
+    }
+
+    @Test
+    public void testEpochDayCastWithHourWithoutFormatter() {
+        PartitionTimeExtractor extractor =
+                new PartitionTimeExtractor("$pd::epoch_day $ph:00:00", null);
+        assertThat(extractor.extract(Arrays.asList("pd", "ph"), Arrays.asList(20477, 0)))
+                .isEqualTo(LocalDateTime.parse("2026-01-24T00:00:00"));
+        assertThat(extractor.extract(Arrays.asList("pd", "ph"), Arrays.asList(20479, 1)))
+                .isEqualTo(LocalDateTime.parse("2026-01-26T01:00:00"));
+    }
+
+    @Test
+    public void testEpochDayCastAlone() {
+        PartitionTimeExtractor extractor = new PartitionTimeExtractor("$pd::epoch_day", null);
+        assertThat(
+                        extractor.extract(
+                                Collections.singletonList("pd"), Collections.singletonList(20477)))
+                .isEqualTo(LocalDateTime.parse("2026-01-24T00:00:00"));
+        assertThat(
+                        extractor.extract(
+                                Collections.singletonList("pd"), Collections.singletonList(-1)))
+                .isEqualTo(LocalDateTime.parse("1969-12-31T00:00:00"));
+    }
+
+    @Test
+    public void testEpochDayCastKeepsFormattedDate() {
+        // A DATE value read from a partition path is already a date string.
+        PartitionTimeExtractor extractor =
+                new PartitionTimeExtractor("$pd::epoch_day $ph:00:00", null);
+        assertThat(extractor.extract(Arrays.asList("pd", "ph"), Arrays.asList("2026-01-24", "5")))
+                .isEqualTo(LocalDateTime.parse("2026-01-24T05:00:00"));
+    }
+
+    @Test
+    public void testEpochDayCastWithPrefixVariableNames() {
+        PartitionTimeExtractor extractor =
+                new PartitionTimeExtractor("$dt::epoch_day $dt1:00:00", null);
+        assertThat(extractor.extract(Arrays.asList("dt", "dt1"), Arrays.asList(20477, 7)))
+                .isEqualTo(LocalDateTime.parse("2026-01-24T07:00:00"));
+    }
+
+    @Test
+    public void testIntegerWithoutEpochDayCastIsUnchanged() {
+        PartitionTimeExtractor extractor = new PartitionTimeExtractor("$dt", "yyyyMMdd");
+        assertThat(
+                        extractor.extract(
+                                Collections.singletonList("dt"),
+                                Collections.singletonList(20230115)))
+                .isEqualTo(LocalDateTime.parse("2023-01-15T00:00:00"));
+    }
 }
