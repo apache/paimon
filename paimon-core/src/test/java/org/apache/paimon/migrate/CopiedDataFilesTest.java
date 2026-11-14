@@ -34,8 +34,10 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.commit.RowTrackingCommitUtils;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.stats.SimpleStats;
@@ -323,6 +325,13 @@ public class CopiedDataFilesTest extends TableTestBase {
                 .extracting(DataFileMeta::fileName)
                 .containsExactly(
                         "n0.parquet", "v0.vector.parquet", "n1.parquet", "v1.vector.parquet");
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (DataFileMeta file : vectors) {
+            entries.add(ManifestEntry.create(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, -1, file));
+        }
+        assertThat(RowTrackingCommitUtils.assignRowTracking(1L, 0L, entries).assignedEntries)
+                .extracting(entry -> entry.file().firstRowId())
+                .containsExactly(0L, 0L, 100L, 150L);
         assertThat(blobs)
                 .extracting(DataFileMeta::fileName)
                 .containsExactly("n2.parquet", "n3.parquet", "b0.blob", "b1.blob");
