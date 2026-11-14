@@ -20,7 +20,11 @@ import os
 import shutil
 import tempfile
 import unittest
+from dataclasses import replace
+from datetime import date, datetime
+from decimal import Decimal
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -29,11 +33,19 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.cli.cli import main
 from pypaimon.common.json_util import JSON
+from pypaimon.data.timestamp import Timestamp
+from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.table.row.generic_row import GenericRow
 
 
 class CliTableTest(unittest.TestCase):
@@ -155,6 +167,34 @@ class CliTableTest(unittest.TestCase):
             with open(table.schema_manager._to_schema_path(schema_id), 'w') as f:
                 f.write(JSON.to_json(schema))
         return identifier, table
+
+    def _create_manifest_table(self, primary_keys=None, options=None, suffix='manifests'):
+        """Write real Avro metadata without creating the referenced data files."""
+        identifier, table = self._create_snapshot_table(
+            snapshots=[self._snapshot(1), self._snapshot(2, changelog_manifest_list='change-2')],
+            primary_keys=primary_keys, options=options, suffix=suffix)
+        empty = GenericRow([], [])
+        key = GenericRow([7] if primary_keys else [], table.trimmed_primary_keys_fields)
+        stats = SimpleStats(GenericRow([7], table.fields), GenericRow([8], table.fields), [0])
+        entry = ManifestEntry(0, empty, 0, table.total_buckets, DataFileMeta(
+            file_name='data-test.parquet', file_size=1024, row_count=2,
+            min_key=key, max_key=key, key_stats=SimpleStats(key, key, [0] if primary_keys else []),
+            value_stats=stats, min_sequence_number=9007199254740993, max_sequence_number=9007199254740994,
+            schema_id=0, level=0, extra_files=[], creation_time=Timestamp.from_epoch_millis(1700000000123),
+            file_source=0))
+        file_manager = ManifestFileManager(table)
+        table.file_io.mkdirs(file_manager.manifest_path)
+        metas = []
+        for name in ('manifest-base', 'manifest-delta', 'manifest-change'):
+            file_manager.write(name, [entry])
+            metas.append(ManifestFileMeta(
+                name, os.path.getsize(os.path.join(file_manager.manifest_path, name)), 1, 0,
+                SimpleStats(empty, empty, []), 0))
+        manager = ManifestListManager(table)
+        for name, files in (('base-1', [metas[0]]), ('delta-1', []),
+                            ('base-2', [metas[0]]), ('delta-2', [metas[1]]), ('change-2', [metas[2]])):
+            manager.write(name, files)
+        return identifier, table, entry
 
     def _run_table_command(self, *argv, config=None):
         """Run a table command and capture stdout, stderr and the exit code."""
@@ -676,6 +716,180 @@ class CliTableTest(unittest.TestCase):
                     self.assertEqual(3, snapshot['nextRowId'])
                 listed = json.loads(self._run_table_command_success('list-snapshots', identifier, '-f', 'json'))
                 self.assertEqual([1], [s['id'] for s in listed])
+
+    def test_cli_table_list_manifests(self):
+        identifier, table, _ = self._create_manifest_table()
+        manager = ManifestListManager(table)
+        meta = manager.read('base-2')[0]
+        manager.write('base-2', [replace(meta, min_row_id=9007199254740993, max_row_id=9007199254740994),
+                                 replace(meta, file_name='manifest-null')])
+        latest = table.snapshot_manager().get_latest_snapshot()
+        with patch.object(SnapshotManager, 'get_latest_snapshot',
+                          side_effect=[latest, AssertionError('resolved twice')]), \
+                patch.object(ManifestFileManager, 'read', side_effect=AssertionError('manifest entries read')):
+            result = json.loads(self._run_table_command_success('list-manifests', identifier, '-f', 'json'))
+        self.assertEqual((identifier, 2), (result['table'], result['snapshot_id']))
+        self.assertEqual([('base', 'base-2'), ('base', 'base-2'), ('delta', 'delta-2'), ('changelog', 'change-2')],
+                         [(m['type'], m['manifest_list']) for m in result['manifests']])
+        self.assertEqual([9007199254740993, None, None, None], [m['min_row_id'] for m in result['manifests']])
+        for options, snapshot_id, names in (
+                (('--type', 'delta'), 2, ['manifest-delta']),
+                (('--snapshot-id', '1'), 1, ['manifest-base']),
+                (('--snapshot-id', '1', '--type', 'changelog'), 1, []),
+                (('-l', '1'), 2, ['manifest-base'])):
+            with self.subTest(options=options):
+                result = json.loads(self._run_table_command_success(
+                    'list-manifests', identifier, *options, '-f', 'json'))
+                self.assertEqual(snapshot_id, result['snapshot_id'])
+                self.assertEqual(names, [m['file_name'] for m in result['manifests']])
+        output = self._run_table_command_success('list-manifests', identifier, '--limit', '3')
+        header = next(line.split() for line in output.splitlines() if 'num_added_files' in line)
+        self.assertEqual(['file_name', 'file_size', 'num_added_files', 'num_deleted_files', 'schema_id',
+                          'min_partition_stats', 'max_partition_stats', 'min_row_id', 'max_row_id'], header)
+        rows = [line.split() for line in output.splitlines() if line.lstrip().startswith('manifest-')]
+        self.assertEqual(['manifest-base', 'manifest-null', 'manifest-delta'], [row[0] for row in rows])
+        self.assertEqual(['{}', '{}', '9007199254740993', '9007199254740994'], rows[0][-4:])
+        self.assertEqual(['-', '-'], rows[1][-2:])
+
+    def test_cli_table_list_manifests_empty_and_missing_snapshot(self):
+        identifier, _ = self._create_snapshot_table(snapshots=[])
+        result = json.loads(self._run_table_command_success('list-manifests', identifier, '-f', 'json'))
+        self.assertEqual({'table': identifier, 'snapshot_id': None, 'manifests': []}, result)
+        self.assertIn('No manifests', self._run_table_command_success('list-manifests', identifier))
+        out, err, code = self._run_table_command('list-manifests', identifier, '--snapshot-id', '99')
+        self.assertEqual(('', 1), (out, code))
+        self.assertIn('Snapshot 99 not found', err)
+
+    def test_cli_table_manifest_preserves_raw_entries_and_formats(self):
+        identifier, table, entry = self._create_manifest_table()
+        extra = dict(first_row_id=9007199254740993, write_cols=['id'], write_cols_sequences=[9007199254740994],
+                     extra_files=['file.index'], embedded_index=b'\x00\xff', delete_row_count=1, file_source=1,
+                     external_path='s3://warehouse/external/data-test.parquet')
+        # This file is absent from all snapshot manifest lists; its data file does not exist.
+        deleted = replace(entry, kind=1, file=replace(entry.file, **extra))
+        ManifestFileManager(table).write('manifest-retained', [entry, deleted])
+        root = Path(table.table_path)
+        before = {path: path.read_bytes() for path in root.rglob('*') if path.is_file()}
+        args = ('manifest', identifier, '--file', 'manifest-retained')
+        with patch.object(SnapshotManager, 'get_latest_snapshot', side_effect=AssertionError('snapshot read')):
+            result = json.loads(self._run_table_command_success(*args))
+        self.assertEqual((identifier, 'manifest-retained', table.table_path + '/manifest/manifest-retained'),
+                         (result['table'], result['manifest_file'], result['manifest_path']))
+        self.assertEqual([('ADD', {}, 0), ('DELETE', {}, 0)],
+                         [(e['kind'], e['partition'], e['bucket']) for e in result['entries']])
+        file = result['entries'][0]['file']
+        expected = dict(file_name='data-test.parquet', file_format='parquet', file_size=1024, row_count=2,
+                        schema_id=0, min_sequence_number=9007199254740993, first_row_id=None, file_source='APPEND',
+                        creation_time='2023-11-14T22:13:20.123000',
+                        file_path=table.table_path + '/bucket-0/data-test.parquet')
+        self.assertEqual(expected, {key: file[key] for key in expected})
+        file = result['entries'][1]['file']
+        expected = dict(extra, file_source='COMPACT', embedded_index={'encoding': 'base64', 'data': 'AP8='},
+                        file_path=extra['external_path'])
+        self.assertEqual(expected, {key: file[key] for key in expected})
+        output = self._run_table_command_success(*args, '-f', 'table')
+        rows = dict(line.split(None, 1) for line in output.splitlines()[1:])
+        self.assertEqual(['table', 'manifest_file', 'manifest_path', 'entries'], list(rows))
+        self.assertEqual(result, dict(rows, entries=json.loads(rows['entries'])))
+        self.assertEqual(before, {path: path.read_bytes() for path in root.rglob('*') if path.is_file()})
+
+    def test_cli_table_manifest_historical_schema(self):
+        identifier, table, entry = self._create_manifest_table(primary_keys=['id'], options={'bucket': '1'})
+        renamed = [DataField.from_dict({'id': 0, 'name': 'renamed_id', 'type': 'INT NOT NULL'}),
+                   DataField.from_dict({'id': 1, 'name': 'new_column', 'type': 'STRING'})]
+        schema = TableSchema.from_schema(1, Schema(
+            fields=renamed, primary_keys=['renamed_id'], options={'bucket': '1'}))
+        with open(table.schema_manager._to_schema_path(1), 'w') as f:
+            f.write(JSON.to_json(schema))
+        meta = replace(entry.file, value_stats=replace(entry.file.value_stats, null_counts=None),
+                       value_stats_cols=['id'])
+        ManifestFileManager(table).write('manifest-old', [replace(entry, file=meta)])
+        result = json.loads(self._run_table_command_success('manifest', identifier, '--file', 'manifest-old'))
+        file = result['entries'][0]['file']
+        self.assertEqual((0, ['id'], {'id': 7}, {'id': 7}),
+                         (file['schema_id'], file['value_stats_cols'], file['min_key'], file['max_key']))
+        self.assertEqual({'min_values': {'id': 7}, 'max_values': {'id': 7}, 'null_counts': {'id': 0}},
+                         file['key_stats'])
+        self.assertEqual({'min_values': {'id': 7}, 'max_values': {'id': 8}, 'null_counts': None}, file['value_stats'])
+
+    def test_cli_table_manifest_typed_stats_and_partition(self):
+        identifier = 'test_db.typed_manifest'
+        definitions = [('pt', 'DATE'), ('amount', 'DECIMAL(30, 9)'), ('payload', 'BYTES'), ('at', 'TIMESTAMP(6)'),
+                       ('nan', 'DOUBLE'), ('positive', 'DOUBLE'), ('negative', 'DOUBLE')]
+        fields = [DataField.from_dict({'id': i, 'name': name, 'type': type_name})
+                  for i, (name, type_name) in enumerate(definitions)]
+        self.catalog.create_table(identifier, Schema(fields=fields, partition_keys=['pt']), False)
+        table = self.catalog.get_table(identifier)
+        empty = GenericRow([], [])
+        values = [date(2026, 11, 13), Decimal('123456789012345678.123456789'), b'\x00\xff',
+                  datetime(2026, 11, 13, 1, 2, 3, 123456), float('nan'), float('inf'), float('-inf')]
+        stats = SimpleStats(GenericRow(values, fields), GenericRow(values, fields), [0, None, 0, 0])
+        entry = ManifestEntry(0, GenericRow(values[:1], table.partition_keys_fields), 0, -1, DataFileMeta(
+            'typed.parquet', 100, 1, empty, empty, SimpleStats(empty, empty, []), stats, 0, 0, 0, 0, []))
+        manager = ManifestFileManager(table)
+        table.file_io.mkdirs(manager.manifest_path)
+        manager.write('manifest-typed', [entry])
+        result = json.loads(self._run_table_command_success('manifest', identifier, '--file', 'manifest-typed'))
+        self.assertEqual({'pt': '2026-11-13'}, result['entries'][0]['partition'])
+        stats = result['entries'][0]['file']['value_stats']
+        expected = {'pt': '2026-11-13', 'amount': '123456789012345678.123456789',
+                    'payload': {'encoding': 'base64', 'data': 'AP8='}, 'at': '2026-11-13T01:02:03.123456',
+                    'nan': 'NaN', 'positive': 'Infinity', 'negative': '-Infinity'}
+        self.assertEqual(expected, stats['min_values'])
+        self.assertEqual(expected, stats['max_values'])
+        self.assertEqual(
+            {'pt': 0, 'amount': None, 'payload': 0, 'at': 0, 'nan': None, 'positive': None, 'negative': None},
+            stats['null_counts'])
+
+    def test_cli_table_manifest_empty_entries_and_stats(self):
+        identifier, table, entry = self._create_manifest_table()
+        manager = ManifestFileManager(table)
+        manager.write('manifest-empty', [])
+        # Dedicated vector files can store an empty row while retaining schema field definitions.
+        meta = replace(entry.file, value_stats=SimpleStats.empty_stats(), value_stats_cols=None)
+        manager.write('manifest-empty-stats', [replace(entry, file=meta)])
+        for name, count in (('manifest-empty', 0), ('manifest-empty-stats', 1)):
+            with self.subTest(file=name):
+                args = ('manifest', identifier, '--file', name)
+                result = json.loads(self._run_table_command_success(*args, '--format', 'json'))
+                self.assertEqual(count, len(result['entries']))
+                if count:
+                    self.assertEqual({'min_values': {}, 'max_values': {}, 'null_counts': {'id': None}},
+                                     result['entries'][0]['file']['value_stats'])
+                output = self._run_table_command_success(*args, '--format', 'table')
+                rows = dict(line.split(None, 1) for line in output.splitlines()[1:])
+                self.assertEqual(result['entries'], json.loads(rows['entries']))
+
+    def test_cli_table_manifest_invalid_arguments(self):
+        cases = [('manifest', 'test_db.users'), ('manifest', 'test_db.users', '--file', 'manifest-test', '-f', 'csv')]
+        cases.extend(('list-manifests', 'test_db.users', option, value)
+                     for option, value in (('--snapshot-id', '0'), ('--limit', '-1'), ('--type', 'invalid')))
+        for args in cases:
+            with self.subTest(args=args):
+                out, err, code = self._run_table_command(*args)
+                self.assertEqual(('', 2), (out, code))
+                self.assertIn('error:', err)
+        for name in ('../manifest-test', 'dir\\manifest-test', '..', '', '\x00'):
+            with self.subTest(file=name):
+                out, err, code = self._run_table_command('manifest', 'test_db.users', '--file', name)
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn('file name', err.lower())
+
+    def test_cli_table_manifest_metadata_errors(self):
+        identifier, table, _ = self._create_manifest_table()
+        os.remove(os.path.join(table.table_path, 'manifest', 'base-2'))
+        with open(os.path.join(table.table_path, 'manifest', 'manifest-corrupt'), 'wb') as f:
+            f.write(b'not avro')
+        for args, message in (
+                (('list-manifests', identifier), 'Failed to list manifests'),
+                (('manifest', identifier, '--file', 'manifest-missing'), 'Failed to read manifest'),
+                (('manifest', identifier, '--file', 'manifest-corrupt'), 'Failed to read manifest'),
+                (('list-manifests', identifier + '$snapshots'), 'expected a FileStoreTable'),
+                (('manifest', identifier + '$snapshots', '--file', 'manifest-base'), 'expected a FileStoreTable')):
+            with self.subTest(args=args):
+                out, err, code = self._run_table_command(*args)
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn(message, err)
 
     def test_cli_table_create_with_json_schema(self):
         """Test table create with JSON schema file."""
