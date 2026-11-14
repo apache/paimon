@@ -1078,7 +1078,8 @@ public class CoreOptions implements Serializable {
                             "The size amplification is defined as the amount (in percentage) of additional storage "
                                     + "needed to store a single byte of data in the merge tree for changelog mode table. "
                                     + "For incremental data-evolution compaction, this limits fully superseded "
-                                    + "normal-file bytes relative to files still supplying current columns.");
+                                    + "file bytes relative to files still supplying current columns. "
+                                    + "Files with row-level fallbacks count as live.");
 
     public static final ConfigOption<Boolean> COMPACTION_FORCE_UP_LEVEL_0 =
             key("compaction.force-up-level-0")
@@ -1094,7 +1095,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) "
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
-                                    + "into this candidate set. Also applies to newest-first normal column-file "
+                                    + "into this candidate set. Also applies to newest-first column-file "
                                     + "version selection in incremental data-evolution compaction.");
 
     public static final ConfigOption<Integer> COMPACT_OFFPEAK_START_HOUR =
@@ -2811,13 +2812,15 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Compact a newest-first prefix of normal column-file versions within "
+                            "Compact a newest-first prefix of column-file versions within "
                                     + "one row-ID range, writing only their columns and retaining "
-                                    + "older files. Uses compaction.min.file-num, compaction.size-ratio "
-                                    + "and compaction.max-size-amplification-percent for selection. "
+                                    + "older files. Applies to normal, BLOB and VECTOR files when their "
+                                    + "compaction is enabled. Uses compaction.min.file-num for normal/VECTOR "
+                                    + "files and the existing two-file trigger for BLOB files, plus "
+                                    + "compaction.size-ratio and compaction.max-size-amplification-percent. "
                                     + "Nested ROW columns are projected by written leaf field IDs. "
-                                    + "Partial rewrites keep their complete row-ID range. Eligible "
-                                    + "oversized files select all column versions for splitting.");
+                                    + "Partial normal rewrites keep their complete row-ID range. Eligible "
+                                    + "oversized normal files select all normal versions for splitting.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_DISCARD_CONFLICTING_TASKS =
             key("data-evolution.compaction.discard-conflicting-tasks")

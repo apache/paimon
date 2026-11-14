@@ -137,6 +137,8 @@ public class DataEvolutionCompactTaskSerializer
                 return new DataEvolutionNormalCompactTask(partition, files, ranges);
             case BLOB:
                 return new DataEvolutionBlobCompactTask(partition, files);
+            case INCREMENTAL_BLOB:
+                return new DataEvolutionIncrementalBlobCompactTask(partition, files);
             case VECTOR:
                 return new DataEvolutionVectorCompactTask(partition, files);
             case INCREMENTAL_NORMAL:

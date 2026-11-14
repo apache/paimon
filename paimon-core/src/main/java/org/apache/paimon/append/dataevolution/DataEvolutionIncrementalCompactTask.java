@@ -23,16 +23,16 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.paimon.append.dataevolution.DataEvolutionCompactProjection.fieldIds;
+import static org.apache.paimon.append.dataevolution.DataEvolutionCompactProjection.project;
 import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -74,41 +74,5 @@ public class DataEvolutionIncrementalCompactTask extends DataEvolutionNormalComp
         }
         RowType normalType = super.readWriteType(table);
         return project(normalType, fieldIds, nestedFieldEnabled);
-    }
-
-    static RowType project(RowType rowType, Set<Integer> fieldIds, boolean nestedFieldEnabled) {
-        return new RowType(
-                rowType.isNullable(),
-                projectFields(rowType.getFields(), fieldIds, nestedFieldEnabled));
-    }
-
-    /** ROW leaves are merge units in nested mode; ARRAY and MAP fields remain whole units. */
-    static Set<Integer> fieldIds(List<DataField> fields, boolean nestedFieldEnabled) {
-        Set<Integer> fieldIds = new HashSet<>();
-        for (DataField field : fields) {
-            if (nestedFieldEnabled && field.type() instanceof RowType) {
-                fieldIds.addAll(fieldIds(((RowType) field.type()).getFields(), true));
-            } else {
-                fieldIds.add(field.id());
-            }
-        }
-        return fieldIds;
-    }
-
-    private static List<DataField> projectFields(
-            List<DataField> fields, Set<Integer> fieldIds, boolean nestedFieldEnabled) {
-        List<DataField> projected = new ArrayList<>();
-        for (DataField field : fields) {
-            if (nestedFieldEnabled && field.type() instanceof RowType) {
-                RowType type = (RowType) field.type();
-                List<DataField> children = projectFields(type.getFields(), fieldIds, true);
-                if (!children.isEmpty()) {
-                    projected.add(field.newType(new RowType(type.isNullable(), children)));
-                }
-            } else if (fieldIds.contains(field.id())) {
-                projected.add(field);
-            }
-        }
-        return projected;
     }
 }

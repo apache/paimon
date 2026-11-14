@@ -21,59 +21,52 @@ package org.apache.paimon.append.dataevolution;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Range;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.function.LongFunction;
-import java.util.stream.Collectors;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 import static java.util.Comparator.comparingLong;
-import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
-import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
-import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 
-/** Selects normal column-file versions to rewrite while retaining older column providers. */
+/**
+ * Selects a newest-first version prefix independently of the physical file format.
+ *
+ * <p>Callers provide current field IDs, whether a file has complete column values for its rows, and
+ * whether the selected columns can be safely rewritten on their own.
+ */
 final class DataEvolutionIncrementalCompactPlanner {
 
     private final CoreOptions options;
-    private final RowType rowType;
-    private final Set<Integer> currentFieldIds;
-    private final LongFunction<TableSchema> schemaFetcher;
+    private final Function<DataFileMeta, Set<Integer>> currentFields;
+    private final Predicate<DataFileMeta> completeColumnValues;
+    private final Predicate<List<DataFileMeta>> canRewrite;
 
-    DataEvolutionIncrementalCompactPlanner(FileStoreTable table) {
-        this.options = table.coreOptions();
-        this.rowType = table.rowType();
-        Set<String> dedicatedFields = fieldNamesInBlobFile(rowType, options.blobInlineField());
-        dedicatedFields.addAll(fieldNamesInVectorFile(rowType, options.withVectorFormat()));
-        this.currentFieldIds =
-                DataEvolutionIncrementalCompactTask.fieldIds(
-                        rowType.getFields().stream()
-                                .filter(field -> !table.partitionKeys().contains(field.name()))
-                                .filter(field -> !dedicatedFields.contains(field.name()))
-                                .collect(Collectors.toList()),
-                        options.dataEvolutionNestedFieldEnabled());
-        Map<Long, TableSchema> schemas = new HashMap<>();
-        this.schemaFetcher = id -> schemas.computeIfAbsent(id, table.schemaManager()::schema);
+    DataEvolutionIncrementalCompactPlanner(
+            CoreOptions options,
+            Function<DataFileMeta, Set<Integer>> currentFields,
+            Predicate<DataFileMeta> completeColumnValues,
+            Predicate<List<DataFileMeta>> canRewrite) {
+        this.options = options;
+        this.currentFields = currentFields;
+        this.completeColumnValues = completeColumnValues;
+        this.canRewrite = canRewrite;
     }
 
     /** Returns a newest-first prefix, the whole group for a full rewrite, or no files. */
-    List<DataFileMeta> selectFiles(List<DataFileMeta> files, Range range, boolean splitLargeFile) {
-        // Smaller output ranges cannot coexist with a retained normal version of this range.
-        if (splitLargeFile
-                || files.stream().anyMatch(file -> !file.nonNullRowIdRange().equals(range))) {
+    List<DataFileMeta> selectFiles(List<DataFileMeta> files, long compactMinFileNum) {
+        // A partial rewrite must supply the same rows as every retained version.
+        if (!files.isEmpty()
+                && files.stream()
+                        .anyMatch(
+                                file ->
+                                        !file.nonNullRowIdRange()
+                                                .equals(files.get(0).nonNullRowIdRange()))) {
             return files;
         }
-        long compactMinFileNum = options.compactionMinFileNum();
         if (files.size() < compactMinFileNum) {
             return Collections.emptyList();
         }
@@ -84,10 +77,15 @@ final class DataEvolutionIncrementalCompactPlanner {
         double liveSize = 0;
         for (DataFileMeta file : sorted) {
             totalSize += file.fileSize();
-            if (suppliedFields.addAll(currentFields(file))) {
+            Set<Integer> fields = currentFields.apply(file);
+            if (!suppliedFields.containsAll(fields)) {
                 // Count the entire file when any current column still needs it. Different
                 // columns are useful data, not redundant versions of the oldest file.
                 liveSize += file.fileSize();
+            }
+            // A version containing placeholders cannot supersede older providers by field ID.
+            if (completeColumnValues.test(file)) {
+                suppliedFields.addAll(fields);
             }
         }
         if ((totalSize - liveSize) * 100 > options.maxSizeAmplificationPercent() * liveSize) {
@@ -98,48 +96,7 @@ final class DataEvolutionIncrementalCompactPlanner {
         if (selected.isEmpty() || selected.size() == files.size()) {
             return selected;
         }
-        Set<Integer> writtenFields = new HashSet<>();
-        for (DataFileMeta file : selected) {
-            writtenFields.addAll(currentFields(file));
-            if (options.dataEvolutionNestedFieldEnabled()) {
-                for (DataField field : fileFields(schemaFetcher.apply(file.schemaId()), file)) {
-                    if (field.type() instanceof RowType
-                            && rowType.containsField(field.id())
-                            && !currentFieldIds.containsAll(
-                                    DataEvolutionIncrementalCompactTask.fieldIds(
-                                            Collections.singletonList(field), true))) {
-                        // Dropped leaves can still be hidden parent-nullness providers.
-                        // Reading the whole group preserves those parents without replacing
-                        // untouched siblings with newly manufactured NULLs.
-                        return files;
-                    }
-                }
-            }
-        }
-        if (writtenFields.isEmpty()) {
-            return files;
-        }
-        if (options.dataEvolutionNestedFieldEnabled()) {
-            RowType projected =
-                    DataEvolutionIncrementalCompactTask.project(rowType, writtenFields, true);
-            try {
-                projected.collectLeafPaths(rowType);
-            } catch (UnsupportedOperationException e) {
-                // Schema evolution can make an old whole struct a deep partial struct, or
-                // introduce an ambiguous dotted path. Such projections need a full rewrite.
-                return files;
-            }
-        }
-        return selected;
-    }
-
-    private Set<Integer> currentFields(DataFileMeta file) {
-        Set<Integer> fields =
-                DataEvolutionIncrementalCompactTask.fieldIds(
-                        fileFields(schemaFetcher.apply(file.schemaId()), file),
-                        options.dataEvolutionNestedFieldEnabled());
-        fields.retainAll(currentFieldIds);
-        return fields;
+        return canRewrite.test(selected) ? selected : files;
     }
 
     @VisibleForTesting

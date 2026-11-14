@@ -391,6 +391,40 @@ public class BlobFallbackRecordReaderTest {
     }
 
     @Test
+    public void testCompactionKeepsUnresolvedPlaceholdersForAllBlobTypes() throws Exception {
+        DataFileMeta file = blobFile("prefix-file", 0, 3, 2);
+        Set<String> placeholders = placeholderRows(file, 1);
+        for (RowType rowType :
+                Arrays.asList(READ_ROW_TYPE, READ_ARRAY_ROW_TYPE, READ_MAP_ROW_TYPE)) {
+            List<InternalRow> input =
+                    rowType == READ_ARRAY_ROW_TYPE
+                            ? arrayFileRows(file, placeholders)
+                            : rowType == READ_MAP_ROW_TYPE
+                                    ? mapFileRows(file, placeholders)
+                                    : fileRows(file, null, placeholders);
+            InternalRow.FieldGetter getter =
+                    InternalRow.createFieldGetter(rowType.getTypeAt(BLOB_INDEX), BLOB_INDEX);
+            List<Object> values = new ArrayList<>();
+            try (RecordReader<InternalRow> reader =
+                    new BlobFallbackRecordReader(
+                            Collections.singletonList(file),
+                            ignored -> oneRowPerBatchReader(file, input),
+                            (recordReader, range) -> recordReader,
+                            new Range(0, 2),
+                            null,
+                            rowType,
+                            BLOB_INDEX,
+                            true)) {
+                reader.forEachRemaining(row -> values.add(getter.getFieldOrNull(row)));
+            }
+            assertThat(values).as(rowType.toString()).hasSize(3).doesNotContainNull();
+            assertThat(values.get(1))
+                    .as(rowType.toString())
+                    .isSameAs(getter.getFieldOrNull(input.get(1)));
+        }
+    }
+
+    @Test
     public void testBlobFallbackRecordReaderReturnsRowIdIfAllRowsArePlaceholders()
             throws Exception {
         DataFileMeta newFile = blobFile("new-placeholder-file", 0, 1, 2);

@@ -31,7 +31,7 @@ have different effects on row IDs and dependent indexes.
 | Goal | Operation | Row IDs |
 | --- | --- | --- |
 | Reduce column-file fragmentation | [Ordinary compaction](#ordinary-compaction) | Preserved |
-| Reduce rewrites of normal column versions | [Incremental compaction](#incremental-column-version-compaction) | Preserved |
+| Reduce rewrites of column versions | [Incremental compaction](#incremental-column-version-compaction) | Preserved |
 | Resize large normal files | [Split during compaction](#splitting-large-files-during-compaction) | Preserved |
 | Remove logically deleted positions | [Materialize deletion vectors](#materialize-deletion-vectors) | Reassigned in rewritten ranges |
 
@@ -91,7 +91,7 @@ column files.
 
 ### Incremental Column-Version Compaction
 
-To reduce repeated rewrites of a large normal base file when only a few columns
+To reduce repeated rewrites of large base files when only a few columns
 change, enable `data-evolution.compaction.incremental.enabled` (default: `false`):
 
 ```sql
@@ -101,7 +101,7 @@ ALTER TABLE default.target_table SET TBLPROPERTIES (
 CALL sys.compact('default.target_table');
 ```
 
-Within one normal file group's complete row-ID range, the planner selects a
+For normal, BLOB and VECTOR files with the same complete row-ID range, the planner selects a
 continuous prefix of versions from newest to oldest. Files with the same
 `maxSequenceNumber` are selected together. The output contains only the selected
 files' current columns, resolved by field ID through their historical schemas.
@@ -126,21 +126,31 @@ Selection uses these existing options:
 - `compaction.min.file-num` triggers selection when a group reaches that file
   count. Above the threshold, the planner selects enough newest files to reduce
   the count toward the threshold. A single selected file is left unchanged.
+  BLOB groups retain their existing two-file trigger.
 - `compaction.size-ratio` is the percentage allowance when comparing the
   selected files' accumulated size with the next older version's size. A much
   larger older version stops size-based selection.
 - `compaction.max-size-amplification-percent` can trigger a full-group rewrite.
   For Data Evolution, the planner estimates redundant space as the bytes of
-  files that no longer supply any current normal column or nested leaf, relative
+  files that no longer supply any current column or nested leaf, relative
   to the bytes of files that still supply at least one. This is a conservative file-level
   estimate: a file supplying any current column counts in full, and files
-  supplying different columns are not treated as redundant versions.
+  supplying different columns are not treated as redundant versions. BLOB files
+  can contain placeholders which fall back to older rows, so their older
+  providers conservatively count as live.
 
-Version groups are compacted independently. A partial rewrite preserves the
+Version groups are compacted independently. A partial normal-file rewrite preserves the
 original complete row-ID range and never splits it or merges it with a
 neighbouring group while older normal files remain. Row IDs, deleted positions,
 the retained deletion-vector anchor, and column sequence metadata are preserved.
-Dedicated BLOB and VECTOR compaction keep their separate options.
+Dedicated BLOB and VECTOR compaction must still be enabled separately with
+`blob-compaction.enabled` and `vector-compaction.enabled`. They use the same
+version-selection policy while keeping their own grouping and output-size rules.
+BLOB groups are scoped to a field ID, and unresolved placeholders survive partial
+rewrites so they can still fall back to retained older files. VECTOR output
+contains only the selected versions' current columns and may roll by
+`vector.target-file-size`. Groups with different file row-ID ranges use a complete
+rewrite under the existing range-coverage rules.
 
 Selection can include every normal version, producing a full-group rewrite.
 With `data-evolution.compaction.split-large-files=true`, an individually oversized
@@ -154,7 +164,7 @@ normal versions should be consolidated without the incremental size policy.
 Files retained by older snapshots or tags still require snapshot expiration
 before their storage can be reclaimed.
 
-The new incremental task type is understood by upgraded Spark and Flink jobs.
+The new incremental normal and BLOB task types are understood by upgraded Spark and Flink jobs.
 New binaries can restore existing compaction tasks; older binaries cannot read
 an in-flight incremental task. Finish those tasks before rolling back a job.
 
