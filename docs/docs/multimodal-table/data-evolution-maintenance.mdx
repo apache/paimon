@@ -227,8 +227,6 @@ This operation reads the affected groups with their deletions applied,
 rewrites the surviving data, assigns new row IDs, removes the applied deletion
 vectors, and drops affected global indexes. Concurrent changes to the affected
 row-ID ranges cause the operation to fail instead of committing stale results.
-Materialization of groups containing dedicated vector files is not currently
-supported.
 
 For a partitioned table, select partitions by either `partitions` or a
 partition predicate in `where`; they cannot be used together. These alternative
