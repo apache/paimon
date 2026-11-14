@@ -31,6 +31,7 @@ import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.mergetree.dataevolution.ColumnFileReaderFactory;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
@@ -360,6 +361,19 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     dvFactory,
                     options,
                     readBatchSizer);
+        }
+
+        /** Builds a reader of column files producing rows of the read value type. */
+        public ColumnFileReaderFactory buildColumnFileReaderFactory(
+                BinaryRow partition, int bucket) {
+            return new ColumnFileReaderFactory(
+                    fileIO,
+                    schemaManager,
+                    schema,
+                    readValueType,
+                    formatDiscover,
+                    pathFactory.createDataFilePathFactory(partition, bucket),
+                    options);
         }
 
         protected FormatReaderMapping.Builder formatReaderMappingBuilder(

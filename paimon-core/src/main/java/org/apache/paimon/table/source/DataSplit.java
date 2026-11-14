@@ -126,13 +126,33 @@ public class DataSplit implements Split {
         return this.dataFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).min();
     }
 
+    /**
+     * Rows this split reads before any merge. Engines use it to weight splits when assigning them,
+     * so a column file of a primary key table must not be counted: it replaces columns of rows the
+     * base file already counts, and counting it would weight a backfilled bucket by a multiple of
+     * its real size. Append tables keep counting every file, their column files are not attached to
+     * a base file holding the same rows.
+     */
     @Override
     public long rowCount() {
+        boolean countColumnFileRows = countColumnFileRows();
         long rowCount = 0;
         for (DataFileMeta file : dataFiles) {
-            rowCount += file.rowCount();
+            if (countColumnFileRows || !file.isPartialColumnFile()) {
+                rowCount += file.rowCount();
+            }
         }
         return rowCount;
+    }
+
+    /** Files with keys belong to a primary key table, where column files follow a base file. */
+    private boolean countColumnFileRows() {
+        for (DataFileMeta file : dataFiles) {
+            if (file.minKey().getFieldCount() > 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
@@ -170,7 +190,8 @@ public class DataSplit implements Split {
 
     private boolean dataEvolutionRowCountAvailable() {
         for (DataFileMeta file : dataFiles) {
-            if (file.firstRowId() == null) {
+            // Files with keys belong to a primary key table, their rows are merged by key.
+            if (file.firstRowId() == null || file.minKey().getFieldCount() > 0) {
                 return false;
             }
         }

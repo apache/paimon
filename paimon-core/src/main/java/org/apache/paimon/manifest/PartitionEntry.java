@@ -114,12 +114,35 @@ public class PartitionEntry {
     }
 
     public static PartitionEntry fromManifestEntry(ManifestEntry entry) {
-        return fromDataFile(entry.partition(), entry.kind(), entry.file(), entry.totalBuckets());
+        return fromManifestEntry(entry, true);
+    }
+
+    public static PartitionEntry fromManifestEntry(
+            ManifestEntry entry, boolean countColumnFileRows) {
+        return fromDataFile(
+                entry.partition(),
+                entry.kind(),
+                entry.file(),
+                entry.totalBuckets(),
+                countColumnFileRows);
     }
 
     public static PartitionEntry fromDataFile(
             BinaryRow partition, FileKind kind, DataFileMeta file, int totalBuckets) {
-        long recordCount = file.rowCount();
+        return fromDataFile(partition, kind, file, totalBuckets, true);
+    }
+
+    /**
+     * @param countColumnFileRows false when partial-column files only replace columns of rows
+     *     already counted by their base file, as in a primary-key table with data evolution.
+     */
+    public static PartitionEntry fromDataFile(
+            BinaryRow partition,
+            FileKind kind,
+            DataFileMeta file,
+            int totalBuckets,
+            boolean countColumnFileRows) {
+        long recordCount = countColumnFileRows || !file.isPartialColumnFile() ? file.rowCount() : 0;
         long fileSizeInBytes = file.fileSize();
         long fileCount = 1;
         if (kind == DELETE) {
@@ -137,9 +160,14 @@ public class PartitionEntry {
     }
 
     public static Collection<PartitionEntry> merge(Collection<ManifestEntry> fileEntries) {
+        return merge(fileEntries, true);
+    }
+
+    public static Collection<PartitionEntry> merge(
+            Collection<ManifestEntry> fileEntries, boolean countColumnFileRows) {
         Map<BinaryRow, PartitionEntry> partitions = new HashMap<>();
         for (ManifestEntry entry : fileEntries) {
-            PartitionEntry partitionEntry = fromManifestEntry(entry);
+            PartitionEntry partitionEntry = fromManifestEntry(entry, countColumnFileRows);
             partitions.compute(
                     entry.partition(),
                     (part, old) -> old == null ? partitionEntry : old.merge(partitionEntry));

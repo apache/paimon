@@ -3055,6 +3055,7 @@ public class FileStoreCommitTest {
                 store::newScan,
                 store.newStatsFileHandler(),
                 store.bucketMode(),
+                true,
                 preCallbacks,
                 callbacks,
                 scanner ->

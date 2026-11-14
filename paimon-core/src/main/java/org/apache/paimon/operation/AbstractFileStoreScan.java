@@ -390,7 +390,9 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                     Function.identity(),
                                     FileEntry.addFilter(),
                                     entry -> !deletedEntries.contains(entry.identifier()))) {
-                        PartitionEntry entry = PartitionEntry.fromManifestEntry(manifestEntry);
+                        PartitionEntry entry =
+                                PartitionEntry.fromManifestEntry(
+                                        manifestEntry, countColumnFileRows());
                         entries.compute(
                                 entry.partition(),
                                 (partition, old) -> old == null ? entry : old.merge(entry));
@@ -415,7 +417,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Consumer<ManifestFileMeta> processor =
                 m ->
                         BucketEntry.merge(
-                                readManifest(m, BucketEntry::fromManifestEntry, null, null),
+                                readManifest(
+                                        m,
+                                        e ->
+                                                BucketEntry.fromManifestEntry(
+                                                        e, countColumnFileRows()),
+                                        null,
+                                        null),
                                 buckets);
         randomlyOnlyExecute(getExecutorService(parallelism), processor, manifests);
         return buckets.values().stream()
@@ -506,6 +514,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     /** Note: Keep this thread-safe. */
     protected abstract boolean filterByStats(ManifestEntry entry);
+
+    /** Whether rows of partial-column files are counted in partition and bucket entries. */
+    protected boolean countColumnFileRows() {
+        return true;
+    }
 
     protected boolean postFilterManifestEntriesEnabled() {
         return false;
