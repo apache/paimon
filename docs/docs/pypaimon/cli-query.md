@@ -426,6 +426,65 @@ Output:
 }
 ```
 
+## Table List Files
+
+List the live data files referenced by the latest or a specific retained snapshot.
+
+```shell
+paimon table list-files mydb.orders
+paimon table list-files mydb.orders --snapshot-id 1 --format json
+paimon table list-files mydb.orders --bucket 0 --limit 20
+```
+
+**Options:**
+
+- `--snapshot-id`: Positive snapshot ID. Omit it to use the latest snapshot.
+- `--bucket`: Only display files in the specified bucket.
+- `--limit, -l`: Positive maximum number of live files after filtering. Omit it to show all.
+- `--format, -f`: Output format: `table` (default) or `json`.
+
+Table output follows the `$files` system table, with `snapshot_id` as the first column and
+`delete_row_count` for the delete-row count. It includes partition, bucket, full file path, format,
+file schema ID, level, record count, size, key bounds, column statistics, sequence-number bounds,
+creation time, file source, first row ID, and written columns. JSON output contains
+`table`, `snapshot_id`, and a `files` array.
+
+Output (selected columns):
+```text
+snapshot_id bucket                                               file_path file_format record_count file_size_in_bytes              creation_time
+          1      0 /warehouse/mydb.db/orders/bucket-0/data-example.parquet     parquet            2                803 2026-11-14T18:23:49.778000
+```
+
+## Table File
+
+Inspect a Parquet file's schema and footer metadata without reading data records. Use the
+`file_path` returned by `list-files`:
+
+```shell
+paimon table file mydb.orders --file /warehouse/mydb.db/orders/bucket-0/data-example.parquet
+paimon table file mydb.orders --file /warehouse/mydb.db/orders/bucket-0/data-example.parquet --format table
+```
+
+**Options:**
+
+- `--file`: Actual Parquet file path or filesystem URI. **Required**.
+- `--format, -f`: Output format: `json` (default) or `table`.
+
+Output includes the file path, format, size, schema, and Parquet metadata such as row groups and
+column statistics. Table output displays `schema` and `metadata` as indented, multiline JSON.
+
+Output (selected fields):
+```json
+{
+  "table": "mydb.orders",
+  "file_path": "/warehouse/mydb.db/orders/bucket-0/data-example.parquet",
+  "file_format": "parquet",
+  "file_size_in_bytes": 803,
+  "schema": {"arrow": "id: int64\nname: string"},
+  "metadata": {"num_columns": 2, "num_rows": 2, "num_row_groups": 1}
+}
+```
+
 ## Table List Partitions
 
 List partitions of a Paimon table. Supports optional pattern filtering to match specific partitions.
