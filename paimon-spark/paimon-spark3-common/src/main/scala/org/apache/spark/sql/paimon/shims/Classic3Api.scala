@@ -23,8 +23,12 @@ import org.apache.spark.sql.catalyst.catalog.FunctionResourceLoader
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, LogicalPlan}
 import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
+import org.apache.spark.sql.execution.columnar.InMemoryRelation
 import org.apache.spark.sql.execution.command.CommandUtils
 import org.apache.spark.sql.internal.SessionResourceLoader
+import org.apache.spark.storage.StorageLevel
+
+import scala.util.control.NonFatal
 class Classic3Api extends ClassicApi {
 
   override def column(expression: Expression): Column = new Column(expression)
@@ -38,6 +42,24 @@ class Classic3Api extends ClassicApi {
 
   override def createDataset(spark: SparkSession, logicalPlan: LogicalPlan): Dataset[Row] = {
     Dataset.ofRows(spark, logicalPlan)
+  }
+
+  override def createDiskCachedDataset(
+      spark: SparkSession,
+      logicalPlan: LogicalPlan): (Dataset[Row], () => Unit) = {
+    val input = Dataset.ofRows(spark, logicalPlan)
+    val relation = InMemoryRelation(StorageLevel.DISK_ONLY, input.queryExecution, None)
+    try {
+      // Optimizer alias elimination must not change consumer attribute identities.
+      val cachedRelation = relation.withOutput(input.queryExecution.analyzed.output)
+      (
+        Dataset.ofRows(spark, cachedRelation),
+        () => relation.cacheBuilder.clearCache(blocking = true))
+    } catch {
+      case NonFatal(e) =>
+        relation.cacheBuilder.clearCache(blocking = true)
+        throw e
+    }
   }
 
   override def recacheByPlan(spark: SparkSession, plan: LogicalPlan): Unit = {

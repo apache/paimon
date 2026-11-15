@@ -567,6 +567,12 @@ under the License.
             <td>If true, enables the file-level pruning step for MergeInto partial column update on data-evolution tables. Set this to false when most files in the target partition are expected to be updated, so that the overhead of collecting touched file IDs outweighs the benefit of pruning untouched files.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.merge-into.join-reuse</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to reuse a disk-persisted match result between deterministic UPDATE and INSERT actions on data evolution tables without DELETE actions or dedicated BLOB/VECTOR columns. This replaces the two action joins with a full outer join and trades repeated target scans for shuffle and executor-local disk storage. Requires Spark adaptive query execution and adaptive partition coalescing; otherwise the original join path is used.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.merge-into.source-persist</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
