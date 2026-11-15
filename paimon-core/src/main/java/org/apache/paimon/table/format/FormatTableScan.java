@@ -197,7 +197,8 @@ public class FormatTableScan implements InnerTableScan {
      *     directories rather than table content
      * @param onlyValueInPath whether a partition directory is named by its value alone ({@code
      *     2025/}) instead of {@code key=value} ({@code year=2025/})
-     * @param defaultPartName the directory name standing for a null partition value
+     * @param defaultPartName the name standing for a null partition value, whose directory has the
+     *     escaped name
      */
     static List<FileStatus> listDataFiles(
             FileIO fileIO,
@@ -206,7 +207,10 @@ public class FormatTableScan implements InnerTableScan {
             boolean onlyValueInPath,
             @Nullable String defaultPartName)
             throws IOException {
-        String partitionDirExemptFromHiding = onlyValueInPath ? defaultPartName : null;
+        String partitionDirExemptFromHiding =
+                onlyValueInPath
+                        ? PartitionPathUtils.defaultPartitionDirName(defaultPartName)
+                        : null;
         List<FileStatus> dataFiles = new ArrayList<>();
         List<Path> level = new ArrayList<>();
         // A missing root is the caller's signal, e.g. a partition that the catalog knows but whose
