@@ -58,7 +58,11 @@ public interface Table extends Serializable {
     /** A name to identify this table. */
     String name();
 
-    /** Full name of the table, default is database.tableName. */
+    /**
+     * Full name of the table. The default implementation returns {@link #name()}. Implementations
+     * that are bound to a catalog identifier should override this to return the qualified name
+     * (typically {@code database.tableName}).
+     */
     default String fullName() {
         return name();
     }

@@ -61,8 +61,21 @@ import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
- * non-null fields on merge.
+ * A {@link MergeFunction} where key is primary key (unique) and value is the partial record.
+ *
+ * <p>Without sequence-group configuration, only non-null fields from the incoming record are
+ * written into the accumulator.
+ *
+ * <p>With sequence-group configuration, merge behavior depends on the field:
+ *
+ * <ul>
+ *   <li>Ordinary fields in a sequence group (no aggregator): when the incoming sequence compares
+ *       greater than or equal to the current one, the field is overwritten, including null.
+ *   <li>Fields with a {@link FieldAggregator}: follow that aggregator's semantics via {@code
+ *       agg}/{@code aggReversed}; they are not described as a direct overwrite, and an older
+ *       incoming sequence may still participate in aggregation.
+ *   <li>Ordinary fields outside any sequence group: keep the non-null-only update behavior.
+ * </ul>
  */
 public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 

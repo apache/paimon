@@ -2063,9 +2063,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     /**
      * Stamps the commit snapshot id into {@link DataFileMeta#minSequenceNumber()} / {@link
-     * DataFileMeta#maxSequenceNumber()} of APPEND files, reusing these fields instead of adding a
-     * new one (same pattern as {@link RowTrackingCommitUtils#assignRowTracking}). COMPACT files are
-     * returned unchanged: their input was read through the override path, so their per-record
+     * DataFileMeta#maxSequenceNumber()} of {@link FileKind#ADD} entries for non-{@link
+     * CommitKind#COMPACT} commits, reusing these fields instead of adding a new one (same pattern
+     * as {@link RowTrackingCommitUtils#assignRowTracking}). For {@link CommitKind#COMPACT}, entries
+     * are returned unchanged: their input was read through the override path, so their per-record
      * {@code _SEQUENCE_NUMBER} already carries the snapshot id.
      *
      * <p>All records of a snapshot share one id, so intra-snapshot order is not preserved. This is
