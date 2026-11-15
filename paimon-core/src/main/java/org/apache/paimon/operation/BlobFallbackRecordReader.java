@@ -62,11 +62,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
 
     private final List<RecordReader<InternalRow>> groupReaders = new ArrayList<>();
-    private final int fieldCount;
+    private final GenericRow nullBlobRow;
     private final int rowIdIndex;
-    private final int seqNumIndex;
-    private final int blobIndex;
-    private final boolean keepPlaceholders;
     private final Object blobPlaceholder;
     private final InternalRow.FieldGetter blobGetter;
     private boolean returned;
@@ -81,12 +78,17 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             int blobIndex,
             boolean keepPlaceholders)
             throws IOException {
-        this.fieldCount = readRowType.getFieldCount();
+        this.nullBlobRow = new GenericRow(readRowType.getFieldCount());
         this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
-        this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
-        this.blobIndex = blobIndex;
-        this.keepPlaceholders = keepPlaceholders;
+        int seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
+        // Set seq num as -1 to mark this row as an all-placeholder row.
+        if (seqNumIndex >= 0) {
+            nullBlobRow.setField(seqNumIndex, -1L);
+        }
         this.blobPlaceholder = blobPlaceholder(readRowType, blobIndex);
+        if (keepPlaceholders) {
+            nullBlobRow.setField(blobIndex, blobPlaceholder);
+        }
         this.blobGetter =
                 InternalRow.createFieldGetter(readRowType.getTypeAt(blobIndex), blobIndex);
 
@@ -235,18 +237,10 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
     }
 
     private InternalRow nullBlobRow(long rowId) {
-        GenericRow row = new GenericRow(fieldCount);
-        if (keepPlaceholders) {
-            row.setField(blobIndex, blobPlaceholder);
-        }
         if (rowIdIndex >= 0) {
-            row.setField(rowIdIndex, rowId);
+            nullBlobRow.setField(rowIdIndex, rowId);
         }
-        // Set seq num as -1 to mark this row as an all-placeholder null
-        if (seqNumIndex >= 0) {
-            row.setField(seqNumIndex, -1L);
-        }
-        return row;
+        return nullBlobRow;
     }
 
     private boolean isPlaceHolder(InternalRow row) {
