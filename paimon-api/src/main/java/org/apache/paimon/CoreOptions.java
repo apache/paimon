@@ -2793,6 +2793,19 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_JOIN_REUSE =
+            key("data-evolution.merge-into.join-reuse")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to reuse a disk-persisted match result between deterministic "
+                                    + "UPDATE and INSERT actions on data evolution tables without "
+                                    + "DELETE actions or dedicated BLOB/VECTOR columns. This replaces "
+                                    + "the two action joins with a full outer join and trades repeated "
+                                    + "target scans for shuffle and executor-local disk storage. "
+                                    + "Requires Spark adaptive query execution and adaptive partition "
+                                    + "coalescing; otherwise the original join path is used.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES =
             key("data-evolution.compaction.split-large-files")
                     .booleanType()
@@ -4811,6 +4824,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionMergeIntoSourcePersist() {
         return options.get(DATA_EVOLUTION_MERGE_INTO_SOURCE_PERSIST);
+    }
+
+    public boolean dataEvolutionMergeIntoJoinReuse() {
+        return options.get(DATA_EVOLUTION_MERGE_INTO_JOIN_REUSE);
     }
 
     public boolean blobCompactionEnabled() {
