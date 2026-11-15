@@ -168,9 +168,9 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
             return CHANGELOG_NO_REWRITE;
         }
 
-        // other merge engines must rewrite file, because some records that are already at higher
-        // level may be merged
-        // See LookupMergeFunction, it just returns newly records.
+        // Other merge engines must rewrite the file: LookupMergeFunction may merge level <= 0
+        // records with a selected high-level record via the wrapped MergeFunction, so already
+        // compacted higher-level values can change.
         return CHANGELOG_WITH_REWRITE;
     }
 

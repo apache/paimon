@@ -33,9 +33,13 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * A {@link MergeFunction} for lookup, this wrapper only considers the latest high level record,
- * because each merge will query the old merged record, so the latest high level record should be
- * the final merged value.
+ * A {@link MergeFunction} wrapper for lookup compaction.
+ *
+ * <p>{@link #getResult()} feeds the wrapped merge function with every candidate whose {@code
+ * level() <= 0} (for example write-buffer records at level -1 and level-0 files), together with the
+ * high-level record chosen by {@link #pickHighLevel()} when one exists (the lowest level among
+ * candidates with {@code level() > 0}). Other higher-level candidates are omitted because lookup
+ * can recover previously merged high-level state.
  */
 public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
