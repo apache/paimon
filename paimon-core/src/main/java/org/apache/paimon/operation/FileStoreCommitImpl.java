@@ -245,9 +245,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
 
-    private <T> T runWithLock(Callable<T> callable) {
+    /**
+     * Run metadata preparation and publication with this commit's lock. Pass {@code false} when the
+     * operation requires the configured lock even on its first attempt.
+     */
+    public <T> T runWithLock(Callable<T> callable, boolean firstCommit) {
         try {
-            return snapshotCommit.runWithLock(callable);
+            return snapshotCommit.runWithLock(callable, firstCommit);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -1190,7 +1194,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     allowRollback,
                                     latestSnapshotSupplier.get(),
                                     detectConflicts,
-                                    newStatsFileName));
+                                    newStatsFileName),
+                    retryResult == null);
         } catch (Lock.AcquisitionException | RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -1675,24 +1680,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
             @Nullable Map<String, String> properties) {
-        return replaceManifestListOnce(
-                latest,
-                totalRecordCount,
-                baseManifestList,
-                deltaManifestList,
-                indexManifest,
-                nextRowId,
-                properties);
-    }
-
-    private boolean replaceManifestListOnce(
-            Snapshot latest,
-            long totalRecordCount,
-            Pair<String, Long> baseManifestList,
-            Pair<String, Long> deltaManifestList,
-            @Nullable String indexManifest,
-            @Nullable Long nextRowId,
-            @Nullable Map<String, String> properties) {
         return runWithLock(
                 () ->
                         replaceManifestListOnceWithoutLock(
@@ -1702,7 +1689,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 deltaManifestList,
                                 indexManifest,
                                 nextRowId,
-                                properties));
+                                properties),
+                false);
     }
 
     private boolean replaceManifestListOnceWithoutLock(
@@ -1756,7 +1744,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private Pair<Boolean, CommitCallback.Context> rollbackToAsLatestOnce(Snapshot targetSnapshot) {
-        return runWithLock(() -> rollbackToAsLatestOnceWithoutLock(targetSnapshot));
+        return runWithLock(() -> rollbackToAsLatestOnceWithoutLock(targetSnapshot), false);
     }
 
     private Pair<Boolean, CommitCallback.Context> rollbackToAsLatestOnceWithoutLock(
@@ -1920,7 +1908,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int retryCount = 0;
         long startMillis = System.currentTimeMillis();
         while (true) {
-            boolean success = compactManifestOnce();
+            boolean success = compactManifestOnce(retryCount == 0);
             if (success) {
                 break;
             }
@@ -1938,8 +1926,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private boolean compactManifestOnce() {
-        return runWithLock(this::compactManifestOnceWithoutLock);
+    private boolean compactManifestOnce(boolean firstCommit) {
+        return runWithLock(this::compactManifestOnceWithoutLock, firstCommit);
     }
 
     private boolean compactManifestOnceWithoutLock() {
