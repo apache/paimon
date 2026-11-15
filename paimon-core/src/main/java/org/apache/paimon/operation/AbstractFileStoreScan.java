@@ -180,6 +180,15 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public FileStoreScan clearPartitionAndBucketFilters() {
+        manifestsReader.clearPartitionAndBucketFilters();
+        specifiedBucket = null;
+        bucketFilter = null;
+        totalAwareBucketFilter = null;
+        return this;
+    }
+
+    @Override
     public FileStoreScan withSnapshot(long snapshotId) {
         this.specifiedSnapshot = snapshotManager.snapshot(snapshotId);
         return this;

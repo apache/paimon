@@ -36,6 +36,49 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
 
   import testImplicits._
 
+  test("Paimon Sink: reject per-partition bucket counts") {
+    for (useV2Write <- Seq("false", "true")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("per_partition_buckets") {
+          spark.sql("""CREATE TABLE per_partition_buckets (id INT, pt STRING)
+                      |PARTITIONED BY (pt)
+                      |TBLPROPERTIES (
+                      |  'bucket' = '2',
+                      |  'bucket-key' = 'id',
+                      |  'bucket.per-partition-count-enabled' = 'true')
+                      |""".stripMargin)
+
+          val exception = intercept[UnsupportedOperationException] {
+            spark.sql("INSERT INTO per_partition_buckets VALUES (1, 'p1')")
+          }
+          assert(
+            exception.getMessage.contains(
+              "Spark does not support writing tables with per-partition bucket counts"))
+        }
+      }
+    }
+  }
+
+  test("Paimon Sink: allow per-partition bucket option for unpartitioned tables") {
+    for (useV2Write <- Seq("false", "true")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("unpartitioned_buckets") {
+          spark.sql("""CREATE TABLE unpartitioned_buckets (id INT, data STRING)
+                      |TBLPROPERTIES (
+                      |  'bucket' = '2',
+                      |  'bucket-key' = 'id',
+                      |  'bucket.per-partition-count-enabled' = 'true')
+                      |""".stripMargin)
+
+          spark.sql("INSERT INTO unpartitioned_buckets VALUES (1, 'a'), (2, 'b')")
+          checkAnswer(
+            spark.sql("SELECT * FROM unpartitioned_buckets ORDER BY id"),
+            Row(1, "a") :: Row(2, "b") :: Nil)
+        }
+      }
+    }
+  }
+
   test("Paimon Sink: forEachBatch") {
     failAfter(streamingTimeout) {
       withTempDir {

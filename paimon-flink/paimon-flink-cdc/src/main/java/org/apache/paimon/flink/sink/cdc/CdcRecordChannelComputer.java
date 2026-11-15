@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 
 /** {@link CdcFixedBucketChannelComputerBase} for {@link CdcRecord}. */
 public class CdcRecordChannelComputer extends CdcFixedBucketChannelComputerBase<CdcRecord> {
@@ -27,11 +28,19 @@ public class CdcRecordChannelComputer extends CdcFixedBucketChannelComputerBase<
     private static final long serialVersionUID = 2L;
 
     public CdcRecordChannelComputer(TableSchema schema) {
-        super(schema);
+        this(schema, PartitionBucketMapping.defaultBuckets(schema.numBuckets()));
     }
+
+    public CdcRecordChannelComputer(
+            TableSchema schema, PartitionBucketMapping partitionBucketMapping) {
+        super(schema);
+        this.partitionBucketMapping = partitionBucketMapping;
+    }
+
+    private final PartitionBucketMapping partitionBucketMapping;
 
     @Override
     protected KeyAndBucketExtractor<CdcRecord> createExtractor() {
-        return new CdcRecordKeyAndBucketExtractor(schema);
+        return new CdcRecordKeyAndBucketExtractor(schema, partitionBucketMapping);
     }
 }

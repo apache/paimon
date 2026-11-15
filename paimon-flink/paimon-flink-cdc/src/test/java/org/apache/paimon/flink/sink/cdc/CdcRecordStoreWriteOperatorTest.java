@@ -34,6 +34,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -146,6 +148,36 @@ public class CdcRecordStoreWriteOperatorTest {
 
         runner.stop();
         t.join();
+        harness.close();
+    }
+
+    @Test
+    public void testWriteWithPerPartitionBucketCounts() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"pt", "k", "v"});
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED, true);
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "k"),
+                        options);
+
+        OneInputStreamOperatorTestHarness<CdcRecord, Committable> harness =
+                createTestHarness(table);
+        harness.open();
+
+        Map<String, String> data = new HashMap<>();
+        data.put("pt", "1");
+        data.put("k", "1");
+        data.put("v", "one");
+        harness.processElement(new CdcRecord(RowKind.INSERT, data), 1);
+        harness.prepareSnapshotPreBarrier(1);
+
+        assertThat(harness.extractOutputValues()).isNotEmpty();
         harness.close();
     }
 
@@ -363,17 +395,28 @@ public class CdcRecordStoreWriteOperatorTest {
         CdcRecordStoreWriteOperator.Factory operatorFactory =
                 new CdcRecordStoreWriteOperator.Factory(
                         table,
-                        (t, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
-                                new StoreSinkWriteImpl(
-                                        t,
-                                        commitUser,
-                                        state,
-                                        ioManager,
-                                        false,
-                                        false,
-                                        true,
-                                        memoryPoolFactory,
-                                        metricGroup),
+                        (t, commitUser, state, ioManager, memoryPoolFactory, metricGroup) -> {
+                            PartitionBucketMapping partitionBucketMapping =
+                                    PartitionBucketMapping.loadFromTable(t);
+                            return new StoreSinkWriteImpl(
+                                    t,
+                                    commitUser,
+                                    state,
+                                    ioManager,
+                                    false,
+                                    false,
+                                    true,
+                                    memoryPoolFactory,
+                                    metricGroup,
+                                    partitionBucketMapping,
+                                    (newTable, user, writeId) ->
+                                            newTable.newWrite(
+                                                    user,
+                                                    writeId,
+                                                    new FixedBucketRowKeyExtractor(
+                                                            newTable.schema(),
+                                                            partitionBucketMapping)));
+                        },
                         commitUser);
         TypeSerializer<CdcRecord> inputSerializer = new JavaSerializer<>();
         TypeSerializer<Committable> outputSerializer =
