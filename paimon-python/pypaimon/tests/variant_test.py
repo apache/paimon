@@ -785,6 +785,21 @@ class TestBuildBinary(unittest.TestCase):
                 value = _build_object_value(fields)
                 self.assertEqual(_extract_overflow_fields(value), fields)
 
+    def test_unsorted_object_residual_is_reordered(self):
+        gv = GenericVariant.from_python({'a': 1, 'z': 2})
+        keys = parse_metadata_dict(gv.metadata())
+        value = _build_object_value([
+            (keys['z'], _encode_scalar_to_value_bytes(2, pa.int64())),
+            (keys['a'], _encode_scalar_to_value_bytes(1, pa.int64())),
+        ])
+        # Reverse the ID and offset table entries while preserving their values.
+        reversed_value = bytearray(value)
+        reversed_value[2:4] = value[2:4][::-1]
+        reversed_value[4:6] = value[4:6][::-1]
+        result = decompose_variant(GenericVariant(bytes(reversed_value), gv.metadata()), [])
+        self.assertEqual([kid for kid, _ in _extract_overflow_fields(result['value'])],
+                         [keys['a'], keys['z']])
+
     def test_build_array_empty(self):
         arr_bytes = _build_array_value([])
         gv = GenericVariant(arr_bytes, b'\x01\x00')
@@ -1846,6 +1861,68 @@ class TestVariantPaimonTable(unittest.TestCase):
         self.assertEqual(py['age'], 30)
         self.assertEqual(py['city'], 'Beijing')
         self.assertEqual(py['active'], True)
+
+    def test_shredded_write_rejects_unknown_object_ids(self):
+        for nested in (False, True):
+            with self.subTest(nested=nested):
+                if nested:
+                    value = {'nested': {'selected': 1, 'other': 2}}
+                    fields = [('nested', {'type': 'ROW', 'fields': [
+                        {'id': 0, 'name': 'selected', 'type': 'BIGINT'}]})]
+                else:
+                    value = {'selected': 1, 'other': 2}
+                    fields = [('selected', 'BIGINT')]
+                identifier = 'default.shredded_unknown_{}'.format(
+                    'nested' if nested else 'top')
+                schema = Schema.from_pyarrow_schema(self._pa_schema(), options={
+                    'variant.shreddingSchema': _schema_json('payload', fields),
+                    'write.native.enabled': 'false',
+                    'read.native.enabled': 'false',
+                })
+                self.catalog.create_table(identifier, schema, False)
+                table = self.catalog.get_table(identifier)
+                good = GenericVariant.from_python(value)
+                good_data = pa.table({
+                    'id': [1],
+                    'payload': GenericVariant.to_arrow_array([good]),
+                }, schema=self._pa_schema())
+                self._write_and_read(table, good_data)
+                snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+
+                unknown = _build_object_value([
+                    (5, _encode_scalar_to_value_bytes(3, pa.int64()))])
+                if nested:
+                    key_id = parse_metadata_dict(good.metadata())['nested']
+                    unknown = _build_object_value([(key_id, unknown)])
+                bad = GenericVariant(unknown, good.metadata())
+                bad_data = pa.table({
+                    'id': [2],
+                    'payload': GenericVariant.to_arrow_array([bad]),
+                }, schema=self._pa_schema())
+                builder = table.new_batch_write_builder()
+                writer = builder.new_write()
+                commit = builder.new_commit()
+                try:
+                    with self.assertRaisesRegex(ValueError, 'MALFORMED_VARIANT'):
+                        writer.write_arrow(bad_data)
+                        commit.commit(writer.prepare_commit())
+                finally:
+                    try:
+                        writer.close()
+                    except ValueError as error:
+                        self.assertIn('MALFORMED_VARIANT', str(error))
+                    finally:
+                        commit.close()
+
+                reopened = self.catalog.get_table(identifier)
+                self.assertEqual(reopened.snapshot_manager().get_latest_snapshot().id,
+                                 snapshot_id)
+                read_builder = reopened.new_read_builder()
+                splits = read_builder.new_scan().plan().splits()
+                rows = read_builder.new_read().to_arrow(splits)
+                self.assertEqual(rows['id'].to_pylist(), [1])
+                self.assertEqual(GenericVariant.from_arrow_struct(
+                    rows['payload'][0].as_py()).to_python(), value)
 
     def test_shredded_variant_null_row(self):
         """SQL-NULL VARIANT rows survive the shred → assemble cycle as None."""

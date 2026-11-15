@@ -117,6 +117,32 @@ def _extract_overflow_fields(overflow_bytes: bytes) -> List[Tuple[int, bytes]]:
     return fields
 
 
+def _split_object_fields(
+    fields: List[Tuple[int, bytes]],
+    id_to_name: Dict[int, str],
+    shredded_names: Set[str],
+):
+    overflow_pairs = []
+    shredded_by_name = {}
+    previous_name = None
+    ordered = True
+    for kid, field_bytes in fields:
+        name = id_to_name.get(kid)
+        if name is None:
+            raise ValueError('MALFORMED_VARIANT: key id out of range')
+        if previous_name is not None and name < previous_name:
+            ordered = False
+        previous_name = name
+        if name in shredded_names:
+            shredded_by_name[name] = field_bytes
+        else:
+            overflow_pairs.append((kid, field_bytes))
+
+    if not ordered:
+        overflow_pairs.sort(key=lambda item: id_to_name[item[0]].encode('utf-8'))
+    return overflow_pairs, shredded_by_name
+
+
 def rebuild_value(
     row: dict,
     schema: VariantSchema,
@@ -367,14 +393,8 @@ def _decompose_field_bytes(
         if shredded_names is None:
             shredded_names = {of.field_name for of in schema.object_fields}
 
-        overflow_pairs = []
-        shredded_by_name = {}
-        for kid, field_bytes in all_sub:
-            name = id_to_name.get(kid)
-            if name in shredded_names:
-                shredded_by_name[name] = field_bytes
-            else:
-                overflow_pairs.append((kid, field_bytes))
+        overflow_pairs, shredded_by_name = _split_object_fields(
+            all_sub, id_to_name, shredded_names)
 
         typed_value: Dict[str, dict] = {}
         for of in schema.object_fields:
@@ -429,14 +449,8 @@ def decompose_variant(
     if shredded_names is None:
         shredded_names = {of.field_name for of in obj_fields}
 
-    overflow_pairs = []
-    shredded_by_name = {}
-    for kid, field_bytes in all_fields:
-        name = id_to_name.get(kid)
-        if name in shredded_names:
-            shredded_by_name[name] = field_bytes
-        else:
-            overflow_pairs.append((kid, field_bytes))
+    overflow_pairs, shredded_by_name = _split_object_fields(
+        all_fields, id_to_name, shredded_names)
 
     typed_value = {}
     for of in obj_fields:
