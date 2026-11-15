@@ -26,14 +26,18 @@ import java.util.List;
 /**
  * Pick strategy for manifest LSM Tree compaction.
  *
- * <p>Strategy priority:
+ * <p>Requires more than {@link #MAX_LEVEL} runs; otherwise returns an empty pick. Strategy priority
+ * when that precondition holds:
  *
  * <ol>
- *   <li><b>SizeAmp</b>: if all lower-level runs' total size exceeds the highest-level run's size
- *       times {@code sizeAmpThreshold}, trigger full compaction (pick all runs).
+ *   <li><b>SizeAmp</b>: if the total size of all lower-level runs is greater than {@code
+ *       sizeAmpThreshold} percent of the highest-level run's size (check: {@code
+ *       lowerLevelTotalSize * 100 > sizeAmpThreshold * highestRunSize}), trigger full compaction
+ *       (pick all runs).
  *   <li><b>SizeRatio</b>: from low to high, pick adjacent runs whose amplification factor is less
  *       than {@code sizeRatioThreshold}.
- *   <li><b>Forced pick</b>: level0 and level1 runs are always picked.
+ *   <li><b>Forced pick</b>: on the SizeRatio path, level0 and level1 runs are included without a
+ *       SizeRatio check; the result is returned only when at least two runs are selected.
  * </ol>
  */
 public class ManifestPickStrategy {
@@ -52,6 +56,9 @@ public class ManifestPickStrategy {
 
     /**
      * Pick runs that need compaction from the given level runs.
+     *
+     * <p>Returns an empty list when {@code levelRuns} is empty or has at most {@link #MAX_LEVEL}
+     * runs. Otherwise tries SizeAmp first, then SizeRatio with forced inclusion of level0/level1.
      *
      * @param levelRuns runs with assigned levels (level 0~4)
      * @return list of picked runs to compact
@@ -72,11 +79,13 @@ public class ManifestPickStrategy {
     }
 
     /**
-     * SizeAmp check: if all lower-level (0~3) runs' total size exceeds the highest-level run's size
-     * by more than {@code sizeAmpThreshold} percent, pick all runs for full compaction.
+     * SizeAmp check: if the total size of all lower-level (0~3) runs is greater than {@code
+     * sizeAmpThreshold} percent of the highest-level run's size, pick all runs for full compaction.
      *
-     * <p>Formula (consistent with {@code UniversalCompaction#pickForSizeAmp}): {@code
-     * lowerLevelTotalSize * 100 > sizeAmpThreshold * highestRunSize}
+     * <p>{@code sizeAmpThreshold} is a percentage of the highest-level run's size, not an
+     * additional-size percentage and not a multiplier. Formula (consistent with {@code
+     * UniversalCompaction#pickForSizeAmp}): {@code lowerLevelTotalSize * 100 > sizeAmpThreshold *
+     * highestRunSize}
      */
     private List<ManifestAdjacentSortedRun> pickForSizeAmp(
             List<ManifestAdjacentSortedRun> levelRuns) {
@@ -107,12 +116,14 @@ public class ManifestPickStrategy {
     }
 
     /**
-     * SizeRatio + forced pick.
+     * SizeRatio + forced pick. Invoked only after {@link #pick} has verified {@code
+     * levelRuns.size() > MAX_LEVEL} and SizeAmp did not trigger.
      *
      * <ul>
-     *   <li>Level0 and level1 are always picked.
+     *   <li>Level0 and level1 runs are included without a SizeRatio check.
      *   <li>From low to high, if the cumulative picked size with ratio amplification covers the
      *       next run's size, continue picking.
+     *   <li>If only one run remains picked after the scan, return an empty list (no compaction).
      * </ul>
      *
      * <p>Formula (consistent with {@code UniversalCompaction#pickForSizeRatio}): {@code pickedSize
@@ -123,11 +134,11 @@ public class ManifestPickStrategy {
         // levelRuns is already sorted by level ascending (set by buildLevelSortedRuns)
         List<ManifestAdjacentSortedRun> picked = new ArrayList<>();
 
-        // Always pick the first run to guarantee a non-empty result.
+        // Seed with the first run; a single-run pick is discarded below.
         picked.add(levelRuns.get(0));
         long pickedSize = levelRuns.get(0).totalSize();
 
-        // From the second run onward: forced pick level0/level1, then SizeRatio for the rest.
+        // From the second run onward: force-include level0/level1, then SizeRatio for the rest.
         for (int i = 1; i < levelRuns.size(); i++) {
             ManifestAdjacentSortedRun run = levelRuns.get(i);
             if (run.level() <= 1) {
