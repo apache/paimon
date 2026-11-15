@@ -1878,6 +1878,299 @@ class FieldNestedUpdateAggTest(unittest.TestCase):
             ]
         )
 
+    def test_field_nested_update_overwrite_on_equal_sequence(self):
+        # Without sequence-field: always overwrite.
+        no_seq_agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(Options({"fields.field0.nested-key": "k0,k1"})),
+        )
+        accumulator = no_seq_agg.agg(None, [self.row(0, 1, "A", 1)])
+        accumulator = no_seq_agg.agg(accumulator, [self.row(0, 1, "A_overwrite", 1)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_overwrite", 1)])
+
+        # Default overwrite-on-equal (true).
+        default_agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                    }
+                )
+            ),
+        )
+        accumulator = default_agg.agg(None, [self.row(0, 1, "A", 2)])
+        accumulator = default_agg.agg(accumulator, [self.row(0, 1, "A_eq", 2)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_eq", 2)])
+        accumulator = default_agg.agg(accumulator, [self.row(0, 1, "A_greater", 3)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_greater", 3)])
+        accumulator = default_agg.agg(accumulator, [self.row(0, 1, "A_late", 2)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_greater", 3)])
+
+        # Explicit true.
+        explicit_true_agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.nested-sequence-overwrite-on-equal": "true",
+                    }
+                )
+            ),
+        )
+        accumulator = explicit_true_agg.agg(None, [self.row(0, 1, "A", 5)])
+        accumulator = explicit_true_agg.agg(accumulator, [self.row(0, 1, "A_eq", 5)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_eq", 5)])
+
+        # Explicit false.
+        false_agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.nested-sequence-overwrite-on-equal": "false",
+                    }
+                )
+            ),
+        )
+        accumulator = false_agg.agg(None, [self.row(0, 1, "A", 2)])
+        accumulator = false_agg.agg(accumulator, [self.row(0, 1, "A_eq", 2)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A", 2)])
+        accumulator = false_agg.agg(accumulator, [self.row(0, 1, "A_greater", 3)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_greater", 3)])
+        accumulator = false_agg.agg(accumulator, [self.row(0, 1, "A_late", 2)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_greater", 3)])
+
+        # NULL sequence (nulls first).
+        accumulator = false_agg.agg(None, [self.row(0, 1, "A", None)])
+        accumulator = false_agg.agg(accumulator, [self.row(0, 1, "A_null_eq", None)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A", None)])
+        accumulator = false_agg.agg(accumulator, [self.row(0, 1, "A_from_null", 1)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_from_null", 1)])
+        accumulator = false_agg.agg(accumulator, [self.row(0, 1, "A_to_null", None)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_from_null", 1)])
+
+        true_null_agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.nested-sequence-overwrite-on-equal": "true",
+                    }
+                )
+            ),
+        )
+        accumulator = true_null_agg.agg(None, [self.row(0, 1, "A", None)])
+        accumulator = true_null_agg.agg(accumulator, [self.row(0, 1, "A_null_eq", None)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_null_eq", None)])
+
+    def test_field_nested_update_overwrite_on_equal_with_multi_sequence_and_count_limit(self):
+        fields = self.DEFAULT_FIELDS + [
+            DataField(3, "seq", AtomicType("INT")),
+            DataField(4, "ts", AtomicType("INT")),
+        ]
+        agg = self._make(
+            self._make_data_type(fields=fields),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq,ts",
+                        "fields.field0.nested-sequence-overwrite-on-equal": "false",
+                        "fields.field0.count-limit": "2",
+                    }
+                )
+            ),
+        )
+
+        accumulator = agg.agg(None, [self.row(0, 1, "A", 1, 10, fields=fields)])
+        accumulator = agg.agg(accumulator, [self.row(1, 2, "B", 1, 10, fields=fields)])
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "A_eq", 1, 10, fields=fields)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(0, 1, "A", 1, 10, fields=fields),
+                self.row(1, 2, "B", 1, 10, fields=fields),
+            ],
+        )
+
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "A_gt", 1, 11, fields=fields)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(0, 1, "A_gt", 1, 11, fields=fields),
+                self.row(1, 2, "B", 1, 10, fields=fields),
+            ],
+        )
+
+        accumulator = agg.agg(accumulator, [self.row(2, 3, "C", 5, 1, fields=fields)])
+        accumulator = agg.agg(accumulator, [self.row(0, 1, "A_gt2", 2, 1, fields=fields)])
+        self.assertCountEqual(
+            accumulator,
+            [
+                self.row(0, 1, "A_gt2", 2, 1, fields=fields),
+                self.row(1, 2, "B", 1, 10, fields=fields),
+            ],
+        )
+
+    def test_field_nested_update_overwrite_on_equal_prerequisite(self):
+        with self.assertRaisesRegex(
+                ValueError,
+                "Option 'fields.<field-name>.nested-sequence-overwrite-on-equal' requires "
+                "'fields.<field-name>.nested-sequence-field' to be configured.",
+        ):
+            self._make(
+                self._make_data_type(fields=self.SEQUENCE_FIELDS),
+                CoreOptions(
+                    Options(
+                        {
+                            "fields.field0.nested-key": "k0,k1",
+                            "fields.field0.nested-sequence-overwrite-on-equal": "false",
+                        }
+                    )
+                ),
+            )
+
+        agg = self._make(
+            self._make_data_type(fields=self.SEQUENCE_FIELDS),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.nested-sequence-overwrite-on-equal": "false",
+                    }
+                )
+            ),
+        )
+        self.assertIsInstance(agg, FieldNestedUpdateAgg)
+
+    def test_field_nested_update_overwrite_on_equal_with_string_sequence(self):
+        fields = [
+            DataField(0, "k0", AtomicType("INT")),
+            DataField(1, "k1", AtomicType("INT")),
+            DataField(2, "v", AtomicType("STRING")),
+            DataField(3, "seq", AtomicType("STRING")),
+        ]
+
+        true_agg = self._make(
+            self._make_data_type(fields=fields),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.nested-sequence-overwrite-on-equal": "true",
+                    }
+                )
+            ),
+        )
+        accumulator = true_agg.agg(None, [self.row(0, 1, "A", "b", fields=fields)])
+        accumulator = true_agg.agg(accumulator, [self.row(0, 1, "A_eq", "b", fields=fields)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_eq", "b", fields=fields)])
+
+        false_agg = self._make(
+            self._make_data_type(fields=fields),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.nested-sequence-overwrite-on-equal": "false",
+                    }
+                )
+            ),
+        )
+        accumulator = false_agg.agg(None, [self.row(0, 1, "A", "b", fields=fields)])
+        accumulator = false_agg.agg(accumulator, [self.row(0, 1, "A_eq", "b", fields=fields)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A", "b", fields=fields)])
+        accumulator = false_agg.agg(accumulator, [self.row(0, 1, "A_gt", "c", fields=fields)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_gt", "c", fields=fields)])
+        accumulator = false_agg.agg(accumulator, [self.row(0, 1, "A_lt", "a", fields=fields)])
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_gt", "c", fields=fields)])
+
+    def test_field_nested_update_overwrite_on_equal_with_multi_sequence_nulls(self):
+        fields = self.DEFAULT_FIELDS + [
+            DataField(3, "seq", AtomicType("INT")),
+            DataField(4, "ts", AtomicType("INT")),
+        ]
+
+        false_agg = self._make(
+            self._make_data_type(fields=fields),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq,ts",
+                        "fields.field0.nested-sequence-overwrite-on-equal": "false",
+                    }
+                )
+            ),
+        )
+
+        # NULLS FIRST on first sequence field: null < non-null, do not overwrite.
+        accumulator = false_agg.agg(None, [self.row(0, 1, "A", 1, 10, fields=fields)])
+        accumulator = false_agg.agg(
+            accumulator, [self.row(0, 1, "A_null_first", None, 99, fields=fields)]
+        )
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A", 1, 10, fields=fields)])
+
+        # First field equal, second null < non-null: do not overwrite.
+        accumulator = false_agg.agg(
+            accumulator, [self.row(0, 1, "A_null_second", 1, None, fields=fields)]
+        )
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A", 1, 10, fields=fields)])
+
+        # Non-null first field replaces null first field.
+        accumulator = false_agg.agg(None, [self.row(0, 1, "A", None, 10, fields=fields)])
+        accumulator = false_agg.agg(
+            accumulator, [self.row(0, 1, "A_from_null", 1, 1, fields=fields)]
+        )
+        self.assertCountEqual(
+            accumulator, [self.row(0, 1, "A_from_null", 1, 1, fields=fields)]
+        )
+
+        # Fully equal multi-field sequence including nulls.
+        accumulator = false_agg.agg(None, [self.row(0, 1, "A", None, None, fields=fields)])
+        accumulator = false_agg.agg(
+            accumulator, [self.row(0, 1, "A_eq_nulls", None, None, fields=fields)]
+        )
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A", None, None, fields=fields)])
+
+        true_agg = self._make(
+            self._make_data_type(fields=fields),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0,k1",
+                        "fields.field0.nested-sequence-field": "seq,ts",
+                        "fields.field0.nested-sequence-overwrite-on-equal": "true",
+                    }
+                )
+            ),
+        )
+        accumulator = true_agg.agg(None, [self.row(0, 1, "A", None, None, fields=fields)])
+        accumulator = true_agg.agg(
+            accumulator, [self.row(0, 1, "A_eq_nulls", None, None, fields=fields)]
+        )
+        self.assertCountEqual(
+            accumulator, [self.row(0, 1, "A_eq_nulls", None, None, fields=fields)]
+        )
+        accumulator = true_agg.agg(
+            accumulator, [self.row(0, 1, "A_eq", 1, 10, fields=fields)]
+        )
+        accumulator = true_agg.agg(
+            accumulator, [self.row(0, 1, "A_eq2", 1, 10, fields=fields)]
+        )
+        self.assertCountEqual(accumulator, [self.row(0, 1, "A_eq2", 1, 10, fields=fields)])
+
     def test_field_nested_update_with_count_limit_with_sequence_field_without_nested_key(self):
         with self.assertRaisesRegex(
                 ValueError,

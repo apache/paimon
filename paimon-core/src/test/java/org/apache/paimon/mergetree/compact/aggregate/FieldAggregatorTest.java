@@ -1488,6 +1488,412 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldNestedUpdateAggOverwriteOnEqualSequence() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        // Without sequence-field: always overwrite.
+        FieldNestedUpdateAgg noSeqAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+        InternalArray accumulator =
+                (InternalArray) noSeqAgg.agg(null, singletonArray(row(0, 1, "A", 1)));
+        accumulator =
+                (InternalArray)
+                        noSeqAgg.agg(accumulator, singletonArray(row(0, 1, "A_overwrite", 1)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A_overwrite", 1));
+
+        // Default overwrite-on-equal (true): equal sequence overwrites.
+        FieldNestedUpdateAgg defaultAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.singletonList("seq"),
+                        Integer.MAX_VALUE);
+        accumulator = (InternalArray) defaultAgg.agg(null, singletonArray(row(0, 1, "A", 2)));
+        accumulator =
+                (InternalArray) defaultAgg.agg(accumulator, singletonArray(row(0, 1, "A_eq", 2)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A_eq", 2));
+        accumulator =
+                (InternalArray)
+                        defaultAgg.agg(accumulator, singletonArray(row(0, 1, "A_greater", 3)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A_greater", 3));
+        accumulator =
+                (InternalArray) defaultAgg.agg(accumulator, singletonArray(row(0, 1, "A_late", 2)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A_greater", 3));
+
+        // Explicit true via factory.
+        FieldNestedUpdateAgg explicitTrueAgg =
+                new FieldNestedUpdateAggFactory()
+                        .create(
+                                DataTypes.ARRAY(elementRowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.nested-key",
+                                                "k0,k1",
+                                                "fields.fieldName.nested-sequence-field",
+                                                "seq",
+                                                "fields.fieldName.nested-sequence-overwrite-on-equal",
+                                                "true")),
+                                "fieldName");
+        accumulator = (InternalArray) explicitTrueAgg.agg(null, singletonArray(row(0, 1, "A", 5)));
+        accumulator =
+                (InternalArray)
+                        explicitTrueAgg.agg(accumulator, singletonArray(row(0, 1, "A_eq", 5)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A_eq", 5));
+
+        // Explicit false: equal sequence does not overwrite; greater still does; less does not.
+        FieldNestedUpdateAgg falseAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.singletonList("seq"),
+                        false,
+                        Integer.MAX_VALUE);
+        accumulator = (InternalArray) falseAgg.agg(null, singletonArray(row(0, 1, "A", 2)));
+        accumulator =
+                (InternalArray) falseAgg.agg(accumulator, singletonArray(row(0, 1, "A_eq", 2)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A", 2));
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(accumulator, singletonArray(row(0, 1, "A_greater", 3)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A_greater", 3));
+        accumulator =
+                (InternalArray) falseAgg.agg(accumulator, singletonArray(row(0, 1, "A_late", 2)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A_greater", 3));
+
+        // NULL sequence (nulls first): null < non-null; both-null equality follows the option.
+        accumulator = (InternalArray) falseAgg.agg(null, singletonArray(row(0, 1, "A", null)));
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(accumulator, singletonArray(row(0, 1, "A_null_eq", null)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A", null));
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(accumulator, singletonArray(row(0, 1, "A_from_null", 1)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A_from_null", 1));
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(accumulator, singletonArray(row(0, 1, "A_to_null", null)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A_from_null", 1));
+
+        FieldNestedUpdateAgg trueNullAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.singletonList("seq"),
+                        true,
+                        Integer.MAX_VALUE);
+        accumulator = (InternalArray) trueNullAgg.agg(null, singletonArray(row(0, 1, "A", null)));
+        accumulator =
+                (InternalArray)
+                        trueNullAgg.agg(accumulator, singletonArray(row(0, 1, "A_null_eq", null)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactly(row(0, 1, "A_null_eq", null));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggOverwriteOnEqualWithMultiSequenceAndCountLimit() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()),
+                        DataTypes.FIELD(4, "ts", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Arrays.asList("seq", "ts"),
+                        false,
+                        2);
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+        InternalRow a = nestedRow(0, 1, "A", 1, 10);
+        InternalRow b = nestedRow(1, 2, "B", 1, 10);
+        InternalArray accumulator = (InternalArray) agg.agg(null, singletonArray(a));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(b));
+        // Equal multi-field sequence must not overwrite when option is false.
+        accumulator =
+                (InternalArray)
+                        agg.agg(accumulator, singletonArray(nestedRow(0, 1, "A_eq", 1, 10)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactlyInAnyOrder(a, b);
+        // Lexicographic greater on second field overwrites.
+        InternalRow aGt = nestedRow(0, 1, "A_gt", 1, 11);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(aGt));
+        assertThat(unnest(accumulator, elementGetter)).containsExactlyInAnyOrder(aGt, b);
+        // New key beyond count-limit is ignored; existing key can still update.
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(nestedRow(2, 3, "C", 5, 1)));
+        InternalRow aGt2 = nestedRow(0, 1, "A_gt2", 2, 1);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(aGt2));
+        assertThat(unnest(accumulator, elementGetter)).containsExactlyInAnyOrder(aGt2, b);
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggFactoryWithOverwriteOnEqualPrerequisite() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        assertThatThrownBy(
+                        () ->
+                                new FieldNestedUpdateAggFactory()
+                                        .create(
+                                                DataTypes.ARRAY(elementRowType),
+                                                CoreOptions.fromMap(
+                                                        ImmutableMap.of(
+                                                                "fields.fieldName.nested-key",
+                                                                "k0,k1",
+                                                                "fields.fieldName.nested-sequence-overwrite-on-equal",
+                                                                "false")),
+                                                "fieldName"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Option 'fields.<field-name>.nested-sequence-overwrite-on-equal' requires "
+                                + "'fields.<field-name>.nested-sequence-field' to be configured.");
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAggFactory()
+                        .create(
+                                DataTypes.ARRAY(elementRowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.nested-key",
+                                                "k0,k1",
+                                                "fields.fieldName.nested-sequence-field",
+                                                "seq",
+                                                "fields.fieldName.nested-sequence-overwrite-on-equal",
+                                                "false")),
+                                "fieldName");
+        assertThat(agg).isNotNull();
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggFactoryOverwriteOnEqualDefaultAndFalse() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        // Factory default (option unset): equal sequence overwrites.
+        FieldNestedUpdateAgg defaultAgg =
+                new FieldNestedUpdateAggFactory()
+                        .create(
+                                DataTypes.ARRAY(elementRowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.nested-key",
+                                                "k0,k1",
+                                                "fields.fieldName.nested-sequence-field",
+                                                "seq")),
+                                "fieldName");
+        InternalArray accumulator =
+                (InternalArray) defaultAgg.agg(null, singletonArray(row(0, 1, "A", 2)));
+        accumulator =
+                (InternalArray) defaultAgg.agg(accumulator, singletonArray(row(0, 1, "A_eq", 2)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A_eq", 2));
+
+        // Factory with overwrite-on-equal=false: equal sequence keeps accumulator.
+        FieldNestedUpdateAgg falseAgg =
+                new FieldNestedUpdateAggFactory()
+                        .create(
+                                DataTypes.ARRAY(elementRowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.nested-key",
+                                                "k0,k1",
+                                                "fields.fieldName.nested-sequence-field",
+                                                "seq",
+                                                "fields.fieldName.nested-sequence-overwrite-on-equal",
+                                                "false")),
+                                "fieldName");
+        accumulator = (InternalArray) falseAgg.agg(null, singletonArray(row(0, 1, "A", 2)));
+        accumulator =
+                (InternalArray) falseAgg.agg(accumulator, singletonArray(row(0, 1, "A_eq", 2)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A", 2));
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(accumulator, singletonArray(row(0, 1, "A_greater", 3)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "A_greater", 3));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggOverwriteOnEqualWithStringSequence() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.STRING()));
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        FieldNestedUpdateAgg trueAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.singletonList("seq"),
+                        true,
+                        Integer.MAX_VALUE);
+        InternalArray accumulator =
+                (InternalArray) trueAgg.agg(null, singletonArray(stringSeqRow(0, 1, "A", "b")));
+        accumulator =
+                (InternalArray)
+                        trueAgg.agg(accumulator, singletonArray(stringSeqRow(0, 1, "A_eq", "b")));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactly(stringSeqRow(0, 1, "A_eq", "b"));
+
+        FieldNestedUpdateAgg falseAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.singletonList("seq"),
+                        false,
+                        Integer.MAX_VALUE);
+        accumulator =
+                (InternalArray) falseAgg.agg(null, singletonArray(stringSeqRow(0, 1, "A", "b")));
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(accumulator, singletonArray(stringSeqRow(0, 1, "A_eq", "b")));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactly(stringSeqRow(0, 1, "A", "b"));
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(accumulator, singletonArray(stringSeqRow(0, 1, "A_gt", "c")));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactly(stringSeqRow(0, 1, "A_gt", "c"));
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(accumulator, singletonArray(stringSeqRow(0, 1, "A_lt", "a")));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactly(stringSeqRow(0, 1, "A_gt", "c"));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggOverwriteOnEqualWithMultiSequenceNulls() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()),
+                        DataTypes.FIELD(4, "ts", DataTypes.INT()));
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        FieldNestedUpdateAgg falseAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Arrays.asList("seq", "ts"),
+                        false,
+                        Integer.MAX_VALUE);
+
+        // NULLS FIRST on first sequence field: null < non-null, do not overwrite.
+        InternalArray accumulator =
+                (InternalArray) falseAgg.agg(null, singletonArray(nestedRow(0, 1, "A", 1, 10)));
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(
+                                accumulator,
+                                singletonArray(nestedRow(0, 1, "A_null_first", null, 99)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(nestedRow(0, 1, "A", 1, 10));
+
+        // First field equal, second null < non-null: do not overwrite.
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(
+                                accumulator,
+                                singletonArray(nestedRow(0, 1, "A_null_second", 1, null)));
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(nestedRow(0, 1, "A", 1, 10));
+
+        // Non-null first field replaces null first field.
+        accumulator =
+                (InternalArray) falseAgg.agg(null, singletonArray(nestedRow(0, 1, "A", null, 10)));
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(
+                                accumulator, singletonArray(nestedRow(0, 1, "A_from_null", 1, 1)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactly(nestedRow(0, 1, "A_from_null", 1, 1));
+
+        // Fully equal multi-field sequence including nulls: false keeps, true overwrites.
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(null, singletonArray(nestedRow(0, 1, "A", null, null)));
+        accumulator =
+                (InternalArray)
+                        falseAgg.agg(
+                                accumulator,
+                                singletonArray(nestedRow(0, 1, "A_eq_nulls", null, null)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactly(nestedRow(0, 1, "A", null, null));
+
+        FieldNestedUpdateAgg trueAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Arrays.asList("seq", "ts"),
+                        true,
+                        Integer.MAX_VALUE);
+        accumulator =
+                (InternalArray) trueAgg.agg(null, singletonArray(nestedRow(0, 1, "A", null, null)));
+        accumulator =
+                (InternalArray)
+                        trueAgg.agg(
+                                accumulator,
+                                singletonArray(nestedRow(0, 1, "A_eq_nulls", null, null)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactly(nestedRow(0, 1, "A_eq_nulls", null, null));
+        accumulator =
+                (InternalArray)
+                        trueAgg.agg(accumulator, singletonArray(nestedRow(0, 1, "A_eq", 1, 10)));
+        accumulator =
+                (InternalArray)
+                        trueAgg.agg(accumulator, singletonArray(nestedRow(0, 1, "A_eq2", 1, 10)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactly(nestedRow(0, 1, "A_eq2", 1, 10));
+    }
+
+    @Test
     public void testFieldNestedUpdateAggWithCountLimitWithSequenceFieldWithoutNestedKey() {
         DataType elementRowType =
                 DataTypes.ROW(
@@ -2142,6 +2548,18 @@ public class FieldAggregatorTest {
     private InternalRow row(
             Object k0, Object k1, String v, Object seq, org.apache.paimon.data.Timestamp ts) {
         return GenericRow.of(k0, k1, BinaryString.fromString(v), seq, ts);
+    }
+
+    private InternalRow nestedRow(Integer k0, Integer k1, String v, Integer seq, Integer ts) {
+        return GenericRow.of(k0, k1, BinaryString.fromString(v), seq, ts);
+    }
+
+    private InternalRow stringSeqRow(Integer k0, Integer k1, String v, String seq) {
+        return GenericRow.of(
+                k0,
+                k1,
+                BinaryString.fromString(v),
+                seq == null ? null : BinaryString.fromString(seq));
     }
 
     @Test

@@ -930,6 +930,9 @@ class FieldNestedUpdateAgg(FieldAggregator):
         self.nested_key = options.field_nested_update_agg_nested_key(field_name)
         self.nested_key_null_strategy = options.field_nested_update_agg_nested_key_null_strategy(field_name)
         self.nested_sequence_field = options.field_nested_update_agg_nested_sequence_field(field_name)
+        self.overwrite_on_equal_sequence = (
+            options.field_nested_update_agg_nested_sequence_overwrite_on_equal(field_name)
+        )
         self.count_limit = options.field_nested_update_agg_count_limit(field_name)
 
         if self.nested_key:
@@ -1021,14 +1024,30 @@ class FieldNestedUpdateAgg(FieldAggregator):
                 "requires 'fields.<field-name>.nested-key' to be configured."
             )
 
-        if (
-                options.field_nested_update_agg_nested_sequence_field(field)
-                and not nested_key
-        ):
+        nested_sequence_field = (
+            options.field_nested_update_agg_nested_sequence_field(field)
+        )
+        if nested_sequence_field and not nested_key:
             raise ValueError(
                 "Option 'fields.<field-name>.nested-sequence-field' "
                 "requires 'fields.<field-name>.nested-key' to be configured."
             )
+
+        overwrite_on_equal_configured = options.options.contains_key(
+            f"{CoreOptions.FIELDS_PREFIX}.{field}."
+            f"{CoreOptions.NESTED_SEQUENCE_OVERWRITE_ON_EQUAL}"
+        )
+        if overwrite_on_equal_configured and not nested_sequence_field:
+            raise ValueError(
+                "Option 'fields.<field-name>.nested-sequence-overwrite-on-equal' "
+                "requires 'fields.<field-name>.nested-sequence-field' to be configured."
+            )
+
+    def _should_update(self, new_row: Record, old_row: Record) -> bool:
+        if not self.has_sequence_field:
+            return True
+        comparison = self._compare_sequence(new_row, old_row)
+        return comparison > 0 or (comparison == 0 and self.overwrite_on_equal_sequence)
 
     def _compare_sequence(self, new_row: Record, old_row: Record) -> int:
         if not self.has_sequence_field:
@@ -1086,7 +1105,7 @@ class FieldNestedUpdateAgg(FieldAggregator):
 
             exists = row_map.get(key)
             if exists is not None:
-                if not self.has_sequence_field or self._compare_sequence(row, exists) >= 0:
+                if self._should_update(row, exists):
                     row_map[key] = row
             elif not limit_new_keys or len(row_map) < self.count_limit:
                 row_map[key] = row

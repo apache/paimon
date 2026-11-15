@@ -28,6 +28,7 @@ import java.util.List;
 
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.NESTED_KEY_NULL_STRATEGY;
+import static org.apache.paimon.CoreOptions.NESTED_SEQUENCE_OVERWRITE_ON_EQUAL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for #{@link FieldNestedUpdateAgg}. */
@@ -51,6 +52,7 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
                 options.fieldNestedUpdateAggNestedKey(field),
                 options.fieldNestedUpdateAggNestedKeyNullStrategy(field),
                 options.fieldNestedUpdateAggNestedSequenceField(field),
+                options.fieldNestedUpdateAggNestedSequenceOverwriteOnEqual(field),
                 options.fieldNestedUpdateAggCountLimit(field));
     }
 
@@ -61,6 +63,7 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
 
     private void checkOptionDependencies(CoreOptions options, String field) {
         List<String> nestedKey = options.fieldNestedUpdateAggNestedKey(field);
+        List<String> nestedSequenceField = options.fieldNestedUpdateAggNestedSequenceField(field);
 
         boolean strategyConfigured =
                 options.toConfiguration()
@@ -72,9 +75,22 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
                         + "'fields.<field-name>.nested-key' to be configured.");
 
         checkArgument(
-                options.fieldNestedUpdateAggNestedSequenceField(field).isEmpty()
-                        || !nestedKey.isEmpty(),
+                nestedSequenceField.isEmpty() || !nestedKey.isEmpty(),
                 "Option 'fields.<field-name>.nested-sequence-field' requires "
                         + "'fields.<field-name>.nested-key' to be configured.");
+
+        boolean overwriteOnEqualConfigured =
+                options.toConfiguration()
+                        .containsKey(
+                                FIELDS_PREFIX
+                                        + "."
+                                        + field
+                                        + "."
+                                        + NESTED_SEQUENCE_OVERWRITE_ON_EQUAL);
+
+        checkArgument(
+                !overwriteOnEqualConfigured || !nestedSequenceField.isEmpty(),
+                "Option 'fields.<field-name>.nested-sequence-overwrite-on-equal' requires "
+                        + "'fields.<field-name>.nested-sequence-field' to be configured.");
     }
 }
