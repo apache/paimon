@@ -660,9 +660,10 @@ public class ChainTableFileStoreTableTest {
                 row(RowKind.UPDATE_AFTER, 2L, 4L, "b2", "B", "20250812"),
                 row(RowKind.DELETE, 5L, 2L, null, null, "20250812"));
 
+        // the -U of key 2 is lone in dt=20250811 because its +U lands in dt=20250812, so it
+        // removes the row there (issue 6862)
         assertThat(getResult(loadTable(), ImmutableMap.of("dt", "20250811")))
-                .containsExactlyInAnyOrder(
-                        row(2L, 2L, "b1", "B", "20250811"), row(5L, 1L, "e", "E", "20250811"));
+                .containsExactlyInAnyOrder(row(5L, 1L, "e", "E", "20250811"));
 
         assertThat(getResult(loadTable(), ImmutableMap.of("dt", "20250812")))
                 .containsExactlyInAnyOrder(row(2L, 4L, "b2", "B", "20250812"));
