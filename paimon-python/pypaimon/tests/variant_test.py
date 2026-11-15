@@ -80,6 +80,7 @@ from pypaimon.execution.python.read.variant_shredding import (
     decompose_variant,
     rebuild,
     rebuild_value,
+    shred_variant_column,
 )
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import (
@@ -776,6 +777,14 @@ class TestBuildBinary(unittest.TestCase):
             [key_dict['a'], key_dict['z']],
         )
 
+    def test_extract_object_id_and_offset_widths(self):
+        for key_id, data_size in ((1, 1), (300, 300),
+                                  (70000, 70000), (17000000, 1)):
+            with self.subTest(key_id=key_id, data_size=data_size):
+                fields = [(0, b'x' * data_size), (key_id, b'y')]
+                value = _build_object_value(fields)
+                self.assertEqual(_extract_overflow_fields(value), fields)
+
     def test_build_array_empty(self):
         arr_bytes = _build_array_value([])
         gv = GenericVariant(arr_bytes, b'\x01\x00')
@@ -1010,6 +1019,33 @@ class TestShreddingWrite(unittest.TestCase):
     def _obj_fields_for(self, col_name, sub_fields):
         """Helper: build obj_fields for a single column from (name, type) pairs."""
         return parse_shredding_schema_option(_schema_json(col_name, sub_fields))[col_name]
+
+    def test_reuses_metadata_for_nested_shredding(self):
+        obj_fields = self._obj_fields_for('payload', [
+            ('nested', {'type': 'ROW', 'fields': [
+                {'id': 0, 'name': 'selected', 'type': 'BIGINT'},
+            ]}),
+        ])
+        values = [
+            {'nested': {'selected': 0, 'rest': True}, 'other': 0},
+            {'nested': {'selected': 1, 'rest': True}, 'other': 1, 'extra': 1},
+            {'nested': {'selected': 2, 'rest': True}, 'other': 2},
+        ]
+        variants = [GenericVariant.from_python(value) for value in values]
+        column = GenericVariant.to_arrow_array(variants)
+        target_type = shredding_schema_to_arrow_type(obj_fields)
+
+        with patch('pypaimon.execution.python.read.variant_shredding.parse_metadata_dict',
+                   wraps=parse_metadata_dict) as parse:
+            shredded = shred_variant_column(column, obj_fields, target_type)
+            self.assertEqual(parse.call_count, 2)
+
+        rebuilt = assemble_shredded_column(shredded, build_variant_schema(shredded.type))
+        self.assertEqual(
+            [GenericVariant.from_arrow_struct(row).to_python()
+             for row in rebuilt.to_pylist()],
+            values,
+        )
 
     # -----------------------------------------------------------------------
     # parse_shredding_schema_option
