@@ -91,8 +91,10 @@ assert [(value.column, value.field_id, value.family) for value in definitions] =
 ]
 
 with TemporaryDirectory() as directory, ExitStack() as stack:
+    catalog_loader = Mock()
+    catalog_loader.load.return_value.load_snapshot.return_value = None
     table = FileStoreTable(FileIO.get(directory), Identifier('default', 'indexed'), directory,
-                           schema, CatalogEnvironment(catalog_loader=object()))
+                           schema, CatalogEnvironment(catalog_loader=catalog_loader))
     predicate = PredicateBuilder(table.fields).greater_than('id', 0)
     native_plan = SimpleNamespace(splits=lambda: [], snapshot_id=lambda: 7, stats=lambda: None)
     core_scan = Mock()

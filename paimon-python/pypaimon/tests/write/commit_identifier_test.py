@@ -83,7 +83,7 @@ def test_stream_prepare_rejects_invalid_identifiers_before_preparing_files(value
 @pytest.mark.parametrize('native', [False, True])
 @pytest.mark.parametrize('value, error', _INVALID)
 def test_stream_commit_rejects_invalid_identifiers_before_selecting_a_backend(native, value, error):
-    table = Mock()
+    table = Mock(is_primary_key_table=False)
     table.options.native_commit_enabled.return_value = native
     table.options.snapshot_ignore_empty_commit.return_value = False
     commit = StreamTableCommit(table, 'user')

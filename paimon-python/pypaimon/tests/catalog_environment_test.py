@@ -104,6 +104,24 @@ class CatalogEnvironmentTest(unittest.TestCase):
         self.assertEqual(environment.copy(main).snapshot_commit(None).uuid, "loaded-uuid")
         self.assertIsNone(environment.copy(dev).snapshot_commit(None).uuid)
 
+    def test_rest_and_custom_jdbc_snapshot_loaders_preserve_catalog_results(self):
+        from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
+
+        class CustomJdbcCatalogLoader(JdbcCatalogLoader):
+            pass
+
+        context = CatalogContext.create_from_options(Options({}))
+        identifier = Identifier.create("db", "table", branch="dev")
+        for loader_type in (RESTCatalogLoader, CustomJdbcCatalogLoader):
+            with self.subTest(loader_type=loader_type):
+                loader = loader_type(context)
+                catalog = mock.Mock()
+                catalog.load_snapshot.return_value.snapshot = mock.sentinel.snapshot
+                environment = CatalogEnvironment(identifier=identifier, catalog_loader=loader)
+                with mock.patch.object(loader, "load", return_value=catalog):
+                    self.assertIs(environment.snapshot_loader().load(), mock.sentinel.snapshot)
+                catalog.load_snapshot.assert_called_once_with(identifier)
+
     def test_dependency_read_context_for_rest_catalog(self):
         root = Identifier.create("db", "root", branch="dev")
         options = Options({"other-option": "value"})

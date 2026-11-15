@@ -28,8 +28,22 @@ from pypaimon.read.streaming_table_scan import StreamTableScan
 from pypaimon.schema.schema_change import SchemaChange
 
 
-def _table(tmp_path, extra=None):
-    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+@pytest.fixture(params=['filesystem', 'jdbc'])
+def guard_catalog(tmp_path, request):
+    options = {'warehouse': str(tmp_path / 'warehouse')}
+    if request.param == 'jdbc':
+        options.update({'metastore': 'jdbc', 'uri': 'jdbc:sqlite:' + str(tmp_path / 'catalog.db')})
+    catalog = CatalogFactory.create(options)
+    try:
+        yield catalog
+    finally:
+        if request.param == 'jdbc':
+            catalog.close()
+
+
+def _table(tmp_path, extra=None, catalog=None):
+    if catalog is None:
+        catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     options = {
         'bucket': '1',
@@ -76,13 +90,13 @@ def _guard_snapshot(table, properties):
 
 
 @pytest.mark.parametrize('native', [False, True])
-def test_enabled_guards_reject_planning_and_writing_before_backend_selection(tmp_path, native):
+def test_enabled_guards_reject_planning_and_writing_before_backend_selection(tmp_path, native, guard_catalog):
     table = _table(tmp_path, {
         'delete-ordering-guards.enabled': 'true',
         'scan.native-plan.enabled': str(native).lower(),
         'read.native.enabled': str(native).lower(),
         'write.native.enabled': str(native).lower(),
-    })
+    }, catalog=guard_catalog)
     with patch('pypaimon.read.read_dispatch._native_scan_execution') as planner:
         for operation in ('plan', 'plan_all', 'scan_with_stats'):
             with pytest.raises(NotImplementedError, match='does not support delete ordering guards'):
@@ -100,8 +114,8 @@ def test_enabled_guards_reject_planning_and_writing_before_backend_selection(tmp
     {'delete-ordering-guards.generations': '{"version":"1","*":"reset"}'},
     {'delete-ordering-guards.partitions': '{}'},
 ])
-def test_retained_guard_history_rejects_reads_and_staged_commits(tmp_path, native, properties):
-    table = _table(tmp_path)
+def test_retained_guard_history_rejects_reads_and_staged_commits(tmp_path, native, properties, guard_catalog):
+    table = _table(tmp_path, catalog=guard_catalog)
     _append(table, 1)
     builder = table.new_read_builder()
     splits = builder.new_scan().plan().splits()
@@ -149,6 +163,30 @@ def test_retained_guard_history_rejects_reads_and_staged_commits(tmp_path, nativ
     finally:
         commit.close()
         selected_commit.close()
+
+
+@pytest.mark.parametrize('branch', ['main', 'dev'])
+def test_snapshot_reads_do_not_reopen_jdbc_catalog(tmp_path, guard_catalog, branch):
+    table = _table(tmp_path, catalog=guard_catalog)
+    _append(table, 1)
+    table.create_tag('base')
+    table.branch_manager().create_branch('dev', 'base')
+    _append(table, 2)
+    selected = table.copy({'branch': branch})
+    expected = [{'id': 1, 'value': 'payload'}]
+    if branch == 'main':
+        expected.append({'id': 2, 'value': 'payload'})
+
+    with patch('pypaimon.catalog.jdbc_catalog_loader.JdbcCatalogLoader.load',
+               side_effect=AssertionError('JDBC connection during planning')) as load:
+        snapshot = selected.snapshot_manager().get_latest_snapshot()
+        assert snapshot.id == (2 if branch == 'main' else 1)
+        builder = selected.new_read_builder()
+        plan = builder.new_scan().plan()
+        assert plan.snapshot_id == snapshot.id
+        rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+        assert sorted(rows, key=lambda row: row['id']) == expected
+        load.assert_not_called()
 
 
 def test_commit_retry_checks_its_exact_snapshot(tmp_path):
