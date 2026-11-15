@@ -404,7 +404,9 @@ public class TableCommitImpl implements InnerTableCommit {
             throw new RuntimeException(maintainError.get());
         }
 
-        if (batchCommitted) {
+        // COMMIT_IDENTIFIER marks the last commit of a bounded input, such as the end-input commit
+        // of a Flink batch job. close() follows it and would interrupt or drop async maintenance.
+        if (batchCommitted || identifier == COMMIT_IDENTIFIER) {
             maintain(identifier, doExpire);
         } else {
             executor.execute(

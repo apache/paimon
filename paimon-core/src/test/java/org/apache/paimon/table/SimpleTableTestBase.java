@@ -1596,6 +1596,55 @@ public abstract class SimpleTableTestBase {
 
     @Test
     @Timeout(120)
+    public void testEndInputCommitExpiresBeforeClose() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(SNAPSHOT_EXPIRE_EXECUTION_MODE.key(), ExpireExecutionMode.ASYNC.toString());
+        options.put(SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        options.put(SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        options.put(SNAPSHOT_EXPIRE_LIMIT.key(), "100");
+        FileStoreTable table = createFileStoreTable().copy(options);
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        TableCommitImpl commit = table.newCommit(commitUser);
+        // occupy the async maintain thread, so only maintenance on the committing thread runs
+        CountDownLatch release = new CountDownLatch(1);
+        commit.getMaintainExecutor()
+                .execute(
+                        () -> {
+                            try {
+                                release.await();
+                            } catch (InterruptedException ignored) {
+                                // interrupted by close()
+                            }
+                        });
+        try (StreamTableWrite write = table.newWrite(commitUser)) {
+            for (int i = 0; i < 2; i++) {
+                write.write(rowData(i, 10 * i, 100L * i));
+                commit.commit(i, write.prepareCommit(false, i));
+            }
+            // checkpoint commits keep expiring asynchronously
+            assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(1L);
+            assertThat(snapshotManager.latestSnapshotId()).isGreaterThan(1L);
+
+            // The end-input commit of a bounded job uses COMMIT_IDENTIFIER and is
+            // followed by close(), which interrupted or dropped the async expiration, so this
+            // commit expires on the committing thread before returning
+            write.write(rowData(2, 20, 200L));
+            commit.filterAndCommit(
+                    Collections.singletonMap(
+                            BatchWriteBuilder.COMMIT_IDENTIFIER,
+                            write.prepareCommit(true, BatchWriteBuilder.COMMIT_IDENTIFIER)));
+        } finally {
+            commit.close();
+            release.countDown();
+        }
+
+        assertThat(snapshotManager.earliestSnapshotId())
+                .isEqualTo(snapshotManager.latestSnapshotId());
+    }
+
+    @Test
+    @Timeout(120)
     public void testExpireWithLimit() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
