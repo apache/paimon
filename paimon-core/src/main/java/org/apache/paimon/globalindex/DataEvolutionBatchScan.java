@@ -322,11 +322,15 @@ public class DataEvolutionBatchScan implements DataTableScan {
             }
         }
 
-        if (pushDownLimit != null && !rowIdFilterDeferred) {
+        // File counts and statistics include rows excluded by the row range filter.
+        if (pushDownLimit != null && !rowIdFilterDeferred && rowRangeIndex == null) {
             batchScan.withLimit(pushDownLimit);
         }
 
-        if (!globalIndexTopNCandidatesFound && topN != null && !rowIdFilterDeferred) {
+        if (!globalIndexTopNCandidatesFound
+                && topN != null
+                && !rowIdFilterDeferred
+                && rowRangeIndex == null) {
             batchScan.withTopN(topN);
         }
 
