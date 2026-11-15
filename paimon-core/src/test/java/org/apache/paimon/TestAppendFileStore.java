@@ -203,7 +203,13 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
 
     public static TestAppendFileStore createAppendStore(
             java.nio.file.Path tempDir, Map<String, String> options) throws Exception {
-        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        return createAppendStore(tempDir, options, TraceableFileIO.SCHEME);
+    }
+
+    public static TestAppendFileStore createAppendStore(
+            java.nio.file.Path tempDir, Map<String, String> options, String scheme)
+            throws Exception {
+        String root = scheme + "://" + tempDir.toString();
         Path path = new Path(tempDir.toUri());
         FileIO fileIO = FileIOFinder.find(new Path(root));
         SchemaManager schemaManage = new FileSystemSchemaManager(new LocalFileIO(), path);
