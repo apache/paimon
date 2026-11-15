@@ -236,8 +236,8 @@ public interface FileIO extends Serializable, Closeable {
      * 'mkdir -p'. Existence of the directory hierarchy is not an error.
      *
      * @param path the directory/directories to be created
-     * @return <code>true</code> if at least one new directory has been created, <code>false</code>
-     *     otherwise
+     * @return <code>true</code> if the directory hierarchy exists after the call, <code>false
+     *     </code> otherwise
      * @throws IOException thrown if an I/O error occurs while creating the directory
      */
     boolean mkdirs(Path path) throws IOException;
@@ -377,7 +377,7 @@ public interface FileIO extends Serializable, Closeable {
      * Write content to one file atomically, initially writes to temp hidden file and only renames
      * to the target file once temp file is closed.
      *
-     * @return false if target file exists
+     * @return <code>true</code> if the atomic write was successful, <code>false</code> otherwise
      */
     default boolean tryToWriteAtomic(Path path, String content) throws IOException {
         Path tmp = path.createTempPath();
