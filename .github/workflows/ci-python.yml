@@ -165,10 +165,11 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build paimon-rust from main
+      - name: Build paimon-rust from the verified 2.1 revision
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@main#subdirectory=bindings/python"
+          # Keep the release branch on the revision verified by Native CI on 2026-10-08.
+          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@ae62495d275ccf3811c38128788be8cf7e144177#subdirectory=bindings/python"
 
       - name: Install Python test dependencies
         run: |
