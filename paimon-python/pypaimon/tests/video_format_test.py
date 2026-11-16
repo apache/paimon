@@ -350,7 +350,7 @@ class VideoFormatTest(unittest.TestCase):
 
         reader = mock.Mock()
         reader.new_input_stream.side_effect = lambda unused: JindoInputFile(
-            JindoStream())
+            JindoStream(), owner=reader)
         descriptor = VideoFrameDescriptor(
             "oss://bucket/video.mp4", 0, -1, 0, -1, 0)
         value = Blob.from_descriptor(reader, descriptor)

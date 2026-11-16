@@ -18,7 +18,6 @@
 import gc
 import io
 import os
-import threading
 import time
 import types
 import unittest
