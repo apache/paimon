@@ -120,6 +120,15 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
     }
   }
 
+  test("unaliased v1 function call keeps the database-qualified column name") {
+    try {
+      sql("CREATE FUNCTION abs_udf AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFAbs'")
+      val df = sql("SELECT abs_udf(-3)")
+      checkAnswer(df, Seq(Row(3)))
+      assert(df.columns.toSeq === Seq("test.abs_udf(-3)"))
+    } finally { sql("DROP FUNCTION IF EXISTS abs_udf") }
+  }
+
   private val modes: Seq[(String, String)] = Seq(
     "primary-key" -> "'bucket'='1', 'primary-key'='id'",
     "append" -> "'bucket'='-1'",
