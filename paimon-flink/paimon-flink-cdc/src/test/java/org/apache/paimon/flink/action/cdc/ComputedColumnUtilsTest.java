@@ -131,6 +131,23 @@ public class ComputedColumnUtilsTest {
     }
 
     @Test
+    public void testTemporalFunctionsWithPreEpochValues() {
+        List<DataField> physicalFields =
+                Arrays.asList(
+                        new DataField(0, "_micros", DataTypes.BIGINT()),
+                        new DataField(1, "_nanos", DataTypes.BIGINT()));
+        List<ComputedColumn> columns =
+                buildComputedColumns(
+                        Arrays.asList(
+                                "_from_micros=date_format(_micros,yyyy-MM-dd HH:mm:ss.SSSSSS,6)",
+                                "_from_nanos=date_format(_nanos,yyyy-MM-dd HH:mm:ss.SSSSSSSSS,9)"),
+                        physicalFields);
+
+        assertEquals("1969-12-31 23:59:59.998500", columns.get(0).eval("-1500"));
+        assertEquals("1969-12-31 23:59:59.999998500", columns.get(1).eval("-1500"));
+    }
+
+    @Test
     public void testCaseInsensitiveMetadataReference() {
         CdcMetadataConverter timestamp =
                 new PrefixedMetadataConverter(
