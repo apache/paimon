@@ -39,6 +39,7 @@ import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.TableCapability
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 import scala.collection.JavaConverters._
 
@@ -57,10 +58,10 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
           val catalog = session.sessionState.catalogManager
             .catalog(relation.options.get(SparkSource.CATALOG))
           a.withNewTable(
-            relation.copy(
-              catalog = Some(catalog),
-              identifier =
-                Some(SparkSource.tableIdentifier(relation.options.asCaseSensitiveMap()))))
+            SparkShimLoader.shim.copyDataSourceV2Relation(
+              relation,
+              catalog,
+              SparkSource.tableIdentifier(relation.options.asCaseSensitiveMap())))
 
         // Keep fallback conversion before the generic V2 rewrite; otherwise an already-resolved
         // query can remain as OverwritePartitionsDynamic until Spark's capability check rejects it.

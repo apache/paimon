@@ -302,6 +302,13 @@ class Spark4Shim extends SparkShim {
     relation.copy(table = table, output = output)
   }
 
+  override def copyDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      catalog: CatalogPlugin,
+      identifier: Identifier): DataSourceV2Relation = {
+    relation.copy(catalog = Some(catalog), identifier = Some(identifier))
+  }
+
   override def createDataSourceV2Relation(
       table: Table,
       catalog: Option[CatalogPlugin],
