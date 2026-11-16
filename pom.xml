@@ -303,6 +303,22 @@ under the License.
     </dependencyManagement>
 
     <profiles>
+        <profile>
+            <!-- GPU compaction (paimon-gpu) through TornadoVM, which needs JDK 22 or later. -->
+            <id>gpu</id>
+            <modules>
+                <module>paimon-gpu</module>
+            </modules>
+            <properties>
+                <target.java.version>22</target.java.version>
+            </properties>
+            <activation>
+                <property>
+                    <name>gpu</name>
+                </property>
+            </activation>
+        </profile>
+
         <!--
           We're reusing the apache-release build profile defined in the Apache Parent POM,
           with one exclusion: do not run the source-release-assembly execution goal.
