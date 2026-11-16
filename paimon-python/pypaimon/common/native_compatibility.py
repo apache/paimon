@@ -27,38 +27,53 @@ keeps Native eligible.
 from typing import Optional
 
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.common.options.options_utils import OptionsUtils
 
 
 _FIELDS_PREFIX = CoreOptions.FIELDS_PREFIX + "."
 _AGG_SUFFIX = ".aggregate-function"
+_DEFAULT_AGG_KEY = _FIELDS_PREFIX + "default-aggregate-function"
 _OVERWRITE_SUFFIX = "." + CoreOptions.NESTED_SEQUENCE_OVERWRITE_ON_EQUAL
 _NESTED_UPDATE = "nested_update"
+# Matches aggregation_merge_function.resolve_agg_func_name when neither a
+# field-level nor table-wide aggregate-function is set.
+_DEFAULT_AGG_FALLBACK = "last_non_null_value"
+
+
+def _effective_aggregate_function(raw, field):
+    """Resolve the aggregator that will actually run for ``field``.
+
+    Same precedence as ``resolve_agg_func_name`` for non-PK / non-sequence
+    fields: field-level ``aggregate-function``, then
+    ``fields.default-aggregate-function``, then the factory default
+    ``last_non_null_value``.
+    """
+    return (
+        raw.get(_FIELDS_PREFIX + field + _AGG_SUFFIX)
+        or raw.get(_DEFAULT_AGG_KEY)
+        or _DEFAULT_AGG_FALLBACK
+    )
 
 
 def nested_update_overwrite_on_equal_false_reason(
         options: Optional[CoreOptions]) -> Optional[str]:
     """Return why Native must not run, or ``None`` when Native stays eligible.
 
-    Only ``aggregate-function=nested_update`` fields with an explicit
-    ``nested-sequence-overwrite-on-equal=false`` force Python. Unset / ``true``
-    leave Native eligible.
+    Fields with an explicit ``nested-sequence-overwrite-on-equal=false`` force
+    Python when their effective aggregator is ``nested_update`` (field-level
+    ``aggregate-function``, otherwise ``fields.default-aggregate-function``).
+    Unset / ``true``, and false on non-``nested_update`` fields, leave Native
+    eligible.
     """
     if options is None or not isinstance(options, CoreOptions):
         return None
     raw = options.options.to_map()
-    for key, value in raw.items():
-        if not (key.startswith(_FIELDS_PREFIX) and key.endswith(_AGG_SUFFIX)):
+    for key in raw:
+        if not (key.startswith(_FIELDS_PREFIX) and key.endswith(_OVERWRITE_SUFFIX)):
             continue
-        if value != _NESTED_UPDATE:
+        field = key[len(_FIELDS_PREFIX):-len(_OVERWRITE_SUFFIX)]
+        if options.field_nested_update_agg_nested_sequence_overwrite_on_equal(field):
             continue
-        field = key[len(_FIELDS_PREFIX):-len(_AGG_SUFFIX)]
-        overwrite_key = (
-            _FIELDS_PREFIX + field + _OVERWRITE_SUFFIX
-        )
-        if overwrite_key not in raw:
-            continue
-        if OptionsUtils.convert_to_boolean(raw[overwrite_key]):
+        if _effective_aggregate_function(raw, field) != _NESTED_UPDATE:
             continue
         return (
             "fields.{0}.nested-sequence-overwrite-on-equal=false is not "

@@ -89,6 +89,18 @@ def _read_values(table):
     return [item['value'] for item in rows[0]['updates']]
 
 
+def _default_nested_options(overwrite='false', field_agg=None, default_agg='nested_update'):
+    options = {
+        'fields.default-aggregate-function': default_agg,
+        'fields.updates.nested-key': 'key',
+        'fields.updates.nested-sequence-field': 'seq',
+        'fields.updates.nested-sequence-overwrite-on-equal': overwrite,
+    }
+    if field_agg is not None:
+        options['fields.updates.aggregate-function'] = field_agg
+    return options
+
+
 @pytest.mark.python_read
 @pytest.mark.python_write
 def test_compatibility_helper_only_flags_explicit_false():
@@ -100,6 +112,30 @@ def test_compatibility_helper_only_flags_explicit_false():
     assert 'nested-sequence-overwrite-on-equal=false' in reason
     with pytest.raises(RuntimeError, match='without a Python fallback'):
         require_native_compatible(CoreOptions(Options(_options('false'))), allow_python_fallback=False)
+
+
+@pytest.mark.python_read
+@pytest.mark.python_write
+def test_compatibility_helper_honors_default_aggregate_function():
+    # default nested_update + false → incompatible
+    reason = nested_update_overwrite_on_equal_false_reason(
+        CoreOptions(Options(_default_nested_options('false'))))
+    assert reason is not None
+    assert 'nested-sequence-overwrite-on-equal=false' in reason
+
+    # default nested_update + field-level last_value override → still Native-eligible
+    assert nested_update_overwrite_on_equal_false_reason(
+        CoreOptions(Options(_default_nested_options('false', field_agg='last_value')))) is None
+
+    # default other + field-level nested_update + false → incompatible
+    reason = nested_update_overwrite_on_equal_false_reason(
+        CoreOptions(Options(_default_nested_options(
+            'false', field_agg='nested_update', default_agg='last_value'))))
+    assert reason is not None
+
+    # default nested_update + true → eligible
+    assert nested_update_overwrite_on_equal_false_reason(
+        CoreOptions(Options(_default_nested_options('true')))) is None
 
 
 @pytest.mark.python_read
@@ -188,3 +224,55 @@ def test_default_and_true_keep_native_eligible(tmp_path, overwrite):
         commit.close()
     # Default / explicit true keep historical equal-sequence overwrite.
     assert _read_values(table) == ['second']
+
+
+@pytest.mark.python_read
+@pytest.mark.python_write
+def test_default_aggregate_function_nested_update_false_routes_to_python(tmp_path):
+    """Table-wide default nested_update + overwrite=false must keep first."""
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'default_agg')})
+    catalog.create_database('default', True)
+    options = {
+        'bucket': '1',
+        'file.format': 'parquet',
+        'merge-engine': 'aggregation',
+        'fields.default-aggregate-function': 'nested_update',
+        'fields.updates.nested-key': 'key',
+        'fields.updates.nested-sequence-field': 'seq',
+        'fields.updates.nested-sequence-overwrite-on-equal': 'false',
+        'read.native.enabled': 'true',
+        'write.native.enabled': 'true',
+        'commit.native.enabled': 'false',
+    }
+    catalog.create_table(
+        'default.t',
+        Schema.from_pyarrow_schema(_SCHEMA, primary_keys=['id'], options=options),
+        False)
+    table = catalog.get_table('default.t')
+    assert nested_update_overwrite_on_equal_false_reason(table.options) is not None
+    with pytest.raises(RuntimeError, match='without a Python fallback'):
+        require_native_compatible(table.options, allow_python_fallback=False)
+
+    with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_write.create_native_write') as create_native, \
+            patch('pypaimon.write.write_dispatch.NativeBatchTableWrite',
+                  side_effect=AssertionError('NativeBatchTableWrite selected')):
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            assert isinstance(writer, BatchTableWrite)
+            assert not isinstance(writer, NativeBatchTableWrite)
+            writer.write_arrow(_batch())
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+    create_native.assert_not_called()
+
+    reopened = CatalogFactory.create({'warehouse': str(tmp_path / 'default_agg')}).get_table('default.t')
+    with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.read.table_read.NativeTableRead') as native_read:
+        assert _read_values(reopened) == ['first']
+    native_read.assert_not_called()
+    with pytest.raises(RuntimeError, match='without a Python fallback'):
+        require_native_compatible(reopened.options, allow_python_fallback=False)
