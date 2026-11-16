@@ -21,7 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.spark.write.PaimonWriteRequirement
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{PaimonUtils, SparkSession}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.plans.logical.{AppendData, LogicalPlan}
 import org.apache.spark.sql.connector.catalog.{Identifier, StagedTable, Table, TableCatalog}
@@ -30,7 +30,6 @@ import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import scala.collection.JavaConverters._
-import scala.util.control.NonFatal
 
 /** Routes Spark 3.2-3.4 table-as-select writes through the normal write planning rules. */
 object PaimonTableAsSelectWrite {
@@ -48,7 +47,7 @@ object PaimonTableAsSelectWrite {
       ident: Identifier,
       query: LogicalPlan,
       options: CaseInsensitiveStringMap): Seq[InternalRow] = {
-    try {
+    PaimonUtils.withFailureCleanup {
       // A staged table delegates its writer but is not a SparkTable relation, so PaimonAnalysis
       // cannot add the legacy bucket distribution for it. Prepare that query here instead.
       val writeQuery = table match {
@@ -71,17 +70,11 @@ object PaimonTableAsSelectWrite {
         case _ =>
       }
       Nil
-    } catch {
-      case NonFatal(error) =>
-        try {
-          table match {
-            case staged: StagedTable => staged.abortStagedChanges()
-            case _ => catalog.dropTable(ident)
-          }
-        } catch {
-          case NonFatal(abortError) => error.addSuppressed(abortError)
-        }
-        throw error
+    } {
+      table match {
+        case staged: StagedTable => staged.abortStagedChanges()
+        case _ => catalog.dropTable(ident)
+      }
     }
   }
 }

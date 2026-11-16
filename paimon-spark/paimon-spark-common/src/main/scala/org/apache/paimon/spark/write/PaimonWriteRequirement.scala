@@ -20,6 +20,7 @@ package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.PartitionSinkStrategy
+import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.commands.BucketExpression.quote
 import org.apache.paimon.spark.commands.FixedBucketExpression
 import org.apache.paimon.table.{FileStoreTable, FormatTable}
@@ -27,7 +28,7 @@ import org.apache.paimon.table.BucketMode._
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.catalyst.expressions.{Expression => CatalystExpression, Literal => CatalystLiteral}
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, RepartitionByExpression}
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.distributions.{ClusteredDistribution, Distribution, Distributions}
 import org.apache.spark.sql.connector.expressions.{Expression, Expressions, Literal, NamedReference, SortOrder, Transform}
 
@@ -67,11 +68,8 @@ object PaimonWriteRequirement extends SQLConfHelper {
 
     apply(table).distribution match {
       case clustered: ClusteredDistribution =>
-        // This Int overload is binary-compatible across Spark 3.2+.
-        RepartitionByExpression(
-          clustered.clustering().map(bind).toSeq,
-          query,
-          conf.numShufflePartitions)
+        // Leave the count unspecified so AQE can coalesce the bucket shuffle on Spark 3.2/3.3.
+        Compatibility.repartitionByExpression(clustered.clustering().map(bind).toSeq, query)
       case _ => query
     }
   }

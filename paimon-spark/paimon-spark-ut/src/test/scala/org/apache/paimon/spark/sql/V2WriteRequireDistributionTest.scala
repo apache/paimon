@@ -23,12 +23,20 @@ import org.apache.paimon.spark.commands.FixedBucketExpression
 import org.apache.paimon.utils.ExceptionUtils
 
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.Row
+import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted, SparkListenerTaskStart}
+import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCapability, TableCatalog}
 import org.apache.spark.sql.execution.{CommandResultExec, SparkPlan}
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.datasources.v2.{AppendDataExec, AppendDataExecV1}
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
+import org.apache.spark.sql.paimon.Utils
+
+import java.util.UUID
+import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
+import java.util.concurrent.atomic.AtomicReference
+
+import scala.collection.JavaConverters._
 
 class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
 
@@ -241,6 +249,131 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
         ExceptionUtils.findThrowableWithMessage(error, "expected CTAS failure").isPresent,
         ExceptionUtils.stringifyException(error))
       assert(!spark.catalog.tableExists("t1"))
+    }
+  }
+
+  for (enabled <- Seq(false, true)) {
+    test(s"Bucket write retains adaptive shuffle coalescing: v2=$enabled") {
+      withSparkSQLConf(
+        "spark.paimon.write.use-v2-write" -> enabled.toString,
+        "spark.sql.adaptive.enabled" -> "true",
+        "spark.sql.adaptive.coalescePartitions.enabled" -> "true",
+        "spark.sql.adaptive.coalescePartitions.minPartitionNum" -> "1",
+        "spark.sql.shuffle.partitions" -> "200"
+      ) {
+        withTable("t1") {
+          sql("""
+                |CREATE TABLE t1 (id INT) USING paimon
+                |TBLPROPERTIES ('bucket-key'='id', 'bucket'='1', 'file.format'='avro')
+                |""".stripMargin)
+          val group = UUID.randomUUID().toString
+          val stageTasks = new ConcurrentLinkedQueue[Int]()
+          val listener = new SparkListener {
+            override def onStageSubmitted(event: SparkListenerStageSubmitted): Unit = {
+              if (event.properties.getProperty("spark.jobGroup.id") == group) {
+                stageTasks.add(event.stageInfo.numTasks)
+              }
+            }
+          }
+          spark.sparkContext.addSparkListener(listener)
+          try {
+            spark.sparkContext.setJobGroup(group, group)
+            sql("INSERT INTO t1 SELECT CAST(id AS INT) FROM range(0, 40, 1, 4)").collect()
+            Utils.waitUntilEventEmpty(spark)
+          } finally {
+            spark.sparkContext.clearJobGroup()
+            spark.sparkContext.removeSparkListener(listener)
+          }
+          checkAnswer(sql("SELECT * FROM t1"), (0 until 40).map(Row(_)))
+          assertSingleBucketFile()
+          assert(stageTasks.asScala.toSeq == Seq(4, 1), s"Submitted stage tasks: $stageTasks")
+        }
+      }
+    }
+  }
+
+  for (enabled <- Seq(false, true); genericCatalog <- Seq(false, true)) {
+    test(s"Interrupted CTAS cleans up its table: v2=$enabled, staged=$genericCatalog") {
+      // Spark 3.5+ already uses native distribution preparation and native failure cleanup.
+      assume(org.apache.spark.SPARK_VERSION < "3.5")
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> enabled.toString) {
+        val session = spark
+        val catalogName = if (genericCatalog) "spark_catalog" else "paimon"
+        val catalog = session.sessionState.catalogManager
+          .catalog(catalogName)
+          .asInstanceOf[TableCatalog]
+        val ident = Identifier.of(Array(dbName0), "interrupted_ctas")
+        val target = s"$catalogName.$dbName0.interrupted_ctas"
+        val group = UUID.randomUUID().toString
+        val taskStarted = new CountDownLatch(1)
+        val finished = new CountDownLatch(1)
+        val failure = new AtomicReference[Throwable]()
+        val listener = new SparkListener {
+          private val stages = scala.collection.mutable.Set.empty[Int]
+
+          override def onStageSubmitted(event: SparkListenerStageSubmitted): Unit = {
+            if (event.properties.getProperty("spark.jobGroup.id") == group) {
+              stages.add(event.stageInfo.stageId)
+            }
+          }
+
+          override def onTaskStart(event: SparkListenerTaskStart): Unit = {
+            if (stages.contains(event.stageId)) {
+              taskStarted.countDown()
+            }
+          }
+        }
+        session.udf.register(
+          "ctas_interrupt_input",
+          (id: Long) => {
+            Thread.sleep(30000)
+            id.toInt
+          })
+        val driver = new Thread("interrupted-ctas-driver") {
+          override def run(): Unit = {
+            SparkSession.setActiveSession(session)
+            session.sparkContext.setJobGroup(group, group, interruptOnCancel = true)
+            try {
+              session
+                .sql(s"""
+                        |CREATE TABLE $target USING paimon
+                        |TBLPROPERTIES ('bucket-key'='id', 'bucket'='1', 'file.format'='avro') AS
+                        |SELECT ctas_interrupt_input(id) AS id FROM range(0, 40, 1, 4)
+                        |""".stripMargin)
+                .collect()
+            } catch {
+              case error: Throwable => failure.set(error)
+            } finally {
+              session.sparkContext.clearJobGroup()
+              SparkSession.clearActiveSession()
+              finished.countDown()
+            }
+          }
+        }
+        driver.setDaemon(true)
+        session.sparkContext.addSparkListener(listener)
+        try {
+          driver.start()
+          assert(taskStarted.await(30, TimeUnit.SECONDS), "CTAS did not start its input tasks")
+          assert(catalog.tableExists(ident), "CTAS must create the table before interruption")
+          driver.interrupt()
+          assert(finished.await(30, TimeUnit.SECONDS), "Interrupted CTAS did not finish")
+          assert(
+            failure.get().isInstanceOf[InterruptedException],
+            s"Expected the original InterruptedException, got ${failure.get()}")
+          // Assert before cancelling executor tasks: job cancellation must not mask the failure.
+          assert(!catalog.tableExists(ident), "Interrupted CTAS left its table registered")
+        } finally {
+          driver.interrupt()
+          session.sparkContext.cancelJobGroup(group)
+          driver.join(10000)
+          session.sparkContext.removeSparkListener(listener)
+          session.sql("DROP TEMPORARY FUNCTION IF EXISTS ctas_interrupt_input")
+          if (catalog.tableExists(ident)) {
+            catalog.dropTable(ident)
+          }
+        }
+      }
     }
   }
 
