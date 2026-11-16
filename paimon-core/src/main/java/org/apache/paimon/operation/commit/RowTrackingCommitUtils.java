@@ -138,7 +138,7 @@ public class RowTrackingCommitUtils {
                     rowIdAssigned.add(entry.assignFirstRowId(start));
                     blobStartDefault = start;
                     blobStarts.clear();
-                    // Copied vector files may already extend past this normal file's start.
+                    // Skip the rows of normal files written without vector-store files.
                     vectorStoreStart = Math.max(vectorStoreStart, start);
                     start += rowCount;
                 }
