@@ -38,6 +38,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.GeneratedColumnRow;
+import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Restorable;
 import org.apache.paimon.utils.RowKindFilter;
 
@@ -74,6 +75,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     private @Nullable DefaultValueRow defaultValueRow;
     private @Nullable GeneratedColumnRow generatedColumnRow;
+    private @Nullable ProjectedRow keyAndBucketRow;
     private final @Nullable Set<String> deleteNotNullFieldNames;
 
     public TableWriteImpl(
@@ -169,6 +171,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
             this.writeType = physicalType;
             updateNotNullFieldIndexes();
             this.generatedColumnRow = generator;
+            this.keyAndBucketRow = null;
             return this;
         }
         write.withWriteType(writeType);
@@ -176,6 +179,10 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         updateNotNullFieldIndexes();
         this.defaultValueRow = DefaultValueRow.create(writeType, rowType);
         this.generatedColumnRow = null;
+        this.keyAndBucketRow =
+                rowType.equals(writeType)
+                        ? null
+                        : ProjectedRow.from(writeType.getFieldIndices(rowType.getFieldNames()));
         return this;
     }
 
@@ -222,13 +229,13 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Override
     public BinaryRow getPartition(InternalRow row) {
-        keyAndBucketExtractor.setRecord(generatedColumnRow == null ? row : prepareRow(row));
+        setKeyAndBucketRecord(generatedColumnRow == null ? row : prepareRow(row));
         return keyAndBucketExtractor.partition();
     }
 
     @Override
     public int getBucket(InternalRow row) {
-        keyAndBucketExtractor.setRecord(generatedColumnRow == null ? row : prepareRow(row));
+        setKeyAndBucketRecord(generatedColumnRow == null ? row : prepareRow(row));
         return keyAndBucketExtractor.bucket();
     }
 
@@ -316,7 +323,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     private SinkRecord toSinkRecord(InternalRow row) {
-        keyAndBucketExtractor.setRecord(row);
+        setKeyAndBucketRecord(row);
         return new SinkRecord(
                 keyAndBucketExtractor.partition(),
                 keyAndBucketExtractor.bucket(),
@@ -325,12 +332,18 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     private SinkRecord toSinkRecord(InternalRow row, int bucket) {
-        keyAndBucketExtractor.setRecord(row);
+        setKeyAndBucketRecord(row);
         return new SinkRecord(
                 keyAndBucketExtractor.partition(),
                 bucket,
                 keyAndBucketExtractor.trimmedPrimaryKey(),
                 row);
+    }
+
+    private void setKeyAndBucketRecord(InternalRow row) {
+        // The extractor uses the table schema; the writer still consumes the supplied write type.
+        keyAndBucketExtractor.setRecord(
+                keyAndBucketRow == null ? row : keyAndBucketRow.replaceRow(row));
     }
 
     @Override
