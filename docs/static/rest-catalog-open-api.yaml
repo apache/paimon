@@ -4752,9 +4752,6 @@ components:
         startedAt: {type: integer, format: int64, minimum: 0}
         finishedAt: {type: integer, format: int64, minimum: 0}
         error: {type: string}
-        total: {type: integer, format: int64, minimum: 0}
-        succeeded: {type: integer, format: int64, minimum: 0}
-        failed: {type: integer, format: int64, minimum: 0}
     ListPredictionsResponse:
       type: object
       required: [predictions]

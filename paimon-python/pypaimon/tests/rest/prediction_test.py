@@ -160,8 +160,7 @@ class PredictionTest(unittest.TestCase):
         catalog = Mock()
         catalog.get_prediction.side_effect = [
             _prediction(PredictionStatus.RUNNING),
-            _prediction(
-                PredictionStatus.SUCCEEDED, total=2, succeeded=2, failed=0),
+            _prediction(PredictionStatus.SUCCEEDED),
         ]
         job = PredictionJob(catalog, _prediction())
         result = job.wait(timeout=timedelta(seconds=1), poll_interval=0)

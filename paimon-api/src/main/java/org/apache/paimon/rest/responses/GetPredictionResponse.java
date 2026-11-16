@@ -47,9 +47,6 @@ public class GetPredictionResponse implements RESTResponse {
     private final @Nullable Long startedAt;
     private final @Nullable Long finishedAt;
     private final @Nullable String error;
-    private final @Nullable Long total;
-    private final @Nullable Long succeeded;
-    private final @Nullable Long failed;
 
     @JsonCreator
     public GetPredictionResponse(
@@ -64,10 +61,7 @@ public class GetPredictionResponse implements RESTResponse {
             @JsonProperty("createdAt") long createdAt,
             @Nullable @JsonProperty("startedAt") Long startedAt,
             @Nullable @JsonProperty("finishedAt") Long finishedAt,
-            @Nullable @JsonProperty("error") String error,
-            @Nullable @JsonProperty("total") Long total,
-            @Nullable @JsonProperty("succeeded") Long succeeded,
-            @Nullable @JsonProperty("failed") Long failed) {
+            @Nullable @JsonProperty("error") String error) {
         this.predictionId = predictionId;
         this.source = source;
         this.name = name;
@@ -80,9 +74,6 @@ public class GetPredictionResponse implements RESTResponse {
         this.startedAt = startedAt;
         this.finishedAt = finishedAt;
         this.error = error;
-        this.total = total;
-        this.succeeded = succeeded;
-        this.failed = failed;
     }
 
     public GetPredictionResponse(Prediction prediction) {
@@ -98,10 +89,7 @@ public class GetPredictionResponse implements RESTResponse {
                 prediction.createdAt(),
                 prediction.startedAt(),
                 prediction.finishedAt(),
-                prediction.error(),
-                prediction.total(),
-                prediction.succeeded(),
-                prediction.failed());
+                prediction.error());
     }
 
     @JsonGetter("predictionId")
@@ -172,27 +160,6 @@ public class GetPredictionResponse implements RESTResponse {
         return error;
     }
 
-    @Nullable
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonGetter("total")
-    public Long getTotal() {
-        return total;
-    }
-
-    @Nullable
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonGetter("succeeded")
-    public Long getSucceeded() {
-        return succeeded;
-    }
-
-    @Nullable
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonGetter("failed")
-    public Long getFailed() {
-        return failed;
-    }
-
     public Prediction toPrediction() {
         return new Prediction(
                 predictionId,
@@ -206,9 +173,6 @@ public class GetPredictionResponse implements RESTResponse {
                 createdAt,
                 startedAt,
                 finishedAt,
-                error,
-                total,
-                succeeded,
-                failed);
+                error);
     }
 }

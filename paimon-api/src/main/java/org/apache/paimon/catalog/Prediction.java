@@ -40,9 +40,6 @@ public class Prediction {
     private final @Nullable Long startedAt;
     private final @Nullable Long finishedAt;
     private final @Nullable String error;
-    private final @Nullable Long total;
-    private final @Nullable Long succeeded;
-    private final @Nullable Long failed;
 
     public Prediction(
             String predictionId,
@@ -56,10 +53,7 @@ public class Prediction {
             long createdAt,
             @Nullable Long startedAt,
             @Nullable Long finishedAt,
-            @Nullable String error,
-            @Nullable Long total,
-            @Nullable Long succeeded,
-            @Nullable Long failed) {
+            @Nullable String error) {
         checkNonBlank(predictionId, "predictionId");
         checkArgument(source != null, "source must not be null");
         checkArgument(status != null, "status must not be null");
@@ -70,9 +64,6 @@ public class Prediction {
         checkArgument(createdAt >= 0, "createdAt must not be negative");
         checkOptionalNonNegative(startedAt, "startedAt");
         checkOptionalNonNegative(finishedAt, "finishedAt");
-        checkOptionalNonNegative(total, "total");
-        checkOptionalNonNegative(succeeded, "succeeded");
-        checkOptionalNonNegative(failed, "failed");
         this.predictionId = predictionId;
         this.source = source;
         this.name = name;
@@ -85,9 +76,6 @@ public class Prediction {
         this.startedAt = startedAt;
         this.finishedAt = finishedAt;
         this.error = error;
-        this.total = total;
-        this.succeeded = succeeded;
-        this.failed = failed;
     }
 
     public String predictionId() {
@@ -140,21 +128,6 @@ public class Prediction {
     @Nullable
     public String error() {
         return error;
-    }
-
-    @Nullable
-    public Long total() {
-        return total;
-    }
-
-    @Nullable
-    public Long succeeded() {
-        return succeeded;
-    }
-
-    @Nullable
-    public Long failed() {
-        return failed;
     }
 
     private static void checkNonBlank(String value, String name) {

@@ -137,9 +137,6 @@ class GetPredictionResponse(RESTResponse):
     started_at: Optional[int] = optional_json_field("startedAt", "non_null")
     finished_at: Optional[int] = optional_json_field("finishedAt", "non_null")
     error: Optional[str] = optional_json_field("error", "non_null")
-    total: Optional[int] = optional_json_field("total", "non_null")
-    succeeded: Optional[int] = optional_json_field("succeeded", "non_null")
-    failed: Optional[int] = optional_json_field("failed", "non_null")
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GetPredictionResponse":
@@ -160,9 +157,6 @@ class GetPredictionResponse(RESTResponse):
             started_at=data.get("startedAt"),
             finished_at=data.get("finishedAt"),
             error=data.get("error"),
-            total=data.get("total"),
-            succeeded=data.get("succeeded"),
-            failed=data.get("failed"),
         )
 
     def to_prediction(self) -> Prediction:
@@ -179,9 +173,6 @@ class GetPredictionResponse(RESTResponse):
             started_at=self.started_at,
             finished_at=self.finished_at,
             error=self.error,
-            total=self.total,
-            succeeded=self.succeeded,
-            failed=self.failed,
         )
 
 

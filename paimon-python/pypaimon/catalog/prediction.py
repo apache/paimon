@@ -96,9 +96,6 @@ class Prediction:
     started_at: Optional[int] = None
     finished_at: Optional[int] = None
     error: Optional[str] = None
-    total: Optional[int] = None
-    succeeded: Optional[int] = None
-    failed: Optional[int] = None
 
     def __post_init__(self):
         _nonblank(self.prediction_id, "prediction_id")
@@ -115,8 +112,7 @@ class Prediction:
         _nonblank(self.output_table, "output_table")
         if type(self.created_at) is not int or self.created_at < 0:
             raise ValueError("created_at must be a non-negative integer")
-        for name in (
-                "started_at", "finished_at", "total", "succeeded", "failed"):
+        for name in ("started_at", "finished_at"):
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value < 0):
                 raise ValueError(

@@ -144,9 +144,6 @@ class RESTApiPredictionTest {
                 10,
                 null,
                 null,
-                null,
-                null,
-                null,
                 null);
     }
 }
