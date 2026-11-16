@@ -36,11 +36,9 @@ private[v2] trait PaimonTableAsSelectWriteExec extends TableWriteExecHelper {
       table: Table,
       options: CaseInsensitiveStringMap,
       ident: Identifier): Seq[InternalRow] = {
-    if (PaimonTableAsSelectWrite.supports(table)) {
-      PaimonTableAsSelectWrite.write(session, catalog, table, ident, plan, options)
-    } else {
-      super.writeToTable(catalog, table, options, ident)
-    }
+    PaimonTableAsSelectWrite
+      .writeIfSupported(session, catalog, table, ident, plan, options)
+      .getOrElse(super.writeToTable(catalog, table, options, ident))
   }
 }
 

@@ -26,7 +26,6 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.plans.logical.{AppendData, LogicalPlan}
 import org.apache.spark.sql.connector.catalog.{Identifier, StagedTable, Table, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import scala.collection.JavaConverters._
@@ -34,47 +33,47 @@ import scala.collection.JavaConverters._
 /** Routes Spark 3.2-3.4 table-as-select writes through the normal write planning rules. */
 object PaimonTableAsSelectWrite {
 
-  def supports(table: Table): Boolean = table match {
-    case target: SparkTable => target.useV2Write
-    case staged: RollbackStagedTable => supports(staged.wrappedTable())
-    case _ => false
-  }
-
-  def write(
+  /** Returns None when Spark should handle the write with its own failure cleanup. */
+  def writeIfSupported(
       spark: SparkSession,
       catalog: TableCatalog,
       table: Table,
       ident: Identifier,
       query: LogicalPlan,
-      options: CaseInsensitiveStringMap): Seq[InternalRow] = {
+      options: CaseInsensitiveStringMap): Option[Seq[InternalRow]] = {
     PaimonUtils.withFailureCleanup {
-      // A staged table delegates its writer but is not a SparkTable relation, so PaimonAnalysis
-      // cannot add the legacy bucket distribution for it. Prepare that query here instead.
-      val writeQuery = table match {
-        case staged: RollbackStagedTable =>
-          staged.wrappedTable() match {
-            case target: SparkTable if target.useV2Write =>
+      unwrapTable(table) match {
+        case target: SparkTable if target.useV2Write =>
+          // PaimonAnalysis prepares ordinary SparkTable relations. Staged tables delegate their
+          // writer but need their legacy distribution prepared here, using the unwrapped table.
+          val writeQuery = table match {
+            case _: RollbackStagedTable =>
               PaimonWriteRequirement.prepareQuery(
                 target.getTable.asInstanceOf[FileStoreTable],
                 query)
             case _ => query
           }
-        case _ => query
+          val relation = DataSourceV2Relation.create(table, Some(catalog), Some(ident))
+          val command =
+            AppendData.byPosition(relation, writeQuery, options.asCaseSensitiveMap().asScala.toMap)
+          PaimonUtils.createDataset(spark, command).collect()
+          table match {
+            case staged: StagedTable => staged.commitStagedChanges()
+            case _ =>
+          }
+          Some(Nil)
+        case _ => None
       }
-      val relation = DataSourceV2Relation.create(table, Some(catalog), Some(ident))
-      val command =
-        AppendData.byPosition(relation, writeQuery, options.asCaseSensitiveMap().asScala.toMap)
-      SparkShimLoader.shim.classicApi.createDataset(spark, command).collect()
-      table match {
-        case staged: StagedTable => staged.commitStagedChanges()
-        case _ =>
-      }
-      Nil
     } {
       table match {
         case staged: StagedTable => staged.abortStagedChanges()
         case _ => catalog.dropTable(ident)
       }
     }
+  }
+
+  private def unwrapTable(table: Table): Table = table match {
+    case staged: RollbackStagedTable => unwrapTable(staged.wrappedTable())
+    case _ => table
   }
 }

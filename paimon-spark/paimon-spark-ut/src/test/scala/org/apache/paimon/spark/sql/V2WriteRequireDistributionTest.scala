@@ -252,6 +252,48 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
     }
   }
 
+  for (tableOption <- Seq(false, true); genericCatalog <- Seq(false, true)) {
+    test(
+      s"CTAS option failure cleans up and allows retry: tableOption=$tableOption, staged=$genericCatalog") {
+      assume(org.apache.spark.SPARK_VERSION < "3.5")
+      val catalogName = if (genericCatalog) "spark_catalog" else "paimon"
+      val catalog =
+        spark.sessionState.catalogManager.catalog(catalogName).asInstanceOf[TableCatalog]
+      val ident = Identifier.of(Array(dbName0), "invalid_option_ctas")
+      val target = s"$catalogName.$dbName0.invalid_option_ctas"
+      val properties = "'bucket-key'='id', 'bucket'='1', 'file.format'='avro'"
+      val invalidOption = if (tableOption) ", 'write.use-v2-write'='typo'" else ""
+      val sessionOptions =
+        if (tableOption) Seq.empty[(String, String)]
+        else Seq("spark.paimon.write.use-v2-write" -> "typo")
+      val query = "SELECT CAST(id AS INT) AS id FROM range(0, 40, 1, 4)"
+      try {
+        val error = intercept[Exception] {
+          withSparkSQLConf(sessionOptions: _*) {
+            sql(
+              s"CREATE TABLE $target USING paimon TBLPROPERTIES ($properties$invalidOption) AS $query")
+              .collect()
+          }
+        }
+        assert(
+          ExceptionUtils.findThrowableWithMessage(error, "typo").isPresent,
+          ExceptionUtils.stringifyException(error))
+        assert(!catalog.tableExists(ident), "Invalid write options left the CTAS table registered")
+
+        withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+          sql(
+            s"CREATE TABLE IF NOT EXISTS $target USING paimon TBLPROPERTIES ($properties) AS $query")
+            .collect()
+          checkAnswer(sql(s"SELECT * FROM $target"), (0 until 40).map(Row(_)))
+        }
+      } finally {
+        if (catalog.tableExists(ident)) {
+          catalog.dropTable(ident)
+        }
+      }
+    }
+  }
+
   for (enabled <- Seq(false, true)) {
     test(s"Bucket write retains adaptive shuffle coalescing: v2=$enabled") {
       withSparkSQLConf(
