@@ -782,12 +782,13 @@ class RESTCommitLockIntegrationTest {
     private static List<String> expected(boolean locking, boolean retry) {
         List<String> events = new ArrayList<>();
         for (int attempt = 0; attempt < (retry ? 2 : 1); attempt++) {
-            if (locking && attempt > 0) {
+            boolean acquiresLease = locking && attempt > 0;
+            if (acquiresLease) {
                 events.add("acquire");
             }
             events.add("head");
             events.add("publish");
-            if (locking) {
+            if (acquiresLease) {
                 events.add("release");
             }
         }
