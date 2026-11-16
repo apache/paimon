@@ -125,7 +125,7 @@ class CancelPredictionRequest(RESTRequest):
 
 @dataclass
 class GetPredictionResponse(RESTResponse):
-    job_id: str = json_field("jobId")
+    prediction_id: str = json_field("predictionId")
     source: PredictionSource = None
     status: str = ""
     snapshot_id: int = json_field("snapshotId", default=0)
@@ -144,7 +144,7 @@ class GetPredictionResponse(RESTResponse):
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GetPredictionResponse":
         return cls(
-            job_id=data.get("jobId"),
+            prediction_id=data.get("predictionId"),
             source=(
                 PredictionSource(**data.get("source"))
                 if isinstance(data.get("source"), dict)
@@ -167,7 +167,7 @@ class GetPredictionResponse(RESTResponse):
 
     def to_prediction(self) -> Prediction:
         return Prediction(
-            job_id=self.job_id,
+            prediction_id=self.prediction_id,
             source=self.source.to_identifier(),
             name=self.name,
             status=PredictionStatus(self.status),

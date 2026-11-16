@@ -414,8 +414,8 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public Prediction getPrediction(String jobId) throws PredictionNotExistException {
-        return wrapped.getPrediction(jobId);
+    public Prediction getPrediction(String predictionId) throws PredictionNotExistException {
+        return wrapped.getPrediction(predictionId);
     }
 
     @Override
@@ -429,8 +429,8 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public Prediction cancelPrediction(String jobId) throws PredictionNotExistException {
-        return wrapped.cancelPrediction(jobId);
+    public Prediction cancelPrediction(String predictionId) throws PredictionNotExistException {
+        return wrapped.cancelPrediction(predictionId);
     }
 
     @Override

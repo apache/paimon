@@ -801,9 +801,9 @@ class RESTApi:
             self.rest_auth_function,
         )
 
-    def get_prediction(self, job_id: str) -> GetPredictionResponse:
+    def get_prediction(self, prediction_id: str) -> GetPredictionResponse:
         return self.client.get(
-            self.resource_paths.prediction(job_id),
+            self.resource_paths.prediction(prediction_id),
             GetPredictionResponse,
             self.rest_auth_function,
         )
@@ -835,9 +835,9 @@ class RESTApi:
         )
         return PagedList(response.predictions, response.next_page_token)
 
-    def cancel_prediction(self, job_id: str) -> GetPredictionResponse:
+    def cancel_prediction(self, prediction_id: str) -> GetPredictionResponse:
         return self.client.post_with_response_type(
-            self.resource_paths.cancel_prediction(job_id),
+            self.resource_paths.cancel_prediction(prediction_id),
             CancelPredictionRequest(),
             GetPredictionResponse,
             self.rest_auth_function,

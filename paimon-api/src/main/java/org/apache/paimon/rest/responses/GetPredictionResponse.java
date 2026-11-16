@@ -35,7 +35,7 @@ import javax.annotation.Nullable;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class GetPredictionResponse implements RESTResponse {
 
-    private final String jobId;
+    private final String predictionId;
     private final PredictionSource source;
     private final @Nullable String name;
     private final PredictionStatus status;
@@ -53,7 +53,7 @@ public class GetPredictionResponse implements RESTResponse {
 
     @JsonCreator
     public GetPredictionResponse(
-            @JsonProperty("jobId") String jobId,
+            @JsonProperty("predictionId") String predictionId,
             @JsonProperty("source") PredictionSource source,
             @Nullable @JsonProperty("name") String name,
             @JsonProperty("status") PredictionStatus status,
@@ -68,7 +68,7 @@ public class GetPredictionResponse implements RESTResponse {
             @Nullable @JsonProperty("total") Long total,
             @Nullable @JsonProperty("succeeded") Long succeeded,
             @Nullable @JsonProperty("failed") Long failed) {
-        this.jobId = jobId;
+        this.predictionId = predictionId;
         this.source = source;
         this.name = name;
         this.status = status;
@@ -87,7 +87,7 @@ public class GetPredictionResponse implements RESTResponse {
 
     public GetPredictionResponse(Prediction prediction) {
         this(
-                prediction.jobId(),
+                prediction.predictionId(),
                 prediction.source(),
                 prediction.name(),
                 prediction.status(),
@@ -104,9 +104,9 @@ public class GetPredictionResponse implements RESTResponse {
                 prediction.failed());
     }
 
-    @JsonGetter("jobId")
-    public String getJobId() {
-        return jobId;
+    @JsonGetter("predictionId")
+    public String getPredictionId() {
+        return predictionId;
     }
 
     @JsonGetter("source")
@@ -195,7 +195,7 @@ public class GetPredictionResponse implements RESTResponse {
 
     public Prediction toPrediction() {
         return new Prediction(
-                jobId,
+                predictionId,
                 source,
                 name,
                 status,

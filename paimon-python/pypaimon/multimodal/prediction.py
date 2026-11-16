@@ -38,7 +38,7 @@ class PredictionJob:
 
     def refresh(self) -> 'PredictionJob':
         self._prediction = self._catalog.get_prediction(
-            self._prediction.job_id)
+            self._prediction.prediction_id)
         return self
 
     def wait(
@@ -65,7 +65,7 @@ class PredictionJob:
                 if remaining <= 0:
                     raise TimeoutError(
                         "Prediction {} did not finish within {}".format(
-                            self._prediction.job_id, timeout))
+                            self._prediction.prediction_id, timeout))
                 time.sleep(min(poll_interval, remaining))
             else:
                 time.sleep(poll_interval)
@@ -74,5 +74,5 @@ class PredictionJob:
 
     def cancel(self) -> 'PredictionJob':
         self._prediction = self._catalog.cancel_prediction(
-            self._prediction.job_id)
+            self._prediction.prediction_id)
         return self

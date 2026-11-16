@@ -1231,11 +1231,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public Prediction getPrediction(String jobId) throws PredictionNotExistException {
+    public Prediction getPrediction(String predictionId) throws PredictionNotExistException {
         try {
-            return api.getPrediction(jobId).toPrediction();
+            return api.getPrediction(predictionId).toPrediction();
         } catch (NoSuchResourceException e) {
-            throw new PredictionNotExistException(jobId, e);
+            throw new PredictionNotExistException(predictionId, e);
         } catch (NotImplementedException e) {
             throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
         }
@@ -1264,11 +1264,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public Prediction cancelPrediction(String jobId) throws PredictionNotExistException {
+    public Prediction cancelPrediction(String predictionId) throws PredictionNotExistException {
         try {
-            return api.cancelPrediction(jobId).toPrediction();
+            return api.cancelPrediction(predictionId).toPrediction();
         } catch (NoSuchResourceException e) {
-            throw new PredictionNotExistException(jobId, e);
+            throw new PredictionNotExistException(predictionId, e);
         } catch (NotImplementedException e) {
             throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
         }

@@ -189,14 +189,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListPredictionsResponse'
         "501": {description: Predictions are not supported}
-  /v1/{prefix}/predictions/{jobId}:
+  /v1/{prefix}/predictions/{predictionId}:
     get:
       tags: [prediction]
       summary: Get a prediction job
       operationId: getPrediction
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: jobId, in: path, required: true, schema: {type: string, minLength: 1}}
+        - {name: predictionId, in: path, required: true, schema: {type: string, minLength: 1}}
       responses:
         "200":
           description: Prediction metadata
@@ -207,7 +207,7 @@ paths:
         "404":
           $ref: '#/components/responses/PredictionNotExistErrorResponse'
         "501": {description: Predictions are not supported}
-  /v1/{prefix}/predictions/{jobId}/cancel:
+  /v1/{prefix}/predictions/{predictionId}/cancel:
     post:
       tags: [prediction]
       summary: Cancel a prediction job
@@ -217,7 +217,7 @@ paths:
         unchanged.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: jobId, in: path, required: true, schema: {type: string, minLength: 1}}
+        - {name: predictionId, in: path, required: true, schema: {type: string, minLength: 1}}
       responses:
         "200":
           description: Latest prediction metadata
@@ -4736,9 +4736,9 @@ components:
     GetPredictionResponse:
       type: object
       additionalProperties: false
-      required: [jobId, source, status, snapshotId, model, modelVersion, outputTable, createdAt]
+      required: [predictionId, source, status, snapshotId, model, modelVersion, outputTable, createdAt]
       properties:
-        jobId: {type: string, minLength: 1}
+        predictionId: {type: string, minLength: 1}
         source:
           $ref: '#/components/schemas/PredictionSource'
         name: {type: string, minLength: 1}

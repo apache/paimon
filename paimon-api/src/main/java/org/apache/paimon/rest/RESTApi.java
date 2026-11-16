@@ -1827,10 +1827,12 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    /** Get one asynchronous prediction by its unique job id. */
-    public GetPredictionResponse getPrediction(String jobId) {
+    /** Get one asynchronous prediction by its unique id. */
+    public GetPredictionResponse getPrediction(String predictionId) {
         return client.get(
-                resourcePaths.prediction(jobId), GetPredictionResponse.class, restAuthFunction);
+                resourcePaths.prediction(predictionId),
+                GetPredictionResponse.class,
+                restAuthFunction);
     }
 
     /** List asynchronous predictions, ordered newest first by the server. */
@@ -1858,9 +1860,9 @@ public class RESTApi {
     }
 
     /** Request cancellation and return the updated prediction metadata. */
-    public GetPredictionResponse cancelPrediction(String jobId) {
+    public GetPredictionResponse cancelPrediction(String predictionId) {
         return client.post(
-                resourcePaths.cancelPrediction(jobId),
+                resourcePaths.cancelPrediction(predictionId),
                 null,
                 GetPredictionResponse.class,
                 restAuthFunction);

@@ -156,11 +156,11 @@ class MultimodalTable:
             self.raw_table.identifier, spec)
         return PredictionJob(self.catalog, prediction)
 
-    def get_prediction(self, job_id):
+    def get_prediction(self, prediction_id):
         """Return a client handle for one asynchronous prediction."""
         from pypaimon.multimodal.prediction import PredictionJob
 
-        prediction = self.catalog.get_prediction(job_id)
+        prediction = self.catalog.get_prediction(prediction_id)
         return PredictionJob(self.catalog, prediction)
 
     def list_predictions(

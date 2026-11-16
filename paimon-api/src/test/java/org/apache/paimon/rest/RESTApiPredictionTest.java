@@ -133,7 +133,7 @@ class RESTApiPredictionTest {
 
     private static Prediction prediction() {
         return new Prediction(
-                "job-1",
+                "prediction-1",
                 new PredictionSource("quality", "clips"),
                 null,
                 PredictionStatus.PENDING,

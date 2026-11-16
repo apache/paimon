@@ -28,7 +28,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 @Experimental
 public class Prediction {
 
-    private final String jobId;
+    private final String predictionId;
     private final PredictionSource source;
     private final @Nullable String name;
     private final PredictionStatus status;
@@ -45,7 +45,7 @@ public class Prediction {
     private final @Nullable Long failed;
 
     public Prediction(
-            String jobId,
+            String predictionId,
             PredictionSource source,
             @Nullable String name,
             PredictionStatus status,
@@ -60,7 +60,7 @@ public class Prediction {
             @Nullable Long total,
             @Nullable Long succeeded,
             @Nullable Long failed) {
-        checkNonBlank(jobId, "jobId");
+        checkNonBlank(predictionId, "predictionId");
         checkArgument(source != null, "source must not be null");
         checkArgument(status != null, "status must not be null");
         checkArgument(snapshotId > 0, "snapshotId must be positive");
@@ -73,7 +73,7 @@ public class Prediction {
         checkOptionalNonNegative(total, "total");
         checkOptionalNonNegative(succeeded, "succeeded");
         checkOptionalNonNegative(failed, "failed");
-        this.jobId = jobId;
+        this.predictionId = predictionId;
         this.source = source;
         this.name = name;
         this.status = status;
@@ -90,8 +90,8 @@ public class Prediction {
         this.failed = failed;
     }
 
-    public String jobId() {
-        return jobId;
+    public String predictionId() {
+        return predictionId;
     }
 
     public PredictionSource source() {

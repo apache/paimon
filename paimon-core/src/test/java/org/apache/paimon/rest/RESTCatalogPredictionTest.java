@@ -51,7 +51,7 @@ class RESTCatalogPredictionTest {
 
             server.enqueue(json(predictionJson("PENDING"), 202));
             Prediction submitted = catalog.submitPrediction(table, spec());
-            assertThat(submitted.jobId()).isEqualTo("job-1");
+            assertThat(submitted.predictionId()).isEqualTo("prediction-1");
             RecordedRequest submit = server.takeRequest(10, TimeUnit.SECONDS);
             assertThat(submit.getPath()).isEqualTo("/v1/catalog/predictions");
             Map<String, Object> request = RESTApi.fromJson(submit.getBody().readUtf8(), Map.class);
@@ -70,7 +70,9 @@ class RESTCatalogPredictionTest {
             PagedList<Prediction> page =
                     catalog.listPredictions(
                             table, "daily-quality", PredictionStatus.RUNNING, 10, "page-1");
-            assertThat(page.getElements()).extracting(Prediction::jobId).containsExactly("job-1");
+            assertThat(page.getElements())
+                    .extracting(Prediction::predictionId)
+                    .containsExactly("prediction-1");
             assertThat(page.getNextPageToken()).isEqualTo("next");
             String listPath = server.takeRequest(10, TimeUnit.SECONDS).getPath();
             assertThat(listPath)
@@ -82,10 +84,10 @@ class RESTCatalogPredictionTest {
                     .contains("pageToken=page-1");
 
             server.enqueue(json(predictionJson("CANCELLED"), 200));
-            assertThat(catalog.cancelPrediction("job/1").status())
+            assertThat(catalog.cancelPrediction("prediction/1").status())
                     .isEqualTo(PredictionStatus.CANCELLED);
             assertThat(server.takeRequest(10, TimeUnit.SECONDS).getPath())
-                    .isEqualTo("/v1/catalog/predictions/job%2F1/cancel");
+                    .isEqualTo("/v1/catalog/predictions/prediction%2F1/cancel");
         }
     }
 
@@ -100,8 +102,8 @@ class RESTCatalogPredictionTest {
             assertThatThrownBy(() -> catalog.submitPrediction(table, spec()))
                     .isInstanceOf(Catalog.ModelNotExistException.class);
 
-            server.enqueue(notFound("PREDICTION", "job-1"));
-            assertThatThrownBy(() -> catalog.getPrediction("job-1"))
+            server.enqueue(notFound("PREDICTION", "prediction-1"));
+            assertThatThrownBy(() -> catalog.getPrediction("prediction-1"))
                     .isInstanceOf(Catalog.PredictionNotExistException.class);
         }
     }
@@ -130,7 +132,7 @@ class RESTCatalogPredictionTest {
     }
 
     private static String predictionJson(String status) {
-        return "{\"jobId\":\"job-1\",\"source\":{\"database\":\"quality\","
+        return "{\"predictionId\":\"prediction-1\",\"source\":{\"database\":\"quality\","
                 + "\"table\":\"clips\"},\"name\":\"daily-quality\",\"status\":\""
                 + status
                 + "\",\"snapshotId\":7,\"model\":\"quality.qwen_vl\","

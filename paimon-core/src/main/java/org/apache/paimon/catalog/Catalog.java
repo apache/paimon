@@ -1205,8 +1205,8 @@ public interface Catalog extends AutoCloseable {
         throw new UnsupportedOperationException("Current Catalog does not support predictions");
     }
 
-    /** Get one asynchronous prediction by its unique job id. */
-    default Prediction getPrediction(String jobId) throws PredictionNotExistException {
+    /** Get one asynchronous prediction by its unique id. */
+    default Prediction getPrediction(String predictionId) throws PredictionNotExistException {
         throw new UnsupportedOperationException("Current Catalog does not support predictions");
     }
 
@@ -1221,7 +1221,7 @@ public interface Catalog extends AutoCloseable {
     }
 
     /** Request cancellation and return the updated prediction metadata. */
-    default Prediction cancelPrediction(String jobId) throws PredictionNotExistException {
+    default Prediction cancelPrediction(String predictionId) throws PredictionNotExistException {
         throw new UnsupportedOperationException("Current Catalog does not support predictions");
     }
 
@@ -1970,19 +1970,19 @@ public interface Catalog extends AutoCloseable {
 
         private static final String MSG = "Prediction %s doesn't exist.";
 
-        private final String jobId;
+        private final String predictionId;
 
-        public PredictionNotExistException(String jobId) {
-            this(jobId, null);
+        public PredictionNotExistException(String predictionId) {
+            this(predictionId, null);
         }
 
-        public PredictionNotExistException(String jobId, @Nullable Throwable cause) {
-            super(String.format(MSG, jobId), cause);
-            this.jobId = jobId;
+        public PredictionNotExistException(String predictionId, @Nullable Throwable cause) {
+            super(String.format(MSG, predictionId), cause);
+            this.predictionId = predictionId;
         }
 
-        public String jobId() {
-            return jobId;
+        public String predictionId() {
+            return predictionId;
         }
     }
 

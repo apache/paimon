@@ -58,7 +58,7 @@ def _spec(**changes):
 
 def _prediction(status=PredictionStatus.PENDING, **changes):
     values = dict(
-        job_id="job-1",
+        prediction_id="prediction-1",
         source=Identifier.create("quality", "clips"),
         name="daily-quality",
         status=status,
@@ -74,7 +74,7 @@ def _prediction(status=PredictionStatus.PENDING, **changes):
 
 def _response(status="PENDING", **changes):
     values = dict(
-        job_id="job-1",
+        prediction_id="prediction-1",
         source=PredictionSource("quality", "clips"),
         name="daily-quality",
         status=status,
@@ -113,7 +113,7 @@ class PredictionTest(unittest.TestCase):
             JSON.to_json(ListPredictionsResponse([_response()], "next")),
             ListPredictionsResponse,
         )
-        self.assertEqual("job-1", page.predictions[0].job_id)
+        self.assertEqual("prediction-1", page.predictions[0].prediction_id)
         self.assertEqual("next", page.next_page_token)
 
     def test_validation(self):
@@ -150,7 +150,7 @@ class PredictionTest(unittest.TestCase):
         )
 
         self.assertIsInstance(job, PredictionJob)
-        self.assertEqual("job-1", job.job_id)
+        self.assertEqual("prediction-1", job.prediction_id)
         sent = catalog.submit_prediction.call_args.args[1]
         self.assertEqual(7, sent.snapshot_id)
         self.assertIsNone(sent.tag_name)
@@ -215,8 +215,8 @@ class PredictionTest(unittest.TestCase):
             catalog.rest_api = api
             identifier = Identifier.create("a/b", "clip table")
 
-            self.assertEqual("job-1", catalog.submit_prediction(
-                identifier, _spec()).job_id)
+            self.assertEqual("prediction-1", catalog.submit_prediction(
+                identifier, _spec()).prediction_id)
             self.assertEqual(
                 "/v1/catalog/predictions",
                 calls[-1][1],
@@ -234,7 +234,7 @@ class PredictionTest(unittest.TestCase):
                 max_results=10,
                 page_token="p1",
             )
-            self.assertEqual("job-1", page.elements[0].job_id)
+            self.assertEqual("prediction-1", page.elements[0].prediction_id)
             self.assertIn("name=daily-quality", calls[-1][1])
             self.assertIn("database=a%2Fb", calls[-1][1])
             self.assertIn("table=clip+table", calls[-1][1])
@@ -242,11 +242,13 @@ class PredictionTest(unittest.TestCase):
             self.assertIn("maxResults=10", calls[-1][1])
             self.assertIn("pageToken=p1", calls[-1][1])
 
-            catalog.get_prediction("job/1")
-            self.assertTrue(calls[-1][1].endswith("/predictions/job%2F1"))
-            catalog.cancel_prediction("job/1")
+            catalog.get_prediction("prediction/1")
             self.assertTrue(
-                calls[-1][1].endswith("/predictions/job%2F1/cancel"))
+                calls[-1][1].endswith("/predictions/prediction%2F1"))
+            catalog.cancel_prediction("prediction/1")
+            self.assertTrue(
+                calls[-1][1].endswith(
+                    "/predictions/prediction%2F1/cancel"))
         finally:
             server.shutdown()
             server.server_close()

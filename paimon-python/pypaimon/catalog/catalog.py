@@ -122,9 +122,9 @@ class Catalog(ABC):
 
     def get_prediction(
             self,
-            job_id: str,
+            prediction_id: str,
     ) -> 'Prediction':
-        """Get one prediction by its unique job id."""
+        """Get one prediction by its unique id."""
         raise NotImplementedError(
             "get_prediction is not supported by this catalog.")
 
@@ -142,7 +142,7 @@ class Catalog(ABC):
 
     def cancel_prediction(
             self,
-            job_id: str,
+            prediction_id: str,
     ) -> 'Prediction':
         """Request cancellation and return the updated prediction."""
         raise NotImplementedError(

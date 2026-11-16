@@ -136,13 +136,14 @@ class ResourcePaths:
     def predictions(self) -> str:
         return "{}/{}".format(self.base_path, self.PREDICTIONS)
 
-    def prediction(self, job_id: str) -> str:
-        if not isinstance(job_id, str) or not job_id.strip():
-            raise ValueError("job_id must be a non-empty string")
-        return "{}/{}".format(self.predictions(), RESTUtil.encode_string(job_id))
+    def prediction(self, prediction_id: str) -> str:
+        if not isinstance(prediction_id, str) or not prediction_id.strip():
+            raise ValueError("prediction_id must be a non-empty string")
+        return "{}/{}".format(
+            self.predictions(), RESTUtil.encode_string(prediction_id))
 
-    def cancel_prediction(self, job_id: str) -> str:
-        return "{}/cancel".format(self.prediction(job_id))
+    def cancel_prediction(self, prediction_id: str) -> str:
+        return "{}/cancel".format(self.prediction(prediction_id))
 
     def tags(self, database_name: str, table_name: str) -> str:
         return "{}/{}/{}/{}/{}/{}".format(

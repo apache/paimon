@@ -703,12 +703,12 @@ class RESTCatalog(Catalog):
 
     def get_prediction(
             self,
-            job_id: str,
+            prediction_id: str,
     ) -> Prediction:
         try:
-            return self.rest_api.get_prediction(job_id).to_prediction()
+            return self.rest_api.get_prediction(prediction_id).to_prediction()
         except NoSuchResourceException as e:
-            raise PredictionNotExistException(job_id) from e
+            raise PredictionNotExistException(prediction_id) from e
         except NotImplementedException as e:
             raise NotImplementedError(
                 "REST Catalog does not support predictions") from e
@@ -736,12 +736,12 @@ class RESTCatalog(Catalog):
 
     def cancel_prediction(
             self,
-            job_id: str,
+            prediction_id: str,
     ) -> Prediction:
         try:
-            return self.rest_api.cancel_prediction(job_id).to_prediction()
+            return self.rest_api.cancel_prediction(prediction_id).to_prediction()
         except NoSuchResourceException as e:
-            raise PredictionNotExistException(job_id) from e
+            raise PredictionNotExistException(prediction_id) from e
         except NotImplementedException as e:
             raise NotImplementedError(
                 "REST Catalog does not support predictions") from e

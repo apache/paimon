@@ -84,7 +84,7 @@ class PredictionSpec:
 class Prediction:
     """Durable metadata for one asynchronous prediction job."""
 
-    job_id: str
+    prediction_id: str
     source: Identifier
     status: PredictionStatus
     snapshot_id: int
@@ -101,7 +101,7 @@ class Prediction:
     failed: Optional[int] = None
 
     def __post_init__(self):
-        _nonblank(self.job_id, "job_id")
+        _nonblank(self.prediction_id, "prediction_id")
         if not isinstance(self.source, Identifier):
             raise ValueError("source must be an Identifier")
         if isinstance(self.status, str):
