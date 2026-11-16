@@ -762,6 +762,14 @@ public class RESTApi {
                 restAuthFunction);
     }
 
+    public void releaseCommitLock(Identifier identifier, String tableUuid, String commitUser) {
+        client.post(
+                resourcePaths.commitLock(identifier.getDatabaseName(), identifier.getObjectName())
+                        + "/release",
+                new CommitLockRequest(tableUuid, commitUser),
+                restAuthFunction);
+    }
+
     /**
      * Rollback instant for table.
      *

@@ -760,7 +760,7 @@ paths:
         Renewal never revives an expired lease. Publication retains snapshot CAS validation
         and atomically releases the lease on a new successful commit. A rejected publication
         does not release the lease. A replay of an already-published snapshot must not release
-        a newer lease. The lease duration is fixed for each scope. There is no unlock RPC.
+        a newer lease. The lease duration is fixed for each scope.
       requestBody:
         required: true
         content:
@@ -825,6 +825,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommitLockResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/commit-lock/release:
+    post:
+      tags:
+        - table
+      summary: Release a table commit lease
+      operationId: releaseCommitLock
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      description: >-
+        Requires the same permission as committing snapshots. Validate the table incarnation
+        and branch and match the exact commitUser against the unexpired lease. If there is no
+        active lease for this commitUser, return success without changing the lease. Clients
+        attempt release after both successful and failed protected operations. Expiry remains the
+        fallback for process termination, network partitions and failed cleanup requests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitLockRequest'
+      responses:
+        "200":
+          description: Released or no active lease for this commitUser.
         "400":
           $ref: '#/components/responses/BadRequestErrorResponse'
         "401":

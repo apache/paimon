@@ -119,10 +119,22 @@ public class RESTCatalogLock implements Lock {
         long startedAt = nanoTime.getAsLong();
         while (true) {
             long requestedAt = nanoTime.getAsLong();
-            CommitLockResponse response = acquireLease();
+            CommitLockResponse response;
+            try {
+                response = acquireLease();
+            } catch (Exception | Error e) {
+                Lock.release(this::releaseLease, e);
+                throw e;
+            }
             if (response.isAcquired()) {
-                validateGrant(response);
-                Lease lease = new Lease(response.getLeaseMillis(), requestedAt);
+                Lease lease;
+                try {
+                    validateGrant(response);
+                    lease = new Lease(response.getLeaseMillis(), requestedAt);
+                } catch (Exception | Error e) {
+                    Lock.release(this::releaseLease, e);
+                    throw e;
+                }
                 try {
                     lease.checkValid();
                     currentLease.set(lease);
@@ -155,6 +167,17 @@ public class RESTCatalogLock implements Lock {
             throw new Catalog.TableNoPermissionException(identifier, e);
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage(), e);
+        }
+    }
+
+    private void releaseLease() {
+        boolean interrupted = Thread.interrupted();
+        try {
+            api.releaseCommitLock(identifier, tableUuid, commitUser);
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -281,12 +304,16 @@ public class RESTCatalogLock implements Lock {
         public void close() {
             if (closed.compareAndSet(false, true)) {
                 try {
-                    renewal.cancel(false);
-                } finally {
-                    FutureTask<Void> request = renewalRequest;
-                    if (request != null) {
-                        request.cancel(true);
+                    try {
+                        renewal.cancel(false);
+                    } finally {
+                        FutureTask<Void> request = renewalRequest;
+                        if (request != null) {
+                            request.cancel(true);
+                        }
                     }
+                } finally {
+                    releaseLease();
                 }
             }
         }

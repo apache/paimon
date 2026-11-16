@@ -58,8 +58,43 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests the owner lease wire protocol without changing legacy snapshot requests. */
+/** Tests the owner lease and snapshot wire protocols. */
 class CommitLockProtocolTest {
+    @Test
+    void acquireRenewAndReleaseCarryTheSameOwner() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            Options options = new Options();
+            options.set(RESTCatalogOptions.URI, server.url("/").toString());
+            options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
+            options.set(RESTCatalogOptions.TOKEN, "token");
+            options.set(RESTCatalogInternalOptions.PREFIX, "catalog");
+            RESTApi api = new RESTApi(options, false);
+            Identifier identifier = new Identifier("db", "table", "dev");
+            CommitLockResponse grant =
+                    new CommitLockResponse(true, "morax-job", 100000, 60000, null);
+            server.enqueue(json(RESTApi.toJson(grant)));
+            api.acquireCommitLock(identifier, "table-id", "morax-job");
+            server.enqueue(json(RESTApi.toJson(grant)));
+            api.renewCommitLock(identifier, "table-id", "morax-job");
+            server.enqueue(new MockResponse().setResponseCode(200));
+            api.releaseCommitLock(identifier, "table-id", "morax-job");
+            ObjectNode expectedBody =
+                    RESTApi.fromJson(
+                            "{\"tableId\":\"table-id\",\"commitUser\":\"morax-job\"}",
+                            ObjectNode.class);
+            for (String suffix :
+                    new String[] {"/commit-lock", "/commit-lock/renew", "/commit-lock/release"}) {
+                RecordedRequest recorded = server.takeRequest(10, TimeUnit.SECONDS);
+                assertThat(recorded.getMethod()).isEqualTo("POST");
+                assertThat(recorded.getPath()).endsWith(suffix);
+                assertThat(recorded.getRequestUrl().pathSegments()).contains("table$branch_dev");
+                assertThat(RESTApi.fromJson(recorded.getBody().readUtf8(), ObjectNode.class))
+                        .isEqualTo(expectedBody);
+            }
+        }
+    }
+
     @Test
     void acquireRenewAndCommitUseTheSameOwnerWithoutToken() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
@@ -207,6 +242,7 @@ class CommitLockProtocolTest {
                             RESTApi.toJson(
                                     new CommitLockResponse(
                                             true, "morax-job", 100000, 60000, snapshot(1)))));
+            server.enqueue(new MockResponse().setResponseCode(200));
             Options tableOptions = Options.fromMap(table.options());
             tableOptions.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, true);
             tableOptions.set(CoreOptions.REST_COMMIT_RETRY_ACQUIRE_LOCK, true);
@@ -228,6 +264,12 @@ class CommitLockProtocolTest {
                         RESTApi.fromJson(acquire.getBody().readUtf8(), CommitLockRequest.class);
                 assertThat(request.getTableId()).isEqualTo("table-id");
                 assertThat(request.getCommitUser()).isEqualTo("morax-job");
+                RecordedRequest release = server.takeRequest(10, TimeUnit.SECONDS);
+                assertThat(release.getPath()).endsWith("/commit-lock/release");
+                CommitLockRequest releaseRequest =
+                        RESTApi.fromJson(release.getBody().readUtf8(), CommitLockRequest.class);
+                assertThat(releaseRequest.getTableId()).isEqualTo(request.getTableId());
+                assertThat(releaseRequest.getCommitUser()).isEqualTo(request.getCommitUser());
             }
         }
     }
