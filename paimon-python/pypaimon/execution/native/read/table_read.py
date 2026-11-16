@@ -106,6 +106,10 @@ class NativeTableRead:
         read = self._read
         if not read.table.options.native_read_enabled():
             return self._fallback("read.native.enabled is false")
+        from pypaimon.common.native_compatibility import require_native_compatible
+        reason = require_native_compatible(read.table.options, allow_python_fallback=True)
+        if reason is not None:
+            return self._fallback(reason)
         if read.table.options.file_format() not in _NATIVE_READ_FILE_FORMATS:
             return self._fallback(
                 "the table file format is not supported")
