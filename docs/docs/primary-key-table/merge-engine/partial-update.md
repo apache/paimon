@@ -272,15 +272,22 @@ source that produces retractions:
 | --- | --- | --- |
 | Default, without sequence groups | Rejected | Rejected |
 | `ignore-delete = true` | Ignored | Ignored |
-| `partial-update.remove-record-on-delete = true` | Remove the whole row | Same as `DELETE` |
+| `partial-update.remove-record-on-delete = true` | Remove the whole row | Remove the whole row and keep its fields |
 | Sequence groups | Retract protected fields according to the group version and aggregate function | Same field-level retraction rules |
-| Sequence groups with `partial-update.remove-record-on-sequence-group` | Remove the whole row when a configured group accepts the delete's version | Same as `DELETE` |
+| Sequence groups with `partial-update.remove-record-on-sequence-group` | Remove the whole row when a configured group accepts the delete's version | Apply field-level retractions; do not remove the whole row |
 
-With either whole-row removal option, an `UPDATE_BEFORE` is a row-level delete. It is handled
-exactly like a `DELETE`, with the same dependence on batching. It re-initializes the row from its
-own values, and a later `INSERT` or `UPDATE_AFTER` writes on top of those values. Columns that
-other writers wrote before the retraction may not be kept. Whether they are kept depends on whether
-the retraction and the later write are merged before being written.
+With `partial-update.remove-record-on-delete`, a `DELETE` re-initializes the row from its own
+values, while an `UPDATE_BEFORE` updates the non-null fields it carries and marks the row removed.
+A later `INSERT` or `UPDATE_AFTER` brings the row back with the kept fields, so the columns of
+other writers survive an `UPDATE_BEFORE` and `UPDATE_AFTER` pair, also when the pair is flushed in
+different write buffers. The kept fields include the values that an `UPDATE_BEFORE` retracted, so
+they come back when another writer restores the row, as the values of a `DELETE` do.
+
+A row left removed is dropped like a `DELETE` by a compaction whose output level is above 0 and at
+least the highest non-empty level, or by any compaction with an output level above 0 when deletion
+vectors are enabled. A write after that compaction starts from an empty row, so with the `lookup`
+or `full-compaction` changelog producer or deletion vectors, the columns of other writers are
+usually kept only within one commit.
 
 For a sequence group, a newer or equal retraction clears non-aggregated protected fields to
 null. Aggregated fields use their function's retraction behavior, including for older versions;
@@ -288,9 +295,8 @@ see each [aggregate function's requirements](./aggregation). A group with all-nu
 fields is skipped, and ungrouped fields are not retracted.
 
 Set `partial-update.remove-record-on-sequence-group` to a comma-separated list of ordering
-field names from the groups whose `DELETE` or `UPDATE_BEFORE` records should remove the whole
-row. For the `profiles` schema above, using `profile_version` allows an accepted profile delete
-to remove the row.
+field names from the groups whose deletes should remove the whole row. For the `profiles`
+schema above, using `profile_version` allows an accepted profile delete to remove the row.
 
 While merging a deleted row, subsequent retractions or updates to other groups do not cancel
 the whole-row deletion. An `INSERT` or `UPDATE_AFTER` for a configured deletion group can

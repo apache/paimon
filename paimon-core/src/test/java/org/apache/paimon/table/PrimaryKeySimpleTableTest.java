@@ -1998,7 +1998,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 2]");
 
-        // 2. Update Before, a lone -U removes the row (issue 6862)
+        // 2. Update Before, a lone -U removes the row
         write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 2, 2));
         commit.commit(1, write.prepareCommit(true, 1));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
@@ -2027,7 +2027,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testPartialUpdateRemoveRecordOnDeleteWithBufferedUpdateBefore() throws Exception {
+    public void testPartialUpdateRemoveRecordOnDeleteWithUpdateBeforeAcrossFlushes()
+            throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -2039,6 +2040,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                         options -> {
                             options.set("merge-engine", "partial-update");
                             options.set("partial-update.remove-record-on-delete", "true");
+                            // no compaction, so every flushed file is merged again on read
+                            options.set("write-only", "true");
                         },
                         rowType);
         Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
@@ -2047,93 +2050,55 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         StreamTableWrite write = table.newWrite("");
         StreamTableCommit commit = table.newCommit("");
 
-        // 1. Another writer fills c for keys a = 1 and a = 2
-        write.write(GenericRow.of(1, 1, null, 20));
-        write.write(GenericRow.of(1, 2, null, 20));
+        // 1. Another writer fills c = 20 for all keys
+        for (int a = 1; a <= 7; a++) {
+            write.write(GenericRow.of(1, a, null, 20));
+        }
         commit.commit(0, write.prepareCommit(true, 0));
 
-        // 2. +I and -U of b: for a = 1 in one write buffer, which merges them before the flush,
-        // for a = 2 in two commits
+        // 2. One commit, the write buffer is flushed by write.compact(..., false):
+        // a = 1: +I, -U, +U of b in one write buffer
+        // a = 2: +I, -U, flush, +U
+        // a = 3: +I, flush, -U, flush, +U
+        // a = 4: +I, -U in one write buffer, no +U
+        // a = 5: +I, flush, -U, no +U
+        // a = 6: +I, -U, flush, the other writer writes c = 30
+        // a = 7: +I, -U and the other writer's c = 30 in one write buffer
         write.write(GenericRow.of(1, 1, 10, null));
         write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 10, null));
-        write.write(GenericRow.of(1, 2, 10, null));
-        commit.commit(1, write.prepareCommit(true, 1));
-        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 2, 10, null));
-        commit.commit(2, write.prepareCommit(true, 2));
-        List<String> result =
-                getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).isEmpty();
-
-        // 3. +U of b writes on top of the -U values. Like after a -D, c = 20 from step 1 is not
-        // kept, and both keys get the same result however the records were batched
         write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 11, null));
+        write.write(GenericRow.of(1, 2, 10, null));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 2, 10, null));
+        write.write(GenericRow.of(1, 3, 10, null));
+        write.write(GenericRow.of(1, 4, 10, null));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 4, 10, null));
+        write.write(GenericRow.of(1, 5, 10, null));
+        write.write(GenericRow.of(1, 6, 10, null));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 6, 10, null));
+        write.write(GenericRow.of(1, 7, 10, null));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 7, 10, null));
+        write.write(GenericRow.of(1, 7, null, 30));
+        write.compact(binaryRow(1), 0, false);
         write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 2, 11, null));
-        commit.commit(3, write.prepareCommit(true, 3));
-        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 11, NULL]", "+I[1, 2, 11, NULL]");
-
-        write.close();
-        commit.close();
-    }
-
-    @Test
-    public void testPartialUpdateRemoveRecordOnSequenceGroupWithBufferedUpdateBefore()
-            throws Exception {
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT()
-                        },
-                        new String[] {"pt", "a", "b", "seq1", "c", "d", "seq2"});
-        FileStoreTable table =
-                createFileStoreTable(
-                        options -> {
-                            options.set("merge-engine", "partial-update");
-                            options.set("fields.seq1.sequence-group", "b");
-                            options.set("fields.seq2.sequence-group", "c,d");
-                            options.set("fields.b.aggregate-function", "sum");
-                            options.set("partial-update.remove-record-on-sequence-group", "seq2");
-                        },
-                        rowType);
-        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
-        SnapshotReader snapshotReader = table.newSnapshotReader();
-        TableRead read = table.newRead();
-        StreamTableWrite write = table.newWrite("");
-        StreamTableCommit commit = table.newCommit("");
-
-        // 1. Both groups for keys a = 1 and a = 2, b is summed
-        write.write(GenericRow.of(1, 1, 5, 1, 29, 29, 2));
-        write.write(GenericRow.of(1, 2, 5, 1, 29, 29, 2));
-        commit.commit(0, write.prepareCommit(true, 0));
-
-        // 2. +I of the seq1 group and -U of the seq2 group: for a = 1 in one write buffer, which
-        // merges them before the flush, for a = 2 in two commits
-        write.write(GenericRow.of(1, 1, 11, 2, null, null, null));
-        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, null, null, 29, 29, 2));
-        write.write(GenericRow.of(1, 2, 11, 2, null, null, null));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 3, 10, null));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 5, 10, null));
+        write.write(GenericRow.of(1, 6, null, 30));
+        write.compact(binaryRow(1), 0, false);
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 3, 11, null));
         commit.commit(1, write.prepareCommit(true, 1));
-        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 2, null, null, 29, 29, 2));
-        commit.commit(2, write.prepareCommit(true, 2));
+
+        // The expected rows are those of a = 1, 4 and 7, whose records meet in one write
+        // buffer: -U keeps c, +U or the other writer's +I brings the row back, and a key that
+        // ends with -U is removed. The flushed keys must read the same.
         List<String> result =
                 getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).isEmpty();
-
-        // 3. +U of the seq2 group writes on top of the -U values. Like after a -D, the summed b
-        // and seq1 are not kept, and both keys get the same result however the records were
-        // batched
-        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, null, null, 30, 30, 3));
-        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 2, null, null, 30, 30, 3));
-        commit.commit(3, write.prepareCommit(true, 3));
-        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        "+I[1, 1, NULL, NULL, 30, 30, 3]", "+I[1, 2, NULL, NULL, 30, 30, 3]");
+                        "+I[1, 1, 11, 20]",
+                        "+I[1, 2, 11, 20]",
+                        "+I[1, 3, 11, 20]",
+                        "+I[1, 6, 10, 30]",
+                        "+I[1, 7, 10, 30]");
 
         write.close();
         commit.close();
@@ -2193,44 +2158,32 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 11, 2, 29, 29, 2]");
 
-        // 2. Update Before of seq1, which is not a remove-record group, only clears b
-        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 11, 2, null, null, null));
+        // 2. Update Before
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 11, 2, 29, 29, 2));
         commit.commit(1, write.prepareCommit(true, 1));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, NULL, 2, 29, 29, 2]");
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, NULL, 2, NULL, NULL, 2]");
 
-        // 3. Update Before of the remove-record group seq2 removes the row like -D (issue 6862)
-        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, null, null, 29, 29, 2));
+        // 3. Update After
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 11, 2, 30, 30, 3));
         commit.commit(2, write.prepareCommit(true, 2));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).isEmpty();
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 11, 2, 30, 30, 3]");
 
-        // 4. Update After writes on top of the -U values, so seq1 = 2 from step 2 is not kept
-        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, null, null, 30, 30, 3));
-        commit.commit(3, write.prepareCommit(true, 3));
-        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, NULL, NULL, 30, 30, 3]");
-
-        // 5. Insert of seq1 fills b again
-        write.write(GenericRow.of(1, 1, 12, 2, null, null, null));
-        commit.commit(4, write.prepareCommit(true, 4));
-        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 12, 2, 30, 30, 3]");
-
-        // 6. Retracts, a newer seq1 clears b, then an accepted seq2 removes the row
+        // 4. Retracts
         write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 12, 3, 30, 30, 2));
-        commit.commit(5, write.prepareCommit(true, 5));
+        commit.commit(3, write.prepareCommit(true, 3));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, NULL, 3, 30, 30, 3]");
 
         write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 12, 2, 30, 31, 5));
-        commit.commit(6, write.prepareCommit(true, 6));
+        commit.commit(4, write.prepareCommit(true, 4));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).isEmpty();
 
-        // 7. Inserts
+        // 5. Inserts
         write.write(GenericRow.of(1, 1, 11, 2, 30, 31, 6));
-        commit.commit(7, write.prepareCommit(true, 7));
+        commit.commit(5, write.prepareCommit(true, 5));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 11, 2, 30, 31, 6]");
 

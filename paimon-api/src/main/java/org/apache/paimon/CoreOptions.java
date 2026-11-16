@@ -1291,7 +1291,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "When -D or -U records of the given sequence groups are received, remove the whole row.");
+                            "When -D records of the given sequence groups are received, remove the whole row.");
 
     @Immutable
     public static final ConfigOption<String> ROWKIND_FIELD =
