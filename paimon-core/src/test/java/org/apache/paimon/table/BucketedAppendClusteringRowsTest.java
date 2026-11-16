@@ -33,9 +33,12 @@ import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -53,6 +56,17 @@ class BucketedAppendClusteringRowsTest extends TableTestBase {
     })
     void testClusteringPreservesNullsAndVariableLengthValues(String curve, boolean asyncWrite)
             throws Exception {
+        checkClustering(curve, asyncWrite, false);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testOrderClusteringPreservesVariableLengthKeys(boolean asyncWrite) throws Exception {
+        checkClustering("order", asyncWrite, true);
+    }
+
+    private void checkClustering(String curve, boolean asyncWrite, boolean variableLengthKey)
+            throws Exception {
         catalog.createTable(
                 identifier(),
                 Schema.newBuilder()
@@ -63,7 +77,9 @@ class BucketedAppendClusteringRowsTest extends TableTestBase {
                         .option(CoreOptions.BUCKET_KEY.key(), "a")
                         .option(CoreOptions.BUCKET_APPEND_ORDERED.key(), "false")
                         .option(CoreOptions.CLUSTERING_INCREMENTAL.key(), "true")
-                        .option(CoreOptions.CLUSTERING_COLUMNS.key(), "a,b")
+                        .option(
+                                CoreOptions.CLUSTERING_COLUMNS.key(),
+                                variableLengthKey ? "c,a" : "a,b")
                         .option(CoreOptions.CLUSTERING_STRATEGY.key(), curve)
                         .option(CoreOptions.NUM_LEVELS.key(), "3")
                         .option(CoreOptions.WRITE_BUFFER_SIZE.key(), "1 mb")
@@ -76,6 +92,7 @@ class BucketedAppendClusteringRowsTest extends TableTestBase {
             prefix.append('x');
         }
         List<String> expected = new ArrayList<>();
+        List<GenericRow> inputs = new ArrayList<>();
         try (IOManager io = IOManager.create(tempPath.toString())) {
             BatchWriteBuilder builder = table.newBatchWriteBuilder();
             try (BatchTableWrite write = builder.newWrite();
@@ -90,6 +107,7 @@ class BucketedAppendClusteringRowsTest extends TableTestBase {
                                             ? null
                                             : BinaryString.fromString(prefix.toString() + i));
                     expected.add(value(row));
+                    inputs.add(row);
                     write.write(row);
                 }
                 commit.commit(write.prepareCommit());
@@ -107,18 +125,43 @@ class BucketedAppendClusteringRowsTest extends TableTestBase {
                     .extracting(entry -> entry.file().level())
                     .containsOnly(2);
             assertThat(read(table)).containsExactlyInAnyOrderElementsOf(expected);
+            if (variableLengthKey) {
+                inputs.sort(
+                        Comparator.comparing(
+                                        (GenericRow row) ->
+                                                row.isNullAt(2)
+                                                        ? null
+                                                        : row.getString(2).toString(),
+                                        Comparator.nullsFirst(Comparator.naturalOrder()))
+                                .thenComparing(
+                                        row -> row.isNullAt(0) ? null : row.getInt(0),
+                                        Comparator.nullsFirst(Comparator.naturalOrder())));
+                assertThat(read(table, true))
+                        .containsExactlyElementsOf(
+                                inputs.stream().map(this::key).collect(Collectors.toList()));
+            }
         }
     }
 
     private List<String> read(FileStoreTable table) throws Exception {
+        return read(table, false);
+    }
+
+    private List<String> read(FileStoreTable table, boolean keysOnly) throws Exception {
         List<String> rows = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 table.newReadBuilder()
                         .newRead()
                         .createReader(table.newReadBuilder().newScan().plan())) {
-            reader.forEachRemaining(row -> rows.add(value(row)));
+            reader.forEachRemaining(row -> rows.add(keysOnly ? key(row) : value(row)));
         }
         return rows;
+    }
+
+    private String key(InternalRow row) {
+        return (row.isNullAt(2) ? "null" : row.getString(2).toString())
+                + "|"
+                + (row.isNullAt(0) ? "null" : String.valueOf(row.getInt(0)));
     }
 
     private String value(InternalRow row) {
