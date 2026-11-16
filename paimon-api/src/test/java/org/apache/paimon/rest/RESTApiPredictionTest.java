@@ -42,8 +42,10 @@ class RESTApiPredictionTest {
     void testRequestAndResponseWireFormat() throws Exception {
         SubmitPredictionRequest request = new SubmitPredictionRequest(spec());
         Map<String, Object> requestMap = RESTApi.fromJson(RESTApi.toJson(request), Map.class);
-        assertThat(requestMap.get("requestId")).isInstanceOf(String.class);
-        assertThat((String) requestMap.get("requestId")).isNotBlank();
+        assertThat(requestMap.get("idempotencyKey")).isInstanceOf(String.class);
+        assertThat((String) requestMap.get("idempotencyKey")).isNotBlank();
+        assertThat(RESTApi.fromJson(RESTApi.toJson(request), Map.class).get("idempotencyKey"))
+                .isEqualTo(requestMap.get("idempotencyKey"));
         assertThat(requestMap)
                 .containsEntry("model", "quality.qwen_vl")
                 .doesNotContainKeys("name", "where", "snapshotId", "tagName");

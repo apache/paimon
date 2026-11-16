@@ -40,7 +40,8 @@ class SubmitPredictionRequest(RESTRequest):
     prompt: str
     output_schema: Dict[str, str] = json_field("outputSchema")
     name: Optional[str] = optional_json_field("name", "non_null")
-    request_id: Optional[str] = optional_json_field("requestId", "non_null")
+    idempotency_key: Optional[str] = optional_json_field(
+        "idempotencyKey", "non_null")
     where: Optional[str] = optional_json_field("where", "non_null")
     snapshot_id: Optional[int] = optional_json_field("snapshotId", "non_null")
     tag_name: Optional[str] = optional_json_field("tagName", "non_null")
@@ -59,10 +60,10 @@ class SubmitPredictionRequest(RESTRequest):
         ):
             if value is not None:
                 _nonblank(value, field_name)
-        if self.request_id is None:
-            self.request_id = uuid.uuid4().hex
+        if self.idempotency_key is None:
+            self.idempotency_key = uuid.uuid4().hex
         else:
-            _nonblank(self.request_id, "request_id")
+            _nonblank(self.idempotency_key, "idempotency_key")
         if self.snapshot_id is not None and (
                 type(self.snapshot_id) is not int or self.snapshot_id <= 0):
             raise ValueError("snapshot_id must be a positive integer")

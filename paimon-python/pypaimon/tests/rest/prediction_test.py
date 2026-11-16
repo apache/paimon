@@ -90,7 +90,11 @@ class PredictionTest(unittest.TestCase):
     def test_request_and_response_wire_format(self):
         request = SubmitPredictionRequest.from_spec(_spec())
         body = json.loads(JSON.to_json(request))
-        self.assertTrue(body["requestId"])
+        self.assertTrue(body["idempotencyKey"])
+        self.assertEqual(
+            body["idempotencyKey"],
+            json.loads(JSON.to_json(request))["idempotencyKey"],
+        )
         self.assertEqual(["clip_id"], body["resultColumns"])
         self.assertEqual({"result": "STRING"}, body["outputSchema"])
         self.assertNotIn("snapshotId", body)
@@ -212,7 +216,7 @@ class PredictionTest(unittest.TestCase):
                 "/v1/catalog/databases/a%2Fb/tables/clip+table/predictions",
                 calls[-1][1],
             )
-            self.assertTrue(calls[-1][2]["requestId"])
+            self.assertTrue(calls[-1][2]["idempotencyKey"])
 
             page = catalog.list_predictions(
                 identifier,

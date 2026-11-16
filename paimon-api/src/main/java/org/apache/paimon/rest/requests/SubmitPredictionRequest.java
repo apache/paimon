@@ -40,7 +40,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class SubmitPredictionRequest implements RESTRequest {
 
     private static final String FIELD_NAME = "name";
-    private static final String FIELD_REQUEST_ID = "requestId";
+    private static final String FIELD_IDEMPOTENCY_KEY = "idempotencyKey";
     private static final String FIELD_MODEL = "model";
     private static final String FIELD_INPUTS = "inputs";
     private static final String FIELD_RESULT_COLUMNS = "resultColumns";
@@ -51,13 +51,13 @@ public class SubmitPredictionRequest implements RESTRequest {
     private static final String FIELD_TAG_NAME = "tagName";
     private static final String FIELD_OPTIONS = "options";
 
-    private final String requestId;
+    private final String idempotencyKey;
     private final PredictionSpec spec;
 
     @JsonCreator
     public SubmitPredictionRequest(
             @Nullable @JsonProperty(FIELD_NAME) String name,
-            @Nullable @JsonProperty(FIELD_REQUEST_ID) String requestId,
+            @Nullable @JsonProperty(FIELD_IDEMPOTENCY_KEY) String idempotencyKey,
             @JsonProperty(FIELD_MODEL) String model,
             @JsonProperty(FIELD_INPUTS) Map<String, String> inputs,
             @JsonProperty(FIELD_RESULT_COLUMNS) List<String> resultColumns,
@@ -68,8 +68,10 @@ public class SubmitPredictionRequest implements RESTRequest {
             @Nullable @JsonProperty(FIELD_TAG_NAME) String tagName,
             @Nullable @JsonProperty(FIELD_OPTIONS) Map<String, Object> options) {
         checkArgument(
-                requestId == null || !requestId.trim().isEmpty(), "requestId must not be blank");
-        this.requestId = requestId == null ? UUID.randomUUID().toString() : requestId;
+                idempotencyKey == null || !idempotencyKey.trim().isEmpty(),
+                "idempotencyKey must not be blank");
+        this.idempotencyKey =
+                idempotencyKey == null ? UUID.randomUUID().toString() : idempotencyKey;
         this.spec =
                 new PredictionSpec(
                         name,
@@ -106,9 +108,9 @@ public class SubmitPredictionRequest implements RESTRequest {
         return spec.name();
     }
 
-    @JsonGetter(FIELD_REQUEST_ID)
-    public String getRequestId() {
-        return requestId;
+    @JsonGetter(FIELD_IDEMPOTENCY_KEY)
+    public String getIdempotencyKey() {
+        return idempotencyKey;
     }
 
     @JsonGetter(FIELD_MODEL)

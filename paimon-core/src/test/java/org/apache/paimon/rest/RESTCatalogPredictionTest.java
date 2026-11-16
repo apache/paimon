@@ -56,8 +56,8 @@ class RESTCatalogPredictionTest {
             assertThat(submit.getPath())
                     .isEqualTo("/v1/catalog/databases/quality/tables/clips/predictions");
             Map<String, Object> request = RESTApi.fromJson(submit.getBody().readUtf8(), Map.class);
-            assertThat(request.get("requestId")).isInstanceOf(String.class);
-            assertThat((String) request.get("requestId")).isNotBlank();
+            assertThat(request.get("idempotencyKey")).isInstanceOf(String.class);
+            assertThat((String) request.get("idempotencyKey")).isNotBlank();
 
             server.enqueue(
                     json(

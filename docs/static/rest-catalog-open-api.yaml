@@ -140,6 +140,8 @@ paths:
       operationId: submitPrediction
       description: >-
         Submits an asynchronous prediction with a fixed snapshot and model version.
+        Reusing an idempotencyKey for the same table and payload returns the existing
+        job; reusing it with a different payload returns 409.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
         - {name: database, in: path, required: true, schema: {type: string}}
@@ -4681,16 +4683,16 @@ components:
     SubmitPredictionRequest:
       type: object
       additionalProperties: false
-      required: [requestId, model, inputs, resultColumns, prompt, outputSchema]
+      required: [idempotencyKey, model, inputs, resultColumns, prompt, outputSchema]
       properties:
         name:
           type: string
           minLength: 1
           description: Optional non-unique label.
-        requestId:
+        idempotencyKey:
           type: string
           minLength: 1
-          description: Client-generated idempotency key.
+          description: SDK-generated key reused for retries of one logical submission.
         model:
           type: string
           minLength: 1
