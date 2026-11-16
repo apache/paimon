@@ -19,7 +19,7 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.Snapshot
-import org.apache.paimon.spark.SparkCatalog
+import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkSource}
 import org.apache.paimon.spark.write.PaimonWriteOptions
 
 import org.apache.spark.sql.{SparkSession, Strategy}
@@ -27,7 +27,7 @@ import org.apache.spark.sql.catalyst.analysis.ResolvedDBObjectName
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan, TableSpec}
 import org.apache.spark.sql.execution.{PaimonTableAsSelectHelper, SparkPlan}
 import org.apache.spark.sql.execution.PaimonTableAsSelectHelper._
-import org.apache.spark.sql.execution.datasources.v2.CreateTableAsSelectExec
+import org.apache.spark.sql.execution.datasources.v2.{CreateTableAsSelectExec, DataSourceV2Strategy, PaimonTableAsSelectWriteExec}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import scala.collection.JavaConverters._
@@ -56,19 +56,30 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
         parts.nonEmpty,
         qualifiedSpec.properties.asJava)
 
-      CreateTableAsSelectExec(
-        catalog.asTableCatalog,
-        ident.asIdentifier,
-        parts,
-        query,
-        planLater(query),
-        qualifiedSpec,
-        new CaseInsensitiveStringMap(
-          (writeOptions +
-            (PaimonWriteOptions.OPERATION_OPTION -> Snapshot.Operation.CREATE_TABLE_AS_SELECT
-              .name())).asJava),
-        ifNotExists
-      ) :: Nil
+      PaimonTableAsSelectWriteExec.prepare(
+        CreateTableAsSelectExec(
+          catalog.asTableCatalog,
+          ident.asIdentifier,
+          parts,
+          query,
+          planLater(query),
+          qualifiedSpec,
+          new CaseInsensitiveStringMap(
+            (writeOptions +
+              (PaimonWriteOptions.OPERATION_OPTION -> Snapshot.Operation.CREATE_TABLE_AS_SELECT
+                .name())).asJava),
+          ifNotExists
+        )) :: Nil
+    case create @ CreateTableAsSelect(
+          ResolvedDBObjectName(_: SparkGenericCatalog, _),
+          _,
+          _,
+          tableSpec: TableSpec,
+          _,
+          _) if tableSpec.provider.exists(_.equalsIgnoreCase(SparkSource.NAME)) =>
+      new DataSourceV2Strategy(spark)
+        .apply(create)
+        .map(exec => PaimonTableAsSelectWriteExec.prepare(exec))
     case _ => Nil
   }
 }

@@ -91,9 +91,11 @@ public class SparkConnectorOptions {
     public static final ConfigOption<Boolean> USE_V2_WRITE =
             key("write.use-v2-write")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
-                            "If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE.");
+                            "If true, use DataSource V2 for batch writes. "
+                                    + "Path-based writes and unsupported table configurations fall back to V1. "
+                                    + "Set to false to use V1 batch writes. Streaming writes use V1.");
 
     public static final ConfigOption<Boolean> HIVE_STYLE_DYNAMIC_PARTITION_ENABLED =
             key("write.hive-style-dynamic-partition.enabled")

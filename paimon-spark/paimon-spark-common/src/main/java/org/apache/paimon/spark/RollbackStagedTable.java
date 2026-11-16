@@ -74,6 +74,10 @@ class RollbackStagedTable implements StagedTable, SupportsRead, SupportsWrite, S
         this.abortAction = abortAction;
     }
 
+    Table wrappedTable() {
+        return table;
+    }
+
     @Override
     public String name() {
         return table.name();

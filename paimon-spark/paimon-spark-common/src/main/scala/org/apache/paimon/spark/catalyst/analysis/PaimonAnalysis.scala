@@ -26,6 +26,7 @@ import org.apache.paimon.spark.catalyst.plans.logical.{PaimonDropPartitions, Pai
 import org.apache.paimon.spark.commands.{PaimonAnalyzeFormatTablePartitionsCommand, PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, SchemaEvolutionHelper}
 import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.spark.util.OptionUtils
+import org.apache.paimon.spark.write.PaimonWriteRequirement
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.utils.GeneratedColumn
 
@@ -60,7 +61,15 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
             if a.query.getTagValue(PAIMON_WRITE_RESOLVED).isEmpty =>
           val options = Options.fromMap(writeOptions(a).asJava)
           val mergeSchemaEnabled = SchemaEvolutionHelper.mergeSchemaEnabled(options)
-          val newQuery = resolvePaimonWrite(a, table, options, mergeSchemaEnabled)
+          val resolvedQuery = resolvePaimonWrite(a, table, options, mergeSchemaEnabled)
+          val sparkTable = table.table.asInstanceOf[SparkTable]
+          val newQuery = if (sparkTable.useV2Write) {
+            PaimonWriteRequirement.prepareQuery(
+              sparkTable.getTable.asInstanceOf[FileStoreTable],
+              resolvedQuery)
+          } else {
+            resolvedQuery
+          }
           if (newQuery ne a.query) {
             // Tag to short-circuit the next Analyzer pass; otherwise inline-kept extras would loop.
             newQuery.setTagValue(PAIMON_WRITE_RESOLVED, ())

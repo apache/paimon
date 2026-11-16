@@ -69,7 +69,10 @@ class SparkSource
       schema: StructType,
       partitioning: Array[Transform],
       properties: JMap[String, String]): Table = {
-    SparkTable.of(loadTable(properties))
+    // Data source relations have no FunctionCatalog to resolve the bucket function in V2 writes.
+    new SparkTable(loadTable(properties)) {
+      override lazy val useV2Write: Boolean = false
+    }
   }
 
   override def createRelation(

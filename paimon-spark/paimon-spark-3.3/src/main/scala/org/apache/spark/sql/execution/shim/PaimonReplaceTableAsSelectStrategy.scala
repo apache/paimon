@@ -19,12 +19,15 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.spark.SparkCatalog
+import org.apache.paimon.spark.catalog.SparkBaseCatalog
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.analysis.ResolvedDBObjectName
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReplaceTableAsSelect, TableSpec}
 import org.apache.spark.sql.connector.catalog.CatalogV2Util
+import org.apache.spark.sql.execution.PaimonTableAsSelectHelper.supportsCatalog
 import org.apache.spark.sql.execution.SparkPlan
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Strategy, PaimonTableAsSelectWriteExec}
 
 import scala.collection.JavaConverters._
 
@@ -32,23 +35,29 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession) extends Strat
 
   import org.apache.spark.sql.connector.catalog.CatalogV2Implicits._
 
-  // Spark plans the replace itself, which drops the old table before it writes, so reject what
-  // it cannot write before that. The check uses the properties Spark creates the table with.
+  // Keep Spark's replacement planning and prepare the write after the target table is created.
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = {
     plan match {
       case ReplaceTableAsSelect(
-            ResolvedDBObjectName(catalog: SparkCatalog, ident),
+            ResolvedDBObjectName(catalog: SparkBaseCatalog, ident),
             parts,
             _,
             tableSpec: TableSpec,
             _,
-            _) =>
+            _) if supportsCatalog(catalog, tableSpec) =>
         val properties = CatalogV2Util.convertTableProperties(tableSpec)
-        catalog.checkPartitionedFormatTableCtas(
-          ident.asIdentifier,
-          tableSpec.provider.orNull,
-          parts.nonEmpty,
-          properties.asJava)
+        catalog match {
+          case paimon: SparkCatalog =>
+            paimon.checkPartitionedFormatTableCtas(
+              ident.asIdentifier,
+              tableSpec.provider.orNull,
+              parts.nonEmpty,
+              properties.asJava)
+          case _ =>
+        }
+        return new DataSourceV2Strategy(spark)
+          .apply(plan)
+          .map(exec => PaimonTableAsSelectWriteExec.prepare(exec))
       case _ =>
     }
     Nil

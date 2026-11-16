@@ -18,12 +18,13 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.{PaimonSparkTestBase, SparkConnectorOptions, SparkTable}
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTableFactory
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.connector.catalog.TableCapability
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.paimon.Utils
 import org.junit.jupiter.api.Assertions
@@ -31,6 +32,81 @@ import org.junit.jupiter.api.Assertions
 class PaimonOptionTest extends PaimonSparkTestBase {
 
   import testImplicits._
+
+  test("Paimon Option: V2 write is enabled by default") {
+    assert(SparkConnectorOptions.USE_V2_WRITE.defaultValue())
+    SQLConf.withExistingConf(new SQLConf) {
+      assert(OptionUtils.useV2Write())
+    }
+  }
+
+  test("Paimon Option: V2 write respects explicit configuration") {
+    for (enabled <- Seq(true, false)) {
+      val conf = new SQLConf
+      conf.setConfString("spark.paimon.write.use-v2-write", enabled.toString)
+      SQLConf.withExistingConf(conf) {
+        assert(OptionUtils.useV2Write() == enabled)
+      }
+    }
+  }
+
+  test("Paimon Option: default V2 write preserves table fallbacks") {
+    val tableProperties = Seq(
+      "'bucket' = '-1'" -> true,
+      "'bucket-key' = 'id', 'bucket' = '2'" -> true,
+      "'primary-key' = 'id', 'bucket' = '2'" -> true,
+      "'primary-key' = 'id', 'bucket' = '-1'" -> false
+    )
+    for ((properties, supportsV2) <- tableProperties) {
+      withTable("T") {
+        sql(s"CREATE TABLE T (id INT) TBLPROPERTIES ($properties)")
+        val table = SparkTable(loadTable("T"))
+        assert(table.capabilities().contains(TableCapability.BATCH_WRITE) == supportsV2)
+        assert(table.capabilities().contains(TableCapability.V1_BATCH_WRITE) == !supportsV2)
+        sql("INSERT INTO T VALUES (1), (2)")
+        checkAnswer(sql("SELECT * FROM T"), Seq(Row(1), Row(2)))
+      }
+    }
+  }
+
+  test("Paimon Option: V2 write can be disabled for supported tables") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      sql("CREATE TABLE T (id INT) TBLPROPERTIES ('bucket-key' = 'id', 'bucket' = '2')")
+      assert(SparkTable(loadTable("T")).capabilities().contains(TableCapability.V1_BATCH_WRITE))
+      sql("INSERT INTO T VALUES (1), (2)")
+      checkAnswer(sql("SELECT * FROM T"), Seq(Row(1), Row(2)))
+    }
+  }
+
+  test("Paimon Option: default V2 write distributes composite bucket keys and quoted columns") {
+    withSparkSQLConf("spark.sql.shuffle.partitions" -> "3") {
+      sql("""
+            |CREATE TABLE T (`k.id` INT, k2 STRING, pt INT)
+            |PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'k.id,k2,pt',
+            |  'bucket-key' = 'k.id,k2',
+            |  'bucket' = '4')
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO T SELECT
+            |CAST(id % 12 AS INT), CAST(id % 3 AS STRING), CAST(id % 2 AS INT)
+            |FROM range(0, 120, 1, 4)
+            |""".stripMargin)
+      checkAnswer(sql("SELECT * FROM T"), (0 until 12).map(i => Row(i, (i % 3).toString, i % 2)))
+    }
+  }
+
+  test("Paimon Option: path-based writes fall back to V1 without a function catalog") {
+    sql("CREATE TABLE T (id INT) TBLPROPERTIES ('bucket-key' = 'id', 'bucket' = '2')")
+    Seq(1, 2)
+      .toDF("id")
+      .write
+      .format("paimon")
+      .mode("append")
+      .save(loadTable("T").location().toString)
+    checkAnswer(sql("SELECT * FROM T"), Seq(Row(1), Row(2)))
+  }
 
   test("Paimon Option: create table with sql conf") {
     withSparkSQLConf("spark.paimon.scan.snapshot-id" -> "2") {
