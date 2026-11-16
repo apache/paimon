@@ -24,10 +24,18 @@ import org.apache.paimon.table.FileStoreTableFactory
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.{Row, SparkSession}
-import org.apache.spark.sql.connector.catalog.TableCapability
+import org.apache.spark.sql.catalyst.plans.logical.V2WriteCommand
+import org.apache.spark.sql.connector.catalog.{Identifier, TableCapability, TableCatalog}
+import org.apache.spark.sql.execution.QueryExecution
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.paimon.Utils
+import org.apache.spark.sql.util.QueryExecutionListener
 import org.junit.jupiter.api.Assertions
+
+import java.util.concurrent.ConcurrentLinkedQueue
+
+import scala.collection.JavaConverters._
 
 class PaimonOptionTest extends PaimonSparkTestBase {
 
@@ -78,6 +86,49 @@ class PaimonOptionTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Option: V2 write follows merged table and session option precedence") {
+    val globalKey = "spark.paimon.write.use-v2-write"
+    val tableKey = s"spark.paimon.paimon.$dbName0.T.write.use-v2-write"
+    for (tableEnabled <- Seq(false, true)) {
+      withTable("T") {
+        sql(s"""
+               |CREATE TABLE T (id INT) TBLPROPERTIES (
+               |  'bucket-key' = 'id', 'bucket' = '2',
+               |  'write.use-v2-write' = '$tableEnabled')
+               |""".stripMargin)
+        val cases = Seq(
+          Seq.empty[(String, String)] -> tableEnabled,
+          Seq(globalKey -> "true") -> true,
+          Seq(globalKey -> "false") -> false,
+          Seq(globalKey -> "false", tableKey -> "true") -> true,
+          Seq(globalKey -> "true", tableKey -> "false") -> false
+        )
+        for (((configs, expected), index) <- cases.zipWithIndex) {
+          withSparkSQLConf(configs: _*) {
+            val table = spark.sessionState.catalogManager.currentCatalog
+              .asInstanceOf[TableCatalog]
+              .loadTable(Identifier.of(Array(dbName0), "T"))
+            assert(table.capabilities().contains(TableCapability.BATCH_WRITE) == expected)
+            assert(table.capabilities().contains(TableCapability.V1_BATCH_WRITE) == !expected)
+            sql(s"INSERT INTO T VALUES ($index)")
+          }
+        }
+        checkAnswer(sql("SELECT * FROM T"), (0 until cases.size).map(Row(_)))
+        assert(loadTable("T").options().get("write.use-v2-write") == tableEnabled.toString)
+      }
+    }
+  }
+
+  test("Paimon Option: table V2 write option cannot enable unsupported bucket modes") {
+    sql("""
+          |CREATE TABLE T (id INT) TBLPROPERTIES (
+          |  'primary-key' = 'id', 'bucket' = '-1', 'write.use-v2-write' = 'true')
+          |""".stripMargin)
+    assert(SparkTable(loadTable("T")).capabilities().contains(TableCapability.V1_BATCH_WRITE))
+    sql("INSERT INTO T VALUES (1), (2)")
+    checkAnswer(sql("SELECT * FROM T"), Seq(Row(1), Row(2)))
+  }
+
   test("Paimon Option: default V2 write distributes composite bucket keys and quoted columns") {
     withSparkSQLConf("spark.sql.shuffle.partitions" -> "3") {
       sql("""
@@ -106,6 +157,101 @@ class PaimonOptionTest extends PaimonSparkTestBase {
       .mode("append")
       .save(loadTable("T").location().toString)
     checkAnswer(sql("SELECT * FROM T"), Seq(Row(1), Row(2)))
+  }
+
+  test("Paimon Option: DataSource catalog writes bind the catalog for V2 distribution") {
+    for (adaptive <- Seq(true, false)) {
+      withSparkSQLConf(
+        "spark.sql.adaptive.enabled" -> adaptive.toString,
+        "spark.sql.shuffle.partitions" -> "3",
+        "spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
+        withTable("T") {
+          sql("""
+                |CREATE TABLE T (id INT, pt INT) PARTITIONED BY (pt)
+                |TBLPROPERTIES ('bucket-key' = 'id', 'bucket' = '1')
+                |""".stripMargin)
+          val location = loadTable("T").location().toString
+          val input = spark
+            .range(0, 40, 1, 4)
+            .selectExpr("CAST(id AS INT) AS id", "CAST(id % 2 AS INT) AS pt")
+          val writes = captureV2Writes {
+            input.write
+              .format("paimon")
+              .option("catalog", "paimon")
+              .option("database", dbName0)
+              .option("table", "T")
+              .mode("append")
+              .save(location)
+          }
+          assert(writes.size == 1)
+          val relation = writes.head.table.asInstanceOf[DataSourceV2Relation]
+          assert(relation.catalog.exists(_.name() == "paimon"))
+          assert(relation.identifier.contains(Identifier.of(Array(dbName0), "T")))
+          assert(relation.table.capabilities().contains(TableCapability.BATCH_WRITE))
+          checkAnswer(sql("SELECT * FROM T"), (0 until 40).map(i => Row(i, i % 2)))
+          checkAnswer(sql("SELECT COUNT(*) FROM `T$files`"), Seq(Row(2L)))
+
+          // A path overwrite still replaces the whole table, including partitions absent in input.
+          val overwrites = captureV2Writes {
+            Seq((100, 0))
+              .toDF("id", "pt")
+              .write
+              .format("paimon")
+              .option("catalog", "paimon")
+              .option("database", dbName0)
+              .option("table", "T")
+              .mode("overwrite")
+              .save(location)
+          }
+          assert(overwrites.size == 1)
+          checkAnswer(sql("SELECT * FROM T"), Seq(Row(100, 0)))
+        }
+      }
+    }
+  }
+
+  test("Paimon Option: DataSource write option overrides the session V2 write option") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      sql("CREATE TABLE T (id INT) TBLPROPERTIES ('bucket-key' = 'id', 'bucket' = '2')")
+      for (enabled <- Seq(false, true)) {
+        val writes = captureV2Writes {
+          Seq(1, 2)
+            .toDF("id")
+            .write
+            .format("paimon")
+            .option("catalog", "paimon")
+            // Infer the database and table from the path when only the catalog is specified.
+            .option("write.use-v2-write", enabled.toString)
+            .mode("append")
+            .save(loadTable("T").location().toString)
+        }
+        assert(writes.nonEmpty == enabled)
+      }
+      checkAnswer(sql("SELECT * FROM T"), Seq(Row(1), Row(2), Row(1), Row(2)))
+    }
+  }
+
+  private def captureV2Writes(f: => Unit): Seq[V2WriteCommand] = {
+    val writes = new ConcurrentLinkedQueue[V2WriteCommand]()
+    val listener = new QueryExecutionListener {
+      override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
+        qe.analyzed match {
+          case write: V2WriteCommand => writes.add(write)
+          case _ =>
+        }
+      }
+
+      override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {}
+    }
+    Utils.waitUntilEventEmpty(spark)
+    spark.listenerManager.register(listener)
+    try {
+      f
+      Utils.waitUntilEventEmpty(spark)
+      writes.asScala.toSeq
+    } finally {
+      spark.listenerManager.unregister(listener)
+    }
   }
 
   test("Paimon Option: create table with sql conf") {

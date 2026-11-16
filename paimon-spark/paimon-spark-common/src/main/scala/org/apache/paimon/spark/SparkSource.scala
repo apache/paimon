@@ -69,9 +69,15 @@ class SparkSource
       schema: StructType,
       partitioning: Array[Transform],
       properties: JMap[String, String]): Table = {
-    // Data source relations have no FunctionCatalog to resolve the bucket function in V2 writes.
-    new SparkTable(loadTable(properties)) {
-      override lazy val useV2Write: Boolean = false
+    val table = loadTable(properties)
+    if (properties.containsKey(CATALOG)) {
+      // PaimonAnalysis attaches this catalog to the relation for V2 distribution planning.
+      SparkTable.of(table)
+    } else {
+      // Pure path relations have no FunctionCatalog to resolve the bucket function in V2 writes.
+      new SparkTable(table) {
+        override lazy val useV2Write: Boolean = false
+      }
     }
   }
 
@@ -100,18 +106,15 @@ class SparkSource
   }
 
   private def loadTable(options: JMap[String, String]): DataTable = {
-    val path = CoreOptions.path(options)
     val sessionState = PaimonSparkSession.active.sessionState
 
     // Only if user specifies the catalog name, then use catalog to get table, otherwise
     // use FileStoreTableFactory to get table by path
     val table = if (options.containsKey(CATALOG)) {
       val catalogName = options.get(CATALOG)
-      val dataBaseName = Option(options.get(DATABASE)).getOrElse(CatalogUtils.database(path))
-      val tableName = Option(options.get(TABLE)).getOrElse(CatalogUtils.table(path))
       val sparkCatalog = sessionState.catalogManager.catalog(catalogName).asInstanceOf[TableCatalog]
       sparkCatalog
-        .loadTable(SparkIdentifier.of(Array(dataBaseName), tableName))
+        .loadTable(tableIdentifier(options))
         .asInstanceOf[SparkTable]
         .getTable
         .asInstanceOf[FileStoreTable]
@@ -137,11 +140,18 @@ object SparkSource {
   val FORMAT_NAMES: Seq[String] = Format.values.map(_.toString.toLowerCase(Locale.ROOT)).toSeq
 
   // Spark dataframe read options
-  private val CATALOG = "catalog"
+  private[spark] val CATALOG = "catalog"
 
   private val DATABASE = "database"
 
   private val TABLE = "table"
+
+  private[spark] def tableIdentifier(options: JMap[String, String]): SparkIdentifier = {
+    lazy val path = CoreOptions.path(options)
+    val database = Option(options.get(DATABASE)).getOrElse(CatalogUtils.database(path))
+    val table = Option(options.get(TABLE)).getOrElse(CatalogUtils.table(path))
+    SparkIdentifier.of(Array(database), table)
+  }
 
   private def toBaseRelation(table: FileStoreTable, _sqlContext: SQLContext): BaseRelation = {
     new BaseRelation {

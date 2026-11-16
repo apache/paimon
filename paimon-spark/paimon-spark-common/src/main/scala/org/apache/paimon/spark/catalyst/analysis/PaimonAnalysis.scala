@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.{SparkSource, SparkTable}
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.plans.logical.{PaimonDropPartitions, PaimonHiveDynamicPartitionQuery}
@@ -49,6 +49,19 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
   override def apply(plan: LogicalPlan): LogicalPlan = {
     val withPaimonWrites = AnalysisHelper.allowInvokingTransformsInAnalyzer {
       plan.transformDown {
+        case a @ PaimonV2WriteCommand(relation)
+            if relation.catalog.isEmpty && relation.options.containsKey(SparkSource.CATALOG) =>
+          // The target table is not a child of V2WriteCommand. Bind it explicitly rather than
+          // relying on relation traversal. TableProvider.getTable does not pass its catalog to
+          // DataFrameWriter, but V2 distribution planning needs it to resolve the bucket function.
+          val catalog = session.sessionState.catalogManager
+            .catalog(relation.options.get(SparkSource.CATALOG))
+          a.withNewTable(
+            relation.copy(
+              catalog = Some(catalog),
+              identifier =
+                Some(SparkSource.tableIdentifier(relation.options.asCaseSensitiveMap()))))
+
         // Keep fallback conversion before the generic V2 rewrite; otherwise an already-resolved
         // query can remain as OverwritePartitionsDynamic until Spark's capability check rejects it.
         case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>

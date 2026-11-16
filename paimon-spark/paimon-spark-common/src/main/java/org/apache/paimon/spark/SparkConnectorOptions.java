@@ -94,7 +94,8 @@ public class SparkConnectorOptions {
                     .defaultValue(true)
                     .withDescription(
                             "If true, use DataSource V2 for batch writes. "
-                                    + "Path-based writes and unsupported table configurations fall back to V1. "
+                                    + "Path-based writes without a catalog and unsupported table configurations fall back to V1. "
+                                    + "Supports table, session and DataSource write options with the standard option precedence. "
                                     + "Set to false to use V1 batch writes. Streaming writes use V1.");
 
     public static final ConfigOption<Boolean> HIVE_STYLE_DYNAMIC_PARTITION_ENABLED =

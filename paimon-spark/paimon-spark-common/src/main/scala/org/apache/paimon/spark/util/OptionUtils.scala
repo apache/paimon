@@ -29,7 +29,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.internal.StaticSQLConf
 
-import java.util.{HashMap => JHashMap, Map => JMap}
+import java.util.{Collections, HashMap => JHashMap, Map => JMap}
 import java.util.regex.Pattern
 
 import scala.collection.JavaConverters._
@@ -71,8 +71,12 @@ object OptionUtils extends SQLConfHelper with Logging {
     }
   }
 
-  def useV2Write(): Boolean = {
-    getOptionString(SparkConnectorOptions.USE_V2_WRITE).toBoolean
+  def useV2Write(options: JMap[String, String] = Collections.emptyMap()): Boolean = {
+    // Catalog and source loading already merge session and operation options into table options.
+    // Reading the session flag again as a veto would discard more specific overrides.
+    Option(options.get(SparkConnectorOptions.USE_V2_WRITE.key()))
+      .getOrElse(getOptionString(SparkConnectorOptions.USE_V2_WRITE))
+      .toBoolean
   }
 
   def writeMergeSchemaEnabled(): Boolean = {

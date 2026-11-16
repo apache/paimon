@@ -49,7 +49,7 @@ abstract class PaimonSparkTableBase(val table: Table)
 
   lazy val coreOptions = new CoreOptions(table.options())
 
-  lazy val useV2Write: Boolean = OptionUtils.useV2Write() && supportsV2Write
+  lazy val useV2Write: Boolean = OptionUtils.useV2Write(table.options()) && supportsV2Write
 
   private def supportsV2Write: Boolean = {
     !coreOptions.bucketFunctionProvider().isPresent &&

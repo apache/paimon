@@ -42,6 +42,19 @@ Session and operation options are temporary; use table properties for persistent
 Some connector options are session-only. Follow the scope in the option description and the
 relevant feature guide, such as [Schema Evolution on Write](./schema-evolution).
 
+Batch writes use DataSource V2 by default when the table supports it. The `write.use-v2-write`
+option follows the normal option precedence: DataSource write options override table-specific
+session options, which override global session options, which override persistent table options.
+With no explicit value, the default is `true`. For example, to persistently disable V2 for one table:
+
+```sql
+ALTER TABLE paimon.default.t SET TBLPROPERTIES ('write.use-v2-write' = 'false');
+```
+
+An explicit session or DataSource write option can override this table property. Setting the option
+to `true` does not enable V2 for unsupported table configurations. Location-based writes without
+the `catalog` option fall back to V1, and streaming writes continue to use V1.
+
 ## Set and Reset Session Options
 
 The SET command sets a property, returns the value of an existing property or returns all SQLConf properties with value and meaning.
