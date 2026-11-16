@@ -266,6 +266,14 @@ public class AppendCompactCoordinator {
                 }
             }
 
+            // a batch job plans each file once, so files left over by packing never reach
+            // COMPACT_AGE; compact them now (issue 5130)
+            if (!isStreaming && toCompact.size() > 1) {
+                packed = new ArrayList<>(packed);
+                packed.add(new ArrayList<>(toCompact));
+                toCompact.clear();
+            }
+
             return packed;
         }
 
