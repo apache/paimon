@@ -30,10 +30,29 @@ from pypaimon.catalog.prediction import (
     _nonblank,
 )
 from pypaimon.common.json_util import json_field, optional_json_field
+from pypaimon.common.identifier import Identifier
+
+
+@dataclass
+class PredictionSource:
+    database: str
+    table: str
+
+    def __post_init__(self):
+        _nonblank(self.database, "database")
+        _nonblank(self.table, "table")
+
+    @classmethod
+    def from_identifier(cls, identifier: Identifier) -> "PredictionSource":
+        return cls(identifier.get_database_name(), identifier.get_object_name())
+
+    def to_identifier(self) -> Identifier:
+        return Identifier.create(self.database, self.table)
 
 
 @dataclass
 class SubmitPredictionRequest(RESTRequest):
+    source: PredictionSource
     model: str
     inputs: Dict[str, str]
     result_columns: List[str] = json_field("resultColumns")
@@ -79,8 +98,11 @@ class SubmitPredictionRequest(RESTRequest):
         self.options = dict(self.options)
 
     @classmethod
-    def from_spec(cls, spec: PredictionSpec) -> "SubmitPredictionRequest":
+    def from_spec(
+            cls, source: Identifier, spec: PredictionSpec
+    ) -> "SubmitPredictionRequest":
         return cls(
+            source=PredictionSource.from_identifier(source),
             name=spec.name,
             model=spec.model,
             inputs=spec.inputs,
@@ -104,6 +126,7 @@ class CancelPredictionRequest(RESTRequest):
 @dataclass
 class GetPredictionResponse(RESTResponse):
     job_id: str = json_field("jobId")
+    source: PredictionSource = None
     status: str = ""
     snapshot_id: int = json_field("snapshotId", default=0)
     model: str = ""
@@ -122,6 +145,11 @@ class GetPredictionResponse(RESTResponse):
     def from_dict(cls, data: Dict[str, Any]) -> "GetPredictionResponse":
         return cls(
             job_id=data.get("jobId"),
+            source=(
+                PredictionSource(**data.get("source"))
+                if isinstance(data.get("source"), dict)
+                else data.get("source")
+            ),
             name=data.get("name"),
             status=data.get("status"),
             snapshot_id=data.get("snapshotId"),
@@ -140,6 +168,7 @@ class GetPredictionResponse(RESTResponse):
     def to_prediction(self) -> Prediction:
         return Prediction(
             job_id=self.job_id,
+            source=self.source.to_identifier(),
             name=self.name,
             status=PredictionStatus(self.status),
             snapshot_id=self.snapshot_id,

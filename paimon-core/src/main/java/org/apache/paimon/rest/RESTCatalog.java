@@ -1218,7 +1218,7 @@ public class RESTCatalog implements Catalog {
     public Prediction submitPrediction(Identifier identifier, PredictionSpec spec)
             throws TableNotExistException, ModelNotExistException {
         try {
-            return api.submitPrediction(identifier, new SubmitPredictionRequest(spec))
+            return api.submitPrediction(new SubmitPredictionRequest(identifier, spec))
                     .toPrediction();
         } catch (NoSuchResourceException e) {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_MODEL)) {
@@ -1231,15 +1231,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public Prediction getPrediction(Identifier identifier, String jobId)
-            throws TableNotExistException, PredictionNotExistException {
+    public Prediction getPrediction(String jobId) throws PredictionNotExistException {
         try {
-            return api.getPrediction(identifier, jobId).toPrediction();
+            return api.getPrediction(jobId).toPrediction();
         } catch (NoSuchResourceException e) {
-            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_PREDICTION)) {
-                throw new PredictionNotExistException(identifier, jobId, e);
-            }
-            throw new TableNotExistException(identifier, e);
+            throw new PredictionNotExistException(jobId, e);
         } catch (NotImplementedException e) {
             throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
         }
@@ -1247,15 +1243,14 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public PagedList<Prediction> listPredictions(
-            Identifier identifier,
+            @Nullable Identifier source,
             @Nullable String name,
             @Nullable PredictionStatus status,
             @Nullable Integer maxResults,
-            @Nullable String pageToken)
-            throws TableNotExistException {
+            @Nullable String pageToken) {
         try {
             PagedList<org.apache.paimon.rest.responses.GetPredictionResponse> response =
-                    api.listPredictions(identifier, name, status, maxResults, pageToken);
+                    api.listPredictions(source, name, status, maxResults, pageToken);
             return new PagedList<>(
                     response.getElements().stream()
                             .map(
@@ -1263,23 +1258,17 @@ public class RESTCatalog implements Catalog {
                                             ::toPrediction)
                             .collect(Collectors.toList()),
                     response.getNextPageToken());
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier, e);
         } catch (NotImplementedException e) {
             throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
         }
     }
 
     @Override
-    public Prediction cancelPrediction(Identifier identifier, String jobId)
-            throws TableNotExistException, PredictionNotExistException {
+    public Prediction cancelPrediction(String jobId) throws PredictionNotExistException {
         try {
-            return api.cancelPrediction(identifier, jobId).toPrediction();
+            return api.cancelPrediction(jobId).toPrediction();
         } catch (NoSuchResourceException e) {
-            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_PREDICTION)) {
-                throw new PredictionNotExistException(identifier, jobId, e);
-            }
-            throw new TableNotExistException(identifier, e);
+            throw new PredictionNotExistException(jobId, e);
         } catch (NotImplementedException e) {
             throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
         }

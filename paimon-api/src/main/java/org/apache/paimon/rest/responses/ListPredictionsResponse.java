@@ -29,7 +29,7 @@ import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.List;
 
-/** Response for listing asynchronous table predictions. */
+/** Response for listing asynchronous prediction jobs. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ListPredictionsResponse implements PagedResponse<GetPredictionResponse> {
 

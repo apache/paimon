@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** REST catalog tests for durable asynchronous table predictions. */
+/** REST catalog tests for durable asynchronous predictions. */
 class RESTCatalogPredictionTest {
 
     @Test
@@ -53,11 +53,13 @@ class RESTCatalogPredictionTest {
             Prediction submitted = catalog.submitPrediction(table, spec());
             assertThat(submitted.jobId()).isEqualTo("job-1");
             RecordedRequest submit = server.takeRequest(10, TimeUnit.SECONDS);
-            assertThat(submit.getPath())
-                    .isEqualTo("/v1/catalog/databases/quality/tables/clips/predictions");
+            assertThat(submit.getPath()).isEqualTo("/v1/catalog/predictions");
             Map<String, Object> request = RESTApi.fromJson(submit.getBody().readUtf8(), Map.class);
             assertThat(request.get("idempotencyKey")).isInstanceOf(String.class);
             assertThat((String) request.get("idempotencyKey")).isNotBlank();
+            assertThat((Map<String, Object>) request.get("source"))
+                    .containsEntry("database", "quality")
+                    .containsEntry("table", "clips");
 
             server.enqueue(
                     json(
@@ -72,18 +74,18 @@ class RESTCatalogPredictionTest {
             assertThat(page.getNextPageToken()).isEqualTo("next");
             String listPath = server.takeRequest(10, TimeUnit.SECONDS).getPath();
             assertThat(listPath)
+                    .contains("database=quality")
+                    .contains("table=clips")
                     .contains("name=daily-quality")
                     .contains("status=RUNNING")
                     .contains("maxResults=10")
                     .contains("pageToken=page-1");
 
             server.enqueue(json(predictionJson("CANCELLED"), 200));
-            assertThat(catalog.cancelPrediction(table, "job/1").status())
+            assertThat(catalog.cancelPrediction("job/1").status())
                     .isEqualTo(PredictionStatus.CANCELLED);
             assertThat(server.takeRequest(10, TimeUnit.SECONDS).getPath())
-                    .isEqualTo(
-                            "/v1/catalog/databases/quality/tables/clips/predictions/"
-                                    + "job%2F1/cancel");
+                    .isEqualTo("/v1/catalog/predictions/job%2F1/cancel");
         }
     }
 
@@ -98,12 +100,8 @@ class RESTCatalogPredictionTest {
             assertThatThrownBy(() -> catalog.submitPrediction(table, spec()))
                     .isInstanceOf(Catalog.ModelNotExistException.class);
 
-            server.enqueue(notFound("TABLE", "clips"));
-            assertThatThrownBy(() -> catalog.getPrediction(table, "job-1"))
-                    .isInstanceOf(Catalog.TableNotExistException.class);
-
             server.enqueue(notFound("PREDICTION", "job-1"));
-            assertThatThrownBy(() -> catalog.getPrediction(table, "job-1"))
+            assertThatThrownBy(() -> catalog.getPrediction("job-1"))
                     .isInstanceOf(Catalog.PredictionNotExistException.class);
         }
     }
@@ -132,7 +130,8 @@ class RESTCatalogPredictionTest {
     }
 
     private static String predictionJson(String status) {
-        return "{\"jobId\":\"job-1\",\"name\":\"daily-quality\",\"status\":\""
+        return "{\"jobId\":\"job-1\",\"source\":{\"database\":\"quality\","
+                + "\"table\":\"clips\"},\"name\":\"daily-quality\",\"status\":\""
                 + status
                 + "\",\"snapshotId\":7,\"model\":\"quality.qwen_vl\","
                 + "\"modelVersion\":\"1\",\"outputTable\":\"system.results\","

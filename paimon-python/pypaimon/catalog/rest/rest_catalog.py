@@ -692,7 +692,7 @@ class RESTCatalog(Catalog):
         check_not_system_table(identifier, "submit_prediction")
         try:
             return self.rest_api.submit_prediction(
-                identifier, SubmitPredictionRequest.from_spec(spec)).to_prediction()
+                SubmitPredictionRequest.from_spec(identifier, spec)).to_prediction()
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_MODEL:
                 raise ModelNotExistException(Identifier.from_string(spec.model)) from e
@@ -703,58 +703,45 @@ class RESTCatalog(Catalog):
 
     def get_prediction(
             self,
-            identifier: Union[str, Identifier],
             job_id: str,
     ) -> Prediction:
-        if not isinstance(identifier, Identifier):
-            identifier = Identifier.from_string(identifier)
         try:
-            return self.rest_api.get_prediction(identifier, job_id).to_prediction()
+            return self.rest_api.get_prediction(job_id).to_prediction()
         except NoSuchResourceException as e:
-            if e.resource_type == ErrorResponse.RESOURCE_TYPE_PREDICTION:
-                raise PredictionNotExistException(identifier, job_id) from e
-            raise TableNotExistException(identifier) from e
+            raise PredictionNotExistException(job_id) from e
         except NotImplementedException as e:
             raise NotImplementedError(
                 "REST Catalog does not support predictions") from e
 
     def list_predictions(
             self,
-            identifier: Union[str, Identifier],
+            source: Optional[Union[str, Identifier]] = None,
             name: Optional[str] = None,
             status: Optional[PredictionStatus] = None,
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
     ) -> PagedList[Prediction]:
-        if not isinstance(identifier, Identifier):
-            identifier = Identifier.from_string(identifier)
+        if source is not None and not isinstance(source, Identifier):
+            source = Identifier.from_string(source)
         try:
             page = self.rest_api.list_predictions(
-                identifier, name, status, max_results, page_token)
+                source, name, status, max_results, page_token)
             return PagedList(
                 [value.to_prediction() for value in page.elements],
                 page.next_page_token,
             )
-        except NoSuchResourceException as e:
-            raise TableNotExistException(identifier) from e
         except NotImplementedException as e:
             raise NotImplementedError(
                 "REST Catalog does not support predictions") from e
 
     def cancel_prediction(
             self,
-            identifier: Union[str, Identifier],
             job_id: str,
     ) -> Prediction:
-        if not isinstance(identifier, Identifier):
-            identifier = Identifier.from_string(identifier)
         try:
-            return self.rest_api.cancel_prediction(
-                identifier, job_id).to_prediction()
+            return self.rest_api.cancel_prediction(job_id).to_prediction()
         except NoSuchResourceException as e:
-            if e.resource_type == ErrorResponse.RESOURCE_TYPE_PREDICTION:
-                raise PredictionNotExistException(identifier, job_id) from e
-            raise TableNotExistException(identifier) from e
+            raise PredictionNotExistException(job_id) from e
         except NotImplementedException as e:
             raise NotImplementedError(
                 "REST Catalog does not support predictions") from e

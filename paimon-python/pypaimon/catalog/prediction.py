@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from pypaimon.common.identifier import Identifier
+
 
 class PredictionStatus(str, Enum):
     PENDING = "PENDING"
@@ -80,9 +82,10 @@ class PredictionSpec:
 
 @dataclass
 class Prediction:
-    """Durable metadata for one asynchronous table prediction."""
+    """Durable metadata for one asynchronous prediction job."""
 
     job_id: str
+    source: Identifier
     status: PredictionStatus
     snapshot_id: int
     model: str
@@ -99,6 +102,8 @@ class Prediction:
 
     def __post_init__(self):
         _nonblank(self.job_id, "job_id")
+        if not isinstance(self.source, Identifier):
+            raise ValueError("source must be an Identifier")
         if isinstance(self.status, str):
             self.status = PredictionStatus(self.status)
         if not isinstance(self.status, PredictionStatus):

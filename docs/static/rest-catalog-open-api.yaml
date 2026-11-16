@@ -133,19 +133,17 @@ paths:
         "404":
           $ref: '#/components/responses/DatabaseOrModelNotExistErrorResponse'
         "501": {description: Models are not supported}
-  /v1/{prefix}/databases/{database}/tables/{table}/predictions:
+  /v1/{prefix}/predictions:
     post:
       tags: [prediction]
-      summary: Submit an asynchronous table prediction
+      summary: Submit a prediction job
       operationId: submitPrediction
       description: >-
-        Submits an asynchronous prediction with a fixed snapshot and model version.
-        Reusing an idempotencyKey for the same table and payload returns the existing
-        job; reusing it with a different payload returns 409.
+        Accepts a job after fixing the source snapshot and model version. Reusing an
+        idempotencyKey with the same payload returns the existing job; conflicting
+        reuse returns 409.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: database, in: path, required: true, schema: {type: string}}
-        - {name: table, in: path, required: true, schema: {type: string}}
       requestBody:
         required: true
         content:
@@ -168,13 +166,13 @@ paths:
         "501": {description: Predictions are not supported}
     get:
       tags: [prediction]
-      summary: List table predictions
+      summary: List prediction jobs
       operationId: listPredictions
       description: Newest first.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: database, in: path, required: true, schema: {type: string}}
-        - {name: table, in: path, required: true, schema: {type: string}}
+        - {name: database, in: query, required: false, schema: {type: string}}
+        - {name: table, in: query, required: false, schema: {type: string}}
         - {name: name, in: query, required: false, schema: {type: string}}
         - name: status
           in: query
@@ -185,23 +183,19 @@ paths:
         - {name: pageToken, in: query, required: false, schema: {type: string}}
       responses:
         "200":
-          description: Prediction metadata for the table
+          description: Prediction jobs
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListPredictionsResponse'
-        "404":
-          $ref: '#/components/responses/TableNotExistErrorResponse'
         "501": {description: Predictions are not supported}
-  /v1/{prefix}/databases/{database}/tables/{table}/predictions/{jobId}:
+  /v1/{prefix}/predictions/{jobId}:
     get:
       tags: [prediction]
-      summary: Get a table prediction
+      summary: Get a prediction job
       operationId: getPrediction
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: database, in: path, required: true, schema: {type: string}}
-        - {name: table, in: path, required: true, schema: {type: string}}
         - {name: jobId, in: path, required: true, schema: {type: string, minLength: 1}}
       responses:
         "200":
@@ -211,20 +205,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetPredictionResponse'
         "404":
-          $ref: '#/components/responses/TableOrPredictionNotExistErrorResponse'
+          $ref: '#/components/responses/PredictionNotExistErrorResponse'
         "501": {description: Predictions are not supported}
-  /v1/{prefix}/databases/{database}/tables/{table}/predictions/{jobId}/cancel:
+  /v1/{prefix}/predictions/{jobId}/cancel:
     post:
       tags: [prediction]
-      summary: Cancel a table prediction
+      summary: Cancel a prediction job
       operationId: cancelPrediction
       description: >-
         Requests cancellation and returns the latest state. Terminal jobs are
         unchanged.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: database, in: path, required: true, schema: {type: string}}
-        - {name: table, in: path, required: true, schema: {type: string}}
         - {name: jobId, in: path, required: true, schema: {type: string, minLength: 1}}
       responses:
         "200":
@@ -234,7 +226,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetPredictionResponse'
         "404":
-          $ref: '#/components/responses/TableOrPredictionNotExistErrorResponse'
+          $ref: '#/components/responses/PredictionNotExistErrorResponse'
         "501": {description: Predictions are not supported}
   /v1/config:
     get:
@@ -2997,8 +2989,8 @@ components:
                   resourceType:
                     type: string
                     enum: [ "DATABASE", "TABLE", "MODEL" ]
-    TableOrPredictionNotExistErrorResponse:
-      description: Database, table, or prediction not found
+    PredictionNotExistErrorResponse:
+      description: Prediction not found
       content:
         application/json:
           schema:
@@ -3009,7 +3001,7 @@ components:
                 properties:
                   resourceType:
                     type: string
-                    enum: [ "DATABASE", "TABLE", "PREDICTION" ]
+                    enum: [ "PREDICTION" ]
     TableNotExistErrorResponse:
       description:
         Not Found - TableNotExistException, the table does not exist
@@ -4680,11 +4672,20 @@ components:
     PredictionStatus:
       type: string
       enum: [PENDING, RUNNING, SUCCEEDED, PARTIAL_SUCCESS, FAILED, CANCELLED]
+    PredictionSource:
+      type: object
+      additionalProperties: false
+      required: [database, table]
+      properties:
+        database: {type: string, minLength: 1}
+        table: {type: string, minLength: 1}
     SubmitPredictionRequest:
       type: object
       additionalProperties: false
-      required: [idempotencyKey, model, inputs, resultColumns, prompt, outputSchema]
+      required: [source, idempotencyKey, model, inputs, resultColumns, prompt, outputSchema]
       properties:
+        source:
+          $ref: '#/components/schemas/PredictionSource'
         name:
           type: string
           minLength: 1
@@ -4735,9 +4736,11 @@ components:
     GetPredictionResponse:
       type: object
       additionalProperties: false
-      required: [jobId, status, snapshotId, model, modelVersion, outputTable, createdAt]
+      required: [jobId, source, status, snapshotId, model, modelVersion, outputTable, createdAt]
       properties:
         jobId: {type: string, minLength: 1}
+        source:
+          $ref: '#/components/schemas/PredictionSource'
         name: {type: string, minLength: 1}
         status:
           $ref: '#/components/schemas/PredictionStatus'

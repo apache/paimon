@@ -18,7 +18,9 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.Prediction;
+import org.apache.paimon.catalog.PredictionSource;
 import org.apache.paimon.catalog.PredictionSpec;
 import org.apache.paimon.catalog.PredictionStatus;
 import org.apache.paimon.rest.requests.SubmitPredictionRequest;
@@ -35,12 +37,13 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Wire-format tests for asynchronous table prediction metadata. */
+/** Wire-format tests for asynchronous prediction metadata. */
 class RESTApiPredictionTest {
 
     @Test
     void testRequestAndResponseWireFormat() throws Exception {
-        SubmitPredictionRequest request = new SubmitPredictionRequest(spec());
+        SubmitPredictionRequest request =
+                new SubmitPredictionRequest(Identifier.create("quality", "clips"), spec());
         Map<String, Object> requestMap = RESTApi.fromJson(RESTApi.toJson(request), Map.class);
         assertThat(requestMap.get("idempotencyKey")).isInstanceOf(String.class);
         assertThat((String) requestMap.get("idempotencyKey")).isNotBlank();
@@ -50,6 +53,9 @@ class RESTApiPredictionTest {
                 .containsEntry("model", "quality.qwen_vl")
                 .doesNotContainKeys("name", "where", "snapshotId", "tagName");
         assertThat(requestMap.get("resultColumns")).isEqualTo(Collections.singletonList("clip_id"));
+        assertThat((Map<String, Object>) requestMap.get("source"))
+                .containsEntry("database", "quality")
+                .containsEntry("table", "clips");
 
         GetPredictionResponse response = new GetPredictionResponse(prediction());
         GetPredictionResponse decoded =
@@ -128,6 +134,7 @@ class RESTApiPredictionTest {
     private static Prediction prediction() {
         return new Prediction(
                 "job-1",
+                new PredictionSource("quality", "clips"),
                 null,
                 PredictionStatus.PENDING,
                 7,

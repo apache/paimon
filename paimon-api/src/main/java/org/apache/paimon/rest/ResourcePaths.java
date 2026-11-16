@@ -161,17 +161,17 @@ public class ResourcePaths {
         return SLASH.join(models(databaseName), encodeString(modelName));
     }
 
-    public String predictions(String databaseName, String tableName) {
-        return SLASH.join(table(databaseName, tableName), PREDICTIONS);
+    public String predictions() {
+        return SLASH.join(V1, prefix, PREDICTIONS);
     }
 
-    public String prediction(String databaseName, String tableName, String jobId) {
+    public String prediction(String jobId) {
         checkArgument(jobId != null && !jobId.trim().isEmpty(), "jobId must not be blank");
-        return SLASH.join(predictions(databaseName, tableName), encodeString(jobId));
+        return SLASH.join(predictions(), encodeString(jobId));
     }
 
-    public String cancelPrediction(String databaseName, String tableName, String jobId) {
-        return SLASH.join(prediction(databaseName, tableName, jobId), "cancel");
+    public String cancelPrediction(String jobId) {
+        return SLASH.join(prediction(jobId), "cancel");
     }
 
     private static void checkModelPathSegment(String value, String name) {

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest.requests;
 
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PredictionSource;
 import org.apache.paimon.catalog.PredictionSpec;
 import org.apache.paimon.rest.RESTRequest;
 
@@ -35,11 +37,12 @@ import java.util.UUID;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Request for submitting an asynchronous table prediction. */
+/** Request for submitting an asynchronous prediction job. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SubmitPredictionRequest implements RESTRequest {
 
     private static final String FIELD_NAME = "name";
+    private static final String FIELD_SOURCE = "source";
     private static final String FIELD_IDEMPOTENCY_KEY = "idempotencyKey";
     private static final String FIELD_MODEL = "model";
     private static final String FIELD_INPUTS = "inputs";
@@ -52,10 +55,12 @@ public class SubmitPredictionRequest implements RESTRequest {
     private static final String FIELD_OPTIONS = "options";
 
     private final String idempotencyKey;
+    private final PredictionSource source;
     private final PredictionSpec spec;
 
     @JsonCreator
     public SubmitPredictionRequest(
+            @JsonProperty(FIELD_SOURCE) PredictionSource source,
             @Nullable @JsonProperty(FIELD_NAME) String name,
             @Nullable @JsonProperty(FIELD_IDEMPOTENCY_KEY) String idempotencyKey,
             @JsonProperty(FIELD_MODEL) String model,
@@ -67,9 +72,11 @@ public class SubmitPredictionRequest implements RESTRequest {
             @Nullable @JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId,
             @Nullable @JsonProperty(FIELD_TAG_NAME) String tagName,
             @Nullable @JsonProperty(FIELD_OPTIONS) Map<String, Object> options) {
+        checkArgument(source != null, "source must not be null");
         checkArgument(
                 idempotencyKey == null || !idempotencyKey.trim().isEmpty(),
                 "idempotencyKey must not be blank");
+        this.source = source;
         this.idempotencyKey =
                 idempotencyKey == null ? UUID.randomUUID().toString() : idempotencyKey;
         this.spec =
@@ -86,8 +93,9 @@ public class SubmitPredictionRequest implements RESTRequest {
                         options);
     }
 
-    public SubmitPredictionRequest(PredictionSpec spec) {
+    public SubmitPredictionRequest(Identifier source, PredictionSpec spec) {
         this(
+                new PredictionSource(source),
                 spec.name(),
                 null,
                 spec.model(),
@@ -99,6 +107,11 @@ public class SubmitPredictionRequest implements RESTRequest {
                 spec.snapshotId(),
                 spec.tagName(),
                 spec.options());
+    }
+
+    @JsonGetter(FIELD_SOURCE)
+    public PredictionSource getSource() {
+        return source;
     }
 
     @Nullable

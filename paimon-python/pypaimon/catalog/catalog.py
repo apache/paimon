@@ -122,7 +122,6 @@ class Catalog(ABC):
 
     def get_prediction(
             self,
-            identifier: Union[str, Identifier],
             job_id: str,
     ) -> 'Prediction':
         """Get one prediction by its unique job id."""
@@ -131,19 +130,18 @@ class Catalog(ABC):
 
     def list_predictions(
             self,
-            identifier: Union[str, Identifier],
+            source: Optional[Union[str, Identifier]] = None,
             name: Optional[str] = None,
             status: Optional['PredictionStatus'] = None,
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
     ) -> PagedList['Prediction']:
-        """List predictions for a table, optionally filtered by name or status."""
+        """List predictions, optionally filtered by source table."""
         raise NotImplementedError(
             "list_predictions is not supported by this catalog.")
 
     def cancel_prediction(
             self,
-            identifier: Union[str, Identifier],
             job_id: str,
     ) -> 'Prediction':
         """Request cancellation and return the updated prediction."""

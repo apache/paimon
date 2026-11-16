@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.catalog.Prediction;
+import org.apache.paimon.catalog.PredictionSource;
 import org.apache.paimon.catalog.PredictionStatus;
 import org.apache.paimon.rest.RESTResponse;
 
@@ -30,11 +31,12 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
-/** Response containing durable metadata for one asynchronous table prediction. */
+/** Response containing durable metadata for one asynchronous prediction job. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class GetPredictionResponse implements RESTResponse {
 
     private final String jobId;
+    private final PredictionSource source;
     private final @Nullable String name;
     private final PredictionStatus status;
     private final long snapshotId;
@@ -52,6 +54,7 @@ public class GetPredictionResponse implements RESTResponse {
     @JsonCreator
     public GetPredictionResponse(
             @JsonProperty("jobId") String jobId,
+            @JsonProperty("source") PredictionSource source,
             @Nullable @JsonProperty("name") String name,
             @JsonProperty("status") PredictionStatus status,
             @JsonProperty("snapshotId") long snapshotId,
@@ -66,6 +69,7 @@ public class GetPredictionResponse implements RESTResponse {
             @Nullable @JsonProperty("succeeded") Long succeeded,
             @Nullable @JsonProperty("failed") Long failed) {
         this.jobId = jobId;
+        this.source = source;
         this.name = name;
         this.status = status;
         this.snapshotId = snapshotId;
@@ -84,6 +88,7 @@ public class GetPredictionResponse implements RESTResponse {
     public GetPredictionResponse(Prediction prediction) {
         this(
                 prediction.jobId(),
+                prediction.source(),
                 prediction.name(),
                 prediction.status(),
                 prediction.snapshotId(),
@@ -102,6 +107,11 @@ public class GetPredictionResponse implements RESTResponse {
     @JsonGetter("jobId")
     public String getJobId() {
         return jobId;
+    }
+
+    @JsonGetter("source")
+    public PredictionSource getSource() {
+        return source;
     }
 
     @Nullable
@@ -186,6 +196,7 @@ public class GetPredictionResponse implements RESTResponse {
     public Prediction toPrediction() {
         return new Prediction(
                 jobId,
+                source,
                 name,
                 status,
                 snapshotId,

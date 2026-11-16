@@ -1819,27 +1819,23 @@ public class RESTApi {
     }
 
     /** Submit an asynchronous prediction over a table. */
-    public GetPredictionResponse submitPrediction(
-            Identifier identifier, SubmitPredictionRequest request) {
+    public GetPredictionResponse submitPrediction(SubmitPredictionRequest request) {
         return client.post(
-                resourcePaths.predictions(identifier.getDatabaseName(), identifier.getObjectName()),
+                resourcePaths.predictions(),
                 request,
                 GetPredictionResponse.class,
                 restAuthFunction);
     }
 
-    /** Get one asynchronous table prediction by its unique job id. */
-    public GetPredictionResponse getPrediction(Identifier identifier, String jobId) {
+    /** Get one asynchronous prediction by its unique job id. */
+    public GetPredictionResponse getPrediction(String jobId) {
         return client.get(
-                resourcePaths.prediction(
-                        identifier.getDatabaseName(), identifier.getObjectName(), jobId),
-                GetPredictionResponse.class,
-                restAuthFunction);
+                resourcePaths.prediction(jobId), GetPredictionResponse.class, restAuthFunction);
     }
 
-    /** List asynchronous predictions for a table, ordered newest first by the server. */
+    /** List asynchronous predictions, ordered newest first by the server. */
     public PagedList<GetPredictionResponse> listPredictions(
-            Identifier identifier,
+            @Nullable Identifier source,
             @Nullable String name,
             @Nullable PredictionStatus status,
             @Nullable Integer maxResults,
@@ -1848,12 +1844,13 @@ public class RESTApi {
                 buildPagedQueryParams(
                         maxResults,
                         pageToken,
+                        Pair.of("database", source == null ? null : source.getDatabaseName()),
+                        Pair.of("table", source == null ? null : source.getObjectName()),
                         Pair.of(PREDICTION_NAME, name),
                         Pair.of(PREDICTION_STATUS, status == null ? null : status.name()));
         ListPredictionsResponse response =
                 client.get(
-                        resourcePaths.predictions(
-                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        resourcePaths.predictions(),
                         queryParams,
                         ListPredictionsResponse.class,
                         restAuthFunction);
@@ -1861,10 +1858,9 @@ public class RESTApi {
     }
 
     /** Request cancellation and return the updated prediction metadata. */
-    public GetPredictionResponse cancelPrediction(Identifier identifier, String jobId) {
+    public GetPredictionResponse cancelPrediction(String jobId) {
         return client.post(
-                resourcePaths.cancelPrediction(
-                        identifier.getDatabaseName(), identifier.getObjectName(), jobId),
+                resourcePaths.cancelPrediction(jobId),
                 null,
                 GetPredictionResponse.class,
                 restAuthFunction);

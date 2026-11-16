@@ -20,16 +20,13 @@ from datetime import timedelta
 from typing import Optional
 
 from pypaimon.catalog.prediction import Prediction
-from pypaimon.common.identifier import Identifier
 
 
 class PredictionJob:
-    """Client handle for a durable asynchronous table prediction."""
+    """Client handle for a durable asynchronous prediction job."""
 
-    def __init__(
-            self, catalog, identifier: Identifier, prediction: Prediction):
+    def __init__(self, catalog, prediction: Prediction):
         self._catalog = catalog
-        self._identifier = identifier
         self._prediction = prediction
 
     @property
@@ -41,7 +38,7 @@ class PredictionJob:
 
     def refresh(self) -> 'PredictionJob':
         self._prediction = self._catalog.get_prediction(
-            self._identifier, self._prediction.job_id)
+            self._prediction.job_id)
         return self
 
     def wait(
@@ -77,5 +74,5 @@ class PredictionJob:
 
     def cancel(self) -> 'PredictionJob':
         self._prediction = self._catalog.cancel_prediction(
-            self._identifier, self._prediction.job_id)
+            self._prediction.job_id)
         return self

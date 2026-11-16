@@ -1205,26 +1205,23 @@ public interface Catalog extends AutoCloseable {
         throw new UnsupportedOperationException("Current Catalog does not support predictions");
     }
 
-    /** Get one asynchronous table prediction by its unique job id. */
-    default Prediction getPrediction(Identifier identifier, String jobId)
-            throws TableNotExistException, PredictionNotExistException {
+    /** Get one asynchronous prediction by its unique job id. */
+    default Prediction getPrediction(String jobId) throws PredictionNotExistException {
         throw new UnsupportedOperationException("Current Catalog does not support predictions");
     }
 
-    /** List asynchronous predictions for a table. */
+    /** List asynchronous predictions, optionally filtered by source table. */
     default PagedList<Prediction> listPredictions(
-            Identifier identifier,
+            @Nullable Identifier source,
             @Nullable String name,
             @Nullable PredictionStatus status,
             @Nullable Integer maxResults,
-            @Nullable String pageToken)
-            throws TableNotExistException {
+            @Nullable String pageToken) {
         throw new UnsupportedOperationException("Current Catalog does not support predictions");
     }
 
     /** Request cancellation and return the updated prediction metadata. */
-    default Prediction cancelPrediction(Identifier identifier, String jobId)
-            throws TableNotExistException, PredictionNotExistException {
+    default Prediction cancelPrediction(String jobId) throws PredictionNotExistException {
         throw new UnsupportedOperationException("Current Catalog does not support predictions");
     }
 
@@ -1971,24 +1968,17 @@ public interface Catalog extends AutoCloseable {
     /** Exception for trying to access a prediction that doesn't exist. */
     class PredictionNotExistException extends Exception {
 
-        private static final String MSG = "Prediction %s for table %s doesn't exist.";
+        private static final String MSG = "Prediction %s doesn't exist.";
 
-        private final Identifier identifier;
         private final String jobId;
 
-        public PredictionNotExistException(Identifier identifier, String jobId) {
-            this(identifier, jobId, null);
+        public PredictionNotExistException(String jobId) {
+            this(jobId, null);
         }
 
-        public PredictionNotExistException(
-                Identifier identifier, String jobId, @Nullable Throwable cause) {
-            super(String.format(MSG, jobId, identifier.getFullName()), cause);
-            this.identifier = identifier;
+        public PredictionNotExistException(String jobId, @Nullable Throwable cause) {
+            super(String.format(MSG, jobId), cause);
             this.jobId = jobId;
-        }
-
-        public Identifier identifier() {
-            return identifier;
         }
 
         public String jobId() {

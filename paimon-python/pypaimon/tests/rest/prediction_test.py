@@ -25,6 +25,7 @@ from unittest.mock import Mock
 from pypaimon.api.prediction import (
     GetPredictionResponse,
     ListPredictionsResponse,
+    PredictionSource,
     SubmitPredictionRequest,
 )
 from pypaimon.api.rest_api import RESTApi
@@ -58,6 +59,7 @@ def _spec(**changes):
 def _prediction(status=PredictionStatus.PENDING, **changes):
     values = dict(
         job_id="job-1",
+        source=Identifier.create("quality", "clips"),
         name="daily-quality",
         status=status,
         snapshot_id=7,
@@ -73,6 +75,7 @@ def _prediction(status=PredictionStatus.PENDING, **changes):
 def _response(status="PENDING", **changes):
     values = dict(
         job_id="job-1",
+        source=PredictionSource("quality", "clips"),
         name="daily-quality",
         status=status,
         snapshot_id=7,
@@ -88,7 +91,8 @@ def _response(status="PENDING", **changes):
 class PredictionTest(unittest.TestCase):
 
     def test_request_and_response_wire_format(self):
-        request = SubmitPredictionRequest.from_spec(_spec())
+        request = SubmitPredictionRequest.from_spec(
+            Identifier.create("quality", "clips"), _spec())
         body = json.loads(JSON.to_json(request))
         self.assertTrue(body["idempotencyKey"])
         self.assertEqual(
@@ -97,6 +101,8 @@ class PredictionTest(unittest.TestCase):
         )
         self.assertEqual(["clip_id"], body["resultColumns"])
         self.assertEqual({"result": "STRING"}, body["outputSchema"])
+        self.assertEqual(
+            {"database": "quality", "table": "clips"}, body["source"])
         self.assertNotIn("snapshotId", body)
 
         response = JSON.from_json(
@@ -157,8 +163,7 @@ class PredictionTest(unittest.TestCase):
             _prediction(
                 PredictionStatus.SUCCEEDED, total=2, succeeded=2, failed=0),
         ]
-        job = PredictionJob(
-            catalog, Identifier.create("quality", "clips"), _prediction())
+        job = PredictionJob(catalog, _prediction())
         result = job.wait(timeout=timedelta(seconds=1), poll_interval=0)
         self.assertIs(job, result)
         self.assertEqual(PredictionStatus.SUCCEEDED, job.status)
@@ -213,8 +218,12 @@ class PredictionTest(unittest.TestCase):
             self.assertEqual("job-1", catalog.submit_prediction(
                 identifier, _spec()).job_id)
             self.assertEqual(
-                "/v1/catalog/databases/a%2Fb/tables/clip+table/predictions",
+                "/v1/catalog/predictions",
                 calls[-1][1],
+            )
+            self.assertEqual(
+                {"database": "a/b", "table": "clip table"},
+                calls[-1][2]["source"],
             )
             self.assertTrue(calls[-1][2]["idempotencyKey"])
 
@@ -227,13 +236,15 @@ class PredictionTest(unittest.TestCase):
             )
             self.assertEqual("job-1", page.elements[0].job_id)
             self.assertIn("name=daily-quality", calls[-1][1])
+            self.assertIn("database=a%2Fb", calls[-1][1])
+            self.assertIn("table=clip+table", calls[-1][1])
             self.assertIn("status=RUNNING", calls[-1][1])
             self.assertIn("maxResults=10", calls[-1][1])
             self.assertIn("pageToken=p1", calls[-1][1])
 
-            catalog.get_prediction(identifier, "job/1")
+            catalog.get_prediction("job/1")
             self.assertTrue(calls[-1][1].endswith("/predictions/job%2F1"))
-            catalog.cancel_prediction(identifier, "job/1")
+            catalog.cancel_prediction("job/1")
             self.assertTrue(
                 calls[-1][1].endswith("/predictions/job%2F1/cancel"))
         finally:

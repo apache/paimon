@@ -138,11 +138,9 @@ class ModelAlreadyExistException(CatalogException):
 class PredictionNotExistException(CatalogException):
     """Prediction not exist exception"""
 
-    def __init__(self, identifier: Identifier, job_id: str):
-        self.identifier = identifier
+    def __init__(self, job_id: str):
         self.job_id = job_id
-        super().__init__(
-            f"Prediction {job_id} for table {identifier.get_full_name()} does not exist")
+        super().__init__(f"Prediction {job_id} does not exist")
 
 
 class ColumnNotExistException(CatalogException):

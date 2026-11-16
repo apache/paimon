@@ -20,7 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Experimental;
 
-/** Lifecycle state of an asynchronous table prediction. */
+/** Lifecycle state of an asynchronous prediction job. */
 @Experimental
 public enum PredictionStatus {
     PENDING,

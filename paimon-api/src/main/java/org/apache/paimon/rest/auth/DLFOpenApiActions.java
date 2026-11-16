@@ -51,22 +51,10 @@ final class DLFOpenApiActions {
         {"GET", "/v1/{prefix}/tables/id/{tableId}", "GetTableById"},
         {"POST", "/v1/{prefix}/tables/rename", "RenameTable"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/auth", "AuthTableQuery"},
-        {
-            "POST",
-            "/v1/{prefix}/databases/{database}/tables/{table}/predictions",
-            "SubmitPrediction"
-        },
-        {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/predictions", "ListPredictions"},
-        {
-            "GET",
-            "/v1/{prefix}/databases/{database}/tables/{table}/predictions/{jobId}",
-            "GetPrediction"
-        },
-        {
-            "POST",
-            "/v1/{prefix}/databases/{database}/tables/{table}/predictions/{jobId}/cancel",
-            "CancelPrediction"
-        },
+        {"POST", "/v1/{prefix}/predictions", "SubmitPrediction"},
+        {"GET", "/v1/{prefix}/predictions", "ListPredictions"},
+        {"GET", "/v1/{prefix}/predictions/{jobId}", "GetPrediction"},
+        {"POST", "/v1/{prefix}/predictions/{jobId}/cancel", "CancelPrediction"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/commit", "CommitTable"},
         {
             "POST",

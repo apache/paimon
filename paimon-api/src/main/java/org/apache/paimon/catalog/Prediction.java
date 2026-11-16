@@ -24,11 +24,12 @@ import javax.annotation.Nullable;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Durable metadata for one asynchronous table prediction. */
+/** Durable metadata for one asynchronous prediction job. */
 @Experimental
 public class Prediction {
 
     private final String jobId;
+    private final PredictionSource source;
     private final @Nullable String name;
     private final PredictionStatus status;
     private final long snapshotId;
@@ -45,6 +46,7 @@ public class Prediction {
 
     public Prediction(
             String jobId,
+            PredictionSource source,
             @Nullable String name,
             PredictionStatus status,
             long snapshotId,
@@ -59,6 +61,7 @@ public class Prediction {
             @Nullable Long succeeded,
             @Nullable Long failed) {
         checkNonBlank(jobId, "jobId");
+        checkArgument(source != null, "source must not be null");
         checkArgument(status != null, "status must not be null");
         checkArgument(snapshotId > 0, "snapshotId must be positive");
         checkNonBlank(model, "model");
@@ -71,6 +74,7 @@ public class Prediction {
         checkOptionalNonNegative(succeeded, "succeeded");
         checkOptionalNonNegative(failed, "failed");
         this.jobId = jobId;
+        this.source = source;
         this.name = name;
         this.status = status;
         this.snapshotId = snapshotId;
@@ -88,6 +92,10 @@ public class Prediction {
 
     public String jobId() {
         return jobId;
+    }
+
+    public PredictionSource source() {
+        return source;
     }
 
     @Nullable

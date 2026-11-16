@@ -27,7 +27,7 @@ import yaml
 
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.model import CreateModelRequest
-from pypaimon.api.prediction import SubmitPredictionRequest
+from pypaimon.api.prediction import PredictionSource, SubmitPredictionRequest
 from pypaimon.catalog.model import ModelField, ProviderModelDefinition
 from pypaimon.common.identifier import Identifier
 from pypaimon.function.function import FunctionImpl
@@ -65,6 +65,7 @@ _ARGUMENTS = {
         ),
     ),
     SubmitPredictionRequest: SubmitPredictionRequest(
+        source=PredictionSource("db", "t"),
         model="db.qwen_vl",
         inputs={"video": "content"},
         result_columns=["id"],

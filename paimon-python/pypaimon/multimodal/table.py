@@ -154,17 +154,14 @@ class MultimodalTable:
         )
         prediction = self.catalog.submit_prediction(
             self.raw_table.identifier, spec)
-        return PredictionJob(
-            self.catalog, self.raw_table.identifier, prediction)
+        return PredictionJob(self.catalog, prediction)
 
     def get_prediction(self, job_id):
         """Return a client handle for one asynchronous prediction."""
         from pypaimon.multimodal.prediction import PredictionJob
 
-        prediction = self.catalog.get_prediction(
-            self.raw_table.identifier, job_id)
-        return PredictionJob(
-            self.catalog, self.raw_table.identifier, prediction)
+        prediction = self.catalog.get_prediction(job_id)
+        return PredictionJob(self.catalog, prediction)
 
     def list_predictions(
             self,
@@ -181,7 +178,7 @@ class MultimodalTable:
         if isinstance(status, str):
             status = PredictionStatus(status)
         page = self.catalog.list_predictions(
-            self.raw_table.identifier,
+            source=self.raw_table.identifier,
             name=name,
             status=status,
             max_results=max_results,
@@ -189,7 +186,7 @@ class MultimodalTable:
         )
         return PagedList(
             [
-                PredictionJob(self.catalog, self.raw_table.identifier, value)
+                PredictionJob(self.catalog, value)
                 for value in page.elements
             ],
             page.next_page_token,

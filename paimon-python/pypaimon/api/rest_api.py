@@ -792,37 +792,35 @@ class RESTApi:
 
     def submit_prediction(
             self,
-            identifier: Identifier,
             request: SubmitPredictionRequest,
     ) -> GetPredictionResponse:
-        database_name, table_name = self._validate_resource_path(identifier)
         return self.client.post_with_response_type(
-            self.resource_paths.predictions(database_name, table_name),
+            self.resource_paths.predictions(),
             request,
             GetPredictionResponse,
             self.rest_auth_function,
         )
 
-    def get_prediction(
-            self, identifier: Identifier, job_id: str
-    ) -> GetPredictionResponse:
-        database_name, table_name = self._validate_resource_path(identifier)
+    def get_prediction(self, job_id: str) -> GetPredictionResponse:
         return self.client.get(
-            self.resource_paths.prediction(database_name, table_name, job_id),
+            self.resource_paths.prediction(job_id),
             GetPredictionResponse,
             self.rest_auth_function,
         )
 
     def list_predictions(
             self,
-            identifier: Identifier,
+            source: Optional[Identifier] = None,
             name: Optional[str] = None,
             status: Optional[PredictionStatus] = None,
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
     ) -> PagedList[GetPredictionResponse]:
-        database_name, table_name = self._validate_resource_path(identifier)
         query_params = {}
+        if source is not None:
+            database_name, table_name = self._validate_resource_path(source)
+            self._put_query_parameter(query_params, "database", database_name)
+            self._put_query_parameter(query_params, "table", table_name)
         self._put_query_parameter(query_params, "name", name)
         self._put_query_parameter(
             query_params, "status", status.value if status is not None else None)
@@ -830,19 +828,16 @@ class RESTApi:
             query_params[self.MAX_RESULTS] = str(max_results)
         self._put_query_parameter(query_params, self.PAGE_TOKEN, page_token)
         response = self.client.get_with_params(
-            self.resource_paths.predictions(database_name, table_name),
+            self.resource_paths.predictions(),
             query_params,
             ListPredictionsResponse,
             self.rest_auth_function,
         )
         return PagedList(response.predictions, response.next_page_token)
 
-    def cancel_prediction(
-            self, identifier: Identifier, job_id: str
-    ) -> GetPredictionResponse:
-        database_name, table_name = self._validate_resource_path(identifier)
+    def cancel_prediction(self, job_id: str) -> GetPredictionResponse:
         return self.client.post_with_response_type(
-            self.resource_paths.cancel_prediction(database_name, table_name, job_id),
+            self.resource_paths.cancel_prediction(job_id),
             CancelPredictionRequest(),
             GetPredictionResponse,
             self.rest_auth_function,
