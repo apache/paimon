@@ -48,6 +48,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -402,10 +404,12 @@ public class BlobFallbackRecordReaderTest {
         assertThat(rows.placeholderRowCount).isEqualTo(0);
     }
 
-    @Test
-    public void testCompactionKeepsUnresolvedPlaceholdersForAllBlobTypes() throws Exception {
-        DataFileMeta file = blobFile("prefix-file", 0, 3, 2);
-        Set<String> placeholders = placeholderRows(file, 1);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testUnresolvedPlaceholdersForAllBlobTypes(boolean keepPlaceholders)
+            throws Exception {
+        DataFileMeta file = blobFile("prefix-file", 1, 3, 2);
+        Set<String> placeholders = placeholderRows(file, 2);
         for (RowType rowType :
                 Arrays.asList(READ_ROW_TYPE, READ_ARRAY_ROW_TYPE, READ_MAP_ROW_TYPE)) {
             List<InternalRow> input =
@@ -414,25 +418,40 @@ public class BlobFallbackRecordReaderTest {
                             : rowType == READ_MAP_ROW_TYPE
                                     ? mapFileRows(file, placeholders)
                                     : fileRows(file, null, placeholders);
+            ((GenericRow) input.get(0)).setField(BLOB_INDEX, null);
             InternalRow.FieldGetter getter =
                     InternalRow.createFieldGetter(rowType.getTypeAt(BLOB_INDEX), BLOB_INDEX);
             List<Object> values = new ArrayList<>();
+            List<Long> rowIds = new ArrayList<>();
+            List<Long> sequenceNumbers = new ArrayList<>();
             try (RecordReader<InternalRow> reader =
                     new BlobFallbackRecordReader(
                             Collections.singletonList(file),
                             ignored -> oneRowPerBatchReader(file, input),
                             (recordReader, range) -> recordReader,
-                            new Range(0, 2),
+                            new Range(0, 4),
                             null,
                             rowType,
                             BLOB_INDEX,
-                            true)) {
-                reader.forEachRemaining(row -> values.add(getter.getFieldOrNull(row)));
+                            keepPlaceholders)) {
+                reader.forEachRemaining(
+                        row -> {
+                            values.add(getter.getFieldOrNull(row));
+                            rowIds.add(row.getLong(1));
+                            sequenceNumbers.add(row.getLong(2));
+                        });
             }
-            assertThat(values).as(rowType.toString()).hasSize(3).doesNotContainNull();
-            assertThat(values.get(1))
+            Object unresolved = keepPlaceholders ? getter.getFieldOrNull(input.get(1)) : null;
+            assertThat(values)
                     .as(rowType.toString())
-                    .isSameAs(getter.getFieldOrNull(input.get(1)));
+                    .containsExactly(
+                            unresolved,
+                            null,
+                            unresolved,
+                            getter.getFieldOrNull(input.get(2)),
+                            unresolved);
+            assertThat(rowIds).containsExactly(0L, 1L, 2L, 3L, 4L);
+            assertThat(sequenceNumbers).containsExactly(-1L, 2L, -1L, 2L, -1L);
         }
     }
 
