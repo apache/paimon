@@ -23,6 +23,7 @@ from pypaimon.api.api_request import RESTRequest
 from pypaimon.api.api_response import PagedResponse, RESTResponse
 from pypaimon.catalog.prediction import (
     Prediction,
+    PredictionOutput as CatalogPredictionOutput,
     PredictionSpec,
     PredictionStatus,
     _copy_string_list,
@@ -49,6 +50,31 @@ class PredictionSource:
 
     def to_identifier(self) -> Identifier:
         return Identifier.create(self.database, self.table)
+
+
+@dataclass
+class PredictionOutput:
+    table: Optional[PredictionSource] = optional_json_field(
+        "table", "non_null")
+
+    def __post_init__(self):
+        if self.table is not None and not isinstance(
+                self.table, PredictionSource):
+            raise ValueError("table must be a PredictionSource")
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PredictionOutput":
+        table = data.get("table")
+        return cls(
+            table=(PredictionSource(**table)
+                   if isinstance(table, dict) else table),
+        )
+
+    def to_catalog_output(self) -> CatalogPredictionOutput:
+        return CatalogPredictionOutput(
+            table=(self.table.to_identifier()
+                   if self.table is not None else None),
+        )
 
 
 @dataclass
@@ -132,8 +158,9 @@ class GetPredictionResponse(RESTResponse):
     snapshot_id: int = json_field("snapshotId", default=0)
     model: str = ""
     model_version: str = json_field("modelVersion", default="")
-    output_table: str = json_field("outputTable", default="")
     name: Optional[str] = optional_json_field("name", "non_null")
+    output: Optional[PredictionOutput] = optional_json_field(
+        "output", "non_null")
     start_time: Optional[int] = optional_json_field("startTime", "non_null")
     end_time: Optional[int] = optional_json_field("endTime", "non_null")
 
@@ -151,7 +178,9 @@ class GetPredictionResponse(RESTResponse):
             snapshot_id=data.get("snapshotId"),
             model=data.get("model"),
             model_version=data.get("modelVersion"),
-            output_table=data.get("outputTable"),
+            output=(PredictionOutput.from_dict(data.get("output"))
+                    if isinstance(data.get("output"), dict)
+                    else data.get("output")),
             start_time=data.get("startTime"),
             end_time=data.get("endTime"),
         )
@@ -165,7 +194,8 @@ class GetPredictionResponse(RESTResponse):
             snapshot_id=self.snapshot_id,
             model=self.model,
             model_version=self.model_version,
-            output_table=self.output_table,
+            output=(self.output.to_catalog_output()
+                    if self.output is not None else None),
             start_time=self.start_time,
             end_time=self.end_time,
         )

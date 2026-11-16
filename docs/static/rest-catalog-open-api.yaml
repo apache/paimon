@@ -4701,6 +4701,13 @@ components:
       properties:
         database: {type: string, minLength: 1}
         table: {type: string, minLength: 1}
+    PredictionOutput:
+      type: object
+      minProperties: 1
+      properties:
+        table:
+          $ref: '#/components/schemas/PredictionSource'
+      additionalProperties: true
     SubmitPredictionRequest:
       type: object
       additionalProperties: false
@@ -4758,7 +4765,7 @@ components:
     GetPredictionResponse:
       type: object
       additionalProperties: false
-      required: [predictionId, source, status, snapshotId, model, modelVersion, outputTable]
+      required: [predictionId, source, status, snapshotId, model, modelVersion]
       properties:
         predictionId: {type: string, minLength: 1}
         source:
@@ -4769,7 +4776,8 @@ components:
         snapshotId: {type: integer, format: int64, minimum: 1}
         model: {type: string, minLength: 1}
         modelVersion: {type: string, minLength: 1}
-        outputTable: {type: string, minLength: 1}
+        output:
+          $ref: '#/components/schemas/PredictionOutput'
         startTime: {type: integer, format: int64, minimum: 0}
         endTime: {type: integer, format: int64, minimum: 0}
     ListPredictionsResponse:

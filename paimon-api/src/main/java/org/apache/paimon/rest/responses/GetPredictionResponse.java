@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.catalog.Prediction;
+import org.apache.paimon.catalog.PredictionOutput;
 import org.apache.paimon.catalog.PredictionSource;
 import org.apache.paimon.catalog.PredictionStatus;
 import org.apache.paimon.rest.RESTResponse;
@@ -42,7 +43,7 @@ public class GetPredictionResponse implements RESTResponse {
     private final long snapshotId;
     private final String model;
     private final String modelVersion;
-    private final String outputTable;
+    private final @Nullable PredictionOutput output;
     private final @Nullable Long startTime;
     private final @Nullable Long endTime;
 
@@ -55,7 +56,7 @@ public class GetPredictionResponse implements RESTResponse {
             @JsonProperty("snapshotId") long snapshotId,
             @JsonProperty("model") String model,
             @JsonProperty("modelVersion") String modelVersion,
-            @JsonProperty("outputTable") String outputTable,
+            @Nullable @JsonProperty("output") PredictionOutput output,
             @Nullable @JsonProperty("startTime") Long startTime,
             @Nullable @JsonProperty("endTime") Long endTime) {
         this.predictionId = predictionId;
@@ -65,7 +66,7 @@ public class GetPredictionResponse implements RESTResponse {
         this.snapshotId = snapshotId;
         this.model = model;
         this.modelVersion = modelVersion;
-        this.outputTable = outputTable;
+        this.output = output;
         this.startTime = startTime;
         this.endTime = endTime;
     }
@@ -79,7 +80,7 @@ public class GetPredictionResponse implements RESTResponse {
                 prediction.snapshotId(),
                 prediction.model(),
                 prediction.modelVersion(),
-                prediction.outputTable(),
+                prediction.output(),
                 prediction.startTime(),
                 prediction.endTime());
     }
@@ -121,9 +122,11 @@ public class GetPredictionResponse implements RESTResponse {
         return modelVersion;
     }
 
-    @JsonGetter("outputTable")
-    public String getOutputTable() {
-        return outputTable;
+    @Nullable
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonGetter("output")
+    public PredictionOutput getOutput() {
+        return output;
     }
 
     @Nullable
@@ -149,7 +152,7 @@ public class GetPredictionResponse implements RESTResponse {
                 snapshotId,
                 model,
                 modelVersion,
-                outputTable,
+                output,
                 startTime,
                 endTime);
     }

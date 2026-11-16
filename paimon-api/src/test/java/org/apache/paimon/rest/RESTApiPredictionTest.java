@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.Prediction;
+import org.apache.paimon.catalog.PredictionOutput;
 import org.apache.paimon.catalog.PredictionSource;
 import org.apache.paimon.catalog.PredictionSpec;
 import org.apache.paimon.catalog.PredictionStatus;
@@ -65,7 +66,14 @@ class RESTApiPredictionTest {
         assertThat(decoded.toPrediction().status().terminationDetails()).isNull();
         assertThat(decoded.getName()).isNull();
         assertThat(RESTApi.fromJson(RESTApi.toJson(response), Map.class))
-                .doesNotContainKeys("createdAt", "startedAt", "finishedAt", "startTime", "endTime");
+                .doesNotContainKeys(
+                        "createdAt",
+                        "startedAt",
+                        "finishedAt",
+                        "outputTable",
+                        "output",
+                        "startTime",
+                        "endTime");
 
         GetPredictionResponse completed =
                 new GetPredictionResponse(
@@ -80,13 +88,19 @@ class RESTApiPredictionTest {
                                 7,
                                 "quality.qwen_vl",
                                 "1",
-                                "system.prediction_results",
+                                new PredictionOutput(
+                                        new PredictionSource("system", "prediction_results")),
                                 10L,
                                 20L));
-        assertThat(RESTApi.fromJson(RESTApi.toJson(completed), Map.class))
+        Map<String, Object> completedMap = RESTApi.fromJson(RESTApi.toJson(completed), Map.class);
+        assertThat(completedMap)
                 .containsEntry("startTime", 10)
                 .containsEntry("endTime", 20)
-                .doesNotContainKeys("createdAt", "startedAt", "finishedAt");
+                .doesNotContainKeys("createdAt", "startedAt", "finishedAt", "outputTable");
+        Map<String, Object> output = (Map<String, Object>) completedMap.get("output");
+        assertThat((Map<String, Object>) output.get("table"))
+                .containsEntry("database", "system")
+                .containsEntry("table", "prediction_results");
 
         ListPredictionsResponse empty = RESTApi.fromJson("{}", ListPredictionsResponse.class);
         assertThat(empty.getPredictions()).isEmpty();
@@ -180,7 +194,7 @@ class RESTApiPredictionTest {
                 7,
                 "quality.qwen_vl",
                 "1",
-                "system.prediction_results",
+                null,
                 null,
                 null);
     }

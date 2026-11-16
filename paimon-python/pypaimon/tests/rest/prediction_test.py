@@ -25,12 +25,14 @@ from unittest.mock import Mock
 from pypaimon.api.prediction import (
     GetPredictionResponse,
     ListPredictionsResponse,
+    PredictionOutput as ApiPredictionOutput,
     PredictionSource,
     SubmitPredictionRequest,
 )
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.catalog.prediction import (
     Prediction,
+    PredictionOutput,
     PredictionState,
     PredictionSpec,
     PredictionStatus,
@@ -70,7 +72,6 @@ def _prediction(status=None, **changes):
         snapshot_id=7,
         model="quality.qwen_vl",
         model_version="1",
-        output_table="system.prediction_results",
     )
     values.update(changes)
     return Prediction(**values)
@@ -87,7 +88,6 @@ def _response(status=None, **changes):
         snapshot_id=7,
         model="quality.qwen_vl",
         model_version="1",
-        output_table="system.prediction_results",
     )
     values.update(changes)
     return GetPredictionResponse(**values)
@@ -119,7 +119,7 @@ class PredictionTest(unittest.TestCase):
         pending_body = json.loads(JSON.to_json(_response()))
         for field in (
                 "createdAt", "startedAt", "finishedAt",
-                "startTime", "endTime"):
+                "outputTable", "output", "startTime", "endTime"):
             self.assertNotIn(field, pending_body)
         terminated = PredictionStatus(
             PredictionState.TERMINATED,
@@ -128,8 +128,14 @@ class PredictionTest(unittest.TestCase):
                 "Model request failed",
             ),
         )
-        terminated_body = json.loads(JSON.to_json(_response(
-            terminated, start_time=10, end_time=20)))
+        completed_response = _response(
+            terminated,
+            output=ApiPredictionOutput(
+                PredictionSource("system", "prediction_results")),
+            start_time=10,
+            end_time=20,
+        )
+        terminated_body = json.loads(JSON.to_json(completed_response))
         self.assertEqual(
             {
                 "state": "TERMINATED",
@@ -142,14 +148,22 @@ class PredictionTest(unittest.TestCase):
         )
         self.assertEqual(10, terminated_body["startTime"])
         self.assertEqual(20, terminated_body["endTime"])
-        for field in ("createdAt", "startedAt", "finishedAt"):
+        self.assertEqual(
+            {"table": {"database": "system", "table": "prediction_results"}},
+            terminated_body["output"],
+        )
+        for field in ("createdAt", "startedAt", "finishedAt", "outputTable"):
             self.assertNotIn(field, terminated_body)
+        completed = JSON.from_json(
+            JSON.to_json(completed_response), GetPredictionResponse)
         self.assertEqual(
             terminated,
-            JSON.from_json(
-                JSON.to_json(_response(terminated)),
-                GetPredictionResponse,
-            ).status,
+            completed.status,
+        )
+        self.assertEqual(
+            PredictionOutput(
+                Identifier.create("system", "prediction_results")),
+            completed.to_prediction().output,
         )
         page = JSON.from_json(
             JSON.to_json(ListPredictionsResponse([_response()], "next")),

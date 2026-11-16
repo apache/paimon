@@ -144,6 +144,17 @@ class PredictionSpec:
 
 
 @dataclass
+class PredictionOutput:
+    """Known output locations of an asynchronous prediction."""
+
+    table: Optional[Identifier] = None
+
+    def __post_init__(self):
+        if self.table is not None and not isinstance(self.table, Identifier):
+            raise ValueError("table must be an Identifier")
+
+
+@dataclass
 class Prediction:
     """Durable metadata for one asynchronous prediction job."""
 
@@ -153,8 +164,8 @@ class Prediction:
     snapshot_id: int
     model: str
     model_version: str
-    output_table: str
     name: Optional[str] = None
+    output: Optional[PredictionOutput] = None
     start_time: Optional[int] = None
     end_time: Optional[int] = None
 
@@ -168,7 +179,9 @@ class Prediction:
             raise ValueError("snapshot_id must be a positive integer")
         _nonblank(self.model, "model")
         _nonblank(self.model_version, "model_version")
-        _nonblank(self.output_table, "output_table")
+        if self.output is not None and not isinstance(
+                self.output, PredictionOutput):
+            raise ValueError("output must be a PredictionOutput")
         for name in ("start_time", "end_time"):
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value < 0):
