@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.Lock.AcquireMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -66,7 +67,7 @@ public class RemoveUnexistingManifests {
         try (FileStoreCommitImpl commit =
                 (FileStoreCommitImpl)
                         table.store().newCommit("Repair-table-" + UUID.randomUUID(), table)) {
-            return commit.runWithLock(() -> repairManifests(commit), false);
+            return commit.runWithLock(() -> repairManifests(commit), AcquireMode.REQUIRED);
         }
     }
 

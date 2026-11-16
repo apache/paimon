@@ -165,7 +165,7 @@ public class RESTCatalogLock implements Lock {
     }
 
     @Override
-    public AutoCloseable acquire(boolean firstCommit) throws Exception {
+    public AutoCloseable acquire(AcquireMode mode) throws Exception {
         if (optimistic.get()) {
             return () -> {};
         }
@@ -173,7 +173,7 @@ public class RESTCatalogLock implements Lock {
             ensureValid();
             return () -> {};
         }
-        if (!firstCommit) {
+        if (mode != AcquireMode.OPTIMISTIC_ALLOWED) {
             return acquire();
         }
         optimistic.set(true);

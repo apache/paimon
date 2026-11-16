@@ -37,6 +37,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.operation.FileStoreCommitImpl;
+import org.apache.paimon.operation.Lock.AcquireMode;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.stats.SimpleStats;
@@ -376,7 +377,9 @@ public class DataEvolutionRowIdReassigner {
                                 () ->
                                         commitAssignment(
                                                 currentPlan, manifestFile, manifestList, commit),
-                                retryCount == 0);
+                                retryCount == 0
+                                        ? AcquireMode.OPTIMISTIC_ALLOWED
+                                        : AcquireMode.REQUIRED);
             }
             if (attempt.success) {
                 return attempt;

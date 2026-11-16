@@ -55,8 +55,13 @@ public abstract class SnapshotCommit implements Lock {
     }
 
     @Override
-    public final <T> T runWithLock(Callable<T> callable, boolean firstCommit) throws Exception {
-        return lock.runWithLock(callable, firstCommit);
+    public final AutoCloseable acquire(AcquireMode mode) throws Exception {
+        return lock.acquire(mode);
+    }
+
+    @Override
+    public final <T> T runWithLock(Callable<T> callable, AcquireMode mode) throws Exception {
+        return lock.runWithLock(callable, mode);
     }
 
     @Override
