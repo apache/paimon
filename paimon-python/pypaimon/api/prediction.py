@@ -44,7 +44,8 @@ class PredictionSource:
 
     @classmethod
     def from_identifier(cls, identifier: Identifier) -> "PredictionSource":
-        return cls(identifier.get_database_name(), identifier.get_object_name())
+        return cls(
+            identifier.get_database_name(), identifier.get_object_name())
 
     def to_identifier(self) -> Identifier:
         return Identifier.create(self.database, self.table)
@@ -132,10 +133,9 @@ class GetPredictionResponse(RESTResponse):
     model: str = ""
     model_version: str = json_field("modelVersion", default="")
     output_table: str = json_field("outputTable", default="")
-    created_at: int = json_field("createdAt", default=0)
     name: Optional[str] = optional_json_field("name", "non_null")
-    started_at: Optional[int] = optional_json_field("startedAt", "non_null")
-    finished_at: Optional[int] = optional_json_field("finishedAt", "non_null")
+    start_time: Optional[int] = optional_json_field("startTime", "non_null")
+    end_time: Optional[int] = optional_json_field("endTime", "non_null")
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GetPredictionResponse":
@@ -152,9 +152,8 @@ class GetPredictionResponse(RESTResponse):
             model=data.get("model"),
             model_version=data.get("modelVersion"),
             output_table=data.get("outputTable"),
-            created_at=data.get("createdAt"),
-            started_at=data.get("startedAt"),
-            finished_at=data.get("finishedAt"),
+            start_time=data.get("startTime"),
+            end_time=data.get("endTime"),
         )
 
     def to_prediction(self) -> Prediction:
@@ -167,9 +166,8 @@ class GetPredictionResponse(RESTResponse):
             model=self.model,
             model_version=self.model_version,
             output_table=self.output_table,
-            created_at=self.created_at,
-            started_at=self.started_at,
-            finished_at=self.finished_at,
+            start_time=self.start_time,
+            end_time=self.end_time,
         )
 
 

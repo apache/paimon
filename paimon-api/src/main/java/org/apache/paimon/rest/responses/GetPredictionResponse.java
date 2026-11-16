@@ -43,9 +43,8 @@ public class GetPredictionResponse implements RESTResponse {
     private final String model;
     private final String modelVersion;
     private final String outputTable;
-    private final long createdAt;
-    private final @Nullable Long startedAt;
-    private final @Nullable Long finishedAt;
+    private final @Nullable Long startTime;
+    private final @Nullable Long endTime;
 
     @JsonCreator
     public GetPredictionResponse(
@@ -57,9 +56,8 @@ public class GetPredictionResponse implements RESTResponse {
             @JsonProperty("model") String model,
             @JsonProperty("modelVersion") String modelVersion,
             @JsonProperty("outputTable") String outputTable,
-            @JsonProperty("createdAt") long createdAt,
-            @Nullable @JsonProperty("startedAt") Long startedAt,
-            @Nullable @JsonProperty("finishedAt") Long finishedAt) {
+            @Nullable @JsonProperty("startTime") Long startTime,
+            @Nullable @JsonProperty("endTime") Long endTime) {
         this.predictionId = predictionId;
         this.source = source;
         this.name = name;
@@ -68,9 +66,8 @@ public class GetPredictionResponse implements RESTResponse {
         this.model = model;
         this.modelVersion = modelVersion;
         this.outputTable = outputTable;
-        this.createdAt = createdAt;
-        this.startedAt = startedAt;
-        this.finishedAt = finishedAt;
+        this.startTime = startTime;
+        this.endTime = endTime;
     }
 
     public GetPredictionResponse(Prediction prediction) {
@@ -83,9 +80,8 @@ public class GetPredictionResponse implements RESTResponse {
                 prediction.model(),
                 prediction.modelVersion(),
                 prediction.outputTable(),
-                prediction.createdAt(),
-                prediction.startedAt(),
-                prediction.finishedAt());
+                prediction.startTime(),
+                prediction.endTime());
     }
 
     @JsonGetter("predictionId")
@@ -130,23 +126,18 @@ public class GetPredictionResponse implements RESTResponse {
         return outputTable;
     }
 
-    @JsonGetter("createdAt")
-    public long getCreatedAt() {
-        return createdAt;
+    @Nullable
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonGetter("startTime")
+    public Long getStartTime() {
+        return startTime;
     }
 
     @Nullable
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonGetter("startedAt")
-    public Long getStartedAt() {
-        return startedAt;
-    }
-
-    @Nullable
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonGetter("finishedAt")
-    public Long getFinishedAt() {
-        return finishedAt;
+    @JsonGetter("endTime")
+    public Long getEndTime() {
+        return endTime;
     }
 
     public Prediction toPrediction() {
@@ -159,8 +150,7 @@ public class GetPredictionResponse implements RESTResponse {
                 model,
                 modelVersion,
                 outputTable,
-                createdAt,
-                startedAt,
-                finishedAt);
+                startTime,
+                endTime);
     }
 }

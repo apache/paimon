@@ -138,8 +138,7 @@ class RESTCatalogPredictionTest {
                 + "\"table\":\"clips\"},\"name\":\"daily-quality\",\"status\":{\"state\":\""
                 + status
                 + "\"},\"snapshotId\":7,\"model\":\"quality.qwen_vl\","
-                + "\"modelVersion\":\"1\",\"outputTable\":\"system.results\","
-                + "\"createdAt\":10}";
+                + "\"modelVersion\":\"1\",\"outputTable\":\"system.results\"}";
     }
 
     private static String terminatedPredictionJson(String code) {
@@ -149,7 +148,7 @@ class RESTCatalogPredictionTest {
                 + code
                 + "\"}},\"snapshotId\":7,\"model\":\"quality.qwen_vl\","
                 + "\"modelVersion\":\"1\",\"outputTable\":\"system.results\","
-                + "\"createdAt\":10}";
+                + "\"startTime\":10,\"endTime\":20}";
     }
 
     private static MockResponse json(String body, int code) {

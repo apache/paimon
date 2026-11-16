@@ -4758,7 +4758,7 @@ components:
     GetPredictionResponse:
       type: object
       additionalProperties: false
-      required: [predictionId, source, status, snapshotId, model, modelVersion, outputTable, createdAt]
+      required: [predictionId, source, status, snapshotId, model, modelVersion, outputTable]
       properties:
         predictionId: {type: string, minLength: 1}
         source:
@@ -4770,9 +4770,8 @@ components:
         model: {type: string, minLength: 1}
         modelVersion: {type: string, minLength: 1}
         outputTable: {type: string, minLength: 1}
-        createdAt: {type: integer, format: int64, minimum: 0}
-        startedAt: {type: integer, format: int64, minimum: 0}
-        finishedAt: {type: integer, format: int64, minimum: 0}
+        startTime: {type: integer, format: int64, minimum: 0}
+        endTime: {type: integer, format: int64, minimum: 0}
     ListPredictionsResponse:
       type: object
       required: [predictions]

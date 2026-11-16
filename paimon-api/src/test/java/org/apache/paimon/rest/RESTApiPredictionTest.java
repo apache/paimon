@@ -64,6 +64,29 @@ class RESTApiPredictionTest {
                 .isEqualTo(PredictionStatus.State.PENDING);
         assertThat(decoded.toPrediction().status().terminationDetails()).isNull();
         assertThat(decoded.getName()).isNull();
+        assertThat(RESTApi.fromJson(RESTApi.toJson(response), Map.class))
+                .doesNotContainKeys("createdAt", "startedAt", "finishedAt", "startTime", "endTime");
+
+        GetPredictionResponse completed =
+                new GetPredictionResponse(
+                        new Prediction(
+                                "prediction-2",
+                                new PredictionSource("quality", "clips"),
+                                null,
+                                new PredictionStatus(
+                                        PredictionStatus.State.TERMINATED,
+                                        new PredictionStatus.TerminationDetails(
+                                                PredictionStatus.TerminationCode.SUCCESS, null)),
+                                7,
+                                "quality.qwen_vl",
+                                "1",
+                                "system.prediction_results",
+                                10L,
+                                20L));
+        assertThat(RESTApi.fromJson(RESTApi.toJson(completed), Map.class))
+                .containsEntry("startTime", 10)
+                .containsEntry("endTime", 20)
+                .doesNotContainKeys("createdAt", "startedAt", "finishedAt");
 
         ListPredictionsResponse empty = RESTApi.fromJson("{}", ListPredictionsResponse.class);
         assertThat(empty.getPredictions()).isEmpty();
@@ -158,7 +181,6 @@ class RESTApiPredictionTest {
                 "quality.qwen_vl",
                 "1",
                 "system.prediction_results",
-                10,
                 null,
                 null);
     }

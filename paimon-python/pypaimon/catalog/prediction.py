@@ -70,7 +70,8 @@ class PredictionStatus:
         }
         if terminating != (self.termination_details is not None):
             raise ValueError(
-                "termination_details must be present only for terminating states")
+                "termination_details must be present only for "
+                "terminating states")
         if self.termination_details is not None and not isinstance(
                 self.termination_details, PredictionTerminationDetails):
             raise ValueError(
@@ -153,10 +154,9 @@ class Prediction:
     model: str
     model_version: str
     output_table: str
-    created_at: int
     name: Optional[str] = None
-    started_at: Optional[int] = None
-    finished_at: Optional[int] = None
+    start_time: Optional[int] = None
+    end_time: Optional[int] = None
 
     def __post_init__(self):
         _nonblank(self.prediction_id, "prediction_id")
@@ -169,9 +169,7 @@ class Prediction:
         _nonblank(self.model, "model")
         _nonblank(self.model_version, "model_version")
         _nonblank(self.output_table, "output_table")
-        if type(self.created_at) is not int or self.created_at < 0:
-            raise ValueError("created_at must be a non-negative integer")
-        for name in ("started_at", "finished_at"):
+        for name in ("start_time", "end_time"):
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value < 0):
                 raise ValueError(

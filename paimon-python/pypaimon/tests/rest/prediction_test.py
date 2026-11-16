@@ -71,7 +71,6 @@ def _prediction(status=None, **changes):
         model="quality.qwen_vl",
         model_version="1",
         output_table="system.prediction_results",
-        created_at=10,
     )
     values.update(changes)
     return Prediction(**values)
@@ -89,7 +88,6 @@ def _response(status=None, **changes):
         model="quality.qwen_vl",
         model_version="1",
         output_table="system.prediction_results",
-        created_at=10,
     )
     values.update(changes)
     return GetPredictionResponse(**values)
@@ -118,6 +116,11 @@ class PredictionTest(unittest.TestCase):
             PredictionState.PENDING, response.to_prediction().status.state)
         self.assertIsNone(
             response.to_prediction().status.termination_details)
+        pending_body = json.loads(JSON.to_json(_response()))
+        for field in (
+                "createdAt", "startedAt", "finishedAt",
+                "startTime", "endTime"):
+            self.assertNotIn(field, pending_body)
         terminated = PredictionStatus(
             PredictionState.TERMINATED,
             PredictionTerminationDetails(
@@ -125,7 +128,8 @@ class PredictionTest(unittest.TestCase):
                 "Model request failed",
             ),
         )
-        terminated_body = json.loads(JSON.to_json(_response(terminated)))
+        terminated_body = json.loads(JSON.to_json(_response(
+            terminated, start_time=10, end_time=20)))
         self.assertEqual(
             {
                 "state": "TERMINATED",
@@ -136,6 +140,10 @@ class PredictionTest(unittest.TestCase):
             },
             terminated_body["status"],
         )
+        self.assertEqual(10, terminated_body["startTime"])
+        self.assertEqual(20, terminated_body["endTime"])
+        for field in ("createdAt", "startedAt", "finishedAt"):
+            self.assertNotIn(field, terminated_body)
         self.assertEqual(
             terminated,
             JSON.from_json(

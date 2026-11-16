@@ -36,9 +36,8 @@ public class Prediction {
     private final String model;
     private final String modelVersion;
     private final String outputTable;
-    private final long createdAt;
-    private final @Nullable Long startedAt;
-    private final @Nullable Long finishedAt;
+    private final @Nullable Long startTime;
+    private final @Nullable Long endTime;
 
     public Prediction(
             String predictionId,
@@ -49,9 +48,8 @@ public class Prediction {
             String model,
             String modelVersion,
             String outputTable,
-            long createdAt,
-            @Nullable Long startedAt,
-            @Nullable Long finishedAt) {
+            @Nullable Long startTime,
+            @Nullable Long endTime) {
         checkNonBlank(predictionId, "predictionId");
         checkArgument(source != null, "source must not be null");
         checkArgument(status != null, "status must not be null");
@@ -59,9 +57,8 @@ public class Prediction {
         checkNonBlank(model, "model");
         checkNonBlank(modelVersion, "modelVersion");
         checkNonBlank(outputTable, "outputTable");
-        checkArgument(createdAt >= 0, "createdAt must not be negative");
-        checkOptionalNonNegative(startedAt, "startedAt");
-        checkOptionalNonNegative(finishedAt, "finishedAt");
+        checkOptionalNonNegative(startTime, "startTime");
+        checkOptionalNonNegative(endTime, "endTime");
         this.predictionId = predictionId;
         this.source = source;
         this.name = name;
@@ -70,9 +67,8 @@ public class Prediction {
         this.model = model;
         this.modelVersion = modelVersion;
         this.outputTable = outputTable;
-        this.createdAt = createdAt;
-        this.startedAt = startedAt;
-        this.finishedAt = finishedAt;
+        this.startTime = startTime;
+        this.endTime = endTime;
     }
 
     public String predictionId() {
@@ -108,18 +104,13 @@ public class Prediction {
         return outputTable;
     }
 
-    public long createdAt() {
-        return createdAt;
+    public Long startTime() {
+        return startTime;
     }
 
     @Nullable
-    public Long startedAt() {
-        return startedAt;
-    }
-
-    @Nullable
-    public Long finishedAt() {
-        return finishedAt;
+    public Long endTime() {
+        return endTime;
     }
 
     private static void checkNonBlank(String value, String name) {
