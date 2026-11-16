@@ -33,6 +33,7 @@ class ResourcePaths:
     FUNCTIONS = "functions"
     FUNCTION_DETAILS = "function-details"
     MODELS = "models"
+    PREDICTIONS = "predictions"
     TAGS = "tags"
     BRANCHES = "branches"
     FORWARD = "forward"
@@ -131,6 +132,21 @@ class ResourcePaths:
         return "{}/{}".format(
             self.models(database_name), RESTUtil.encode_string(model_name)
         )
+
+    def predictions(self, database_name: str, table_name: str) -> str:
+        return "{}/{}".format(
+            self.table(database_name, table_name), self.PREDICTIONS)
+
+    def prediction(self, database_name: str, table_name: str, job_id: str) -> str:
+        if not isinstance(job_id, str) or not job_id.strip():
+            raise ValueError("job_id must be a non-empty string")
+        return "{}/{}".format(
+            self.predictions(database_name, table_name), RESTUtil.encode_string(job_id))
+
+    def cancel_prediction(
+            self, database_name: str, table_name: str, job_id: str) -> str:
+        return "{}/cancel".format(
+            self.prediction(database_name, table_name, job_id))
 
     def tags(self, database_name: str, table_name: str) -> str:
         return "{}/{}/{}/{}/{}/{}".format(
