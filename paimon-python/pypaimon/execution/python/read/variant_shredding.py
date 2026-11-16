@@ -499,6 +499,9 @@ def shred_variant_column(
             result.append(None)
         else:
             gv = GenericVariant.from_arrow_struct(row)
+            value = gv.value()
+            id_to_name = (metadata_names(gv.metadata())
+                          if value and (value[0] & 0x3) == _OBJECT else None)
             result.append(decompose_variant(
-                gv, obj_fields, shredded_names, metadata_names(gv.metadata())))
+                gv, obj_fields, shredded_names, id_to_name))
     return pa.array(result, type=target_type)

@@ -1062,6 +1062,25 @@ class TestShreddingWrite(unittest.TestCase):
             values,
         )
 
+    def test_non_object_variants_skip_metadata_parsing(self):
+        obj_fields = self._obj_fields_for('payload', [('selected', 'BIGINT')])
+        values = [[{'first': 1}], [{'second': 2}], 3, 'text']
+        column = GenericVariant.to_arrow_array([
+            GenericVariant.from_python(value) for value in values])
+        target_type = shredding_schema_to_arrow_type(obj_fields)
+
+        with patch('pypaimon.execution.python.read.variant_shredding.parse_metadata_dict',
+                   wraps=parse_metadata_dict) as parse:
+            shredded = shred_variant_column(column, obj_fields, target_type)
+            self.assertEqual(parse.call_count, 0)
+
+        rebuilt = assemble_shredded_column(shredded, build_variant_schema(shredded.type))
+        self.assertEqual(
+            [GenericVariant.from_arrow_struct(row).to_python()
+             for row in rebuilt.to_pylist()],
+            values,
+        )
+
     # -----------------------------------------------------------------------
     # parse_shredding_schema_option
     # -----------------------------------------------------------------------
