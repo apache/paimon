@@ -24,25 +24,28 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
+import org.apache.paimon.table.sink.RowKeyExtractor;
 
 /** {@link ChannelComputer} for {@link InternalRow}. */
 public class RowDataChannelComputer implements ChannelComputer<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
-    private final TableSchema schema;
+    private final KeyAndBucketExtractor<InternalRow> extractor;
 
     private transient int numChannels;
-    private transient KeyAndBucketExtractor<InternalRow> extractor;
 
     public RowDataChannelComputer(TableSchema schema) {
-        this.schema = schema;
+        this(new FixedBucketRowKeyExtractor(schema));
+    }
+
+    public RowDataChannelComputer(RowKeyExtractor extractor) {
+        this.extractor = extractor;
     }
 
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        this.extractor = new FixedBucketRowKeyExtractor(schema);
     }
 
     @Override
