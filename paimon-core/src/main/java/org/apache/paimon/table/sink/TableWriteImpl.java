@@ -38,7 +38,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.GeneratedColumnRow;
-import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Restorable;
 import org.apache.paimon.utils.RowKindFilter;
 
@@ -50,6 +49,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -62,7 +62,9 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State<T>>> {
 
     private final FileStoreWrite<T> write;
-    private final KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
+    private final Function<RowType, KeyAndBucketExtractor<InternalRow>>
+            keyAndBucketExtractorFactory;
+    private KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
     private final RecordExtractor<T> recordExtractor;
     @Nullable private final RowKindGenerator rowKindGenerator;
     @Nullable private final RowKindFilter rowKindFilter;
@@ -75,20 +77,19 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     private @Nullable DefaultValueRow defaultValueRow;
     private @Nullable GeneratedColumnRow generatedColumnRow;
-    private @Nullable ProjectedRow keyAndBucketRow;
     private final @Nullable Set<String> deleteNotNullFieldNames;
 
     public TableWriteImpl(
             RowType rowType,
             FileStoreWrite<T> write,
-            KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor,
+            Function<RowType, KeyAndBucketExtractor<InternalRow>> keyAndBucketExtractorFactory,
             RecordExtractor<T> recordExtractor,
             @Nullable RowKindGenerator rowKindGenerator,
             @Nullable RowKindFilter rowKindFilter) {
         this(
                 rowType,
                 write,
-                keyAndBucketExtractor,
+                keyAndBucketExtractorFactory,
                 recordExtractor,
                 rowKindGenerator,
                 rowKindFilter,
@@ -98,7 +99,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     public TableWriteImpl(
             RowType rowType,
             FileStoreWrite<T> write,
-            KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor,
+            Function<RowType, KeyAndBucketExtractor<InternalRow>> keyAndBucketExtractorFactory,
             RecordExtractor<T> recordExtractor,
             @Nullable RowKindGenerator rowKindGenerator,
             @Nullable RowKindFilter rowKindFilter,
@@ -106,7 +107,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         this.rowType = rowType;
         this.writeType = rowType;
         this.write = write;
-        this.keyAndBucketExtractor = keyAndBucketExtractor;
+        this.keyAndBucketExtractorFactory = keyAndBucketExtractorFactory;
         this.recordExtractor = recordExtractor;
         this.rowKindGenerator = rowKindGenerator;
         this.rowKindFilter = rowKindFilter;
@@ -171,7 +172,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
             this.writeType = physicalType;
             updateNotNullFieldIndexes();
             this.generatedColumnRow = generator;
-            this.keyAndBucketRow = null;
+            this.keyAndBucketExtractor = null;
             return this;
         }
         write.withWriteType(writeType);
@@ -179,10 +180,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         updateNotNullFieldIndexes();
         this.defaultValueRow = DefaultValueRow.create(writeType, rowType);
         this.generatedColumnRow = null;
-        this.keyAndBucketRow =
-                rowType.equals(writeType)
-                        ? null
-                        : ProjectedRow.from(writeType.getFieldIndices(rowType.getFieldNames()));
+        this.keyAndBucketExtractor = null;
         return this;
     }
 
@@ -341,9 +339,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     private void setKeyAndBucketRecord(InternalRow row) {
-        // The extractor uses the table schema; the writer still consumes the supplied write type.
-        keyAndBucketExtractor.setRecord(
-                keyAndBucketRow == null ? row : keyAndBucketRow.replaceRow(row));
+        // Created on first use, as writers that bypass routing may omit partition keys.
+        if (keyAndBucketExtractor == null) {
+            keyAndBucketExtractor = keyAndBucketExtractorFactory.apply(writeType);
+        }
+        keyAndBucketExtractor.setRecord(row);
     }
 
     @Override
