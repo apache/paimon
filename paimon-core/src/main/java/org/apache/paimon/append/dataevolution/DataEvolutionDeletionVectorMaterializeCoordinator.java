@@ -429,15 +429,9 @@ public class DataEvolutionDeletionVectorMaterializeCoordinator {
                 List<List<DataFileMeta>> components =
                         rangeHelper.mergeOverlappingRanges(partitionFiles.getValue());
                 MaterializeBin bin = new MaterializeBin(targetFileSize);
-                long previousEnd = Long.MIN_VALUE;
+                // Materialization assigns new row IDs, so gaps between complete components
+                // do not need to end a bin.
                 for (List<DataFileMeta> component : components) {
-                    Range componentRange = componentRange(component);
-                    if (!bin.isEmpty()
-                            && previousEnd != Long.MAX_VALUE
-                            && componentRange.from > previousEnd + 1) {
-                        addTask(tasks, bin.drain(), partition, deletionFiles);
-                    }
-
                     long weight = componentWeight(component, deletionFiles);
                     if (weight > targetFileSize) {
                         addTask(tasks, bin.drain(), partition, deletionFiles);
@@ -455,7 +449,6 @@ public class DataEvolutionDeletionVectorMaterializeCoordinator {
                             addTask(tasks, bin.drain(), partition, deletionFiles);
                         }
                     }
-                    previousEnd = componentRange.to;
                 }
                 addTask(tasks, bin.drain(), partition, deletionFiles);
             }
@@ -526,17 +519,6 @@ public class DataEvolutionDeletionVectorMaterializeCoordinator {
                             .collect(Collectors.toList());
             return new RangeHelper<DataFileMeta>(DataFileMeta::nonNullRowIdRange)
                     .mergeOverlappingRanges(normalFiles);
-        }
-
-        private Range componentRange(List<DataFileMeta> component) {
-            long min = Long.MAX_VALUE;
-            long max = Long.MIN_VALUE;
-            for (DataFileMeta file : component) {
-                Range range = file.nonNullRowIdRange();
-                min = Math.min(min, range.from);
-                max = Math.max(max, range.to);
-            }
-            return new Range(min, max);
         }
     }
 

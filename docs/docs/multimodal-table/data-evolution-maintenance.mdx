@@ -228,6 +228,10 @@ rewrites the surviving data, assigns new row IDs, removes the applied deletion
 vectors, and drops affected global indexes. Concurrent changes to the affected
 row-ID ranges cause the operation to fail instead of committing stale results.
 
+Within each batch, complete selected row-ID components from the same partition
+are packed by estimated surviving size, even across gaps in the old row IDs.
+Independent ranges without deletion vectors remain untouched.
+
 For a partitioned table, select partitions by either `partitions` or a
 partition predicate in `where`; they cannot be used together. These alternative
 examples assume an existing `default.partitioned_table` with an integer partition

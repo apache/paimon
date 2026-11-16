@@ -1153,6 +1153,54 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testMaterializePacksRangesAcrossUnchangedRange() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        updateStructuredColumn(table);
+        commitDeletionVectors(
+                table,
+                Arrays.asList(
+                        new DvSpec(new Range(0, 4), 1, 4), new DvSpec(new Range(10, 14), 10, 12)));
+        Map<Range, List<DataFileMeta>> filesBefore = normalFilesByRange(table);
+
+        materializeDeletionVectors(table);
+
+        Map<Range, List<DataFileMeta>> filesAfter = normalFilesByRange(table);
+        assertThat(filesAfter.keySet())
+                .containsExactlyInAnyOrder(new Range(5, 9), new Range(15, 20));
+        assertThat(filesAfter.get(new Range(15, 20))).hasSize(1);
+        assertThat(fileNames(filesAfter.get(new Range(5, 9))))
+                .isEqualTo(fileNames(filesBefore.get(new Range(5, 9))));
+        assertThat(readRows(table.newReadBuilder()))
+                .containsExactlyElementsOf(
+                        expectedRowsExcluding("updated", FULL_RANGE, 1, 4, 10, 12));
+        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
+    }
+
+    @Test
+    public void testMaterializeDisjointRangesRespectTargetSize() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        commitDeletionVectors(
+                table,
+                Arrays.asList(new DvSpec(new Range(0, 4), 1), new DvSpec(new Range(10, 14), 12)));
+        table = table.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "1 b"));
+
+        List<DataEvolutionCompactTask> tasks =
+                new DataEvolutionDeletionVectorMaterializeCoordinator(
+                                table, null, table.latestSnapshot().get())
+                        .plan();
+
+        assertThat(tasks).hasSize(2);
+        assertThat(normalFileRowRanges(tasks.get(0).compactBefore()))
+                .containsExactly(new Range(0, 4));
+        assertThat(normalFileRowRanges(tasks.get(1).compactBefore()))
+                .containsExactly(new Range(10, 14));
+    }
+
+    @Test
     public void testMaterializeRangeCoveredBySpanningBlobFile() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
