@@ -36,11 +36,11 @@ public class TestJindoDlfAccessTracking {
 
     private Options getHadoopOptions(JindoFileIO fileIO) {
         try {
-            Field field = JindoFileIO.class.getDeclaredField("jindoHadoopOptions");
+            Field field = JindoFileIO.class.getDeclaredField("hadoopOptions");
             field.setAccessible(true);
-            return ((JindoHadoopOptions) field.get(fileIO)).get(false);
+            return (Options) field.get(fileIO);
         } catch (NoSuchFieldException | IllegalAccessException e) {
-            throw new RuntimeException("Failed to access Jindo Hadoop options", e);
+            throw new RuntimeException("Failed to access hadoopOptions field", e);
         }
     }
 

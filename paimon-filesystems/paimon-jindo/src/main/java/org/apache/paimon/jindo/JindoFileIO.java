@@ -24,24 +24,32 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.plugin.PluginLoader;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.dls.JindoDlsFileSystem;
 import com.aliyun.jindodata.oss.JindoOssFileSystem;
+import com.aliyun.jindodata.oss.auth.SimpleCredentialsProvider;
 import com.aliyun.jindodata.store.JindoMpuStore;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -57,14 +65,50 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private static final Logger LOG = LoggerFactory.getLogger(JindoFileIO.class);
 
     /**
+     * In order to simplify, we make paimon oss configuration keys same with hadoop oss module. So,
+     * we add all configuration key with prefix `fs.` in paimon conf to hadoop conf.
+     *
+     * <p>Not use fs.oss because this FileIO also access dlf/dls scheme.
+     */
+    private static final String[] CONFIG_PREFIXES = {"fs."};
+
+    private static final String OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
+    private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
+    private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
+    private static final String OSS_SHOW_DIR_TIMESTAMP = "fs.oss.show-dir-timestamp";
+
+    private static final ConfigOption<Duration> IO_STATS_INTERVAL =
+            ConfigOptions.key("jindo.io-stats.interval")
+                    .durationType()
+                    .defaultValue(Duration.ZERO)
+                    .withDescription(
+                            "Interval of logging Jindo stream and memory statistics while Jindo "
+                                    + "streams are in use, e.g. 1 min. Stream counts cover the "
+                                    + "class loader of paimon-jindo, which is the whole JVM unless "
+                                    + "jobs bundle their own copy. The shortest interval set in "
+                                    + "it is used. 0 (the default) disables it, and streams of "
+                                    + "this FileIO are not counted.");
+
+    private static final Map<String, String> CASE_SENSITIVE_KEYS =
+            new HashMap<String, String>() {
+                {
+                    put(OSS_ACCESS_KEY_ID.toLowerCase(Locale.ROOT), OSS_ACCESS_KEY_ID);
+                    put(OSS_ACCESS_KEY_SECRET.toLowerCase(Locale.ROOT), OSS_ACCESS_KEY_SECRET);
+                    put(OSS_SECURITY_TOKEN.toLowerCase(Locale.ROOT), OSS_SECURITY_TOKEN);
+                }
+            };
+
+    /**
      * Cache JindoOssFileSystem, at present, there is no good mechanism to ensure that the file
      * system will be shut down, so here the fs cache is used to avoid resource leakage.
      */
     private static final Map<CacheKey, Pair<JindoHadoopSystem, String>> CACHE =
             new ConcurrentHashMap<>();
 
-    private JindoHadoopOptions jindoHadoopOptions;
+    private Options hadoopOptions;
+    private Options hadoopOptionsWithCache;
     private boolean allowCache = true;
+    private Duration ioStatsInterval = IO_STATS_INTERVAL.defaultValue();
     private transient BlobPresigner blobPresigner;
 
     public JindoFileIO() {}
@@ -82,7 +126,61 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     public void configure(CatalogContext context) {
         super.configure(context);
         allowCache = context.options().get(FILE_IO_ALLOW_CACHE);
-        jindoHadoopOptions = new JindoHadoopOptions(context);
+        ioStatsInterval = context.options().get(IO_STATS_INTERVAL);
+        hadoopOptions = new Options();
+        // read all configuration with prefix 'CONFIG_PREFIXES'
+        for (String key : context.options().keySet()) {
+            for (String prefix : CONFIG_PREFIXES) {
+                if (key.startsWith(prefix)) {
+                    String value = context.options().get(key);
+                    if (CASE_SENSITIVE_KEYS.containsKey(key.toLowerCase(Locale.ROOT))) {
+                        key = CASE_SENSITIVE_KEYS.get(key.toLowerCase(Locale.ROOT));
+                    }
+                    hadoopOptions.set(key, value);
+
+                    LOG.debug(
+                            "Adding config entry for {} as {} to Hadoop config",
+                            key,
+                            SensitiveConfigUtils.redactValue(key, hadoopOptions.get(key)));
+                }
+            }
+        }
+        // as in rest catalog use could define ak for table so we need first use ak.
+        if (hadoopOptions.containsKey(OSS_ACCESS_KEY_ID)
+                && hadoopOptions.containsKey(OSS_ACCESS_KEY_SECRET)) {
+            LOG.info("Using Ak init Jindo.");
+            // https://github.com/aliyun/alibabacloud-jindodata/blob/master/docs/user/4.x/4.6.x/4.6.1/oss/hadoop/jindosdk_ide_hadoop.md
+            hadoopOptions.set("fs.oss.impl", "com.aliyun.jindodata.oss.JindoOssFileSystem");
+            hadoopOptions.set("fs.AbstractFileSystem.oss.impl", "com.aliyun.jindodata.oss.OSS");
+
+            // Misalignment can greatly affect performance, so the maximum buffer is set here
+            hadoopOptions.set("fs.oss.read.position.buffer.size", "8388608");
+            hadoopOptions.set("fs.oss.credentials.provider", SimpleCredentialsProvider.NAME);
+        } else {
+            LOG.info("Using hadoop conf init Jindo.");
+            context.hadoopConf()
+                    .iterator()
+                    .forEachRemaining(entry -> hadoopOptions.set(entry.getKey(), entry.getValue()));
+        }
+
+        // Resolving a timestamp for every listed directory is expensive in Jindo.
+        if (!hadoopOptions.containsKey(OSS_SHOW_DIR_TIMESTAMP)) {
+            hadoopOptions.set(OSS_SHOW_DIR_TIMESTAMP, "false");
+        }
+
+        JindoUserAgent.apply(context.options(), hadoopOptions);
+
+        // another config when enable cache
+        hadoopOptionsWithCache = new Options(hadoopOptions.toMap());
+        hadoopOptionsWithCache.set("fs.xengine", "jindocache");
+        if (!hadoopOptionsWithCache.containsKey("fs.jindocache.client.metrics.enable")) {
+            // enable metrics report by default
+            hadoopOptionsWithCache.set("fs.jindocache.client.metrics.enable", "true");
+        }
+        // Workaround: following configurations to avoid bug in some JindoSDK versions
+        hadoopOptionsWithCache.set("fs.oss.read.profile.columnar.use-pread", "false");
+        hadoopOptionsWithCache.set(
+                "fs.jindocache.read.profile.columnar.readahead.pread.enable", "false");
     }
 
     /**
@@ -102,7 +200,11 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         } else if (opType.equalsIgnoreCase("meta")) {
             shouldCache = metaCacheEnabled && shouldCache(path);
         }
-        return jindoHadoopOptions.get(shouldCache);
+        if (shouldCache) {
+            return hadoopOptionsWithCache;
+        } else {
+            return hadoopOptions;
+        }
     }
 
     @Override
@@ -122,7 +224,10 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             return super.newTwoPhaseOutputStream(path, overwrite);
         }
         return new JindoTwoPhaseOutputStream(
-                new JindoMultiPartUpload(mpuStore, fs.getWorkingDirectory()), hadoopPath, path);
+                new JindoMultiPartUpload(mpuStore, fs.getWorkingDirectory()),
+                hadoopPath,
+                path,
+                ioStatsInterval());
     }
 
     @Override
@@ -148,7 +253,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
                 thread.setContextClassLoader(loader.submoduleClassLoader());
                 BlobPresigner presigner =
                         loader.newInstance("org.apache.paimon.jindo.JindoBlobPresigner");
-                presigner.configure(jindoHadoopOptions.get(false));
+                presigner.configure(hadoopOptions);
                 blobPresigner = presigner;
             } finally {
                 thread.setContextClassLoader(previous);
@@ -174,7 +279,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             org.apache.hadoop.fs.Path path, boolean enableCache) {
         final String scheme = path.toUri().getScheme();
         final String authority = path.toUri().getAuthority();
-        Options options = jindoHadoopOptions.get(enableCache);
+        Options options = enableCache ? hadoopOptionsWithCache : hadoopOptions;
         Supplier<Pair<JindoHadoopSystem, String>> supplier =
                 () -> {
                     Configuration hadoopConf = new Configuration(false);
@@ -209,11 +314,22 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
                 };
 
         if (allowCache) {
-            return CACHE.computeIfAbsent(
-                    new CacheKey(options, scheme, authority), key -> supplier.get());
+            Pair<JindoHadoopSystem, String> pair =
+                    CACHE.computeIfAbsent(
+                            new CacheKey(options, scheme, authority), key -> supplier.get());
+            // cached file systems are never closed, so the reporter may call into them
+            JindoIOStats.registerNativeMetrics(pair.getKey(), path);
+            return pair;
         } else {
             return supplier.get();
         }
+    }
+
+    @Nullable
+    @Override
+    protected Duration ioStatsInterval() {
+        // FileIOs deserialized from older versions have no interval
+        return ioStatsInterval;
     }
 
     @Override
@@ -230,8 +346,8 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             }
         }
         if (!allowCache) {
-            closeFileSystems(fsMap);
-            closeFileSystems(cacheFsMap);
+            fsMap.values().stream().map(Pair::getKey).forEach(IOUtils::closeQuietly);
+            fsMap.clear();
         }
     }
 
@@ -245,14 +361,6 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
 
         @Override
         void close();
-    }
-
-    private static void closeFileSystems(Map<String, Pair<JindoHadoopSystem, String>> fileSystems) {
-        if (fileSystems == null) {
-            return;
-        }
-        fileSystems.values().stream().map(Pair::getKey).forEach(IOUtils::closeQuietly);
-        fileSystems.clear();
     }
 
     private static class CacheKey {

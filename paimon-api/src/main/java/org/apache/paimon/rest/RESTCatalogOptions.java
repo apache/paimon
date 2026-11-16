@@ -114,6 +114,21 @@ public class RESTCatalogOptions {
                                     + "'openapi' (the earlier ROA HMAC-SHA1 scheme). "
                                     + "If not set, will be automatically selected based on endpoint host.");
 
+    /**
+     * Legacy JindoCache switch, retained for compatibility. Remote cache endpoint routing does not
+     * use this option.
+     *
+     * @deprecated The JindoCache integration is deprecated. Use the REST cache policy instead.
+     */
+    @Deprecated
+    public static final ConfigOption<Boolean> IO_CACHE_ENABLED =
+            ConfigOptions.key("io-cache.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Deprecated: enables only the legacy JindoCache integration in JindoFileIO. "
+                                    + "This option does not control REST cache endpoint routing.");
+
     public static final ConfigOption<Boolean> IO_CACHE_IGNORE_VPC_VALIDATE =
             ConfigOptions.key("io-cache.ignore-vpc-validate")
                     .booleanType()
@@ -152,11 +167,13 @@ public class RESTCatalogOptions {
     public static final ConfigOption<String> IO_CACHE_WHITELIST_PATH =
             ConfigOptions.key("io-cache.whitelist-path")
                     .stringType()
-                    .defaultValue("*")
+                    .defaultValue("bucket,manifest,index")
                     .withDescription(
                             "Comma-separated list of path substrings allowed to use the cache endpoint. "
                                     + "Use * to allow all paths. A path must match both io-cache.whitelist "
-                                    + "and io-cache.whitelist-path to use the cache endpoint.");
+                                    + "and io-cache.whitelist-path to use the cache endpoint. "
+                                    + "REST cache endpoint routing defaults to * when this option is absent; "
+                                    + "the deprecated JindoCache integration retains its original default.");
 
     public static final ConfigOption<String> IO_CACHE_POLICY =
             ConfigOptions.key("io-cache.policy")

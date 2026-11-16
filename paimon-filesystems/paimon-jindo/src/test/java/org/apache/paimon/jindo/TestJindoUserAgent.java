@@ -103,9 +103,9 @@ public class TestJindoUserAgent {
         JindoFileIO fileIO = new JindoFileIO();
         fileIO.configure(CatalogContext.create(options));
         try {
-            Field field = JindoFileIO.class.getDeclaredField("jindoHadoopOptions");
+            Field field = JindoFileIO.class.getDeclaredField("hadoopOptions");
             field.setAccessible(true);
-            return ((JindoHadoopOptions) field.get(fileIO)).get(false);
+            return (Options) field.get(fileIO);
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }

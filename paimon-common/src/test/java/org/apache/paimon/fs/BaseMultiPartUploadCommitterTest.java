@@ -19,7 +19,9 @@
 package org.apache.paimon.fs;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.cache.CachePolicyFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTTokenFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +29,9 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.Collections;
 
+import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILE_IO_ENABLED;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -71,6 +76,26 @@ public class BaseMultiPartUploadCommitterTest {
         RecordingCommitter committer = new RecordingCommitter();
         committer.commit(resolved);
         assertThat(committer.received).isSameAs(resolved);
+    }
+
+    @Test
+    public void testCommitAndDiscardResolveRestPolicyAndResolverWrappers() throws IOException {
+        Options options = new Options();
+        options.set(IO_CACHE_POLICY, "write");
+        options.set(IO_CACHE_VPC_VALIDATED, true);
+        options.set(RESOLVING_FILE_IO_ENABLED, true);
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(resolved);
+        try (FileIO policy =
+                CachePolicyFileIO.create(TARGET, CatalogContext.create(options, loader, null))) {
+            RESTTokenFileIO rest = mock(RESTTokenFileIO.class);
+            when(rest.fileIO()).thenReturn(policy);
+            RecordingCommitter committer = new RecordingCommitter();
+            committer.commit(rest);
+            assertThat(committer.received).isSameAs(resolved);
+            committer.discardStaging(rest);
+            assertThat(committer.received).isSameAs(resolved);
+        }
     }
 
     private static class RecordingCommitter extends BaseMultiPartUploadCommitter<String, String> {

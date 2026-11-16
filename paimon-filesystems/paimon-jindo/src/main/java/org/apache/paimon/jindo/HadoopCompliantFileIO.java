@@ -26,9 +26,9 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.utils.FileType;
 import org.apache.paimon.utils.Pair;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.types.JindoHadoopFileStatus;
@@ -45,17 +45,13 @@ import java.io.UncheckedIOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
 
 /**
@@ -68,7 +64,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
     private static final long serialVersionUID = 1L;
 
-    // Cache policy tags select the operation types that use cache.
+    /// Detailed cache strategies are retrieved from REST server.
     private static final String META_CACHE_ENABLED_TAG = "meta";
     private static final String READ_CACHE_ENABLED_TAG = "read";
     private static final String WRITE_CACHE_ENABLED_TAG = "write";
@@ -79,26 +75,18 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     protected boolean writeCacheEnabled = false;
 
     protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> fsMap;
-    protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> cacheFsMap;
+    protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> jindoCacheFsMap;
 
-    private Set<FileType> cacheWhitelist = EnumSet.noneOf(FileType.class);
+    // Only enable cache for path which is generated with uuid
     private List<String> cacheWhitelistPaths = new ArrayList<>();
-    private boolean cacheAllPaths = false;
 
     boolean shouldCache(Path path) {
-        return !FileType.isMutable(path)
-                && cacheWhitelist.contains(FileType.classify(path))
-                && matchesCacheWhitelistPath(path);
-    }
-
-    private boolean matchesCacheWhitelistPath(Path path) {
-        if (cacheAllPaths) {
+        if (cacheWhitelistPaths.isEmpty()) {
             return true;
         }
-
-        String pathString = path.toUri().getPath();
+        String pathStr = path.toUri().getPath();
         for (String pattern : cacheWhitelistPaths) {
-            if (pathString.contains(pattern)) {
+            if (pathStr.contains(pattern)) {
                 return true;
             }
         }
@@ -107,57 +95,38 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
     @Override
     public void configure(CatalogContext context) {
-        metaCacheEnabled = false;
-        readCacheEnabled = false;
-        writeCacheEnabled = false;
-        cacheWhitelist = EnumSet.noneOf(FileType.class);
-        cacheWhitelistPaths = new ArrayList<>();
-        cacheAllPaths = false;
-
         // Process file io cache configuration
-        Options options = context.options();
-        String cachePolicy = options.get(IO_CACHE_POLICY);
-        boolean vpcValidated = options.get(IO_CACHE_VPC_VALIDATED);
-        boolean ignoreVpcValidate = options.get(IO_CACHE_IGNORE_VPC_VALIDATE);
-        if (cachePolicy == null
-                || cachePolicy.contains(DISABLE_CACHE_TAG)
-                || (!vpcValidated && !ignoreVpcValidate)) {
+        if (!context.options().get(IO_CACHE_ENABLED)
+                || context.options().get(IO_CACHE_POLICY) == null
+                || context.options().get(IO_CACHE_POLICY).contains(DISABLE_CACHE_TAG)) {
             LOG.debug(
-                    "Cache is disabled with io-cache.policy={}, io-cache.vpc-validated={}, io-cache.ignore-vpc-validate={}",
-                    cachePolicy,
-                    vpcValidated,
-                    ignoreVpcValidate);
+                    "Cache is disabled with io-cache.enabled={}, io-cache.policy={}",
+                    context.options().get(IO_CACHE_ENABLED),
+                    context.options().get(IO_CACHE_POLICY));
             return;
         }
         // Enable file io cache
-        metaCacheEnabled = cachePolicy.contains(META_CACHE_ENABLED_TAG);
-        readCacheEnabled = cachePolicy.contains(READ_CACHE_ENABLED_TAG);
-        writeCacheEnabled = cachePolicy.contains(WRITE_CACHE_ENABLED_TAG);
-        String whitelist = options.get(IO_CACHE_WHITELIST);
-        if (whitelist != null && "*".equals(whitelist.trim())) {
-            cacheWhitelist = EnumSet.allOf(FileType.class);
+        if (context.options().get("fs.jindocache.namespace.rpc.address") == null) {
+            LOG.info(
+                    "FileIO cache is enabled but JindoCache RPC address is not set, fallback to no-cache");
         } else {
-            cacheWhitelist = FileType.parseWhitelist(whitelist);
-        }
-
-        String whitelistPath = options.get(IO_CACHE_WHITELIST_PATH);
-        if (whitelistPath != null && "*".equals(whitelistPath.trim())) {
-            cacheAllPaths = true;
-        } else if (whitelistPath != null) {
-            for (String pattern : whitelistPath.split(",")) {
-                pattern = pattern.trim();
-                if (!pattern.isEmpty()) {
-                    cacheWhitelistPaths.add(pattern);
-                }
+            metaCacheEnabled =
+                    context.options().get(IO_CACHE_POLICY).contains(META_CACHE_ENABLED_TAG);
+            readCacheEnabled =
+                    context.options().get(IO_CACHE_POLICY).contains(READ_CACHE_ENABLED_TAG);
+            writeCacheEnabled =
+                    context.options().get(IO_CACHE_POLICY).contains(WRITE_CACHE_ENABLED_TAG);
+            String whitelist = context.options().get(IO_CACHE_WHITELIST_PATH);
+            if (!whitelist.equals("*")) {
+                cacheWhitelistPaths = Lists.newArrayList(whitelist.split(","));
             }
+            LOG.info(
+                    "Cache enabled with cache policy: meta cache enabled {}, read cache enabled {}, write cache enabled {}, whitelist path: {}",
+                    metaCacheEnabled,
+                    readCacheEnabled,
+                    writeCacheEnabled,
+                    whitelist);
         }
-        LOG.info(
-                "Cache enabled with cache policy: meta cache enabled {}, read cache enabled {}, write cache enabled {}, whitelist file types: {}, whitelist path: {}",
-                metaCacheEnabled,
-                readCacheEnabled,
-                writeCacheEnabled,
-                cacheWhitelist,
-                whitelistPath);
     }
 
     @Override
@@ -318,14 +287,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
             org.apache.hadoop.fs.Path path, boolean enableCache) throws IOException {
         Map<String, Pair<JindoHadoopSystem, String>> map;
         if (enableCache) {
-            if (cacheFsMap == null) {
+            if (jindoCacheFsMap == null) {
                 synchronized (this) {
-                    if (cacheFsMap == null) {
-                        cacheFsMap = new ConcurrentHashMap<>();
+                    if (jindoCacheFsMap == null) {
+                        jindoCacheFsMap = new ConcurrentHashMap<>();
                     }
                 }
             }
-            map = cacheFsMap;
+            map = jindoCacheFsMap;
         } else {
             if (fsMap == null) {
                 synchronized (this) {

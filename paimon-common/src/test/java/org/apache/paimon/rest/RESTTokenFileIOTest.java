@@ -24,8 +24,10 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.RemoteIterator;
+import org.apache.paimon.fs.cache.CachePolicyFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 
@@ -34,9 +36,15 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ORIGIN_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -48,6 +56,73 @@ import static org.mockito.Mockito.when;
 
 /** Tests for {@link RESTTokenFileIO}. */
 class RESTTokenFileIOTest {
+
+    @Test
+    void testTokenRefreshRebuildsPolicyWrapper() throws IOException {
+        Path root = new Path("oss://bucket/table");
+        Path data = new Path(root, "bucket-0/data.orc");
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenAnswer(ignored -> mock(FileIO.class));
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        Map<String, String> tokenOptions = new HashMap<>();
+        tokenOptions.put(IO_CACHE_POLICY.key(), "read");
+        tokenOptions.put(IO_CACHE_VPC_VALIDATED.key(), "true");
+        tokenOptions.put(IO_CACHE_ENDPOINT.key(), "cache");
+        tokenOptions.put(IO_CACHE_ORIGIN_ENDPOINT.key(), "origin");
+        Map<String, String> disabledOptions = new HashMap<>(tokenOptions);
+        disabledOptions.put(IO_CACHE_POLICY.key(), "none");
+        long now = System.currentTimeMillis();
+        AtomicLong clock = new AtomicLong(now);
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(tokenOptions, now + 3_600_000),
+                        new GetTableTokenResponse(disabledOptions, Long.MAX_VALUE));
+        RESTTokenFileIO rest =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options(), loader, null), api, identifier, root) {
+                    @Override
+                    long currentTimeMillis() {
+                        return clock.get();
+                    }
+                };
+        FileIO first = rest.fileIO();
+        assertThat(first).isInstanceOf(CachePolicyFileIO.class);
+        assertThat(
+                        ((HadoopOptionsProvider) first)
+                                .hadoopOptions(data, "read")
+                                .get("fs.oss.endpoint"))
+                .isEqualTo("cache");
+        assertThat(rest.fileIO()).isSameAs(first);
+        clock.set(now + 3_600_000);
+        FileIO refreshed = rest.fileIO();
+        assertThat(refreshed).isNotSameAs(first).isNotInstanceOf(CachePolicyFileIO.class);
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    @Test
+    void testIdenticalTokensDoNotShareDifferentPathsOrCatalogContexts() throws IOException {
+        Path root = new Path("oss://bucket/table");
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        when(api.loadTableToken(identifier))
+                .thenReturn(new GetTableTokenResponse(Collections.emptyMap(), Long.MAX_VALUE));
+        FileIOLoader firstLoader = mock(FileIOLoader.class);
+        FileIOLoader secondLoader = mock(FileIOLoader.class);
+        when(firstLoader.load(any())).thenAnswer(ignored -> mock(FileIO.class));
+        when(secondLoader.load(any())).thenAnswer(ignored -> mock(FileIO.class));
+        CatalogContext firstContext = CatalogContext.create(new Options(), firstLoader, null);
+        CatalogContext secondContext = CatalogContext.create(new Options(), secondLoader, null);
+        FileIO first = new RESTTokenFileIO(firstContext, api, identifier, root).fileIO();
+        assertThat(new RESTTokenFileIO(firstContext, api, identifier, root).fileIO())
+                .isSameAs(first);
+        assertThat(new RESTTokenFileIO(secondContext, api, identifier, root).fileIO())
+                .isNotSameAs(first);
+        assertThat(
+                        new RESTTokenFileIO(firstContext, api, identifier, new Path(root, "other"))
+                                .fileIO())
+                .isNotSameAs(first);
+    }
 
     @Test
     void testSetFileIOCacheMaximumSize() {

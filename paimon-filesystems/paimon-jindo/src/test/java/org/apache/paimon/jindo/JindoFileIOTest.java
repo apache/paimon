@@ -29,7 +29,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Pair;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
-import com.aliyun.jindodata.oss.JindoOssFileSystem;
 import com.aliyun.jindodata.types.JindoHadoopFileStatus;
 import com.aliyun.oss.ClientConfiguration;
 import com.aliyun.oss.HttpMethod;
@@ -46,11 +45,8 @@ import java.net.URL;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Date;
-import java.util.concurrent.ConcurrentHashMap;
 
-import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -275,41 +271,6 @@ public class JindoFileIOTest {
                 org.apache.hadoop.fs.Path path, boolean enableCache) {
             return Pair.of(fs, "dls");
         }
-    }
-
-    @Test
-    void closeClearsDirectAndCacheFileSystems() {
-        JindoFileIO fileIO = createNonCachingFileIO();
-        fileIO.fsMap = new ConcurrentHashMap<>();
-        fileIO.fsMap.put("test-bucket", Pair.of(new JindoOssFileSystem(), "test"));
-        fileIO.cacheFsMap = new ConcurrentHashMap<>();
-        fileIO.cacheFsMap.put("test-bucket", Pair.of(new JindoOssFileSystem(), "test"));
-
-        fileIO.close();
-
-        assertThat(fileIO.fsMap).isEmpty();
-        assertThat(fileIO.cacheFsMap).isEmpty();
-
-        assertThatCode(fileIO::close).doesNotThrowAnyException();
-    }
-
-    @Test
-    void closeHandlesCacheOnlyFileSystem() {
-        JindoFileIO fileIO = createNonCachingFileIO();
-        fileIO.cacheFsMap = new ConcurrentHashMap<>();
-        fileIO.cacheFsMap.put("test-bucket", Pair.of(new JindoOssFileSystem(), "test"));
-
-        assertThatCode(fileIO::close).doesNotThrowAnyException();
-
-        assertThat(fileIO.cacheFsMap).isEmpty();
-    }
-
-    private JindoFileIO createNonCachingFileIO() {
-        Options options = new Options();
-        options.set(FILE_IO_ALLOW_CACHE, false);
-        JindoFileIO fileIO = new JindoFileIO();
-        fileIO.configure(CatalogContext.create(options));
-        return fileIO;
     }
 
     private static String sha256Hex(byte[] bytes) throws Exception {

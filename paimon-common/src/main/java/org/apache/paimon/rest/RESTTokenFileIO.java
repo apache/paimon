@@ -28,6 +28,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.fs.cache.CachePolicyFileIO;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
@@ -47,6 +48,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
@@ -67,7 +69,7 @@ public class RESTTokenFileIO implements FileIO {
                     .defaultValue(false)
                     .withDescription("Whether to support data token provided by the REST server.");
 
-    private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
+    private static final Cache<FileIOCacheKey, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
                     .maximumSize(1000)
                     .expireAfterAccess(10, TimeUnit.HOURS)
@@ -250,13 +252,14 @@ public class RESTTokenFileIO implements FileIO {
                             + "REST credential lifetime after refresh.");
         }
 
-        FileIO fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
+        FileIOCacheKey cacheKey = new FileIOCacheKey(currentToken, path, catalogContext);
+        FileIO fileIO = FILE_IO_CACHE.getIfPresent(cacheKey);
         if (fileIO != null) {
             return new FileIOWithToken(fileIO, currentToken);
         }
 
         synchronized (FILE_IO_CACHE) {
-            fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
+            fileIO = FILE_IO_CACHE.getIfPresent(cacheKey);
             if (fileIO != null) {
                 return new FileIOWithToken(fileIO, currentToken);
             }
@@ -270,8 +273,8 @@ public class RESTTokenFileIO implements FileIO {
                             catalogContext.hadoopConf(),
                             catalogContext.preferIO(),
                             catalogContext.fallbackIO());
-            fileIO = FileIO.get(path, context);
-            FILE_IO_CACHE.put(currentToken, fileIO);
+            fileIO = CachePolicyFileIO.create(path, context);
+            FILE_IO_CACHE.put(cacheKey, fileIO);
             return new FileIOWithToken(fileIO, currentToken);
         }
     }
@@ -303,6 +306,35 @@ public class RESTTokenFileIO implements FileIO {
         return token == null
                 || token.expireAtMillis() - currentTimeMillis()
                         < Math.max(TOKEN_EXPIRATION_SAFE_TIME_MILLIS, minimumValidityMillis);
+    }
+
+    private static class FileIOCacheKey {
+
+        private final RESTToken token;
+        private final Path path;
+        // A token can be shared by tables using different loaders, Hadoop settings or policies.
+        // Only wrappers built from the same catalog context may share a delegate.
+        private final CatalogContext context;
+
+        private FileIOCacheKey(RESTToken token, Path path, CatalogContext context) {
+            this.token = token;
+            this.path = path;
+            this.context = context;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (!(other instanceof FileIOCacheKey)) {
+                return false;
+            }
+            FileIOCacheKey that = (FileIOCacheKey) other;
+            return token.equals(that.token) && path.equals(that.path) && context == that.context;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(token, path, System.identityHashCode(context));
+        }
     }
 
     private static class FileIOWithToken {
