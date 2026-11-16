@@ -39,7 +39,6 @@ public class Prediction {
     private final long createdAt;
     private final @Nullable Long startedAt;
     private final @Nullable Long finishedAt;
-    private final @Nullable String error;
 
     public Prediction(
             String predictionId,
@@ -52,8 +51,7 @@ public class Prediction {
             String outputTable,
             long createdAt,
             @Nullable Long startedAt,
-            @Nullable Long finishedAt,
-            @Nullable String error) {
+            @Nullable Long finishedAt) {
         checkNonBlank(predictionId, "predictionId");
         checkArgument(source != null, "source must not be null");
         checkArgument(status != null, "status must not be null");
@@ -75,7 +73,6 @@ public class Prediction {
         this.createdAt = createdAt;
         this.startedAt = startedAt;
         this.finishedAt = finishedAt;
-        this.error = error;
     }
 
     public String predictionId() {
@@ -123,11 +120,6 @@ public class Prediction {
     @Nullable
     public Long finishedAt() {
         return finishedAt;
-    }
-
-    @Nullable
-    public String error() {
-        return error;
     }
 
     private static void checkNonBlank(String value, String name) {

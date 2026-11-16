@@ -127,7 +127,7 @@ class CancelPredictionRequest(RESTRequest):
 class GetPredictionResponse(RESTResponse):
     prediction_id: str = json_field("predictionId")
     source: PredictionSource = None
-    status: str = ""
+    status: PredictionStatus = None
     snapshot_id: int = json_field("snapshotId", default=0)
     model: str = ""
     model_version: str = json_field("modelVersion", default="")
@@ -136,7 +136,6 @@ class GetPredictionResponse(RESTResponse):
     name: Optional[str] = optional_json_field("name", "non_null")
     started_at: Optional[int] = optional_json_field("startedAt", "non_null")
     finished_at: Optional[int] = optional_json_field("finishedAt", "non_null")
-    error: Optional[str] = optional_json_field("error", "non_null")
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GetPredictionResponse":
@@ -148,7 +147,7 @@ class GetPredictionResponse(RESTResponse):
                 else data.get("source")
             ),
             name=data.get("name"),
-            status=data.get("status"),
+            status=PredictionStatus.from_dict(data.get("status")),
             snapshot_id=data.get("snapshotId"),
             model=data.get("model"),
             model_version=data.get("modelVersion"),
@@ -156,7 +155,6 @@ class GetPredictionResponse(RESTResponse):
             created_at=data.get("createdAt"),
             started_at=data.get("startedAt"),
             finished_at=data.get("finishedAt"),
-            error=data.get("error"),
         )
 
     def to_prediction(self) -> Prediction:
@@ -164,7 +162,7 @@ class GetPredictionResponse(RESTResponse):
             prediction_id=self.prediction_id,
             source=self.source.to_identifier(),
             name=self.name,
-            status=PredictionStatus(self.status),
+            status=self.status,
             snapshot_id=self.snapshot_id,
             model=self.model,
             model_version=self.model_version,
@@ -172,7 +170,6 @@ class GetPredictionResponse(RESTResponse):
             created_at=self.created_at,
             started_at=self.started_at,
             finished_at=self.finished_at,
-            error=self.error,
         )
 
 

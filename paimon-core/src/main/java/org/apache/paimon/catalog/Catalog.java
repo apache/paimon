@@ -1214,7 +1214,7 @@ public interface Catalog extends AutoCloseable {
     default PagedList<Prediction> listPredictions(
             @Nullable Identifier source,
             @Nullable String name,
-            @Nullable PredictionStatus status,
+            @Nullable PredictionStatus.State state,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
         throw new UnsupportedOperationException("Current Catalog does not support predictions");

@@ -46,7 +46,7 @@ from pypaimon.catalog.catalog_exception import (
 )
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.model import Model, ModelDefinition
-from pypaimon.catalog.prediction import Prediction, PredictionSpec, PredictionStatus
+from pypaimon.catalog.prediction import Prediction, PredictionSpec, PredictionState
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.catalog.rest.table_metadata import TableMetadata
@@ -717,7 +717,7 @@ class RESTCatalog(Catalog):
             self,
             source: Optional[Union[str, Identifier]] = None,
             name: Optional[str] = None,
-            status: Optional[PredictionStatus] = None,
+            state: Optional[PredictionState] = None,
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
     ) -> PagedList[Prediction]:
@@ -725,7 +725,7 @@ class RESTCatalog(Catalog):
             source = Identifier.from_string(source)
         try:
             page = self.rest_api.list_predictions(
-                source, name, status, max_results, page_token)
+                source, name, state, max_results, page_token)
             return PagedList(
                 [value.to_prediction() for value in page.elements],
                 page.next_page_token,

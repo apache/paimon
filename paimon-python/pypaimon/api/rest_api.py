@@ -65,7 +65,7 @@ from pypaimon.common import user_agent
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
-from pypaimon.catalog.prediction import PredictionStatus
+from pypaimon.catalog.prediction import PredictionState
 from pypaimon.management.data_policy import DataPolicy
 from pypaimon.management.list_permissions_request import \
     ListPermissionsRequest
@@ -812,7 +812,7 @@ class RESTApi:
             self,
             source: Optional[Identifier] = None,
             name: Optional[str] = None,
-            status: Optional[PredictionStatus] = None,
+            state: Optional[PredictionState] = None,
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
     ) -> PagedList[GetPredictionResponse]:
@@ -823,7 +823,7 @@ class RESTApi:
             self._put_query_parameter(query_params, "table", table_name)
         self._put_query_parameter(query_params, "name", name)
         self._put_query_parameter(
-            query_params, "status", status.value if status is not None else None)
+            query_params, "state", state.value if state is not None else None)
         if max_results is not None and max_results > 0:
             query_params[self.MAX_RESULTS] = str(max_results)
         self._put_query_parameter(query_params, self.PAGE_TOKEN, page_token)

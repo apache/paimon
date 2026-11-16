@@ -167,20 +167,20 @@ class MultimodalTable:
             self,
             *,
             name=None,
-            status=None,
+            state=None,
             max_results=None,
             page_token=None):
         """List prediction handles for this table."""
         from pypaimon.api.api_response import PagedList
-        from pypaimon.catalog.prediction import PredictionStatus
+        from pypaimon.catalog.prediction import PredictionState
         from pypaimon.multimodal.prediction import PredictionJob
 
-        if isinstance(status, str):
-            status = PredictionStatus(status)
+        if isinstance(state, str):
+            state = PredictionState(state)
         page = self.catalog.list_predictions(
             source=self.raw_table.identifier,
             name=name,
-            status=status,
+            state=state,
             max_results=max_results,
             page_token=page_token,
         )

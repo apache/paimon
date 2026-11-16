@@ -422,10 +422,10 @@ public abstract class DelegateCatalog implements Catalog {
     public PagedList<Prediction> listPredictions(
             @Nullable Identifier source,
             @Nullable String name,
-            @Nullable PredictionStatus status,
+            @Nullable PredictionStatus.State state,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
-        return wrapped.listPredictions(source, name, status, maxResults, pageToken);
+        return wrapped.listPredictions(source, name, state, maxResults, pageToken);
     }
 
     @Override

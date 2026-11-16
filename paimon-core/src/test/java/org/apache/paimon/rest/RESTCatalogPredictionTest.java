@@ -69,7 +69,7 @@ class RESTCatalogPredictionTest {
                             200));
             PagedList<Prediction> page =
                     catalog.listPredictions(
-                            table, "daily-quality", PredictionStatus.RUNNING, 10, "page-1");
+                            table, "daily-quality", PredictionStatus.State.RUNNING, 10, "page-1");
             assertThat(page.getElements())
                     .extracting(Prediction::predictionId)
                     .containsExactly("prediction-1");
@@ -79,13 +79,15 @@ class RESTCatalogPredictionTest {
                     .contains("database=quality")
                     .contains("table=clips")
                     .contains("name=daily-quality")
-                    .contains("status=RUNNING")
+                    .contains("state=RUNNING")
                     .contains("maxResults=10")
                     .contains("pageToken=page-1");
 
-            server.enqueue(json(predictionJson("CANCELLED"), 200));
-            assertThat(catalog.cancelPrediction("prediction/1").status())
-                    .isEqualTo(PredictionStatus.CANCELLED);
+            server.enqueue(json(terminatedPredictionJson("CANCELED"), 200));
+            PredictionStatus cancelled = catalog.cancelPrediction("prediction/1").status();
+            assertThat(cancelled.state()).isEqualTo(PredictionStatus.State.TERMINATED);
+            assertThat(cancelled.terminationDetails().code())
+                    .isEqualTo(PredictionStatus.TerminationCode.CANCELED);
             assertThat(server.takeRequest(10, TimeUnit.SECONDS).getPath())
                     .isEqualTo("/v1/catalog/predictions/prediction%2F1/cancel");
         }
@@ -133,9 +135,19 @@ class RESTCatalogPredictionTest {
 
     private static String predictionJson(String status) {
         return "{\"predictionId\":\"prediction-1\",\"source\":{\"database\":\"quality\","
-                + "\"table\":\"clips\"},\"name\":\"daily-quality\",\"status\":\""
+                + "\"table\":\"clips\"},\"name\":\"daily-quality\",\"status\":{\"state\":\""
                 + status
-                + "\",\"snapshotId\":7,\"model\":\"quality.qwen_vl\","
+                + "\"},\"snapshotId\":7,\"model\":\"quality.qwen_vl\","
+                + "\"modelVersion\":\"1\",\"outputTable\":\"system.results\","
+                + "\"createdAt\":10}";
+    }
+
+    private static String terminatedPredictionJson(String code) {
+        return "{\"predictionId\":\"prediction-1\",\"source\":{\"database\":\"quality\","
+                + "\"table\":\"clips\"},\"name\":\"daily-quality\","
+                + "\"status\":{\"state\":\"TERMINATED\",\"terminationDetails\":{\"code\":\""
+                + code
+                + "\"}},\"snapshotId\":7,\"model\":\"quality.qwen_vl\","
                 + "\"modelVersion\":\"1\",\"outputTable\":\"system.results\","
                 + "\"createdAt\":10}";
     }

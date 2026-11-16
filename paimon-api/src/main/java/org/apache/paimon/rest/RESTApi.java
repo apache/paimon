@@ -209,7 +209,7 @@ public class RESTApi {
     public static final String ENTITY_TYPE = "entityType";
     public static final String ENTITY_NAME = "entityName";
     public static final String PREDICTION_NAME = "name";
-    public static final String PREDICTION_STATUS = "status";
+    public static final String PREDICTION_STATE = "state";
 
     public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
 
@@ -1839,7 +1839,7 @@ public class RESTApi {
     public PagedList<GetPredictionResponse> listPredictions(
             @Nullable Identifier source,
             @Nullable String name,
-            @Nullable PredictionStatus status,
+            @Nullable PredictionStatus.State state,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
         Map<String, String> queryParams =
@@ -1849,7 +1849,7 @@ public class RESTApi {
                         Pair.of("database", source == null ? null : source.getDatabaseName()),
                         Pair.of("table", source == null ? null : source.getObjectName()),
                         Pair.of(PREDICTION_NAME, name),
-                        Pair.of(PREDICTION_STATUS, status == null ? null : status.name()));
+                        Pair.of(PREDICTION_STATE, state == null ? null : state.name()));
         ListPredictionsResponse response =
                 client.get(
                         resourcePaths.predictions(),

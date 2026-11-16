@@ -31,8 +31,11 @@ from pypaimon.api.prediction import (
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.catalog.prediction import (
     Prediction,
+    PredictionState,
     PredictionSpec,
     PredictionStatus,
+    PredictionTerminationCode,
+    PredictionTerminationDetails,
 )
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.identifier import Identifier
@@ -56,7 +59,9 @@ def _spec(**changes):
     return PredictionSpec(**values)
 
 
-def _prediction(status=PredictionStatus.PENDING, **changes):
+def _prediction(status=None, **changes):
+    if status is None:
+        status = PredictionStatus(PredictionState.PENDING)
     values = dict(
         prediction_id="prediction-1",
         source=Identifier.create("quality", "clips"),
@@ -72,7 +77,9 @@ def _prediction(status=PredictionStatus.PENDING, **changes):
     return Prediction(**values)
 
 
-def _response(status="PENDING", **changes):
+def _response(status=None, **changes):
+    if status is None:
+        status = PredictionStatus(PredictionState.PENDING)
     values = dict(
         prediction_id="prediction-1",
         source=PredictionSource("quality", "clips"),
@@ -108,7 +115,34 @@ class PredictionTest(unittest.TestCase):
         response = JSON.from_json(
             JSON.to_json(_response()), GetPredictionResponse)
         self.assertEqual(
-            PredictionStatus.PENDING, response.to_prediction().status)
+            PredictionState.PENDING, response.to_prediction().status.state)
+        self.assertIsNone(
+            response.to_prediction().status.termination_details)
+        terminated = PredictionStatus(
+            PredictionState.TERMINATED,
+            PredictionTerminationDetails(
+                PredictionTerminationCode.FAILED,
+                "Model request failed",
+            ),
+        )
+        terminated_body = json.loads(JSON.to_json(_response(terminated)))
+        self.assertEqual(
+            {
+                "state": "TERMINATED",
+                "terminationDetails": {
+                    "code": "FAILED",
+                    "message": "Model request failed",
+                },
+            },
+            terminated_body["status"],
+        )
+        self.assertEqual(
+            terminated,
+            JSON.from_json(
+                JSON.to_json(_response(terminated)),
+                GetPredictionResponse,
+            ).status,
+        )
         page = JSON.from_json(
             JSON.to_json(ListPredictionsResponse([_response()], "next")),
             ListPredictionsResponse,
@@ -131,6 +165,14 @@ class PredictionTest(unittest.TestCase):
         for changes in invalid:
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 _spec(**changes)
+        with self.assertRaises(ValueError):
+            PredictionStatus(PredictionState.TERMINATED)
+        with self.assertRaises(ValueError):
+            PredictionStatus(
+                PredictionState.RUNNING,
+                PredictionTerminationDetails(
+                    PredictionTerminationCode.FAILED),
+            )
 
     def test_table_submit_fixes_view_and_returns_job(self):
         raw = Mock(spec=FileStoreTable)
@@ -159,13 +201,21 @@ class PredictionTest(unittest.TestCase):
     def test_wait_is_client_side_polling(self):
         catalog = Mock()
         catalog.get_prediction.side_effect = [
-            _prediction(PredictionStatus.RUNNING),
-            _prediction(PredictionStatus.SUCCEEDED),
+            _prediction(PredictionStatus(PredictionState.RUNNING)),
+            _prediction(PredictionStatus(
+                PredictionState.TERMINATED,
+                PredictionTerminationDetails(
+                    PredictionTerminationCode.SUCCESS),
+            )),
         ]
         job = PredictionJob(catalog, _prediction())
         result = job.wait(timeout=timedelta(seconds=1), poll_interval=0)
         self.assertIs(job, result)
-        self.assertEqual(PredictionStatus.SUCCEEDED, job.status)
+        self.assertEqual(PredictionState.TERMINATED, job.status.state)
+        self.assertEqual(
+            PredictionTerminationCode.SUCCESS,
+            job.status.termination_details.code,
+        )
         self.assertEqual(2, catalog.get_prediction.call_count)
 
     def test_rest_round_trip_paths_and_filters(self):
@@ -229,7 +279,7 @@ class PredictionTest(unittest.TestCase):
             page = catalog.list_predictions(
                 identifier,
                 name="daily-quality",
-                status=PredictionStatus.RUNNING,
+                state=PredictionState.RUNNING,
                 max_results=10,
                 page_token="p1",
             )
@@ -237,7 +287,7 @@ class PredictionTest(unittest.TestCase):
             self.assertIn("name=daily-quality", calls[-1][1])
             self.assertIn("database=a%2Fb", calls[-1][1])
             self.assertIn("table=clip+table", calls[-1][1])
-            self.assertIn("status=RUNNING", calls[-1][1])
+            self.assertIn("state=RUNNING", calls[-1][1])
             self.assertIn("maxResults=10", calls[-1][1])
             self.assertIn("pageToken=p1", calls[-1][1])
 

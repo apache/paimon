@@ -174,11 +174,11 @@ paths:
         - {name: database, in: query, required: false, schema: {type: string}}
         - {name: table, in: query, required: false, schema: {type: string}}
         - {name: name, in: query, required: false, schema: {type: string}}
-        - name: status
+        - name: state
           in: query
           required: false
           schema:
-            $ref: '#/components/schemas/PredictionStatus'
+            $ref: '#/components/schemas/PredictionState'
         - {name: maxResults, in: query, required: false, schema: {type: integer, format: int32, minimum: 1}}
         - {name: pageToken, in: query, required: false, schema: {type: string}}
       responses:
@@ -4669,9 +4669,31 @@ components:
             $ref: '#/components/schemas/GetModelResponse'
         nextPageToken:
           type: [ string, "null" ]
-    PredictionStatus:
+    PredictionState:
       type: string
-      enum: [PENDING, RUNNING, SUCCEEDED, PARTIAL_SUCCESS, FAILED, CANCELLED]
+      enum: [PENDING, RUNNING, TERMINATING, TERMINATED]
+    PredictionTerminationCode:
+      type: string
+      enum: [SUCCESS, SUCCESS_WITH_FAILURES, FAILED, CANCELED]
+    PredictionTerminationDetails:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          $ref: '#/components/schemas/PredictionTerminationCode'
+        message:
+          type: string
+    PredictionStatus:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state:
+          $ref: '#/components/schemas/PredictionState'
+        terminationDetails:
+          $ref: '#/components/schemas/PredictionTerminationDetails'
+      description: terminationDetails is present when state is TERMINATING or TERMINATED.
     PredictionSource:
       type: object
       additionalProperties: false
@@ -4751,7 +4773,6 @@ components:
         createdAt: {type: integer, format: int64, minimum: 0}
         startedAt: {type: integer, format: int64, minimum: 0}
         finishedAt: {type: integer, format: int64, minimum: 0}
-        error: {type: string}
     ListPredictionsResponse:
       type: object
       required: [predictions]

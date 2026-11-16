@@ -60,7 +60,9 @@ class RESTApiPredictionTest {
         GetPredictionResponse response = new GetPredictionResponse(prediction());
         GetPredictionResponse decoded =
                 RESTApi.fromJson(RESTApi.toJson(response), GetPredictionResponse.class);
-        assertThat(decoded.toPrediction().status()).isEqualTo(PredictionStatus.PENDING);
+        assertThat(decoded.toPrediction().status().state())
+                .isEqualTo(PredictionStatus.State.PENDING);
+        assertThat(decoded.toPrediction().status().terminationDetails()).isNull();
         assertThat(decoded.getName()).isNull();
 
         ListPredictionsResponse empty = RESTApi.fromJson("{}", ListPredictionsResponse.class);
@@ -107,12 +109,27 @@ class RESTApiPredictionTest {
 
     @Test
     void testTerminalStates() {
-        assertThat(PredictionStatus.PENDING.isTerminal()).isFalse();
-        assertThat(PredictionStatus.RUNNING.isTerminal()).isFalse();
-        assertThat(PredictionStatus.SUCCEEDED.isTerminal()).isTrue();
-        assertThat(PredictionStatus.PARTIAL_SUCCESS.isTerminal()).isTrue();
-        assertThat(PredictionStatus.FAILED.isTerminal()).isTrue();
-        assertThat(PredictionStatus.CANCELLED.isTerminal()).isTrue();
+        assertThat(new PredictionStatus(PredictionStatus.State.PENDING, null).isTerminal())
+                .isFalse();
+        assertThat(new PredictionStatus(PredictionStatus.State.RUNNING, null).isTerminal())
+                .isFalse();
+        assertThat(
+                        new PredictionStatus(
+                                        PredictionStatus.State.TERMINATING,
+                                        new PredictionStatus.TerminationDetails(
+                                                PredictionStatus.TerminationCode.CANCELED, null))
+                                .isTerminal())
+                .isFalse();
+        PredictionStatus terminated =
+                new PredictionStatus(
+                        PredictionStatus.State.TERMINATED,
+                        new PredictionStatus.TerminationDetails(
+                                PredictionStatus.TerminationCode.SUCCESS, null));
+        assertThat(terminated.isTerminal()).isTrue();
+        assertThat(terminated.terminationDetails().code())
+                .isEqualTo(PredictionStatus.TerminationCode.SUCCESS);
+        assertThatThrownBy(() -> new PredictionStatus(PredictionStatus.State.TERMINATED, null))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     private static PredictionSpec spec() {
@@ -136,13 +153,12 @@ class RESTApiPredictionTest {
                 "prediction-1",
                 new PredictionSource("quality", "clips"),
                 null,
-                PredictionStatus.PENDING,
+                new PredictionStatus(PredictionStatus.State.PENDING, null),
                 7,
                 "quality.qwen_vl",
                 "1",
                 "system.prediction_results",
                 10,
-                null,
                 null,
                 null);
     }

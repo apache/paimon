@@ -46,7 +46,6 @@ public class GetPredictionResponse implements RESTResponse {
     private final long createdAt;
     private final @Nullable Long startedAt;
     private final @Nullable Long finishedAt;
-    private final @Nullable String error;
 
     @JsonCreator
     public GetPredictionResponse(
@@ -60,8 +59,7 @@ public class GetPredictionResponse implements RESTResponse {
             @JsonProperty("outputTable") String outputTable,
             @JsonProperty("createdAt") long createdAt,
             @Nullable @JsonProperty("startedAt") Long startedAt,
-            @Nullable @JsonProperty("finishedAt") Long finishedAt,
-            @Nullable @JsonProperty("error") String error) {
+            @Nullable @JsonProperty("finishedAt") Long finishedAt) {
         this.predictionId = predictionId;
         this.source = source;
         this.name = name;
@@ -73,7 +71,6 @@ public class GetPredictionResponse implements RESTResponse {
         this.createdAt = createdAt;
         this.startedAt = startedAt;
         this.finishedAt = finishedAt;
-        this.error = error;
     }
 
     public GetPredictionResponse(Prediction prediction) {
@@ -88,8 +85,7 @@ public class GetPredictionResponse implements RESTResponse {
                 prediction.outputTable(),
                 prediction.createdAt(),
                 prediction.startedAt(),
-                prediction.finishedAt(),
-                prediction.error());
+                prediction.finishedAt());
     }
 
     @JsonGetter("predictionId")
@@ -153,13 +149,6 @@ public class GetPredictionResponse implements RESTResponse {
         return finishedAt;
     }
 
-    @Nullable
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonGetter("error")
-    public String getError() {
-        return error;
-    }
-
     public Prediction toPrediction() {
         return new Prediction(
                 predictionId,
@@ -172,7 +161,6 @@ public class GetPredictionResponse implements RESTResponse {
                 outputTable,
                 createdAt,
                 startedAt,
-                finishedAt,
-                error);
+                finishedAt);
     }
 }

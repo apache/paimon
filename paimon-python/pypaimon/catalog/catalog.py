@@ -132,7 +132,7 @@ class Catalog(ABC):
             self,
             source: Optional[Union[str, Identifier]] = None,
             name: Optional[str] = None,
-            status: Optional['PredictionStatus'] = None,
+            state: Optional['PredictionState'] = None,
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
     ) -> PagedList['Prediction']:

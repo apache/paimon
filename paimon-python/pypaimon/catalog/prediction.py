@@ -20,24 +20,86 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.json_util import optional_json_field
 
 
-class PredictionStatus(str, Enum):
+class PredictionState(str, Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
-    SUCCEEDED = "SUCCEEDED"
-    PARTIAL_SUCCESS = "PARTIAL_SUCCESS"
+    TERMINATING = "TERMINATING"
+    TERMINATED = "TERMINATED"
+
+
+class PredictionTerminationCode(str, Enum):
+    SUCCESS = "SUCCESS"
+    SUCCESS_WITH_FAILURES = "SUCCESS_WITH_FAILURES"
     FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
+    CANCELED = "CANCELED"
+
+
+@dataclass
+class PredictionTerminationDetails:
+    """Result and diagnostic message available after termination."""
+
+    code: PredictionTerminationCode
+    message: Optional[str] = None
+
+    def __post_init__(self):
+        if isinstance(self.code, str):
+            self.code = PredictionTerminationCode(self.code)
+        if not isinstance(self.code, PredictionTerminationCode):
+            raise ValueError("code must be a PredictionTerminationCode")
+
+
+@dataclass
+class PredictionStatus:
+    """Lifecycle and optional termination details of a prediction."""
+
+    state: PredictionState
+    termination_details: Optional[PredictionTerminationDetails] = \
+        optional_json_field("terminationDetails", "non_null")
+
+    def __post_init__(self):
+        if isinstance(self.state, str):
+            self.state = PredictionState(self.state)
+        if not isinstance(self.state, PredictionState):
+            raise ValueError("state must be a PredictionState")
+        terminating = self.state in {
+            PredictionState.TERMINATING,
+            PredictionState.TERMINATED,
+        }
+        if terminating != (self.termination_details is not None):
+            raise ValueError(
+                "termination_details must be present only for terminating states")
+        if self.termination_details is not None and not isinstance(
+                self.termination_details, PredictionTerminationDetails):
+            raise ValueError(
+                "termination_details must be PredictionTerminationDetails")
+
+    @classmethod
+    def from_dict(cls, value):
+        details = value.get("terminationDetails")
+        return cls(
+            state=value.get("state"),
+            termination_details=(
+                PredictionTerminationDetails(**details)
+                if details is not None else None),
+        )
+
+    def to_dict(self):
+        result = {"state": self.state.value}
+        if self.termination_details is not None:
+            result["terminationDetails"] = {
+                "code": self.termination_details.code.value,
+            }
+            if self.termination_details.message is not None:
+                result["terminationDetails"]["message"] = \
+                    self.termination_details.message
+        return result
 
     @property
     def terminal(self) -> bool:
-        return self in {
-            PredictionStatus.SUCCEEDED,
-            PredictionStatus.PARTIAL_SUCCESS,
-            PredictionStatus.FAILED,
-            PredictionStatus.CANCELLED,
-        }
+        return self.state is PredictionState.TERMINATED
 
 
 @dataclass
@@ -95,14 +157,11 @@ class Prediction:
     name: Optional[str] = None
     started_at: Optional[int] = None
     finished_at: Optional[int] = None
-    error: Optional[str] = None
 
     def __post_init__(self):
         _nonblank(self.prediction_id, "prediction_id")
         if not isinstance(self.source, Identifier):
             raise ValueError("source must be an Identifier")
-        if isinstance(self.status, str):
-            self.status = PredictionStatus(self.status)
         if not isinstance(self.status, PredictionStatus):
             raise ValueError("status must be a PredictionStatus")
         if type(self.snapshot_id) is not int or self.snapshot_id <= 0:

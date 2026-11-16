@@ -1245,12 +1245,12 @@ public class RESTCatalog implements Catalog {
     public PagedList<Prediction> listPredictions(
             @Nullable Identifier source,
             @Nullable String name,
-            @Nullable PredictionStatus status,
+            @Nullable PredictionStatus.State state,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
         try {
             PagedList<org.apache.paimon.rest.responses.GetPredictionResponse> response =
-                    api.listPredictions(source, name, status, maxResults, pageToken);
+                    api.listPredictions(source, name, state, maxResults, pageToken);
             return new PagedList<>(
                     response.getElements().stream()
                             .map(
