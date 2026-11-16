@@ -108,7 +108,7 @@ class PyArrowFileIO(FileIO):
 
     def _set_pyarrow_version(self):
         self._pyarrow_gte_22 = parse(pyarrow.__version__) >= parse("22.0.0")
-        self._pyarrow_gte_8 = parse(pyarrow.__version__) >= parse("8.0.0")
+        self._pyarrow_gte_10 = parse(pyarrow.__version__) >= parse("10.0.0")
         # force_virtual_addressing landed in PyArrow 16; below it the OSS bucket
         # goes into endpoint_override, so keys must omit it (init + path share
         # this flag so they can't drift).
@@ -175,7 +175,8 @@ class PyArrowFileIO(FileIO):
             request_timeout: int = 60,
             connect_timeout: int = 60
     ) -> Dict[str, Any]:
-        if self._pyarrow_gte_8:
+        # S3 timeout arguments and retry strategies were added in Arrow 10.
+        if self._pyarrow_gte_10:
             config = {
                 'request_timeout': request_timeout,
                 'connect_timeout': connect_timeout
