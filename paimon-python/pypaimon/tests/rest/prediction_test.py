@@ -20,8 +20,9 @@ import threading
 import unittest
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
+from pypaimon.api.api_response import PagedList
 from pypaimon.api.prediction import (
     GetPredictionResponse,
     ListPredictionsResponse,
@@ -44,7 +45,11 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.multimodal.prediction import PredictionJob
+from pypaimon.multimodal.prediction import (
+    PredictionCanceledError,
+    PredictionFailedError,
+    PredictionWait,
+)
 from pypaimon.multimodal.table import MultimodalTable
 from pypaimon.table.file_store_table import FileStoreTable
 
@@ -204,7 +209,7 @@ class PredictionTest(unittest.TestCase):
                     PredictionTerminationCode.FAILED),
             )
 
-    def test_table_submit_fixes_view_and_returns_job(self):
+    def test_table_submit_fixes_view_and_returns_waiter(self):
         raw = Mock(spec=FileStoreTable)
         raw.options = CoreOptions(Options({"scan.snapshot-id": "7"}))
         raw.identifier = Identifier.create("quality", "clips")
@@ -212,22 +217,43 @@ class PredictionTest(unittest.TestCase):
         catalog.submit_prediction.return_value = _prediction()
         table = MultimodalTable(catalog, "quality.clips", raw)
 
-        job = table.predict(
+        waiter = table.predict(
             name="daily-quality",
             model="quality.qwen_vl",
             inputs={"video": "content"},
             instructions="Classify",
         )
 
-        self.assertIsInstance(job, PredictionJob)
-        self.assertEqual("prediction-1", job.prediction_id)
+        self.assertIsInstance(waiter, PredictionWait)
+        self.assertEqual("prediction-1", waiter.prediction_id)
         sent = catalog.submit_prediction.call_args[0][1]
         self.assertEqual(7, sent.snapshot_id)
         self.assertIsNone(sent.tag_name)
         self.assertEqual([], sent.merge_key_columns)
         raw.new_read_builder.assert_not_called()
 
-    def test_wait_is_client_side_polling(self):
+    def test_table_queries_return_metadata_and_cancel_returns_waiter(self):
+        raw = Mock(spec=FileStoreTable)
+        raw.identifier = Identifier.create("quality", "clips")
+        catalog = Mock()
+        prediction = _prediction()
+        page = PagedList([prediction], "next")
+        catalog.get_prediction.return_value = prediction
+        catalog.list_predictions.return_value = page
+        catalog.cancel_prediction.return_value = prediction
+        table = MultimodalTable(catalog, "quality.clips", raw)
+
+        self.assertIs(prediction, table.get_prediction("prediction-1"))
+        self.assertIs(
+            page,
+            table.list_predictions(state=PredictionState.PENDING),
+        )
+        waiter = table.cancel_prediction("prediction-1")
+        self.assertIsInstance(waiter, PredictionWait)
+        self.assertEqual("prediction-1", waiter.prediction_id)
+
+    @patch("pypaimon.common.wait.time.sleep")
+    def test_result_is_client_side_polling(self, sleep):
         catalog = Mock()
         catalog.get_prediction.side_effect = [
             _prediction(PredictionStatus(PredictionState.RUNNING)),
@@ -237,15 +263,52 @@ class PredictionTest(unittest.TestCase):
                     PredictionTerminationCode.SUCCESS),
             )),
         ]
-        job = PredictionJob(catalog, _prediction())
-        result = job.wait(timeout=timedelta(seconds=1), poll_interval=0)
-        self.assertIs(job, result)
-        self.assertEqual(PredictionState.TERMINATED, job.status.state)
+        waiter = PredictionWait(catalog, _prediction())
+        observed = []
+        result = waiter.result(
+            timeout=timedelta(seconds=1),
+            callback=lambda prediction: observed.append(
+                prediction.status.state),
+        )
+        self.assertIs(waiter.current, result)
+        self.assertEqual(PredictionState.TERMINATED, result.status.state)
         self.assertEqual(
             PredictionTerminationCode.SUCCESS,
-            job.status.termination_details.code,
+            result.status.termination_details.code,
         )
+        self.assertEqual(
+            [PredictionState.RUNNING, PredictionState.TERMINATED], observed)
         self.assertEqual(2, catalog.get_prediction.call_count)
+        self.assertEqual(2, sleep.call_count)
+
+    @patch("pypaimon.common.wait.time.sleep")
+    def test_result_raises_for_failed_and_canceled_predictions(self, sleep):
+        for code, error in (
+                (PredictionTerminationCode.FAILED, PredictionFailedError),
+                (PredictionTerminationCode.CANCELED, PredictionCanceledError),
+        ):
+            with self.subTest(code=code):
+                catalog = Mock()
+                catalog.get_prediction.return_value = _prediction(
+                    PredictionStatus(
+                        PredictionState.TERMINATED,
+                        PredictionTerminationDetails(code, "terminal"),
+                    ))
+                waiter = PredictionWait(catalog, _prediction())
+                with self.assertRaises(error):
+                    waiter.result(timeout=timedelta(seconds=1))
+
+    @patch("pypaimon.common.wait.time.monotonic", side_effect=[0, 2])
+    def test_result_timeout_does_not_cancel_prediction(self, monotonic):
+        catalog = Mock()
+        waiter = PredictionWait(catalog, _prediction())
+
+        with self.assertRaisesRegex(
+                TimeoutError, "Prediction prediction-1 did not finish"):
+            waiter.result(timeout=timedelta(seconds=1))
+
+        catalog.get_prediction.assert_not_called()
+        catalog.cancel_prediction.assert_not_called()
 
     def test_rest_round_trip_paths_and_filters(self):
         calls = []

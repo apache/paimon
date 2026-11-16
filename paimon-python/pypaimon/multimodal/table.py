@@ -123,7 +123,7 @@ class MultimodalTable:
             options=None):
         """Submit an asynchronous prediction without reading rows locally."""
         from pypaimon.catalog.prediction import PredictionSpec
-        from pypaimon.multimodal.prediction import PredictionJob
+        from pypaimon.multimodal.prediction import PredictionWait
         from pypaimon.table.file_store_table import FileStoreTable
 
         if not isinstance(self.raw_table, FileStoreTable):
@@ -138,7 +138,8 @@ class MultimodalTable:
         ]
         if unsupported:
             raise ValueError(
-                "Prediction does not support scan options: {}".format(unsupported))
+                "Prediction does not support scan options: {}".format(
+                    unsupported))
         spec = PredictionSpec(
             name=name,
             model=model,
@@ -153,14 +154,18 @@ class MultimodalTable:
         )
         prediction = self.catalog.submit_prediction(
             self.raw_table.identifier, spec)
-        return PredictionJob(self.catalog, prediction)
+        return PredictionWait(self.catalog, prediction)
 
     def get_prediction(self, prediction_id):
-        """Return a client handle for one asynchronous prediction."""
-        from pypaimon.multimodal.prediction import PredictionJob
+        """Return metadata for one asynchronous prediction."""
+        return self.catalog.get_prediction(prediction_id)
 
-        prediction = self.catalog.get_prediction(prediction_id)
-        return PredictionJob(self.catalog, prediction)
+    def cancel_prediction(self, prediction_id):
+        """Request cancellation and return a wait handle."""
+        from pypaimon.multimodal.prediction import PredictionWait
+
+        prediction = self.catalog.cancel_prediction(prediction_id)
+        return PredictionWait(self.catalog, prediction)
 
     def list_predictions(
             self,
@@ -169,10 +174,8 @@ class MultimodalTable:
             state=None,
             max_results=None,
             page_token=None):
-        """List prediction handles for this table."""
-        from pypaimon.api.api_response import PagedList
+        """List prediction metadata for this table."""
         from pypaimon.catalog.prediction import PredictionState
-        from pypaimon.multimodal.prediction import PredictionJob
 
         if isinstance(state, str):
             state = PredictionState(state)
@@ -183,13 +186,7 @@ class MultimodalTable:
             max_results=max_results,
             page_token=page_token,
         )
-        return PagedList(
-            [
-                PredictionJob(self.catalog, value)
-                for value in page.elements
-            ],
-            page.next_page_token,
-        )
+        return page
 
     def add(self, data):
         arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))

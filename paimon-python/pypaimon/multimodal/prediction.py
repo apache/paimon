@@ -15,64 +15,66 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import time
-from datetime import timedelta
-from typing import Optional
-
 from pypaimon.catalog.prediction import Prediction
+from pypaimon.catalog.prediction import PredictionTerminationCode
+from pypaimon.common.wait import Wait
 
 
-class PredictionJob:
-    """Client handle for a durable asynchronous prediction job."""
+class PredictionFailedError(RuntimeError):
+    """Raised when an asynchronous prediction fails."""
+
+    def __init__(self, prediction: Prediction):
+        details = prediction.status.termination_details
+        message = details.message if details is not None else None
+        super().__init__(
+            message or "Prediction {} failed".format(
+                prediction.prediction_id))
+        self.prediction = prediction
+
+
+class PredictionCanceledError(RuntimeError):
+    """Raised when an asynchronous prediction is canceled."""
+
+    def __init__(self, prediction: Prediction):
+        details = prediction.status.termination_details
+        message = details.message if details is not None else None
+        super().__init__(
+            message or "Prediction {} was canceled".format(
+                prediction.prediction_id))
+        self.prediction = prediction
+
+
+class PredictionWait(Wait[Prediction]):
+    """Wait handle returned after submitting an asynchronous prediction."""
 
     def __init__(self, catalog, prediction: Prediction):
         self._catalog = catalog
-        self._prediction = prediction
+        prediction_id = prediction.prediction_id
+        super().__init__(
+            prediction,
+            lambda: catalog.get_prediction(prediction_id),
+            lambda value: value.status.terminal,
+            _validate_prediction_result,
+            "Prediction {}".format(prediction_id),
+        )
 
     @property
-    def prediction(self) -> Prediction:
-        return self._prediction
+    def prediction_id(self) -> str:
+        return self.current.prediction_id
 
-    def __getattr__(self, name):
-        return getattr(self._prediction, name)
-
-    def refresh(self) -> 'PredictionJob':
-        self._prediction = self._catalog.get_prediction(
-            self._prediction.prediction_id)
+    def cancel(self) -> 'PredictionWait':
+        self._current = self._catalog.cancel_prediction(self.prediction_id)
         return self
 
-    def wait(
-            self,
-            timeout: Optional[timedelta] = None,
-            poll_interval: float = 1.0,
-    ) -> 'PredictionJob':
-        """Poll prediction metadata until it reaches a terminal state.
 
-        This is client-side polling over ``get_prediction``. It does not keep
-        a long-lived request open on the REST service.
-        """
-        if timeout is not None and not isinstance(timeout, timedelta):
-            raise ValueError("timeout must be a datetime.timedelta")
-        if poll_interval < 0:
-            raise ValueError("poll_interval must not be negative")
-        deadline = (
-            None if timeout is None
-            else time.monotonic() + timeout.total_seconds()
-        )
-        while not self._prediction.status.terminal:
-            if deadline is not None:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError(
-                        "Prediction {} did not finish within {}".format(
-                            self._prediction.prediction_id, timeout))
-                time.sleep(min(poll_interval, remaining))
-            else:
-                time.sleep(poll_interval)
-            self.refresh()
-        return self
-
-    def cancel(self) -> 'PredictionJob':
-        self._prediction = self._catalog.cancel_prediction(
-            self._prediction.prediction_id)
-        return self
+def _validate_prediction_result(prediction: Prediction) -> Prediction:
+    details = prediction.status.termination_details
+    if details is None:
+        raise RuntimeError(
+            "Terminal prediction {} has no termination details".format(
+                prediction.prediction_id))
+    if details.code is PredictionTerminationCode.FAILED:
+        raise PredictionFailedError(prediction)
+    if details.code is PredictionTerminationCode.CANCELED:
+        raise PredictionCanceledError(prediction)
+    return prediction
