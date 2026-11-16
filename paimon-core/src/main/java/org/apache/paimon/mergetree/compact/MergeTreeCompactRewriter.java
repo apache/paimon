@@ -133,6 +133,15 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
         return files;
     }
 
+    /**
+     * The factory this rewriter writes compaction output through, for the partition and bucket it
+     * was created for. A {@link CompactRewriterFactory} can use it to place, read and describe
+     * files as this rewriter does.
+     */
+    public KeyValueFileWriterFactory writerFactory() {
+        return writerFactory;
+    }
+
     public void setMetricsReporter(@Nullable CompactionMetrics.Reporter reporter) {
         this.metricsReporter = reporter;
     }
