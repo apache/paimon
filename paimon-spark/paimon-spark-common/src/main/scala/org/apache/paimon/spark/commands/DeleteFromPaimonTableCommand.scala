@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.{CoreOptions, Snapshot}
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
@@ -42,6 +43,7 @@ case class DeleteFromPaimonTableCommand(
   with SupportsSubquery {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    rejectRewriteUnderQueryAuth(table, "DELETE")
     val commitMessages = if (usePKUpsertDelete()) {
       performPrimaryKeyDelete(sparkSession)
     } else {

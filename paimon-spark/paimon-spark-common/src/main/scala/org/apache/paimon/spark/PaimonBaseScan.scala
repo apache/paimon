@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.TableQueryAuthResult.{rejectRewriteUnderQueryAuth, rejectRewriteUnderQueryAuthRules}
 import org.apache.paimon.globalindex.GlobalIndexResult
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder, VectorSearch}
@@ -58,6 +59,12 @@ abstract class PaimonBaseScan(table: InnerTable)
 
     val plan = scan.plan()
     registerReadProtectionTagCleanup(scan.readProtectionTagName)
+    // A rewrite reading this scan, such as an insert-only merge, needs full access.
+    Option(table.options().get(CoreOptions.SCAN_REWRITE_OPERATION.key())).foreach {
+      operation =>
+        rejectRewriteUnderQueryAuth(table, operation)
+        rejectRewriteUnderQueryAuthRules(plan.splits(), operation)
+    }
     plan.splits().asScala.toArray
   }
 

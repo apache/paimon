@@ -45,6 +45,8 @@ import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
+
 /** Builds the Flink batch topology for postpone merge-on-read. */
 final class PostponeMergeOnRead {
 
@@ -99,8 +101,13 @@ final class PostponeMergeOnRead {
             TypeInformation<RowData> outputType,
             @Nullable NestedProjectedRowData outerProject,
             @Nullable Long limit,
-            boolean blobAsDescriptor) {
-        PostponeMergeInputSource inputSource = new PostponeMergeInputSource(plan);
+            boolean blobAsDescriptor,
+            @Nullable String rewriteOperation) {
+        if (rewriteOperation != null) {
+            rejectRewriteUnderQueryAuth(table, rewriteOperation);
+        }
+        PostponeMergeInputSource inputSource =
+                new PostponeMergeInputSource(plan, table, rewriteOperation);
         DataStream<Split> inputs =
                 env.fromSource(
                                 new PaimonDataStreamSource<>(inputSource, table),

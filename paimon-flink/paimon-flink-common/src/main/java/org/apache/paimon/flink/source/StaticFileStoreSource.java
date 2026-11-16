@@ -24,6 +24,7 @@ import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.table.ChainGroupReadTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
@@ -38,6 +39,8 @@ import javax.annotation.Nullable;
 import java.util.Collection;
 import java.util.List;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuthRules;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode;
 
 /** Bounded {@link FlinkSource} for reading records. It does not monitor new snapshots. */
@@ -56,6 +59,9 @@ public class StaticFileStoreSource extends FlinkSource {
     @Nullable private final SerializableFunction<FileStoreSourceSplit, ?> splitGroupFunc;
 
     private final boolean skipPreloadTargetSnapshot;
+
+    @Nullable private String rewriteOperation;
+    @Nullable private Table rewriteTable;
 
     public StaticFileStoreSource(
             ReadBuilder readBuilder,
@@ -144,10 +150,19 @@ public class StaticFileStoreSource extends FlinkSource {
         return Boundedness.BOUNDED;
     }
 
+    public StaticFileStoreSource withRewriteOperation(@Nullable String operation, Table table) {
+        this.rewriteOperation = operation;
+        this.rewriteTable = table;
+        return this;
+    }
+
     @Override
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
+        if (rewriteOperation != null) {
+            rejectRewriteUnderQueryAuth(rewriteTable, rewriteOperation);
+        }
         Collection<FileStoreSourceSplit> splits =
                 checkpoint == null ? getSplits(context) : checkpoint.splits();
         SplitAssigner splitAssigner =
@@ -173,7 +188,11 @@ public class StaticFileStoreSource extends FlinkSource {
             ((InnerTableScan) scan)
                     .withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
         }
-        return splitGenerator.createSplits(scan.plan());
+        TableScan.Plan plan = scan.plan();
+        if (rewriteOperation != null) {
+            rejectRewriteUnderQueryAuthRules(plan.splits(), rewriteOperation);
+        }
+        return splitGenerator.createSplits(plan);
     }
 
     public static SplitAssigner createSplitAssigner(

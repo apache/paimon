@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.partition.PartitionStatistics
 import org.apache.paimon.table.{FileStoreTable, FormatTable, Table}
 import org.apache.paimon.table.source.ScanMode
@@ -122,6 +123,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
   }
 
   override def truncatePartitions(idents: Array[InternalRow]): Boolean = {
+    rejectRewriteUnderQueryAuth(table, "TRUNCATE")
     val partitions = toPaimonPartitions(idents).toSeq.asJava
     val commit = table.newBatchWriteBuilder().newCommit()
     try {

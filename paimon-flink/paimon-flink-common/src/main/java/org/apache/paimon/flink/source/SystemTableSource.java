@@ -40,6 +40,7 @@ import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
+import static org.apache.paimon.CoreOptions.SCAN_REWRITE_OPERATION;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
 
 /** A {@link FlinkTableSource} for system table. */
@@ -137,7 +138,7 @@ public class SystemTableSource extends FlinkTableSource {
                     new ContinuousFileStoreSource(
                             readBuilder, table.options(), limit, isUnordered(table), rowData);
         } else {
-            source =
+            StaticFileStoreSource staticSource =
                     new StaticFileStoreSource(
                             readBuilder,
                             limit,
@@ -152,6 +153,9 @@ public class SystemTableSource extends FlinkTableSource {
                                             .getOrDefault(
                                                     CoreOptions.BLOB_AS_DESCRIPTOR.key(), "false")),
                             false);
+            source =
+                    staticSource.withRewriteOperation(
+                            table.options().get(SCAN_REWRITE_OPERATION.key()), table);
         }
         return new PaimonDataStreamScanProvider(
                 source.getBoundedness() == Boundedness.BOUNDED,
