@@ -672,6 +672,101 @@ public class FileStoreCommitTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRecoverHalfCommittedIdentifierWithConcurrentOverlap(boolean overwrite)
+            throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        Collections.singletonMap(CoreOptions.OVERWRITE_UPGRADE.key(), "false"));
+        KeyValue row = gen.nextInsert("20211110", 8, 1L, null, "replacement");
+        List<ManifestCommittable> prepared = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            store.commitDataImpl(
+                    Collections.singletonList(row),
+                    gen::getPartition,
+                    value -> 0,
+                    false,
+                    2L,
+                    123L,
+                    Collections.emptyList(),
+                    (commit, committable) -> prepared.add(committable));
+        }
+        CommitMessageImpl append = (CommitMessageImpl) prepared.get(0).fileCommittables().get(0);
+        CommitMessageImpl ours = (CommitMessageImpl) prepared.get(1).fileCommittables().get(0);
+        CommitMessageImpl theirs = (CommitMessageImpl) prepared.get(2).fileCommittables().get(0);
+        List<DataFileMeta> oursUpgraded = new ArrayList<>();
+        for (DataFileMeta file : ours.newFilesIncrement().newFiles()) {
+            oursUpgraded.add(file.upgrade(1));
+        }
+        List<DataFileMeta> theirsUpgraded = new ArrayList<>();
+        for (DataFileMeta file : theirs.newFilesIncrement().newFiles()) {
+            theirsUpgraded.add(file.upgrade(1));
+        }
+        // Identifier 2 compacts its own level 0 file into a level 1 file.
+        ManifestCommittable pending =
+                new ManifestCommittable(
+                        2,
+                        123L,
+                        Collections.singletonList(
+                                new CommitMessageImpl(
+                                        append.partition(),
+                                        append.bucket(),
+                                        append.totalBuckets(),
+                                        append.newFilesIncrement(),
+                                        new CompactIncrement(
+                                                append.newFilesIncrement().newFiles(),
+                                                oursUpgraded,
+                                                Collections.emptyList()))));
+        try (FileStoreCommit commit = store.newCommit("writer", null)) {
+            // Only the first phase of identifier 2 is published.
+            if (overwrite) {
+                commit.overwritePartition(Collections.emptyMap(), prepared.get(0));
+            } else {
+                commit.commit(prepared.get(0), false);
+            }
+
+            // Another user appends a same-key file and compacts it to level 1, while the level 0
+            // input of identifier 2 is still live.
+            try (FileStoreCommit other = store.newCommit("other", null)) {
+                other.commit(prepared.get(2), false);
+                other.commit(
+                        new ManifestCommittable(
+                                3,
+                                null,
+                                Collections.singletonList(
+                                        new CommitMessageImpl(
+                                                theirs.partition(),
+                                                theirs.bucket(),
+                                                theirs.totalBuckets(),
+                                                DataIncrement.emptyIncrement(),
+                                                new CompactIncrement(
+                                                        theirs.newFilesIncrement().newFiles(),
+                                                        theirsUpgraded,
+                                                        Collections.emptyList())))),
+                        false);
+            }
+            Snapshot latest = store.snapshotManager().latestSnapshot();
+            assertThat(latest.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+
+            // The liveness checks pass, but the recovered level 1 output overlaps theirs. Each
+            // restart must drop the recovery instead of failing on the same LSM conflict.
+            for (int restart = 0; restart < 2; restart++) {
+                List<ManifestCommittable> recovered =
+                        commit.filterCommitted(Collections.singletonList(pending));
+                assertThat(recovered).hasSize(1);
+                int generated =
+                        overwrite
+                                ? commit.overwritePartition(
+                                        Collections.emptyMap(), recovered.get(0))
+                                : commit.commit(recovered.get(0), false);
+                assertThat(generated).isZero();
+                assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(latest.id());
+            }
+        }
+    }
+
     @Test
     public void testFilterHalfCommittedIdentifierWithConcurrentlyDroppedIndex() throws Exception {
         TestFileStore store = createStore(false);
