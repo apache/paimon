@@ -62,10 +62,6 @@ public final class CopiedDataFiles {
     public static void adaptToTarget(
             FileStoreTable target, Collection<List<DataFileMeta>> copiedFilesByBucket) {
         boolean rowTracking = target.coreOptions().rowTrackingEnabled();
-        boolean vectorStoreFiles =
-                copiedFilesByBucket.stream()
-                        .flatMap(List::stream)
-                        .anyMatch(file -> kind(file) == 2);
         for (List<DataFileMeta> files : copiedFilesByBucket) {
             checkNoColumnUpdates(target, files);
             if (rowTracking) {
@@ -76,7 +72,7 @@ public final class CopiedDataFiles {
                                         (DataFileMeta file) -> file.firstRowId(),
                                         Comparator.nullsLast(Comparator.naturalOrder()))
                                 .thenComparingInt(CopiedDataFiles::kind));
-                checkDedicatedFilesFollowTheirRows(target, files, vectorStoreFiles);
+                checkDedicatedFilesFollowTheirRows(target, files);
             }
             ListIterator<DataFileMeta> iterator = files.listIterator();
             while (iterator.hasNext()) {
@@ -166,15 +162,14 @@ public final class CopiedDataFiles {
      * Refuses a blob or vector-store file that the commit would give the row ids of other rows than
      * it holds. The commit gives a normal file the row ids after the normal file before it, a blob
      * file those from the start of the normal file before it, or after the blob file of the same
-     * field following that normal file, and a vector-store file those after the vector-store file
-     * before it in the whole commit. This replays that on the files of one bucket, which the commit
-     * keeps together but may order among the other buckets in any way: so when the copy has
-     * vector-store files, those of every bucket must also hold as many rows as its normal files. A
-     * source breaks this when a blob or vector column was updated, or added after rows were
-     * written.
+     * field following that normal file. The vector-store cursor also advances to each normal file's
+     * start, while preserving any progress past it. This replays that on the files of one bucket,
+     * which the commit keeps together but may order among the other buckets in any way. Normal
+     * files without vectors are safe, but dedicated column updates may not follow the assignment
+     * order.
      */
     private static void checkDedicatedFilesFollowTheirRows(
-            FileStoreTable target, List<DataFileMeta> files, boolean vectorStoreFiles) {
+            FileStoreTable target, List<DataFileMeta> files) {
         // the row ids the commit gives, counted from the first one it gives to the bucket
         long start = 0;
         long blobStartDefault = 0;
@@ -191,6 +186,7 @@ public final class CopiedDataFiles {
                 normalStarts.add(start);
                 blobStartDefault = start;
                 blobStarts.clear();
+                vectorStoreStart = Math.max(vectorStoreStart, start);
                 start += file.rowCount();
                 continue;
             }
@@ -234,15 +230,6 @@ public final class CopiedDataFiles {
                     throw rowsOfOtherFiles(target, file);
                 }
                 row = endRowId(normalFile);
-            }
-        }
-
-        if (vectorStoreFiles && vectorStoreStart < start) {
-            // rows without a vector-store file move those of the next buckets onto other rows
-            for (int n = normalFiles.size() - 1; n >= 0; n--) {
-                if (normalStarts.get(n) <= vectorStoreStart) {
-                    throw rowsOfOtherFiles(target, normalFiles.get(n));
-                }
             }
         }
     }

@@ -24,6 +24,7 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -58,6 +59,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -300,6 +303,76 @@ public class CopiedDataFilesTest extends TableTestBase {
         assertThat(rowIds).containsExactly(entry(1, 1L), entry(2, 2L), entry(3, 3L));
     }
 
+    @ParameterizedTest
+    @CsvSource({"json,false", "parquet,false", "json,true", "parquet,true"})
+    public void testVectorFilesAfterNormalOnlyFilesAreCopied(String format, boolean partitioned)
+            throws Exception {
+        Schema.Builder schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("pt", DataTypes.STRING())
+                        .column("embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()))
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.FILE_COMPRESSION.key(), "none")
+                        .option(CoreOptions.VECTOR_FILE_FORMAT.key(), format);
+        if (partitioned) {
+            schema.partitionKeys("pt");
+        }
+        catalog.createTable(SOURCE, schema.build(), false);
+        catalog.createTable(TARGET, schema.build(), false);
+        FileStoreTable source = table(SOURCE);
+        RowType normalType = source.rowType().project(Arrays.asList("id", "pt"));
+        BatchWriteBuilder builder = source.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(normalType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(1, BinaryString.fromString("p1")));
+            write.write(GenericRow.of(2, BinaryString.fromString("p1")));
+            write.write(GenericRow.of(5, BinaryString.fromString("p2")));
+            commit.commit(write.prepareCommit());
+        }
+        write(
+                source,
+                GenericRow.of(
+                        3,
+                        BinaryString.fromString("p1"),
+                        BinaryVector.fromPrimitiveArray(new float[] {30, 0})),
+                GenericRow.of(
+                        4,
+                        BinaryString.fromString("p1"),
+                        BinaryVector.fromPrimitiveArray(new float[] {40, 0})));
+        Map<Integer, Float> expected = new TreeMap<>();
+        expected.put(1, null);
+        expected.put(2, null);
+        expected.put(3, 30F);
+        expected.put(4, 40F);
+        expected.put(5, null);
+        assertThat(vectorValues(source)).isEqualTo(expected);
+        write(
+                table(TARGET),
+                GenericRow.of(
+                        10,
+                        BinaryString.fromString("p1"),
+                        BinaryVector.fromPrimitiveArray(new float[] {100, 0})));
+
+        copy(SOURCE, TARGET, null);
+
+        FileStoreTable target = table(TARGET);
+        assertThat(vectorValues(target)).isEqualTo(expected);
+        assertThat(rowIds(target).values()).containsExactlyInAnyOrder(1L, 2L, 3L, 4L, 5L);
+        assertThat(target.snapshotManager().latestSnapshot().nextRowId()).isEqualTo(6L);
+    }
+
+    private static Map<Integer, Float> vectorValues(FileStoreTable table) throws Exception {
+        Map<Integer, Float> values = new TreeMap<>();
+        List<InternalRow> rows = read(table, table.rowType());
+        for (InternalRow row : rows) {
+            values.put(row.getInt(0), row.isNullAt(2) ? null : row.getVector(2).toFloatArray()[0]);
+        }
+        assertThat(values).hasSameSizeAs(rows);
+        return values;
+    }
+
     @Test
     public void testDedicatedFilesFollowingTheirRowsAreAccepted() throws Exception {
         createTable(TARGET, Options.DATA_EVOLUTION, false);
@@ -340,13 +413,6 @@ public class CopiedDataFilesTest extends TableTestBase {
     @Test
     public void testDedicatedFilesTheCommitWouldGiveOtherRowsAreRefused() throws Exception {
         createTable(TARGET, Options.DATA_EVOLUTION, false);
-        // a vector column added after the first rows: the vector-store file would get rows 0 and 1
-        assertRefused(
-                "v1.vector.parquet",
-                files(
-                        file("n0.parquet", 0, 2),
-                        file("n1.parquet", 2, 2),
-                        file("v1.vector.parquet", 2, 2, "e")));
         // a vector column updated
         assertRefused(
                 "u0.vector.parquet",
@@ -361,11 +427,6 @@ public class CopiedDataFilesTest extends TableTestBase {
                         file("n0.parquet", 0, 2),
                         file("b0.blob", 0, 2, "b"),
                         file("u0.blob", 1, 1, "b")));
-        // a bucket without vector-store files would move those of the other buckets
-        assertRefused(
-                "n0.parquet",
-                files(file("n0.parquet", 0, 2)),
-                files(file("n1.parquet", 2, 2), file("v1.vector.parquet", 2, 2, "e")));
     }
 
     @Test
