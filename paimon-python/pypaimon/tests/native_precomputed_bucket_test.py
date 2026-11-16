@@ -168,13 +168,18 @@ def test_precomputed_append_projects_full_or_selected_schema(tmp_path):
     builder = table.new_batch_write_builder()
     writer = builder.new_write()
     try:
-        with patch.object(writer, '_switch_to_python', side_effect=AssertionError('Python fallback')):
+        assert table.options.native_write_enabled()
+        assert not isinstance(writer, NativeTableWrite)
+        with patch('pypaimon.execution.native.write.native_write.NativeTableWrite.write_arrow_batch',
+                   side_effect=AssertionError('Bucketed append requires advancing Python sequence ranges')):
             writer.with_write_type(['pt', 'id'])
             writer.write_arrow(_batch([1], ['omitted']), bucket=3)
             writer.write_arrow(_batch([2], ['omitted']).select(['pt', 'id']), bucket=3)
             messages = writer.prepare_commit()
         assert {message.bucket for message in messages} == {3}
         assert all(file.write_cols == ['pt', 'id'] for message in messages for file in message.new_files)
+        assert [(file.min_sequence_number, file.max_sequence_number)
+                for message in messages for file in message.new_files] == [(2, 3)]
         builder.new_commit().commit(messages)
     finally:
         writer.close()

@@ -65,6 +65,8 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
     private final int fieldCount;
     private final int rowIdIndex;
     private final int seqNumIndex;
+    private final int blobIndex;
+    private final boolean keepPlaceholders;
     private final Object blobPlaceholder;
     private final InternalRow.FieldGetter blobGetter;
     private boolean returned;
@@ -73,32 +75,17 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             List<DataFileMeta> files,
             BlobFileReaderFactory readerFactory,
             ReaderWrapper readerWrapper,
-            List<Range> rowRanges,
-            RowType readRowType,
-            int blobIndex)
-            throws IOException {
-        this(
-                files,
-                readerFactory,
-                readerWrapper,
-                enclosingRange(files),
-                rowRanges,
-                readRowType,
-                blobIndex);
-    }
-
-    BlobFallbackRecordReader(
-            List<DataFileMeta> files,
-            BlobFileReaderFactory readerFactory,
-            ReaderWrapper readerWrapper,
             Range logicalRange,
             List<Range> rowRanges,
             RowType readRowType,
-            int blobIndex)
+            int blobIndex,
+            boolean keepPlaceholders)
             throws IOException {
         this.fieldCount = readRowType.getFieldCount();
         this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
         this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
+        this.blobIndex = blobIndex;
+        this.keepPlaceholders = keepPlaceholders;
         this.blobPlaceholder = blobPlaceholder(readRowType, blobIndex);
         this.blobGetter =
                 InternalRow.createFieldGetter(readRowType.getTypeAt(blobIndex), blobIndex);
@@ -161,18 +148,6 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                                     firstRowId,
                                     lastRowId)));
         }
-    }
-
-    private static Range enclosingRange(List<DataFileMeta> files) {
-        checkArgument(!files.isEmpty(), "Blob bunch should not be empty.");
-        long firstRowId = Long.MAX_VALUE;
-        long lastRowId = Long.MIN_VALUE;
-        for (DataFileMeta file : files) {
-            Range range = file.nonNullRowIdRange();
-            firstRowId = Math.min(firstRowId, range.from);
-            lastRowId = Math.max(lastRowId, range.to);
-        }
-        return new Range(firstRowId, lastRowId);
     }
 
     @Nullable
@@ -261,6 +236,9 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
 
     private InternalRow nullBlobRow(long rowId) {
         GenericRow row = new GenericRow(fieldCount);
+        if (keepPlaceholders) {
+            row.setField(blobIndex, blobPlaceholder);
+        }
         if (rowIdIndex >= 0) {
             row.setField(rowIdIndex, rowId);
         }

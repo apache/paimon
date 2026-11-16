@@ -147,6 +147,16 @@ public class DataEvolutionCompactCoordinator {
                         snapshot,
                         candidateOptions,
                         candidateFilesPerBatch);
+        DataEvolutionIncrementalCompactPlanner incrementalPlanner = null;
+        if (options.dataEvolutionCompactionIncrementalEnabled()) {
+            DataEvolutionCompactProjection projection = new DataEvolutionCompactProjection(table);
+            incrementalPlanner =
+                    new DataEvolutionIncrementalCompactPlanner(
+                            options,
+                            projection::currentFields,
+                            file -> !isBlobFile(file.fileName()),
+                            projection::canRewrite);
+        }
         this.planner =
                 new CompactPlanner(
                         compactBlob,
@@ -159,7 +169,8 @@ public class DataEvolutionCompactCoordinator {
                         schemaFetcher,
                         currentBlobFieldIds,
                         options.vectorTargetFileSize(),
-                        currentVectorFieldIds);
+                        currentVectorFieldIds,
+                        incrementalPlanner);
     }
 
     static long largeFileThreshold(long targetFileSize, double ratio) {
@@ -292,52 +303,7 @@ public class DataEvolutionCompactCoordinator {
         @Nullable private final Set<Integer> currentVectorFieldIds;
         private Set<String> completedNormalFiles = Collections.emptySet();
         private Set<String> completedVectorFiles = Collections.emptySet();
-
-        @VisibleForTesting
-        CompactPlanner(
-                boolean compactBlob,
-                boolean compactVector,
-                long targetFileSize,
-                long openFileCost,
-                long compactMinFileNum) {
-            this(
-                    compactBlob,
-                    compactVector,
-                    Long.MAX_VALUE,
-                    targetFileSize,
-                    targetFileSize,
-                    openFileCost,
-                    compactMinFileNum,
-                    schemaId -> {
-                        throw new IllegalStateException(
-                                "Schema fetcher is required for blob compaction.");
-                    },
-                    null);
-        }
-
-        CompactPlanner(
-                boolean compactBlob,
-                boolean compactVector,
-                long largeFileThreshold,
-                long targetFileSize,
-                long blobTargetFileSize,
-                long openFileCost,
-                long compactMinFileNum,
-                LongFunction<RowType> schemaFetcher,
-                @Nullable Set<Integer> currentBlobFieldIds) {
-            this(
-                    compactBlob,
-                    compactVector,
-                    largeFileThreshold,
-                    targetFileSize,
-                    blobTargetFileSize,
-                    openFileCost,
-                    compactMinFileNum,
-                    schemaFetcher,
-                    currentBlobFieldIds,
-                    targetFileSize,
-                    null);
-        }
+        @Nullable private final DataEvolutionIncrementalCompactPlanner incrementalPlanner;
 
         CompactPlanner(
                 boolean compactBlob,
@@ -350,7 +316,8 @@ public class DataEvolutionCompactCoordinator {
                 LongFunction<RowType> schemaFetcher,
                 @Nullable Set<Integer> currentBlobFieldIds,
                 long vectorTargetFileSize,
-                @Nullable Set<Integer> currentVectorFieldIds) {
+                @Nullable Set<Integer> currentVectorFieldIds,
+                @Nullable DataEvolutionIncrementalCompactPlanner incrementalPlanner) {
             this.compactBlob = compactBlob;
             this.compactVector = compactVector;
             this.largeFileThreshold = largeFileThreshold;
@@ -364,6 +331,7 @@ public class DataEvolutionCompactCoordinator {
             this.currentBlobFieldIds = currentBlobFieldIds;
             this.vectorTargetFileSize = vectorTargetFileSize;
             this.currentVectorFieldIds = currentVectorFieldIds;
+            this.incrementalPlanner = incrementalPlanner;
         }
 
         CompactPlanner withCompletedVectorFiles(Set<String> fileNames) {
@@ -428,6 +396,23 @@ public class DataEvolutionCompactCoordinator {
                                 "Data files %s should be all row id ranges same.",
                                 continuousDataFiles);
                         long groupWeight = groupWeight(fileGroup);
+                        if (incrementalPlanner != null && fileGroup.size() > 1) {
+                            tasks.addAll(
+                                    triggerTask(
+                                            compactBin.drain(),
+                                            partition,
+                                            dataFileToBlobFiles,
+                                            dataFileToVectorStoreFiles));
+                            // Retained normal versions forbid merging this range with its
+                            // neighbours.
+                            tasks.addAll(
+                                    triggerTask(
+                                            compactBin(fileGroup, groupWeight),
+                                            partition,
+                                            dataFileToBlobFiles,
+                                            dataFileToVectorStoreFiles));
+                            continue;
+                        }
                         if (groupWeight > targetFileSize) {
                             tasks.addAll(
                                     triggerTask(
@@ -507,19 +492,17 @@ public class DataEvolutionCompactCoordinator {
             boolean hasUncompactedFiles =
                     dataFiles.stream()
                             .anyMatch(file -> !completedNormalFiles.contains(file.fileName()));
+            boolean splitLargeFile =
+                    canSplit(normalRange, protectedRanges)
+                            && dataFiles.stream()
+                                    .anyMatch(
+                                            file ->
+                                                    file.fileSize() > largeFileThreshold
+                                                            && !completedNormalFiles.contains(
+                                                                    file.fileName()));
             boolean triggerNormalFile =
                     hasUncompactedFiles
-                            && (dataFiles.size() >= compactMinFileNum
-                                    || (canSplit(normalRange, protectedRanges)
-                                            && dataFiles.stream()
-                                                    .anyMatch(
-                                                            f ->
-                                                                    f.fileSize()
-                                                                                    > largeFileThreshold
-                                                                            && !completedNormalFiles
-                                                                                    .contains(
-                                                                                            f
-                                                                                                    .fileName()))));
+                            && (dataFiles.size() >= compactMinFileNum || splitLargeFile);
 
             if (compactBlob) {
                 if (triggerNormalFile) {
@@ -555,16 +538,19 @@ public class DataEvolutionCompactCoordinator {
                                     dataFile, Collections.emptyList()));
                 }
                 // Output may span several normal files only when they are merged in this batch.
-                if (triggerNormalFile
-                        && dataFiles.size() >= compactMinFileNum
-                        && vectorStoreFilesCompactable(binVectorStoreFiles)) {
-                    tasks.add(new DataEvolutionVectorCompactTask(partition, binVectorStoreFiles));
+                List<DataFileMeta> selectedVectorFiles =
+                        triggerNormalFile && dataFiles.size() >= compactMinFileNum
+                                ? vectorStoreFilesToCompact(binVectorStoreFiles)
+                                : Collections.emptyList();
+                if (!selectedVectorFiles.isEmpty()) {
+                    tasks.add(new DataEvolutionVectorCompactTask(partition, selectedVectorFiles));
                 } else {
                     for (DataFileMeta dataFile : dataFiles) {
                         List<DataFileMeta> vectorStoreFiles =
-                                dataFileToVectorStoreFiles.getOrDefault(
-                                        dataFile, Collections.emptyList());
-                        if (vectorStoreFilesCompactable(vectorStoreFiles)) {
+                                vectorStoreFilesToCompact(
+                                        dataFileToVectorStoreFiles.getOrDefault(
+                                                dataFile, Collections.emptyList()));
+                        if (!vectorStoreFiles.isEmpty()) {
                             tasks.add(
                                     new DataEvolutionVectorCompactTask(
                                             partition, vectorStoreFiles));
@@ -580,23 +566,51 @@ public class DataEvolutionCompactCoordinator {
                 }
                 if (dataFiles.size() >= compactMinFileNum
                         || canSplit(normalRange, protectedRanges)) {
-                    tasks.add(
-                            0,
-                            new DataEvolutionNormalCompactTask(
-                                    partition, dataFiles, protectedRanges));
+                    List<DataFileMeta> selected =
+                            incrementalPlanner == null
+                                            || (splitLargeFile
+                                                    && canSplit(normalRange, protectedRanges))
+                                    ? dataFiles
+                                    : incrementalPlanner.selectFiles(dataFiles, compactMinFileNum);
+                    if (!selected.isEmpty()
+                            && selected.stream()
+                                    .anyMatch(
+                                            file ->
+                                                    !completedNormalFiles.contains(
+                                                            file.fileName()))) {
+                        tasks.add(
+                                0,
+                                new DataEvolutionNormalCompactTask(
+                                        partition,
+                                        selected,
+                                        protectedRanges,
+                                        selected.size() < dataFiles.size()));
+                    }
                 }
             }
             return tasks;
         }
 
-        private boolean vectorStoreFilesCompactable(List<DataFileMeta> vectorStoreFiles) {
-            return vectorStoreFiles.size() > 1
-                    && vectorStoreFiles.size() >= compactMinFileNum
-                    && !vectorStoreFiles.stream()
+        private List<DataFileMeta> vectorStoreFilesToCompact(List<DataFileMeta> vectorStoreFiles) {
+            if (vectorStoreFiles.size() < 2
+                    || vectorStoreFiles.size() < compactMinFileNum
+                    || vectorStoreFiles.stream()
                             .allMatch(file -> completedVectorFiles.contains(file.fileName()))
-                    && vectorStoreFilesNeedRewrite(vectorStoreFiles)
-                    && DataEvolutionVectorCompactTask.coversRangeForEveryField(
-                            vectorStoreFiles, schemaFetcher, currentVectorFieldIds);
+                    || !vectorStoreFilesNeedRewrite(vectorStoreFiles)) {
+                return Collections.emptyList();
+            }
+            List<DataFileMeta> selected =
+                    incrementalPlanner == null
+                            ? vectorStoreFiles
+                            : incrementalPlanner.selectFiles(vectorStoreFiles, compactMinFileNum);
+            return !selected.isEmpty()
+                            && selected.stream()
+                                    .anyMatch(
+                                            file -> !completedVectorFiles.contains(file.fileName()))
+                            && DataEvolutionVectorCompactTask.coversRangeForEveryField(
+                                    selected, schemaFetcher, currentVectorFieldIds)
+                    ? selected
+                    : Collections.emptyList();
         }
 
         /**
@@ -675,6 +689,21 @@ public class DataEvolutionCompactCoordinator {
                                 .map(DataFileMeta::nonNullRowIdRange)
                                 .collect(Collectors.toList());
                 Range rowRange = Range.sortAndMergeOverlap(rowRanges).get(0);
+                if (incrementalPlanner != null && rowRangeGroup.size() > 1) {
+                    List<DataFileMeta> selected =
+                            incrementalPlanner.selectFiles(
+                                    rowRangeGroup, BLOB_COMPACT_MIN_FILE_NUM);
+                    if (selected.size() < rowRangeGroup.size()) {
+                        // Retained versions must not be bridged by adjacent-range compaction.
+                        addFileGroupsToCompact(result, continuousOrOverlapFiles);
+                        continuousOrOverlapFiles.clear();
+                        if (!selected.isEmpty()) {
+                            result.add(selected);
+                        }
+                        expectedFirstRowId = rowRange.to + 1;
+                        continue;
+                    }
+                }
                 long firstRowId = rowRange.from;
                 if (!continuousOrOverlapFiles.isEmpty() && firstRowId != expectedFirstRowId) {
                     addFileGroupsToCompact(result, continuousOrOverlapFiles);

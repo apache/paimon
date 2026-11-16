@@ -27,11 +27,15 @@ import pyarrow.compute as pc
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.common.file_io import FileIO
+from pypaimon.common.options import Options
+from pypaimon.execution.python.read.reader.deferred_blob_resolve_reader import DeferredBlobResolveReader
+from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.execution.python.read.reader.format_blob_reader import (BlobRecordIterator)
-from pypaimon.table.row.blob import BlobRef
+from pypaimon.table.row.blob import BlobDescriptor, BlobRef
 
 
 _ROW_COUNT = 10
@@ -213,7 +217,6 @@ class DeferredBlobResolveTest(unittest.TestCase):
 
         self.assertEqual(5, result.num_rows)
         self.assertEqual(5, counting_file_io.blobs_fetched)
-        self.assertEqual(0, counting_file_io.concurrent_read_calls)
         self.assertEqual(
             [bytes([index]) * 1024 for index in range(5)],
             result.column("payload").to_pylist(),
@@ -611,6 +614,77 @@ class DeferredBlobResolveTest(unittest.TestCase):
             payload_by_score[3],
         )
 
+
+@pytest.mark.python_read
+@pytest.mark.parametrize("options, expected_ranges", [
+    ({}, [(0, 10)]),
+    ({"file-io.read-coalesce.max-gap": "0b"}, [(0, 6), (8, 2)]),
+    ({"file-io.read-coalesce.max-block": "5b"}, [(0, 4), (4, 2), (8, 2)]),
+])
+def test_single_worker_deferred_blobs_coalesce_ranges(tmp_path, options, expected_ranges):
+    path = str(tmp_path / "payload.bin")
+    (tmp_path / "payload.bin").write_bytes(b"abcdefghij")
+    file_io = FileIO.get(str(tmp_path), Options(options))
+    descriptors = [
+        BlobDescriptor(path, 4, 2).serialize(),
+        None,
+        BlobDescriptor(path, 0, 4).serialize(),
+        BlobDescriptor(path, 4, 2).serialize(),
+        BlobDescriptor(path, 8, 2).serialize(),
+    ]
+    batch = pa.record_batch(
+        [pa.array(descriptors, type=pa.large_binary())], names=["payload"])
+
+    class BatchReader(RecordBatchReader):
+        def read_arrow_batch(self):
+            return batch
+
+        def close(self):
+            pass
+
+    opened = []
+    ranges = []
+    closed = []
+    original_open = file_io.new_input_stream
+
+    class CountingStream:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def read(self, size=-1):
+            ranges.append((self.stream.tell(), size))
+            return self.stream.read(size)
+
+        def read_at(self, size, offset):
+            ranges.append((offset, size))
+            position = self.stream.tell()
+            try:
+                self.stream.seek(offset)
+                return self.stream.read(size)
+            finally:
+                self.stream.seek(position)
+
+        def close(self):
+            closed.append(self)
+            self.stream.close()
+
+    def open_stream(source):
+        stream = CountingStream(original_open(source))
+        opened.append(stream)
+        return stream
+
+    with patch.object(file_io, "new_input_stream", side_effect=open_stream):
+        reader = DeferredBlobResolveReader(BatchReader(), file_io, ["payload"])
+        result = reader.read_arrow_batch()
+        reader.close()
+
+    assert result.column("payload").to_pylist() == [b"ef", None, b"abcd", b"ef", b"ij"]
+    assert ranges == expected_ranges
+    assert len(opened) == 1
+    assert closed == opened
 
 if __name__ == "__main__":
     unittest.main()

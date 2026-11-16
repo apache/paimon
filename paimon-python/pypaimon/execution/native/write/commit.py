@@ -76,7 +76,7 @@ def prepare_native_commit(owner, messages, *, batch=False):
         create_native_commit, native_messages_supported,
         to_native_commit_messages,
     )
-    if not native_messages_supported(owner.table, messages):
+    if not native_messages_supported(owner.table, messages, for_commit=True):
         return None
     if owner._native_commit is None or (batch and not owner._native_commit._is_batch):
         native = create_native_commit(

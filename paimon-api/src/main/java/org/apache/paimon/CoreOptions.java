@@ -1026,15 +1026,16 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Enable the REST catalog's server-side table commit lease capability. "
-                                    + "Writers acquire a lease only when rest.commit.acquire-lock is enabled.");
+                                    + "Writers acquire a lease only when rest.commit.retry-acquire-lock is enabled.");
 
-    public static final ConfigOption<Boolean> REST_COMMIT_ACQUIRE_LOCK =
-            key("rest.commit.acquire-lock")
+    public static final ConfigOption<Boolean> REST_COMMIT_RETRY_ACQUIRE_LOCK =
+            key("rest.commit.retry-acquire-lock")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether this writer acquires a REST commit lease for each publication "
-                                    + "attempt. Can be set dynamically for a writer and requires "
+                            "Whether this writer acquires a REST commit lease when retrying a conflicting publication. "
+                                    + "The first attempt is optimistic for retryable operations. Rollback as latest and "
+                                    + "manifest repair acquire the lease before preparing their single attempt. Can be set dynamically for a writer and requires "
                                     + "rest.commit.lock-enabled on the server-side table.");
 
     public static final ConfigOption<Duration> COMMIT_TIMEOUT =
@@ -1076,7 +1077,10 @@ public class CoreOptions implements Serializable {
                     .defaultValue(200)
                     .withDescription(
                             "The size amplification is defined as the amount (in percentage) of additional storage "
-                                    + "needed to store a single byte of data in the merge tree for changelog mode table.");
+                                    + "needed to store a single byte of data in the merge tree for changelog mode table. "
+                                    + "For incremental data-evolution compaction, this limits fully superseded "
+                                    + "file bytes relative to files still supplying current columns. "
+                                    + "Files with row-level fallbacks count as live.");
 
     public static final ConfigOption<Boolean> COMPACTION_FORCE_UP_LEVEL_0 =
             key("compaction.force-up-level-0")
@@ -1092,7 +1096,8 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) "
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
-                                    + "into this candidate set.");
+                                    + "into this candidate set. Also applies to newest-first column-file "
+                                    + "version selection in incremental data-evolution compaction.");
 
     public static final ConfigOption<Integer> COMPACT_OFFPEAK_START_HOUR =
             key("compaction.offpeak.start.hour")
@@ -2789,6 +2794,19 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_JOIN_REUSE =
+            key("data-evolution.merge-into.join-reuse")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to reuse a disk-persisted match result between deterministic "
+                                    + "UPDATE and INSERT actions on data evolution tables without "
+                                    + "DELETE actions or dedicated BLOB/VECTOR columns. This replaces "
+                                    + "the two action joins with a full outer join and trades repeated "
+                                    + "target scans for shuffle and executor-local disk storage. "
+                                    + "Requires Spark adaptive query execution and adaptive partition "
+                                    + "coalescing; otherwise the original join path is used.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES =
             key("data-evolution.compaction.split-large-files")
                     .booleanType()
@@ -2802,6 +2820,21 @@ public class CoreOptions implements Serializable {
                                     + "BLOB or VECTOR file range. Actual output sizes may differ from the target. "
                                     + "Row IDs and logical deletions are preserved, and associated "
                                     + "BLOB and VECTOR files are not rewritten by this option.");
+
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_INCREMENTAL_ENABLED =
+            key("data-evolution.compaction.incremental.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Compact a newest-first prefix of column-file versions within "
+                                    + "one row-ID range, writing only their columns and retaining "
+                                    + "older files. Applies to normal, BLOB and VECTOR files when their "
+                                    + "compaction is enabled. Uses compaction.min.file-num for normal/VECTOR "
+                                    + "files and the existing two-file trigger for BLOB files, plus "
+                                    + "compaction.size-ratio and compaction.max-size-amplification-percent. "
+                                    + "Nested ROW columns are projected by written leaf field IDs. "
+                                    + "Partial normal rewrites keep their complete row-ID range. Eligible "
+                                    + "oversized normal files select all normal versions for splitting.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_DISCARD_CONFLICTING_TASKS =
             key("data-evolution.compaction.discard-conflicting-tasks")
@@ -4038,8 +4071,8 @@ public class CoreOptions implements Serializable {
         return options.get(REST_COMMIT_LOCK_ENABLED);
     }
 
-    public boolean restCommitAcquireLock() {
-        return options.get(REST_COMMIT_ACQUIRE_LOCK);
+    public boolean restCommitRetryAcquireLock() {
+        return options.get(REST_COMMIT_RETRY_ACQUIRE_LOCK);
     }
 
     public long commitTimeout() {
@@ -4665,6 +4698,10 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES);
     }
 
+    public boolean dataEvolutionCompactionIncrementalEnabled() {
+        return options.get(DATA_EVOLUTION_COMPACTION_INCREMENTAL_ENABLED);
+    }
+
     public double dataEvolutionCompactionLargeFileRatio() {
         double ratio = options.get(DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO);
         checkArgument(
@@ -4788,6 +4825,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionMergeIntoSourcePersist() {
         return options.get(DATA_EVOLUTION_MERGE_INTO_SOURCE_PERSIST);
+    }
+
+    public boolean dataEvolutionMergeIntoJoinReuse() {
+        return options.get(DATA_EVOLUTION_MERGE_INTO_JOIN_REUSE);
     }
 
     public boolean blobCompactionEnabled() {

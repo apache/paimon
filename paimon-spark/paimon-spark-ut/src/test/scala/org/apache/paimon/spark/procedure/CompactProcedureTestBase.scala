@@ -2324,7 +2324,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       assert(normalFiles.size == 2)
       val stagedTask = new DataEvolutionNormalCompactTask(
         BinaryRow.EMPTY_ROW,
-        normalFiles.asJava
+        normalFiles.asJava,
+        util.Collections.emptyList[Range](),
+        false
       )
       val taskSnapshot = table.latestSnapshot().get()
       val planned = new AtomicBoolean(false)
@@ -2416,7 +2418,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
       val stagedTask = new DataEvolutionNormalCompactTask(
         BinaryRow.EMPTY_ROW,
-        normalFiles.asJava
+        normalFiles.asJava,
+        util.Collections.emptyList[Range](),
+        false
       )
       val stagedUser = "staged-compact"
       val stagedMessage = stagedTask.doCompact(table, stagedUser)
@@ -2430,7 +2434,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
       val concurrentTask = new DataEvolutionNormalCompactTask(
         BinaryRow.EMPTY_ROW,
-        normalDataFiles(table).asJava
+        normalDataFiles(table).asJava,
+        util.Collections.emptyList[Range](),
+        false
       )
       val concurrentUser = "concurrent-compact"
       val concurrentMessage = concurrentTask.doCompact(table, concurrentUser)
@@ -2488,7 +2494,12 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       val normalFiles = normalDataFiles(table)
       assert(normalFiles.size == 2)
 
-      val stagedTask = new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, normalFiles.asJava)
+      val stagedTask = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalFiles.asJava,
+        util.Collections.emptyList[Range](),
+        false
+      )
       val stagedMessage = stagedTask.doCompact(table, "staged-compact")
       val baseSnapshot = table.latestSnapshot().get()
 
@@ -2554,7 +2565,12 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       val normalFiles = normalDataFiles(table)
       assert(normalFiles.size == 2)
 
-      val stagedTask = new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, normalFiles.asJava)
+      val stagedTask = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalFiles.asJava,
+        util.Collections.emptyList[Range](),
+        false
+      )
       val stagedMessage = stagedTask.doCompact(table, "staged-compact")
       val baseSnapshot = table.latestSnapshot().get()
 
@@ -2606,7 +2622,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       assert(normalFiles.size == 2)
       val stagedTask = new DataEvolutionNormalCompactTask(
         BinaryRow.EMPTY_ROW,
-        normalFiles.asJava
+        normalFiles.asJava,
+        util.Collections.emptyList[Range](),
+        false
       )
       val taskSnapshot = table.latestSnapshot().get()
       val planned = new AtomicBoolean(false)
@@ -2631,7 +2649,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             case 1 =>
               val concurrentTask = new DataEvolutionNormalCompactTask(
                 BinaryRow.EMPTY_ROW,
-                normalDataFiles(table).asJava
+                normalDataFiles(table).asJava,
+                util.Collections.emptyList[Range](),
+                false
               )
               val compactUser = "concurrent-compact"
               val compactMessage = concurrentTask.doCompact(table, compactUser)

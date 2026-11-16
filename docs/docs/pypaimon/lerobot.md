@@ -189,6 +189,9 @@ conn.load_from_lerobot(
 )
 ```
 
+Each source has one row in `_datasets`. Episode `stats` preserves the source
+values; `_datasets.__paimon_lerobot_read_control_stats` stores derived statistics for the
+combined training reader.
 `dataset_name` accepts a string for one source or a list/tuple with one label per
 source in input order. Omitted names are null, and duplicate labels do not merge
 sources. [Dataset fields](#dataset-fields) describes the retained source metadata.
@@ -200,8 +203,8 @@ rejected before any target table is created. Episode fields without `/` retain
 their original names and Paimon-supported Arrow types as columns in `_episodes`;
 unsupported types are rejected before table creation.
 Training metadata reads only Episode controls; query `_episodes` for extensions.
-Control-field statistics reflect merged IDs; their original quantiles are
-omitted. Training reads skip `stats`. Repeated task/subtask text within one
+Episode statistics retain the original source values, including quantiles.
+Training reads skip Episode `stats`. Repeated task/subtask text within one
 source is rejected before creating tables to avoid losing original frame IDs.
 
 Sources must share robot type and compatible definitions for common features. Each source retains its own

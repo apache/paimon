@@ -40,7 +40,7 @@ import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil
-import org.apache.paimon.types.{BlobType, RowType}
+import org.apache.paimon.types.{BlobType, RowType, VectorType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.BranchManager
 
@@ -49,9 +49,9 @@ import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.EliminateSubqueryAliases
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, CreateNamedStruct, EqualTo, Expression, ExprId, GetStructField, If, IsNull, Literal, Or, PythonUDF, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, AttributeReference, CreateNamedStruct, EqualTo, Expression, ExprId, GetStructField, If, IsNotNull, IsNull, Literal, Or, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
-import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
+import org.apache.spark.sql.catalyst.plans.{FullOuter, LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
@@ -380,6 +380,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       }
 
     var targetActionCleanup = () => ()
+    var sharedMatches: Option[SharedMergeJoin] = None
     try {
       // step 1: find the related data splits for matched / insert actions.
       lazy val matchedOrInsertDataSplits: Seq[DataSplit] = targetRelatedSplits(
@@ -392,6 +393,11 @@ case class MergeIntoPaimonDataEvolutionTable(
       lazy val touchedFileTargetRelation =
         createNewScanPlan(matchedOrInsertDataSplits, targetRelation)
 
+      if (canReuseMergeJoin(sparkSession) && matchedOrInsertDataSplits.nonEmpty) {
+        sharedMatches = Some(
+          createSharedMergeJoin(sparkSession, touchedFileTargetRelation, persistSourceDss))
+      }
+
       // step 2: invoke target-side action
       val matchedResult =
         if (matchedActions.nonEmpty) {
@@ -400,7 +406,8 @@ case class MergeIntoPaimonDataEvolutionTable(
             sparkSession,
             touchedFileTargetRelation,
             firstRowIds,
-            persistSourceDss)
+            persistSourceDss,
+            sharedMatches)
           targetActionCleanup = result.cleanup
           result
         } else {
@@ -420,7 +427,11 @@ case class MergeIntoPaimonDataEvolutionTable(
       // step 3: invoke insert action
       val insertCommit =
         if (notMatchedActions.nonEmpty)
-          insertActionInvoke(sparkSession, touchedFileTargetRelation, persistSourceDss)
+          insertActionInvoke(
+            sparkSession,
+            touchedFileTargetRelation,
+            persistSourceDss,
+            sharedMatches)
         else Nil
 
       DataEvolutionRowIdConflictCommitter.commit(
@@ -434,11 +445,81 @@ case class MergeIntoPaimonDataEvolutionTable(
         Snapshot.Operation.MERGE
       )
     } finally {
-      targetActionCleanup()
-      if (persistSourceDss.isDefined) {
-        persistSourceDss.get.unpersist(blocking = false)
+      try {
+        targetActionCleanup()
+      } finally {
+        try {
+          sharedMatches.foreach(_.cleanup())
+        } finally {
+          persistSourceDss.foreach(_.unpersist(blocking = false))
+        }
       }
     }
+  }
+
+  private lazy val mergeReadExpressions: Seq[Expression] = {
+    Seq(matchedCondition) ++ (matchedActions ++ notMatchedActions).flatMap {
+      case update: UpdateAction =>
+        update.condition.toSeq ++ update.assignments
+          .filter(a => updateColumns.contains(assignmentKeyAttribute(a)))
+          .map(_.value)
+      case insert: InsertAction =>
+        insert.condition.toSeq ++ insert.assignments.map(_.value)
+      case action => action.condition.toSeq
+    }
+  }
+
+  private def canReuseMergeJoin(sparkSession: SparkSession): Boolean = {
+    table.coreOptions().dataEvolutionMergeIntoJoinReuse() &&
+    sparkSession.conf.get("spark.sql.adaptive.enabled").toBoolean &&
+    sparkSession.conf.get("spark.sql.adaptive.coalescePartitions.enabled").toBoolean &&
+    matchedActions.nonEmpty && matchedActions.forall(_.isInstanceOf[UpdateAction]) &&
+    notMatchedActions.nonEmpty && notMatchedBySourceActions.isEmpty &&
+    mergeReadExpressions.forall(e => e.deterministic && !SubqueryExpression.hasSubquery(e)) &&
+    !sourceTable.exists(
+      p => p.expressions.exists(e => !e.deterministic || SubqueryExpression.hasSubquery(e))) &&
+    !matchedCondition.exists(_.isInstanceOf[PythonUDF]) &&
+    !table.rowType().getFields.asScala.exists {
+      field => BlobType.isBlobFileField(field.`type`()) || field.`type`().isInstanceOf[VectorType]
+    }
+  }
+
+  private case class SharedMergeJoin(
+      dataset: Dataset[Row],
+      targetMarkerId: ExprId,
+      sourceMarkerId: ExprId,
+      cleanup: () => Unit) {
+    def targetMarker(plan: LogicalPlan): Attribute =
+      plan.output.find(_.exprId == targetMarkerId).get
+
+    def sourceMarker(plan: LogicalPlan): Attribute =
+      plan.output.find(_.exprId == sourceMarkerId).get
+  }
+
+  private def createSharedMergeJoin(
+      sparkSession: SparkSession,
+      touchedFileTargetRelation: DataSourceV2Relation,
+      persistSourceDss: Option[Dataset[Row]]): SharedMergeJoin = {
+    val needed = (mergeReadExpressions.flatMap(extractFields) ++ updateColumns)
+      .map(_.exprId)
+      .toSet
+    val targetAttributes = (targetRelation.output ++ targetRelation.metadataOutput)
+      .foldLeft(Seq.empty[AttributeReference]) {
+        (attrs, attr) => if (attrs.exists(_.exprId == attr.exprId)) attrs else attrs :+ attr
+      }
+      .filter(attr => needed.contains(attr.exprId) || attr.name == ROW_ID_NAME)
+    val targetRead = touchedFileTargetRelation.copy(output = targetAttributes)
+    val targetMarker = Alias(TrueLiteral, ROW_FROM_TARGET)()
+    val sourceMarker = Alias(TrueLiteral, ROW_FROM_SOURCE)()
+    val targetProject = Project(targetRead.output :+ targetMarker, targetRead)
+    val sourceRead = persistSourceDss.map(_.queryExecution.logical).getOrElse(sourceTable)
+    val sourceProject = Project(
+      sourceRead.output.filter(attr => needed.contains(attr.exprId)) :+ sourceMarker,
+      sourceRead)
+    val (dataset, cleanup) = createDiskCachedDataset(
+      sparkSession,
+      Join(targetProject, sourceProject, FullOuter, Some(matchedCondition), JoinHint.NONE))
+    SharedMergeJoin(dataset, targetMarker.exprId, sourceMarker.exprId, cleanup)
   }
 
   private def pushDownMergeFilters(snapshotReader: SnapshotReader): Unit = {
@@ -591,7 +672,8 @@ case class MergeIntoPaimonDataEvolutionTable(
       sparkSession: SparkSession,
       touchedFileTargetRelation: DataSourceV2Relation,
       firstRowIds: immutable.IndexedSeq[Long],
-      persistSourceDss: Option[Dataset[Row]]): TargetActionResult = {
+      persistSourceDss: Option[Dataset[Row]],
+      sharedMatches: Option[SharedMergeJoin]): TargetActionResult = {
     if (dataSplits.isEmpty) {
       return TargetActionResult(Nil, None, () => ())
     }
@@ -943,10 +1025,16 @@ case class MergeIntoPaimonDataEvolutionTable(
       val sourceChild = persistSourceDss.map(_.queryExecution.logical).getOrElse(sourceTable)
       val sourceTableProj = Project(sourceTableProjExprs, sourceChild)
 
-      val joinPlan =
-        Join(targetTableProj, sourceTableProj, LeftOuter, Some(matchedCondition), JoinHint.NONE)
-      val rowFromSourceAttr = attribute(ROW_FROM_SOURCE, joinPlan)
-      val rowFromTargetAttr = attribute(ROW_FROM_TARGET, joinPlan)
+      val (joinPlan, rowFromSourceAttr, rowFromTargetAttr) = sharedMatches match {
+        case Some(shared) =>
+          val plan = shared.dataset.queryExecution.analyzed
+          val targetMarker = shared.targetMarker(plan)
+          (Filter(IsNotNull(targetMarker), plan), shared.sourceMarker(plan), targetMarker)
+        case None =>
+          val plan =
+            Join(targetTableProj, sourceTableProj, LeftOuter, Some(matchedCondition), JoinHint.NONE)
+          (plan, attribute(ROW_FROM_SOURCE, plan), attribute(ROW_FROM_TARGET, plan))
+      }
 
       val mergeRows = MergeRows(
         isSourceRowPresent = rowFromSourceAttr,
@@ -1121,7 +1209,8 @@ case class MergeIntoPaimonDataEvolutionTable(
   private def insertActionInvoke(
       sparkSession: SparkSession,
       touchedFileTargetRelation: DataSourceV2Relation,
-      persistSourceDss: Option[Dataset[Row]]): Seq[CommitMessage] = {
+      persistSourceDss: Option[Dataset[Row]],
+      sharedMatches: Option[SharedMergeJoin]): Seq[CommitMessage] = {
     val mergeFields = extractFields(matchedCondition)
     val allReadFieldsOnTarget =
       mergeFields.filter(field => targetTable.output.exists(attr => attr.equals(field)))
@@ -1130,8 +1219,16 @@ case class MergeIntoPaimonDataEvolutionTable(
       touchedFileTargetRelation.copy(output = allReadFieldsOnTarget.toSeq)
     val sourceReadPlan = persistSourceDss.map(_.queryExecution.logical).getOrElse(sourceTable)
 
-    val joinPlan =
-      Join(sourceReadPlan, targetReadPlan, LeftAnti, Some(matchedCondition), JoinHint.NONE)
+    val joinPlan = sharedMatches match {
+      case Some(shared) =>
+        val plan = shared.dataset.queryExecution.analyzed
+        val sourceIds = sourceTable.output.map(_.exprId).toSet
+        Project(
+          plan.output.filter(attr => sourceIds.contains(attr.exprId)),
+          Filter(IsNull(shared.targetMarker(plan)), plan))
+      case None =>
+        Join(sourceReadPlan, targetReadPlan, LeftAnti, Some(matchedCondition), JoinHint.NONE)
+    }
 
     // merge rows as there are multiple not matched actions
     val mergeRows = MergeRows(

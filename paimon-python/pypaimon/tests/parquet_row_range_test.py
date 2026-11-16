@@ -54,6 +54,8 @@ class _LocalFileIO:
 
 
 def _commit_with_row_groups(table, data):
+    # This fixture injects row groups through the Python FileIO writer below.
+    table = table.copy({"write.native.enabled": "false"})
     original = table.file_io.write_parquet
 
     def patched(path, arrow_table, **kwargs):
