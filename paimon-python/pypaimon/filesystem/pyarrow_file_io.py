@@ -438,6 +438,10 @@ class PyArrowFileIO(FileIO):
 
     def new_input_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
+        if self._use_jindo:
+            # PyFileSystem's C facade erases PythonFile.read_at overrides.
+            # Keep the handler's NativeFile for exact Python range reads.
+            return self.filesystem.handler.open_input_file(path_str)
         return self.filesystem.open_input_file(path_str)
 
     def new_output_stream(self, path: str):

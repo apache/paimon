@@ -128,7 +128,8 @@ def test_blob_descriptor_input_routes_by_source_uri(tmp_path, wrapper, destinati
               else (destination / 'table' / 'result.blob').as_uri())
 
     def local_bucket_filesystem(file_io, path):
-        file_io._use_jindo = True
+        file_io._use_jindo = False
+        file_io.to_filesystem_path = lambda uri: urlparse(uri).path.lstrip('/')
         bucket_dir = tmp_path / urlparse(path).netloc
         return pa.fs.SubTreeFileSystem(os.fspath(bucket_dir), pa.fs.LocalFileSystem())
 
