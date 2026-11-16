@@ -58,10 +58,10 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests the owner lease wire protocol without changing legacy snapshot requests. */
+/** Tests the owner lease and snapshot wire protocols. */
 class CommitLockProtocolTest {
     @Test
-    void acquireRenewAndReleaseCarryTheSameScopeIdentity() throws Exception {
+    void acquireRenewAndReleaseCarryTheSameOwner() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
             server.start();
             Options options = new Options();
@@ -74,21 +74,23 @@ class CommitLockProtocolTest {
             CommitLockResponse grant =
                     new CommitLockResponse(true, "morax-job", 100000, 60000, null);
             server.enqueue(json(RESTApi.toJson(grant)));
-            api.acquireCommitLock(identifier, "table-id", "morax-job", "scope-id");
+            api.acquireCommitLock(identifier, "table-id", "morax-job");
             server.enqueue(json(RESTApi.toJson(grant)));
-            api.renewCommitLock(identifier, "table-id", "morax-job", "scope-id");
-            server.enqueue(new MockResponse().setResponseCode(204));
-            api.releaseCommitLock(identifier, "table-id", "morax-job", "scope-id");
+            api.renewCommitLock(identifier, "table-id", "morax-job");
+            server.enqueue(new MockResponse().setResponseCode(200));
+            api.releaseCommitLock(identifier, "table-id", "morax-job");
+            ObjectNode expectedBody =
+                    RESTApi.fromJson(
+                            "{\"tableId\":\"table-id\",\"commitUser\":\"morax-job\"}",
+                            ObjectNode.class);
             for (String suffix :
                     new String[] {"/commit-lock", "/commit-lock/renew", "/commit-lock/release"}) {
                 RecordedRequest recorded = server.takeRequest(10, TimeUnit.SECONDS);
+                assertThat(recorded.getMethod()).isEqualTo("POST");
                 assertThat(recorded.getPath()).endsWith(suffix);
                 assertThat(recorded.getRequestUrl().pathSegments()).contains("table$branch_dev");
-                CommitLockRequest request =
-                        RESTApi.fromJson(recorded.getBody().readUtf8(), CommitLockRequest.class);
-                assertThat(request.getTableId()).isEqualTo("table-id");
-                assertThat(request.getCommitUser()).isEqualTo("morax-job");
-                assertThat(request.getLeaseId()).isEqualTo("scope-id");
+                assertThat(RESTApi.fromJson(recorded.getBody().readUtf8(), ObjectNode.class))
+                        .isEqualTo(expectedBody);
             }
         }
     }
@@ -114,12 +116,10 @@ class CommitLockProtocolTest {
             RecordedRequest acquire = server.takeRequest(10, TimeUnit.SECONDS);
             assertThat(acquire.getPath())
                     .isEqualTo("/v1/catalog/databases/db/tables/table/commit-lock");
-            String acquireBody = acquire.getBody().readUtf8();
-            CommitLockRequest request = RESTApi.fromJson(acquireBody, CommitLockRequest.class);
+            CommitLockRequest request =
+                    RESTApi.fromJson(acquire.getBody().readUtf8(), CommitLockRequest.class);
             assertThat(request.getTableId()).isEqualTo("table-id");
             assertThat(request.getCommitUser()).isEqualTo("morax-job");
-            assertThat(request.getLeaseId()).isNull();
-            assertThat(RESTApi.fromJson(acquireBody, ObjectNode.class).has("leaseId")).isFalse();
             server.enqueue(json(RESTApi.toJson(grant)));
             assertThat(api.renewCommitLock(identifier, "table-id", "morax-job").isAcquired())
                     .isTrue();
@@ -242,7 +242,7 @@ class CommitLockProtocolTest {
                             RESTApi.toJson(
                                     new CommitLockResponse(
                                             true, "morax-job", 100000, 60000, snapshot(1)))));
-            server.enqueue(new MockResponse().setResponseCode(204));
+            server.enqueue(new MockResponse().setResponseCode(200));
             Options tableOptions = Options.fromMap(table.options());
             tableOptions.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, true);
             tableOptions.set(CoreOptions.REST_COMMIT_ACQUIRE_LOCK, true);
@@ -264,15 +264,12 @@ class CommitLockProtocolTest {
                         RESTApi.fromJson(acquire.getBody().readUtf8(), CommitLockRequest.class);
                 assertThat(request.getTableId()).isEqualTo("table-id");
                 assertThat(request.getCommitUser()).isEqualTo("morax-job");
-                assertThat(request.getLeaseId()).isNotEmpty();
                 RecordedRequest release = server.takeRequest(10, TimeUnit.SECONDS);
                 assertThat(release.getPath()).endsWith("/commit-lock/release");
-                assertThat(
-                                RESTApi.fromJson(
-                                                release.getBody().readUtf8(),
-                                                CommitLockRequest.class)
-                                        .getLeaseId())
-                        .isEqualTo(request.getLeaseId());
+                CommitLockRequest releaseRequest =
+                        RESTApi.fromJson(release.getBody().readUtf8(), CommitLockRequest.class);
+                assertThat(releaseRequest.getTableId()).isEqualTo(request.getTableId());
+                assertThat(releaseRequest.getCommitUser()).isEqualTo(request.getCommitUser());
             }
         }
     }

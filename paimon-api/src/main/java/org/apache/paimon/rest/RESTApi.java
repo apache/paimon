@@ -745,39 +745,28 @@ public class RESTApi {
 
     public CommitLockResponse acquireCommitLock(
             Identifier identifier, String tableUuid, String commitUser) {
-        return acquireCommitLock(identifier, tableUuid, commitUser, null);
-    }
-
-    public CommitLockResponse acquireCommitLock(
-            Identifier identifier, String tableUuid, String commitUser, @Nullable String leaseId) {
         return client.post(
                 resourcePaths.commitLock(identifier.getDatabaseName(), identifier.getObjectName()),
-                new CommitLockRequest(tableUuid, commitUser, leaseId),
+                new CommitLockRequest(tableUuid, commitUser),
                 CommitLockResponse.class,
                 restAuthFunction);
     }
 
     public CommitLockResponse renewCommitLock(
             Identifier identifier, String tableUuid, String commitUser) {
-        return renewCommitLock(identifier, tableUuid, commitUser, null);
-    }
-
-    public CommitLockResponse renewCommitLock(
-            Identifier identifier, String tableUuid, String commitUser, @Nullable String leaseId) {
         return client.post(
                 resourcePaths.commitLock(identifier.getDatabaseName(), identifier.getObjectName())
                         + "/renew",
-                new CommitLockRequest(tableUuid, commitUser, leaseId),
+                new CommitLockRequest(tableUuid, commitUser),
                 CommitLockResponse.class,
                 restAuthFunction);
     }
 
-    public void releaseCommitLock(
-            Identifier identifier, String tableUuid, String commitUser, String leaseId) {
+    public void releaseCommitLock(Identifier identifier, String tableUuid, String commitUser) {
         client.post(
                 resourcePaths.commitLock(identifier.getDatabaseName(), identifier.getObjectName())
                         + "/release",
-                new CommitLockRequest(tableUuid, commitUser, leaseId),
+                new CommitLockRequest(tableUuid, commitUser),
                 restAuthFunction);
     }
 

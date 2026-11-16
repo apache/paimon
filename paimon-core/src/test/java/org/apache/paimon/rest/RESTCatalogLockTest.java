@@ -50,7 +50,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
@@ -118,11 +117,10 @@ class RESTCatalogLockTest {
         grant("morax-job", 3000);
         CommitLockResponse otherGrant =
                 new CommitLockResponse(true, "other-job", 100000, 3000, null);
-        when(api.acquireCommitLock(eq(identifier), eq("table-id"), eq("other-job"), anyString()))
-                .thenReturn(otherGrant);
+        when(api.acquireCommitLock(identifier, "table-id", "other-job")).thenReturn(otherGrant);
         CountDownLatch otherRenewed = new CountDownLatch(1);
         AtomicBoolean firstClosed = new AtomicBoolean();
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("other-job"), anyString()))
+        when(api.renewCommitLock(identifier, "table-id", "other-job"))
                 .thenAnswer(
                         invocation -> {
                             if (firstClosed.get()) {
@@ -215,7 +213,7 @@ class RESTCatalogLockTest {
                         renewalWorker,
                         clock::get);
         Thread acquiringThread = Thread.currentThread();
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
                 .thenAnswer(
                         invocation -> {
                             assertThat(Thread.currentThread()).isNotSameAs(acquiringThread);
@@ -229,9 +227,7 @@ class RESTCatalogLockTest {
                 renewal().run();
                 // A FIFO barrier waits until the renewal and its deadline update have completed.
                 renewalWorker.submit(() -> {}).get(10, TimeUnit.SECONDS);
-                verify(api)
-                        .renewCommitLock(
-                                eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+                verify(api).renewCommitLock(identifier, "table-id", "morax-job");
 
                 clock.set(TimeUnit.MILLISECONDS.toNanos(70000));
                 realLock.ensureValid();
@@ -249,7 +245,7 @@ class RESTCatalogLockTest {
     @Test
     void renewalUsesExactOwnerAndStopsAfterClose() throws Exception {
         grant("morax-job", 60000);
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
                 .thenReturn(new CommitLockResponse(true, "morax-job", 100000, 60000, null));
         Runnable callback =
                 run(
@@ -260,14 +256,14 @@ class RESTCatalogLockTest {
                             return renewal;
                         });
         callback.run();
-        verify(api).renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api).renewCommitLock(identifier, "table-id", "morax-job");
         verify(future).cancel(false);
     }
 
     @Test
     void rejectedRenewalInvalidatesLease() throws Exception {
         grant("morax-job", 60000);
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
                 .thenReturn(CommitLockResponse.unavailable());
         run(
                 () -> {
@@ -277,15 +273,14 @@ class RESTCatalogLockTest {
                             .hasCauseInstanceOf(IllegalStateException.class);
                     return null;
                 });
-        verify(api).renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api).renewCommitLock(identifier, "table-id", "morax-job");
     }
 
     @Test
     void renewalExceptionPreservesCause() throws Exception {
         grant("morax-job", 60000);
         RuntimeException failure = new RuntimeException("Disconnected");
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
-                .thenThrow(failure);
+        when(api.renewCommitLock(identifier, "table-id", "morax-job")).thenThrow(failure);
         run(
                 () -> {
                     renewal().run();
@@ -296,7 +291,7 @@ class RESTCatalogLockTest {
 
     @Test
     void busyTimeoutDoesNotExecuteCallbackOrStartRenewal() {
-        when(api.acquireCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.acquireCommitLock(identifier, "table-id", "morax-job"))
                 .thenReturn(CommitLockResponse.unavailable());
         assertThatThrownBy(
                         () ->
@@ -335,9 +330,7 @@ class RESTCatalogLockTest {
                     clock.set(TimeUnit.MILLISECONDS.toNanos(60000));
                     assertThatThrownBy(lock::ensureValid).hasMessageContaining("no longer usable");
                     renewal().run();
-                    verify(api, never())
-                            .renewCommitLock(
-                                    eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+                    verify(api, never()).renewCommitLock(identifier, "table-id", "morax-job");
                     return null;
                 });
     }
@@ -345,7 +338,7 @@ class RESTCatalogLockTest {
     @Test
     void renewalExtendsLocalLifetimeAndIncludesResponseTime() throws Exception {
         grant("morax-job", 60000);
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
                 .thenAnswer(
                         invocation -> {
                             clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(10000));
@@ -366,16 +359,13 @@ class RESTCatalogLockTest {
     @Test
     void acquirePreservesCatalogPermissionAndMissingTableErrors() {
         ForbiddenException denied = new ForbiddenException("Denied");
-        when(api.acquireCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
-                .thenThrow(denied);
+        when(api.acquireCommitLock(identifier, "table-id", "morax-job")).thenThrow(denied);
         assertThatThrownBy(() -> run(() -> null))
                 .isInstanceOf(Lock.AcquisitionException.class)
                 .hasCauseInstanceOf(Catalog.TableNoPermissionException.class)
                 .hasRootCause(denied);
         NoSuchResourceException missing = new NoSuchResourceException("table", "table", "Missing");
-        doThrow(missing)
-                .when(api)
-                .acquireCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        doThrow(missing).when(api).acquireCommitLock(identifier, "table-id", "morax-job");
         assertThatThrownBy(() -> run(() -> null))
                 .isInstanceOf(Lock.AcquisitionException.class)
                 .hasCauseInstanceOf(Catalog.TableNotExistException.class)
@@ -386,7 +376,7 @@ class RESTCatalogLockTest {
     @Test
     void slowAcquisitionCannotStartProtectedOperation() {
         grant("morax-job", 60000);
-        when(api.acquireCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.acquireCommitLock(identifier, "table-id", "morax-job"))
                 .thenAnswer(
                         invocation -> {
                             clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(60000));
@@ -457,7 +447,7 @@ class RESTCatalogLockTest {
     @ValueSource(booleans = {false, true})
     void invalidRenewalGrantCannotExtendLease(boolean differentOwner) throws Exception {
         grant("morax-job", 60000);
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
                 .thenReturn(
                         new CommitLockResponse(
                                 true,
@@ -496,7 +486,7 @@ class RESTCatalogLockTest {
     @Test
     void queuedRenewalIsCancelledAndCannotAffectANewScope() throws Exception {
         grant("morax-job", 60000);
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
                 .thenReturn(new CommitLockResponse(true, "morax-job", 100000, 60000, null));
         List<Runnable> requests = queueRenewals();
         AutoCloseable first = lock.acquire();
@@ -506,8 +496,7 @@ class RESTCatalogLockTest {
         assertThat(requests).hasSize(1);
         first.close();
         requests.get(0).run();
-        verify(api, never())
-                .renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api, never()).renewCommitLock(identifier, "table-id", "morax-job");
         try (AutoCloseable second = lock.acquire()) {
             first.close();
             oldTick.run();
@@ -517,7 +506,7 @@ class RESTCatalogLockTest {
             requests.get(1).run();
             lock.ensureValid();
         }
-        verify(api).renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api).renewCommitLock(identifier, "table-id", "morax-job");
         verify(workers, never()).shutdownNow();
     }
 
@@ -534,8 +523,7 @@ class RESTCatalogLockTest {
                             .hasRootCauseMessage("The commit lease has expired locally.");
                     return null;
                 });
-        verify(api, never())
-                .renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api, never()).renewCommitLock(identifier, "table-id", "morax-job");
     }
 
     @Test
@@ -550,7 +538,7 @@ class RESTCatalogLockTest {
                     return null;
                 });
         grant("morax-job", 60000);
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
                 .thenReturn(new CommitLockResponse(true, "morax-job", 100000, 60000, null));
         run(
                 () -> {
@@ -558,7 +546,7 @@ class RESTCatalogLockTest {
                     lock.ensureValid();
                     return null;
                 });
-        verify(api).renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api).renewCommitLock(identifier, "table-id", "morax-job");
         verify(workers, never()).shutdownNow();
     }
 
@@ -566,8 +554,7 @@ class RESTCatalogLockTest {
     void renewalErrorInvalidatesLeaseAndStopsFurtherDispatch() throws Exception {
         grant("morax-job", 60000);
         AssertionError failure = new AssertionError("RPC failed");
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
-                .thenThrow(failure);
+        when(api.renewCommitLock(identifier, "table-id", "morax-job")).thenThrow(failure);
         run(
                 () -> {
                     Runnable tick = renewal();
@@ -576,7 +563,7 @@ class RESTCatalogLockTest {
                     assertThatThrownBy(lock::ensureValid).hasCause(failure);
                     return null;
                 });
-        verify(api).renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api).renewCommitLock(identifier, "table-id", "morax-job");
     }
 
     @ParameterizedTest
@@ -587,7 +574,7 @@ class RESTCatalogLockTest {
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch resume = new CountDownLatch(1);
         CommitLockResponse renewed = new CommitLockResponse(true, "morax-job", 100000, 60000, null);
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
                 .thenAnswer(
                         invocation -> {
                             started.countDown();
@@ -620,8 +607,7 @@ class RESTCatalogLockTest {
             runner.shutdownNow();
             assertThat(runner.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
         }
-        verify(api, times(2))
-                .renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api, times(2)).renewCommitLock(identifier, "table-id", "morax-job");
     }
 
     @Test
@@ -630,7 +616,7 @@ class RESTCatalogLockTest {
         List<Runnable> requests = queueRenewals();
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch resume = new CountDownLatch(1);
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
                 .thenAnswer(
                         invocation -> {
                             started.countDown();
@@ -664,13 +650,13 @@ class RESTCatalogLockTest {
         when(renewer.scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> future)
                 .thenAnswer(invocation -> secondRenewal);
-        when(api.acquireCommitLock(eq(identifier), eq("table-id"), eq("other-job"), anyString()))
+        when(api.acquireCommitLock(identifier, "table-id", "other-job"))
                 .thenReturn(new CommitLockResponse(true, "other-job", 100000, 60000, null));
         CountDownLatch firstStarted = new CountDownLatch(1);
         CountDownLatch resumeFirst = new CountDownLatch(1);
         CountDownLatch firstInterrupted = new CountDownLatch(1);
         CountDownLatch secondRenewed = new CountDownLatch(1);
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
                 .thenAnswer(
                         invocation -> {
                             firstStarted.countDown();
@@ -682,7 +668,7 @@ class RESTCatalogLockTest {
                             }
                             return new CommitLockResponse(true, "morax-job", 100000, 60000, null);
                         });
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("other-job"), anyString()))
+        when(api.renewCommitLock(identifier, "table-id", "other-job"))
                 .thenAnswer(
                         invocation -> {
                             secondRenewed.countDown();
@@ -727,10 +713,8 @@ class RESTCatalogLockTest {
             assertThat(sharedWorkers.isShutdown()).isFalse();
             secondLock.ensureValid();
             firstTick.run();
-            verify(api)
-                    .renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
-            verify(api)
-                    .renewCommitLock(eq(identifier), eq("table-id"), eq("other-job"), anyString());
+            verify(api).renewCommitLock(identifier, "table-id", "morax-job");
+            verify(api).renewCommitLock(identifier, "table-id", "other-job");
             verify(secondRenewal, never()).cancel(anyBoolean());
         } finally {
             resumeFirst.countDown();
@@ -745,7 +729,7 @@ class RESTCatalogLockTest {
         Lock publication = Lock.reentrant(lock);
         assertThat(publication.runWithLock(() -> publication.runWithLock(() -> "published")))
                 .isEqualTo("published");
-        verify(api).acquireCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api).acquireCommitLock(identifier, "table-id", "morax-job");
         verify(future).cancel(false);
         publication.runWithLock(
                 () -> {
@@ -759,8 +743,7 @@ class RESTCatalogLockTest {
                             .hasMessageContaining("no longer usable");
                     return null;
                 });
-        verify(api, times(2))
-                .acquireCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api, times(2)).acquireCommitLock(identifier, "table-id", "morax-job");
     }
 
     @Test
@@ -771,16 +754,17 @@ class RESTCatalogLockTest {
         try (AutoCloseable second = lock.acquire()) {
             first.close();
             lock.ensureValid();
+            verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
         }
-        verify(api, times(2))
-                .acquireCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api, times(2)).acquireCommitLock(identifier, "table-id", "morax-job");
+        verify(api, times(2)).releaseCommitLock(identifier, "table-id", "morax-job");
         verify(future, times(2)).cancel(false);
     }
 
     @Test
     void interruptedContentionStopsAcquisition() {
         grant("morax-job", 60000);
-        when(api.acquireCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.acquireCommitLock(identifier, "table-id", "morax-job"))
                 .thenReturn(CommitLockResponse.unavailable());
         RESTCatalogLock waiting =
                 new RESTCatalogLock(
@@ -817,32 +801,13 @@ class RESTCatalogLockTest {
         grant("morax-job", 60000);
         Object result = run(() -> null);
         assertThat(result).isNull();
-        verify(api).acquireCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
-        verify(api).releaseCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
-    }
-
-    @Test
-    void renewAndReleaseUseTheSameAcquisitionIdentity() throws Exception {
-        grant("morax-job", 60000);
-        when(api.renewCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
-                .thenReturn(new CommitLockResponse(true, "morax-job", 100000, 60000, null));
-        run(
-                () -> {
-                    renewal().run();
-                    lock.ensureValid();
-                    return null;
-                });
-        ArgumentCaptor<String> acquiredId = ArgumentCaptor.forClass(String.class);
-        verify(api)
-                .acquireCommitLock(
-                        eq(identifier), eq("table-id"), eq("morax-job"), acquiredId.capture());
-        verify(api).renewCommitLock(identifier, "table-id", "morax-job", acquiredId.getValue());
-        verify(api).releaseCommitLock(identifier, "table-id", "morax-job", acquiredId.getValue());
+        verify(api).acquireCommitLock(identifier, "table-id", "morax-job");
+        verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void everyCompletedScopeReleasesItsExactRemoteLease(boolean failOperation) throws Exception {
+    void everyCompletedScopeReleasesTheRemoteLease(boolean failOperation) throws Exception {
         grant("morax-job", 60000);
         RuntimeException failure = new RuntimeException("Compaction preparation failed");
         if (failOperation) {
@@ -856,11 +821,8 @@ class RESTCatalogLockTest {
         } else {
             assertThat(run(() -> "published")).isEqualTo("published");
         }
-        ArgumentCaptor<String> acquiredId = ArgumentCaptor.forClass(String.class);
-        verify(api)
-                .acquireCommitLock(
-                        eq(identifier), eq("table-id"), eq("morax-job"), acquiredId.capture());
-        verify(api).releaseCommitLock(identifier, "table-id", "morax-job", acquiredId.getValue());
+        verify(api).acquireCommitLock(identifier, "table-id", "morax-job");
+        verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
     }
 
     @Test
@@ -874,7 +836,7 @@ class RESTCatalogLockTest {
                                             throw failure;
                                         }))
                 .isSameAs(failure);
-        verify(api).releaseCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
     }
 
     @ParameterizedTest
@@ -883,9 +845,7 @@ class RESTCatalogLockTest {
         grant("morax-job", 60000);
         RuntimeException releaseFailure = new RuntimeException("Release unavailable");
         RuntimeException operationFailure = new RuntimeException("Preparation failed");
-        doThrow(releaseFailure)
-                .when(api)
-                .releaseCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        doThrow(releaseFailure).when(api).releaseCommitLock(identifier, "table-id", "morax-job");
         if (failOperation) {
             assertThatThrownBy(
                             () ->
@@ -910,38 +870,16 @@ class RESTCatalogLockTest {
         when(renewer.scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any()))
                 .thenThrow(failure);
         assertThatThrownBy(() -> run(() -> "unused")).hasCause(failure);
-        verify(api).releaseCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
     }
 
     @Test
     void uncertainAcquisitionStillAttemptsRemoteRelease() {
         RuntimeException failure = new RuntimeException("Grant response lost");
-        when(api.acquireCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
-                .thenThrow(failure);
+        when(api.acquireCommitLock(identifier, "table-id", "morax-job")).thenThrow(failure);
         assertThatThrownBy(() -> run(() -> "unused")).hasCause(failure);
-        verify(api).releaseCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+        verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
         verifyNoInteractions(renewer);
-    }
-
-    @Test
-    void newScopeUsesANewIdentityAndOldCloseIsIdempotent() throws Exception {
-        grant("morax-job", 60000);
-        AutoCloseable first = lock.acquire();
-        first.close();
-        try (AutoCloseable second = lock.acquire()) {
-            first.close();
-            ArgumentCaptor<String> acquiredIds = ArgumentCaptor.forClass(String.class);
-            verify(api, times(2))
-                    .acquireCommitLock(
-                            eq(identifier), eq("table-id"), eq("morax-job"), acquiredIds.capture());
-            assertThat(acquiredIds.getAllValues()).doesNotHaveDuplicates();
-            verify(api)
-                    .releaseCommitLock(
-                            identifier, "table-id", "morax-job", acquiredIds.getAllValues().get(0));
-            verify(api, never())
-                    .releaseCommitLock(
-                            identifier, "table-id", "morax-job", acquiredIds.getAllValues().get(1));
-        }
     }
 
     @Test
@@ -953,15 +891,13 @@ class RESTCatalogLockTest {
                             return null;
                         })
                 .when(api)
-                .releaseCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+                .releaseCommitLock(identifier, "table-id", "morax-job");
         AutoCloseable scope = lock.acquire();
         Thread.currentThread().interrupt();
         try {
             scope.close();
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
-            verify(api)
-                    .releaseCommitLock(
-                            eq(identifier), eq("table-id"), eq("morax-job"), anyString());
+            verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
         } finally {
             Thread.interrupted();
         }
@@ -975,7 +911,7 @@ class RESTCatalogLockTest {
                         })
                 .when(workers)
                 .execute(any(Runnable.class));
-        when(api.acquireCommitLock(eq(identifier), eq("table-id"), eq("morax-job"), anyString()))
+        when(api.acquireCommitLock(identifier, "table-id", "morax-job"))
                 .thenReturn(new CommitLockResponse(true, owner, 100000, leaseMillis, null));
         when(renewer.scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> future);

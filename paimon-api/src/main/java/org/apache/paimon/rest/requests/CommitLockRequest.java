@@ -22,10 +22,7 @@ import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
-
-import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
 
@@ -39,24 +36,13 @@ public class CommitLockRequest implements RESTRequest {
     @JsonProperty("commitUser")
     private final String commitUser;
 
-    @JsonProperty("leaseId")
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @Nullable
-    private final String leaseId;
-
-    public CommitLockRequest(String tableId, String commitUser) {
-        this(tableId, commitUser, null);
-    }
-
     @JsonCreator
-    @ConstructorProperties({"tableId", "commitUser", "leaseId"})
+    @ConstructorProperties({"tableId", "commitUser"})
     public CommitLockRequest(
             @JsonProperty("tableId") String tableId,
-            @JsonProperty("commitUser") String commitUser,
-            @JsonProperty("leaseId") @Nullable String leaseId) {
+            @JsonProperty("commitUser") String commitUser) {
         this.tableId = tableId;
         this.commitUser = commitUser;
-        this.leaseId = leaseId;
     }
 
     public String getTableId() {
@@ -65,10 +51,5 @@ public class CommitLockRequest implements RESTRequest {
 
     public String getCommitUser() {
         return commitUser;
-    }
-
-    @Nullable
-    public String getLeaseId() {
-        return leaseId;
     }
 }

@@ -182,6 +182,7 @@ class RESTCommitLockIntegrationTest {
                                     .contains("table$branch_dev");
                             if (path.endsWith("/commit-lock")) {
                                 assertThat(locking).isTrue();
+                                assertThat(lease.get()).isFalse();
                                 CommitLockRequest acquire =
                                         fromJson(request, CommitLockRequest.class);
                                 assertThat(acquire.getTableId()).isEqualTo("table-id");
@@ -229,8 +230,14 @@ class RESTCommitLockIntegrationTest {
                                 return json(tableResponse);
                             }
                             if (path.endsWith("/commit-lock/release")) {
+                                assertThat(locking).isTrue();
+                                CommitLockRequest release =
+                                        fromJson(request, CommitLockRequest.class);
+                                assertThat(release.getTableId()).isEqualTo("table-id");
+                                assertThat(release.getCommitUser()).isEqualTo("morax-job");
+                                events.add("release");
                                 lease.set(false);
-                                return new MockResponse().setResponseCode(204);
+                                return new MockResponse().setResponseCode(200);
                             }
                             return new MockResponse().setResponseCode(400);
                         }
@@ -364,7 +371,7 @@ class RESTCommitLockIntegrationTest {
                             }
                             if (path.endsWith("/commit-lock/release")) {
                                 owner.set(null);
-                                return new MockResponse().setResponseCode(204);
+                                return new MockResponse().setResponseCode(200);
                             }
                             return new MockResponse().setResponseCode(400);
                         }
@@ -462,6 +469,9 @@ class RESTCommitLockIntegrationTest {
             }
             events.add("head");
             events.add("publish");
+            if (locking) {
+                events.add("release");
+            }
         }
         return events;
     }
