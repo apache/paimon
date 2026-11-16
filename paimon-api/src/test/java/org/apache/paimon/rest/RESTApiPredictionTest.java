@@ -52,8 +52,9 @@ class RESTApiPredictionTest {
                 .isEqualTo(requestMap.get("idempotencyKey"));
         assertThat(requestMap)
                 .containsEntry("model", "quality.qwen_vl")
-                .doesNotContainKeys("name", "where", "snapshotId", "tagName");
-        assertThat(requestMap.get("resultColumns")).isEqualTo(Collections.singletonList("clip_id"));
+                .doesNotContainKeys("name", "where", "snapshotId", "tagName", "resultColumns");
+        assertThat(requestMap.get("mergeKeyColumns"))
+                .isEqualTo(Collections.singletonList("clip_id"));
         assertThat((Map<String, Object>) requestMap.get("source"))
                 .containsEntry("database", "quality")
                 .containsEntry("table", "clips");
@@ -118,7 +119,7 @@ class RESTApiPredictionTest {
                                         null,
                                         "quality.qwen_vl",
                                         Collections.emptyMap(),
-                                        Collections.emptyList(),
+                                        null,
                                         "Classify",
                                         Collections.singletonMap("result", "STRING"),
                                         null,
@@ -142,7 +143,7 @@ class RESTApiPredictionTest {
                                         null,
                                         Collections.emptyMap()))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("resultColumns must not contain duplicates");
+                .hasMessageContaining("mergeKeyColumns must not contain duplicates");
     }
 
     @Test

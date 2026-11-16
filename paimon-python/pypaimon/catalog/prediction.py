@@ -109,9 +109,9 @@ class PredictionSpec:
 
     model: str
     inputs: Dict[str, str]
-    result_columns: List[str]
     prompt: str
     output_schema: Dict[str, str]
+    merge_key_columns: List[str] = field(default_factory=list)
     name: Optional[str] = None
     where: Optional[str] = None
     snapshot_id: Optional[int] = None
@@ -134,8 +134,8 @@ class PredictionSpec:
         if self.snapshot_id is not None and self.tag_name is not None:
             raise ValueError("snapshot_id and tag_name are mutually exclusive")
         self.inputs = _copy_string_mapping(self.inputs, "inputs", True)
-        self.result_columns = _copy_string_list(
-            self.result_columns, "result_columns")
+        self.merge_key_columns = _copy_string_list(
+            self.merge_key_columns, "merge_key_columns")
         self.output_schema = _copy_string_mapping(
             self.output_schema, "output_schema", True)
         if not isinstance(self.options, dict):

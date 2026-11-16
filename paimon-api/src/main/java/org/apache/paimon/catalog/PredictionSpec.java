@@ -37,7 +37,7 @@ public class PredictionSpec {
     private final @Nullable String name;
     private final String model;
     private final Map<String, String> inputs;
-    private final List<String> resultColumns;
+    private final List<String> mergeKeyColumns;
     private final String prompt;
     private final Map<String, String> outputSchema;
     private final @Nullable String where;
@@ -49,7 +49,7 @@ public class PredictionSpec {
             @Nullable String name,
             String model,
             Map<String, String> inputs,
-            List<String> resultColumns,
+            @Nullable List<String> mergeKeyColumns,
             String prompt,
             Map<String, String> outputSchema,
             @Nullable String where,
@@ -68,7 +68,7 @@ public class PredictionSpec {
         this.name = name;
         this.model = model;
         this.inputs = copyStringMap(inputs, "inputs", true);
-        this.resultColumns = copyStringList(resultColumns, "resultColumns");
+        this.mergeKeyColumns = copyOptionalStringList(mergeKeyColumns, "mergeKeyColumns");
         this.prompt = prompt;
         this.outputSchema = copyStringMap(outputSchema, "outputSchema", true);
         this.where = where;
@@ -93,8 +93,8 @@ public class PredictionSpec {
         return inputs;
     }
 
-    public List<String> resultColumns() {
-        return resultColumns;
+    public List<String> mergeKeyColumns() {
+        return mergeKeyColumns;
     }
 
     public String prompt() {
@@ -147,6 +147,10 @@ public class PredictionSpec {
             copy.add(value);
         }
         return Collections.unmodifiableList(copy);
+    }
+
+    private static List<String> copyOptionalStringList(@Nullable List<String> values, String name) {
+        return values == null ? Collections.emptyList() : copyStringList(values, name);
     }
 
     private static void checkOptionalNonBlank(@Nullable String value, String name) {

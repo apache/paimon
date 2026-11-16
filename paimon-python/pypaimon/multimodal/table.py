@@ -116,9 +116,9 @@ class MultimodalTable:
             *,
             model,
             inputs,
-            result_columns,
             prompt,
             output_schema,
+            merge_key_columns=None,
             name=None,
             where=None,
             options=None):
@@ -144,9 +144,10 @@ class MultimodalTable:
             name=name,
             model=model,
             inputs=inputs,
-            result_columns=result_columns,
             prompt=prompt,
             output_schema=output_schema,
+            merge_key_columns=(
+                [] if merge_key_columns is None else merge_key_columns),
             where=where,
             snapshot_id=self.raw_table.options.scan_snapshot_id(),
             tag_name=self.raw_table.options.scan_tag_name(),

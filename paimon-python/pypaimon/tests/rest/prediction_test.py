@@ -53,7 +53,6 @@ def _spec(**changes):
     values = dict(
         model="quality.qwen_vl",
         inputs={"video": "content"},
-        result_columns=["clip_id"],
         prompt="Classify",
         output_schema={"result": "STRING"},
     )
@@ -102,11 +101,19 @@ class PredictionTest(unittest.TestCase):
             body["idempotencyKey"],
             json.loads(JSON.to_json(request))["idempotencyKey"],
         )
-        self.assertEqual(["clip_id"], body["resultColumns"])
+        self.assertNotIn("resultColumns", body)
+        self.assertNotIn("mergeKeyColumns", body)
         self.assertEqual({"result": "STRING"}, body["outputSchema"])
         self.assertEqual(
             {"database": "quality", "table": "clips"}, body["source"])
         self.assertNotIn("snapshotId", body)
+
+        keyed = SubmitPredictionRequest.from_spec(
+            Identifier.create("quality", "clips"),
+            _spec(merge_key_columns=["clip_id"]),
+        )
+        keyed_body = json.loads(JSON.to_json(keyed))
+        self.assertEqual(["clip_id"], keyed_body["mergeKeyColumns"])
 
         response = JSON.from_json(
             JSON.to_json(_response()), GetPredictionResponse)
@@ -178,8 +185,8 @@ class PredictionTest(unittest.TestCase):
             dict(model=""),
             dict(inputs={}),
             dict(inputs={"video": ""}),
-            dict(result_columns=["id", "id"]),
-            dict(result_columns="id"),
+            dict(merge_key_columns=["id", "id"]),
+            dict(merge_key_columns="id"),
             dict(prompt=" "),
             dict(output_schema={}),
             dict(snapshot_id=0),
@@ -209,16 +216,16 @@ class PredictionTest(unittest.TestCase):
             name="daily-quality",
             model="quality.qwen_vl",
             inputs={"video": "content"},
-            result_columns=["clip_id"],
             prompt="Classify",
             output_schema={"result": "STRING"},
         )
 
         self.assertIsInstance(job, PredictionJob)
         self.assertEqual("prediction-1", job.prediction_id)
-        sent = catalog.submit_prediction.call_args.args[1]
+        sent = catalog.submit_prediction.call_args[0][1]
         self.assertEqual(7, sent.snapshot_id)
         self.assertIsNone(sent.tag_name)
+        self.assertEqual([], sent.merge_key_columns)
         raw.new_read_builder.assert_not_called()
 
     def test_wait_is_client_side_polling(self):
@@ -298,6 +305,7 @@ class PredictionTest(unittest.TestCase):
                 calls[-1][2]["source"],
             )
             self.assertTrue(calls[-1][2]["idempotencyKey"])
+            self.assertNotIn("mergeKeyColumns", calls[-1][2])
 
             page = catalog.list_predictions(
                 identifier,

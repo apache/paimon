@@ -46,7 +46,7 @@ public class SubmitPredictionRequest implements RESTRequest {
     private static final String FIELD_IDEMPOTENCY_KEY = "idempotencyKey";
     private static final String FIELD_MODEL = "model";
     private static final String FIELD_INPUTS = "inputs";
-    private static final String FIELD_RESULT_COLUMNS = "resultColumns";
+    private static final String FIELD_MERGE_KEY_COLUMNS = "mergeKeyColumns";
     private static final String FIELD_PROMPT = "prompt";
     private static final String FIELD_OUTPUT_SCHEMA = "outputSchema";
     private static final String FIELD_WHERE = "where";
@@ -65,7 +65,7 @@ public class SubmitPredictionRequest implements RESTRequest {
             @Nullable @JsonProperty(FIELD_IDEMPOTENCY_KEY) String idempotencyKey,
             @JsonProperty(FIELD_MODEL) String model,
             @JsonProperty(FIELD_INPUTS) Map<String, String> inputs,
-            @JsonProperty(FIELD_RESULT_COLUMNS) List<String> resultColumns,
+            @Nullable @JsonProperty(FIELD_MERGE_KEY_COLUMNS) List<String> mergeKeyColumns,
             @JsonProperty(FIELD_PROMPT) String prompt,
             @JsonProperty(FIELD_OUTPUT_SCHEMA) Map<String, String> outputSchema,
             @Nullable @JsonProperty(FIELD_WHERE) String where,
@@ -84,7 +84,7 @@ public class SubmitPredictionRequest implements RESTRequest {
                         name,
                         model,
                         inputs,
-                        resultColumns,
+                        mergeKeyColumns,
                         prompt,
                         outputSchema,
                         where,
@@ -100,7 +100,7 @@ public class SubmitPredictionRequest implements RESTRequest {
                 null,
                 spec.model(),
                 spec.inputs(),
-                spec.resultColumns(),
+                spec.mergeKeyColumns(),
                 spec.prompt(),
                 spec.outputSchema(),
                 spec.where(),
@@ -136,9 +136,10 @@ public class SubmitPredictionRequest implements RESTRequest {
         return spec.inputs();
     }
 
-    @JsonGetter(FIELD_RESULT_COLUMNS)
-    public List<String> getResultColumns() {
-        return spec.resultColumns();
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @JsonGetter(FIELD_MERGE_KEY_COLUMNS)
+    public List<String> getMergeKeyColumns() {
+        return spec.mergeKeyColumns();
     }
 
     @JsonGetter(FIELD_PROMPT)

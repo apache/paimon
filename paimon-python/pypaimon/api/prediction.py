@@ -82,9 +82,10 @@ class SubmitPredictionRequest(RESTRequest):
     source: PredictionSource
     model: str
     inputs: Dict[str, str]
-    result_columns: List[str] = json_field("resultColumns")
     prompt: str
     output_schema: Dict[str, str] = json_field("outputSchema")
+    merge_key_columns: Optional[List[str]] = optional_json_field(
+        "mergeKeyColumns", "non_null")
     name: Optional[str] = optional_json_field("name", "non_null")
     idempotency_key: Optional[str] = optional_json_field(
         "idempotencyKey", "non_null")
@@ -116,8 +117,9 @@ class SubmitPredictionRequest(RESTRequest):
         if self.snapshot_id is not None and self.tag_name is not None:
             raise ValueError("snapshot_id and tag_name are mutually exclusive")
         self.inputs = _copy_string_mapping(self.inputs, "inputs", True)
-        self.result_columns = _copy_string_list(
-            self.result_columns, "result_columns")
+        if self.merge_key_columns is not None:
+            self.merge_key_columns = _copy_string_list(
+                self.merge_key_columns, "merge_key_columns")
         self.output_schema = _copy_string_mapping(
             self.output_schema, "output_schema", True)
         if not isinstance(self.options, dict):
@@ -133,9 +135,9 @@ class SubmitPredictionRequest(RESTRequest):
             name=spec.name,
             model=spec.model,
             inputs=spec.inputs,
-            result_columns=spec.result_columns,
             prompt=spec.prompt,
             output_schema=spec.output_schema,
+            merge_key_columns=spec.merge_key_columns or None,
             where=spec.where,
             snapshot_id=spec.snapshot_id,
             tag_name=spec.tag_name,
