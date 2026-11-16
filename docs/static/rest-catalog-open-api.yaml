@@ -139,9 +139,9 @@ paths:
       summary: Submit a prediction job
       operationId: submitPrediction
       description: >-
-        Accepts a job after fixing the source snapshot and model version. Reusing an
-        idempotencyKey with the same payload returns the existing job; conflicting
-        reuse returns 409.
+        Accepts a job after fixing the source snapshot and resolving the registered model.
+        Reusing an idempotencyKey with the same payload returns the existing job;
+        conflicting reuse returns 409.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
       requestBody:
@@ -4765,7 +4765,7 @@ components:
     GetPredictionResponse:
       type: object
       additionalProperties: false
-      required: [predictionId, source, status, snapshotId, model, modelVersion]
+      required: [predictionId, source, status, snapshotId, model]
       properties:
         predictionId: {type: string, minLength: 1}
         source:
@@ -4775,7 +4775,6 @@ components:
           $ref: '#/components/schemas/PredictionStatus'
         snapshotId: {type: integer, format: int64, minimum: 1}
         model: {type: string, minLength: 1}
-        modelVersion: {type: string, minLength: 1}
         output:
           $ref: '#/components/schemas/PredictionOutput'
         startTime: {type: integer, format: int64, minimum: 0}

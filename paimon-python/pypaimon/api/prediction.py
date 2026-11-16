@@ -157,7 +157,6 @@ class GetPredictionResponse(RESTResponse):
     status: PredictionStatus = None
     snapshot_id: int = json_field("snapshotId", default=0)
     model: str = ""
-    model_version: str = json_field("modelVersion", default="")
     name: Optional[str] = optional_json_field("name", "non_null")
     output: Optional[PredictionOutput] = optional_json_field(
         "output", "non_null")
@@ -177,7 +176,6 @@ class GetPredictionResponse(RESTResponse):
             status=PredictionStatus.from_dict(data.get("status")),
             snapshot_id=data.get("snapshotId"),
             model=data.get("model"),
-            model_version=data.get("modelVersion"),
             output=(PredictionOutput.from_dict(data.get("output"))
                     if isinstance(data.get("output"), dict)
                     else data.get("output")),
@@ -193,7 +191,6 @@ class GetPredictionResponse(RESTResponse):
             status=self.status,
             snapshot_id=self.snapshot_id,
             model=self.model,
-            model_version=self.model_version,
             output=(self.output.to_catalog_output()
                     if self.output is not None else None),
             start_time=self.start_time,

@@ -42,7 +42,6 @@ public class GetPredictionResponse implements RESTResponse {
     private final PredictionStatus status;
     private final long snapshotId;
     private final String model;
-    private final String modelVersion;
     private final @Nullable PredictionOutput output;
     private final @Nullable Long startTime;
     private final @Nullable Long endTime;
@@ -55,7 +54,6 @@ public class GetPredictionResponse implements RESTResponse {
             @JsonProperty("status") PredictionStatus status,
             @JsonProperty("snapshotId") long snapshotId,
             @JsonProperty("model") String model,
-            @JsonProperty("modelVersion") String modelVersion,
             @Nullable @JsonProperty("output") PredictionOutput output,
             @Nullable @JsonProperty("startTime") Long startTime,
             @Nullable @JsonProperty("endTime") Long endTime) {
@@ -65,7 +63,6 @@ public class GetPredictionResponse implements RESTResponse {
         this.status = status;
         this.snapshotId = snapshotId;
         this.model = model;
-        this.modelVersion = modelVersion;
         this.output = output;
         this.startTime = startTime;
         this.endTime = endTime;
@@ -79,7 +76,6 @@ public class GetPredictionResponse implements RESTResponse {
                 prediction.status(),
                 prediction.snapshotId(),
                 prediction.model(),
-                prediction.modelVersion(),
                 prediction.output(),
                 prediction.startTime(),
                 prediction.endTime());
@@ -117,11 +113,6 @@ public class GetPredictionResponse implements RESTResponse {
         return model;
     }
 
-    @JsonGetter("modelVersion")
-    public String getModelVersion() {
-        return modelVersion;
-    }
-
     @Nullable
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonGetter("output")
@@ -145,15 +136,6 @@ public class GetPredictionResponse implements RESTResponse {
 
     public Prediction toPrediction() {
         return new Prediction(
-                predictionId,
-                source,
-                name,
-                status,
-                snapshotId,
-                model,
-                modelVersion,
-                output,
-                startTime,
-                endTime);
+                predictionId, source, name, status, snapshotId, model, output, startTime, endTime);
     }
 }

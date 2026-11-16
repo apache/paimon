@@ -70,6 +70,7 @@ class RESTApiPredictionTest {
                         "createdAt",
                         "startedAt",
                         "finishedAt",
+                        "modelVersion",
                         "outputTable",
                         "output",
                         "startTime",
@@ -87,7 +88,6 @@ class RESTApiPredictionTest {
                                                 PredictionStatus.TerminationCode.SUCCESS, null)),
                                 7,
                                 "quality.qwen_vl",
-                                "1",
                                 new PredictionOutput(
                                         new PredictionSource("system", "prediction_results")),
                                 10L,
@@ -96,7 +96,8 @@ class RESTApiPredictionTest {
         assertThat(completedMap)
                 .containsEntry("startTime", 10)
                 .containsEntry("endTime", 20)
-                .doesNotContainKeys("createdAt", "startedAt", "finishedAt", "outputTable");
+                .doesNotContainKeys(
+                        "createdAt", "startedAt", "finishedAt", "modelVersion", "outputTable");
         Map<String, Object> output = (Map<String, Object>) completedMap.get("output");
         assertThat((Map<String, Object>) output.get("table"))
                 .containsEntry("database", "system")
@@ -193,7 +194,6 @@ class RESTApiPredictionTest {
                 new PredictionStatus(PredictionStatus.State.PENDING, null),
                 7,
                 "quality.qwen_vl",
-                "1",
                 null,
                 null,
                 null);

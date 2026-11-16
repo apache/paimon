@@ -71,7 +71,6 @@ def _prediction(status=None, **changes):
         status=status,
         snapshot_id=7,
         model="quality.qwen_vl",
-        model_version="1",
     )
     values.update(changes)
     return Prediction(**values)
@@ -87,7 +86,6 @@ def _response(status=None, **changes):
         status=status,
         snapshot_id=7,
         model="quality.qwen_vl",
-        model_version="1",
     )
     values.update(changes)
     return GetPredictionResponse(**values)
@@ -119,7 +117,8 @@ class PredictionTest(unittest.TestCase):
         pending_body = json.loads(JSON.to_json(_response()))
         for field in (
                 "createdAt", "startedAt", "finishedAt",
-                "outputTable", "output", "startTime", "endTime"):
+                "modelVersion", "outputTable", "output", "startTime",
+                "endTime"):
             self.assertNotIn(field, pending_body)
         terminated = PredictionStatus(
             PredictionState.TERMINATED,
@@ -152,7 +151,9 @@ class PredictionTest(unittest.TestCase):
             {"table": {"database": "system", "table": "prediction_results"}},
             terminated_body["output"],
         )
-        for field in ("createdAt", "startedAt", "finishedAt", "outputTable"):
+        for field in (
+                "createdAt", "startedAt", "finishedAt", "modelVersion",
+                "outputTable"):
             self.assertNotIn(field, terminated_body)
         completed = JSON.from_json(
             JSON.to_json(completed_response), GetPredictionResponse)

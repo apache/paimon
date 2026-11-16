@@ -163,7 +163,6 @@ class Prediction:
     status: PredictionStatus
     snapshot_id: int
     model: str
-    model_version: str
     name: Optional[str] = None
     output: Optional[PredictionOutput] = None
     start_time: Optional[int] = None
@@ -178,7 +177,6 @@ class Prediction:
         if type(self.snapshot_id) is not int or self.snapshot_id <= 0:
             raise ValueError("snapshot_id must be a positive integer")
         _nonblank(self.model, "model")
-        _nonblank(self.model_version, "model_version")
         if self.output is not None and not isinstance(
                 self.output, PredictionOutput):
             raise ValueError("output must be a PredictionOutput")
