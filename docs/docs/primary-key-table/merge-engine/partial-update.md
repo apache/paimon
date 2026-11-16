@@ -272,9 +272,15 @@ source that produces retractions:
 | --- | --- | --- |
 | Default, without sequence groups | Rejected | Rejected |
 | `ignore-delete = true` | Ignored | Ignored |
-| `partial-update.remove-record-on-delete = true` | Remove the whole row | Remove the whole row; a later `INSERT` or `UPDATE_AFTER` restores it |
+| `partial-update.remove-record-on-delete = true` | Remove the whole row | Same as `DELETE` |
 | Sequence groups | Retract protected fields according to the group version and aggregate function | Same field-level retraction rules |
-| Sequence groups with `partial-update.remove-record-on-sequence-group` | Remove the whole row when a configured group accepts the delete's version | Apply field-level retractions, and remove the whole row when a configured group accepts the retraction's version |
+| Sequence groups with `partial-update.remove-record-on-sequence-group` | Remove the whole row when a configured group accepts the delete's version | Same as `DELETE` |
+
+With either whole-row removal option, an `UPDATE_BEFORE` is a row-level delete. It is handled
+exactly like a `DELETE`, with the same dependence on batching. It re-initializes the row from its
+own values, and a later `INSERT` or `UPDATE_AFTER` writes on top of those values. Columns that
+other writers wrote before the retraction may not be kept. Whether they are kept depends on whether
+the retraction and the later write are merged before being written.
 
 For a sequence group, a newer or equal retraction clears non-aggregated protected fields to
 null. Aggregated fields use their function's retraction behavior, including for older versions;

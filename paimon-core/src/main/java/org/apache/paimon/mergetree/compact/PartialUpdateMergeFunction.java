@@ -206,12 +206,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             }
 
             if (removeRecordOnDelete) {
-                // -U also removes the row, a later +I or +U restores it
                 currentDeleteRow = true;
-                if (kv.valueKind() == RowKind.DELETE) {
-                    row = new GenericRow(getters.length);
-                    initRow(row, kv.value());
-                }
+                row = new GenericRow(getters.length);
+                initRow(row, kv.value());
                 return;
             }
 
@@ -378,16 +375,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             .anyMatch(field -> field == index)) {
                         for (int field : seqComparator.compareFields()) {
                             if (!updatedSequenceFields.contains(field)) {
-                                if (kv.valueKind() == RowKind.DELETE
-                                        && sequenceGroupPartialDelete.contains(field)) {
+                                if (sequenceGroupPartialDelete.contains(field)) {
                                     currentDeleteRow = true;
                                     row = new GenericRow(getters.length);
                                     initRow(row, kv.value());
                                     return;
                                 } else {
-                                    if (sequenceGroupPartialDelete.contains(field)) {
-                                        currentDeleteRow = true;
-                                    }
                                     row.setField(field, getters[field].getFieldOrNull(kv.value()));
                                     updatedSequenceFields.add(field);
                                 }

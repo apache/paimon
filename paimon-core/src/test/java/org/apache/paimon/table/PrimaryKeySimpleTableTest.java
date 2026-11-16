@@ -2027,6 +2027,119 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
+    public void testPartialUpdateRemoveRecordOnDeleteWithBufferedUpdateBefore() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "partial-update");
+                            options.set("partial-update.remove-record-on-delete", "true");
+                        },
+                        rowType);
+        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
+        SnapshotReader snapshotReader = table.newSnapshotReader();
+        TableRead read = table.newRead();
+        StreamTableWrite write = table.newWrite("");
+        StreamTableCommit commit = table.newCommit("");
+
+        // 1. Another writer fills c for keys a = 1 and a = 2
+        write.write(GenericRow.of(1, 1, null, 20));
+        write.write(GenericRow.of(1, 2, null, 20));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // 2. +I and -U of b: for a = 1 in one write buffer, which merges them before the flush,
+        // for a = 2 in two commits
+        write.write(GenericRow.of(1, 1, 10, null));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 10, null));
+        write.write(GenericRow.of(1, 2, 10, null));
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 2, 10, null));
+        commit.commit(2, write.prepareCommit(true, 2));
+        List<String> result =
+                getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).isEmpty();
+
+        // 3. +U of b writes on top of the -U values. Like after a -D, c = 20 from step 1 is not
+        // kept, and both keys get the same result however the records were batched
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 11, null));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 2, 11, null));
+        commit.commit(3, write.prepareCommit(true, 3));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 11, NULL]", "+I[1, 2, 11, NULL]");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testPartialUpdateRemoveRecordOnSequenceGroupWithBufferedUpdateBefore()
+            throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "seq1", "c", "d", "seq2"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "partial-update");
+                            options.set("fields.seq1.sequence-group", "b");
+                            options.set("fields.seq2.sequence-group", "c,d");
+                            options.set("fields.b.aggregate-function", "sum");
+                            options.set("partial-update.remove-record-on-sequence-group", "seq2");
+                        },
+                        rowType);
+        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
+        SnapshotReader snapshotReader = table.newSnapshotReader();
+        TableRead read = table.newRead();
+        StreamTableWrite write = table.newWrite("");
+        StreamTableCommit commit = table.newCommit("");
+
+        // 1. Both groups for keys a = 1 and a = 2, b is summed
+        write.write(GenericRow.of(1, 1, 5, 1, 29, 29, 2));
+        write.write(GenericRow.of(1, 2, 5, 1, 29, 29, 2));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // 2. +I of the seq1 group and -U of the seq2 group: for a = 1 in one write buffer, which
+        // merges them before the flush, for a = 2 in two commits
+        write.write(GenericRow.of(1, 1, 11, 2, null, null, null));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, null, null, 29, 29, 2));
+        write.write(GenericRow.of(1, 2, 11, 2, null, null, null));
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 2, null, null, 29, 29, 2));
+        commit.commit(2, write.prepareCommit(true, 2));
+        List<String> result =
+                getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).isEmpty();
+
+        // 3. +U of the seq2 group writes on top of the -U values. Like after a -D, the summed b
+        // and seq1 are not kept, and both keys get the same result however the records were
+        // batched
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, null, null, 30, 30, 3));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 2, null, null, 30, 30, 3));
+        commit.commit(3, write.prepareCommit(true, 3));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[1, 1, NULL, NULL, 30, 30, 3]", "+I[1, 2, NULL, NULL, 30, 30, 3]");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testPartialUpdateRemoveRecordOnSequenceGroup() throws Exception {
         RowType rowType =
                 RowType.of(
@@ -2080,32 +2193,44 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 11, 2, 29, 29, 2]");
 
-        // 2. Update Before, a lone -U of the remove-record group seq2 removes the row (issue 6862)
-        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 11, 2, 29, 29, 2));
+        // 2. Update Before of seq1, which is not a remove-record group, only clears b
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 11, 2, null, null, null));
         commit.commit(1, write.prepareCommit(true, 1));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, NULL, 2, 29, 29, 2]");
+
+        // 3. Update Before of the remove-record group seq2 removes the row like -D (issue 6862)
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, null, null, 29, 29, 2));
+        commit.commit(2, write.prepareCommit(true, 2));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).isEmpty();
 
-        // 3. Update After
-        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 11, 2, 30, 30, 3));
-        commit.commit(2, write.prepareCommit(true, 2));
-        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 11, 2, 30, 30, 3]");
-
-        // 4. Retracts
-        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 12, 3, 30, 30, 2));
+        // 4. Update After writes on top of the -U values, so seq1 = 2 from step 2 is not kept
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, null, null, 30, 30, 3));
         commit.commit(3, write.prepareCommit(true, 3));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, NULL, NULL, 30, 30, 3]");
+
+        // 5. Insert of seq1 fills b again
+        write.write(GenericRow.of(1, 1, 12, 2, null, null, null));
+        commit.commit(4, write.prepareCommit(true, 4));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 12, 2, 30, 30, 3]");
+
+        // 6. Retracts, a newer seq1 clears b, then an accepted seq2 removes the row
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 12, 3, 30, 30, 2));
+        commit.commit(5, write.prepareCommit(true, 5));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, NULL, 3, 30, 30, 3]");
 
         write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 12, 2, 30, 31, 5));
-        commit.commit(4, write.prepareCommit(true, 4));
+        commit.commit(6, write.prepareCommit(true, 6));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).isEmpty();
 
-        // 5. Inserts
+        // 7. Inserts
         write.write(GenericRow.of(1, 1, 11, 2, 30, 31, 6));
-        commit.commit(5, write.prepareCommit(true, 5));
+        commit.commit(7, write.prepareCommit(true, 7));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 11, 2, 30, 31, 6]");
 

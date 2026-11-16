@@ -1556,33 +1556,14 @@ public class PartialUpdateMergeFunctionTest {
         // issue 6862: a filter in front of the sink drops the +U, so the lone -U is the last
         // message of the key and the row must be removed instead of keeping the stale value
         add(function, RowKind.UPDATE_BEFORE, 1, 10, null);
+        // like -D, the -U re-initializes the row from its own values, so f2 = 20 is dropped
         assertThat(function.getResult().valueKind()).isEqualTo(RowKind.DELETE);
-        // unlike DELETE, -U does not re-initialize the row, so the DELETE keeps the merged row
-        validate(function, 1, 10, 20);
+        validate(function, 1, 10, null);
 
-        // a following +U still updates the merged row, so f2 written by another writer is kept
+        // a following +U writes on top of the -U values, f2 written by another writer stays null
         add(function, RowKind.UPDATE_AFTER, 1, 11, null);
         assertThat(function.getResult().valueKind()).isEqualTo(RowKind.INSERT);
-        validate(function, 1, 11, 20);
-    }
-
-    @Test
-    public void testRemoveRecordOnDeleteWithOnlyUpdateBefore() {
-        Options options = new Options();
-        options.set("partial-update.remove-record-on-delete", "true");
-        MergeFunction<KeyValue> function =
-                PartialUpdateMergeFunction.factory(
-                                options,
-                                RowType.of(DataTypes.INT(), DataTypes.INT()),
-                                ImmutableList.of("f0"))
-                        .create();
-        function.reset();
-
-        // A key that receives only one -U, with no INSERT before it, should still produce a
-        // DELETE. The remove-record-on-delete docs say UPDATE_BEFORE removes the whole row.
-        add(function, RowKind.UPDATE_BEFORE, 1, 10);
-        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.DELETE);
-        validate(function, 1, 10);
+        validate(function, 1, 11, null);
     }
 
     @Test
@@ -1601,14 +1582,16 @@ public class PartialUpdateMergeFunctionTest {
         assertThat(function.getResult().valueKind()).isEqualTo(RowKind.INSERT);
         validate(function, 1, 1, 10, 1, null);
 
-        // issue 6862: a lone -U of the remove-record group f1 removes the row
+        // issue 6862: an accepted -U of the remove-record group f1 removes the row like -D and
+        // re-initializes it from the -U values, so f3 = 1 of the other group is dropped
         add(function, RowKind.UPDATE_BEFORE, 1, 1, 10, null, null);
         assertThat(function.getResult().valueKind()).isEqualTo(RowKind.DELETE);
+        validate(function, 1, 1, 10, null, null);
 
-        // an accepted +U of group f1 revives the row and keeps the retained f3 group value
+        // an accepted +U of group f1 writes on top of the -U values, f3 stays null
         add(function, RowKind.UPDATE_AFTER, 1, 2, 11, null, null);
         assertThat(function.getResult().valueKind()).isEqualTo(RowKind.INSERT);
-        validate(function, 1, 2, 11, 1, null);
+        validate(function, 1, 2, 11, null, null);
     }
 
     @ParameterizedTest
