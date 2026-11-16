@@ -16,6 +16,7 @@
 # under the License.
 
 import logging
+from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional, Union
 from pypaimon.api.api_response import ErrorResponse, GetTableResponse, GetTagResponse, PagedList, Partition
 from pypaimon.api.model import CreateModelRequest
@@ -57,6 +58,7 @@ from pypaimon.common.json_util import JSON
 from pypaimon.management.permission_management import PermissionManagement
 from pypaimon.management.policy_management import PolicyManagement
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
@@ -305,12 +307,31 @@ class RESTCatalog(Catalog):
         check_not_branch(identifier, "create_table")
         check_not_system_table(identifier, "create_table")
         try:
+            if schema is not None:
+                schema = self._infer_schema_if_external_paimon_table(schema)
             self.rest_api.create_table(identifier, schema)
         except AlreadyExistsException as e:
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier) from e
         except NoSuchResourceException as e:
             raise DatabaseNotExistException(identifier.get_database_name()) from e
+
+    def _infer_schema_if_external_paimon_table(self, schema: Schema) -> Schema:
+        table_type = schema.options.get(CoreOptions.TYPE.key(), 'table').strip().lower()
+        path = schema.options.get(CoreOptions.PATH.key())
+        if table_type != 'table' or path is None:
+            return schema
+
+        latest = SchemaManager(self.file_io_from_options(path), path).latest()
+        if latest is None:
+            return schema
+
+        existing = deepcopy(latest).to_schema()
+        SchemaManager.check_schema_for_external_table(existing, schema)
+        if schema.options.get(self.OWNER_PROP) is not None:
+            existing.options[self.OWNER_PROP] = schema.options[self.OWNER_PROP]
+        existing.options[CoreOptions.PATH.key()] = path
+        return existing
 
     def rename_table(self, source_identifier: Union[str, Identifier],
                      target_identifier: Union[str, Identifier]) -> None:
