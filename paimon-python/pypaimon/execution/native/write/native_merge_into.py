@@ -20,6 +20,7 @@
 import pyarrow as pa
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+from pypaimon.execution.native.table import _native_variant_write_supported
 from pypaimon.execution.native.write.native_commit import create_native_write_table, from_native_commit_messages
 from pypaimon.execution.native.write.native_update import (
     _dictionary_value_type, _native_row_id_table, _native_update_columns_supported,
@@ -34,7 +35,7 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
 
     target_keys, source_keys = _normalize_on(on)
     self_merge = _is_self_merge(table, source, target_keys, source_keys)
-    if not_matched and table.options.video_frame_fields():
+    if not_matched and (table.options.video_frame_fields() or not _native_variant_write_supported(table)):
         return None
     native_table = _native_row_id_table(table)
     if native_table is None:

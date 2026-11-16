@@ -248,10 +248,16 @@ Retention overrides such as `retain_max` and dynamic `options` apply only to tha
 operation; they do not update the table properties. An override can cause changelogs to be retained
 independently even though the persisted snapshot and changelog retention settings are equal.
 For example, with both maximum counts set to `4` and otherwise matching retention settings,
-calling `expire_snapshots` with `retain_max=1` can leave changelog history after its snapshots expire. A new streaming reader using the unchanged
-`4`/`4` settings does not discover that independent history. The reader must also use a configuration
-that enables independent changelog retention, such as a changelog maximum count greater than the
-snapshot maximum count. Retaining the files alone does not enable their discovery by that reader.
+calling `expire_snapshots` with `retain_max=1` can leave changelog history after its snapshots expire.
+Ordinary streaming readers with `changelog-producer` set to `input`, `lookup`, or `full-compaction`
+can discover this retained history without repeating the retention overrides. The changelog
+metadata and the files it references must still be available. This does not restore expired
+snapshots for full reads, and does not apply to streaming overwrite reads or special scans
+such as file monitoring and compaction. Flink lookup joins keep their existing discovery rules.
+If a timestamp-based start cannot be located safely because retained metadata has a gap,
+the reader reports the missing history instead of skipping it, even if the next retained commit
+matches the requested timestamp. Starting from an explicit retained snapshot ID avoids this
+ambiguity when that starting point is intended.
 
 <Tabs groupId="manually-expire-snapshot">
 

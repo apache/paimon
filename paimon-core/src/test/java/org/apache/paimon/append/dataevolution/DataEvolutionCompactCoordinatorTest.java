@@ -25,6 +25,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.io.ProjectedDataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
@@ -77,6 +79,76 @@ import static org.mockito.Mockito.when;
 
 /** Tests for {@link DataEvolutionCompactCoordinator.CompactPlanner}. */
 public class DataEvolutionCompactCoordinatorTest {
+
+    @Test
+    public void testIncrementalSelectionKeepsAContinuousNewestPrefix() {
+        DataFileMeta base = createDataFileMeta("base.parquet", 0, 10, 1, 10000);
+        DataFileMeta old = createDataFileMeta("old.parquet", 0, 10, 2, 1000);
+        DataFileMeta middle = createDataFileMeta("middle.parquet", 0, 10, 3, 10);
+        DataFileMeta latest = createDataFileMeta("latest.parquet", 0, 10, 4, 10);
+        List<DataFileMeta> files = Arrays.asList(middle, base, latest, old);
+        assertThat(DataEvolutionIncrementalCompactPlanner.pickIncrementalFiles(files, 3, 1))
+                .containsExactly(latest, middle);
+        // A lower file-count limit must include the intervening large version, not skip it.
+        assertThat(DataEvolutionIncrementalCompactPlanner.pickIncrementalFiles(files, 2, 1))
+                .containsExactly(latest, middle, old);
+    }
+
+    @Test
+    public void testIncrementalSelectionPreservesSameVersionFilesAndRatioBoundary() {
+        DataFileMeta base = createDataFileMeta("base.parquet", 0, 10, 1, 10000);
+        DataFileMeta sameVersion = createDataFileMeta("same.parquet", 0, 10, 2, 1000);
+        DataFileMeta small = createDataFileMeta("small.parquet", 0, 10, 2, 1);
+        DataFileMeta latest = createDataFileMeta("latest.parquet", 0, 10, 3, 100);
+        assertThat(
+                        DataEvolutionIncrementalCompactPlanner.pickIncrementalFiles(
+                                Arrays.asList(base, sameVersion, small, latest), 3, 0))
+                .containsExactly(latest, sameVersion, small);
+        DataFileMeta boundary = createDataFileMeta("boundary.parquet", 0, 10, 2, 101);
+        assertThat(
+                        DataEvolutionIncrementalCompactPlanner.pickIncrementalFiles(
+                                Arrays.asList(base, boundary, latest), 3, 1))
+                .containsExactly(latest, boundary);
+        assertThat(
+                        DataEvolutionIncrementalCompactPlanner.pickIncrementalFiles(
+                                Arrays.asList(base, boundary, latest), 3, 0))
+                .isEmpty();
+    }
+
+    @Test
+    public void testIncrementalSelectionSkipsSingleOutputsAndAvoidsSizeOverflow() {
+        DataFileMeta base = createDataFileMeta("base.parquet", 0, 10, 1, Long.MAX_VALUE);
+        DataFileMeta latest = createDataFileMeta("latest.parquet", 0, 10, 2, 10);
+        assertThat(
+                        DataEvolutionIncrementalCompactPlanner.pickIncrementalFiles(
+                                Arrays.asList(base, latest), 2, 1))
+                .isEmpty();
+        assertThat(
+                        DataEvolutionIncrementalCompactPlanner.pickIncrementalFiles(
+                                Arrays.asList(base, latest), 3, 1))
+                .isEmpty();
+        DataFileMeta middle = createDataFileMeta("middle.parquet", 0, 10, 2, Long.MAX_VALUE);
+        latest = createDataFileMeta("latest.parquet", 0, 10, 3, Long.MAX_VALUE);
+        assertThat(
+                        DataEvolutionIncrementalCompactPlanner.pickIncrementalFiles(
+                                Arrays.asList(base, middle, latest), 3, 1))
+                .containsExactly(latest, middle, base);
+    }
+
+    @Test
+    public void testPartialNormalTaskRejectsAdjacentNormalRanges() {
+        assertThatThrownBy(
+                        () ->
+                                new DataEvolutionNormalCompactTask(
+                                        BinaryRow.EMPTY_ROW,
+                                        Arrays.asList(
+                                                createDataFileMeta("a.parquet", 0, 10, 1, 100),
+                                                createDataFileMeta("b.parquet", 10, 10, 2, 100)),
+                                        Collections.emptyList(),
+                                        true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("identical row-ID ranges");
+    }
 
     @Test
     public void testRejectsRewriteRowIdsOption() {
@@ -161,6 +233,9 @@ public class DataEvolutionCompactCoordinatorTest {
                         1000L,
                         10L,
                         schemaId -> null,
+                        null,
+                        100L,
+                        null,
                         null);
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
@@ -177,8 +252,7 @@ public class DataEvolutionCompactCoordinatorTest {
         entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
 
         DataEvolutionCompactCoordinator.CompactPlanner planner =
-                new DataEvolutionCompactCoordinator.CompactPlanner(
-                        false, false, 128 * 1024 * 1024, 4 * 1024 * 1024, 2);
+                planner(false, false, 128 * 1024 * 1024, 4 * 1024 * 1024, 2);
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
@@ -204,6 +278,9 @@ public class DataEvolutionCompactCoordinatorTest {
                             1000L,
                             10L,
                             schemaId -> null,
+                            null,
+                            100L,
+                            null,
                             null);
             List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
             if (enabled) {
@@ -227,7 +304,18 @@ public class DataEvolutionCompactCoordinatorTest {
                                 : makeBlobEntry("whole.blob", 0L, 10L, 10L));
         DataEvolutionCompactCoordinator.CompactPlanner planner =
                 new DataEvolutionCompactCoordinator.CompactPlanner(
-                        false, false, 200L, 100L, 100L, 1L, 2L, schemaId -> null, null);
+                        false,
+                        false,
+                        200L,
+                        100L,
+                        100L,
+                        1L,
+                        2L,
+                        schemaId -> null,
+                        null,
+                        100L,
+                        null,
+                        null);
 
         assertThat(planner.compactPlan(entries)).isEmpty();
     }
@@ -243,7 +331,18 @@ public class DataEvolutionCompactCoordinatorTest {
                         makeVectorStoreEntry("original.vector.lance", 5L, 5L, 1000L));
         DataEvolutionCompactCoordinator.CompactPlanner planner =
                 new DataEvolutionCompactCoordinator.CompactPlanner(
-                        false, false, 200L, 100L, 100L, 1L, 2L, schemaId -> null, null);
+                        false,
+                        false,
+                        200L,
+                        100L,
+                        100L,
+                        1L,
+                        2L,
+                        schemaId -> null,
+                        null,
+                        100L,
+                        null,
+                        null);
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
@@ -262,8 +361,7 @@ public class DataEvolutionCompactCoordinatorTest {
         entries.add(makeEntry("file3.parquet", 200L, 100L, 100));
 
         // Use small target file size to trigger compaction
-        DataEvolutionCompactCoordinator.CompactPlanner planner =
-                new DataEvolutionCompactCoordinator.CompactPlanner(false, false, 199, 1, 2);
+        DataEvolutionCompactCoordinator.CompactPlanner planner = planner(false, false, 199, 1, 2);
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
@@ -271,7 +369,7 @@ public class DataEvolutionCompactCoordinatorTest {
         assertThat(tasks.get(0).compactBefore())
                 .containsExactly(entries.get(0).file(), entries.get(1).file());
 
-        planner = new DataEvolutionCompactCoordinator.CompactPlanner(false, false, 200, 1, 2);
+        planner = planner(false, false, 200, 1, 2);
         tasks = planner.compactPlan(entries);
         assertThat(tasks).isNotEmpty();
         assertThat(tasks.get(0).compactBefore())
@@ -291,8 +389,7 @@ public class DataEvolutionCompactCoordinatorTest {
 
         // Use large target file size so compaction is triggered by gap, not size
         DataEvolutionCompactCoordinator.CompactPlanner planner =
-                new DataEvolutionCompactCoordinator.CompactPlanner(
-                        false, false, 128 * 1024 * 1024, 4 * 1024 * 1024, 2);
+                planner(false, false, 128 * 1024 * 1024, 4 * 1024 * 1024, 2);
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
@@ -321,8 +418,7 @@ public class DataEvolutionCompactCoordinatorTest {
         entries.add(makeEntry(BinaryRow.singleColumn(1), "file8.parquet", 900L, 100L, 100));
 
         DataEvolutionCompactCoordinator.CompactPlanner planner =
-                new DataEvolutionCompactCoordinator.CompactPlanner(
-                        false, false, 100 * 1024 * 1024, 4 * 1024 * 1024, 2);
+                planner(false, false, 100 * 1024 * 1024, 4 * 1024 * 1024, 2);
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
@@ -1137,6 +1233,30 @@ public class DataEvolutionCompactCoordinatorTest {
                 null);
     }
 
+    private DataEvolutionCompactCoordinator.CompactPlanner planner(
+            boolean compactBlob,
+            boolean compactVector,
+            long targetFileSize,
+            long openFileCost,
+            long compactMinFileNum) {
+        return new DataEvolutionCompactCoordinator.CompactPlanner(
+                compactBlob,
+                compactVector,
+                Long.MAX_VALUE,
+                targetFileSize,
+                targetFileSize,
+                openFileCost,
+                compactMinFileNum,
+                schemaId -> {
+                    throw new IllegalStateException(
+                            "Schema fetcher is required for blob compaction.");
+                },
+                null,
+                targetFileSize,
+                null,
+                null);
+    }
+
     private DataEvolutionCompactCoordinator.CompactPlanner blobPlanner(
             long targetFileSize, long openFileCost, long compactMinFileNum, RowType rowType) {
         return blobPlanner(
@@ -1158,7 +1278,10 @@ public class DataEvolutionCompactCoordinatorTest {
                 openFileCost,
                 compactMinFileNum,
                 schemaFetcher,
-                fieldIds(currentRowType));
+                fieldIds(currentRowType),
+                targetFileSize,
+                null,
+                null);
     }
 
     private DataEvolutionCompactCoordinator.CompactPlanner vectorStorePlanner(
@@ -1182,7 +1305,8 @@ public class DataEvolutionCompactCoordinatorTest {
                 schemaId -> rowType,
                 null,
                 targetFileSize,
-                new HashSet<>(Arrays.asList(1, 2)));
+                new HashSet<>(Arrays.asList(1, 2)),
+                null);
     }
 
     private RowType rowType(DataField... fields) {
@@ -1197,27 +1321,83 @@ public class DataEvolutionCompactCoordinatorTest {
         return fieldIds;
     }
 
-    @Test
-    public void testSerializerBasic() throws IOException {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSerializerBasic(boolean partialRewrite) throws IOException {
         DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
 
         List<DataFileMeta> files =
                 Arrays.asList(
                         createDataFileMeta("file1.parquet", 0L, 100L, 0, 1024),
-                        createDataFileMeta("file2.parquet", 100L, 100L, 0, 1024));
+                        createDataFileMeta(
+                                "file2.parquet", partialRewrite ? 0L : 100L, 100L, 1, 1024));
 
-        DataEvolutionCompactTask task =
+        DataEvolutionNormalCompactTask task =
                 new DataEvolutionNormalCompactTask(
                         BinaryRow.EMPTY_ROW,
                         files,
-                        Arrays.asList(
-                                new Range(0L, 49L), new Range(50L, 149L), new Range(150L, 199L)));
+                        Arrays.asList(new Range(0L, 49L), new Range(50L, 99L)),
+                        partialRewrite);
 
         byte[] bytes = serializer.serialize(task);
         DataEvolutionCompactTask deserialized =
                 serializer.deserialize(serializer.getVersion(), bytes);
 
         assertThat(deserialized).isEqualTo(task);
+        assertThat(deserialized.type()).isEqualTo(DataEvolutionCompactTask.TaskType.NORMAL);
+        assertThat(((DataEvolutionNormalCompactTask) deserialized).partialRewrite())
+                .isEqualTo(partialRewrite);
+    }
+
+    @Test
+    public void testSerializerMixedTaskModes() throws IOException {
+        List<DataFileMeta> normalFiles =
+                Arrays.asList(
+                        createDataFileMeta("first.parquet", 0, 10, 1, 100),
+                        createDataFileMeta("second.parquet", 0, 10, 2, 100));
+        List<DataEvolutionCompactTask> tasks =
+                Arrays.asList(
+                        new DataEvolutionNormalCompactTask(
+                                BinaryRow.EMPTY_ROW,
+                                normalFiles,
+                                Collections.singletonList(new Range(0, 4)),
+                                false),
+                        new DataEvolutionNormalCompactTask(
+                                BinaryRow.EMPTY_ROW, normalFiles, Collections.emptyList(), true),
+                        new DataEvolutionBlobCompactTask(
+                                BinaryRow.EMPTY_ROW,
+                                Arrays.asList(
+                                        createDataFileMeta("first.blob", 0, 10, 1, 100),
+                                        createDataFileMeta("second.blob", 0, 10, 2, 100))),
+                        new DataEvolutionVectorCompactTask(
+                                BinaryRow.EMPTY_ROW,
+                                Arrays.asList(
+                                        createDataFileMeta("first.vector.json", 0, 10, 1, 100),
+                                        createDataFileMeta("second.vector.json", 0, 10, 2, 100))));
+        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
+        DataOutputSerializer output = new DataOutputSerializer(128);
+        serializer.serializeList(tasks, output);
+        List<DataEvolutionCompactTask> restored =
+                serializer.deserializeList(
+                        serializer.getVersion(),
+                        new DataInputDeserializer(output.getCopyOfBuffer()));
+        assertThat(restored).containsExactlyElementsOf(tasks);
+    }
+
+    @Test
+    public void testPartialRewriteIsPartOfNormalTaskIdentity() {
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        createDataFileMeta("base.parquet", 0, 10, 1, 100),
+                        createDataFileMeta("update.parquet", 0, 10, 2, 100));
+        DataEvolutionNormalCompactTask full =
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW, files, Collections.emptyList(), false);
+        DataEvolutionNormalCompactTask partial =
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW, files, Collections.emptyList(), true);
+        assertThat(full).isNotEqualTo(partial);
+        assertThat(partial).isNotEqualTo(full);
     }
 
     @Test
@@ -1282,7 +1462,9 @@ public class DataEvolutionCompactCoordinatorTest {
                         createDataFileMeta("file2.parquet", 100L, 100L, 0, 1024));
 
         BinaryRow partition = BinaryRow.singleColumn(42);
-        DataEvolutionCompactTask task = new DataEvolutionNormalCompactTask(partition, files);
+        DataEvolutionCompactTask task =
+                new DataEvolutionNormalCompactTask(
+                        partition, files, Collections.emptyList(), false);
 
         byte[] bytes = serializer.serialize(task);
         DataEvolutionCompactTask deserialized =
@@ -1299,7 +1481,10 @@ public class DataEvolutionCompactCoordinatorTest {
                         createDataFileMeta("file1.parquet", 0L, 10L, 0, 1024),
                         createDataFileMeta("file2.parquet", 20L, 10L, 0, 1024));
 
-        assertThatThrownBy(() -> new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, files))
+        assertThatThrownBy(
+                        () ->
+                                new DataEvolutionNormalCompactTask(
+                                        BinaryRow.EMPTY_ROW, files, Collections.emptyList(), false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("contiguous row range");
     }
@@ -1309,7 +1494,8 @@ public class DataEvolutionCompactCoordinatorTest {
         List<DataFileMeta> files =
                 Collections.singletonList(createDataFileMeta("file.parquet", 100, 10, 0, 1000));
         DataEvolutionNormalCompactTask task =
-                new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, files);
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW, files, Collections.emptyList(), false);
         assertThat(task.planOutputRanges(400))
                 .containsExactly(new Range(100, 103), new Range(104, 107), new Range(108, 109));
 
@@ -1318,7 +1504,8 @@ public class DataEvolutionCompactCoordinatorTest {
                         BinaryRow.EMPTY_ROW,
                         files,
                         Arrays.asList(
-                                new Range(105, 107), new Range(103, 106), new Range(108, 109)));
+                                new Range(105, 107), new Range(103, 106), new Range(108, 109)),
+                        false);
         // A cut after 103 lies inside overlapping dedicated files and moves to 107.
         // The adjacent dedicated file starting at 108 must not prevent this boundary.
         assertThat(task.planOutputRanges(400))
@@ -1335,7 +1522,9 @@ public class DataEvolutionCompactCoordinatorTest {
                         BinaryRow.EMPTY_ROW,
                         Arrays.asList(
                                 createDataFileMeta("base.parquet", 100, 10, 0, 400),
-                                createDataFileMeta("update.parquet", 100, 10, 1, 600)));
+                                createDataFileMeta("update.parquet", 100, 10, 1, 600)),
+                        Collections.emptyList(),
+                        false);
         assertThat(task.planOutputRanges(500))
                 .containsExactly(new Range(100, 104), new Range(105, 109));
     }
@@ -1353,7 +1542,9 @@ public class DataEvolutionCompactCoordinatorTest {
                                         Long.MAX_VALUE - 10,
                                         10,
                                         1,
-                                        Long.MAX_VALUE)));
+                                        Long.MAX_VALUE)),
+                        Collections.emptyList(),
+                        false);
         assertThat(task.planOutputRanges(Long.MAX_VALUE))
                 .containsExactly(
                         new Range(Long.MAX_VALUE - 10, Long.MAX_VALUE - 6),
@@ -1363,11 +1554,9 @@ public class DataEvolutionCompactCoordinatorTest {
                         BinaryRow.EMPTY_ROW,
                         Collections.singletonList(
                                 createDataFileMeta(
-                                        "last.parquet",
-                                        Long.MAX_VALUE - 9,
-                                        10,
-                                        0,
-                                        Long.MAX_VALUE)));
+                                        "last.parquet", Long.MAX_VALUE - 9, 10, 0, Long.MAX_VALUE)),
+                        Collections.emptyList(),
+                        false);
         assertThat(task.planOutputRanges(Long.MAX_VALUE / 2))
                 .containsExactly(
                         new Range(Long.MAX_VALUE - 9, Long.MAX_VALUE - 5),

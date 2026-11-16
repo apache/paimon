@@ -33,6 +33,7 @@ import java.util.Collections;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -61,6 +62,7 @@ public class DataEvolutionDeletionVectorMaterializeCoordinatorTest {
         DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
                 new DataEvolutionDeletionVectorMaterializeCoordinator(table, null, snapshot);
 
+        assertThat(coordinator.isScanFinished()).isTrue();
         assertThatThrownBy(coordinator::plan).isInstanceOf(EndOfScanException.class);
         verify(table, never()).newSnapshotReader();
         verify(store, never()).newScan();

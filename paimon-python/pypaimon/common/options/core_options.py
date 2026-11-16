@@ -723,7 +723,7 @@ class CoreOptions:
     SCAN_NATIVE_PLAN_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("scan.native-plan.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description("Plan splits via the native (pypaimon_rust) planner "
                           "instead of the Python manifest scanner; the pypaimon "
                           "reader still reads the files.")
@@ -732,16 +732,16 @@ class CoreOptions:
     READ_NATIVE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("read.native.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description("Read data via pypaimon_rust and return PyArrow batches. "
-                          "This also enables native split planning; unsupported "
+                          "This also requests native split planning unless explicitly disabled; unsupported "
                           "routes fall back to pypaimon.")
     )
 
     COMMIT_NATIVE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("commit.native.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description("Commit append and batch overwrite messages via pypaimon_rust. Unsupported "
                           "operations use Python before any native commit is attempted.")
     )
@@ -749,7 +749,7 @@ class CoreOptions:
     WRITE_NATIVE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("write.native.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description("Write Arrow data via pypaimon_rust when the table and "
                           "writer API are supported. Unsupported routes use Python "
                           "before any native data is written.")

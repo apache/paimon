@@ -485,6 +485,116 @@ def cmd_table_list_snapshots(args):
         sys.exit(1)
 
 
+def cmd_table_list_manifests(args):
+    """
+    Execute the 'table list-manifests' command.
+    
+    Lists the base, delta and changelog manifests referenced by a snapshot.
+    
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.manifest.manifest_list_manager import ManifestListManager
+    from pypaimon.utils.row_to_string import cast_row_to_string
+
+    table = _open_manifest_table(args)
+    try:
+        manager = table.snapshot_manager()
+        snapshot = (manager.get_latest_snapshot() if args.snapshot_id is None
+                    else manager.get_snapshot_by_id(args.snapshot_id))
+        if snapshot is None and args.snapshot_id is not None:
+            raise ValueError(f"Snapshot {args.snapshot_id} not found for table '{args.table}'.")
+
+        manifests = []
+        kinds = ('base', 'delta', 'changelog') if args.type == 'all' else (args.type,)
+        if snapshot is not None:
+            list_manager = ManifestListManager(table)
+            for kind in kinds:
+                list_name = getattr(snapshot, kind + '_manifest_list')
+                if not list_name:
+                    continue
+                list_size = getattr(snapshot, kind + '_manifest_list_size')
+                for meta in list_manager.read(list_name, list_size):
+                    manifests.append({
+                        'type': kind,
+                        'manifest_list': list_name,
+                        'file_name': meta.file_name,
+                        'file_size': meta.file_size,
+                        'num_added_files': meta.num_added_files,
+                        'num_deleted_files': meta.num_deleted_files,
+                        'schema_id': meta.schema_id,
+                        'min_partition_stats': cast_row_to_string(meta.partition_stats.min_values),
+                        'max_partition_stats': cast_row_to_string(meta.partition_stats.max_values),
+                        'min_row_id': meta.min_row_id,
+                        'max_row_id': meta.max_row_id,
+                    })
+                    if args.limit is not None and len(manifests) >= args.limit:
+                        break
+                if args.limit is not None and len(manifests) >= args.limit:
+                    break
+
+        snapshot_id = snapshot.id if snapshot is not None else None
+        if args.format == 'json':
+            print(json.dumps({'table': args.table, 'snapshot_id': snapshot_id, 'manifests': manifests},
+                             ensure_ascii=False, indent=2, allow_nan=False))
+        else:
+            print(f"Table: {args.table}\nSnapshot: {_snapshot_display_value(snapshot_id)}")
+            if not manifests:
+                print(f"No manifests found for table '{args.table}'.")
+                return
+            import pandas as pd
+            columns = ['file_name', 'file_size', 'num_added_files', 'num_deleted_files', 'schema_id',
+                       'min_partition_stats', 'max_partition_stats', 'min_row_id', 'max_row_id']
+            for kind in kinds:
+                group = [meta for meta in manifests if meta['type'] == kind]
+                if not group:
+                    continue
+                print('\n{} ({}):'.format(kind, group[0]['manifest_list']))
+                # Convert before Pandas can coerce nullable row IDs to floats.
+                rows = [[_snapshot_display_value(meta[column]) for column in columns] for meta in group]
+                print(pd.DataFrame(rows, columns=columns).to_string(index=False))
+    except Exception as e:
+        print(f"Error: Failed to list manifests for table '{args.table}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_table_manifest(args):
+    """
+    Execute the 'table manifest' command.
+    
+    Displays a manifest's original ADD/DELETE entries and complete metadata.
+    
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+
+    table = _open_manifest_table(args)
+    try:
+        name = args.file
+        if not name or name in ('.', '..') or any(char in name for char in ('/', '\\', '\x00')):
+            raise ValueError('--file must be a file name within the table manifest directory.')
+        manager = ManifestFileManager(table)
+        # Reading a single file preserves DELETE entries and their original order.
+        entries = manager.read(name, drop_stats=False)
+        result = {
+            'table': args.table,
+            'manifest_file': name,
+            'manifest_path': manager.manifest_path + '/' + name,
+            'entries': [_manifest_entry_to_dict(table, entry) for entry in entries],
+        }
+        result = _manifest_json_value(result)
+        if getattr(args, 'format', 'json') == 'json':
+            print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+        else:
+            import pandas as pd
+            rows = [[key, _snapshot_display_value(value)] for key, value in result.items()]
+            print(pd.DataFrame(rows, columns=['Field', 'Value']).to_string(index=False))
+    except Exception as e:
+        print(f"Error: Failed to read manifest '{args.file}' for table '{args.table}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_table_rollback(args):
     """
     Execute the 'table rollback' command.
@@ -1063,6 +1173,85 @@ def _open_snapshot_manager(args):
         sys.exit(1)
 
 
+def _open_manifest_table(args):
+    """Load a file-store table for the manifest inspection commands."""
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    table = _open_schema_table(args)
+    if not isinstance(table, FileStoreTable):
+        print('Error: Manifest inspection is not supported for this table type; expected a FileStoreTable.',
+              file=sys.stderr)
+        sys.exit(1)
+    return table
+
+
+def _manifest_entry_to_dict(table, entry):
+    """Keep all stored file metadata and add the resolved data-file path and format."""
+    from dataclasses import fields
+    from pypaimon.table.system.files_table import _data_file_format, _metadata_file_path
+
+    meta = entry.file
+    file = {field.name: getattr(meta, field.name) for field in fields(meta)}
+    if table.primary_keys and meta.schema_id != table.table_schema.id:
+        schema = table.schema_manager.get_schema(meta.schema_id)
+        key_names = [name for name in schema.primary_keys if name not in schema.partition_keys]
+        # Key types cannot change, but the reader uses the latest key names.
+        # Restore the names recorded by this file's schema after a rename.
+        for name in ('min_key', 'max_key', 'key_stats'):
+            file[name] = _manifest_json_value(file[name], key_names)
+    file['file_path'] = _metadata_file_path(table, entry)
+    file['file_format'] = _data_file_format(meta.file_name)
+    file['file_source'] = {0: 'APPEND', 1: 'COMPACT'}.get(meta.file_source, meta.file_source)
+    return {
+        'kind': {0: 'ADD', 1: 'DELETE'}.get(entry.kind, entry.kind),
+        'partition': entry.partition,
+        'bucket': entry.bucket,
+        'total_buckets': entry.total_buckets,
+        'file': file,
+    }
+
+
+def _manifest_json_value(value, field_names=None):
+    """Render decoded metadata without losing integers, decimal precision or binary values."""
+    import base64
+    import math
+    from datetime import date, time
+    from decimal import Decimal
+    from pypaimon.data.timestamp import Timestamp
+    from pypaimon.manifest.schema.simple_stats import SimpleStats
+    from pypaimon.table.row.internal_row import InternalRow
+
+    if isinstance(value, InternalRow):
+        names = [field.name for field in value.fields] if field_names is None else field_names
+        # Empty stats can retain schema fields even when the stored row has no values.
+        return {name: _manifest_json_value(value.get_field(i)) for i, name in enumerate(names[:len(value)])}
+    if isinstance(value, SimpleStats):
+        counts = value.null_counts
+        names = [field.name for field in value.min_values.fields] if field_names is None else field_names
+        return {
+            'min_values': _manifest_json_value(value.min_values, names),
+            'max_values': _manifest_json_value(value.max_values, names),
+            'null_counts': None if counts is None else {
+                name: counts[i] if i < len(counts) else None for i, name in enumerate(names)
+            },
+        }
+    if isinstance(value, dict):
+        return {key: _manifest_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_manifest_json_value(item) for item in value]
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {'encoding': 'base64', 'data': base64.b64encode(value).decode('ascii')}
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, Timestamp):
+        return value.to_local_date_time().isoformat()
+    if isinstance(value, (date, time)):
+        return value.isoformat()
+    if isinstance(value, float) and not math.isfinite(value):
+        return 'NaN' if math.isnan(value) else ('Infinity' if value > 0 else '-Infinity')
+    return value
+
+
 def add_table_subcommands(table_parser):
     """
     Add table subcommands to the parser.
@@ -1211,6 +1400,41 @@ def add_table_subcommands(table_parser):
         help='Output format: table (default) or json'
     )
     list_snapshots_parser.set_defaults(func=cmd_table_list_snapshots)
+
+    # table list-manifests command
+    list_manifests_parser = table_subparsers.add_parser(
+        'list-manifests', help='List the manifests referenced by a snapshot'
+    )
+    list_manifests_parser.add_argument('table', help='Table identifier in format: database.table')
+    list_manifests_parser.add_argument(
+        '--snapshot-id', type=_positive_int, default=None,
+        help='Snapshot ID to inspect (default: the latest snapshot)'
+    )
+    list_manifests_parser.add_argument(
+        '--type', choices=['all', 'base', 'delta', 'changelog'], default='all',
+        help='Manifest list type (default: all)'
+    )
+    list_manifests_parser.add_argument(
+        '--limit', '-l', type=_positive_int, default=None,
+        help='Maximum number of manifests across all selected lists (default: all)'
+    )
+    list_manifests_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='table',
+        help='Output format: table (default) or json'
+    )
+    list_manifests_parser.set_defaults(func=cmd_table_list_manifests)
+
+    # table manifest command
+    manifest_parser = table_subparsers.add_parser(
+        'manifest', help='Inspect a manifest and its original ADD/DELETE entries'
+    )
+    manifest_parser.add_argument('table', help='Table identifier in format: database.table')
+    manifest_parser.add_argument('--file', required=True, help='Manifest file name within the table manifest directory')
+    manifest_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='json',
+        help='Output format: json (default) or table'
+    )
+    manifest_parser.set_defaults(func=cmd_table_manifest)
 
     # table rollback command
     rollback_parser = table_subparsers.add_parser(

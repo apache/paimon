@@ -19,8 +19,10 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogSnapshotCommit;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.operation.Lock.AcquireMode;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.responses.CommitLockResponse;
@@ -723,11 +725,46 @@ class RESTCatalogLockTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void optimisticScopeIsInheritedAndClearedBeforeRequiredAcquisition(boolean acquireDirectly)
+            throws Exception {
+        Lock publication =
+                new CatalogSnapshotCommit(mock(Catalog.class), identifier, "table-id", lock);
+        Callable<String> operation =
+                () ->
+                        publication.runWithLock(
+                                () -> {
+                                    publication.ensureValid();
+                                    return "published";
+                                });
+        if (acquireDirectly) {
+            try (AutoCloseable ignored = publication.acquire(AcquireMode.OPTIMISTIC_ALLOWED)) {
+                assertThat(operation.call()).isEqualTo("published");
+            }
+        } else {
+            assertThat(publication.runWithLock(operation, AcquireMode.OPTIMISTIC_ALLOWED))
+                    .isEqualTo("published");
+        }
+        verifyNoInteractions(api, renewer, workers);
+        assertThatThrownBy(publication::ensureValid).hasMessageContaining("No commit lease");
+
+        grant("morax-job", 60000);
+        assertThat(publication.runWithLock(operation)).isEqualTo("published");
+        verify(api).acquireCommitLock(identifier, "table-id", "morax-job");
+        verify(future).cancel(false);
+    }
+
     @Test
     void nestedPublicationReusesLeaseAndRechecksValidity() throws Exception {
         grant("morax-job", 60000);
         Lock publication = Lock.reentrant(lock);
-        assertThat(publication.runWithLock(() -> publication.runWithLock(() -> "published")))
+        assertThat(
+                        publication.runWithLock(
+                                () ->
+                                        publication.runWithLock(
+                                                () -> "published", AcquireMode.OPTIMISTIC_ALLOWED),
+                                AcquireMode.REQUIRED))
                 .isEqualTo("published");
         verify(api).acquireCommitLock(identifier, "table-id", "morax-job");
         verify(future).cancel(false);
@@ -739,7 +776,8 @@ class RESTCatalogLockTest {
                                             publication.runWithLock(
                                                     () -> {
                                                         throw new AssertionError();
-                                                    }))
+                                                    },
+                                                    AcquireMode.OPTIMISTIC_ALLOWED))
                             .hasMessageContaining("no longer usable");
                     return null;
                 });

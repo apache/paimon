@@ -148,6 +148,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     protected RowType readRowType;
     @Nullable private List<Predicate> filters;
     @Nullable private ReadBatchSizer readBatchSizer;
+    private boolean keepBlobPlaceholders;
 
     public DataEvolutionSplitRead(
             FileIO fileIO,
@@ -174,6 +175,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public SplitRead<InternalRow> forceKeepDelete() {
+        return this;
+    }
+
+    /** Keeps unresolved placeholders when compacting only a prefix of blob versions. */
+    public DataEvolutionSplitRead withKeepBlobPlaceholders() {
+        this.keepBlobPlaceholders = true;
         return this;
     }
 
@@ -744,7 +751,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     blobBunch.logicalRange(),
                     rowRanges,
                     readRowType,
-                    blobIndex);
+                    blobIndex,
+                    keepBlobPlaceholders);
         } else {
             throw new UnsupportedOperationException("Unsupported bunch type: " + bunch);
         }

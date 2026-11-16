@@ -70,6 +70,10 @@ Nested `ROW` fields use dot notation, for example
 key. Shared-shredding MAP files prune unselected keys; other layouts read the
 full MAP and extract the key.
 
+With Native runtime 0.5.0, ORC shared-shredding MAP files use the Python reader.
+This also applies to retained ORC files after the table's write format or MAP
+storage layout changes. Parquet shared-shredding MAP reads support Native execution.
+
 Limitations:
 
 - Data-evolution tables support MAP keys, but not nested ROW fields.
