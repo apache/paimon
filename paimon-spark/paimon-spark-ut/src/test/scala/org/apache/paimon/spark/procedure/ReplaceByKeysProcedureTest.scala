@@ -18,9 +18,15 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.options.ExpireConfig
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.commands.ReplaceByKeysSource
 
+import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.expressions.{CurrentDate, CurrentTimestamp}
+
+import java.time.Duration
 
 class ReplaceByKeysProcedureTest extends PaimonSparkTestBase {
 
@@ -212,6 +218,109 @@ class ReplaceByKeysProcedureTest extends PaimonSparkTestBase {
           Row(7, null, "old-null", null)
         )
       )
+    }
+  }
+
+  test("replacement source keeps fallback rows when the current branch has no snapshot") {
+    withTable("target", "source") {
+      sql("""CREATE TABLE target (tenant INT, entity STRING, value STRING)
+            |TBLPROPERTIES ('data-evolution.enabled'='true','row-tracking.enabled'='true',
+            |'deletion-vectors.enabled'='true','write-only'='true')""".stripMargin)
+      sql("INSERT INTO target VALUES (7,'a','old')")
+      sql("CREATE TABLE source (tenant INT, entity STRING, value STRING) PARTITIONED BY (tenant)")
+      sql("CALL sys.create_branch('test.source', 'backup')")
+      sql("INSERT INTO `source$branch_backup` VALUES (7,'a','from-backup')")
+      assert(loadTable("source").snapshotManager().latestSnapshot() == null)
+      sql("ALTER TABLE source SET TBLPROPERTIES ('scan.fallback-branch'='backup')")
+      checkAnswer(sql("SELECT * FROM source"), Seq(Row(7, "a", "from-backup")))
+      val target = loadTable("target")
+      val bound = ReplaceByKeysSource.bind(
+        spark,
+        target,
+        "SELECT l.* FROM source l JOIN source r ON l.tenant=r.tenant AND l.entity=r.entity",
+        target.snapshotManager().latestSnapshot())
+      sql("INSERT INTO `source$branch_backup` VALUES (9,'later','after-binding')")
+      checkAnswer(createDataset(spark, bound), Seq(Row(7, "a", "from-backup")))
+      checkAnswer(createDataset(spark, bound), Seq(Row(7, "a", "from-backup")))
+      sql("""CALL sys.replace_by_keys(table => 'target',
+            |source_query => 'SELECT * FROM source WHERE tenant=7',
+            |key_columns => ARRAY('tenant','entity'))""".stripMargin)
+      checkAnswer(sql("SELECT * FROM target"), Seq(Row(7, "a", "from-backup")))
+    }
+  }
+
+  test("replacement source retains a tag after the ordinary snapshot has expired") {
+    withTable("target", "source") {
+      createTarget()
+      val source = loadTable("source")
+      val taggedId = source.snapshotManager().latestSnapshot().id()
+      source.createTag("keep", taggedId)
+      val expected = sql("SELECT * FROM source").collect().toSeq
+      sql("INSERT INTO source VALUES (9,'later','not-in-tag')")
+      source
+        .newExpireSnapshots()
+        .config(
+          ExpireConfig
+            .builder()
+            .snapshotMaxDeletes(Integer.MAX_VALUE)
+            .snapshotRetainMin(1)
+            .snapshotRetainMax(1)
+            .snapshotTimeRetain(Duration.ZERO)
+            .build())
+        .expire()
+      assert(!source.snapshotManager().snapshotExists(taggedId))
+      try {
+        spark.read
+          .option("scan.tag-name", "keep")
+          .table("source")
+          .createOrReplaceTempView("replacement_retained_tag")
+        checkAnswer(sql("SELECT * FROM replacement_retained_tag"), expected)
+        sql("""CALL sys.replace_by_keys(table => 'target',
+              |source_query => 'SELECT * FROM replacement_retained_tag',
+              |key_columns => ARRAY('tenant','entity'))""".stripMargin)
+      } finally spark.catalog.dropTempView("replacement_retained_tag")
+      checkAnswer(
+        sql("SELECT * FROM target"),
+        Seq(
+          Row(7, "a", "new-1"),
+          Row(7, "a", "new-2"),
+          Row(7, "b", "keep"),
+          Row(7, "c", null),
+          Row(7, null, "old-null"),
+          Row(7, null, "new-null"),
+          Row(8, "a", "excluded"))
+      )
+    }
+  }
+
+  test("replacement source freezes one query time inside nested subqueries") {
+    withTable("target", "source") {
+      createTarget()
+      val target = loadTable("target")
+      val bound = ReplaceByKeysSource.bind(
+        spark,
+        target,
+        "SELECT current_timestamp() AS outer_time, " +
+          "(SELECT current_timestamp()) AS inner_time, " +
+          "(SELECT (SELECT current_timestamp())) AS nested_time, " +
+          "(SELECT current_date()) AS inner_date",
+        target.snapshotManager().latestSnapshot()
+      )
+      // Check the bound plan, not a coincidentally fast pair of clock evaluations at execution.
+      bound.transformUpWithSubqueries {
+        case node =>
+          node.expressions.foreach(_.foreach {
+            case _: CurrentTimestamp | _: CurrentDate => fail("Unfrozen subquery clock")
+            case _ =>
+          })
+          node
+      }
+      val first = createDataset(spark, bound).collect().toSeq
+      val second = createDataset(spark, bound).collect().toSeq
+      assert(first == second && first.size == 1)
+      assert(first.head.getTimestamp(0) == first.head.getTimestamp(1))
+      assert(first.head.getTimestamp(0) == first.head.getTimestamp(2))
+      assert(!first.head.isNullAt(3))
     }
   }
 }

@@ -21,7 +21,11 @@ package org.apache.paimon.operation.commit;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.Bitmap64DeletionVector;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.errors.ErrorMessages;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -34,6 +38,7 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
@@ -367,7 +372,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         }
 
         return checkForRowIdFromSnapshot(
-                latestSnapshot, deltaEntries, deltaIndexEntries, rowIdConflictChecker);
+                latestSnapshot, baseEntries, deltaEntries, deltaIndexEntries, rowIdConflictChecker);
     }
 
     private Optional<RuntimeException> checkRowIdRangeConflicts(
@@ -465,12 +470,21 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
 
     private Optional<RuntimeException> checkForRowIdFromSnapshot(
             Snapshot latestSnapshot,
+            List<SimpleFileEntry> baseEntries,
             List<SimpleFileEntry> deltaEntries,
             List<IndexManifestEntry> deltaIndexEntries,
             @Nullable RowIdConflictChecker conflictChecker) {
-        if (rowIdCheckFromSnapshot == null
-                || conflictChecker == null
-                || conflictChecker.isEmpty()) {
+        if (rowIdCheckFromSnapshot == null || rowIdCheckFromSnapshot == latestSnapshot.id()) {
+            return Optional.empty();
+        }
+
+        // A deletion vector has no data-file increment, but deletes every column of its rows.
+        RowRangeIndex deletedRowRanges =
+                rowIdConflictCheckStrategy() == DataEvolutionDmlRowIdConflictCheck.INSTANCE
+                        ? deletionVectorRowRanges(baseEntries, deltaIndexEntries)
+                        : RowRangeIndex.create(Collections.emptyList());
+        if ((conflictChecker == null || conflictChecker.isEmpty())
+                && deletedRowRanges.ranges().isEmpty()) {
             return Optional.empty();
         }
 
@@ -494,7 +508,10 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                 DataFileMeta file = entry.file();
                 if (file.firstRowId() != null
                         && file.nonNullRowIdRange().from < checkNextRowId
-                        && conflictChecker.conflictsWith(file)) {
+                        && ((conflictChecker != null && conflictChecker.conflictsWith(file))
+                                || deletedRowRanges.intersects(
+                                        file.nonNullRowIdRange().from,
+                                        file.nonNullRowIdRange().to))) {
                     LOG.debug(
                             "Data evolution row id conflict detected for table {}, commit user {}, "
                                     + "snapshot {}, file {}.",
@@ -509,6 +526,83 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             }
         }
         return Optional.empty();
+    }
+
+    private RowRangeIndex deletionVectorRowRanges(
+            List<SimpleFileEntry> baseEntries, List<IndexManifestEntry> deltaIndexEntries) {
+        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> previousFiles = new HashMap<>();
+        for (IndexManifestEntry entry : deltaIndexEntries) {
+            if (entry.kind() == FileKind.DELETE && entry.indexFile().dvRanges() != null) {
+                Map<String, DeletionFile> files =
+                        previousFiles.computeIfAbsent(
+                                Pair.of(entry.partition(), entry.bucket()), key -> new HashMap<>());
+                entry.indexFile()
+                        .dvRanges()
+                        .forEach((name, meta) -> files.put(name, deletionFile(entry, meta)));
+            }
+        }
+        Map<Pair<BinaryRow, Integer>, Set<String>> deletedFiles = new HashMap<>();
+        for (IndexManifestEntry entry : deltaIndexEntries) {
+            if (entry.kind() == FileKind.ADD && entry.indexFile().dvRanges() != null) {
+                Pair<BinaryRow, Integer> key = Pair.of(entry.partition(), entry.bucket());
+                Map<String, DeletionFile> previous =
+                        previousFiles.getOrDefault(key, Collections.emptyMap());
+                for (DeletionVectorMeta meta : entry.indexFile().dvRanges().values()) {
+                    DeletionFile before = previous.get(meta.dataFileName());
+                    if (before == null
+                            || !unchangedDeletionVector(entry, before, deletionFile(entry, meta))) {
+                        deletedFiles
+                                .computeIfAbsent(key, ignored -> new HashSet<>())
+                                .add(meta.dataFileName());
+                    }
+                }
+            }
+        }
+        List<Range> ranges = new ArrayList<>();
+        for (SimpleFileEntry entry : baseEntries) {
+            Set<String> files = deletedFiles.get(Pair.of(entry.partition(), entry.bucket()));
+            if (entry.firstRowId() != null && files != null && files.contains(entry.fileName())) {
+                ranges.add(entry.nonNullRowIdRange());
+            }
+        }
+        return RowRangeIndex.create(ranges);
+    }
+
+    private DeletionFile deletionFile(IndexManifestEntry entry, DeletionVectorMeta meta) {
+        return new DeletionFile(
+                indexFileHandler.filePath(entry).toString(),
+                meta.offset(),
+                meta.length(),
+                meta.cardinality());
+    }
+
+    private boolean unchangedDeletionVector(
+            IndexManifestEntry entry, DeletionFile before, DeletionFile after) {
+        if (before.equals(after)) {
+            return true;
+        }
+        if (before.cardinality() != null
+                && after.cardinality() != null
+                && !before.cardinality().equals(after.cardinality())) {
+            return false;
+        }
+        // Repacking an index can move untouched vectors. Compare one pair at a time, including
+        // legacy metadata without cardinalities, rather than treating relocation as deletion.
+        DeletionVector left =
+                indexFileHandler
+                        .dvIndex(entry.partition(), entry.bucket())
+                        .readDeletionVector(before);
+        DeletionVector right =
+                indexFileHandler
+                        .dvIndex(entry.partition(), entry.bucket())
+                        .readDeletionVector(after);
+        if (left instanceof BitmapDeletionVector && right instanceof Bitmap64DeletionVector) {
+            left = Bitmap64DeletionVector.fromBitmapDeletionVector((BitmapDeletionVector) left);
+        } else if (right instanceof BitmapDeletionVector
+                && left instanceof Bitmap64DeletionVector) {
+            right = Bitmap64DeletionVector.fromBitmapDeletionVector((BitmapDeletionVector) right);
+        }
+        return left.equals(right);
     }
 
     boolean shouldCheckHistoricalRowIdEntry(FileKind kind) {

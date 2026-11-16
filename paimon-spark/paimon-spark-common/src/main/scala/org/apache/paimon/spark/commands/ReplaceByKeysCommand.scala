@@ -19,29 +19,22 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.{CoreOptions, Snapshot}
-import org.apache.paimon.spark.{PaimonScanBuilder, SparkTable}
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonOutputResolver
-import org.apache.paimon.table.{FileStoreTable, KnownSplitsTable}
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
-import org.apache.paimon.table.source.{DataSplit, Split}
-import org.apache.paimon.table.source.snapshot.TimeTravelUtil
+import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Attribute, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
-import org.apache.spark.sql.catalyst.optimizer.ComputeCurrentTime
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Command, CTERelationRef, Deduplicate, GlobalLimit, LocalLimit, LocalRelation, LogicalPlan, OneRowRelation, ParsedStatement, Range, Sample, Tail, Window}
-import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, expr}
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.{Collections, TreeMap}
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable
 
 /** Prepare a key-based delete and append, publishing both in one data commit. */
 case class ReplaceByKeysCommand(
@@ -87,7 +80,7 @@ case class ReplaceByKeysCommand(
         fields.get(key).name
     }
     require(keys.distinct.size == keyColumns.size, "Duplicate key columns")
-    val source = stableSource(spark, snapshot)
+    val source = ReplaceByKeysSource.bind(spark, table, sourceQuery, snapshot)
     val sourceFields = byName(source.output)
     require(
       sourceFields.keySet() == fields.keySet(),
@@ -127,13 +120,11 @@ case class ReplaceByKeysCommand(
   }
 
   // Release the target scan and full file inventory before starting the append job.
-  private def prepareDeletion(
+  private[spark] def prepareDeletion(
       spark: SparkSession,
       snapshot: Snapshot,
       sourceKeys: DataFrame,
       keys: Seq[String]): Seq[CommitMessage] = {
-    val reader = table.newSnapshotReader()
-    if (snapshot != null) reader.withSnapshot(snapshot)
     val predicate = targetFilter
       .map {
         text =>
@@ -151,6 +142,9 @@ case class ReplaceByKeysCommand(
           resolved
       }
       .getOrElse(TrueLiteral)
+    // An empty baseline must not start reading a concurrent writer's first snapshot.
+    if (snapshot == null) return Seq.empty
+    val reader = table.newSnapshotReader().withSnapshot(snapshot)
     convertConditionToPaimonPredicate(
       predicate,
       relation.output,
@@ -174,146 +168,10 @@ case class ReplaceByKeysCommand(
     } else Seq.empty
   }
 
-  private def stableSource(spark: SparkSession, targetSnapshot: Snapshot): LogicalPlan = {
-    require(sourceQuery != null && sourceQuery.trim.nonEmpty, "source_query must not be empty")
-    val parsed = spark.sessionState.sqlParser.parsePlan(sourceQuery)
-    parsed.foreach {
-      case _: Command | _: ParsedStatement =>
-        throw new IllegalArgumentException("source_query must be a query, not a command")
-      case _ =>
-    }
-    // Dataset construction eagerly executes commands. Analyze without creating one first.
-    val analyzed = spark.sessionState.executePlan(parsed).analyzed
-    analyzed.foreach {
-      case _: Command =>
-        throw new IllegalArgumentException("source_query must be a query, not a command")
-      case _ =>
-    }
-    require(!analyzed.isStreaming, "Streaming source queries are not supported")
-    val selectors = Seq(
-      CoreOptions.SCAN_SNAPSHOT_ID.key(),
-      CoreOptions.SCAN_TAG_NAME.key(),
-      CoreOptions.SCAN_WATERMARK.key(),
-      CoreOptions.SCAN_TIMESTAMP.key(),
-      CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
-      CoreOptions.SCAN_VERSION.key()
-    )
-    val snapshots = mutable.Map
-      .empty[(String, String, Seq[Option[String]], CoreOptions.StartupMode), Option[Snapshot]]
-    snapshots.put(
-      (
-        table.location().toString,
-        table.coreOptions().branch(),
-        selectors.map(k => Option(table.options().get(k))),
-        CoreOptions.StartupMode.LATEST_FULL),
-      Option(targetSnapshot)
-    )
-    // Query-time values must not be evaluated afresh by the two preparation jobs.
-    ComputeCurrentTime(analyzed).transformUpWithSubqueries {
-      case r: DataSourceV2Relation =>
-        require(r.expressions.forall(_.deterministic), "Source query must be deterministic")
-        r.table match {
-          case s @ SparkTable(fileTable: FileStoreTable) =>
-            val effective = fileTable.copyWithoutTimeTravel(r.options.asCaseSensitiveMap())
-            val mode = effective.coreOptions().startupMode()
-            require(
-              Set(
-                CoreOptions.StartupMode.LATEST_FULL,
-                CoreOptions.StartupMode.LATEST,
-                CoreOptions.StartupMode.FROM_TIMESTAMP,
-                CoreOptions.StartupMode.FROM_SNAPSHOT,
-                CoreOptions.StartupMode.FROM_SNAPSHOT_FULL
-              ).contains(mode),
-              "Source tables must use a full snapshot scan, not an incremental or file-time scan"
-            )
-            require(
-              effective.coreOptions().toConfiguration.get(CoreOptions.BATCH_SCAN_MODE) ==
-                CoreOptions.BatchScanMode.NONE,
-              "Source monitoring scans are not supported"
-            )
-            val normalizedMode = mode match {
-              case CoreOptions.StartupMode.LATEST => CoreOptions.StartupMode.LATEST_FULL
-              case CoreOptions.StartupMode.FROM_SNAPSHOT_FULL =>
-                CoreOptions.StartupMode.FROM_SNAPSHOT
-              case other => other
-            }
-            val identity = (
-              effective.location().toString,
-              effective.coreOptions().branch(),
-              selectors.map(k => Option(effective.options().get(k))),
-              normalizedMode)
-            val historicalKeys =
-              if (normalizedMode == CoreOptions.StartupMode.FROM_TIMESTAMP)
-                Seq(CoreOptions.SCAN_TIMESTAMP.key(), CoreOptions.SCAN_TIMESTAMP_MILLIS.key())
-              else
-                selectors.filterNot(
-                  k =>
-                    k == CoreOptions.SCAN_TIMESTAMP.key() ||
-                      k == CoreOptions.SCAN_TIMESTAMP_MILLIS.key())
-            require(
-              normalizedMode == CoreOptions.StartupMode.LATEST_FULL ||
-                historicalKeys.exists(k => effective.options().get(k) != null),
-              "Historical source mode requires an explicit matching snapshot selector"
-            )
-            val selected = snapshots.getOrElseUpdate(
-              identity,
-              if (normalizedMode == CoreOptions.StartupMode.LATEST_FULL)
-                Option(effective.snapshotManager().latestSnapshot())
-              else {
-                val historical = TimeTravelUtil.tryTravelToSnapshot(effective)
-                require(historical.isPresent, "Could not bind the requested source snapshot")
-                Some(historical.get())
-              }
-            )
-            val scanTable = selected match {
-              case Some(snapshot) =>
-                val options = new java.util.HashMap[String, String]()
-                selectors.foreach(k => options.put(k, null))
-                options.put(
-                  CoreOptions.SCAN_MODE.key(),
-                  CoreOptions.StartupMode.FROM_SNAPSHOT.toString)
-                options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshot.id().toString)
-                new ReplaceByKeysCommand.PinnedSourceTable(effective.copyWithoutTimeTravel(options))
-              case None => s.copy(table = KnownSplitsTable.create(effective, Array.empty[Split]))
-            }
-            SparkShimLoader.shim.copyDataSourceV2Relation(r, scanTable, r.output)
-          case _ =>
-            throw new IllegalArgumentException("Source tables must support Paimon snapshots")
-        }
-      case p =>
-        require(p.expressions.forall(_.deterministic), "Source query must be deterministic")
-        val unstable = p match {
-          case _: Aggregate | _: Deduplicate | _: GlobalLimit | _: LocalLimit | _: Sample |
-              _: Tail | _: Window =>
-            true
-          // OFFSET is unavailable in older Spark compilation targets.
-          case _ => p.nodeName == "Offset"
-        }
-        require(
-          !unstable,
-          "Source query must be repeatable across projections; materialize aggregate, window, " +
-            "limit, offset, deduplication or sampled batches into a Paimon table first"
-        )
-        require(
-          p.children.nonEmpty || p.isInstanceOf[LocalRelation] || p.isInstanceOf[CTERelationRef] ||
-            p.isInstanceOf[OneRowRelation] || p.isInstanceOf[Range],
-          "Source leaves must be Paimon tables or immutable SQL values"
-        )
-        p
-    }
-  }
-
   private def quoted(name: String): String = "`" + name.replace("`", "``") + "`"
 }
 
 object ReplaceByKeysCommand {
-
-  // Keep the analyzed schema while pinning data. A normal scan builder copies the table again,
-  // which both reapplies relation options and travels to the snapshot's historical schema.
-  private class PinnedSourceTable(pinned: FileStoreTable) extends SparkTable(pinned) {
-    override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder =
-      new PaimonScanBuilder(pinned)
-  }
 
   /** Java procedure bridge; no table configuration is persisted. */
   def execute(

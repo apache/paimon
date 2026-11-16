@@ -97,7 +97,10 @@ original keys, before any INSERT casts, to preserve `DELETE ... IN` semantics.
 Deterministic queries over Paimon
 snapshot tables and immutable SQL values are supported. Each Paimon source is
 bound to a snapshot for both preparation jobs, without materializing another
-copy of the whole source. Streaming, commands, nondeterministic expressions and
+copy of the whole source. Fallback sources bind each branch separately, and
+tagged sources retain the selected snapshot even after its ordinary snapshot
+file expires. Query-time expressions share one value across both jobs,
+including inside subqueries. Streaming, commands, nondeterministic expressions and
 sources without a stable snapshot binding are rejected. `target_filter` must
 be a deterministic predicate over target columns without subqueries.
 Incremental, latest-delta, monitoring, compacted-only and file-creation-time
@@ -117,7 +120,9 @@ can increase peak metadata memory. Inline write compaction is disabled for this
 operation; table maintenance can publish separate snapshots after the atomic
 data commit.
 
-Existing conflict checks apply. A conflict requires replanning the operation;
+Existing conflict checks apply, including concurrent partial-column updates
+overlapping the old file row ranges referenced by deletion vectors.
+A conflict requires replanning the operation;
 the procedure does not automatically retry the logical replacement. Atomic
 visibility does not enforce business-key uniqueness against concurrent appends
 or provide a general multi-statement, cross-table transaction. After a publication
