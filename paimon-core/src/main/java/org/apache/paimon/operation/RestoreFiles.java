@@ -24,6 +24,7 @@ import org.apache.paimon.io.DataFileMeta;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.List;
 
 /** Restored files with snapshot and total buckets. */
@@ -35,6 +36,7 @@ public class RestoreFiles {
     private final @Nullable IndexFileMeta dynamicBucketIndex;
     private final @Nullable List<IndexFileMeta> deleteVectorsIndex;
     private final @Nullable List<IndexFileMeta> sourceIndexPayloads;
+    private final List<IndexFileMeta> deleteOrderingGuards;
 
     public RestoreFiles(
             @Nullable Snapshot snapshot,
@@ -43,12 +45,31 @@ public class RestoreFiles {
             @Nullable IndexFileMeta dynamicBucketIndex,
             @Nullable List<IndexFileMeta> deleteVectorsIndex,
             @Nullable List<IndexFileMeta> sourceIndexPayloads) {
+        this(
+                snapshot,
+                totalBuckets,
+                dataFiles,
+                dynamicBucketIndex,
+                deleteVectorsIndex,
+                sourceIndexPayloads,
+                Collections.emptyList());
+    }
+
+    public RestoreFiles(
+            @Nullable Snapshot snapshot,
+            @Nullable Integer totalBuckets,
+            @Nullable List<DataFileMeta> dataFiles,
+            @Nullable IndexFileMeta dynamicBucketIndex,
+            @Nullable List<IndexFileMeta> deleteVectorsIndex,
+            @Nullable List<IndexFileMeta> sourceIndexPayloads,
+            List<IndexFileMeta> deleteOrderingGuards) {
         this.snapshot = snapshot;
         this.totalBuckets = totalBuckets;
         this.dataFiles = dataFiles;
         this.dynamicBucketIndex = dynamicBucketIndex;
         this.deleteVectorsIndex = deleteVectorsIndex;
         this.sourceIndexPayloads = sourceIndexPayloads;
+        this.deleteOrderingGuards = deleteOrderingGuards;
     }
 
     @Nullable
@@ -79,6 +100,10 @@ public class RestoreFiles {
     @Nullable
     public List<IndexFileMeta> sourceIndexPayloads() {
         return sourceIndexPayloads;
+    }
+
+    public List<IndexFileMeta> deleteOrderingGuards() {
+        return deleteOrderingGuards;
     }
 
     public static RestoreFiles empty() {

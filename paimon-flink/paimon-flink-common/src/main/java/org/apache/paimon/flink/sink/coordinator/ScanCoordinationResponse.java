@@ -30,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /** Write response to initial data files for partition and bucket. */
@@ -43,6 +44,7 @@ public class ScanCoordinationResponse implements CoordinationResponse {
     @Nullable private final byte[] dynamicBucketIndex;
     @Nullable private final List<byte[]> deleteVectorsIndex;
     @Nullable private final List<byte[]> vectorIndexPayloads;
+    @Nullable private final List<byte[]> deleteOrderingGuards;
 
     public ScanCoordinationResponse(
             @Nullable Snapshot snapshot,
@@ -51,6 +53,25 @@ public class ScanCoordinationResponse implements CoordinationResponse {
             @Nullable IndexFileMeta dynamicBucketIndex,
             @Nullable List<IndexFileMeta> deleteVectorsIndex,
             @Nullable List<IndexFileMeta> vectorIndexPayloads)
+            throws IOException {
+        this(
+                snapshot,
+                totalBuckets,
+                dataFiles,
+                dynamicBucketIndex,
+                deleteVectorsIndex,
+                vectorIndexPayloads,
+                Collections.emptyList());
+    }
+
+    public ScanCoordinationResponse(
+            @Nullable Snapshot snapshot,
+            @Nullable Integer totalBuckets,
+            @Nullable List<DataFileMeta> dataFiles,
+            @Nullable IndexFileMeta dynamicBucketIndex,
+            @Nullable List<IndexFileMeta> deleteVectorsIndex,
+            @Nullable List<IndexFileMeta> vectorIndexPayloads,
+            List<IndexFileMeta> deleteOrderingGuards)
             throws IOException {
         this.snapshot = snapshot;
         this.totalBuckets = totalBuckets;
@@ -88,6 +109,11 @@ public class ScanCoordinationResponse implements CoordinationResponse {
             }
         } else {
             this.vectorIndexPayloads = null;
+        }
+
+        this.deleteOrderingGuards = new ArrayList<>(deleteOrderingGuards.size());
+        for (IndexFileMeta indexFile : deleteOrderingGuards) {
+            this.deleteOrderingGuards.add(indexSerializer.serializeToBytes(indexFile));
         }
     }
 
@@ -143,6 +169,19 @@ public class ScanCoordinationResponse implements CoordinationResponse {
         IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
         List<IndexFileMeta> metas = new ArrayList<>(vectorIndexPayloads.size());
         for (byte[] file : vectorIndexPayloads) {
+            metas.add(serializer.deserializeFromBytes(file));
+        }
+        return metas;
+    }
+
+    public List<IndexFileMeta> extractDeleteOrderingGuards() throws IOException {
+        // Responses serialized before this field was added have no guard references.
+        if (deleteOrderingGuards == null) {
+            return Collections.emptyList();
+        }
+        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
+        List<IndexFileMeta> metas = new ArrayList<>(deleteOrderingGuards.size());
+        for (byte[] file : deleteOrderingGuards) {
             metas.add(serializer.deserializeFromBytes(file));
         }
         return metas;
