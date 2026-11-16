@@ -28,6 +28,7 @@ import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMateria
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -86,6 +87,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassignerTest.reassignerWithBeforeCommit;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -1185,6 +1187,141 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"json", "parquet"})
+    public void testMaterializeRangeCoveredBySpanningVectorFile(String format) throws Exception {
+        FileStoreTable table = createVectorTable(format);
+        writeVectorRows(table, 0, 3);
+        writeVectorRows(table, 3, 6);
+        writeVectorRows(table, 6, 9);
+        commitDeletionVectors(table, Collections.singletonList(new DvSpec(new Range(0, 2), 2)));
+        // Seed a spanning dedicated file through the same low-level write as the blob test.
+        writeVectorRange(table, 1, vector(101), vector(102), vector(103), null);
+
+        List<DataFileMeta> before = currentDataFiles(table, BinaryRow.EMPTY_ROW);
+        assertThat(normalFileRowRanges(before))
+                .containsExactly(new Range(0, 2), new Range(3, 5), new Range(6, 8));
+        assertThat(vectorFileRowRanges(before))
+                .containsExactly(
+                        new Range(0, 2), new Range(1, 4), new Range(3, 5), new Range(6, 8));
+        List<DataFileMeta> untouched =
+                before.stream()
+                        .filter(file -> file.nonNullFirstRowId() == 6)
+                        .collect(Collectors.toList());
+        assertThat(untouched).hasSize(2);
+        assertThat(liveDeletionVectorDataFileNames(table)).hasSize(1);
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMaterializeDeletionVectors(table, snapshot, 1);
+        // The index arrives after preparation, so the commit must invalidate it.
+        commitGlobalIndex(
+                table, BinaryRow.EMPTY_ROW, globalIndexFile("late-index", new Range(0, 8)));
+        assertThat(liveGlobalIndexFileNames(table)).containsExactly("late-index");
+        commitMaterializeDeletionVectors(table, snapshot, messages, "test-materialize-vector");
+
+        List<DataFileMeta> after = currentDataFiles(table, BinaryRow.EMPTY_ROW);
+        assertThat(normalFileRowRanges(after)).containsExactly(new Range(6, 8), new Range(9, 13));
+        assertThat(vectorFileRowRanges(after)).containsExactly(new Range(6, 8), new Range(9, 13));
+        assertThat(fileNames(after)).containsAll(fileNames(untouched));
+        List<String> replacedFiles =
+                before.stream()
+                        .filter(file -> !untouched.contains(file))
+                        .map(DataFileMeta::fileName)
+                        .collect(Collectors.toList());
+        assertThat(fileNames(after)).doesNotContainAnyElementsOf(replacedFiles);
+        assertThat(liveDeletionVectorIndexFileNames(table)).isEmpty();
+        assertThat(liveGlobalIndexFileNames(table)).isEmpty();
+        assertThat(readVectorRowsWithRowIds(table))
+                .containsExactlyInAnyOrder(
+                        "0|9|[0.0, 0.5]",
+                        "1|10|[101.0, 101.5]",
+                        "3|11|[103.0, 103.5]",
+                        "4|12|null",
+                        "5|13|[5.0, 5.5]",
+                        "6|6|[6.0, 6.5]",
+                        "7|7|[7.0, 7.5]",
+                        "8|8|[8.0, 8.5]");
+    }
+
+    @Test
+    public void testMaterializeDeletionVectorsWithRollingVectorFiles() throws Exception {
+        FileStoreTable table = createVectorTable("parquet");
+        writeVectorRows(table, 0, 2004);
+        Range originalRange = new Range(0, 2003);
+        long[] deleted = {0, 1000, 2003};
+        commitDeletionVectors(table, Collections.singletonList(new DvSpec(originalRange, deleted)));
+        List<DataFileMeta> before = currentDataFiles(table, BinaryRow.EMPTY_ROW);
+        assertThat(vectorFileRowRanges(before)).containsExactly(originalRange);
+
+        materializeDeletionVectors(
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.VECTOR_TARGET_FILE_SIZE.key(), "1 b")));
+
+        List<DataFileMeta> after = currentDataFiles(table, BinaryRow.EMPTY_ROW);
+        assertThat(normalFileRowRanges(after)).containsExactly(new Range(2004, 4004));
+        assertThat(vectorFileRowRanges(after))
+                .containsExactly(
+                        new Range(2004, 3003), new Range(3004, 4003), new Range(4004, 4004));
+        assertThat(fileNames(after)).doesNotContainAnyElementsOf(fileNames(before));
+        assertThat(liveDeletionVectorIndexFileNames(table)).isEmpty();
+        List<String> expected = new ArrayList<>();
+        long nextRowId = 2004;
+        for (int id = 0; id < 2004; id++) {
+            if (!isDeleted(id, deleted)) {
+                expected.add(
+                        id + "|" + nextRowId++ + "|" + Arrays.toString(vector(id).toFloatArray()));
+            }
+        }
+        assertThat(readVectorRowsWithRowIds(table)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    public void testMaterializeFullyDeletedVectorRange() throws Exception {
+        FileStoreTable table = createVectorTable("parquet");
+        writeVectorRows(table, 0, 3);
+        writeVectorRows(table, 3, 6);
+        commitDeletionVectors(
+                table, Collections.singletonList(new DvSpec(new Range(0, 2), 0, 1, 2)));
+        List<DataFileMeta> before = currentDataFiles(table, BinaryRow.EMPTY_ROW);
+        assertThat(vectorFileRowRanges(before)).containsExactly(new Range(0, 2), new Range(3, 5));
+
+        materializeDeletionVectors(table);
+
+        assertThat(currentDataFiles(table, BinaryRow.EMPTY_ROW))
+                .containsExactlyInAnyOrderElementsOf(
+                        before.stream()
+                                .filter(file -> file.nonNullFirstRowId() == 3)
+                                .collect(Collectors.toList()));
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(6L);
+        assertThat(liveDeletionVectorIndexFileNames(table)).isEmpty();
+        assertThat(readVectorRowsWithRowIds(table))
+                .containsExactlyInAnyOrder("3|3|[3.0, 3.5]", "4|4|[4.0, 4.5]", "5|5|[5.0, 5.5]");
+    }
+
+    @Test
+    public void testStaleMaterializeRejectedAfterConcurrentVectorUpdate() throws Exception {
+        FileStoreTable table = createVectorTable("parquet");
+        writeVectorRows(table, 0, 3);
+        commitDeletionVectors(table, Collections.singletonList(new DvSpec(new Range(0, 2), 1)));
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMaterializeDeletionVectors(table, snapshot, null);
+
+        writeVectorRange(table, 1, vector(101), vector(102));
+        long updateSnapshotId = table.latestSnapshot().get().id();
+        assertThatThrownBy(
+                        () ->
+                                commitMaterializeDeletionVectors(
+                                        table, snapshot, messages, "test-stale-vector"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("dedicated file")
+                .hasMessageContaining("is not covered by one data file range");
+
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(updateSnapshotId);
+        assertThat(liveDeletionVectorDataFileNames(table)).hasSize(1);
+        assertThat(readVectorRowsWithRowIds(table))
+                .containsExactlyInAnyOrder("0|0|[0.0, 0.5]", "2|2|[102.0, 102.5]");
+    }
+
     @Test
     public void testBlobCompactKeepsDeletionVectors() throws Exception {
         createTableDefault();
@@ -1324,6 +1461,78 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                                             + row.getInt(1)
                                             + "|"
                                             + row.getString(2)));
+        }
+        return rows;
+    }
+
+    private FileStoreTable createVectorTable(String format) throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("embedding", DataTypes.VECTOR(VECTOR_DIM, DataTypes.FLOAT()))
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .option(CoreOptions.VECTOR_FILE_FORMAT.key(), format)
+                        .option(CoreOptions.FILE_COMPRESSION.key(), "none")
+                        .build(),
+                false);
+        return getTableDefault();
+    }
+
+    private void writeVectorRows(FileStoreTable table, int from, int toExclusive) throws Exception {
+        write(
+                table,
+                IntStream.range(from, toExclusive)
+                        .mapToObj(id -> GenericRow.of(id, vector(id)))
+                        .toArray(InternalRow[]::new));
+    }
+
+    private void writeVectorRange(FileStoreTable table, long firstRowId, BinaryVector... vectors)
+            throws Exception {
+        RowType writeType = table.rowType().project(Collections.singletonList("embedding"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (BinaryVector vector : vectors) {
+                write.write(GenericRow.of(vector));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, firstRowId);
+            commit.commit(messages);
+        }
+    }
+
+    private static BinaryVector vector(int id) {
+        return BinaryVector.fromPrimitiveArray(new float[] {id, id + 0.5F});
+    }
+
+    private static List<Range> vectorFileRowRanges(List<DataFileMeta> files) {
+        return fileRanges(
+                files.stream()
+                        .filter(file -> isVectorStoreFile(file.fileName()))
+                        .collect(Collectors.toList()));
+    }
+
+    private static List<String> readVectorRowsWithRowIds(FileStoreTable table) throws IOException {
+        ReadBuilder builder =
+                table.newReadBuilder()
+                        .withReadType(SpecialFields.rowTypeWithRowId(table.rowType()));
+        List<String> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                builder.newRead().createReader(builder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row ->
+                            rows.add(
+                                    row.getInt(0)
+                                            + "|"
+                                            + row.getLong(2)
+                                            + "|"
+                                            + (row.isNullAt(1)
+                                                    ? null
+                                                    : Arrays.toString(
+                                                            row.getVector(1).toFloatArray()))));
         }
         return rows;
     }
