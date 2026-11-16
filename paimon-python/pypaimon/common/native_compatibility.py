@@ -44,7 +44,7 @@ def nested_update_overwrite_on_equal_false_reason(
     ``nested-sequence-overwrite-on-equal=false`` force Python. Unset / ``true``
     leave Native eligible.
     """
-    if options is None:
+    if options is None or not isinstance(options, CoreOptions):
         return None
     raw = options.options.to_map()
     for key, value in raw.items():
