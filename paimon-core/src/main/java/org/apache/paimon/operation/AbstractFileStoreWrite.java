@@ -560,14 +560,23 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         partition, bucket, latestSnapshot, ignorePreviousFiles);
         RestoreFiles restored;
         Snapshot baseSnapshot;
-        if (actualIgnorePreviousFiles) {
+        boolean restoreIndexes =
+                dbMaintainerFactory != null
+                        || dvMaintainerFactory != null
+                        || primaryKeyIndexMaintainerFactory != null;
+        if (ignorePreviousFiles || (actualIgnorePreviousFiles && !restoreIndexes)) {
             restored = RestoreFiles.empty();
             // An overwrite starts from empty files and checks commits made after writer creation.
             baseSnapshot = requiresCompactionBaseline() ? latestSnapshot : null;
         } else {
             restored =
                     scanExistingFileMetas(
-                            partition, bucket, expectedTotalBuckets, validateNumBuckets);
+                            partition,
+                            bucket,
+                            expectedTotalBuckets,
+                            validateNumBuckets,
+                            // Primary-key indexes also need the existing data files.
+                            !actualIgnorePreviousFiles || primaryKeyIndexMaintainerFactory != null);
             baseSnapshot = restored.snapshot();
         }
 
@@ -593,7 +602,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 ioManager,
                                 DeletionVector.factory(dvMaintainer));
 
-        List<DataFileMeta> restoreFiles = restored.dataFiles();
+        List<DataFileMeta> restoreFiles = actualIgnorePreviousFiles ? null : restored.dataFiles();
         if (restoreFiles == null) {
             restoreFiles = new ArrayList<>();
         }
@@ -660,7 +669,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private RestoreFiles scanExistingFileMetas(
-            BinaryRow partition, int bucket, int expectedTotalBuckets, boolean validateNumBuckets) {
+            BinaryRow partition,
+            int bucket,
+            int expectedTotalBuckets,
+            boolean validateNumBuckets,
+            boolean scanDataFileMetas) {
         Supplier<String> partInfo =
                 () ->
                         partitionType.getFieldCount() > 0
@@ -679,7 +692,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             bucket,
                             dbMaintainerFactory != null,
                             dvMaintainerFactory != null,
-                            primaryKeyIndexMaintainerFactory != null);
+                            primaryKeyIndexMaintainerFactory != null,
+                            scanDataFileMetas);
         } catch (RuntimeException e) {
             throw new RuntimeException(
                     String.format(
