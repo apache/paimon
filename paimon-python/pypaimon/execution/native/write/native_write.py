@@ -18,7 +18,7 @@
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import ChangelogProducer
+from pypaimon.common.options.core_options import ChangelogProducer, MergeEngine
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.execution.native.runtime import native_runtime_available
 from pypaimon.execution.native.table import _native_variant_write_supported
@@ -32,6 +32,44 @@ from pypaimon.execution.native.write.native_commit import (
 from pypaimon.write.row_utils import (
     require_columns, row_to_named_values, row_values_to_arrow_table, validate_write_columns,
 )
+
+# Native Writer reduces same-batch PK maps with Rust UTF-8 ``&str`` order.
+# Java/Python ``merge_map_with_keytime`` uses UTF-16; refuse Native before
+# ``create_native_write_table`` so backend_dispatch selects Python Writer.
+_MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
+
+
+def _field_agg_func_name(field_name, primary_keys, options_map, sequence_fields):
+    # Same precedence as Java ``getAggFuncName`` / Python resolve; kept
+    # private here so Native Write never imports Native Read.
+    if field_name in sequence_fields:
+        return "last_value"
+    if field_name in primary_keys:
+        return "primary_key"
+    return (
+        options_map.get("fields.{}.aggregate-function".format(field_name))
+        or options_map.get("fields.default-aggregate-function")
+        or "last_non_null_value"
+    )
+
+
+def _native_write_refuses_merge_map_keytime(table) -> bool:
+    """True when Native must not reduce this table's keytime maps."""
+    if not getattr(table, 'is_primary_key_table', False):
+        return False
+    options = table.options
+    if options.merge_engine() not in (
+            MergeEngine.AGGREGATE, MergeEngine.PARTIAL_UPDATE):
+        return False
+    options_map = options.options.to_map()
+    pk_set = set(table.primary_keys)
+    sequence_fields = set(options.sequence_field())
+    for field in table.fields:
+        if _field_agg_func_name(
+                field.name, pk_set, options_map, sequence_fields
+        ) == _MERGE_MAP_WITH_KEYTIME:
+            return True
+    return False
 
 
 def create_native_write(table, commit_user, static_partition=None, stream=False,
@@ -50,7 +88,8 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
                 and table.options.changelog_producer() == ChangelogProducer.INPUT
                 and (stream or static_partition is None))
             or table.options.file_format() != 'parquet'
-            or table.options.video_frame_fields()):
+            or table.options.video_frame_fields()
+            or _native_write_refuses_merge_map_keytime(table)):
         return None
     # Rust 0.5.0 emits zero sequence bounds for ordinary bucketed append files.
     # Java compaction needs advancing ranges to preserve their append order.

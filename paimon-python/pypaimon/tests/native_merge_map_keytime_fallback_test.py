@@ -15,11 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Native fallback for every merge_map_with_keytime table.
+"""Native gates for merge_map_with_keytime (UTF-8 vs UTF-16).
 
-STRING cannot stay on Native (UTF-8 vs UTF-16). The previous Native gate
-only cleared STRING-family anyway, so all keytime timestamp types fall
-back to Python before Native opens. Non-keytime aggregators keep Native.
+* Aggregate Reader: fall back to Python before Native opens.
+* Partial Update Reader: raise before Native opens (Python unsupported).
+* Writer: refuse Native so backend_dispatch selects Python Writer.
+Non-keytime aggregators keep Native.
 """
 
 from unittest.mock import Mock, patch
@@ -33,8 +34,16 @@ from pypaimon.common.options.options import Options
 from pypaimon.execution.native.read.table_read import (
     NativeTableRead,
     _native_merge_map_keytime_timestamp_supported,
+    _table_uses_merge_map_keytime,
 )
+from pypaimon.execution.native.write.native_write import (
+    _native_write_refuses_merge_map_keytime,
+    create_native_write,
+)
+from pypaimon.execution.python.write.table_write import PythonTableWrite
 from pypaimon.schema.data_types import AtomicType, DataField, MapType, RowType
+from pypaimon.write.table_write import BatchTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 
 def _options(**extra):
@@ -190,6 +199,62 @@ def test_non_pk_non_aggregate_and_other_aggs_stay_on_native():
     for table in cases:
         _assert_stays_on_native(table, batch)
 
+    # Plain partial-update without keytime must keep Native.
+    pu = _table(
+        [DataField(0, 'id', AtomicType('STRING')),
+         DataField(1, 'v', AtomicType('STRING'))],
+        _options(**{'merge-engine': 'partial-update'}))
+    _assert_stays_on_native(
+        pu, pa.record_batch([pa.array(['1']), pa.array(['x'])], names=['id', 'v']))
+
+
+def _partial_update_keytime_fields():
+    return [
+        DataField(0, 'id', AtomicType('STRING')),
+        DataField(1, 'seq', AtomicType('INT')),
+        DataField(2, 'updates', MapType(True, AtomicType('STRING'), _value_row('STRING'))),
+    ]
+
+
+def _partial_update_keytime_options():
+    return _options(**{
+        'merge-engine': 'partial-update',
+        'sequence.field': 'seq',
+        'fields.seq.sequence-group': 'updates',
+        'fields.updates.aggregate-function': 'merge_map_with_keytime',
+        'fields.updates.ts-field': 'event_time',
+    })
+
+
+def test_partial_update_sequence_group_keytime_detected():
+    table = _table(_partial_update_keytime_fields(), _partial_update_keytime_options())
+    assert _table_uses_merge_map_keytime(table) is True
+    assert _native_merge_map_keytime_timestamp_supported(table) is False
+    assert _native_write_refuses_merge_map_keytime(table) is True
+
+
+def test_partial_update_sequence_group_without_keytime_not_flagged():
+    table = _table(
+        _partial_update_keytime_fields(),
+        _options(**{
+            'merge-engine': 'partial-update',
+            'sequence.field': 'seq',
+            'fields.seq.sequence-group': 'updates',
+        }))
+    assert _table_uses_merge_map_keytime(table) is False
+    assert _native_merge_map_keytime_timestamp_supported(table) is True
+    assert _native_write_refuses_merge_map_keytime(table) is False
+
+
+def test_partial_update_keytime_raises_before_opening_native():
+    table = _table(_partial_update_keytime_fields(), _partial_update_keytime_options())
+    read = _table_read(table)
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
+        with pytest.raises(NotImplementedError, match='partial-update'):
+            NativeTableRead(read).read_batches(
+                [_split()], pa.schema([('id', pa.string())]))
+    native.assert_not_called()
+
 
 # -- real FileStore public-read fallback --------------------------------
 
@@ -306,3 +371,185 @@ def test_catalog_double_falls_back_before_native(tmp_path):
     updates = dict(rows[0]['updates'])
     assert updates['k']['value'] == 'new'
     assert updates['k']['event_time'] == 10.25
+
+
+# -- Native Writer refuses keytime; Python keeps UTF-16 winner ------------
+
+
+def _create_keytime_table_native_write_requested(tmp_path, name):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    catalog.create_database('default', True)
+    value_type = pa.struct([
+        pa.field('value', pa.string()),
+        pa.field('event_time', pa.string()),
+    ])
+    pa_schema = pa.schema([
+        pa.field('id', pa.string(), nullable=False),
+        pa.field('updates', pa.map_(pa.string(), value_type)),
+    ])
+    options = {
+        'bucket': '1',
+        'merge-engine': 'aggregation',
+        'file.format': 'parquet',
+        'fields.updates.aggregate-function': 'merge_map_with_keytime',
+        'fields.updates.ts-field': 'event_time',
+        'write.native.enabled': 'true',
+        'read.native.enabled': 'true',
+        'scan.native-plan.enabled': 'false',
+        'commit.native.enabled': 'false',
+    }
+    schema = Schema.from_pyarrow_schema(
+        pa_schema, primary_keys=['id'], options=options)
+    catalog.create_table('default.{}'.format(name), schema, False)
+    return catalog.get_table('default.{}'.format(name)), pa_schema
+
+
+def test_native_writer_refuses_keytime_same_batch_keeps_utf16_first(tmp_path):
+    """Same write_arrow batch: Native refused; Python keeps UTF-16 first.
+
+    PMC scenario: one batch, same PK/map key, U+E000/first then
+    U+10000/second. Native UTF-8 would persist second; gated Python
+    Writer must keep first through commit and reopen.
+    """
+    table, pa_schema = _create_keytime_table_native_write_requested(
+        tmp_path, 'writer_utf16_gate')
+    assert _native_write_refuses_merge_map_keytime(table) is True
+
+    older = '\uE000'
+    newer_under_utf8 = '\U00010000'
+
+    with patch(
+            'pypaimon.execution.native.write.native_write.native_runtime_available',
+            return_value=True), \
+            patch(
+                'pypaimon.execution.native.write.native_write.create_native_write_table'
+            ) as create_table:
+        assert create_native_write(table, 'job') is None
+        create_table.assert_not_called()
+
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        create_table.assert_not_called()
+        assert not isinstance(writer, NativeTableWrite)
+        assert isinstance(writer, BatchTableWrite)
+        assert isinstance(writer._execution, PythonTableWrite)
+
+        try:
+            writer.write_arrow(pa.Table.from_pylist([
+                {'id': '1', 'updates': [
+                    ('k', {'value': 'first', 'event_time': older})]},
+                {'id': '1', 'updates': [
+                    ('k', {'value': 'second', 'event_time': newer_under_utf8})]},
+            ], schema=pa_schema))
+            commit = wb.new_commit()
+            try:
+                commit.commit(writer.prepare_commit())
+            finally:
+                commit.close()
+        finally:
+            writer.close()
+
+        create_table.assert_not_called()
+
+    reopened = CatalogFactory.create(
+        {'warehouse': str(tmp_path / 'warehouse')}
+    ).get_table('default.writer_utf16_gate')
+    rows = _public_read(reopened).to_pylist()
+    assert len(rows) == 1
+    updates = dict(rows[0]['updates'])
+    assert updates['k']['value'] == 'first'
+    assert updates['k']['event_time'] == older
+
+
+# -- Partial Update + sequence-group: raise before Native Reader ----------
+
+
+def _create_partial_update_keytime_table(tmp_path, name):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    catalog.create_database('default', True)
+    value_type = pa.struct([
+        pa.field('value', pa.string()),
+        pa.field('event_time', pa.string()),
+    ])
+    pa_schema = pa.schema([
+        pa.field('id', pa.string(), nullable=False),
+        pa.field('seq', pa.int32(), nullable=False),
+        pa.field('updates', pa.map_(pa.string(), value_type)),
+    ])
+    options = {
+        'bucket': '1',
+        'merge-engine': 'partial-update',
+        'file.format': 'parquet',
+        'sequence.field': 'seq',
+        'fields.seq.sequence-group': 'updates',
+        'fields.updates.aggregate-function': 'merge_map_with_keytime',
+        'fields.updates.ts-field': 'event_time',
+        'read.native.enabled': 'true',
+        'write.native.enabled': 'false',
+        'scan.native-plan.enabled': 'false',
+    }
+    schema = Schema.from_pyarrow_schema(
+        pa_schema, primary_keys=['id'], options=options)
+    catalog.create_table('default.{}'.format(name), schema, False)
+    return catalog.get_table('default.{}'.format(name)), pa_schema
+
+
+def test_partial_update_java_shaped_table_raises_before_native_reader(tmp_path):
+    """Real table matching Java Writer Partial Update + sequence-group.
+
+    Python cannot legally write this merge config, so write-side
+    ``check_supported`` is bypassed only to plant the same on-disk shape a
+    Java Writer leaves (top-level seq 1/2, nested U+E000 then U+10000).
+    Reading must raise before Native opens; silent UTF-8 ``second`` is
+    forbidden.
+    """
+    table, pa_schema = _create_partial_update_keytime_table(
+        tmp_path, 'pu_keytime_java_shape')
+    assert _native_merge_map_keytime_timestamp_supported(table) is False
+
+    older = '\uE000'
+    newer_under_utf8 = '\U00010000'
+    # Python refuses sequence-group / field aggregators on Partial Update
+    # write; bypass only while planting files that mirror a Java Writer
+    # leaving top-level seq 1/2 and nested U+E000 / U+10000 for Native
+    # Reader merge.
+    with patch(
+            'pypaimon.execution.python.merge_engine_dispatch.'
+            'partial_update_unsupported_options',
+            return_value=set()):
+        for seq, value, ts in (
+                (1, 'first', older),
+                (2, 'second', newer_under_utf8),
+        ):
+            wb = table.new_batch_write_builder()
+            w = wb.new_write()
+            c = wb.new_commit()
+            try:
+                w.write_arrow(pa.Table.from_pylist([{
+                    'id': '1',
+                    'seq': seq,
+                    'updates': {
+                        'k': {'value': value, 'event_time': ts}},
+                }], schema=pa_schema))
+                c.commit(w.prepare_commit())
+            finally:
+                w.close()
+                c.close()
+
+    reopened = CatalogFactory.create(
+        {'warehouse': str(tmp_path / 'warehouse')}
+    ).get_table('default.pu_keytime_java_shape')
+    read = reopened.new_read_builder().new_read()
+    splits = reopened.new_read_builder().new_scan().plan().splits()
+    assert splits, 'expected persisted splits from planted Java-shaped writes'
+    schema = read._output_arrow_schema(splits)
+
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
+        with pytest.raises(NotImplementedError, match='partial-update'):
+            NativeTableRead(read).read_batches(splits, schema)
+    native.assert_not_called()
+
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
+        with pytest.raises(NotImplementedError, match='partial-update'):
+            _public_read(reopened)
+    native.assert_not_called()

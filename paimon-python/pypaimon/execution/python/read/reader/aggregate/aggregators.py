@@ -1328,21 +1328,31 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
         self._string_timestamp = ts_base in _KEYTIME_STRING_TYPES
 
     def _put_to_map(self, maps: Dict[Any, Any], input_field: Any):
+        # Arrow ``Table.to_pydict`` / ``as_py`` materialize MAP as a list of
+        # ``(key, value)`` tuples. Accept that shape so same-batch Writer
+        # folds (and Reader merges fed from Arrow) can run keytime compare.
         if isinstance(input_field, dict):
             maps.update(input_field)
         elif isinstance(input_field, list):
             tmp_map = {}
             for item in input_field:
-                if not isinstance(item, dict):
+                if isinstance(item, dict):
+                    tmp_map[item['key']] = item['value']
+                elif isinstance(item, (tuple, list)) and len(item) == 2:
+                    tmp_map[item[0]] = item[1]
+                else:
                     raise TypeError(
-                        "list element must be dict, got {}".format(type(item))
+                        "list element must be dict or (key, value), got {}".format(
+                            type(item)
+                        )
                     )
-                tmp_map[item['key']] = item['value']
 
             maps.update(tmp_map)
         else:
             raise TypeError(
-                "input_field must be dict or list[dict], got {}".format(type(input_field))
+                "input_field must be dict or list[dict|(key, value)], got {}".format(
+                    type(input_field)
+                )
             )
 
     def _merge_input_map(self, result_map: Dict[Any, Any], input_field: Any):

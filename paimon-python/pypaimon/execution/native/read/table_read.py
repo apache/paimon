@@ -40,13 +40,12 @@ _NATIVE_READ_FILE_FORMATS = frozenset({
 _NATIVE_READ_FILE_SUFFIXES = tuple('.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
 _NATIVE_BLOB_FILE_SUFFIXES = ('.blob', '.video')
 
-# merge_map_with_keytime always uses the Python aggregator for now:
-# * STRING/CHAR/VARCHAR: Rust UTF-8 ``&str`` order diverges from
-#   Java/Python UTF-16 (e.g. U+E000 vs U+10000).
-# * Every other timestamp type historically fell back already (the old
-#   Native gate only cleared STRING-family via StringArray), and there
-#   is no end-to-end-correct Native replacement without a Rust compare
-#   fix. Fall back before Native opens; do not catch mid-read.
+# merge_map_with_keytime is unsafe on Native until Rust matches Java
+# UTF-16 string order (e.g. U+E000 vs U+10000):
+# * AGGREGATE: fall back to the Python aggregator before Native opens.
+# * PARTIAL_UPDATE (incl. sequence-group field aggregators): Python
+#   cannot run this config either, so raise before Native opens rather
+#   than returning a wrong UTF-8 winner.
 _MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
 
 
@@ -65,18 +64,20 @@ def _field_agg_func_name(field_name, primary_keys, options_map, sequence_fields)
     )
 
 
-def _native_merge_map_keytime_timestamp_supported(table) -> bool:
-    """Whether Native can run ``merge_map_with_keytime`` for this table.
+def _table_uses_merge_map_keytime(table) -> bool:
+    """True when a field aggregator actually resolves to keytime.
 
-    Always ``False`` when any field uses ``merge_map_with_keytime`` on a
-    PK aggregation table. Non-PK / non-AGGREGATE / other aggregators are
-    unchanged and still clear this gate.
+    Covers Aggregate and Partial Update (including sequence-group tables
+    that set ``fields.<f>.aggregate-function=merge_map_with_keytime`` on
+    a group member). Detection follows field-aggregator precedence; it
+    does not treat ``sequence-group`` alone as keytime.
     """
     if not getattr(table, 'is_primary_key_table', False):
-        return True
+        return False
     options = table.options
-    if options.merge_engine() != MergeEngine.AGGREGATE:
-        return True
+    if options.merge_engine() not in (
+            MergeEngine.AGGREGATE, MergeEngine.PARTIAL_UPDATE):
+        return False
 
     options_map = options.options.to_map()
     pk_set = set(table.primary_keys)
@@ -85,8 +86,28 @@ def _native_merge_map_keytime_timestamp_supported(table) -> bool:
         if _field_agg_func_name(
                 field.name, pk_set, options_map, sequence_fields
         ) == _MERGE_MAP_WITH_KEYTIME:
-            return False
-    return True
+            return True
+    return False
+
+
+def _native_merge_map_keytime_timestamp_supported(table) -> bool:
+    """Whether Native can run ``merge_map_with_keytime`` for this table.
+
+    Always ``False`` when any field uses ``merge_map_with_keytime`` on a
+    PK aggregation or partial-update table. Non-PK / other engines /
+    other aggregators are unchanged and still clear this gate.
+    """
+    return not _table_uses_merge_map_keytime(table)
+
+
+def _partial_update_keytime_unsupported_message():
+    return (
+        "merge_map_with_keytime with merge-engine 'partial-update' is not "
+        "supported: the native reader compares STRING timestamps as UTF-8 "
+        "while Java/Python use UTF-16, and the Python reader does not "
+        "implement per-field aggregators or sequence-group on "
+        "partial-update tables"
+    )
 
 
 def _prepare_native_read(table, predicate: Optional[Predicate] = None,
@@ -162,8 +183,12 @@ class NativeTableRead:
         if not self._blob_view_supported():
             return self._fallback(
                 "the table uses an unsupported BLOB view")
-        # Fall back before setup for every merge_map_with_keytime table.
+        # Keytime: Aggregate falls back to Python; Partial Update has no
+        # correct Python path either, so fail before Native opens.
         if not _native_merge_map_keytime_timestamp_supported(read.table):
+            if read.table.options.merge_engine() == MergeEngine.PARTIAL_UPDATE:
+                raise NotImplementedError(
+                    _partial_update_keytime_unsupported_message())
             return self._fallback(
                 "merge_map_with_keytime is not supported by the native "
                 "reader; falling back to Python")
