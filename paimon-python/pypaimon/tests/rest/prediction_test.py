@@ -53,7 +53,7 @@ def _spec(**changes):
     values = dict(
         model="quality.qwen_vl",
         inputs={"video": "content"},
-        prompt="Classify",
+        instructions="Classify",
         output_schema={"result": "STRING"},
     )
     values.update(changes)
@@ -103,6 +103,8 @@ class PredictionTest(unittest.TestCase):
         )
         self.assertNotIn("resultColumns", body)
         self.assertNotIn("mergeKeyColumns", body)
+        self.assertNotIn("prompt", body)
+        self.assertEqual("Classify", body["instructions"])
         self.assertEqual({"result": "STRING"}, body["outputSchema"])
         self.assertEqual(
             {"database": "quality", "table": "clips"}, body["source"])
@@ -187,7 +189,7 @@ class PredictionTest(unittest.TestCase):
             dict(inputs={"video": ""}),
             dict(merge_key_columns=["id", "id"]),
             dict(merge_key_columns="id"),
-            dict(prompt=" "),
+            dict(instructions=" "),
             dict(output_schema={}),
             dict(snapshot_id=0),
             dict(snapshot_id=1, tag_name="v1"),
@@ -216,7 +218,7 @@ class PredictionTest(unittest.TestCase):
             name="daily-quality",
             model="quality.qwen_vl",
             inputs={"video": "content"},
-            prompt="Classify",
+            instructions="Classify",
             output_schema={"result": "STRING"},
         )
 

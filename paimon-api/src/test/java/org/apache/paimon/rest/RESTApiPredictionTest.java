@@ -52,7 +52,9 @@ class RESTApiPredictionTest {
                 .isEqualTo(requestMap.get("idempotencyKey"));
         assertThat(requestMap)
                 .containsEntry("model", "quality.qwen_vl")
-                .doesNotContainKeys("name", "where", "snapshotId", "tagName", "resultColumns");
+                .containsEntry("instructions", "Classify")
+                .doesNotContainKeys(
+                        "name", "prompt", "where", "snapshotId", "tagName", "resultColumns");
         assertThat(requestMap.get("mergeKeyColumns"))
                 .isEqualTo(Collections.singletonList("clip_id"));
         assertThat((Map<String, Object>) requestMap.get("source"))

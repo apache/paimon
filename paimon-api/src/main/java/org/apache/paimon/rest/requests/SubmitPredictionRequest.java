@@ -47,7 +47,7 @@ public class SubmitPredictionRequest implements RESTRequest {
     private static final String FIELD_MODEL = "model";
     private static final String FIELD_INPUTS = "inputs";
     private static final String FIELD_MERGE_KEY_COLUMNS = "mergeKeyColumns";
-    private static final String FIELD_PROMPT = "prompt";
+    private static final String FIELD_INSTRUCTIONS = "instructions";
     private static final String FIELD_OUTPUT_SCHEMA = "outputSchema";
     private static final String FIELD_WHERE = "where";
     private static final String FIELD_SNAPSHOT_ID = "snapshotId";
@@ -66,7 +66,7 @@ public class SubmitPredictionRequest implements RESTRequest {
             @JsonProperty(FIELD_MODEL) String model,
             @JsonProperty(FIELD_INPUTS) Map<String, String> inputs,
             @Nullable @JsonProperty(FIELD_MERGE_KEY_COLUMNS) List<String> mergeKeyColumns,
-            @JsonProperty(FIELD_PROMPT) String prompt,
+            @JsonProperty(FIELD_INSTRUCTIONS) String instructions,
             @JsonProperty(FIELD_OUTPUT_SCHEMA) Map<String, String> outputSchema,
             @Nullable @JsonProperty(FIELD_WHERE) String where,
             @Nullable @JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId,
@@ -85,7 +85,7 @@ public class SubmitPredictionRequest implements RESTRequest {
                         model,
                         inputs,
                         mergeKeyColumns,
-                        prompt,
+                        instructions,
                         outputSchema,
                         where,
                         snapshotId,
@@ -101,7 +101,7 @@ public class SubmitPredictionRequest implements RESTRequest {
                 spec.model(),
                 spec.inputs(),
                 spec.mergeKeyColumns(),
-                spec.prompt(),
+                spec.instructions(),
                 spec.outputSchema(),
                 spec.where(),
                 spec.snapshotId(),
@@ -142,9 +142,9 @@ public class SubmitPredictionRequest implements RESTRequest {
         return spec.mergeKeyColumns();
     }
 
-    @JsonGetter(FIELD_PROMPT)
-    public String getPrompt() {
-        return spec.prompt();
+    @JsonGetter(FIELD_INSTRUCTIONS)
+    public String getInstructions() {
+        return spec.instructions();
     }
 
     @JsonGetter(FIELD_OUTPUT_SCHEMA)

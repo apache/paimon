@@ -68,7 +68,7 @@ _ARGUMENTS = {
         source=PredictionSource("db", "t"),
         model="db.qwen_vl",
         inputs={"video": "content"},
-        prompt="classify",
+        instructions="classify",
         output_schema={"result": "STRING"},
     ),
     str: "SELECT",

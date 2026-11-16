@@ -4711,7 +4711,7 @@ components:
     SubmitPredictionRequest:
       type: object
       additionalProperties: false
-      required: [source, idempotencyKey, model, inputs, prompt, outputSchema]
+      required: [source, idempotencyKey, model, inputs, instructions, outputSchema]
       properties:
         source:
           $ref: '#/components/schemas/PredictionSource'
@@ -4742,9 +4742,10 @@ components:
             Stable source columns used when table primary keys or row IDs are unavailable.
             Omit to let the server derive identity; without stable identity the prediction
             runs as a full refresh.
-        prompt:
+        instructions:
           type: string
           minLength: 1
+          description: Natural-language guidance for the prediction.
         outputSchema:
           type: object
           minProperties: 1

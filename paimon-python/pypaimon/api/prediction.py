@@ -82,7 +82,7 @@ class SubmitPredictionRequest(RESTRequest):
     source: PredictionSource
     model: str
     inputs: Dict[str, str]
-    prompt: str
+    instructions: str
     output_schema: Dict[str, str] = json_field("outputSchema")
     merge_key_columns: Optional[List[str]] = optional_json_field(
         "mergeKeyColumns", "non_null")
@@ -97,7 +97,7 @@ class SubmitPredictionRequest(RESTRequest):
     def __post_init__(self):
         for value, field_name in (
                 (self.model, "model"),
-                (self.prompt, "prompt"),
+                (self.instructions, "instructions"),
         ):
             _nonblank(value, field_name)
         for value, field_name in (
@@ -135,7 +135,7 @@ class SubmitPredictionRequest(RESTRequest):
             name=spec.name,
             model=spec.model,
             inputs=spec.inputs,
-            prompt=spec.prompt,
+            instructions=spec.instructions,
             output_schema=spec.output_schema,
             merge_key_columns=spec.merge_key_columns or None,
             where=spec.where,

@@ -38,7 +38,7 @@ public class PredictionSpec {
     private final String model;
     private final Map<String, String> inputs;
     private final List<String> mergeKeyColumns;
-    private final String prompt;
+    private final String instructions;
     private final Map<String, String> outputSchema;
     private final @Nullable String where;
     private final @Nullable Long snapshotId;
@@ -50,7 +50,7 @@ public class PredictionSpec {
             String model,
             Map<String, String> inputs,
             @Nullable List<String> mergeKeyColumns,
-            String prompt,
+            String instructions,
             Map<String, String> outputSchema,
             @Nullable String where,
             @Nullable Long snapshotId,
@@ -58,7 +58,7 @@ public class PredictionSpec {
             @Nullable Map<String, Object> options) {
         checkOptionalNonBlank(name, "name");
         checkNonBlank(model, "model");
-        checkNonBlank(prompt, "prompt");
+        checkNonBlank(instructions, "instructions");
         checkOptionalNonBlank(where, "where");
         checkOptionalNonBlank(tagName, "tagName");
         checkArgument(snapshotId == null || snapshotId > 0, "snapshotId must be positive");
@@ -69,7 +69,7 @@ public class PredictionSpec {
         this.model = model;
         this.inputs = copyStringMap(inputs, "inputs", true);
         this.mergeKeyColumns = copyOptionalStringList(mergeKeyColumns, "mergeKeyColumns");
-        this.prompt = prompt;
+        this.instructions = instructions;
         this.outputSchema = copyStringMap(outputSchema, "outputSchema", true);
         this.where = where;
         this.snapshotId = snapshotId;
@@ -97,8 +97,8 @@ public class PredictionSpec {
         return mergeKeyColumns;
     }
 
-    public String prompt() {
-        return prompt;
+    public String instructions() {
+        return instructions;
     }
 
     public Map<String, String> outputSchema() {

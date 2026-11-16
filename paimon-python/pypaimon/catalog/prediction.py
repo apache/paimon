@@ -109,7 +109,7 @@ class PredictionSpec:
 
     model: str
     inputs: Dict[str, str]
-    prompt: str
+    instructions: str
     output_schema: Dict[str, str]
     merge_key_columns: List[str] = field(default_factory=list)
     name: Optional[str] = None
@@ -120,7 +120,7 @@ class PredictionSpec:
 
     def __post_init__(self):
         _nonblank(self.model, "model")
-        _nonblank(self.prompt, "prompt")
+        _nonblank(self.instructions, "instructions")
         for value, name in (
                 (self.name, "name"),
                 (self.where, "where"),
