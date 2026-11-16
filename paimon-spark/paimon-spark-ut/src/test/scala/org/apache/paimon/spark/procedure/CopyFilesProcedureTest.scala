@@ -380,14 +380,13 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
       sql("INSERT INTO src VALUES (3, array(3.0f, 0.0f)), (4, array(4.0f, 0.0f))")
       assert(fileNames("src").exists(_.contains(".vector.")), fileNames("src"))
 
-      assertCopyRefused("src", "dst")
-      // rewriting the rows gives each of them its vector
-      sql("INSERT OVERWRITE src SELECT * FROM src")
+      // the vectors keep the row ids of their rows
       checkAnswer(
         sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
         Row(true) :: Nil)
-      checkAnswer(sql("SELECT id, embedding FROM dst"), sql("SELECT id, embedding FROM src"))
-      checkAnswer(sql("SELECT count(DISTINCT _ROW_ID) = count(*) FROM dst"), Row(true) :: Nil)
+      checkAnswer(
+        sql("SELECT id, embedding, _ROW_ID FROM dst"),
+        sql("SELECT id, embedding, _ROW_ID FROM src"))
     }
   }
 
@@ -488,17 +487,12 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
       sql("ALTER TABLE src ADD COLUMN embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;2'")
       sql("INSERT INTO src VALUES (3, 'b', array(3.0f, 0.0f)), (4, 'b', array(4.0f, 0.0f))")
 
-      // the rows of partition a have no vector file, which would move those of partition b
-      assertCopyRefused("src", "dst")
-
-      // each partition alone has a vector file for all of its rows or for none
+      // the rows of partition a have no vector file, the commit may order the partitions in any way
       checkAnswer(
-        sql("""CALL sys.copy(source_table => 'src', target_table => 'dst', where => "pt = 'b'")"""),
-        Row(true) :: Nil)
-      checkAnswer(
-        sql("""CALL sys.copy(source_table => 'src', target_table => 'dst', where => "pt = 'a'")"""),
+        sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
         Row(true) :: Nil)
       checkAnswer(sql("SELECT * FROM dst"), sql("SELECT * FROM src"))
+      checkAnswer(sql("SELECT count(DISTINCT _ROW_ID) = count(*) FROM dst"), Row(true) :: Nil)
     }
   }
 
