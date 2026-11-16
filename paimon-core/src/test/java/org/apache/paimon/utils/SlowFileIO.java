@@ -34,6 +34,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -51,6 +52,9 @@ public class SlowFileIO extends LocalFileIO {
             new AtomicReference<>(Collections.emptySet());
     private static final ConcurrentLinkedQueue<ClassLoader> DELETE_CONTEXT_CLASS_LOADERS =
             new ConcurrentLinkedQueue<>();
+    private static final AtomicReference<CountDownLatch> NEXT_DELETE_GATE = new AtomicReference<>();
+    private static final AtomicInteger ACTIVE_DELETES = new AtomicInteger();
+    private static final AtomicInteger MAX_ACTIVE_DELETES = new AtomicInteger();
 
     public static void reset() {
         DELAY_MILLIS.set(0);
@@ -59,6 +63,24 @@ public class SlowFileIO extends LocalFileIO {
         MAX_ACTIVE_OPERATIONS.set(0);
         UNCHECKED_DELETE_FAILURE_NAMES.set(Collections.emptySet());
         DELETE_CONTEXT_CLASS_LOADERS.clear();
+        NEXT_DELETE_GATE.set(null);
+        ACTIVE_DELETES.set(0);
+        MAX_ACTIVE_DELETES.set(0);
+    }
+
+    /** Makes the next delete wait until the returned latch is counted down. */
+    public static CountDownLatch holdNextDelete() {
+        CountDownLatch gate = new CountDownLatch(1);
+        NEXT_DELETE_GATE.set(gate);
+        return gate;
+    }
+
+    public static int activeDeletes() {
+        return ACTIVE_DELETES.get();
+    }
+
+    public static int maxActiveDeletes() {
+        return MAX_ACTIVE_DELETES.get();
     }
 
     /** Context class loaders seen by delayed deletes since the last {@link #reset()}. */
@@ -120,14 +142,26 @@ public class SlowFileIO extends LocalFileIO {
 
     @Override
     public boolean delete(Path path, boolean recursive) throws IOException {
-        if (DELAY_MILLIS.get() > 0) {
-            DELETE_CONTEXT_CLASS_LOADERS.add(Thread.currentThread().getContextClassLoader());
+        MAX_ACTIVE_DELETES.accumulateAndGet(ACTIVE_DELETES.incrementAndGet(), Math::max);
+        try {
+            CountDownLatch gate = NEXT_DELETE_GATE.getAndSet(null);
+            if (gate != null) {
+                gate.await();
+            }
+            if (DELAY_MILLIS.get() > 0) {
+                DELETE_CONTEXT_CLASS_LOADERS.add(Thread.currentThread().getContextClassLoader());
+            }
+            delay();
+            if (UNCHECKED_DELETE_FAILURE_NAMES.get().contains(path.getName())) {
+                throw new IllegalStateException("Injected delete failure for " + path);
+            }
+            return super.delete(path, recursive);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException(e);
+        } finally {
+            ACTIVE_DELETES.decrementAndGet();
         }
-        delay();
-        if (UNCHECKED_DELETE_FAILURE_NAMES.get().contains(path.getName())) {
-            throw new IllegalStateException("Injected delete failure for " + path);
-        }
-        return super.delete(path, recursive);
     }
 
     @Override

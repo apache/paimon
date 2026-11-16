@@ -112,6 +112,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.Semaphore;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -786,8 +787,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             return;
         }
 
-        ExecutorService executor =
-                FileOperationThreadPool.getExecutorService(options.fileOperationThreadNum());
+        int threadNum = options.fileOperationThreadNum();
+        ExecutorService executor = FileOperationThreadPool.getExecutorService(threadNum);
+        // The bounded executor runs a task without a permit if the caller is interrupted while
+        // waiting for one, so abort bounds the deletes with its own permits and keeps waiting for
+        // them under interrupts. A thread-num of 0 or below is bounded by the pool size only.
+        Semaphore permits = new Semaphore(threadNum > 0 ? threadNum : files.size());
         boolean interrupted = false;
         // Run each delete with the caller's context class loader, as the sequential abort did.
         ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
@@ -803,10 +808,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     fileIO.deleteQuietly(file);
                                 } finally {
                                     thread.setContextClassLoader(previous);
+                                    permits.release();
                                 }
                             },
                             null);
-            // Clear the flag first, otherwise the bounded executor skips its permit and the bound.
+            permits.acquireUninterruptibly();
+            // Remember and clear the flag, so the bounded executor takes its permit as usual.
             interrupted |= Thread.interrupted();
             executor.execute(delete);
             deletes.add(delete);

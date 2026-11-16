@@ -128,6 +128,7 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.table.BucketMode.POSTPONE_BUCKET;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
+import static org.apache.paimon.utils.CommonTestUtils.waitUtil;
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1571,6 +1572,118 @@ public class FileStoreCommitTest {
             }
         } else {
             assertThat(abortFailure).isNull();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testAbortKeepsDeleteBoundWhenInterruptedWhileSubmitting(boolean interrupt)
+            throws Exception {
+        // file-operation.thread-num is "the maximum number of concurrent file operations"; 1 is
+        // below the shared pool size, so the 4 deletes (2 data files with one extra file each)
+        // must run one at a time
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_OPERATION_THREAD_NUM.key(), "1");
+        TestAppendFileStore store =
+                TestAppendFileStore.createAppendStore(tempDir, options, SlowFileIO.SCHEME);
+        BinaryRow partition = gen.getPartition(gen.next());
+        DataFilePathFactory pathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+        List<DataFileMeta> newFiles = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            newFiles.add(createDataFileWithExtraFile(store, pathFactory.newPath(), false));
+        }
+        CommitMessage commitMessage = newFilesCommitMessage(store, partition, newFiles);
+
+        // Start every thread of the shared pool and keep all but two busy: one runs the first
+        // delete, and the other is the only idle thread, so it runs queued tasks in order.
+        FileOperationThreadPool.getExecutorService(4);
+        ThreadPoolExecutor pool =
+                (ThreadPoolExecutor) FileOperationThreadPool.getExecutorService(0);
+        int poolSize = pool.getMaximumPoolSize();
+        CountDownLatch allRunning = new CountDownLatch(poolSize);
+        CountDownLatch freeTwo = new CountDownLatch(1);
+        CountDownLatch freeRest = new CountDownLatch(1);
+        List<Future<?>> blockers = new ArrayList<>();
+        SlowFileIO.reset();
+        CountDownLatch firstDelete = SlowFileIO.holdNextDelete();
+        Thread caller = null;
+        try {
+            for (int i = 0; i < poolSize; i++) {
+                CountDownLatch free = i < 2 ? freeTwo : freeRest;
+                blockers.add(
+                        pool.submit(
+                                () -> {
+                                    allRunning.countDown();
+                                    return free.await(30, TimeUnit.SECONDS);
+                                }));
+            }
+            assertThat(allRunning.await(10, TimeUnit.SECONDS)).isTrue();
+            freeTwo.countDown();
+            blockers.get(0).get(10, TimeUnit.SECONDS);
+            blockers.get(1).get(10, TimeUnit.SECONDS);
+
+            AtomicReference<Throwable> abortFailure = new AtomicReference<>();
+            AtomicBoolean interruptedAfterAbort = new AtomicBoolean();
+            FileStoreCommitImpl commit = store.newCommit();
+            caller =
+                    new Thread(
+                            () -> {
+                                try {
+                                    commit.abort(Collections.singletonList(commitMessage));
+                                } catch (Throwable t) {
+                                    abortFailure.set(t);
+                                } finally {
+                                    interruptedAfterAbort.set(Thread.interrupted());
+                                    commit.close();
+                                }
+                            });
+            caller.start();
+            Thread abortCaller = caller;
+            // the first delete holds the only permit, so the caller waits to submit the next one
+            waitUtil(
+                    () ->
+                            SlowFileIO.activeDeletes() == 1
+                                    && abortCaller.getState() == Thread.State.WAITING,
+                    Duration.ofSeconds(10),
+                    Duration.ofMillis(1));
+            // Interrupt twice. If abort stopped waiting for its own permit on the first interrupt,
+            // it would go on to wait in the bounded executor, which keeps the bound on that
+            // interrupt and only runs a task without a permit on the next one.
+            if (interrupt) {
+                for (int i = 0; i < 2; i++) {
+                    abortCaller.interrupt();
+                    // the caller clears the flag when it handles the interrupt, then waits again
+                    waitUtil(
+                            () ->
+                                    !abortCaller.isInterrupted()
+                                            && abortCaller.getState() == Thread.State.WAITING,
+                            Duration.ofSeconds(10),
+                            Duration.ofMillis(1));
+                }
+            }
+            // the idle thread runs queued tasks in order, so after this probe any delete
+            // submitted while the first one is held has run
+            pool.submit(() -> {}).get(10, TimeUnit.SECONDS);
+            firstDelete.countDown();
+            caller.join(TimeUnit.SECONDS.toMillis(20));
+            assertThat(caller.isAlive()).as("abort finished").isFalse();
+
+            // issue 11111: an interrupt must not let a delete run without a permit, the bound
+            // holds, every file is deleted and the caller's interrupt flag survives the cleanup
+            assertThat(SlowFileIO.maxActiveDeletes()).isEqualTo(1);
+            assertThat(abortFailure.get()).isNull();
+            assertThat(interruptedAfterAbort.get()).isEqualTo(interrupt);
+            assertAllDeleted(store, pathFactory, newFiles);
+        } finally {
+            firstDelete.countDown();
+            freeTwo.countDown();
+            freeRest.countDown();
+            if (caller != null) {
+                caller.interrupt();
+                caller.join(TimeUnit.SECONDS.toMillis(20));
+            }
+            SlowFileIO.reset();
         }
     }
 
