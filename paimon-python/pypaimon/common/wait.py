@@ -67,7 +67,8 @@ class Wait(Generic[T]):
 
         The waiter polls through the supplied operation-specific callback. A
         timeout only stops this client-side wait; it does not cancel the
-        server-side operation.
+        server-side operation. Durable workflows should observe long-running
+        operations asynchronously instead of keeping a client blocked here.
         """
         if timeout is None:
             timeout = self._default_timeout

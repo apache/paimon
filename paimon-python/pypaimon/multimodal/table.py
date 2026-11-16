@@ -121,7 +121,13 @@ class MultimodalTable:
             name=None,
             where=None,
             options=None):
-        """Submit an asynchronous prediction without reading rows locally."""
+        """Submit an asynchronous prediction without reading rows locally.
+
+        The returned waiter exposes the prediction ID immediately. Calling
+        ``result()`` is optional and intended for interactive clients; durable
+        workflows should persist the ID and observe the prediction
+        asynchronously.
+        """
         from pypaimon.catalog.prediction import PredictionSpec
         from pypaimon.multimodal.prediction import PredictionWait
         from pypaimon.table.file_store_table import FileStoreTable
