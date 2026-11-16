@@ -2072,11 +2072,20 @@ class RESTCatalogServer:
                 create_table = JSON.from_json(data, CreateTableRequest)
                 if create_table.identifier.get_full_name() in self.table_metadata_store:
                     raise TableAlreadyExistException(create_table.identifier)
+                options = create_table.schema.options
+                external = PATH in options and options.get(TYPE, 'table').strip().lower() == 'table'
+                schema_id = 0
+                if external:
+                    latest = SchemaManager(self._get_file_io(), options[PATH]).latest()
+                    if latest is not None:
+                        schema_id = latest.id
                 table_metadata = self._create_table_metadata(
-                    create_table.identifier, 0, create_table.schema, str(uuid.uuid4()), False
+                    create_table.identifier, schema_id, create_table.schema, str(uuid.uuid4()), external
                 )
                 self.table_metadata_store.update({create_table.identifier.get_full_name(): table_metadata})
                 self.table_identifiers[create_table.identifier.get_full_name()] = create_table.identifier
+                if external:
+                    return self._mock_response("", 200)
                 table_dir = (
                     Path(self.data_path) / self.warehouse / database_name /
                     create_table.identifier.get_object_name() / 'schema'
@@ -2098,6 +2107,8 @@ class RESTCatalogServer:
                 identifier, (response_identifier or identifier).get_branch_name())
             table_path = (f'file://{self.data_path}/{self.warehouse}/'
                           f'{identifier.get_database_name()}/{identifier.get_object_name()}')
+            if table_metadata.is_external:
+                table_path = table_metadata.schema.options.get(PATH, table_path)
             schema = table_metadata.schema.to_schema()
             response = self.mock_table(
                 response_identifier or identifier, table_metadata, table_path, schema)
@@ -2389,6 +2400,8 @@ class RESTCatalogServer:
         table_path = (
             f'file://{self.data_path}/{self.warehouse}/'
             f'{identifier.get_database_name()}/{identifier.get_object_name()}')
+        if table_metadata.is_external:
+            table_path = table_schema.options.get(PATH, table_path)
 
         table_identifier = Identifier.create(
             identifier.get_database_name(), identifier.get_table_name(), branch=branch)

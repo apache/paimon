@@ -275,6 +275,32 @@ table = catalog.get_table('database_name.table_name')
 table = catalog.get_table_by_id('table_id')
 ```
 
+### Register an Existing Table in a REST Catalog
+
+With a REST catalog, register an existing Paimon table by supplying its path:
+
+```python
+from pypaimon import Schema
+
+catalog.create_table(
+    identifier='database_name.existing_table',
+    schema=Schema(options={'path': 's3://bucket/existing-table'}),
+    ignore_if_exists=False,
+)
+```
+
+PyPaimon reads the latest filesystem schema and inherits its fields, partition keys,
+primary keys, options, and table comment. Explicitly supplied fields and keys must
+match the existing definition. Supplied options must match existing values, except
+for `owner` and `path`: a non-null `owner` overrides the inherited owner option in
+the create request, and `path` is set to the supplied location. Registration leaves
+the filesystem schema unchanged.
+
+If no Paimon schema exists at the path, PyPaimon sends the supplied definition in
+the REST create request without inference. The server handles the request; omitting
+fields in this case does not guarantee successful creation.
+This inference applies to Paimon tables, excluding format, object, and Iceberg tables.
+
 ## Alter Table
 
 Alter a table with a list of schema changes. Use `SchemaChange` from `pypaimon.schema.schema_change` and types from `pypaimon.schema.data_types` (e.g. `AtomicType`).
