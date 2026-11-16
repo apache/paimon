@@ -39,7 +39,6 @@ public class PredictionSpec {
     private final Map<String, String> inputs;
     private final List<String> mergeKeyColumns;
     private final String instructions;
-    private final Map<String, String> outputSchema;
     private final @Nullable String where;
     private final @Nullable Long snapshotId;
     private final @Nullable String tagName;
@@ -51,7 +50,6 @@ public class PredictionSpec {
             Map<String, String> inputs,
             @Nullable List<String> mergeKeyColumns,
             String instructions,
-            Map<String, String> outputSchema,
             @Nullable String where,
             @Nullable Long snapshotId,
             @Nullable String tagName,
@@ -70,7 +68,6 @@ public class PredictionSpec {
         this.inputs = copyStringMap(inputs, "inputs", true);
         this.mergeKeyColumns = copyOptionalStringList(mergeKeyColumns, "mergeKeyColumns");
         this.instructions = instructions;
-        this.outputSchema = copyStringMap(outputSchema, "outputSchema", true);
         this.where = where;
         this.snapshotId = snapshotId;
         this.tagName = tagName;
@@ -99,10 +96,6 @@ public class PredictionSpec {
 
     public String instructions() {
         return instructions;
-    }
-
-    public Map<String, String> outputSchema() {
-        return outputSchema;
     }
 
     @Nullable

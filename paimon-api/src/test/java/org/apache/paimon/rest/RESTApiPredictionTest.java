@@ -54,7 +54,13 @@ class RESTApiPredictionTest {
                 .containsEntry("model", "quality.qwen_vl")
                 .containsEntry("instructions", "Classify")
                 .doesNotContainKeys(
-                        "name", "prompt", "where", "snapshotId", "tagName", "resultColumns");
+                        "name",
+                        "prompt",
+                        "outputSchema",
+                        "where",
+                        "snapshotId",
+                        "tagName",
+                        "resultColumns");
         assertThat(requestMap.get("mergeKeyColumns"))
                 .isEqualTo(Collections.singletonList("clip_id"));
         assertThat((Map<String, Object>) requestMap.get("source"))
@@ -123,7 +129,6 @@ class RESTApiPredictionTest {
                                         Collections.emptyMap(),
                                         null,
                                         "Classify",
-                                        Collections.singletonMap("result", "STRING"),
                                         null,
                                         null,
                                         null,
@@ -139,7 +144,6 @@ class RESTApiPredictionTest {
                                         Collections.singletonMap("video", "content"),
                                         Arrays.asList("clip_id", "clip_id"),
                                         "Classify",
-                                        Collections.singletonMap("result", "STRING"),
                                         null,
                                         null,
                                         null,
@@ -182,7 +186,6 @@ class RESTApiPredictionTest {
                 inputs,
                 Collections.singletonList("clip_id"),
                 "Classify",
-                Collections.singletonMap("result", "STRING"),
                 null,
                 null,
                 null,

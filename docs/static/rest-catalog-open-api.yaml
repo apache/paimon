@@ -4707,11 +4707,14 @@ components:
       properties:
         table:
           $ref: '#/components/schemas/PredictionSource'
+          description: >-
+            Managed result table containing source identity columns, a response string,
+            and an error string.
       additionalProperties: true
     SubmitPredictionRequest:
       type: object
       additionalProperties: false
-      required: [source, idempotencyKey, model, inputs, instructions, outputSchema]
+      required: [source, idempotencyKey, model, inputs, instructions]
       properties:
         source:
           $ref: '#/components/schemas/PredictionSource'
@@ -4746,13 +4749,6 @@ components:
           type: string
           minLength: 1
           description: Natural-language guidance for the prediction.
-        outputSchema:
-          type: object
-          minProperties: 1
-          additionalProperties:
-            type: string
-            minLength: 1
-          description: Paimon output column types.
         where:
           type: string
           minLength: 1

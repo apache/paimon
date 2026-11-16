@@ -48,7 +48,6 @@ public class SubmitPredictionRequest implements RESTRequest {
     private static final String FIELD_INPUTS = "inputs";
     private static final String FIELD_MERGE_KEY_COLUMNS = "mergeKeyColumns";
     private static final String FIELD_INSTRUCTIONS = "instructions";
-    private static final String FIELD_OUTPUT_SCHEMA = "outputSchema";
     private static final String FIELD_WHERE = "where";
     private static final String FIELD_SNAPSHOT_ID = "snapshotId";
     private static final String FIELD_TAG_NAME = "tagName";
@@ -67,7 +66,6 @@ public class SubmitPredictionRequest implements RESTRequest {
             @JsonProperty(FIELD_INPUTS) Map<String, String> inputs,
             @Nullable @JsonProperty(FIELD_MERGE_KEY_COLUMNS) List<String> mergeKeyColumns,
             @JsonProperty(FIELD_INSTRUCTIONS) String instructions,
-            @JsonProperty(FIELD_OUTPUT_SCHEMA) Map<String, String> outputSchema,
             @Nullable @JsonProperty(FIELD_WHERE) String where,
             @Nullable @JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId,
             @Nullable @JsonProperty(FIELD_TAG_NAME) String tagName,
@@ -86,7 +84,6 @@ public class SubmitPredictionRequest implements RESTRequest {
                         inputs,
                         mergeKeyColumns,
                         instructions,
-                        outputSchema,
                         where,
                         snapshotId,
                         tagName,
@@ -102,7 +99,6 @@ public class SubmitPredictionRequest implements RESTRequest {
                 spec.inputs(),
                 spec.mergeKeyColumns(),
                 spec.instructions(),
-                spec.outputSchema(),
                 spec.where(),
                 spec.snapshotId(),
                 spec.tagName(),
@@ -145,11 +141,6 @@ public class SubmitPredictionRequest implements RESTRequest {
     @JsonGetter(FIELD_INSTRUCTIONS)
     public String getInstructions() {
         return spec.instructions();
-    }
-
-    @JsonGetter(FIELD_OUTPUT_SCHEMA)
-    public Map<String, String> getOutputSchema() {
-        return spec.outputSchema();
     }
 
     @Nullable

@@ -54,7 +54,6 @@ def _spec(**changes):
         model="quality.qwen_vl",
         inputs={"video": "content"},
         instructions="Classify",
-        output_schema={"result": "STRING"},
     )
     values.update(changes)
     return PredictionSpec(**values)
@@ -105,7 +104,7 @@ class PredictionTest(unittest.TestCase):
         self.assertNotIn("mergeKeyColumns", body)
         self.assertNotIn("prompt", body)
         self.assertEqual("Classify", body["instructions"])
-        self.assertEqual({"result": "STRING"}, body["outputSchema"])
+        self.assertNotIn("outputSchema", body)
         self.assertEqual(
             {"database": "quality", "table": "clips"}, body["source"])
         self.assertNotIn("snapshotId", body)
@@ -190,7 +189,6 @@ class PredictionTest(unittest.TestCase):
             dict(merge_key_columns=["id", "id"]),
             dict(merge_key_columns="id"),
             dict(instructions=" "),
-            dict(output_schema={}),
             dict(snapshot_id=0),
             dict(snapshot_id=1, tag_name="v1"),
         ]
@@ -219,7 +217,6 @@ class PredictionTest(unittest.TestCase):
             model="quality.qwen_vl",
             inputs={"video": "content"},
             instructions="Classify",
-            output_schema={"result": "STRING"},
         )
 
         self.assertIsInstance(job, PredictionJob)

@@ -110,7 +110,6 @@ class PredictionSpec:
     model: str
     inputs: Dict[str, str]
     instructions: str
-    output_schema: Dict[str, str]
     merge_key_columns: List[str] = field(default_factory=list)
     name: Optional[str] = None
     where: Optional[str] = None
@@ -136,8 +135,6 @@ class PredictionSpec:
         self.inputs = _copy_string_mapping(self.inputs, "inputs", True)
         self.merge_key_columns = _copy_string_list(
             self.merge_key_columns, "merge_key_columns")
-        self.output_schema = _copy_string_mapping(
-            self.output_schema, "output_schema", True)
         if not isinstance(self.options, dict):
             raise ValueError("options must be a mapping")
         self.options = dict(self.options)

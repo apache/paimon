@@ -117,7 +117,6 @@ class MultimodalTable:
             model,
             inputs,
             instructions,
-            output_schema,
             merge_key_columns=None,
             name=None,
             where=None,
@@ -145,7 +144,6 @@ class MultimodalTable:
             model=model,
             inputs=inputs,
             instructions=instructions,
-            output_schema=output_schema,
             merge_key_columns=(
                 [] if merge_key_columns is None else merge_key_columns),
             where=where,

@@ -57,7 +57,8 @@ class RESTCatalogPredictionTest {
             Map<String, Object> request = RESTApi.fromJson(submit.getBody().readUtf8(), Map.class);
             assertThat(request.get("idempotencyKey")).isInstanceOf(String.class);
             assertThat((String) request.get("idempotencyKey")).isNotBlank();
-            assertThat(request).doesNotContainKeys("resultColumns", "mergeKeyColumns");
+            assertThat(request)
+                    .doesNotContainKeys("resultColumns", "mergeKeyColumns", "outputSchema");
             assertThat((Map<String, Object>) request.get("source"))
                     .containsEntry("database", "quality")
                     .containsEntry("table", "clips");
@@ -118,7 +119,6 @@ class RESTCatalogPredictionTest {
                 Collections.singletonMap("video", "content"),
                 null,
                 "Classify",
-                Collections.singletonMap("result", "STRING"),
                 null,
                 null,
                 null,

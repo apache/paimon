@@ -69,7 +69,6 @@ _ARGUMENTS = {
         model="db.qwen_vl",
         inputs={"video": "content"},
         instructions="classify",
-        output_schema={"result": "STRING"},
     ),
     str: "SELECT",
     bool: False,

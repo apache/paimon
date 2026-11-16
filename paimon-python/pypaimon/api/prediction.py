@@ -83,7 +83,6 @@ class SubmitPredictionRequest(RESTRequest):
     model: str
     inputs: Dict[str, str]
     instructions: str
-    output_schema: Dict[str, str] = json_field("outputSchema")
     merge_key_columns: Optional[List[str]] = optional_json_field(
         "mergeKeyColumns", "non_null")
     name: Optional[str] = optional_json_field("name", "non_null")
@@ -120,8 +119,6 @@ class SubmitPredictionRequest(RESTRequest):
         if self.merge_key_columns is not None:
             self.merge_key_columns = _copy_string_list(
                 self.merge_key_columns, "merge_key_columns")
-        self.output_schema = _copy_string_mapping(
-            self.output_schema, "output_schema", True)
         if not isinstance(self.options, dict):
             raise ValueError("options must be a mapping")
         self.options = dict(self.options)
@@ -136,7 +133,6 @@ class SubmitPredictionRequest(RESTRequest):
             model=spec.model,
             inputs=spec.inputs,
             instructions=spec.instructions,
-            output_schema=spec.output_schema,
             merge_key_columns=spec.merge_key_columns or None,
             where=spec.where,
             snapshot_id=spec.snapshot_id,
