@@ -31,13 +31,25 @@ import java.util.concurrent.Callable;
 @Public
 public interface Lock extends AutoCloseable {
 
+    /** Acquisition policy for the outermost operation scope. Nested operations reuse that scope. */
+    enum AcquireMode {
+        /** Acquire the configured lock. */
+        REQUIRED,
+
+        /**
+         * Allow the backend to use optimistic concurrency instead of acquiring the lock. The
+         * operation must support retrying after a publication conflict.
+         */
+        OPTIMISTIC_ALLOWED
+    }
+
     /**
      * Acquire a scope to release on the acquiring thread. Clean up partial acquisition on failure.
      */
     AutoCloseable acquire() throws Exception;
 
-    /** Acquire the scope for the given commit attempt. */
-    default AutoCloseable acquire(boolean firstCommit) throws Exception {
+    /** Acquire a scope using the given policy. Backends may always acquire the configured lock. */
+    default AutoCloseable acquire(AcquireMode mode) throws Exception {
         return acquire();
     }
 
@@ -47,14 +59,14 @@ public interface Lock extends AutoCloseable {
      * result or exception.
      */
     default <T> T runWithLock(Callable<T> callable) throws Exception {
-        return runWithLock(callable, false);
+        return runWithLock(callable, AcquireMode.REQUIRED);
     }
 
-    /** Run a commit attempt with the scope required by this lock. */
-    default <T> T runWithLock(Callable<T> callable, boolean firstCommit) throws Exception {
+    /** Run an operation with the given acquisition policy. */
+    default <T> T runWithLock(Callable<T> callable, AcquireMode mode) throws Exception {
         AutoCloseable scope;
         try {
-            scope = acquire(firstCommit);
+            scope = acquire(mode);
         } catch (Exception e) {
             if (ExceptionUtils.findThrowable(e, InterruptedException.class).isPresent()) {
                 Thread.currentThread().interrupt();
@@ -111,7 +123,7 @@ public interface Lock extends AutoCloseable {
         }
 
         @Override
-        public <T> T runWithLock(Callable<T> callable, boolean firstCommit) throws Exception {
+        public <T> T runWithLock(Callable<T> callable, AcquireMode mode) throws Exception {
             return callable.call();
         }
 
@@ -137,16 +149,16 @@ public interface Lock extends AutoCloseable {
 
         @Override
         public AutoCloseable acquire() throws Exception {
-            return acquire(false);
+            return acquire(AcquireMode.REQUIRED);
         }
 
         @Override
-        public AutoCloseable acquire(boolean firstCommit) throws Exception {
+        public AutoCloseable acquire(AcquireMode mode) throws Exception {
             if (held.get()) {
                 delegate.ensureValid();
                 return () -> {};
             }
-            AutoCloseable scope = delegate.acquire(firstCommit);
+            AutoCloseable scope = delegate.acquire(mode);
             try {
                 delegate.ensureValid();
                 held.set(true);
@@ -161,12 +173,12 @@ public interface Lock extends AutoCloseable {
         }
 
         @Override
-        public <T> T runWithLock(Callable<T> callable, boolean firstCommit) throws Exception {
+        public <T> T runWithLock(Callable<T> callable, AcquireMode mode) throws Exception {
             if (held.get()) {
                 delegate.ensureValid();
                 return callable.call();
             }
-            return Lock.super.runWithLock(callable, firstCommit);
+            return Lock.super.runWithLock(callable, mode);
         }
 
         @Override

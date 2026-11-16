@@ -43,6 +43,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.operation.Lock.AcquireMode;
 import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.CommitChangesProvider;
 import org.apache.paimon.operation.commit.CommitCleaner;
@@ -245,13 +246,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
 
-    /**
-     * Run metadata preparation and publication with this commit's lock. Pass {@code false} when the
-     * operation requires the configured lock even on its first attempt.
-     */
-    public <T> T runWithLock(Callable<T> callable, boolean firstCommit) {
+    /** Run metadata preparation and publication with the given lock acquisition policy. */
+    public <T> T runWithLock(Callable<T> callable, AcquireMode mode) {
         try {
-            return snapshotCommit.runWithLock(callable, firstCommit);
+            return snapshotCommit.runWithLock(callable, mode);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -1195,7 +1193,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     latestSnapshotSupplier.get(),
                                     detectConflicts,
                                     newStatsFileName),
-                    retryResult == null);
+                    retryResult == null ? AcquireMode.OPTIMISTIC_ALLOWED : AcquireMode.REQUIRED);
         } catch (Lock.AcquisitionException | RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -1690,7 +1688,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 indexManifest,
                                 nextRowId,
                                 properties),
-                false);
+                AcquireMode.REQUIRED);
     }
 
     private boolean replaceManifestListOnceWithoutLock(
@@ -1744,7 +1742,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private Pair<Boolean, CommitCallback.Context> rollbackToAsLatestOnce(Snapshot targetSnapshot) {
-        return runWithLock(() -> rollbackToAsLatestOnceWithoutLock(targetSnapshot), false);
+        return runWithLock(
+                () -> rollbackToAsLatestOnceWithoutLock(targetSnapshot), AcquireMode.REQUIRED);
     }
 
     private Pair<Boolean, CommitCallback.Context> rollbackToAsLatestOnceWithoutLock(
@@ -1908,7 +1907,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int retryCount = 0;
         long startMillis = System.currentTimeMillis();
         while (true) {
-            boolean success = compactManifestOnce(retryCount == 0);
+            boolean success =
+                    compactManifestOnce(
+                            retryCount == 0
+                                    ? AcquireMode.OPTIMISTIC_ALLOWED
+                                    : AcquireMode.REQUIRED);
             if (success) {
                 break;
             }
@@ -1926,8 +1929,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private boolean compactManifestOnce(boolean firstCommit) {
-        return runWithLock(this::compactManifestOnceWithoutLock, firstCommit);
+    private boolean compactManifestOnce(AcquireMode mode) {
+        return runWithLock(this::compactManifestOnceWithoutLock, mode);
     }
 
     private boolean compactManifestOnceWithoutLock() {
