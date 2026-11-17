@@ -20,7 +20,6 @@ package org.apache.paimon.append.cluster;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.compact.CompactUnit;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.compact.UniversalCompaction;
 import org.apache.paimon.schema.SchemaManager;
@@ -72,9 +71,9 @@ public class IncrementalClusterStrategy {
         }
 
         if (runs.size() == 1 && runs.get(0).level() == maxLevel) {
-            boolean sameClusterKeys =
+            boolean allFilesHaveSameClusterKeys =
                     runs.get(0).run().files().stream()
-                            .mapToLong(DataFileMeta::schemaId)
+                            .map(file -> file.schemaId())
                             .distinct()
                             .allMatch(
                                     schemaId ->
@@ -84,8 +83,8 @@ public class IncrementalClusterStrategy {
                                                                     .options())
                                                     .clusteringColumns()
                                                     .equals(clusterKeys));
-            // only one sorted run in the maxLevel with the same cluster key
-            if (sameClusterKeys) {
+            // Only skip compaction when all files in the run have the same cluster keys.
+            if (allFilesHaveSameClusterKeys) {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug(
                             "only one sorted run in the maxLevel with the same cluster key, no need to compact");

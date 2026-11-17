@@ -60,6 +60,9 @@ trait SparkShim {
 
   def createCustomResolution(spark: SparkSession): Rule[LogicalPlan]
 
+  // Spark 4 can invalidate metadata values when a row is updated. Spark 3 preserves them.
+  def resolveUpdateMetadata(assignments: Seq[Assignment]): Seq[Assignment] = assignments
+
   def createSparkInternalRow(rowType: RowType): SparkInternalRow
 
   def createSparkInternalRowWithBlob(
@@ -196,6 +199,11 @@ trait SparkShim {
       relation: DataSourceV2Relation,
       table: Table,
       output: Seq[AttributeReference]): DataSourceV2Relation
+
+  def copyDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      catalog: CatalogPlugin,
+      identifier: Identifier): DataSourceV2Relation
 
   // Per-version shim: Spark 4.1 added a 5th `timeTravelSpec` parameter with a default. A 4-arg call
   // site compiled against 4.1 emits a `create$default$5()` lookup absent on 4.0.

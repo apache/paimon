@@ -46,6 +46,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BatchRecordWriter;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.IOFunction;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RecordWriter;
@@ -288,22 +289,26 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
 
     @Override
     public void close() throws Exception {
-        // cancel compaction so that it does not block job cancelling
-        compactManager.cancelCompaction();
-        sync();
-
-        compactManager.close();
-        for (DataFileMeta file : compactAfter.values()) {
-            // appendOnlyCompactManager will rewrite the file and no file upgrade will occur, so we
-            // can directly delete the file in compactAfter.
-            file.collectFiles(pathFactory).forEach(fileIO::deleteQuietly);
-        }
-
-        sinkWriter.close();
-
-        if (compactDeletionFile != null) {
-            compactDeletionFile.clean();
-        }
+        IOUtils.closeAll(
+                () -> {
+                    // Cancel compaction so that it does not block job cancelling.
+                    compactManager.cancelCompaction();
+                    sync();
+                },
+                compactManager::close,
+                () -> {
+                    for (DataFileMeta file : compactAfter.values()) {
+                        // Append compaction rewrites files rather than upgrading them, so its
+                        // uncommitted output can be deleted directly.
+                        file.collectFiles(pathFactory).forEach(fileIO::deleteQuietly);
+                    }
+                },
+                sinkWriter::close,
+                () -> {
+                    if (compactDeletionFile != null) {
+                        compactDeletionFile.clean();
+                    }
+                });
     }
 
     public void toBufferedWriter() throws Exception {

@@ -21,13 +21,17 @@ package org.apache.paimon.spark.catalyst
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.TableOutputResolver
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Cast, Expression}
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, V2WriteCommand}
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, RepartitionByExpression, V2WriteCommand}
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.execution.ui.SQLPlanMetric
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.DataType
 
 object Compatibility {
+
+  def repartitionByExpression(expressions: Seq[Expression], query: LogicalPlan): LogicalPlan = {
+    RepartitionByExpression(expressions, query, None)
+  }
 
   def resolveTableOutputColumns(
       tableName: String,

@@ -2764,6 +2764,21 @@ public class CoreOptions implements Serializable {
                                     + "selected row count is no more than "
                                     + "data-evolution.row-sidecar.max-selected-rows.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_DATA_FILE_DV_PUSHDOWN_ENABLED =
+            key("data-evolution.data-file-dv-pushdown.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to prune a contiguous deletion span from data file reads. "
+                                    + "When the deletions of a Parquet data file form one "
+                                    + "contiguous span of physical rows covering at least half "
+                                    + "of the file, the scan skips that span and reads the "
+                                    + "remaining rows as ranges. This applies only when the "
+                                    + "scan has no other row-range or file-index selection; "
+                                    + "scattered deletions also keep the regular read path. "
+                                    + "The deletion vector is still applied on top, so results "
+                                    + "never change.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGED_READ_STATS_PUSHDOWN_ENABLED =
             key("data-evolution.merged-read.stats-pushdown.enabled")
                     .booleanType()
@@ -4819,6 +4834,10 @@ public class CoreOptions implements Serializable {
         return maxSelectionRatio;
     }
 
+    public boolean dataEvolutionDataFileDvPushdownEnabled() {
+        return options.get(DATA_EVOLUTION_DATA_FILE_DV_PUSHDOWN_ENABLED);
+    }
+
     public boolean dataEvolutionMergeIntoFilePruning() {
         return options.get(DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING);
     }
@@ -5153,6 +5172,19 @@ public class CoreOptions implements Serializable {
 
     public boolean fmIndexEnabled() {
         return !fmIndexColumns().isEmpty();
+    }
+
+    /**
+     * Whether any source-backed primary-key index (vector, full-text, FM, BTree, bitmap,
+     * multivalue) is configured.
+     */
+    public boolean primaryKeyIndexEnabled() {
+        return !VectorIndexOptions.columns(options).isEmpty()
+                || fullTextIndexEnabled()
+                || fmIndexEnabled()
+                || !btreeIndexColumns().isEmpty()
+                || !bitmapIndexColumns().isEmpty()
+                || !multiValueIndexColumns().isEmpty();
     }
 
     public List<String> btreeIndexColumns() {

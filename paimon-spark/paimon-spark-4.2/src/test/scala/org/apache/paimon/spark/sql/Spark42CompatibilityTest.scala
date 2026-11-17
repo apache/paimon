@@ -190,8 +190,8 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
       checkAnswer(
         sql(
           "SELECT variant_get(v, '$.id', 'int'), hex(ST_AsBinary(g)), " +
-            "hex(ST_AsBinary(a[0])), hex(ST_AsBinary(gg)) FROM typed"),
-        Seq(Row(1, point, point, point))
+            "hex(ST_AsBinary(a[0])), hex(ST_AsBinary(gg)), ST_Srid(g), ST_Srid(a[0]) FROM typed"),
+        Seq(Row(1, point, point, point, 3857, 3857))
       )
     }
   }

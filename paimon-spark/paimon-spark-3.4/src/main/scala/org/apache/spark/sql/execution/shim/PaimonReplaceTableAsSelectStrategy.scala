@@ -29,7 +29,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReplaceTable, R
 import org.apache.spark.sql.connector.catalog.{Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.execution.{PaimonTableAsSelectHelper, SparkPlan}
 import org.apache.spark.sql.execution.PaimonTableAsSelectHelper._
-import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, ReplaceTableAsSelectExec}
+import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, PaimonTableAsSelectWriteExec, ReplaceTableAsSelectExec}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -49,7 +49,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
           tableSpec: TableSpec,
           options,
           orCreate,
-          analyzedQuery) if supportsCatalog(catalog, tableSpec) =>
+          analyzedQuery) if supportsCatalog(catalog, tableSpec.provider.orNull) =>
       assert(analyzedQuery.isDefined)
       // For V1 saveAsTable + overwrite on an existing table, rewrite to
       // OverwriteByExpression to preserve table definition.
@@ -82,30 +82,32 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
       val pinnedQuery =
         pinSnapshotInQuery(catalog, ident, analyzedQuery.get)
       if (canAtomicReplace(catalog, ident, qualifiedSpec, parts)) {
-        AtomicReplaceTableAsSelectExec(
-          catalog.asInstanceOf[StagingTableCatalog],
-          ident,
-          parts,
-          pinnedQuery,
-          planLater(query),
-          qualifiedSpec,
-          writeOpts,
-          orCreate = orCreate,
-          invalidateCache
-        ) :: Nil
+        PaimonTableAsSelectWriteExec.prepare(
+          AtomicReplaceTableAsSelectExec(
+            catalog.asInstanceOf[StagingTableCatalog],
+            ident,
+            parts,
+            pinnedQuery,
+            planLater(query),
+            qualifiedSpec,
+            writeOpts,
+            orCreate = orCreate,
+            invalidateCache
+          )) :: Nil
       } else {
         checkNonAtomicSelfReference(catalog, ident, analyzedQuery.get)
-        ReplaceTableAsSelectExec(
-          catalog,
-          ident,
-          parts,
-          pinnedQuery,
-          planLater(query),
-          qualifiedSpec,
-          writeOpts,
-          orCreate = orCreate,
-          invalidateCache
-        ) :: Nil
+        PaimonTableAsSelectWriteExec.prepare(
+          ReplaceTableAsSelectExec(
+            catalog,
+            ident,
+            parts,
+            pinnedQuery,
+            planLater(query),
+            qualifiedSpec,
+            writeOpts,
+            orCreate = orCreate,
+            invalidateCache
+          )) :: Nil
       }
     case _ => Nil
   }
@@ -127,7 +129,7 @@ case class PaimonReplaceTableStrategy(spark: SparkSession)
           schemaOrColumns,
           parts,
           tableSpec: TableSpec,
-          orCreate) if supportsCatalog(catalog, tableSpec) =>
+          orCreate) if supportsCatalog(catalog, tableSpec.provider.orNull) =>
       val columns =
         SparkShimLoader.shim.toReplaceTableColumns(
           replace.tableSchema,

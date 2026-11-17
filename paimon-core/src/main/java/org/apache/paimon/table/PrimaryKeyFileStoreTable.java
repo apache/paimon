@@ -207,7 +207,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
         return new TableWriteImpl<>(
                 rowType(),
                 storeWrite,
-                createRowKeyExtractor(),
+                this::createRowKeyExtractor,
                 (record, rowKind) ->
                         kv.replace(
                                 record.primaryKey(),
