@@ -138,6 +138,8 @@ public class RowTrackingCommitUtils {
                     rowIdAssigned.add(entry.assignFirstRowId(start));
                     blobStartDefault = start;
                     blobStarts.clear();
+                    // Skip the rows of normal files written without vector-store files.
+                    vectorStoreStart = Math.max(vectorStoreStart, start);
                     start += rowCount;
                 }
             } else {
