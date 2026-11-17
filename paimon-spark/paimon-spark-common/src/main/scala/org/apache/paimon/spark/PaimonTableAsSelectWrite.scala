@@ -42,7 +42,8 @@ object PaimonTableAsSelectWrite {
       query: LogicalPlan,
       options: CaseInsensitiveStringMap): Option[Seq[InternalRow]] = {
     PaimonUtils.withFailureCleanup {
-      unwrapTable(table) match {
+      val writeTable = PaimonSparkTableBase.withWriteOptions(table, options.asCaseSensitiveMap())
+      unwrapTable(writeTable) match {
         case target: SparkTable if target.useV2Write =>
           // PaimonAnalysis prepares ordinary SparkTable relations. Staged tables delegate their
           // writer but need their legacy distribution prepared here, using the unwrapped table.
@@ -53,7 +54,7 @@ object PaimonTableAsSelectWrite {
                 query)
             case _ => query
           }
-          val relation = DataSourceV2Relation.create(table, Some(catalog), Some(ident))
+          val relation = DataSourceV2Relation.create(writeTable, Some(catalog), Some(ident))
           val command =
             AppendData.byPosition(relation, writeQuery, options.asCaseSensitiveMap().asScala.toMap)
           PaimonUtils.createDataset(spark, command).collect()

@@ -19,7 +19,7 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.Snapshot
-import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkSource}
+import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog}
 import org.apache.paimon.spark.write.PaimonWriteOptions
 
 import org.apache.spark.sql.{SparkSession, Strategy}
@@ -71,12 +71,12 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
           ifNotExists
         )) :: Nil
     case create @ CreateTableAsSelect(
-          ResolvedDBObjectName(_: SparkGenericCatalog, _),
+          ResolvedDBObjectName(catalog: SparkGenericCatalog, _),
           _,
           _,
           tableSpec: TableSpec,
           _,
-          _) if tableSpec.provider.exists(_.equalsIgnoreCase(SparkSource.NAME)) =>
+          _) if supportsCatalog(catalog, tableSpec) =>
       new DataSourceV2Strategy(spark)
         .apply(create)
         .map(exec => PaimonTableAsSelectWriteExec.prepare(exec))

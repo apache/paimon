@@ -164,10 +164,13 @@ object PaimonTableAsSelectHelper {
     }
   }
 
-  def supportsCatalog(catalog: SparkBaseCatalog, tableSpec: TableSpec): Boolean = catalog match {
+  def supportsCatalog(catalog: SparkBaseCatalog, tableSpec: TableSpec): Boolean =
+    supportsCatalog(catalog, tableSpec.provider.orNull)
+
+  def supportsCatalog(catalog: SparkBaseCatalog, provider: String): Boolean = catalog match {
     case _: SparkCatalog => true
     case _: SparkGenericCatalog =>
-      tableSpec.provider.exists(_.equalsIgnoreCase(SparkSource.NAME))
+      SparkBaseCatalog.usePaimon(provider)
     case _ => false
   }
 

@@ -53,7 +53,7 @@ class RollbackStagedTable implements StagedTable, SupportsRead, SupportsWrite, S
 
     private static final Action DO_NOTHING = () -> {};
 
-    private final Table table;
+    private Table table;
     private final StagedAction commitAction;
     private final Action abortAction;
     private boolean committed;
@@ -76,6 +76,10 @@ class RollbackStagedTable implements StagedTable, SupportsRead, SupportsWrite, S
 
     Table wrappedTable() {
         return table;
+    }
+
+    void replaceWrappedTable(Table replacement) {
+        table = replacement;
     }
 
     @Override

@@ -150,13 +150,19 @@ class PaimonOptionTest extends PaimonSparkTestBase {
 
   test("Paimon Option: path-based writes fall back to V1 without a function catalog") {
     sql("CREATE TABLE T (id INT) TBLPROPERTIES ('bucket-key' = 'id', 'bucket' = '2')")
-    Seq(1, 2)
-      .toDF("id")
-      .write
-      .format("paimon")
-      .mode("append")
-      .save(loadTable("T").location().toString)
-    checkAnswer(sql("SELECT * FROM T"), Seq(Row(1), Row(2)))
+    for (enabled <- Seq(false, true)) {
+      val writes = captureV2Writes {
+        Seq(1, 2)
+          .toDF("id")
+          .write
+          .format("paimon")
+          .option("write.use-v2-write", enabled.toString)
+          .mode("append")
+          .save(loadTable("T").location().toString)
+      }
+      assert(writes.isEmpty)
+    }
+    checkAnswer(sql("SELECT * FROM T"), Seq(Row(1), Row(2), Row(1), Row(2)))
   }
 
   test("Paimon Option: DataSource catalog writes bind the catalog for V2 distribution") {

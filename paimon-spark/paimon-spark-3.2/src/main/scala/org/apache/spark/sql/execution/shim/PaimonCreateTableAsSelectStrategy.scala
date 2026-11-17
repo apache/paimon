@@ -19,12 +19,12 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.Snapshot
-import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkSource}
+import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog}
 import org.apache.paimon.spark.write.PaimonWriteOptions
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan}
-import org.apache.spark.sql.connector.catalog.CatalogV2Util
+import org.apache.spark.sql.connector.catalog.{CatalogV2Util, TableCatalog}
 import org.apache.spark.sql.execution.{PaimonTableAsSelectHelper, SparkPlan}
 import org.apache.spark.sql.execution.PaimonTableAsSelectHelper._
 import org.apache.spark.sql.execution.datasources.v2.{CreateTableAsSelectExec, DataSourceV2Strategy, PaimonTableAsSelectWriteExec}
@@ -67,8 +67,8 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession) extends Strate
                 .name())).asJava),
           ifNotExists
         )) :: Nil
-    case create @ CreateTableAsSelect(_: SparkGenericCatalog, _, _, _, props, _, _)
-        if props.get("provider").exists(_.equalsIgnoreCase(SparkSource.NAME)) =>
+    case create @ CreateTableAsSelect(catalog: SparkGenericCatalog, _, _, _, props, _, _)
+        if supportsCatalog(catalog, props.get(TableCatalog.PROP_PROVIDER).orNull) =>
       new DataSourceV2Strategy(spark)
         .apply(create)
         .map(exec => PaimonTableAsSelectWriteExec.prepare(exec))

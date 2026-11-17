@@ -18,12 +18,13 @@
 
 package org.apache.spark.sql.execution.shim
 
-import org.apache.paimon.spark.{SparkCatalog, SparkSource}
+import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.catalog.SparkBaseCatalog
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReplaceTableAsSelect}
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, TableCatalog}
+import org.apache.spark.sql.execution.PaimonTableAsSelectHelper.supportsCatalog
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Strategy, PaimonTableAsSelectWriteExec}
 
@@ -35,8 +36,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession) extends Strat
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = {
     plan match {
       case ReplaceTableAsSelect(catalog: SparkBaseCatalog, ident, parts, _, props, _, _)
-          if catalog.isInstanceOf[SparkCatalog] ||
-            props.get(TableCatalog.PROP_PROVIDER).exists(_.equalsIgnoreCase(SparkSource.NAME)) =>
+          if supportsCatalog(catalog, props.get(TableCatalog.PROP_PROVIDER).orNull) =>
         val properties = CatalogV2Util.withDefaultOwnership(props)
         catalog match {
           case paimon: SparkCatalog =>

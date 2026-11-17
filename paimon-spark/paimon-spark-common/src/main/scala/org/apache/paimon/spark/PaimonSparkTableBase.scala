@@ -30,7 +30,7 @@ import org.apache.paimon.spark.write.{PaimonV2WriteBuilder, PaimonWriteBuilder}
 import org.apache.paimon.table.{CatalogTableType, Table, _}
 import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED, POSTPONE_MODE}
 
-import org.apache.spark.sql.connector.catalog._
+import org.apache.spark.sql.connector.catalog.{Table => SparkCatalogTable, _}
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
 import org.apache.spark.sql.types.StructType
@@ -49,9 +49,17 @@ abstract class PaimonSparkTableBase(val table: Table)
 
   lazy val coreOptions = new CoreOptions(table.options())
 
-  lazy val useV2Write: Boolean = OptionUtils.useV2Write(table.options()) && supportsV2Write
+  lazy val useV2Write: Boolean = useV2WriteWithOptions(Collections.emptyMap())
 
-  private def supportsV2Write: Boolean = {
+  private def useV2WriteWithOptions(writeOptions: JMap[String, String]): Boolean = {
+    val key = SparkConnectorOptions.USE_V2_WRITE.key()
+    val options = Option(new CaseInsensitiveStringMap(writeOptions).get(key))
+      .map(value => Collections.singletonMap(key, value))
+      .getOrElse(table.options())
+    OptionUtils.useV2Write(options) && supportsV2Write
+  }
+
+  protected def supportsV2Write: Boolean = {
     !coreOptions.bucketFunctionProvider().isPresent &&
     coreOptions.bucketFunctionType() == BucketFunctionType.DEFAULT && {
       table match {
@@ -193,7 +201,7 @@ abstract class PaimonSparkTableBase(val table: Table)
     table match {
       case fileStoreTable: FileStoreTable =>
         val options = Options.fromMap(info.options)
-        if (useV2Write) {
+        if (useV2WriteWithOptions(info.options().asCaseSensitiveMap())) {
           new PaimonV2WriteBuilder(fileStoreTable, info.schema(), options)
         } else {
           new PaimonWriteBuilder(fileStoreTable, options)
@@ -211,5 +219,30 @@ abstract class PaimonSparkTableBase(val table: Table)
       commit.close()
     }
     true
+  }
+}
+
+object PaimonSparkTableBase {
+
+  /** Bind the operation's switch before Spark selects write capabilities and a writer. */
+  def withWriteOptions(
+      table: SparkCatalogTable,
+      options: JMap[String, String]): SparkCatalogTable = {
+    val key = SparkConnectorOptions.USE_V2_WRITE.key()
+    Option(new CaseInsensitiveStringMap(options).get(key)) match {
+      case Some(value) =>
+        table match {
+          case target: SparkTable if target.getTable.options().get(key) != value =>
+            SparkTable.of(target.getTable.copy(Collections.singletonMap(key, value)))
+          case staged: RollbackStagedTable =>
+            val updated = withWriteOptions(staged.wrappedTable(), options)
+            if (updated ne staged.wrappedTable()) {
+              staged.replaceWrappedTable(updated)
+            }
+            staged
+          case _ => table
+        }
+      case None => table
+    }
   }
 }

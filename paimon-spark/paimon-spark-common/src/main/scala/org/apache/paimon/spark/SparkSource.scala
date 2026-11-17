@@ -76,7 +76,7 @@ class SparkSource
     } else {
       // Pure path relations have no FunctionCatalog to resolve the bucket function in V2 writes.
       new SparkTable(table) {
-        override lazy val useV2Write: Boolean = false
+        override protected def supportsV2Write: Boolean = false
       }
     }
   }
