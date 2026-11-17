@@ -233,7 +233,8 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
               case (partitionName, index) =>
                 val internalRowIndex = partitionSchema.fieldIndex(partitionName)
                 val structField = partitionSchema.fields(internalRowIndex)
-                Objects.equals(
+                // `deepEquals`: a BINARY partition value is a `byte[]`.
+                Objects.deepEquals(
                   sparkInternalRow.get(internalRowIndex, structField.dataType),
                   internalRow.get(index, structField.dataType))
             }

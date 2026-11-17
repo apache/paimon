@@ -104,6 +104,21 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
     }
   }
 
+  test("describe a binary partition") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, p BINARY) PARTITIONED BY (p)")
+      sql("INSERT INTO t VALUES (1, CAST('2021' AS BINARY)), (2, CAST('2022' AS BINARY))")
+      // Spark renders a BINARY partition value as hex bytes by default.
+      withSQLConf("spark.sql.binaryOutputStyle" -> "UTF-8") {
+        checkAnswer(
+          sql("DESCRIBE FORMATTED t PARTITION (p = '2021')")
+            .filter("col_name = 'Partition Values'")
+            .select("data_type"),
+          Seq(Row("[p=2021]")))
+      }
+    }
+  }
+
   test("SQL scalar functions, builtin lookup and unsupported table function rejection") {
     try {
       sql("CREATE FUNCTION add_one(x INT) RETURNS INT RETURN x + 1")

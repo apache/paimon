@@ -211,6 +211,33 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
     )
   }
 
+  test("Paimon Partition Management: show, add and drop a binary partition") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (a INT, p BINARY) PARTITIONED BY (p)")
+      spark.sql("INSERT INTO T VALUES (1, CAST('2021' AS BINARY)), (2, CAST('2022' AS BINARY))")
+      checkAnswer(spark.sql("SHOW PARTITIONS T PARTITION (p = '2021')"), Row("p=2021") :: Nil)
+
+      val e = intercept[AnalysisException] {
+        spark.sql("ALTER TABLE T ADD PARTITION (p = '2021')")
+      }
+      assert(e.getMessage.contains("already exist"))
+
+      spark.sql("ALTER TABLE T DROP PARTITION (p = '2021')")
+      checkAnswer(spark.sql("SHOW PARTITIONS T"), Row("p=2022") :: Nil)
+    }
+  }
+
+  test("Paimon Partition Management: truncate with a partial binary partition spec") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (a INT, p1 BINARY, p2 STRING) PARTITIONED BY (p1, p2)")
+      spark.sql(
+        "INSERT INTO T VALUES (1, CAST('x' AS BINARY), 'a'), (2, CAST('x' AS BINARY), 'b'), " +
+          "(3, CAST('y' AS BINARY), 'a')")
+      spark.sql("TRUNCATE TABLE T PARTITION (p1 = 'x')")
+      checkAnswer(spark.sql("SELECT a FROM T"), Row(3) :: Nil)
+    }
+  }
+
   test("Paimon Partition Management: timestamp partition column") {
     spark.sql(s"""
                  |CREATE TABLE T (a INT, dt TIMESTAMP)
