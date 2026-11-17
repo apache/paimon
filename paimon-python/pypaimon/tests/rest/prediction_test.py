@@ -45,11 +45,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.multimodal.prediction import (
-    PredictionCanceledError,
-    PredictionFailedError,
-    PredictionWait,
-)
+from pypaimon.multimodal.prediction_wait import PredictionWait
 from pypaimon.multimodal.table import MultimodalTable
 from pypaimon.table.file_store_table import FileStoreTable
 
@@ -252,8 +248,9 @@ class PredictionTest(unittest.TestCase):
         self.assertIsInstance(waiter, PredictionWait)
         self.assertEqual("prediction-1", waiter.prediction_id)
 
-    @patch("pypaimon.common.wait.time.sleep")
-    def test_result_is_client_side_polling(self, sleep):
+    @patch("pypaimon.multimodal.prediction_wait.random.random", return_value=0)
+    @patch("pypaimon.multimodal.prediction_wait.time.sleep")
+    def test_result_is_client_side_polling(self, sleep, random):
         catalog = Mock()
         catalog.get_prediction.side_effect = [
             _prediction(PredictionStatus(PredictionState.RUNNING)),
@@ -266,26 +263,23 @@ class PredictionTest(unittest.TestCase):
         waiter = PredictionWait(catalog, _prediction())
         observed = []
         result = waiter.result(
-            timeout=timedelta(seconds=1),
+            timeout=timedelta(seconds=10),
             callback=lambda prediction: observed.append(
                 prediction.status.state),
         )
-        self.assertIs(waiter.current, result)
         self.assertEqual(PredictionState.TERMINATED, result.status.state)
         self.assertEqual(
             PredictionTerminationCode.SUCCESS,
             result.status.termination_details.code,
         )
-        self.assertEqual(
-            [PredictionState.RUNNING, PredictionState.TERMINATED], observed)
+        self.assertEqual([PredictionState.RUNNING], observed)
         self.assertEqual(2, catalog.get_prediction.call_count)
-        self.assertEqual(2, sleep.call_count)
+        sleep.assert_called_once_with(1)
 
-    @patch("pypaimon.common.wait.time.sleep")
-    def test_result_raises_for_failed_and_canceled_predictions(self, sleep):
-        for code, error in (
-                (PredictionTerminationCode.FAILED, PredictionFailedError),
-                (PredictionTerminationCode.CANCELED, PredictionCanceledError),
+    def test_result_returns_failed_and_canceled_predictions(self):
+        for code in (
+                PredictionTerminationCode.FAILED,
+                PredictionTerminationCode.CANCELED,
         ):
             with self.subTest(code=code):
                 catalog = Mock()
@@ -295,10 +289,14 @@ class PredictionTest(unittest.TestCase):
                         PredictionTerminationDetails(code, "terminal"),
                     ))
                 waiter = PredictionWait(catalog, _prediction())
-                with self.assertRaises(error):
-                    waiter.result(timeout=timedelta(seconds=1))
+                result = waiter.result(timeout=timedelta(seconds=1))
+                self.assertEqual(
+                    code, result.status.termination_details.code)
 
-    @patch("pypaimon.common.wait.time.monotonic", side_effect=[0, 2])
+    @patch(
+        "pypaimon.multimodal.prediction_wait.time.monotonic",
+        side_effect=[0, 2],
+    )
     def test_result_timeout_does_not_cancel_prediction(self, monotonic):
         catalog = Mock()
         waiter = PredictionWait(catalog, _prediction())

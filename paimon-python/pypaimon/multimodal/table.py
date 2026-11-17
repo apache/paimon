@@ -129,7 +129,7 @@ class MultimodalTable:
         asynchronously.
         """
         from pypaimon.catalog.prediction import PredictionSpec
-        from pypaimon.multimodal.prediction import PredictionWait
+        from pypaimon.multimodal.prediction_wait import PredictionWait
         from pypaimon.table.file_store_table import FileStoreTable
 
         if not isinstance(self.raw_table, FileStoreTable):
@@ -168,7 +168,7 @@ class MultimodalTable:
 
     def cancel_prediction(self, prediction_id):
         """Request cancellation and return a wait handle."""
-        from pypaimon.multimodal.prediction import PredictionWait
+        from pypaimon.multimodal.prediction_wait import PredictionWait
 
         prediction = self.catalog.cancel_prediction(prediction_id)
         return PredictionWait(self.catalog, prediction)
