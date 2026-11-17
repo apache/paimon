@@ -19,12 +19,15 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactDeletionVectorRewriter;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionNormalCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -43,6 +46,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -69,6 +73,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
@@ -99,6 +104,11 @@ import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Tests filename-anchored deletion vectors for data evolution tables. */
 public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
@@ -111,6 +121,72 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                     new DvSpec(new Range(0, 4), 1, 4),
                     new DvSpec(new Range(5, 9), 6),
                     new DvSpec(new Range(10, 14), 10, 12));
+
+    @Test
+    public void testCompactScansDeletionVectorIndexesOnceAcrossPartitions() throws Exception {
+        FileStoreTable table = createPartitionedReassignTable("compact_dv_scan", false);
+        writePartitionRows(table, "a", 0, 1, 2);
+        writePartitionRows(table, "a", 3, 4, 5);
+        writePartitionRows(table, "b", 6, 7, 8);
+        writePartitionRows(table, "b", 9, 10, 11);
+        writePartitionRows(table, "c", 12, 13, 14);
+        BinaryRow partitionA = partition(table, "a");
+        BinaryRow partitionB = partition(table, "b");
+        commitDeletionVectors(
+                table,
+                partitionA,
+                Arrays.asList(new DvSpec(new Range(0, 2), 1), new DvSpec(new Range(3, 5), 4)));
+        commitDeletionVectors(
+                table,
+                partitionB,
+                Arrays.asList(new DvSpec(new Range(6, 8), 7), new DvSpec(new Range(9, 11), 10)));
+        commitDeletionVectors(
+                table,
+                partition(table, "c"),
+                Collections.singletonList(new DvSpec(new Range(12, 14), 13)));
+        writePartialStrings(table, "a", 0, 0, 1, 2);
+        writePartialStrings(table, "b", 6, 6, 7, 8);
+        List<String> rowsBefore = readPartitionedRows(table);
+        List<String> anchorsBefore = liveDeletionVectorDataFileNames(table);
+        List<CommitMessage> messages = new ArrayList<>();
+        for (BinaryRow partition : Arrays.asList(partitionA, partitionB)) {
+            long firstRowId = partition.equals(partitionA) ? 0 : 6;
+            List<DataFileMeta> files =
+                    currentDataFiles(table, partition).stream()
+                            .filter(file -> file.nonNullFirstRowId() == firstRowId)
+                            .collect(Collectors.toList());
+            messages.add(
+                    new DataEvolutionNormalCompactTask(
+                                    partition, files, Collections.emptyList(), false)
+                            .doCompact(table, "test-compact-dv-scan"));
+        }
+
+        Snapshot snapshot = table.latestSnapshot().get();
+        IndexFileHandler indexFileHandler = spy(table.store().newIndexFileHandler());
+        FileStore store = mock(FileStore.class);
+        FileStoreTable rewriteTable = mock(FileStoreTable.class);
+        when(rewriteTable.coreOptions()).thenReturn(table.coreOptions());
+        when(rewriteTable.store()).thenReturn(store);
+        when(store.newIndexFileHandler()).thenReturn(indexFileHandler);
+
+        messages.addAll(
+                new DataEvolutionCompactDeletionVectorRewriter(rewriteTable, snapshot)
+                        .rewriteDeletionVectors(messages));
+
+        verify(indexFileHandler)
+                .scanBucketEntries(
+                        snapshot,
+                        DELETION_VECTORS_INDEX,
+                        Arrays.asList(partitionA, partitionB).stream()
+                                .map(partition -> Pair.of(partition, UNAWARE_BUCKET))
+                                .collect(Collectors.toSet()));
+        verify(indexFileHandler, never()).scan(snapshot, DELETION_VECTORS_INDEX);
+        commit(table, messages);
+        assertThat(readPartitionedRows(table)).containsExactlyInAnyOrderElementsOf(rowsBefore);
+        List<String> anchorsAfter = liveDeletionVectorDataFileNames(table);
+        assertThat(anchorsAfter).hasSize(5);
+        assertThat(anchorsBefore.stream().filter(anchorsAfter::contains).count()).isEqualTo(3L);
+    }
 
     @Test
     public void testMergedReadAfterManyDeletedBatches() throws Exception {
