@@ -26,6 +26,7 @@ import org.apache.paimon.rest.ResourcePaths;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.TreeSet;
@@ -38,6 +39,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Test for {@link DLFOpenApiActions}. */
 public class DLFOpenApiActionsTest {
 
+    private static final Set<String> REST_ONLY_OPERATIONS =
+            new HashSet<>(
+                    Arrays.asList(
+                            OpenApiSpec.normalize("POST /v1/{prefix}/predictions"),
+                            OpenApiSpec.normalize("GET /v1/{prefix}/predictions"),
+                            OpenApiSpec.normalize("GET /v1/{prefix}/predictions/{predictionId}"),
+                            OpenApiSpec.normalize(
+                                    "POST /v1/{prefix}/predictions/{predictionId}/cancel")));
+
     private final ResourcePaths paths = new ResourcePaths("clg-paimon-1");
 
     /** Each template, filled in, must come back to its own action rather than an earlier one. */
@@ -49,7 +59,7 @@ public class DLFOpenApiActionsTest {
             assertEquals(operation[2], DLFOpenApiActions.resolve(operation[0], path), path);
             actions.add(operation[2]);
         }
-        assertEquals(83, actions.size());
+        assertEquals(79, actions.size());
     }
 
     /** The table and docs/static/rest-*-open-api.yaml must list the same operations. */
@@ -59,12 +69,13 @@ public class DLFOpenApiActionsTest {
         for (String operation : OpenApiSpec.operations()) {
             spec.add(OpenApiSpec.normalize(operation));
         }
+        spec.removeAll(REST_ONLY_OPERATIONS);
         Set<String> registered = new TreeSet<>();
         for (String[] operation : DLFOpenApiActions.operations()) {
             registered.add(OpenApiSpec.normalize(operation[0] + " " + operation[1]));
         }
         assertThat(registered)
-                .as("DLFOpenApiActions must register exactly the spec operations")
+                .as("DLFOpenApiActions must register the POP-enabled spec operations")
                 .containsExactlyInAnyOrderElementsOf(spec);
     }
 

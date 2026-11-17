@@ -45,8 +45,13 @@ from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.instant import Instant
 
-# RESTApi methods with no entry in dlf_openapi_actions; they are signed without an action.
-WITHOUT_ACTION = frozenset()
+# REST-only APIs with no DLF POP action; they are signed without x-acs-action.
+WITHOUT_ACTION = frozenset({
+    "cancel_prediction",
+    "get_prediction",
+    "list_predictions",
+    "submit_prediction",
+})
 
 _SPEC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), *[os.pardir] * 4, "docs", "static")
 _SPEC_FILES = ("rest-catalog-open-api.yaml", "rest-management-open-api.yaml")
