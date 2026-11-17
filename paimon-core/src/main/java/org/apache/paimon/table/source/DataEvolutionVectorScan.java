@@ -196,7 +196,8 @@ public class DataEvolutionVectorScan implements VectorScan {
                     new RawVectorSearchSplit(
                             rawRowRanges,
                             scalarIndexFiles(allIndexFiles, rawRowRanges),
-                            vectorIndexType));
+                            vectorIndexType,
+                            true));
         }
 
         @Nullable Snapshot planSnapshot = snapshot;

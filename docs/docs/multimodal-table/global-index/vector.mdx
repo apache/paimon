@@ -310,9 +310,22 @@ result = (
 )
 ```
 
-The scalar filter is evaluated with matching scalar global indexes before vector search. Build a
-BTree index for frequently used metadata filters, such as `category`, `tenant_id`, or `event_time`,
-so vector search can restrict the candidate row ids before running ANN search.
+Exact scalar global-index answers pre-filter the vector search. If scalar indexes cannot
+evaluate the predicate, each shard runs ANN once and checks only its candidates against the
+filter columns of the same pinned snapshot. The coordinator merges the filtered results;
+it does not perform a full-table scalar scan or a raw scan to fill missing matches.
+
+`vector-index.post-filter.candidates-factor` is a positive integer, defaulting to `10`.
+The candidate count is `max(original Top-K * factor, required reranking limit)`, capped by
+the shard size and the backend integer limit. For example, Top-K 10 normally requests 100
+candidates. Batch execution may split large inputs into memory-bounded chunks; every query
+still runs ANN once. Post-filtering may return fewer than Top-K rows, including zero even
+when matches exist outside the candidates. Increasing the factor trades more ANN/scalar
+work for more candidates. There are no retries or automatic raw scans of indexed ranges.
+Raw work outside vector coverage still follows the configured index search modes.
+
+Build a BTree index for frequently used metadata filters, such as `category`, `tenant_id`,
+or `event_time`, to restrict candidate row IDs before ANN.
 
 An index answer that is only a candidate set — `contains`, ends-with or `LIKE` on a BTree index,
 or a conjunction with a member no index can evaluate — is never ranked as if it matched, because
