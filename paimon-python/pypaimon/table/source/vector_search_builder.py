@@ -20,9 +20,9 @@
 from abc import ABC, abstractmethod
 from copy import copy
 
+from pypaimon.common.options.vector_index_options import VectorIndexOptions
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 
 
@@ -226,10 +226,9 @@ class AbstractVectorSearchBuilderImpl:
         return create_vector_scan(self, execution, self._native_batch_search)
 
     def _is_primary_key_vector_search(self):
-        if self._vector_column is None:
+        if self._vector_column is None or not getattr(self._table.table_schema, 'primary_keys', None):
             return False
-        core = CoreOptions(Options(dict(self._table.table_schema.options)))
-        return self._vector_column.name in core.primary_key_vector_index_columns()
+        return self._vector_column.name in VectorIndexOptions.columns(Options(dict(self._table.table_schema.options)))
 
 
 class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuilder):

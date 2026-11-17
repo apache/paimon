@@ -313,10 +313,10 @@ def create_python_row_id_delete(table, precomputed=None):
     return PythonTableDeleteByRowId().initialize(table, precomputed)
 
 
-def create_python_shard_updator(table, projection, columns, commit_user, shard, shard_count):
+def create_python_shard_updator(table, projection, columns, commit_user, shard=0, shard_count=1, *, splits=None):
     """Initialize the Python shard resources only after backend selection."""
     from pypaimon.execution.python.write.table_update import ShardTableUpdator
-    return ShardTableUpdator(table, projection, columns, commit_user, shard, shard_count)
+    return ShardTableUpdator(table, projection, columns, commit_user, shard, shard_count, splits=splits)
 
 
 def create_python_update_operation(context, commit_identifier, predicate=None, *, has_callable=False, has_array=False):
@@ -350,8 +350,7 @@ def create_shard_update_execution(table, projection, columns, commit_user, shard
 
 def create_row_id_plan_execution(table, plan):
     """Select pure routing once; execution errors never replay another backend."""
-    if (table.options.native_write_enabled() or table.options.native_read_enabled()
-            or table.options.native_plan_enabled()):
+    if table.options.native_write_enabled():
         from pypaimon.execution.native.write.row_id_plan import create_native_row_id_plan, NativeRowIdPlan
         native = create_native_row_id_plan(table, plan)
         if native is not None:

@@ -45,6 +45,28 @@ The package includes the core catalog, table, Arrow, and pandas APIs, as well as
 the `paimon` command. Core table reads and writes do not require a JVM or a
 running Flink or Spark cluster.
 
+On Python 3.10 and newer, installation also includes `pypaimon-rust>=0.5.0`.
+Split planning, reads, writes, updates, and commits use Native execution by
+default when supported. Python 3.6–3.9 and unsupported operations use Python
+execution. To select Python execution explicitly for a table, disable all four
+options:
+
+```python
+table = table.copy({
+    "scan.native-plan.enabled": "false",
+    "read.native.enabled": "false",
+    "write.native.enabled": "false",
+    "commit.native.enabled": "false",
+})
+```
+
+The options are independent; disabling only native reads does not disable native
+split planning or writes. Explicit `scan.native-plan.enabled=false` selects the
+Python planner even when native reads are enabled. Explicit
+`write.native.enabled=false` also selects Python row-ID update routing.
+REST catalog management continues to use the Python
+REST client.
+
 ## Optional dependencies
 
 Install only the extras needed by your workload. Quote package names containing

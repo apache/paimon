@@ -670,7 +670,7 @@ public class CompactProcedure extends BaseProcedure {
         AtomicReference<DataEvolutionCompactCoordinator> coordinatorRef = new AtomicReference<>();
         Set<String> completedNormalFiles = new HashSet<>();
         Set<String> completedVectorFiles = new HashSet<>();
-        Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner =
+        Function<Snapshot, DataEvolutionRewriteExecutor.PlanResult> taskPlanner =
                 planningSnapshot -> {
                     DataEvolutionCompactCoordinator coordinator = coordinatorRef.get();
                     if (coordinator == null
@@ -695,8 +695,14 @@ public class CompactProcedure extends BaseProcedure {
                                 .withCompletedVectorFiles(completedVectorFiles);
                         coordinatorRef.set(coordinator);
                     }
-                    return filterIdlePartitions(
-                            coordinator.plan(), table, partitionPredicate, partitionIdleTime);
+                    List<DataEvolutionCompactTask> tasks =
+                            filterIdlePartitions(
+                                    coordinator.plan(),
+                                    table,
+                                    partitionPredicate,
+                                    partitionIdleTime);
+                    return new DataEvolutionRewriteExecutor.PlanResult(
+                            tasks, coordinator.isScanFinished());
                 };
         boolean trackNormalFiles = table.coreOptions().dataEvolutionCompactionSplitLargeFiles();
         boolean trackVectorFiles = table.coreOptions().vectorCompactionEnabled();

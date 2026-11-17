@@ -158,9 +158,12 @@ class TagManager:
                     tag_file_name = os.path.basename(tag_file)
                 except TypeError:
                     tag_file_name = None
-            if tag_file_name is not None:
-                _, tag = tag_file_name.split("-", 1)
-                result.append(tag)
+            # Like the Java TagManager, skip files without the tag prefix,
+            # such as .DS_Store.
+            if not (tag_file_name or '').startswith(TAG_PREFIX):
+                continue
+            _, tag = tag_file_name.split("-", 1)
+            result.append(tag)
         return result
 
     def _create_or_replace_tag(

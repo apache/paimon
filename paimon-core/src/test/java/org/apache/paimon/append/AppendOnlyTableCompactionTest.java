@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -50,6 +51,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonMap;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
@@ -274,6 +276,27 @@ public class AppendOnlyTableCompactionTest {
         assertThatThrownBy(batchCoordinator::scan)
                 .satisfies(anyCauseMatches(EndOfScanException.class));
         assertThat(batchCoordinator.batchRemainFiles()).isFalse();
+    }
+
+    @Test
+    public void testBatchCompactsLeftoverFiles() throws Exception {
+        // 2 files, fewer than compaction.min.file-num = 3
+        commit(writeCommit(2));
+
+        // streaming waits for more files or for COMPACT_AGE
+        assertThat(coordinator.run()).isEmpty();
+
+        // issue 5130: a batch compaction plans once, so it compacts the 2 files right away
+        List<AppendCompactTask> tasks = createBatchCoordinator(Collections.emptyMap()).run();
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).compactBefore()).hasSize(2);
+        commit(doCompact(tasks));
+        List<DataFileMeta> files =
+                appendOnlyFileStoreTable.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList());
+        assertThat(files).hasSize(1);
+        assertThat(files.get(0).rowCount()).isEqualTo(2);
     }
 
     private AppendCompactCoordinator createBatchCoordinator(Map<String, String> extraOptions) {

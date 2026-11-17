@@ -97,6 +97,13 @@ See [Configurations](../maintenance/configurations) for table and catalog option
 Use one `--computed_column` argument per derived field. Expressions reference source fields and
 use Paimon's CDC functions; they are not arbitrary Flink SQL expressions.
 
+For single-table synchronization into an append-only table without primary keys, expressions can
+also reference enabled metadata columns. Use the metadata column's name in the Paimon table,
+including any configured prefix. Metadata references, including dependencies through other
+computed columns, are rejected for primary-key targets. Metadata columns can still be stored in
+primary-key tables when computed columns do not depend on them.
+See the [Kafka metadata example](./kafka-cdc#compute-columns-from-kafka-metadata).
+
 For a source with `id` and `create_time`, derive a daily partition as follows:
 
 ```bash

@@ -612,6 +612,7 @@ def _create_inner_readers(
         index_type, file_io, index_path, field, io_metas, executor=None, options=None):
     """Build per-file (or per-shard) readers for a single indexType/range."""
     core_options = options or CoreOptions(Options.from_none())
+    core_options = CoreOptions(core_options.global_index_options(index_type, field.name))
     if index_type == 'btree':
         from pypaimon.execution.python.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
         from pypaimon.execution.python.globalindex.key_serializer import create_serializer

@@ -30,6 +30,7 @@ import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -196,13 +197,21 @@ public class BucketsTable implements ReadonlyTable {
 
         private RowType readType;
 
+        @Nullable private Predicate predicate;
+
         public BucketsRead(FileStoreTable table) {
             this.fileStoreTable = table;
         }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // filter pushdown is handled at the Scan layer through BucketsSplit
+            if (predicate == null) {
+                this.predicate = null;
+                return this;
+            }
+            // The scan applies plain partition and bucket leaves; evaluate the rest on the rows.
+            List<Predicate> remaining = FilesTable.scanResidualPredicates(predicate);
+            this.predicate = remaining.isEmpty() ? null : PredicateBuilder.and(remaining);
             return this;
         }
 
@@ -261,6 +270,10 @@ public class BucketsTable implements ReadonlyTable {
                                     Comparator.comparing((InternalRow row) -> row.getString(0))
                                             .thenComparing(row -> row.getInt(1)))
                             .iterator();
+
+            if (predicate != null) {
+                iterator = Iterators.filter(iterator, predicate::test);
+            }
 
             if (readType != null) {
                 iterator =

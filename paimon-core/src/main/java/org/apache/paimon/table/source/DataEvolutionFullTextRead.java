@@ -28,7 +28,6 @@ import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
@@ -392,15 +391,15 @@ public class DataEvolutionFullTextRead implements FullTextRead {
         String indexType = file.indexType();
         GlobalIndexMeta meta = checkNotNull(file.globalIndexMeta());
         if (meta.extraFieldIds() != null) {
-            return GlobalIndexerFactoryUtils.load(indexType)
-                    .create(
-                            meta.getIndexedFields(table.rowType()),
-                            table.coreOptions().toConfiguration());
+            return GlobalIndexer.create(
+                    indexType,
+                    meta.getIndexedFields(table.rowType()),
+                    table.coreOptions().toConfiguration());
         }
-        return GlobalIndexerFactoryUtils.load(indexType)
-                .create(
-                        Collections.singletonList(textColumn),
-                        table.coreOptions().toConfiguration());
+        return GlobalIndexer.create(
+                indexType,
+                Collections.singletonList(textColumn),
+                table.coreOptions().toConfiguration());
     }
 
     private CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(

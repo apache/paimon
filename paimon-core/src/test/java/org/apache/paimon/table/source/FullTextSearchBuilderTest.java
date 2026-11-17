@@ -135,6 +135,31 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(ids).containsAnyOf(0, 1, 3);
     }
 
+    @Test
+    public void testDeclaredFullTextIndexOnOrdinaryAppendTable() throws Exception {
+        Identifier identifier = identifier("declared_full_text_append");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.STRING())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option("global-index.full-text.index-columns", TEXT_FIELD_NAME)
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier);
+        String[] documents = {"Apache Paimon", "Paimon lake", "other document"};
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("Paimon"))
+                        .withLimit(10)
+                        .executeLocal();
+        assertThat(result.results()).containsExactlyInAnyOrder(0L, 1L);
+    }
+
     @ParameterizedTest
     @CsvSource({"full,true", "detail,true", "full,false", "detail,false"})
     public void testPartialCompositeKeepsScalarFilterCoverage(String mode, boolean scalar)

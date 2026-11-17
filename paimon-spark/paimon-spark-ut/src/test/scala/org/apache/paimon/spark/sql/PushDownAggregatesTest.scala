@@ -18,7 +18,10 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.schema.SchemaChange
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.plans.logical.Aggregate
@@ -250,6 +253,25 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
       spark.sql("ALTER TABLE T ADD COLUMN c3 INT")
       spark.sql("INSERT INTO T VALUES (4, 40, 400)")
       runAndCheckAggregate("SELECT MIN(c3), MAX(c3) FROM T", Row(400, 400) :: Nil, 0)
+    }
+  }
+
+  test("Push down aggregate - column type change that breaks ordering") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (c1 STRING, c2 INT)")
+      // one file holds '100' and '2', so as strings its min is '100' and its max is '2'
+      spark.sql("INSERT INTO T SELECT /*+ COALESCE(1) */ * FROM VALUES ('100', 1), ('2', 2)")
+      // Spark only up-casts in ALTER TABLE, so change the type as Flink or the Java API would
+      paimonCatalog.alterTable(
+        Identifier.create(dbName0, "T"),
+        SchemaChange.updateColumnType("c1", DataTypes.INT()),
+        false)
+      spark.sql("INSERT INTO T VALUES (50, 3)")
+      runAndCheckAggregate("SELECT MIN(c1), MAX(c1) FROM T", Row(2, 100) :: Nil, 2)
+
+      // a widening keeps the order of values, so the aggregate is still pushed down
+      spark.sql("ALTER TABLE T ALTER COLUMN c2 TYPE BIGINT")
+      runAndCheckAggregate("SELECT MIN(c2), MAX(c2) FROM T", Row(1L, 3L) :: Nil, 0)
     }
   }
 

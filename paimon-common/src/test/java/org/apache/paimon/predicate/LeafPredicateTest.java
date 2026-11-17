@@ -18,9 +18,13 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.data.BinaryArray;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -29,6 +33,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -121,6 +126,68 @@ class LeafPredicateTest {
                                 }));
         assertThat(InstantiationUtil.clone(overlap).test(row)).isTrue();
         assertThat(InstantiationUtil.clone(containsAll).test(row)).isTrue();
+    }
+
+    @Test
+    public void testEmptyNullCountsWithCompleteBounds() {
+        RowType type = RowType.of(DataTypes.STRING(), DataTypes.STRING());
+        PredicateBuilder builder = new PredicateBuilder(type);
+        InternalRowSerializer serializer = new InternalRowSerializer(type);
+        BinaryRow bounds =
+                serializer
+                        .toBinaryRow(
+                                GenericRow.of(
+                                        BinaryString.fromString("sample"),
+                                        BinaryString.fromString("1")))
+                        .copy();
+        BinaryArray nullCounts = BinaryArray.fromLongArray(new Long[0]);
+        Predicate first = builder.equal(0, BinaryString.fromString("other"));
+        Predicate second = builder.equal(1, BinaryString.fromString("1"));
+
+        assertThat(first.test(1, bounds, bounds, nullCounts)).isFalse();
+        assertThat(second.test(1, bounds, bounds, nullCounts)).isTrue();
+        assertThat(builder.isNull(0).test(1, bounds, bounds, nullCounts)).isTrue();
+        assertThat(builder.isNotNull(1).test(1, bounds, bounds, nullCounts)).isTrue();
+        assertThat(PredicateBuilder.and(first, second).test(1, bounds, bounds, nullCounts))
+                .isFalse();
+        assertThat(PredicateBuilder.or(first, second).test(1, bounds, bounds, nullCounts)).isTrue();
+    }
+
+    @Test
+    public void testNullComparisonLiteralWithUnknownNullCount() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
+        for (Predicate predicate :
+                Arrays.asList(
+                        builder.equal(0, null),
+                        builder.notEqual(0, null),
+                        builder.lessThan(0, null),
+                        builder.lessOrEqual(0, null),
+                        builder.greaterThan(0, null),
+                        builder.greaterOrEqual(0, null))) {
+            assertNullLiteralDoesNotMatchStats(predicate);
+        }
+    }
+
+    @Test
+    public void testNullBetweenBoundsWithUnknownNullCount() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
+        for (Predicate predicate :
+                Arrays.asList(
+                        builder.between(0, null, 3),
+                        builder.between(0, 1, null),
+                        builder.between(0, null, null))) {
+            assertNullLiteralDoesNotMatchStats(predicate);
+        }
+    }
+
+    private void assertNullLiteralDoesNotMatchStats(Predicate predicate) {
+        for (InternalArray nullCounts :
+                Arrays.asList(
+                        BinaryArray.fromLongArray(new Long[0]),
+                        BinaryArray.fromLongArray(new Long[] {null}),
+                        BinaryArray.fromLongArray(new Long[] {0L}))) {
+            assertThat(predicate.test(3, GenericRow.of(1), GenericRow.of(3), nullCounts)).isFalse();
+        }
     }
 
     private LeafPredicate create() {

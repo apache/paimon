@@ -31,6 +31,15 @@ from pypaimon.common.options import Options
 _LOG = logging.getLogger(__name__)
 
 
+def _is_local_path(path):
+    from urllib.parse import urlparse
+
+    uri = urlparse(path)
+    # urlparse treats a Windows drive letter as a URI scheme.
+    return not uri.scheme or uri.scheme == "file" or (
+        os.name == "nt" and len(uri.scheme) == 1 and not uri.netloc)
+
+
 def normalize_naive_datetimes(value):
     """Recursively attach UTC to naive datetimes, including ones nested inside
     ROW (dict) and ARRAY/MAP (list/tuple) values.
@@ -56,7 +65,7 @@ def supports_pread(stream) -> bool:
     """Check if the stream supports position-based reads (thread-safe I/O)."""
     if hasattr(stream, 'read_at'):
         return True
-    if hasattr(stream, 'fileno'):
+    if callable(getattr(os, 'pread', None)) and hasattr(stream, 'fileno'):
         try:
             stream.fileno()
             return True
@@ -651,7 +660,7 @@ class FileIO(ABC):
     def get(path: str, catalog_options: Optional[Options] = None) -> 'FileIO':
         """
         Returns a FileIO instance for accessing the file system identified by the given path.
-        - LocalFileIO for local file system (file:// or no scheme)
+        - LocalFileIO for local file system (file://, no scheme, or Windows drive paths)
         - HdfsNativeFileIO for HDFS/ViewFS (default; pure protocol client, no Hadoop install)
         - OssFileIO for OSS (oss://)
         - PyArrowFileIO for other remote file systems (s3://, gs://, ...),
@@ -670,7 +679,7 @@ class FileIO(ABC):
         uri = urlparse(path)
         scheme = uri.scheme
 
-        if not scheme or scheme == "file":
+        if _is_local_path(path):
             from pypaimon.filesystem.local_file_io import LocalFileIO
             return LocalFileIO(path, catalog_options)
 

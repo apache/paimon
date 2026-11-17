@@ -51,6 +51,309 @@ def _builder(table, family):
     return table.new_vector_search_builder().with_vector_column('embedding').with_limit(2).with_query_vector([1.0, 0.0])
 
 
+@pytest.mark.parametrize('family,legacy', [
+    ('vector', False), ('batch', False), ('text', False), ('hybrid', False), ('vector', True),
+])
+@pytest.mark.parametrize('configure_metric', [True, False])
+def test_native_search_routes_use_shared_index_options(search_table, tmp_path, family, configure_metric, legacy):
+    from pypaimon.execution.native.read import native_vector_search, native_full_text_search, native_hybrid_search
+    from pypaimon.table.source.hybrid_search_builder import HybridSearchRoute
+
+    declaration = ({'pk-vector.index.columns': 'embedding', 'fields.embedding.pk-vector.index.type': 'ivf-pq'}
+                   if legacy else {'global-index.ivf-pq.index-columns': 'embedding'})
+    options = dict(declaration, **{
+        'global-index.full-text.index-column': 'body',
+        'ivf-pq.dimension': '2',
+        'fields.embedding.index-options': json.dumps(
+            {'distance.metric': 'COSINE', 'refine_factor': 3} if configure_metric else {'refine_factor': 3}),
+        'fields.body.index-options': '{"tokenizer":"raw","lower-case":false}',
+    })
+    if legacy:
+        from pypaimon.tests.native_index_options_test import _table
+        table = _table(tmp_path / 'pk', True, dict(options, **{'read.native.enabled': 'true'}))
+    else:
+        table = search_table.copy(options)
+    core = Mock()
+    core.with_limit.return_value = core
+    core.add_full_text_route.side_effect = HybridSearchRoute.full_text_route
+    proxy = SimpleNamespace(new_vector_search_builder=lambda: core,
+                            new_batch_vector_search_builder=lambda: core,
+                            new_full_text_search_builder=lambda: core,
+                            new_hybrid_search_builder=lambda: core)
+    module = native_hybrid_search if family == 'hybrid' else (
+        native_full_text_search if family == 'text' else native_vector_search)
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(module, 'native_runtime_available', return_value=True))
+        bridge = stack.enter_context(patch.object(module, '_native_table', return_value=proxy))
+        if family in ('vector', 'batch'):
+            stack.enter_context(patch.object(module, '_catalog_metastore', return_value='rest'))
+            module._native_vector_builder(_builder(table, family), family == 'batch')
+        else:
+            stack.enter_context(patch.object(module, '_rest_catalog_supported', return_value=True))
+            if family == 'text':
+                module._native_full_text_builder(_builder(table, family))
+            else:
+                builder = (table.new_hybrid_search_builder().with_limit(2)
+                           .add_vector_route('embedding', [1.0, 0.0], 2)
+                           .add_full_text_route('body', '{}', 2))
+                module._native_builder(builder)
+        assert bridge.call_args[0][0] is table
+        from pypaimon.execution.native.table import _resolved_schema_json
+        wire = json.loads(_resolved_schema_json(table))['options']
+        for key, value in options.items():
+            assert wire[key] == value
+        if family == 'hybrid':
+            assert core.add_vector_route.call_args[0][-1] == {}
+            assert core.add_full_text_route.call_args[0][-1] == {}
+        elif family in ('vector', 'batch'):
+            core.with_options.assert_called_once_with({})
+
+
+@pytest.mark.parametrize('family', ['vector', 'batch', 'hybrid'])
+@pytest.mark.parametrize('query_options', [
+    {},
+    {'fields.embedding.index-options': '{"metric":"COSINE","refine_factor":4}'},
+    {'fields.embedding.pk-vector.index.options': '{"distance.metric":"COSINE","refine_factor":4}'},
+    {'fields.embedding.metric': 'COSINE'},
+    {'ivf-pq.distance.metric': 'COSINE'},
+    {'metric': 'COSINE'},
+    {'fields.embedding.index-options': '{"refine_factor":4}'},
+])
+def test_native_vector_query_options_preserve_explicit_metric_scope(search_table, family, query_options):
+    from pypaimon.execution.native.read import native_vector_search, native_hybrid_search
+
+    table = search_table.copy({'global-index.ivf-pq.index-columns': 'embedding',
+                               'ivf-pq.dimension': '2', 'fields.embedding.distance.metric': 'l2',
+                               'fields.embedding.refine_factor': '3'})
+    core = Mock()
+    core.with_limit.return_value = core
+    proxy = SimpleNamespace(new_vector_search_builder=lambda: core,
+                            new_batch_vector_search_builder=lambda: core,
+                            new_hybrid_search_builder=lambda: core)
+    module = native_hybrid_search if family == 'hybrid' else native_vector_search
+    original = dict(query_options)
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(module, 'native_runtime_available', return_value=True))
+        bridge = stack.enter_context(patch.object(module, '_native_table', return_value=proxy))
+        if family == 'hybrid':
+            stack.enter_context(patch.object(module, '_rest_catalog_supported', return_value=True))
+            builder = (table.new_hybrid_search_builder().with_limit(2)
+                       .add_vector_route('embedding', [1., 0.], 2, options=query_options))
+            assert module._native_builder(builder) is not None
+            actual = core.add_vector_route.call_args[0][-1]
+        else:
+            stack.enter_context(patch.object(module, '_catalog_metastore', return_value='rest'))
+            builder = _builder(table, family).with_options(query_options)
+            assert module._native_vector_builder(builder, family == 'batch') is core
+            actual = core.with_options.call_args[0][0]
+    assert actual == original
+    assert bridge.call_args[0][0] is table
+    assert table.options.options.to_map()['fields.embedding.distance.metric'] == 'l2'
+    assert query_options == original
+
+
+@pytest.mark.parametrize('family,legacy', [
+    ('vector', False), ('batch', False), ('hybrid', False), ('vector', True),
+])
+@pytest.mark.parametrize('configured', [True, False])
+def test_native_configuration_needs_only_standard_builder_api(search_table, tmp_path, family, configured, legacy):
+    from pypaimon.execution.native.read import native_vector_search, native_hybrid_search
+
+    declaration = ({'pk-vector.index.columns': 'embedding', 'fields.embedding.pk-vector.index.type': 'ivf-flat'}
+                   if legacy else {'global-index.ivf-flat.index-columns': 'embedding'})
+    if legacy:
+        from pypaimon.tests.native_index_options_test import _table
+        table = _table(tmp_path / 'pk', True, dict(
+            declaration if configured else {}, **{'read.native.enabled': 'true'}))
+    else:
+        table = search_table.copy(declaration if configured else {})
+    core = Mock(spec=['with_limit', 'with_ranker', 'with_options', 'with_vector_column',
+                      'add_vector_route', 'execute', 'route_builders'])
+    core.with_limit.return_value = core
+    proxy = SimpleNamespace(new_vector_search_builder=lambda: core,
+                            new_batch_vector_search_builder=lambda: core,
+                            new_hybrid_search_builder=lambda: core)
+    module = native_hybrid_search if family == 'hybrid' else native_vector_search
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(module, 'native_runtime_available', return_value=True))
+        stack.enter_context(patch.object(module, '_native_table', return_value=proxy))
+        if family == 'hybrid':
+            stack.enter_context(patch.object(module, '_rest_catalog_supported', return_value=True))
+            builder = table.new_hybrid_search_builder().with_limit(2).add_vector_route('embedding', [1., 0.], 2)
+            result = module._native_builder(builder)
+        else:
+            stack.enter_context(patch.object(module, '_catalog_metastore', return_value='rest'))
+            result = module._native_vector_builder(_builder(table, family), family == 'batch')
+    assert result is not None
+    core.execute.assert_not_called()
+    core.route_builders.assert_not_called()
+    core.with_limit.assert_called_once_with(2)
+
+
+@pytest.mark.parametrize('family,entry', [
+    ('vector', 'execute'), ('vector', 'scan'), ('vector', 'read'),
+    ('batch', 'execute'), ('batch', 'scan'), ('batch', 'read'),
+    ('hybrid', 'execute'), ('hybrid', 'routes'),
+])
+def test_native_option_errors_never_select_python(search_table, family, entry):
+    from pypaimon.execution.native.read import native_vector_search, native_hybrid_search
+
+    table = search_table.copy({'global-index.ivf-flat.index-columns': 'embedding'})
+    core = Mock()
+    core.with_limit.return_value = core
+    core.with_options.side_effect = ValueError('invalid native options')
+    core.add_vector_route.side_effect = ValueError('invalid native options')
+    proxy = SimpleNamespace(new_vector_search_builder=lambda: core,
+                            new_batch_vector_search_builder=lambda: core,
+                            new_hybrid_search_builder=lambda: core)
+    module = native_hybrid_search if family == 'hybrid' else native_vector_search
+    with ExitStack() as stack:
+        stack.enter_context(_forbid_python_execution())
+        stack.enter_context(patch.object(module, 'native_runtime_available', return_value=True))
+        stack.enter_context(patch.object(module, '_native_table', return_value=proxy))
+        if family == 'hybrid':
+            stack.enter_context(patch.object(module, '_rest_catalog_supported', return_value=True))
+            builder = table.new_hybrid_search_builder().with_limit(2).add_vector_route('embedding', [1., 0.], 2)
+            invoke = builder.execute_local if entry == 'execute' else builder.route_builders
+        else:
+            stack.enter_context(patch.object(module, '_catalog_metastore', return_value='rest'))
+            builder = _builder(table, family)
+            if entry == 'execute':
+                invoke = builder.execute_batch_local if family == 'batch' else builder.execute_local
+            else:
+                invoke = _factories(builder, family)[0 if entry == 'scan' else 1]
+        with pytest.raises(ValueError, match='invalid native options'):
+            invoke()
+    core.execute.assert_not_called()
+    core.route_builders.assert_not_called()
+
+
+@pytest.mark.parametrize('family', ['vector', 'batch', 'hybrid'])
+@pytest.mark.parametrize('key', ['index_type', 'index-type', 'vector.index-type', 'fields.embedding.index-type'])
+def test_native_search_keeps_uninterpreted_options(search_table, family, key):
+    from pypaimon.execution.native.read import native_vector_search, native_hybrid_search
+
+    table = search_table.copy({key: 'diskann'})
+    core = Mock()
+    core.with_limit.return_value = core
+    proxy = SimpleNamespace(new_vector_search_builder=lambda: core,
+                            new_batch_vector_search_builder=lambda: core,
+                            new_hybrid_search_builder=lambda: core)
+    module = native_hybrid_search if family == 'hybrid' else native_vector_search
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(module, 'native_runtime_available', return_value=True))
+        stack.enter_context(patch.object(module, '_native_table', return_value=proxy))
+        if family == 'hybrid':
+            stack.enter_context(patch.object(module, '_rest_catalog_supported', return_value=True))
+            builder = (table.new_hybrid_search_builder().with_limit(2)
+                       .add_vector_route('embedding', [1., 0.], 2, options={key: 'ivf-pq'}))
+            assert module._native_builder(builder) is not None
+            assert core.add_vector_route.call_args[0][-1][key] == 'ivf-pq'
+        else:
+            stack.enter_context(patch.object(module, '_catalog_metastore', return_value='rest'))
+            builder = _builder(table, family).with_option(key, 'ivf-pq')
+            assert module._native_vector_builder(builder, family == 'batch') is core
+            assert core.with_options.call_args[0][0][key] == 'ivf-pq'
+
+
+@pytest.mark.parametrize('family', ['vector', 'batch', 'hybrid'])
+def test_native_table_configuration_errors_propagate(search_table, family):
+    from pypaimon.execution.native.read import native_vector_search, native_hybrid_search
+
+    table = search_table.copy({'global-index.ivf-flat.index-columns': 'embedding'})
+    core = Mock()
+    module = native_hybrid_search if family == 'hybrid' else native_vector_search
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(module, 'native_runtime_available', return_value=True))
+        stack.enter_context(patch.object(
+            module, '_native_table', side_effect=ValueError('unsupported native index configuration')))
+        stack.enter_context(pytest.raises(ValueError, match='unsupported native index configuration'))
+        if family == 'hybrid':
+            stack.enter_context(patch.object(module, '_rest_catalog_supported', return_value=True))
+            builder = table.new_hybrid_search_builder().with_limit(2).add_vector_route('embedding', [1., 0.], 2)
+            module._native_builder(builder)
+        else:
+            stack.enter_context(patch.object(module, '_catalog_metastore', return_value='rest'))
+            module._native_vector_builder(_builder(table, family), family == 'batch')
+    core.execute.assert_not_called()
+    core.route_builders.assert_not_called()
+
+
+def test_native_hybrid_vector_columns_keep_independent_types(tmp_path):
+    from pypaimon.execution.native.read import native_hybrid_search
+
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    catalog.create_database('default', True)
+    catalog.create_table('default.search', Schema.from_pyarrow_schema(
+        pa.schema([('embedding', pa.list_(pa.float32())), ('other', pa.list_(pa.float32()))]),
+        options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+                 'read.native.enabled': 'true', 'global-index.ivf-pq.index-columns': 'embedding',
+                 'global-index.diskann.index-column': 'other'}), False)
+    table = catalog.get_table('default.search')
+    builder = (table.new_hybrid_search_builder().with_limit(2)
+               .add_vector_route('other', [0., 1.], 2).add_vector_route('embedding', [1., 0.], 2))
+    core = Mock()
+    core.with_limit.return_value = core
+    proxy = SimpleNamespace(new_hybrid_search_builder=lambda: core)
+    with patch.object(native_hybrid_search, 'native_runtime_available', return_value=True), \
+            patch.object(native_hybrid_search, '_rest_catalog_supported', return_value=True), \
+            patch.object(native_hybrid_search, '_native_table', return_value=proxy) as bridge:
+        assert native_hybrid_search._native_builder(builder) is not None
+    assert bridge.call_args[0][0] is table
+    assert table.table_schema.options['global-index.ivf-pq.index-columns'] == 'embedding'
+    assert table.table_schema.options['global-index.diskann.index-column'] == 'other'
+    assert [call[0][0] for call in core.add_vector_route.call_args_list] == ['other', 'embedding']
+
+
+@pytest.mark.parametrize('same_analyzer', [True, False])
+def test_native_hybrid_full_text_routes_preserve_each_field_analyzer(tmp_path, same_analyzer):
+    from pypaimon.execution.native.read import native_hybrid_search
+    from pypaimon.table.source.hybrid_search_builder import HybridSearchRoute
+
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    catalog.create_database('default', True)
+    catalog.create_table('default.search', Schema.from_pyarrow_schema(
+        pa.schema([('body', pa.string()), ('title', pa.string())]),
+        options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+                 'read.native.enabled': 'true',
+                 'fields.body.index-options': '{"tokenizer":"raw"}',
+                 'fields.title.index-options': '{"tokenizer":"%s"}' % ('raw' if same_analyzer else 'jieba')}),
+        False)
+    table = catalog.get_table('default.search')
+    builder = (table.new_hybrid_search_builder().with_limit(2)
+               .add_full_text_route('body', '{}', 2).add_full_text_route('title', '{}', 2))
+    core = Mock()
+    core.with_limit.return_value = core
+    core.add_full_text_route.side_effect = HybridSearchRoute.full_text_route
+    proxy = SimpleNamespace(new_hybrid_search_builder=lambda: core)
+    with patch.object(native_hybrid_search, 'native_runtime_available', return_value=True), \
+            patch.object(native_hybrid_search, '_rest_catalog_supported', return_value=True), \
+            patch.object(native_hybrid_search, '_native_table', return_value=proxy) as bridge:
+        configured = native_hybrid_search._native_builder(builder)
+    assert configured is not None
+    assert bridge.call_args[0][0] is table
+    assert table.table_schema.options['fields.body.index-options'] == '{"tokenizer":"raw"}'
+    assert table.table_schema.options['fields.title.index-options'] == (
+        '{"tokenizer":"%s"}' % ('raw' if same_analyzer else 'jieba'))
+    assert core.add_full_text_route.call_count == 2
+    assert all(call.args[-1] == {} for call in core.add_full_text_route.call_args_list)
+
+
+def test_native_vector_passes_field_options_without_knowing_type(search_table):
+    from pypaimon.execution.native.read import native_vector_search
+
+    table = search_table.copy({'fields.embedding.index-options': '{"nlist":64}'})
+    core = Mock(spec=['with_limit', 'with_options', 'with_vector_column'])
+    core.with_limit.return_value = core
+    proxy = SimpleNamespace(new_vector_search_builder=lambda: core)
+    with patch.object(native_vector_search, 'native_runtime_available', return_value=True), \
+            patch.object(native_vector_search, '_catalog_metastore', return_value='rest'), \
+            patch.object(native_vector_search, '_native_table', return_value=proxy) as bridge:
+        assert native_vector_search._native_vector_builder(_builder(table, 'vector')) is core
+    bridge.assert_called_once_with(table)
+    assert table.table_schema.options['fields.embedding.index-options'] == '{"nlist":64}'
+
+
 def _factories(builder, family):
     if family == 'text':
         return builder.new_full_text_scan, builder.new_full_text_read

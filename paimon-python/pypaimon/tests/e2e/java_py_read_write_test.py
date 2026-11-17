@@ -138,6 +138,26 @@ class JavaPyReadWriteTest(unittest.TestCase):
         writer.close()
         commit.close()
 
+    def test_py_write_bucketed_append_sequence(self):
+        # Six one-row commits to one bucket; testReadPythonBucketedAppendOrder
+        # compacts them with a Java write and checks the append order.
+        table_name = 'default.bucketed_append_order_python_to_java'
+        self.catalog.drop_table(table_name, True)
+        arrow_schema = pa.schema([('id', pa.int32()), ('seq', pa.int32())])
+        self.catalog.create_table(table_name, Schema.from_pyarrow_schema(
+            arrow_schema, options={'bucket': '1', 'bucket-key': 'id'}), False)
+        table = self.catalog.get_table(table_name)
+        for seq in range(6):
+            builder = table.new_batch_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(pa.Table.from_pydict(
+                    {'id': [1], 'seq': [seq]}, schema=arrow_schema))
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+
     @parameterized.expand([
         (type_name, order, grouping)
         for type_name in ('float', 'double')
@@ -335,7 +355,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table_read = read_builder.new_read()
         result = table_read.to_pandas(table_scan.plan().splits())
         print(f"Format: {file_format}, Result:\n{result}")
-        self.assertEqual(initial_data.to_dict(), result.to_dict())
+        # Primary-key scans across partitions and buckets have no global row order.
+        self.assertEqual(initial_data.to_dict(), result.sort_values('id').reset_index(drop=True).to_dict())
 
         from pypaimon.execution.python.write.row_key_extractor import FixedBucketRowKeyExtractor
         expected_bucket_first_row = 2

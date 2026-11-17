@@ -31,7 +31,7 @@ class RESTCatalogTest(RESTBaseTest):
         """Test table rollback to snapshot and tag."""
         table_name = "default.table_for_rollback"
         pa_schema = pa.schema([('col1', pa.int32())])
-        schema = Schema.from_pyarrow_schema(pa_schema)
+        schema = Schema.from_pyarrow_schema(pa_schema, options={"write-only": "true"})
         self.rest_catalog.create_table(table_name, schema, False)
         table = self.rest_catalog.get_table(table_name)
         identifier = Identifier.from_string(table_name)
@@ -167,7 +167,7 @@ class RESTCatalogTest(RESTBaseTest):
         """Test table-level rollback_to_snapshot via FileStoreTable."""
         table_name = "default.table_level_rollback_snapshot"
         pa_schema = pa.schema([('col1', pa.int32())])
-        schema = Schema.from_pyarrow_schema(pa_schema)
+        schema = Schema.from_pyarrow_schema(pa_schema, options={"write-only": "true"})
         self.rest_catalog.create_table(table_name, schema, False)
         table = self.rest_catalog.get_table(table_name)
 
@@ -196,7 +196,7 @@ class RESTCatalogTest(RESTBaseTest):
         """Test table-level rollback_to_tag via FileStoreTable."""
         table_name = "default.table_level_rollback_tag"
         pa_schema = pa.schema([('col1', pa.int32())])
-        schema = Schema.from_pyarrow_schema(pa_schema)
+        schema = Schema.from_pyarrow_schema(pa_schema, options={"write-only": "true"})
         self.rest_catalog.create_table(table_name, schema, False)
         table = self.rest_catalog.get_table(table_name)
 
@@ -409,7 +409,7 @@ class RESTCatalogTest(RESTBaseTest):
         """Test load_snapshot returns correct snapshot after rollback."""
         table_name = "default.table_load_snapshot_after_rollback"
         pa_schema = pa.schema([('col1', pa.int32())])
-        schema = Schema.from_pyarrow_schema(pa_schema)
+        schema = Schema.from_pyarrow_schema(pa_schema, options={"write-only": "true"})
         self.rest_catalog.create_table(table_name, schema, False)
         table = self.rest_catalog.get_table(table_name)
         identifier = Identifier.from_string(table_name)

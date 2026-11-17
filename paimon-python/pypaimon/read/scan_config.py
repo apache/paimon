@@ -41,7 +41,7 @@ def _validate_scan_mode(table):
     has_watermark = options.contains(CoreOptions.SCAN_WATERMARK)
     has_timestamp_millis = options.contains(CoreOptions.SCAN_TIMESTAMP_MILLIS)
     has_timestamp = options.contains(CoreOptions.SCAN_TIMESTAMP)
-    has_incremental = options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
+    incremental_keys = [key for key in CoreOptions.INCREMENTAL_SCAN_KEYS if options.contains_key(key)]
     has_file_creation_time = options.contains(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS)
     has_creation_time = options.contains(CoreOptions.SCAN_CREATION_TIME_MILLIS)
 
@@ -58,8 +58,7 @@ def _validate_scan_mode(table):
         present_keys.append(CoreOptions.SCAN_TIMESTAMP_MILLIS.key())
     if has_timestamp:
         present_keys.append(CoreOptions.SCAN_TIMESTAMP.key())
-    if has_incremental:
-        present_keys.append(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key())
+    present_keys.extend(incremental_keys)
     if has_file_creation_time:
         present_keys.append(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key())
     if has_creation_time:
@@ -101,11 +100,11 @@ def _validate_scan_mode(table):
                 "scan.version, scan.snapshot-id, scan.tag-name, or scan.watermark is set."
             )
     elif mode == StartupMode.INCREMENTAL:
-        allowed = {CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()}
-        if not has_incremental:
+        allowed = set(CoreOptions.INCREMENTAL_SCAN_KEYS)
+        if len(incremental_keys) != 1:
             raise ValueError(
-                "scan.mode is 'incremental' but "
-                "incremental-between-timestamp is not set."
+                "must set only one key in [incremental-between,incremental-between-timestamp,incremental-to-auto-tag] "
+                "when you use incremental for scan.mode"
             )
     elif mode in (StartupMode.LATEST_FULL, StartupMode.LATEST):
         allowed = set()
@@ -146,6 +145,10 @@ def validate_scan_options(table):
 
     _validate_scan_mode(table)
     options = table.options.options
+    if options.contains(CoreOptions.INCREMENTAL_TO_AUTO_TAG):
+        raise NotImplementedError("incremental-to-auto-tag is not supported in pypaimon.")
+    if options.contains(CoreOptions.INCREMENTAL_BETWEEN):
+        table.options.incremental_between()
     has_time_travel = any(options.contains_key(key) for key in SCAN_KEYS)
     if not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
         return None

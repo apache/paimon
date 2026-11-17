@@ -18,9 +18,8 @@
 """Transport hybrid queries, captured routes and weighted results to Rust Core."""
 
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
-from pypaimon.globalindex.full_text_options import NativeFullTextIndexOptions
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.table import (_native_table, _options_to_native)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.file_store_table import FileStoreTable
@@ -43,19 +42,15 @@ def _native_builder(builder, executor=None):
     builder._validate_search()
     if executor is not None and not table.options.data_evolution_enabled():
         raise ValueError('Distributed search supports only data-evolution tables')
-    if any(route.is_full_text() for route in builder._routes):
-        # Preserve the same typed analyzer normalization used by native full-text.
-        options = {'full-text.' + key: value for key, value in NativeFullTextIndexOptions.from_options(
-            table.options.options.to_map()).to_native_options().items()}
-        table = table.copy(options)
     native = _native_table(table).new_hybrid_search_builder()
     native.with_limit(builder._limit).with_ranker(builder._ranker)
     for route in builder._routes:
+        options = _options_to_native(route.options)
         if route.is_vector():
-            native.add_vector_route(route.field_name, route.vector, route.limit, route.weight, route.options)
+            native.add_vector_route(route.field_name, route.vector, route.limit, route.weight, options)
         else:
             native.add_full_text_route(
-                route.field_name, route.full_text_query, route.limit, route.weight, route.options)
+                route.field_name, route.full_text_query, route.limit, route.weight, options)
     try:
         if builder._partition_filter is not None:
             native.with_partition_filter(_predicate_to_native(builder._partition_filter))

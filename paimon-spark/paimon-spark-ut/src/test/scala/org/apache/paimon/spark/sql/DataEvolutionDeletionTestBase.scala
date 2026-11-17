@@ -715,6 +715,61 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Data Evolution deletion: compact with spillable append write buffer") {
+    withTable("t") {
+      createSpillableWriteBufferTable()
+      val expected = sql("SELECT id, v, _ROW_ID FROM t").collect()
+      assert(expected.length == 9990)
+      assert(dataFileCount() == 2)
+
+      compactDataEvolutionTable()
+
+      assert(dataFileCount() == 1)
+      checkAnswer(sql("SELECT id, v, _ROW_ID FROM t"), expected)
+    }
+  }
+
+  test("Data Evolution deletion: materialize deletion vectors with spillable append write buffer") {
+    withTable("t") {
+      createSpillableWriteBufferTable()
+      val expected = sql("SELECT id, v FROM t").collect()
+      assert(expected.length == 9990)
+
+      materializeDeletionVectors()
+
+      checkAnswer(sql("SELECT id, v FROM t"), expected)
+      checkAnswer(
+        sql("SELECT count(*), min(_ROW_ID), max(_ROW_ID) FROM t"),
+        Row(9990L, 10000L, 19989L))
+    }
+  }
+
+  // Each compaction input holds far more than 'write-buffer-size' bytes, so a buffered compaction
+  // writer must spill.
+  private def createSpillableWriteBufferTable(): Unit = {
+    sql("""
+          |CREATE TABLE t (id INT, v STRING)
+          |TBLPROPERTIES (
+          |  'row-tracking.enabled' = 'true',
+          |  'data-evolution.enabled' = 'true',
+          |  'deletion-vectors.enabled' = 'true',
+          |  'write-buffer-for-append' = 'true',
+          |  'write-buffer-size' = '256 kb',
+          |  'page-size' = '64 kb')
+          |""".stripMargin)
+    for (start <- Seq(0, 5000)) {
+      sql(s"""
+             |INSERT INTO t SELECT /*+ REPARTITION(1) */ id, concat(repeat('x', 200), id)
+             |FROM range($start, ${start + 5000})
+             |""".stripMargin)
+    }
+    sql("DELETE FROM t WHERE id % 1000 = 0")
+  }
+
+  private def dataFileCount(): Long = {
+    sql("SELECT count(*) FROM `t$files`").head().getLong(0)
+  }
+
   private def compactDataEvolutionTable(): Unit = {
     sql("CALL sys.compact(table => 't', options => 'compaction.min.file-num=2')")
   }

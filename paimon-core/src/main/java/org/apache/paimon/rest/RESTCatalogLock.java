@@ -58,6 +58,7 @@ public class RESTCatalogLock implements Lock {
     private final LongSupplier nanoTime;
     private final long acquireTimeoutMillis;
     private final ThreadLocal<Lease> currentLease = new ThreadLocal<>();
+    private final ThreadLocal<Boolean> optimistic = ThreadLocal.withInitial(() -> false);
 
     public RESTCatalogLock(
             RESTApi api,
@@ -118,10 +119,22 @@ public class RESTCatalogLock implements Lock {
         long startedAt = nanoTime.getAsLong();
         while (true) {
             long requestedAt = nanoTime.getAsLong();
-            CommitLockResponse response = acquireLease();
+            CommitLockResponse response;
+            try {
+                response = acquireLease();
+            } catch (Exception | Error e) {
+                Lock.release(this::releaseLease, e);
+                throw e;
+            }
             if (response.isAcquired()) {
-                validateGrant(response);
-                Lease lease = new Lease(response.getLeaseMillis(), requestedAt);
+                Lease lease;
+                try {
+                    validateGrant(response);
+                    lease = new Lease(response.getLeaseMillis(), requestedAt);
+                } catch (Exception | Error e) {
+                    Lock.release(this::releaseLease, e);
+                    throw e;
+                }
                 try {
                     lease.checkValid();
                     currentLease.set(lease);
@@ -157,6 +170,17 @@ public class RESTCatalogLock implements Lock {
         }
     }
 
+    private void releaseLease() {
+        boolean interrupted = Thread.interrupted();
+        try {
+            api.releaseCommitLock(identifier, tableUuid, commitUser);
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
     private void validateGrant(CommitLockResponse response) {
         if (!commitUser.equals(response.getCommitUser()) || response.getLeaseMillis() <= 0) {
             throw new IllegalStateException("The server returned an invalid commit lease.");
@@ -164,7 +188,26 @@ public class RESTCatalogLock implements Lock {
     }
 
     @Override
+    public AutoCloseable acquire(AcquireMode mode) throws Exception {
+        if (optimistic.get()) {
+            return () -> {};
+        }
+        if (currentLease.get() != null) {
+            ensureValid();
+            return () -> {};
+        }
+        if (mode != AcquireMode.OPTIMISTIC_ALLOWED) {
+            return acquire();
+        }
+        optimistic.set(true);
+        return optimistic::remove;
+    }
+
+    @Override
     public void ensureValid() {
+        if (optimistic.get()) {
+            return;
+        }
         Lease lease = currentLease.get();
         if (lease == null) {
             throw new IllegalStateException("No commit lease is held by this thread.");
@@ -261,12 +304,16 @@ public class RESTCatalogLock implements Lock {
         public void close() {
             if (closed.compareAndSet(false, true)) {
                 try {
-                    renewal.cancel(false);
-                } finally {
-                    FutureTask<Void> request = renewalRequest;
-                    if (request != null) {
-                        request.cancel(true);
+                    try {
+                        renewal.cancel(false);
+                    } finally {
+                        FutureTask<Void> request = renewalRequest;
+                        if (request != null) {
+                            request.cancel(true);
+                        }
                     }
+                } finally {
+                    releaseLease();
                 }
             }
         }

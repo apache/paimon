@@ -45,6 +45,7 @@ public class BucketFiles {
     private final FileIO fileIO;
 
     private @Nullable Integer totalBuckets;
+    private @Nullable Long checkFromSnapshot;
     private final Map<String, DataFileMeta> newFiles;
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
@@ -66,6 +67,10 @@ public class BucketFiles {
 
     public void update(CommitMessageImpl message) {
         totalBuckets = message.totalBuckets();
+        Long snapshotId = message.checkFromSnapshot();
+        if (snapshotId != null && (checkFromSnapshot == null || snapshotId < checkFromSnapshot)) {
+            checkFromSnapshot = snapshotId;
+        }
 
         for (DataFileMeta file : message.newFilesIncrement().newFiles()) {
             newFiles.put(file.fileName(), file);
@@ -110,6 +115,7 @@ public class BucketFiles {
                         realCompactAfter,
                         changelogFiles,
                         newIndexFiles,
-                        deletedIndexFiles));
+                        deletedIndexFiles),
+                checkFromSnapshot);
     }
 }

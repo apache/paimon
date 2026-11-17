@@ -65,15 +65,20 @@ public class PrimaryKeyBatchVectorRead implements BatchVectorRead, Serializable 
     public List<GlobalIndexResult> readBatch(VectorScan.Plan plan) {
         PrimaryKeyVectorRead firstRead = queryReads.get(0);
         PrimaryKeyVectorScan.Plan primaryKeyPlan = firstRead.primaryKeyPlan(plan);
+        List<BucketVectorSearchSplit> splits = firstRead.bucketSplits(primaryKeyPlan);
+        PrimaryKeyVectorRead.SearchParameters parameters = firstRead.searchParameters(splits);
         List<PrimaryKeyVectorRead.SearchResult> searchResults =
-                firstRead.searchBuckets(firstRead.bucketSplits(primaryKeyPlan), queries);
+                firstRead.searchBuckets(splits, queries, parameters);
         checkArgument(
                 searchResults.size() == queryReads.size(),
                 "Primary-key vector batch result count does not match query count.");
 
         List<GlobalIndexResult> results = new ArrayList<>(queryReads.size());
         for (int i = 0; i < queryReads.size(); i++) {
-            results.add(queryReads.get(i).createResult(primaryKeyPlan, searchResults.get(i)));
+            results.add(
+                    queryReads
+                            .get(i)
+                            .createResult(primaryKeyPlan, searchResults.get(i), parameters));
         }
         return Collections.unmodifiableList(results);
     }

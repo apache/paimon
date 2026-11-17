@@ -98,6 +98,9 @@ class DataWriter(ABC):
         )
         self.write_cols = write_cols
         self.blob_as_descriptor = self.options.blob_as_descriptor()
+        self.blob_descriptor_fields = CoreOptions.blob_descriptor_fields(self.options)
+        self.blob_view_fields = CoreOptions.blob_view_fields(self.options)
+        self.blob_inline_fields = self.blob_descriptor_fields.union(self.blob_view_fields)
 
         self.path_factory = self.table.path_factory()
         self.external_path_provider: Optional[ExternalPathProvider] = self.path_factory.create_external_path_provider(
@@ -138,6 +141,7 @@ class DataWriter(ABC):
 
     def write(self, data: pa.RecordBatch):
         try:
+            self._validate_inline_stored_fields_input(data)
             processed_data = self._process_data(data)
             self._buffer.append(processed_data)
             self._check_and_roll_if_needed()
@@ -147,6 +151,67 @@ class DataWriter(ABC):
             logger.warning("Exception occurs when writing data. Cleaning up.", exc_info=e)
             self.abort()
             raise e
+
+    def _validate_inline_stored_fields_input(self, data: pa.RecordBatch):
+        if not getattr(self, 'blob_inline_fields', None):
+            return
+
+        from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
+
+        for field_name in getattr(self, 'blob_descriptor_fields', ()):
+            if field_name not in data.schema.names:
+                continue
+            values = data.column(data.schema.get_field_index(field_name)).to_pylist()
+            for value in values:
+                if value is None:
+                    continue
+                if hasattr(value, 'as_py'):
+                    value = value.as_py()
+                if isinstance(value, str):
+                    value = value.encode('utf-8')
+                if not isinstance(value, (bytes, bytearray)):
+                    raise ValueError(
+                        "blob-descriptor-field requires blob field value to be a serialized "
+                        "BlobDescriptor."
+                    )
+                descriptor_bytes = bytes(value)
+                # Like Java, schema-declared descriptors use the prefix parser.
+                # Exact wire length is only needed when detecting descriptors
+                # among arbitrary payload bytes.
+                try:
+                    BlobDescriptor.deserialize(descriptor_bytes)
+                except Exception as e:
+                    raise ValueError(
+                        "blob-descriptor-field requires blob field value to be a serialized "
+                        "BlobDescriptor."
+                    ) from e
+
+        for field_name in getattr(self, 'blob_view_fields', ()):
+            if field_name not in data.schema.names:
+                continue
+            values = data.column(data.schema.get_field_index(field_name)).to_pylist()
+            for value in values:
+                if value is None:
+                    continue
+                if hasattr(value, 'as_py'):
+                    value = value.as_py()
+                if isinstance(value, str):
+                    value = value.encode('utf-8')
+                if not isinstance(value, (bytes, bytearray)):
+                    raise ValueError(
+                        "blob-view-field requires blob field value to be a serialized "
+                        "BlobViewStruct."
+                    )
+                try:
+                    view_bytes = bytes(value)
+                    view_struct = BlobViewStruct.deserialize(view_bytes)
+                    if view_struct.serialize() != view_bytes:
+                        raise ValueError("BlobViewStruct payload contains trailing bytes.")
+                except Exception as e:
+                    raise ValueError(
+                        "blob-view-field requires blob field value to be a serialized "
+                        "BlobViewStruct."
+                    ) from e
 
     def prepare_commit(self) -> List[DataFileMeta]:
         if self._buffer.num_rows > 0:
@@ -220,6 +285,12 @@ class DataWriter(ABC):
     @abstractmethod
     def _merge_data(self, existing_data: pa.RecordBatch, new_data: pa.RecordBatch) -> pa.RecordBatch:
         """Merge existing data with new data. Must be implemented by subclasses."""
+
+    def _numbers_append_rows(self) -> bool:
+        # Unaware-bucket files keep the zero range that commit replaces with
+        # the snapshot id on row-tracking tables.
+        return (not self.table.is_primary_key_table
+                and self.table.bucket_mode() != BucketMode.BUCKET_UNAWARE)
 
     def _append_file_sequence_range(self, row_count: int) -> Tuple[int, int]:
         if row_count <= 0:
@@ -381,6 +452,11 @@ class DataWriter(ABC):
             minmax = pc.min_max(sequences)
             min_seq = minmax["min"].as_py()
             max_seq = minmax["max"].as_py()
+        elif self._numbers_append_rows():
+            # Like Java's AppendOnlyWriter, number the rows from the bucket's
+            # restored max sequence number + 1.
+            min_seq = self.sequence_generator.current + 1
+            max_seq = self.sequence_generator.current + data.num_rows
         else:
             min_seq = self.sequence_generator.start
             max_seq = self.sequence_generator.current
@@ -394,6 +470,8 @@ class DataWriter(ABC):
     def _finish_data_file(self, data_meta, changelog_meta=None,
                           shared_shredding_stats=None):
         """Record a fully written data file and its optional changelog."""
+        if self._numbers_append_rows():
+            self.sequence_generator.current = data_meta.max_sequence_number
         self.sequence_generator.start = self.sequence_generator.current
         if shared_shredding_stats is not None:
             self._map_shared_shredding.file_completed(shared_shredding_stats)
@@ -402,6 +480,8 @@ class DataWriter(ABC):
             self.committed_changelog_files.append(changelog_meta)
 
     def _write_parquet_data(self, path, data):
+        from pypaimon.execution.python.write.format_file_writer import parquet_write_data
+        data = parquet_write_data(data)
         if self._map_shared_shredding.is_active():
             return self._map_shared_shredding.write_parquet(
                 self.file_io, path, data, self.compression, self.zstd_level)

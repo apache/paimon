@@ -44,7 +44,8 @@ public interface CommitMessage extends Serializable {
     Integer totalBuckets();
 
     /**
-     * Snapshot used to read rows before producing this message, if row-id conflicts need checking.
+     * Writer's base snapshot, or the operation's read snapshot for a Data Evolution row-id conflict
+     * check.
      */
     @Nullable
     default Long checkFromSnapshot() {

@@ -40,6 +40,7 @@ import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
@@ -53,6 +54,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -250,6 +252,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
 
         List<CommitMessage> result = new ArrayList<>();
+        boolean requiresCompactionBaseline = requiresCompactionBaseline();
 
         Iterator<Map.Entry<BinaryRow, Map<Integer, WriterContainer<T>>>> partIter =
                 writers.entrySet().iterator();
@@ -287,7 +290,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 bucket,
                                 writerContainer.totalBuckets,
                                 newFilesIncrement,
-                                compactIncrement);
+                                compactIncrement,
+                                requiresCompactionBaseline ? writerContainer.baseSnapshotId : null);
                 result.add(committable);
 
                 if (committable.isEmpty()) {
@@ -333,6 +337,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     //
     // For writers with no conflicts, `commitUser` might be some random value.
     protected abstract Function<WriterContainer<T>, Boolean> createWriterCleanChecker();
+
+    protected boolean requiresCompactionBaseline() {
+        return false;
+    }
 
     protected static <T>
             Function<WriterContainer<T>, Boolean> createConflictAwareWriterCleanChecker(
@@ -550,11 +558,26 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         boolean actualIgnorePreviousFiles =
                 ignorePreviousFilesForWriter(
                         partition, bucket, latestSnapshot, ignorePreviousFiles);
-        RestoreFiles restored = RestoreFiles.empty();
-        if (!actualIgnorePreviousFiles) {
+        RestoreFiles restored;
+        Snapshot baseSnapshot;
+        boolean restoreIndexes =
+                dbMaintainerFactory != null
+                        || dvMaintainerFactory != null
+                        || primaryKeyIndexMaintainerFactory != null;
+        if (ignorePreviousFiles || (actualIgnorePreviousFiles && !restoreIndexes)) {
+            restored = RestoreFiles.empty();
+            // An overwrite starts from empty files and checks commits made after writer creation.
+            baseSnapshot = requiresCompactionBaseline() ? latestSnapshot : null;
+        } else {
             restored =
                     scanExistingFileMetas(
-                            partition, bucket, expectedTotalBuckets, validateNumBuckets);
+                            partition,
+                            bucket,
+                            expectedTotalBuckets,
+                            validateNumBuckets,
+                            // Primary-key indexes also need the existing data files.
+                            !actualIgnorePreviousFiles || primaryKeyIndexMaintainerFactory != null);
+            baseSnapshot = restored.snapshot();
         }
 
         DynamicBucketIndexMaintainer indexMaintainer =
@@ -579,7 +602,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 ioManager,
                                 DeletionVector.factory(dvMaintainer));
 
-        List<DataFileMeta> restoreFiles = restored.dataFiles();
+        List<DataFileMeta> restoreFiles = actualIgnorePreviousFiles ? null : restored.dataFiles();
         if (restoreFiles == null) {
             restoreFiles = new ArrayList<>();
         }
@@ -596,14 +619,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         actualIgnorePreviousFiles);
         notifyNewWriter(writer);
 
-        Snapshot previousSnapshot = restored.snapshot();
         return new WriterContainer<>(
                 writer,
                 firstNonNull(restored.totalBuckets(), expectedTotalBuckets),
                 indexMaintainer,
                 dvMaintainer,
                 primaryKeyIndexMaintainer,
-                previousSnapshot == null ? null : previousSnapshot.id());
+                baseSnapshot == null ? null : baseSnapshot.id());
     }
 
     private long writerNumber() {
@@ -647,7 +669,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private RestoreFiles scanExistingFileMetas(
-            BinaryRow partition, int bucket, int expectedTotalBuckets, boolean validateNumBuckets) {
+            BinaryRow partition,
+            int bucket,
+            int expectedTotalBuckets,
+            boolean validateNumBuckets,
+            boolean scanDataFileMetas) {
         Supplier<String> partInfo =
                 () ->
                         partitionType.getFieldCount() > 0
@@ -666,7 +692,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             bucket,
                             dbMaintainerFactory != null,
                             dvMaintainerFactory != null,
-                            primaryKeyIndexMaintainerFactory != null);
+                            primaryKeyIndexMaintainerFactory != null,
+                            scanDataFileMetas);
         } catch (RuntimeException e) {
             throw new RuntimeException(
                     String.format(
@@ -716,7 +743,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private ExecutorService primaryKeyIndexExecutor() {
         if (lazyPrimaryKeyIndexExecutor == null) {
             lazyPrimaryKeyIndexExecutor =
-                    Executors.newSingleThreadExecutor(
+                    Executors.newFixedThreadPool(
+                            options.primaryKeyIndexBuildParallelism(),
                             new ExecutorThreadFactory(
                                     Thread.currentThread().getName() + "-primary-key-index"));
         }
@@ -763,7 +791,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 @Nullable DynamicBucketIndexMaintainer dynamicBucketMaintainer,
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
                 @Nullable BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer,
-                Long baseSnapshotId) {
+                @Nullable Long baseSnapshotId) {
             this.writer = writer;
             this.totalBuckets = totalBuckets;
             this.dynamicBucketMaintainer = dynamicBucketMaintainer;
@@ -820,6 +848,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
         private void validate(BinaryRow partition) {
             Object[] array = partitionConverter.convert(partition);
+            RowType partitionType = partitionConverter.rowType();
+            for (int i = 0; i < array.length; i++) {
+                // DATE is stored as an epoch day, same as PartitionExpireStrategy#convertPartition.
+                if (array[i] != null
+                        && partitionType.getTypeAt(i).getTypeRoot() == DataTypeRoot.DATE) {
+                    array[i] = LocalDate.ofEpochDay((Integer) array[i]);
+                }
+            }
             try {
                 timeExtractor.extract(partitionKeys, Arrays.asList(array));
             } catch (DateTimeParseException e) {

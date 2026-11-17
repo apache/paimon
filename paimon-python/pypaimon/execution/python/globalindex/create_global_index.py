@@ -389,7 +389,7 @@ class PythonGlobalIndexBuilder:
                 index_path,
                 index_field.type,
                 self._index_type,
-                self._table.options.options.to_map(),
+                self._options.to_map(),
                 index_field.name,
                 self._user_options,
             )

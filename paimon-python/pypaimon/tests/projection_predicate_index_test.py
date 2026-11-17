@@ -203,6 +203,23 @@ class ProjectionPredicateIndexTest(unittest.TestCase):
         self.assertEqual(actual.column_names, ['id'])
         self.assertEqual(actual.column('id').to_pylist(), [1])
 
+    def test_top_level_projection_preserves_order_duplicates_and_empty_rows(self):
+        table = self._populate_append('test_top_level_projection')
+        for columns in (['name', 'id'], ['id', 'id'], []):
+            with self.subTest(columns=columns):
+                builder = table.new_read_builder().with_projection(columns)
+                builder.with_filter('value >= 20')
+                read = builder.new_read()
+                splits = builder.new_scan().plan().splits()
+                expected = self.data.slice(1).select(columns)
+                with read.to_arrow_batch_reader(splits) as reader:
+                    actual = reader.read_all()
+                self.assertEqual(actual.num_rows, expected.num_rows)
+                self.assertEqual(actual.schema, pa.schema([
+                    (name, self.pa_schema.field(name).type) for name in columns]))
+                for index in range(expected.num_columns):
+                    self.assertTrue(actual.column(index).equals(expected.column(index)))
+
     def test_append_only_filter_with_projection_unchanged(self):
         table = self._populate_append('test_append_proj_filter')
 

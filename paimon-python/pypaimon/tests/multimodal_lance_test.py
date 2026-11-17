@@ -92,7 +92,7 @@ def test_export_lance_exports_logical_updates_deletes_and_historical_schema(conn
     }, [
         {"id": 1, "text": "before", "image": b"before"},
         {"id": 2, "text": "deleted", "image": b"deleted"},
-    ])
+    ], options={"deletion-vectors.enabled": "true"})
     snapshot_id = table.raw_table.snapshot_manager().get_latest_snapshot().id
     table.raw_table.create_tag("training-v1", snapshot_id=snapshot_id)
     conn.catalog.alter_table("default.history", [

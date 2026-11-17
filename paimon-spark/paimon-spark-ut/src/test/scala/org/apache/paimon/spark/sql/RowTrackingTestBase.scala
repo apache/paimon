@@ -713,6 +713,31 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  Seq(false, true).foreach {
+    useV2Write =>
+      test(s"Row Tracking: update struct columns with V2 write $useV2Write") {
+        withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write.toString) {
+          withTable("t") {
+            sql("""CREATE TABLE t (id INT, data STRUCT<a: INT, b: STRING>, other STRUCT<a: INT>)
+                  |TBLPROPERTIES ('row-tracking.enabled' = 'true')""".stripMargin)
+            sql("""INSERT INTO t SELECT /*+ REPARTITION(1) */ * FROM VALUES
+                  |(1, named_struct('a', 1, 'b', 'one'), named_struct('a', 10)),
+                  |(2, NULL, NULL)""".stripMargin)
+
+            sql("UPDATE t SET data.a = data.a + 1 WHERE _ROW_ID = 0")
+            checkAnswer(
+              sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+              Seq(Row(1, Row(2, "one"), Row(10), 0L, 2L), Row(2, null, null, 1L, 1L)))
+
+            sql("UPDATE t SET data = named_struct('b', 'three', 'a', 3) WHERE _ROW_ID = 0")
+            checkAnswer(
+              sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+              Seq(Row(1, Row(3, "three"), Row(10), 0L, 3L), Row(2, null, null, 1L, 1L)))
+          }
+        }
+      }
+  }
+
   test("Row Tracking: update table without condition") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
@@ -919,6 +944,36 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
             Seq(Row(1, 11, 11, 2, 2), Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
           )
         }
+    }
+  }
+
+  test("Data Evolution: merge into with a spilling append write buffer") {
+    withTable("s", "t") {
+      sql("""CREATE TABLE t (id INT, b STRING, c INT) TBLPROPERTIES
+            |('row-tracking.enabled' = 'true',
+            |'data-evolution.enabled' = 'true',
+            |'write-buffer-for-append' = 'true',
+            |'write-buffer-size' = '256 kb',
+            |'page-size' = '64 kb')""".stripMargin)
+      sql(
+        "INSERT INTO t SELECT /*+ REPARTITION(1) */ CAST(id AS INT), CAST(id AS STRING), " +
+          "CAST(id AS INT) FROM range(0, 20000)")
+      sql("CREATE TABLE s (id INT, b STRING)")
+      sql(
+        "INSERT INTO s SELECT CAST(id AS INT), concat(repeat('x', 100), CAST(id AS STRING)) " +
+          "FROM range(0, 20000)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |""".stripMargin)
+      checkAnswer(
+        sql(
+          "SELECT count(*) FROM t WHERE b = concat(repeat('x', 100), CAST(id AS STRING)) " +
+            "AND c = id"),
+        Seq(Row(20000)))
     }
   }
 

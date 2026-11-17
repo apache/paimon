@@ -118,7 +118,7 @@ def test_export_lance_unresolvable_legacy_descriptor_does_not_publish(conn, tmp_
 def test_export_lance_rejects_video_frame_in_ordinary_descriptor_field(conn, tmp_path, mode):
     video = tmp_path / "video.bin"
     video.write_bytes(b"encoded-video")
-    descriptor = VideoFrameDescriptor(str(video), 0, video.stat().st_size, 2, -1, 0)
+    descriptor = VideoFrameDescriptor(str(video), 0, video.stat().st_size, 2)
     # Seed the invalid legacy value through Python; Native rejects it before export.
     table = lance_tests._table(conn, "frame_reference", {"id": pa.int32(), "payload": pa.large_binary()}, [
         {"id": 1, "payload": descriptor},

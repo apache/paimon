@@ -483,7 +483,7 @@ def test_post_mask_string_filter_uses_declared_type(tmp_path, condition, pattern
 
 @pytest.mark.parametrize('table', ['primary-key', 'partitioned-primary-key'], indirect=True)
 def test_streaming_post_mask_filter_keeps_delete_row_kind(table):
-    builder = table.copy({'query-auth.enabled': 'false'}).new_batch_write_builder()
+    builder = table.new_batch_write_builder()
     writer = builder.new_write()
     try:
         writer.write_row(GenericRow([2, 'beta', 'visible'], table.fields, RowKind.DELETE))

@@ -27,6 +27,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -51,7 +52,6 @@ public class PrimaryKeyVectorScan implements VectorScan {
 
     private final FileStoreTable table;
     private final int vectorFieldId;
-    private final String indexType;
     @Nullable private final PartitionPredicate partitionFilter;
     @Nullable private final Predicate filter;
     @Nullable private final Snapshot pinnedSnapshot;
@@ -59,22 +59,19 @@ public class PrimaryKeyVectorScan implements VectorScan {
     public PrimaryKeyVectorScan(
             FileStoreTable table,
             int vectorFieldId,
-            String indexType,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter) {
-        this(table, vectorFieldId, indexType, partitionFilter, filter, null);
+        this(table, vectorFieldId, partitionFilter, filter, null);
     }
 
     PrimaryKeyVectorScan(
             FileStoreTable table,
             int vectorFieldId,
-            String indexType,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter,
             @Nullable Snapshot pinnedSnapshot) {
         this.table = table;
         this.vectorFieldId = vectorFieldId;
-        this.indexType = indexType;
         this.partitionFilter = partitionFilter;
         this.filter = filter;
         this.pinnedSnapshot = pinnedSnapshot;
@@ -83,7 +80,7 @@ public class PrimaryKeyVectorScan implements VectorScan {
     @Override
     public Plan scan() {
         checkArgument(
-                table.coreOptions().primaryKeyVectorIndexEnabled(),
+                !VectorIndexOptions.columns(table.coreOptions().toConfiguration()).isEmpty(),
                 "Primary-key vector search requires a configured primary-key vector index.");
         checkArgument(
                 filter == null
@@ -131,7 +128,7 @@ public class PrimaryKeyVectorScan implements VectorScan {
                 indexFileHandler.scan(
                         snapshot,
                         entry ->
-                                entry.indexFile().indexType().equals(indexType)
+                                CoreOptions.isVectorIndexType(entry.indexFile().indexType())
                                         && entry.indexFile().globalIndexMeta() != null
                                         && entry.indexFile().globalIndexMeta().sourceMeta() != null
                                         && entry.indexFile().globalIndexMeta().indexFieldId()

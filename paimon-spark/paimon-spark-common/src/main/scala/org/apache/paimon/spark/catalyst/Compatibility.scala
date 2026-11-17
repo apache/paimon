@@ -21,7 +21,7 @@ package org.apache.paimon.spark.catalyst
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.TableOutputResolver
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Cast, Expression}
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, V2WriteCommand}
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, RepartitionByExpression, V2WriteCommand}
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.execution.ui.SQLPlanMetric
 import org.apache.spark.sql.internal.SQLConf
@@ -29,19 +29,42 @@ import org.apache.spark.sql.types.DataType
 
 object Compatibility {
 
+  def repartitionByExpression(expressions: Seq[Expression], query: LogicalPlan): LogicalPlan = {
+    RepartitionByExpression(expressions, query, None)
+  }
+
   def resolveTableOutputColumns(
       tableName: String,
       expected: Seq[Attribute],
       query: LogicalPlan,
       byName: Boolean,
       conf: SQLConf): LogicalPlan = {
-    TableOutputResolver.resolveOutputColumns(
-      tableName,
-      expected,
-      query,
-      byName,
-      conf,
-      supportColDefaultValue = false)
+    // Spark 4.2 replaced the boolean with DefaultValueFillMode. Preserve the old false
+    // behavior (NONE) without linking 3.x/4.1 builds to the new enumeration.
+    val method = TableOutputResolver.getClass.getMethods
+      .find(m => m.getName == "resolveOutputColumns" && m.getParameterTypes.length == 6)
+      .get
+    val fillMode: AnyRef = if (method.getParameterTypes.last == java.lang.Boolean.TYPE) {
+      java.lang.Boolean.FALSE
+    } else {
+      val cls = Class.forName(
+        "org.apache.spark.sql.catalyst.analysis.TableOutputResolver$DefaultValueFillMode$")
+      cls.getMethod("NONE").invoke(cls.getField("MODULE$").get(null))
+    }
+    try {
+      method
+        .invoke(
+          TableOutputResolver,
+          tableName,
+          expected,
+          query,
+          java.lang.Boolean.valueOf(byName),
+          conf,
+          fillMode)
+        .asInstanceOf[LogicalPlan]
+    } catch {
+      case e: java.lang.reflect.InvocationTargetException => throw e.getCause
+    }
   }
 
   def withNewQuery(o: V2WriteCommand, query: LogicalPlan): V2WriteCommand = {

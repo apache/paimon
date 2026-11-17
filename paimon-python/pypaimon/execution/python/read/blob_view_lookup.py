@@ -20,6 +20,7 @@ from typing import Dict, List, Set, Tuple
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.uri_reader import UriReader, UriReaderFactory
+from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 from pypaimon.table.special_fields import SpecialFields
@@ -310,11 +311,25 @@ class BlobViewLookup:
     def _load_table(self, identifier: Identifier):
         catalog_environment = self._table.catalog_environment
         catalog_loader = catalog_environment.catalog_loader
+        catalog_context = catalog_environment.catalog_context()
         dependency_context = catalog_environment.dependency_read_context()
-        if dependency_context is catalog_environment.catalog_context():
+        if catalog_loader is not None and dependency_context is catalog_context:
             catalog = catalog_loader.load()
         else:
             from pypaimon.catalog.catalog_factory import CatalogFactory
+            # A nested external REST table may already carry Read-Via, which makes
+            # dependency_read_context() return the original context unchanged. Such
+            # a table has no catalog loader, and the REST response is the provenance
+            # proving dependency reads must still use REST. Ensure its context selects
+            # the REST catalog before reconstructing the dependency catalog.
+            if (
+                    catalog_loader is None
+                    and dependency_context is not None
+                    and catalog_environment.rest_table_response is not None):
+                dependency_options = dependency_context.options.copy()
+                if not dependency_options.contains(CatalogOptions.METASTORE):
+                    dependency_options.set(CatalogOptions.METASTORE, "rest")
+                dependency_context = dependency_context.with_options(dependency_options)
             catalog = CatalogFactory.create_from_context(
                 dependency_context, config_required=False)
         return catalog.get_table(identifier)

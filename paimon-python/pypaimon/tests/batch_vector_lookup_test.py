@@ -36,6 +36,7 @@ def docs(tmp_path, request):
     table = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
         "docs", schema=schema, partitioned=["category"], options={
             "file.format": "parquet", "vector.file.format": "parquet",
+            "deletion-vectors.enabled": "true",
             "vector-index.search-mode": "full", "read.parallelism": str(request.param),
             "read.batch-size": "2", "blob-as-descriptor": "false",
         })

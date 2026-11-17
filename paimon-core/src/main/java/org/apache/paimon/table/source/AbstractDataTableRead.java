@@ -117,6 +117,10 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         return predicate;
     }
 
+    protected boolean hasSequenceNumber(Split split) {
+        return false;
+    }
+
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
@@ -153,6 +157,9 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
                         resolvedBlobViewFields);
         if (readType != null || !transform.readType().equals(currentReadType())) {
             applyReadType(transform.readType());
+        }
+        if (hasSequenceNumber(split)) {
+            transform = transform.withSequenceNumber();
         }
         return transform.apply(reader(split));
     }

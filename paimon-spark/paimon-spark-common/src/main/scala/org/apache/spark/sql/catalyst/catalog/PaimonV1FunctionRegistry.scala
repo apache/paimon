@@ -159,12 +159,20 @@ case class PaimonV1FunctionRegistry(session: SparkSession) extends SQLConfHelper
       throw new IllegalArgumentException(s"Cannot load class: $className")
     }
     val clazz = PaimonUtils.classForName(className)
-    val name = func.identifier.unquotedString
+    // The builder name shows up in the default column name of an unaliased call, so leave out
+    // the catalog that `qualifyIdentifier` keeps on Spark 4.2.
+    val name = func.identifier.copy(catalog = None).unquotedString
     (input) => functionExpressionBuilder.makeExpression(name, clazz, input)
   }
 
   private def qualifyIdentifier(ident: FunctionIdentifier): FunctionIdentifier = {
-    FunctionIdentifier(funcName = format(ident.funcName), database = ident.database)
+    val catalog = if (org.apache.spark.SPARK_VERSION.startsWith("4.2.")) {
+      ident.catalog.orElse(Some(session.sessionState.catalogManager.currentCatalog.name))
+    } else None
+    FunctionIdentifier(
+      funcName = format(ident.funcName),
+      database = ident.database,
+      catalog = catalog)
   }
 
   protected def format(name: String): String = {

@@ -20,7 +20,6 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
@@ -153,7 +152,7 @@ public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
         if (snapshot == null) {
             return;
         }
-        Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner =
+        Function<Snapshot, DataEvolutionRewriteExecutor.PlanResult> taskPlanner =
                 planningSnapshot -> {
                     DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
                             deletionFilesPerBatch == null
@@ -164,7 +163,8 @@ public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
                                             partitionPredicate,
                                             planningSnapshot,
                                             deletionFilesPerBatch);
-                    return coordinator.plan();
+                    return new DataEvolutionRewriteExecutor.PlanResult(
+                            coordinator.plan(), coordinator.isScanFinished());
                 };
         DataEvolutionRewriteExecutor.execute(
                 table,

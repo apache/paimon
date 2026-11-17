@@ -995,7 +995,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         .withWriteType(table.rowType().project(Arrays.asList("pt", "video")))) {
             VideoFrameDescriptor frame =
                     new VideoFrameDescriptor(
-                            new Path(source.toUri()).toString(), 0, VIDEO_PAYLOAD.length, 7, -1, 0);
+                            new Path(source.toUri()).toString(), 0, VIDEO_PAYLOAD.length, 7);
             write.write(
                     GenericRow.of(
                             BinaryString.fromString("a"),

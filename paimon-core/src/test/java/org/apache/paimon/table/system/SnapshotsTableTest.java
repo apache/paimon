@@ -25,11 +25,15 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.LowerTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -39,6 +43,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
@@ -52,7 +57,10 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
@@ -104,6 +112,45 @@ public class SnapshotsTableTest extends TableTestBase {
     }
 
     @Test
+    public void testReadSnapshotProperties() throws Exception {
+        ManifestCommittable committable = new ManifestCommittable(0);
+        committable.addProperty("source.batch-id", "42");
+        committable.addProperty("empty", "");
+        committable.addProperty("nullable", null);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier(tableName));
+        try (TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            commit.commit(committable);
+        }
+
+        int propertiesIndex = snapshotsTable.rowType().getFieldIndex("properties");
+        Map<BinaryString, BinaryString> expected = new HashMap<>();
+        expected.put(BinaryString.fromString("source.batch-id"), BinaryString.fromString("42"));
+        expected.put(BinaryString.fromString("empty"), BinaryString.fromString(""));
+        expected.put(BinaryString.fromString("nullable"), null);
+
+        List<InternalRow> rows = read(snapshotsTable);
+        assertThat(rows).hasSize(3);
+        assertThat(rows.get(0).isNullAt(propertiesIndex)).isTrue();
+        assertThat(rows.get(1).isNullAt(propertiesIndex)).isTrue();
+        assertThat(
+                        InternalMapSerializer.convertToJavaMap(
+                                rows.get(2).getMap(propertiesIndex),
+                                DataTypes.STRING(),
+                                DataTypes.STRING()))
+                .isEqualTo(expected);
+
+        rows = read(snapshotsTable, new int[] {propertiesIndex, 0});
+        assertThat(rows).hasSize(3);
+        assertThat(rows.get(0).isNullAt(0)).isTrue();
+        assertThat(rows.get(1).isNullAt(0)).isTrue();
+        assertThat(rows.get(2).getLong(1)).isEqualTo(3L);
+        assertThat(
+                        InternalMapSerializer.convertToJavaMap(
+                                rows.get(2).getMap(0), DataTypes.STRING(), DataTypes.STRING()))
+                .isEqualTo(expected);
+    }
+
+    @Test
     public void testReadSnapshotsWithInFilterContainingUnknownId() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
         Predicate predicate =
@@ -120,6 +167,42 @@ public class SnapshotsTableTest extends TableTestBase {
                 .forEachRemaining(row -> result.add(serializer.copy(row)));
 
         assertThat(result).containsExactlyInAnyOrderElementsOf(getExpectedResult(new long[] {1}));
+    }
+
+    @Test
+    public void testReadSnapshotsWithTransformFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
+        int snapshotIdIdx = snapshotsTable.rowType().getFieldNames().indexOf("snapshot_id");
+        int commitKindIdx = snapshotsTable.rowType().getFieldNames().indexOf("commit_kind");
+        LowerTransform lowerCommitKind =
+                new LowerTransform(
+                        Collections.singletonList(
+                                new FieldRef(
+                                        commitKindIdx,
+                                        "commit_kind",
+                                        snapshotsTable.rowType().getTypeAt(commitKindIdx))));
+
+        assertThat(
+                        readWithFilter(
+                                PredicateBuilder.and(
+                                        builder.greaterOrEqual(snapshotIdIdx, 2L),
+                                        builder.equal(
+                                                lowerCommitKind,
+                                                BinaryString.fromString("append")))))
+                .containsExactlyInAnyOrderElementsOf(getExpectedResult(new long[] {2}));
+        assertThat(
+                        readWithFilter(
+                                builder.equal(lowerCommitKind, BinaryString.fromString("compact"))))
+                .isEmpty();
+
+        int schemaIdIdx = snapshotsTable.rowType().getFieldNames().indexOf("schema_id");
+        assertThat(
+                        readWithFilter(
+                                PredicateBuilder.and(
+                                        builder.equal(
+                                                lowerCommitKind, BinaryString.fromString("append")),
+                                        builder.equal(schemaIdIdx, 999L))))
+                .isEmpty();
     }
 
     @Test
@@ -210,7 +293,8 @@ public class SnapshotsTableTest extends TableTestBase {
                             snapshot.operation() == null
                                     ? null
                                     : BinaryString.fromString(snapshot.operation().toString()),
-                            BinaryString.fromString(snapshot.writerVersion())));
+                            BinaryString.fromString(snapshot.writerVersion()),
+                            null));
         }
 
         return expectedRow;

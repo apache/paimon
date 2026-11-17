@@ -39,6 +39,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -64,7 +65,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
@@ -75,6 +78,35 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /** Test for BTree indexed batch scan. */
 public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
+
+    @Test
+    public void testSharedFieldOptionsUsedByBuildAndScan() throws Exception {
+        Schema schema = schemaDefault();
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.put("global-index.btree.index-columns", "f1");
+        options.put("btree-index.block-size", "invalid table default");
+        options.put("btree-index.fallback-scan-max-size", "invalid table default");
+        options.put(
+                "fields.f1.index-options",
+                "{\"block-size\":\"4 kb\",\"fallback-scan-max-size\":\"1 mb\"}");
+        catalog.createTable(
+                identifier(),
+                new Schema(
+                        schema.fields(),
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        options,
+                        schema.comment()),
+                false);
+        write(2);
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        Predicate predicate =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a1"));
+        assertThat(globalIndexScan(table, predicate).toRangeList())
+                .containsExactly(new Range(1, 1));
+    }
 
     @Test
     public void testBTreeGlobalIndex() throws Exception {

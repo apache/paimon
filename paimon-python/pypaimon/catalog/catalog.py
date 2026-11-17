@@ -16,7 +16,7 @@
 # under the License.
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from pypaimon.api.api_response import GetTagResponse, PagedList, Partition
 from pypaimon.catalog.database import Database
@@ -78,6 +78,38 @@ class Catalog(ABC):
         Returns:
             List of table names.
         """
+
+    def create_model(
+            self,
+            identifier: Union[str, Identifier],
+            definition: Union['ModelDefinition', Dict[str, Any]],
+            comment: Optional[str] = None,
+            ignore_if_exists: bool = False,
+    ) -> 'Model':
+        """Create a database-scoped model and return its persisted metadata.
+
+        If ``ignore_if_exists`` is true, return the existing model on conflict.
+        """
+        raise NotImplementedError("create_model is not supported by this catalog.")
+
+    def get_model(self, identifier: Union[str, Identifier]) -> 'Model':
+        """Get a database-scoped model."""
+        raise NotImplementedError("get_model is not supported by this catalog.")
+
+    def list_models(self, database_name: str) -> List['Model']:
+        """List model metadata in a database."""
+        raise NotImplementedError("list_models is not supported by this catalog.")
+
+    def drop_model(
+            self,
+            identifier: Union[str, Identifier],
+            ignore_if_not_exists: bool = False,
+    ) -> None:
+        """Drop a database-scoped model.
+
+        If ``ignore_if_not_exists`` is true, a missing model is ignored.
+        """
+        raise NotImplementedError("drop_model is not supported by this catalog.")
 
     def alter_database(self, name: str, changes: List[PropertyChange]) -> None:
         """Alter database properties.

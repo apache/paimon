@@ -142,10 +142,23 @@ public class S3ASchemeTest {
                         + ", getUri() = "
                         + fsUri);
 
-        assertEquals("org.apache.hadoop.fs.s3a.S3AFileSystem", fs.getClass().getName());
+        // Plugin FileSystem may be a subclass (e.g. RecoverableS3AFileSystem) loaded in an
+        // isolated classloader; walk superclasses by name instead of using instanceof.
+        assertTrue(
+                isS3AFileSystem(fs.getClass()),
+                "expected S3AFileSystem ancestry, got " + fs.getClass().getName());
         assertEquals(scheme, fsUri.getScheme());
         assertEquals(bucket, fsUri.getHost());
         assertEquals("probe", fileIO.readFileUtf8(path));
         assertTrue(fileIO.delete(path, false));
+    }
+
+    private static boolean isS3AFileSystem(Class<?> clazz) {
+        for (Class<?> c = clazz; c != null; c = c.getSuperclass()) {
+            if ("org.apache.hadoop.fs.s3a.S3AFileSystem".equals(c.getName())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

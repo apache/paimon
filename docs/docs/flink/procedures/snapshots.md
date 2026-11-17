@@ -101,6 +101,20 @@ To expire changelogs. Argument:
 
 - `delete_all`: whether to delete all separated changelogs.
 
+For Flink 1.19 and later, explicit arguments override table retention options for this invocation
+without changing the stored table options. Omitted arguments use the table options:
+`retain_max` uses `changelog.num-retained.max`, `retain_min` uses `changelog.num-retained.min`,
+`older_than` uses `changelog.time-retained`, and `max_deletes` uses `snapshot.expire.limit`.
+Unset changelog retention options follow the corresponding snapshot retention options.
+This also applies to the `expire_changelogs` Flink action. Calling with only a table identifier
+therefore expires changelogs according to the table's retention policy. An explicitly supplied
+`older_than` must not be empty or whitespace-only, including when `delete_all` is true.
+
+Previously, omitted arguments used internal defaults instead of table options. Existing calls
+may now expire changelogs that were previously retained, or fail if an explicit maximum conflicts
+with the table's minimum retention. Specify both bounds when overriding them together.
+The `delete_all` path is unchanged and does not use these retention arguments.
+
 **Syntax**
 
 ```sql

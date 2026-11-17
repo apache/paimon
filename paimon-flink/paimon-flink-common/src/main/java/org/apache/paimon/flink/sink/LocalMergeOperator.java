@@ -201,13 +201,12 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
     }
 
     private void flushBuffer() throws Exception {
-        if (merger.isEmpty()) {
-            return;
+        if (!merger.isEmpty()) {
+            merger.forEach(row -> output.collect(new StreamRecord<>(row)));
+            merger.clear();
         }
 
-        merger.forEach(row -> output.collect(new StreamRecord<>(row)));
-        merger.clear();
-
+        // emit the watermark even when no rows are buffered, e.g. when all rows are filtered out
         if (currentWatermark != Long.MIN_VALUE) {
             super.processWatermark(new Watermark(currentWatermark));
             // each watermark should only be emitted once

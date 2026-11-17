@@ -20,6 +20,7 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
@@ -50,6 +51,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.IteratorRecordReader;
@@ -59,6 +61,8 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -66,6 +70,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -111,7 +116,13 @@ public class SnapshotsTable implements ReadonlyTable {
                             new DataField(13, "next_row_id", new BigIntType(true)),
                             new DataField(14, "operation", SerializationUtils.newStringType(true)),
                             new DataField(
-                                    15, "writer_version", SerializationUtils.newStringType(true))));
+                                    15, "writer_version", SerializationUtils.newStringType(true)),
+                            new DataField(
+                                    16,
+                                    "properties",
+                                    new MapType(
+                                            SerializationUtils.newStringType(false),
+                                            SerializationUtils.newStringType(true)))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -210,6 +221,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
         private final FileIO fileIO;
         private RowType readType;
+        @Nullable private Predicate rowFilter;
         private Optional<Long> optionalFilterSnapshotIdMax = Optional.empty();
         private Optional<Long> optionalFilterSnapshotIdMin = Optional.empty();
         private final List<Long> snapshotIds = new ArrayList<>();
@@ -220,6 +232,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
+            this.rowFilter = LeafPredicateExtractor.rowFilterForTransforms(predicate);
             if (predicate == null) {
                 return this;
             }
@@ -313,6 +326,9 @@ public class SnapshotsTable implements ReadonlyTable {
             }
 
             Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
+            if (rowFilter != null) {
+                rows = Iterators.filter(rows, rowFilter::test);
+            }
             if (readType != null) {
                 rows =
                         Iterators.transform(
@@ -325,6 +341,18 @@ public class SnapshotsTable implements ReadonlyTable {
         }
 
         private InternalRow toRow(Snapshot snapshot) {
+            GenericMap properties = null;
+            if (snapshot.properties() != null) {
+                Map<BinaryString, BinaryString> map = new HashMap<>();
+                snapshot.properties()
+                        .forEach(
+                                (key, value) ->
+                                        map.put(
+                                                BinaryString.fromString(key),
+                                                BinaryString.fromString(value)));
+                properties = new GenericMap(map);
+            }
+
             return GenericRow.of(
                     snapshot.id(),
                     snapshot.schemaId(),
@@ -346,7 +374,8 @@ public class SnapshotsTable implements ReadonlyTable {
                     snapshot.operation() == null
                             ? null
                             : BinaryString.fromString(snapshot.operation().toString()),
-                    BinaryString.fromString(snapshot.writerVersion()));
+                    BinaryString.fromString(snapshot.writerVersion()),
+                    properties);
         }
     }
 }

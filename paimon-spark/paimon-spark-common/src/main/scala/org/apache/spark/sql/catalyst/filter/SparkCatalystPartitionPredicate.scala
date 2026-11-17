@@ -27,7 +27,10 @@ import org.apache.paimon.types.RowType
 import org.apache.spark.sql.catalyst.expressions.{And, Attribute, BasePredicate, BoundReference, Expression, Predicate, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.execution.datasources.DataSourceUtils
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.StructType
+
+import scala.util.control.NonFatal
 
 /**
  * A [[PartitionPredicate]] that applies Spark Catalyst partition filters to a partition
@@ -40,20 +43,46 @@ case class SparkCatalystPartitionPredicate(
 
   private val partitionSchema: StructType = CharVarcharUtils.replaceCharVarcharWithStringInSchema(
     SparkTypeUtils.fromPaimonRowType(partitionRowType))
+  // Expression copies and lazy evaluators can consult SQLConf again (e.g. empty IN semantics).
+  // Preserve the query context across asynchronous scans and serialization, for both test paths.
+  private val evaluationSettings: Map[String, String] = SQLConf.get.getAllConfs
+  // SQLConf supports concurrent reads. Populate it once per predicate, then keep it read-only;
+  // only the mutable expression evaluators need thread-local instances.
+  @transient private lazy val evaluationConf: SQLConf = {
+    val conf = new SQLConf
+    evaluationSettings.foreach { case (key, value) => conf.setConfString(key, value) }
+    conf
+  }
   @transient private lazy val predicateThreadLocal: ThreadLocal[BasePredicate] =
     ThreadLocal.withInitial(
       () => new StructExpressionFilters(partitionFilter, partitionSchema).toPredicate)
 
+  @transient private lazy val statisticsThreadLocal: ThreadLocal[SparkCatalystPartitionStats] =
+    ThreadLocal.withInitial(
+      () => new SparkCatalystPartitionStats(partitionFilter, partitionRowType, partitionSchema))
+
   override def test(partition: BinaryRow): Boolean = {
-    val predicate = predicateThreadLocal.get()
-    predicate.eval(SparkInternalRow.create(partitionRowType).replace(partition))
+    SQLConf.withExistingConf(evaluationConf) {
+      val predicate = predicateThreadLocal.get()
+      predicate.eval(SparkInternalRow.create(partitionRowType).replace(partition))
+    }
   }
 
   override def test(
       rowCount: Long,
       minValues: PaimonInternalRow,
       maxValues: PaimonInternalRow,
-      nullCounts: InternalArray): Boolean = true
+      nullCounts: InternalArray): Boolean = {
+    try {
+      SQLConf.withExistingConf(evaluationConf) {
+        statisticsThreadLocal.get().test(rowCount, minValues, maxValues, nullCounts)
+      }
+    } catch {
+      // An evaluation failure is unknown, never proof that no partition matches. Keep it for
+      // ordinary scanning; independent pushed predicates may still prune the same manifest.
+      case NonFatal(_) => true
+    }
+  }
 
   override def toString: String = partitionFilter.toString()
 

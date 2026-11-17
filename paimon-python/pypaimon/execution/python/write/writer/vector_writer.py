@@ -21,7 +21,7 @@ from typing import List, Tuple
 import pyarrow as pa
 
 from pypaimon.execution.python.write.format_file_writer import (
-    write_vortex_file
+    parquet_write_data, write_vortex_file
 )
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.data.timestamp import Timestamp
@@ -92,7 +92,7 @@ class VectorWriter(AppendOnlyDataWriter):
         external_path_str = file_path if is_external_path else None
 
         if self.vector_file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            self.file_io.write_parquet(file_path, data,
+            self.file_io.write_parquet(file_path, parquet_write_data(data),
                                        compression=self.compression,
                                        zstd_level=self.zstd_level,
                                        **self.parquet_writer_options)

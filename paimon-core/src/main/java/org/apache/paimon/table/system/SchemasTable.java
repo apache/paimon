@@ -185,6 +185,7 @@ public class SchemasTable implements ReadonlyTable {
     private class SchemasRead implements InnerTableRead {
 
         private RowType readType;
+        @Nullable private Predicate rowFilter;
 
         private @Nullable Long schemaIdMin = null;
         private @Nullable Long schemaIdMax = null;
@@ -192,6 +193,7 @@ public class SchemasTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
+            this.rowFilter = LeafPredicateExtractor.rowFilterForTransforms(predicate);
             if (predicate == null) {
                 return this;
             }
@@ -279,6 +281,9 @@ public class SchemasTable implements ReadonlyTable {
             @SuppressWarnings("DataFlowIssue")
             Iterator<InternalRow> rows =
                     Iterators.transform(tableSchemas.iterator(), SchemasTable::toRow);
+            if (rowFilter != null) {
+                rows = Iterators.filter(rows, rowFilter::test);
+            }
             if (readType != null) {
                 rows =
                         Iterators.transform(

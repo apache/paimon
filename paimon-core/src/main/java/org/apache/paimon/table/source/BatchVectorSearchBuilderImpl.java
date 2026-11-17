@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -128,12 +129,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
     public VectorScan newVectorScan() {
         TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         if (isPrimaryKeyVectorSearch()) {
-            return new PrimaryKeyVectorScan(
-                    table,
-                    vectorColumn.id(),
-                    table.coreOptions().primaryKeyVectorIndexType(vectorColumn.name()),
-                    partitionFilter,
-                    filter);
+            return new PrimaryKeyVectorScan(table, vectorColumn.id(), partitionFilter, filter);
         }
         return new DataEvolutionVectorScan(table, partitionFilter, filter, vectorColumn, options);
     }
@@ -157,7 +153,9 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
     }
 
     protected boolean isPrimaryKeyVectorSearch() {
-        return vectorColumn != null
-                && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn.name());
+        return !table.schema().primaryKeys().isEmpty()
+                && vectorColumn != null
+                && VectorIndexOptions.columns(table.coreOptions().toConfiguration())
+                        .contains(vectorColumn.name());
     }
 }

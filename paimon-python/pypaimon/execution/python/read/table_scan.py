@@ -17,7 +17,9 @@
 
 """Python file scanner construction for the public TableScan."""
 
-from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
+import re
+
+from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer, IncrementalBetweenScanMode, StartupMode
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
@@ -32,6 +34,8 @@ from pypaimon.utils.range import Range
 def _resolve_incremental_snapshot_range(table):
     """Resolve Python scan boundaries only after selecting this backend."""
     window = validate_scan_options(table)
+    if table.options.options.contains(CoreOptions.INCREMENTAL_BETWEEN):
+        return _resolve_incremental_ids(table)
     if window is None:
         return None
     start_timestamp, end_timestamp = window
@@ -60,6 +64,50 @@ def _resolve_incremental_snapshot_range(table):
     return start_id, end_id
 
 
+def _resolve_incremental_ids(table):
+    start, end = table.options.incremental_between()
+    tag_manager = table.tag_manager()
+    start_tag, end_tag = tag_manager.get(start), tag_manager.get(end)
+    if start_tag is not None and end_tag is not None:
+        start_id, end_id = start_tag.id, end_tag.id
+        if not table.options.incremental_between_tag_to_snapshot():
+            if end_id < start_id:
+                raise ValueError(
+                    "Tag end %s with snapshot id %s should be >= tag start %s with snapshot id %s"
+                    % (end, end_id, start, start_id))
+            if start_id == end_id:
+                return None
+            raise NotImplementedError(
+                "Incremental diff between tags is not supported in pypaimon. "
+                "Set incremental-between-tag-to-snapshot=true to scan snapshot deltas or changelogs.")
+        if table.options.incremental_between_scan_mode() == IncrementalBetweenScanMode.DIFF:
+            raise NotImplementedError("Unsupported incremental scan mode DIFF")
+    else:
+        try:
+            if any(re.fullmatch(r'[+-]?[0-9]+', value) is None for value in (start, end)):
+                raise ValueError()
+            start_id, end_id = int(start), int(end)
+            if not all(-(1 << 63) <= value < (1 << 63) for value in (start_id, end_id)):
+                raise ValueError()
+        except ValueError:
+            raise ValueError(
+                "Didn't find two tags for start '%s' and end '%s', and they are not two snapshot Ids. "
+                "Please set two tags or two snapshot Ids." % (start, end))
+        if end_id < start_id:
+            raise ValueError("Ending snapshotId should >= starting snapshotId %s. [%s]" % (end_id, start_id))
+        if table.snapshot_manager().get_latest_snapshot() is None or start_id == end_id:
+            return None
+
+    snapshot_manager = table.snapshot_manager()
+    latest_id = snapshot_manager.get_latest_snapshot().id
+    earliest_id = snapshot_manager.try_get_earliest_snapshot(latest_id).id
+    if start_id < earliest_id - 1 or end_id > latest_id:
+        raise ValueError(
+            "The specified scan snapshotId range [%s, %s] is out of available snapshotId range [%s, %s]."
+            % (start_id, end_id, earliest_id, latest_id))
+    return start_id, end_id
+
+
 class PythonTableScan:
     """Plan with Python's file scanner and the public scan configuration."""
 
@@ -78,7 +126,7 @@ class PythonTableScan:
 
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil, SCAN_KEYS
         has_time_travel = any(options.contains_key(key) for key in SCAN_KEYS)
-        has_incremental = options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
+        has_incremental = scan.table.options.startup_mode() == StartupMode.INCREMENTAL
 
         if has_incremental:
             snapshot_range = _resolve_incremental_snapshot_range(scan.table)
@@ -89,9 +137,12 @@ class PythonTableScan:
                     partition_predicate=scan.partition_predicate,
                 )
             start_id, end_id = snapshot_range
-            # Java's AUTO mode uses physical changelogs when a producer is
-            # configured, and APPEND deltas otherwise.
-            changelog = scan.table.options.changelog_producer() != ChangelogProducer.NONE
+            mode = scan.table.options.incremental_between_scan_mode()
+            if mode == IncrementalBetweenScanMode.DIFF:
+                raise NotImplementedError("incremental-between-scan-mode 'diff' is not supported in pypaimon.")
+            changelog = (mode == IncrementalBetweenScanMode.CHANGELOG
+                         or (mode == IncrementalBetweenScanMode.AUTO
+                             and scan.table.options.changelog_producer() != ChangelogProducer.NONE))
 
             def incremental_manifest():
                 snapshots_in_range = []

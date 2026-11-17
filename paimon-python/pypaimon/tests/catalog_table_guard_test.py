@@ -24,6 +24,8 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.catalog.catalog import Catalog
+from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
@@ -77,6 +79,25 @@ def assert_table_guards(test, catalog, database):
     catalog.rename_table(Identifier(database, 'm', branch='main'), Identifier(database, 'm2', branch='MAIN'))
     test.assertEqual(sorted(catalog.list_tables(database)), ['m2', 't'])
     catalog.drop_table(Identifier(database, 'm2', branch='main'), False)
+    test.assertEqual(catalog.list_tables(database), ['t'])
+
+    # As in Java, the sys database and the tables in it cannot be created, dropped or changed.
+    operations = [
+        lambda: catalog.create_database('sys', True),
+        lambda: catalog.drop_database('sys', True),
+        lambda: catalog.create_table('sys.t', schema, True),
+        lambda: catalog.drop_table('sys.t', True),
+        lambda: catalog.rename_table(name, 'sys.t'),
+        lambda: catalog.alter_table('sys.t', [add_column]),
+    ]
+    if type(catalog).alter_database is not Catalog.alter_database:
+        operations.append(lambda: catalog.alter_database('sys', [PropertyChange.set_property('k', 'v')]))
+    for operation in operations:
+        with test.assertRaises(ValueError):
+            operation()
+    with test.assertRaisesRegex(ValueError, "Can't do operation on system database."):
+        catalog.create_database('sys', False)
+    test.assertNotIn('sys', catalog.list_databases())
     test.assertEqual(catalog.list_tables(database), ['t'])
 
 

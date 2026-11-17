@@ -24,6 +24,7 @@ import org.apache.paimon.flink.compact.MultiAppendCompactTableScan;
 import org.apache.paimon.flink.compact.MultiTableScanBase;
 import org.apache.paimon.flink.sink.MultiTableCompactionTaskTypeInfo;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
+import org.apache.paimon.flink.source.DelayedAvailability;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -35,6 +36,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.FINISHED;
@@ -69,6 +71,8 @@ public class CombinedAppendCompactStreamSource
 
     private class Reader extends AbstractNonCoordinatedSourceReader<MultiTableAppendCompactTask> {
         private MultiTableScanBase<MultiTableAppendCompactTask> tableScan;
+        private final DelayedAvailability availability =
+                new DelayedAvailability("combined-append-compact-source-timer");
 
         @Override
         public void start() {
@@ -84,6 +88,11 @@ public class CombinedAppendCompactStreamSource
         }
 
         @Override
+        public CompletableFuture<Void> isAvailable() {
+            return availability.future();
+        }
+
+        @Override
         public InputStatus pollNext(ReaderOutput<MultiTableAppendCompactTask> readerOutput)
                 throws Exception {
             MultiTableScanBase.ScanResult scanResult = tableScan.scanTable(readerOutput);
@@ -91,13 +100,15 @@ public class CombinedAppendCompactStreamSource
                 return InputStatus.END_OF_INPUT;
             }
             if (scanResult == IS_EMPTY) {
-                Thread.sleep(monitorInterval);
+                availability.delay(monitorInterval);
+                return InputStatus.NOTHING_AVAILABLE;
             }
             return InputStatus.MORE_AVAILABLE;
         }
 
         @Override
         public void close() throws Exception {
+            availability.close();
             super.close();
             if (tableScan != null) {
                 tableScan.close();

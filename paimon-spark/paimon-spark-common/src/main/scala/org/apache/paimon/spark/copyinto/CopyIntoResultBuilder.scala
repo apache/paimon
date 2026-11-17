@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.copyinto
 
+import org.apache.paimon.spark.execution.CopyIntoUtils
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.hadoop.fs.FileStatus
@@ -66,7 +67,8 @@ object CopyIntoResultBuilder {
 
     val loadedResults = filesToLoad.map {
       fileStatus =>
-        val baseName = fileStatus.getPath.getName
+        val baseName = CopyIntoUtils.encodedBaseName(fileStatus)
+        val displayName = fileStatus.getPath.getName
         val fullPath = fileStatus.getPath.toString
         val parsedCount = totalRowsPerFile.getOrElse(baseName, 0L)
         val fileParseErrors = parseErrors.getOrElse(baseName, 0L)
@@ -93,7 +95,7 @@ object CopyIntoResultBuilder {
         val fileFirstError =
           firstParseErrorPerFile.get(baseName).orElse(firstCastErrorPerFile.get(baseName))
         buildResultRow(
-          baseName,
+          displayName,
           status,
           rowsLoaded,
           parsedCount,
@@ -120,7 +122,8 @@ object CopyIntoResultBuilder {
 
     val loadedResults = filesToLoad.map {
       fileStatus =>
-        val baseName = fileStatus.getPath.getName
+        val baseName = CopyIntoUtils.encodedBaseName(fileStatus)
+        val displayName = fileStatus.getPath.getName
         val rowCount = rowCountsPerFile.getOrElse(baseName, 0L)
 
         historyManager.recordLoaded(
@@ -133,7 +136,7 @@ object CopyIntoResultBuilder {
             rowsLoaded = rowCount
           ))
 
-        buildResultRow(baseName, "LOADED", rowCount, rowCount, 0L, null)
+        buildResultRow(displayName, "LOADED", rowCount, rowCount, 0L, null)
     }.toSeq
 
     loadedResults ++ buildSkippedResults(skippedFiles)

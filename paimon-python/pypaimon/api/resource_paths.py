@@ -32,6 +32,7 @@ class ResourcePaths:
     PARTITIONS = "partitions"
     FUNCTIONS = "functions"
     FUNCTION_DETAILS = "function-details"
+    MODELS = "models"
     TAGS = "tags"
     BRANCHES = "branches"
     FORWARD = "forward"
@@ -117,6 +118,19 @@ class ResourcePaths:
     def function(self, database_name: str, function_name: str) -> str:
         return "{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                                        self.FUNCTIONS, RESTUtil.encode_string(function_name))
+
+    def models(self, database_name: str) -> str:
+        return "{}/{}/{}/{}".format(
+            self.base_path,
+            self.DATABASES,
+            RESTUtil.encode_string(database_name),
+            self.MODELS,
+        )
+
+    def model(self, database_name: str, model_name: str) -> str:
+        return "{}/{}".format(
+            self.models(database_name), RESTUtil.encode_string(model_name)
+        )
 
     def tags(self, database_name: str, table_name: str) -> str:
         return "{}/{}/{}/{}/{}/{}".format(

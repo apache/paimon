@@ -65,6 +65,34 @@ database exists and that SQL uses that database. Load data before building index
 
 `global-index.enabled` defaults to `true`; setting it does not create index files.
 
+Index declarations and field options use the same configuration names as
+[primary-key indexes](../primary-key-table/global-index#options):
+
+```properties
+global-index.btree.index-columns=category
+global-index.ivf-pq.index-columns=embedding
+ivf-pq.dimension=768
+fields.embedding.index-options={"nlist":64,"distance.metric":"cosine"}
+```
+
+For raw vector searches without existing index files, declare the implementation
+with `global-index.<type>.index-columns` (or singular `index-column`). The former
+`index_type`, `index-type`, `vector.index-type`, and `fields.<column>.index-type`
+table/query option aliases are no longer interpreted. Legacy primary-key index
+configuration remains supported, including `fields.<column>.pk-vector.index.type`.
+
+Use the actual implementation identifier, such as `ivf-pq`, in the declaration.
+Each listed column declares an independent index. The singular `index-column`
+spelling remains an alias; `index-columns` takes precedence. Field JSON options
+override implementation-level parameters and support short keys without repeating
+the implementation prefix. Existing flat vector field options such as
+`fields.embedding.dimension` and `fields.embedding.nlist` remain supported.
+
+These declarations do not schedule builds in standalone Paimon. Continue to use
+the [index build commands](./global-index/manage-indexes#build-an-index), or the
+index scheduling service provided by your catalog. Data Evolution indexes address
+table-wide row IDs; primary-key indexes retain their bucket-local compaction lifecycle.
+
 The example table below is shared by the BTree, Bitmap, Multivalue, Vector, and
 Full-Text guides. It contains three-dimensional sample vectors and is partitioned
 by `dt`, so the partition-scoped build and drop examples also apply. Create and

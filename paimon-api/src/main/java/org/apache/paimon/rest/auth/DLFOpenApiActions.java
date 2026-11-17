@@ -62,6 +62,11 @@ final class DLFOpenApiActions {
             "/v1/{prefix}/databases/{database}/tables/{table}/commit-lock/renew",
             "RenewCommitLock"
         },
+        {
+            "POST",
+            "/v1/{prefix}/databases/{database}/tables/{table}/commit-lock/release",
+            "ReleaseCommitLock"
+        },
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/replace", "ReplaceTable"},
         {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/token", "GetTableToken"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/rollback", "RollbackToSnapshot"},
@@ -157,6 +162,10 @@ final class DLFOpenApiActions {
         {"GET", "/v1/{prefix}/databases/{database}/functions/{function}", "GetFunction"},
         {"POST", "/v1/{prefix}/databases/{database}/functions/{function}", "AlterFunction"},
         {"DELETE", "/v1/{prefix}/databases/{database}/functions/{function}", "DropFunction"},
+        {"GET", "/v1/{prefix}/databases/{database}/models", "ListModels"},
+        {"POST", "/v1/{prefix}/databases/{database}/models", "CreateModel"},
+        {"GET", "/v1/{prefix}/databases/{database}/models/{model}", "GetModel"},
+        {"DELETE", "/v1/{prefix}/databases/{database}/models/{model}", "DropModel"},
         {"GET", "/v1/{prefix}/permissions", "ListPermissionAssignments"},
         {"POST", "/v1/{prefix}/permissions/grant", "GrantPermissionAssignment"},
         {"POST", "/v1/{prefix}/permissions/revoke", "RevokePermissionAssignment"},

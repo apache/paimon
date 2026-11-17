@@ -35,12 +35,15 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE;
+import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
+import static org.apache.paimon.CoreOptions.IGNORE_RETRACT;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE;
 import static org.apache.paimon.CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for creating changelog table with primary keys. */
 public class PrimaryKeyTableUtils {
@@ -61,6 +64,19 @@ public class PrimaryKeyTableUtils {
         Options conf = Options.fromMap(tableSchema.options());
         CoreOptions options = new CoreOptions(conf);
         CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
+
+        if (mergeEngine == CoreOptions.MergeEngine.AGGREGATE
+                || mergeEngine == CoreOptions.MergeEngine.PARTIAL_UPDATE) {
+            for (String primaryKey : tableSchema.primaryKeys()) {
+                checkArgument(
+                        !options.fieldAggIgnoreRetract(primaryKey),
+                        "Primary key field '%s' cannot be configured with '%s.%s.%s=true'.",
+                        primaryKey,
+                        FIELDS_PREFIX,
+                        primaryKey,
+                        IGNORE_RETRACT);
+            }
+        }
 
         switch (mergeEngine) {
             case DEDUPLICATE:

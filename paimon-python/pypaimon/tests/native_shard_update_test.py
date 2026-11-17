@@ -130,6 +130,8 @@ def test_native_shard_updates_use_the_captured_reader_order(native_rest_catalog,
 @pytest.mark.parametrize('count', [1, 3, 7])
 def test_native_shards_are_balanced_by_file_group(native_rest_catalog, partitions, count):
     table, schema = _table(native_rest_catalog, partitions=partitions)
+    # Keep five independent file groups for the shard distribution check.
+    table = table.copy({'write-only': 'true'})
     for i in range(5):
         _append(table, [dict(p=str(i % 2), id=i, value=i * 10)], schema)
     snapshot_id = table.snapshot_manager().get_latest_snapshot().id

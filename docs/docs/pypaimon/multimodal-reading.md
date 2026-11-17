@@ -175,6 +175,10 @@ for batch in aligned.to_arrow_batch_reader(batch_size=128):
     train(batch)
 ```
 
+Set `parallelism=4` in `to_arrow_batch_reader()` to plan and read sources concurrently
+(default: 1). Output order is preserved; per-table reader concurrency still applies.
+Custom catalog and authorization callbacks must be thread-safe.
+
 `direction` is `backward`, `forward`, or `nearest`; tolerance is inclusive and
 zero permits only exact matches. Nearest ties use the earlier time. For duplicate
 timestamps, backward uses the last row and forward uses the first. Nearest uses the last
@@ -365,6 +369,11 @@ original history, future and stride must be preserved. See
 [task-local context and anchor selection](pytorch#task-local-context-and-anchor-selection)
 for a metadata-only selection example and distributed ownership guidance.
 
+On data-evolution tables, search queries also expose
+`to_contiguous_window_dataset()`: hits automatically select anchors while a
+separate scan on the same snapshot preserves their history and future context.
+See [search hits as training samples and window anchors](pytorch#search-hits-as-training-samples-and-window-anchors).
+
 The Dataset plans and authorizes all requested columns once, reads only the
 index columns at construction, and reuses the resulting split metadata for
 lazy payload reads across projections and workers.
@@ -536,26 +545,47 @@ row_ids = candidates["_ROW_ID"].tolist()
 
 When a row-id manifest is persisted beyond a short-lived latest-snapshot
 workflow, record the source snapshot or tag and pass it back to the read API.
-`scan`, `search`, `search_vectors`, `search_hybrid`, and `take_row_ids` accept
+`scan`, `search`, `search_vectors`, `search_hybrid`, `take_row_ids`, and `take_batch` accept
 `snapshot_id` or `tag_name`. These two options are mutually exclusive.
 
 Use `take_row_ids` to fetch rows selected by an earlier scan, vector search,
-full-text search, hybrid search, sampler, or split manifest. Results are not
-guaranteed to follow the input row-id order. Include `_ROW_ID` and reorder on
-the client if order matters.
+full-text search, hybrid search, or split manifest when only membership matters.
+It is a filtering query: input duplicates do not repeat rows, missing or deleted
+IDs are omitted, and result order is unspecified. For example,
+`take_row_ids([2, 0, 2])` can return row IDs `[0, 2]`.
+
+Use `take_batch` for training samplers, sampling with replacement, or any read
+that must align one-for-one with the supplied IDs:
+
+| API | Input identifiers | Order and duplicates | Missing rows |
+| --- | --- | --- | --- |
+| `take_row_ids(ids)` | Paimon `_ROW_ID` | Membership only; no order guarantee or repetition | Omitted |
+| `take_batch(ids, columns=...)` | Paimon `_ROW_ID` | Preserved exactly | Raises `KeyError` |
+| Map-style Torch Dataset `__getitems__(indices)` | Positions in that Dataset | Preserved exactly | Out-of-range positions raise `IndexError` |
 
 ```python
-payload = (
-    docs.take_row_ids(row_ids, snapshot_id=source_snapshot_id)
-    .select(["id", "content", "image"])
-    .with_row_id()
-    .to_arrow()
-    .to_pylist()
+batch = docs.take_batch(
+    row_ids,
+    columns=["id", "content", "image", "_ROW_ID"],
+    snapshot_id=source_snapshot_id,
 )
-
-payload_by_row_id = {row["_ROW_ID"]: row for row in payload}
-ordered_payload = [payload_by_row_id[row_id] for row_id in row_ids]
+assert batch["_ROW_ID"].to_pylist() == row_ids
+ordered_payload = batch.to_pylist()
 ```
+
+`take_batch` executes immediately and returns a `pyarrow.Table`. It requires
+row tracking. For existing row IDs `[2, 0, 2]`, it returns three rows in exactly
+that order. Empty input returns an empty table with the projected schema.
+`columns` defaults to all table columns; request `_ROW_ID` explicitly to include
+it. BLOB columns follow the table's read options, including
+`blob-as-descriptor`. A deleted, unavailable, or filtered-out ID fails the whole
+batch instead of silently reducing its size.
+
+For `scan().to_torch(streaming=False)`, let DataLoader pass sampler batches to
+the Dataset's `__getitems__`. These inputs are Dataset positions, so position
+`2` need not refer to Paimon row ID `2`. Both lazy and materialized map-style
+Datasets preserve sampler order and repeated positions; an empty batch returns
+an empty list.
 
 This pattern keeps broad candidate generation cheap: first search or filter to
 produce a compact row-id manifest, then fetch only the columns needed by the
@@ -576,24 +606,19 @@ manifest = (
 )
 
 # Stage 2: expensive reranking payload, fetched only for candidates.
-rerank_payload = (
-    docs.take_row_ids(
-        manifest["_ROW_ID"].tolist(),
-        snapshot_id=source_snapshot_id,
-    )
-    .select(["id", "content", "image"])
-    .with_row_id()
-    .to_list()
-)
+rerank_payload = docs.take_batch(
+    manifest["_ROW_ID"].tolist(),
+    columns=["id", "content", "image", "_ROW_ID"],
+    snapshot_id=source_snapshot_id,
+).to_pylist()
 
-payload_by_row_id = {row["_ROW_ID"]: row for row in rerank_payload}
 rerank_inputs = [
     {
-        "row_id": row_id,
+        "row_id": row["_ROW_ID"],
         "candidate_rank": rank,
-        "doc": payload_by_row_id[row_id],
+        "doc": row,
     }
-    for rank, row_id in enumerate(manifest["_ROW_ID"])
+    for rank, row in enumerate(rerank_payload)
 ]
 ```
 
@@ -604,12 +629,11 @@ they need:
 
 ```python
 def run_inference_worker(docs, row_id_batch, source_snapshot_id):
-    rows = (
-        docs.take_row_ids(row_id_batch, snapshot_id=source_snapshot_id)
-        .select(["id", "content"])
-        .with_row_id()
-        .to_list()
-    )
+    rows = docs.take_batch(
+        row_id_batch,
+        columns=["id", "content", "_ROW_ID"],
+        snapshot_id=source_snapshot_id,
+    ).to_pylist()
 
     outputs = []
     for row in rows:
@@ -631,7 +655,7 @@ Best practices:
   manifests.
 - Use business keys or application columns when writing inference or training
   outputs back to a table.
-- Reorder `take_row_ids` results client-side when input order matters.
+- Use `take_batch` when input order, repeated samples, or exact batch size matters.
 
 ### BLOB URI affinity
 

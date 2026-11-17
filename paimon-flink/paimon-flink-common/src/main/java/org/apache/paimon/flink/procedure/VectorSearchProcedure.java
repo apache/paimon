@@ -29,6 +29,7 @@ import org.apache.paimon.format.json.JsonOptions;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
@@ -260,7 +261,9 @@ public class VectorSearchProcedure extends ProcedureBase {
 
     private static void validatePrimaryKeyFilter(
             FileStoreTable table, String vectorColumn, FilterParts filterParts) {
-        if (!table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn)
+        if (table.schema().primaryKeys().isEmpty()
+                || !VectorIndexOptions.columns(table.coreOptions().toConfiguration())
+                        .contains(vectorColumn)
                 || !filterParts.hasDataFilter()) {
             return;
         }

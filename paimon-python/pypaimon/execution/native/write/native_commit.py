@@ -22,7 +22,7 @@ import json
 from pypaimon.common.json_util import JSON
 from pypaimon.execution.native.runtime import native_runtime_available
 from pypaimon.execution.native.table import (
-    _catalog_context_options, _catalog_metastore, _option_value_to_string,
+    _catalog_context_options, _catalog_metastore, _option_value_to_string, _options_to_native,
     _resolved_schema_file_io_options)
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.commit_message_serializer import (
@@ -30,11 +30,17 @@ from pypaimon.write.commit_message_serializer import (
 )
 
 
-def native_messages_supported(table, messages) -> bool:
+def native_messages_supported(table, messages, *, for_commit=False) -> bool:
     for message in messages:
         if (message.compact_before or message.compact_after
                 or message.compact_changelog_files
                 or message.compact_index_adds or message.compact_index_deletes):
+            return False
+        # Native 0.5.0 cannot validate retained field IDs against the schema of
+        # each publication attempt. Full-row updates also retain field IDs;
+        # write_cols=None does not exempt them. Pure conflict probes are safe.
+        if (for_commit and table.options.data_evolution_enabled()
+                and any(file.first_row_id is not None for file in message.new_files)):
             return False
         partition = tuple(message.partition)
         for file in message.new_files + message.changelog_files:
@@ -153,8 +159,7 @@ def create_native_write_table(table):
     from pypaimon_rust.datafusion import Table as NativeTable
     # Preserve the resolved schema and all effective table options, including
     # copy() overrides. Do not inject scan options or reload catalog schemas.
-    options = {str(key): _option_value_to_string(value)
-               for key, value in table.table_schema.options.items() if value is not None}
+    options = _options_to_native(table.table_schema.options)
     # Python accepts boolean spellings such as "off"; pass the parsed value.
     options['dynamic-partition-overwrite'] = _option_value_to_string(
         table.options.dynamic_partition_overwrite())
@@ -166,7 +171,7 @@ def create_native_write_table(table):
         table.options.data_evolution_row_sidecar_enabled())
     options['query-auth.enabled'] = _option_value_to_string(table.options.query_auth_enabled)
     schema_json = JSON.to_json(table.table_schema.copy(new_options=options))
-    if environment.supports_version_management:
+    if environment.catalog_loader is not None and environment.supports_version_management:
         if not _rest_catalog_supported(table):
             return None
         return _native_rest_table(table, schema_json)

@@ -49,7 +49,7 @@ class CustomBucketFunctionTest extends PaimonSparkTestBase with AdaptiveSparkPla
         createTable("default_bucket", primaryKey = true, custom = false)
         val table = loadTable("custom_bucket")
         assert(table.coreOptions().bucketFunctionType() == BucketFunctionType.DEFAULT)
-        assert(SparkTable(loadTable("default_bucket")).useV2Write == gteqSpark3_4)
+        assert(SparkTable(loadTable("default_bucket")).useV2Write)
         assert(!SparkTable(table).useV2Write)
         assert(!SparkTable(table).capabilities().contains(TableCapability.BATCH_WRITE))
       }

@@ -303,9 +303,13 @@ def test_invalid_build_parallelism_is_rejected_before_writing_files(rest_catalog
 def test_all_null_build_does_not_instantiate_native_training(rest_catalog, kind):
     catalog, _ = rest_catalog
     table = _table(catalog, [None] * 4)
-    options = {kind + '.dimension': '2', kind + '.distance.metric': 'invalid'}
+    # Metric resolution precedes scanning; these invalid training parameters
+    # instead prove that an all-null shard never instantiates a trainer.
+    options = {kind + '.dimension': '2', kind + '.distance.metric': 'l2'}
     if kind != 'diskann':
         options[kind + '.nlist'] = '0'
+    else:
+        options['diskann.build-preset'] = 'invalid'
     assert _build(table, kind, options) == []
     classic = table.copy({'write.native.enabled': 'false'})
     assert GlobalIndexBuilder(classic, 'embedding', index_type=kind, options=options).build() == []

@@ -79,6 +79,38 @@ expiration, and partition expiration.
 
 For multiple jobs to write the same table, you can refer to [dedicated compaction job](../maintenance/dedicated-compaction#dedicated-compaction-job) for more info.
 
+### Physical Generated Columns
+
+On Flink 1.18 and later, `INSERT INTO` and batch `INSERT OVERWRITE` fill nullable physical generated
+columns omitted from an explicit target column list. Create their definitions through
+[Spark DDL](../spark/sql-ddl#generated-columns) or the Java schema builder's
+`generatedColumn(name, type, expression)`; Flink SQL does not provide DDL syntax for these definitions.
+
+For an existing table with ordinary columns `id`, `name`, `event_time` and generated columns
+`label = UPPER(name)` and `dt = CAST(event_time AS DATE)`:
+
+```sql
+INSERT INTO events (id, name, event_time)
+VALUES (1, 'hello', TIMESTAMP '2026-10-30 12:00:00');
+
+-- label is stored as 'HELLO', and dt as DATE '2026-10-30'.
+```
+
+Paimon evaluates its stored expressions, applying source-column defaults before generation.
+Generation happens before partition routing and bucket assignment and supports ordinary append,
+primary-key, and Data Evolution tables. Explicitly supplied generated values, including NULL,
+are preserved without evaluating or checking the expression. Static partition values are also
+treated as supplied.
+
+Flink SQL does not support automatically filling NOT NULL generated columns, generated primary-key
+columns, or generated partition columns in primary-key tables; supply their values explicitly.
+Nullable generated partition columns can be filled for ordinary append and Data Evolution tables.
+Generated-column filling retains the sink's existing changelog and merge-engine behavior.
+
+`UPDATE` preserves generated values unless explicitly assigned. Flink's virtual computed columns
+(`column AS expression`) retain their existing semantics. On Flink 1.16 and 1.17, supply all
+physical generated values explicitly because those versions do not expose the target column list.
+
 ### Clustering
 
 Clustering groups append-table rows by selected columns to improve data skipping. This write

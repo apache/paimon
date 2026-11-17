@@ -26,6 +26,7 @@ from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.catalog.catalog_utils import (
     check_not_branch,
+    check_not_system_database,
     check_not_system_table,
     encoded_branch_name
 )
@@ -324,6 +325,7 @@ class JdbcCatalog(Catalog):
 
     def create_database(self, name: str, ignore_if_exists: bool,
                         properties: Optional[Dict[str, str]] = None) -> None:
+        check_not_system_database(name)
         if self._database_exists(name):
             if not ignore_if_exists:
                 raise DatabaseAlreadyExistException(name)
@@ -337,6 +339,7 @@ class JdbcCatalog(Catalog):
             self._insert_database_properties(name, create_props)
 
     def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
+        check_not_system_database(name)
         if not self._database_exists(name):
             if not ignore_if_not_exists:
                 raise DatabaseNotExistException(name)
@@ -362,6 +365,7 @@ class JdbcCatalog(Catalog):
             )
 
     def alter_database(self, name: str, changes: List[PropertyChange]) -> None:
+        check_not_system_database(name)
         self.get_database(name)
         set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
         current = self._fetch_database_properties(name)

@@ -162,7 +162,7 @@ class PrimaryKeySortedIndexBatchScanTest {
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(), "false");
         options.put(CoreOptions.GLOBAL_INDEX_ENABLED.key(), Boolean.toString(globalIndexEnabled));
-        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "f7");
+        options.put(CoreOptions.GLOBAL_INDEX_BTREE_INDEX_COLUMNS.key(), "f7");
         return new TableSchema(
                 5,
                 Arrays.asList(

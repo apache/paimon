@@ -19,7 +19,7 @@
 
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.execution.native.table import (_catalog_metastore, _native_table)
+from pypaimon.execution.native.table import (_catalog_metastore, _native_table, _options_to_native)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.execution.native.read.native_search_plan import _result
@@ -49,7 +49,7 @@ def _native_vector_builder(builder, batch=False):
               native_table.new_vector_search_builder())
     if builder._vector_column is not None:
         native.with_vector_column(builder._vector_column.name)
-    native.with_limit(builder._limit).with_options(builder._options)
+    native.with_limit(builder._limit).with_options(_options_to_native(builder._options))
     try:
         if builder._filter is not None:
             native.with_filter(_predicate_to_native(builder._filter))

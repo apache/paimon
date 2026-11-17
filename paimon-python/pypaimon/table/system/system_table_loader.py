@@ -81,12 +81,20 @@ SYSTEM_TABLE_LOADERS: Dict[str, Callable[..., "SystemTable"]] = {
 }
 
 
+_PHYSICAL_METADATA_TABLES = ("files", "file_key_ranges", "binlog", "statistics")
+
+
 def load(name: str, base_table: "FileStoreTable") -> Optional["SystemTable"]:
     """Return the SystemTable implementation for ``name`` or ``None``.
 
     Callers (typically a Catalog) treat ``None`` as "no such system
     table" and surface a ``TableNotExistException`` to the user.
     """
+    name = name.lower()
+    if name in _PHYSICAL_METADATA_TABLES and base_table.options.query_auth_enabled:
+        raise NotImplementedError(
+            "System table '{}' is not supported on a query-auth table: it reports "
+            "raw file statistics, which column masking cannot be applied to.".format(name))
     factory = SYSTEM_TABLE_LOADERS.get(name)
     if factory is None:
         return None
