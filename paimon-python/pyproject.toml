@@ -163,7 +163,7 @@ datafusion = [
 ]
 sql = [
     "pypaimon[datafusion]; python_version >= '3.10'",
-    "pypaimon-rust>=0.3.0; python_version >= '3.10'",
+    "pypaimon-rust>=0.3.0,<0.5.0; python_version >= '3.10'",
 ]
 hdfs = [
     "hdfs-native>=0.13,<1; python_version >= '3.10' and platform_system != 'Windows'",

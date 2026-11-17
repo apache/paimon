@@ -165,16 +165,18 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build paimon-rust from the verified 2.1 revision
-        run: |
-          python -m pip install --upgrade pip
-          # Keep the release branch on the revision verified by Native CI on 2026-10-08.
-          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@ae62495d275ccf3811c38128788be8cf7e144177#subdirectory=bindings/python"
-
       - name: Install Python test dependencies
         run: |
+          python -m pip install --upgrade pip
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e ./paimon-python --group ./paimon-python/pyproject.toml:dev
+          python -m pip check
+
+      - name: Build paimon-rust from the verified 2.1 revision
+        run: |
+          # Install after the SQL extra, which constrains published wheels below 0.5.0.
+          # This verified source revision also reports 0.5.0, but predates that release.
+          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@ae62495d275ccf3811c38128788be8cf7e144177#subdirectory=bindings/python"
           python -m pip check
 
       - name: Verify native wheel provenance
@@ -187,6 +189,7 @@ jobs:
 
           distribution = metadata.distribution('pypaimon-rust')
           source = json.loads(distribution.read_text('direct_url.json'))
+          assert source['vcs_info']['commit_id'] == 'ae62495d275ccf3811c38128788be8cf7e144177'
           print('pypaimon-rust', distribution.version,
                 'commit', source['vcs_info']['commit_id'])
           PY
