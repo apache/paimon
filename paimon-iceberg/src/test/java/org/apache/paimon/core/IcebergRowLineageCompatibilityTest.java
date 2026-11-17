@@ -35,6 +35,7 @@ import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
+import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -608,7 +609,10 @@ public class IcebergRowLineageCompatibilityTest {
             assertThat(entries.get(0).status()).isEqualTo(IcebergManifestEntry.Status.DELETED);
             List<IcebergManifestFileMeta> rewritten =
                     oldEntryWriter.rollingWrite(
-                            entries.iterator(), meta.sequenceNumber(), meta.content());
+                            entries.iterator(),
+                            meta.sequenceNumber(),
+                            meta.content(),
+                            IcebergSchema.create(v2SchemaView.schema()));
             Path target = new Path(meta.manifestPath());
             LocalFileIO.create().deleteQuietly(target);
             LocalFileIO.create().rename(new Path(rewritten.get(0).manifestPath()), target);
