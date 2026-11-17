@@ -1188,7 +1188,9 @@ public class FileStoreCommitTest {
                                 Collections.singletonList(compactDeleted)));
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
-            commit.abort(Collections.singletonList(commitMessage));
+            commit.abort(
+                    Collections.singletonList(commitMessage),
+                    store.options().fileOperationThreadNum());
         }
 
         assertThat(store.fileIO().exists(dataNewPath)).isFalse();
@@ -1224,7 +1226,9 @@ public class FileStoreCommitTest {
                                 Collections.emptyList()));
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
-            commit.abort(Collections.singletonList(commitMessage));
+            commit.abort(
+                    Collections.singletonList(commitMessage),
+                    store.options().fileOperationThreadNum());
         }
 
         for (Path path : dataNew.collectFiles(pathFactory)) {
@@ -1270,8 +1274,12 @@ public class FileStoreCommitTest {
                                 Collections.emptyList()));
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
-            commit.abort(Collections.singletonList(commitMessage));
-            commit.abort(Collections.singletonList(commitMessage));
+            commit.abort(
+                    Collections.singletonList(commitMessage),
+                    store.options().fileOperationThreadNum());
+            commit.abort(
+                    Collections.singletonList(commitMessage),
+                    store.options().fileOperationThreadNum());
         }
 
         for (Path path : reused.collectFiles(pathFactory)) {
@@ -1324,8 +1332,8 @@ public class FileStoreCommitTest {
             }
             assertThat(store.snapshotManager().latestSnapshotId()).isNull();
 
-            commit.abort(messages);
-            commit.abort(messages);
+            commit.abort(messages, store.options().fileOperationThreadNum());
+            commit.abort(messages, store.options().fileOperationThreadNum());
 
             for (Path path : pendingPaths) {
                 assertThat(store.fileIO().exists(path)).as("aborted file %s", path).isFalse();
@@ -1375,7 +1383,9 @@ public class FileStoreCommitTest {
             SlowFileIO.setDelayMillis(50);
             caller.setContextClassLoader(callerLoader);
             try (FileStoreCommitImpl commit = store.newCommit()) {
-                commit.abort(Collections.singletonList(commitMessage));
+                commit.abort(
+                        Collections.singletonList(commitMessage),
+                        store.options().fileOperationThreadNum());
             } finally {
                 caller.setContextClassLoader(original);
             }
@@ -1438,7 +1448,9 @@ public class FileStoreCommitTest {
 
         // issue 11111: a failed delete is logged and neither throws nor skips the other files
         try (FileStoreCommitImpl commit = store.newCommit()) {
-            commit.abort(Collections.singletonList(commitMessage));
+            commit.abort(
+                    Collections.singletonList(commitMessage),
+                    store.options().fileOperationThreadNum());
         }
 
         assertThat(store.fileIO().exists(undeletable)).isTrue();
@@ -1470,7 +1482,9 @@ public class FileStoreCommitTest {
         try (FileStoreCommitImpl commit = store.newCommit()) {
             Thread.currentThread().interrupt();
             try {
-                commit.abort(Collections.singletonList(commitMessage));
+                commit.abort(
+                        Collections.singletonList(commitMessage),
+                        store.options().fileOperationThreadNum());
             } finally {
                 interruptedAfterAbort = Thread.interrupted();
             }
@@ -1531,7 +1545,9 @@ public class FileStoreCommitTest {
                             });
             interrupter.start();
             try {
-                commit.abort(Collections.singletonList(commitMessage));
+                commit.abort(
+                        Collections.singletonList(commitMessage),
+                        store.options().fileOperationThreadNum());
             } catch (Throwable t) {
                 abortFailure = t;
             } finally {
@@ -1630,7 +1646,9 @@ public class FileStoreCommitTest {
                     new Thread(
                             () -> {
                                 try {
-                                    commit.abort(Collections.singletonList(commitMessage));
+                                    commit.abort(
+                                            Collections.singletonList(commitMessage),
+                                            store.options().fileOperationThreadNum());
                                 } catch (Throwable t) {
                                     abortFailure.set(t);
                                 } finally {

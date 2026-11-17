@@ -735,7 +735,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void abort(List<CommitMessage> commitMessages) {
+    public void abort(List<CommitMessage> commitMessages, int threadNum) {
         DataFilePathFactories dataFactories = new DataFilePathFactories(pathFactory);
         IndexFilePathFactories indexFactories = new IndexFilePathFactories(pathFactory);
         List<Path> filesToDelete = new ArrayList<>();
@@ -774,7 +774,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 filesToDelete.add(indexPathFactory.toPath(file));
             }
         }
-        deleteConcurrently(filesToDelete);
+        deleteConcurrently(filesToDelete, threadNum);
     }
 
     /**
@@ -782,12 +782,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
      * first unchecked failure in input order is rethrown as is, later ones are suppressed into it.
      * Do not call this from a {@link FileOperationThreadPool} thread, it may wait for itself.
      */
-    private void deleteConcurrently(List<Path> files) {
+    private void deleteConcurrently(List<Path> files, int threadNum) {
         if (files.isEmpty()) {
             return;
         }
 
-        int threadNum = options.fileOperationThreadNum();
         ExecutorService executor = FileOperationThreadPool.getExecutorService(threadNum);
         // The bounded executor runs a task without a permit if the caller is interrupted while
         // waiting for one, so abort bounds the deletes with its own permits and keeps waiting for

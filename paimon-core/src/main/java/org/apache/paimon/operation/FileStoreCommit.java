@@ -82,8 +82,11 @@ public interface FileStoreCommit extends AutoCloseable {
     /** Roll back to the target snapshot and materialize it as the latest snapshot. */
     boolean rollbackToAsLatest(Snapshot targetSnapshot);
 
-    /** Abort an unsuccessful commit. The data files will be deleted. */
-    void abort(List<CommitMessage> commitMessages);
+    /**
+     * Abort an unsuccessful commit. The data files will be deleted, with {@code threadNum} bounding
+     * the concurrent deletes as {@code file-operation.thread-num} does.
+     */
+    void abort(List<CommitMessage> commitMessages, int threadNum);
 
     /** With metrics to measure commits. */
     FileStoreCommit withMetrics(CommitMetrics metrics);
