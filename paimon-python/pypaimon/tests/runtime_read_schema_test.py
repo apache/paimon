@@ -146,3 +146,38 @@ def test_row_id_update_rejects_null_in_declared_not_null_column(tmp_path, native
     assert table.snapshot_manager().get_latest_snapshot().id == snapshot
     read = table.new_read_builder()
     assert read.new_read().to_arrow(read.new_scan().plan().splits()).to_pylist() == [{'id': 1, 'score': 2}]
+
+
+@pytest.mark.parametrize('native_write', [False, True])
+@pytest.mark.parametrize('data_type,values', [
+    (pa.struct([pa.field('n', pa.int32(), nullable=False)]),
+     [{'n': 1}, None, {'n': 3}, None]),
+    (pa.list_(pa.struct([pa.field('n', pa.int32(), nullable=False)])),
+     [[{'n': 1}], [], None, [{'n': 4}]]),
+    (pa.map_(pa.string(), pa.field('value', pa.int32(), nullable=False)),
+     [[('a', 1)], [], None, [('d', 4)]]),
+])
+def test_de_column_group_merge_uses_runtime_nested_schema(tmp_path, native_write, data_type, values):
+    pytest.importorskip('pypaimon_rust.data')
+    from pypaimon.tests.native_nested_update_test import _table
+    table, _ = _table(tmp_path, data_type, native_write)
+    field_before = table.fields[1].to_dict()
+    builder = table.new_batch_write_builder()
+    updater = builder.new_update().with_update_type(['value'])
+    changes = pa.table({'_ROW_ID': pa.array(range(4), type=pa.int64()),
+                        'value': pa.array(values, type=data_type)})
+    messages = updater.update_by_arrow_with_row_id(changes)
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages)
+    finally:
+        commit.close()
+    for native_read in (False, True):
+        copy = table.copy({'scan.native-plan.enabled': str(native_read).lower(),
+                           'read.native.enabled': str(native_read).lower()})
+        reader = copy.new_read_builder()
+        result = reader.new_read().to_arrow(reader.new_scan().plan().splits()).sort_by('id')
+        assert result['id'].to_pylist() == [0, 1, 2, 3]
+        assert result['value'].to_pylist() == values
+        assert result['untouched'].to_pylist() == [10, 11, 12, 13]
+        assert table.fields[1].to_dict() == field_before

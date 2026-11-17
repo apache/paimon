@@ -21,6 +21,7 @@ from copy import copy
 from functools import partial
 from typing import Callable, Dict, List, Optional, Tuple
 
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.common.merge_engine_dispatch import build_merge_function
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.common.predicate import Predicate
@@ -1753,7 +1754,9 @@ class DataEvolutionSplitRead(SplitRead):
                 if not field.type.nullable:
                     raise ValueError(f"Field {field} is not null but can't find any file contains it.")
 
-        output_schema = PyarrowFieldParser.from_paimon_schema(all_read_fields)
+        # Column-group readers return runtime nullability after schema evolution.
+        # Preserve those nested types when assembling the columns into one batch.
+        output_schema = read_arrow_schema(all_read_fields)
         return DataEvolutionMergeReader(row_offsets, field_offsets, file_record_readers, schema=output_schema)
 
     def _create_file_reader(
