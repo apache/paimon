@@ -47,6 +47,7 @@ public class PredictionSpec {
     private final String instructions;
     private final @Nullable String where;
     private final Map<String, String> options;
+    private final @Nullable String idempotencyKey;
 
     public PredictionSpec(
             @Nullable String name,
@@ -55,17 +56,22 @@ public class PredictionSpec {
             @Nullable List<String> mergeKeyColumns,
             String instructions,
             @Nullable String where,
-            @Nullable Map<String, String> options) {
+            @Nullable Map<String, String> options,
+            @Nullable String idempotencyKey) {
         checkOptionalNonBlank(name, "name");
         checkArgument(model != null, "model must not be null");
+        checkNonBlank(model.getDatabaseName(), "model database");
+        checkNonBlank(model.getObjectName(), "model object");
         checkNonBlank(instructions, "instructions");
         checkOptionalNonBlank(where, "where");
+        checkOptionalNonBlank(idempotencyKey, "idempotencyKey");
         this.name = name;
         this.model = model;
         this.inputs = copyStringMap(inputs, "inputs", true);
         this.mergeKeyColumns = copyOptionalStringList(mergeKeyColumns, "mergeKeyColumns");
         this.instructions = instructions;
         this.where = where;
+        this.idempotencyKey = idempotencyKey;
         this.options =
                 options == null ? Collections.emptyMap() : copyStringMap(options, "options", false);
         CoreOptions coreOptions = new CoreOptions(this.options);
@@ -105,6 +111,11 @@ public class PredictionSpec {
 
     public Map<String, String> options() {
         return options;
+    }
+
+    @Nullable
+    public String idempotencyKey() {
+        return idempotencyKey;
     }
 
     private static Map<String, String> copyStringMap(

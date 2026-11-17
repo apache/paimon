@@ -131,6 +131,7 @@ class SubmitPredictionRequest(RESTRequest):
             inputs=spec.inputs,
             instructions=spec.instructions,
             merge_key_columns=spec.merge_key_columns or None,
+            idempotency_key=spec.idempotency_key,
             where=spec.where,
             options=spec.options,
         )

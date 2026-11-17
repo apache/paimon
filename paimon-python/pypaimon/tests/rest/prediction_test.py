@@ -124,10 +124,14 @@ class PredictionTest(unittest.TestCase):
 
         keyed = SubmitPredictionRequest.from_spec(
             Identifier.create("quality", "clips"),
-            _spec(merge_key_columns=["clip_id"]),
+            _spec(
+                merge_key_columns=["clip_id"],
+                idempotency_key="retry-1",
+            ),
         )
         keyed_body = json.loads(JSON.to_json(keyed))
         self.assertEqual(["clip_id"], keyed_body["mergeKeyColumns"])
+        self.assertEqual("retry-1", keyed_body["idempotencyKey"])
 
         response = JSON.from_json(
             JSON.to_json(_response()), GetPredictionResponse)
@@ -213,6 +217,8 @@ class PredictionTest(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 _spec(**changes)
         with self.assertRaises(ValueError):
+            _spec(model=Identifier.create("", "qwen_vl"))
+        with self.assertRaises(ValueError):
             PredictionStatus(PredictionState.TERMINATED)
         with self.assertRaises(ValueError):
             PredictionStatus(
@@ -246,6 +252,7 @@ class PredictionTest(unittest.TestCase):
             model="quality.qwen_vl",
             inputs={"video": "content"},
             instructions="Classify",
+            idempotency_key="retry-1",
         )
 
         self.assertIsInstance(waiter, PredictionWait)
@@ -253,6 +260,7 @@ class PredictionTest(unittest.TestCase):
         sent = catalog.submit_prediction.call_args[0][1]
         self.assertEqual({"scan.snapshot-id": "7"}, sent.options)
         self.assertEqual([], sent.merge_key_columns)
+        self.assertEqual("retry-1", sent.idempotency_key)
         raw.new_read_builder.assert_not_called()
 
     def test_table_queries_return_metadata_and_cancel_returns_waiter(self):

@@ -133,13 +133,15 @@ class RESTApiPredictionTest {
                         null,
                         "Classify",
                         null,
-                        Collections.emptyMap());
+                        Collections.emptyMap(),
+                        "retry-1");
         SubmitPredictionRequest request =
                 new SubmitPredictionRequest(Identifier.create("quality", "clips"), spec);
         SubmitPredictionRequest decoded =
                 RESTApi.fromJson(RESTApi.toJson(request), SubmitPredictionRequest.class);
 
         assertThat(decoded.getModel()).isEqualTo(Identifier.create("quality.archive", "qwen.vl"));
+        assertThat(decoded.getIdempotencyKey()).isEqualTo("retry-1");
     }
 
     @Test
@@ -153,7 +155,8 @@ class RESTApiPredictionTest {
                                         null,
                                         "Classify",
                                         null,
-                                        Collections.emptyMap()))
+                                        Collections.emptyMap(),
+                                        null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("inputs must not be empty");
 
@@ -166,7 +169,8 @@ class RESTApiPredictionTest {
                                         Arrays.asList("clip_id", "clip_id"),
                                         "Classify",
                                         null,
-                                        Collections.emptyMap()))
+                                        Collections.emptyMap(),
+                                        null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("mergeKeyColumns must not contain duplicates");
 
@@ -179,7 +183,8 @@ class RESTApiPredictionTest {
                                         null,
                                         "Classify",
                                         null,
-                                        Collections.singletonMap("scan.snapshot-id", "0")))
+                                        Collections.singletonMap("scan.snapshot-id", "0"),
+                                        null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("scan.snapshot-id must be positive");
 
@@ -195,9 +200,24 @@ class RESTApiPredictionTest {
                                         null,
                                         "Classify",
                                         null,
-                                        conflictingOptions))
+                                        conflictingOptions,
+                                        null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("mutually exclusive");
+
+        assertThatThrownBy(
+                        () ->
+                                new PredictionSpec(
+                                        null,
+                                        Identifier.create("", "qwen_vl"),
+                                        Collections.singletonMap("video", "content"),
+                                        null,
+                                        "Classify",
+                                        null,
+                                        Collections.emptyMap(),
+                                        null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("model database");
     }
 
     @Test
@@ -235,7 +255,8 @@ class RESTApiPredictionTest {
                 Collections.singletonList("clip_id"),
                 "Classify",
                 null,
-                Collections.singletonMap("scan.snapshot-id", "7"));
+                Collections.singletonMap("scan.snapshot-id", "7"),
+                null);
     }
 
     private static Prediction prediction() {

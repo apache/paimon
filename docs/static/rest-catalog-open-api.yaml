@@ -139,7 +139,8 @@ paths:
       summary: Submit a prediction job
       operationId: submitPrediction
       description: >-
-        Accepts a job after fixing the source snapshot and resolving the registered model.
+        Records the source snapshot and resolves the registered model. Execution reads
+        the recorded snapshot and fails if it is no longer available.
         Reusing an idempotencyKey with the same payload returns the existing job;
         conflicting reuse returns 409.
       parameters:
@@ -4731,7 +4732,12 @@ components:
             Optional key reused for retries of one logical submission. SDKs generate
             one by default; requests without a key are independent submissions.
         model:
-          $ref: '#/components/schemas/Identifier'
+          allOf:
+            - $ref: '#/components/schemas/Identifier'
+          required: [database, object]
+          properties:
+            database: {type: string, minLength: 1, maxLength: 128}
+            object: {type: string, minLength: 1, maxLength: 128}
         inputs:
           type: object
           minProperties: 1

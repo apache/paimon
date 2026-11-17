@@ -112,6 +112,28 @@ class RESTCatalogPredictionTest {
         }
     }
 
+    @Test
+    void testPredictionRejectsBranchAndSystemTable() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            Catalog catalog = catalog(server);
+
+            assertThatThrownBy(
+                            () ->
+                                    catalog.submitPrediction(
+                                            new Identifier("quality", "clips", "dev"), spec()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("branch");
+            assertThatThrownBy(
+                            () ->
+                                    catalog.submitPrediction(
+                                            new Identifier("quality", "clips", null, "snapshots"),
+                                            spec()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("system table");
+        }
+    }
+
     private static PredictionSpec spec() {
         return new PredictionSpec(
                 "daily-quality",
@@ -120,7 +142,8 @@ class RESTCatalogPredictionTest {
                 null,
                 "Classify",
                 null,
-                Collections.emptyMap());
+                Collections.emptyMap(),
+                null);
     }
 
     private static Catalog catalog(MockWebServer server) {

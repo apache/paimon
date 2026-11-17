@@ -1217,6 +1217,8 @@ public class RESTCatalog implements Catalog {
     @Override
     public Prediction submitPrediction(Identifier identifier, PredictionSpec spec)
             throws TableNotExistException, ModelNotExistException {
+        checkNotBranch(identifier, "submitPrediction");
+        checkNotSystemTable(identifier, "submitPrediction");
         try {
             return api.submitPrediction(new SubmitPredictionRequest(identifier, spec))
                     .toPrediction();

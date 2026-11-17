@@ -120,7 +120,8 @@ class MultimodalTable:
             merge_key_columns=None,
             name=None,
             where=None,
-            options=None):
+            options=None,
+            idempotency_key=None):
         """Submit an asynchronous prediction without reading rows locally.
 
         ``options`` uses Paimon dynamic table option names. Time travel uses
@@ -173,6 +174,7 @@ class MultimodalTable:
                 [] if merge_key_columns is None else merge_key_columns),
             where=where,
             options=prediction_options,
+            idempotency_key=idempotency_key,
         )
         prediction = self.catalog.submit_prediction(
             self.raw_table.identifier, spec)

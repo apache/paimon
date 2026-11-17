@@ -76,14 +76,21 @@ public class SubmitPredictionRequest implements RESTRequest {
                 idempotencyKey == null ? UUID.randomUUID().toString() : idempotencyKey;
         this.spec =
                 new PredictionSpec(
-                        name, model, inputs, mergeKeyColumns, instructions, where, options);
+                        name,
+                        model,
+                        inputs,
+                        mergeKeyColumns,
+                        instructions,
+                        where,
+                        options,
+                        idempotencyKey);
     }
 
     public SubmitPredictionRequest(Identifier source, PredictionSpec spec) {
         this(
                 new PredictionSource(source),
                 spec.name(),
-                null,
+                spec.idempotencyKey(),
                 spec.model(),
                 spec.inputs(),
                 spec.mergeKeyColumns(),

@@ -115,16 +115,20 @@ class PredictionSpec:
     name: Optional[str] = None
     where: Optional[str] = None
     options: Dict[str, str] = field(default_factory=dict)
+    idempotency_key: Optional[str] = None
 
     def __post_init__(self):
         if isinstance(self.model, str):
             self.model = Identifier.from_string(self.model)
         if not isinstance(self.model, Identifier):
             raise ValueError("model must be an Identifier or qualified name")
+        _nonblank(self.model.get_database_name(), "model database")
+        _nonblank(self.model.get_object_name(), "model object")
         _nonblank(self.instructions, "instructions")
         for value, name in (
                 (self.name, "name"),
                 (self.where, "where"),
+                (self.idempotency_key, "idempotency_key"),
         ):
             if value is not None:
                 _nonblank(value, name)
