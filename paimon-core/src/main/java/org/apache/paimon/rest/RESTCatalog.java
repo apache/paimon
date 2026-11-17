@@ -1222,7 +1222,7 @@ public class RESTCatalog implements Catalog {
                     .toPrediction();
         } catch (NoSuchResourceException e) {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_MODEL)) {
-                throw new ModelNotExistException(Identifier.fromString(spec.model()), e);
+                throw new ModelNotExistException(spec.model(), e);
             }
             throw new TableNotExistException(identifier, e);
         } catch (NotImplementedException e) {

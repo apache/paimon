@@ -51,7 +51,6 @@ class RESTApiPredictionTest {
         assertThat(RESTApi.fromJson(RESTApi.toJson(request), Map.class).get("idempotencyKey"))
                 .isEqualTo(requestMap.get("idempotencyKey"));
         assertThat(requestMap)
-                .containsEntry("model", "quality.qwen_vl")
                 .containsEntry("instructions", "Classify")
                 .doesNotContainKeys(
                         "name",
@@ -66,6 +65,9 @@ class RESTApiPredictionTest {
         assertThat((Map<String, Object>) requestMap.get("source"))
                 .containsEntry("database", "quality")
                 .containsEntry("table", "clips");
+        assertThat((Map<String, Object>) requestMap.get("model"))
+                .containsEntry("database", "quality")
+                .containsEntry("model", "qwen_vl");
         assertThat((Map<String, Object>) requestMap.get("options"))
                 .containsEntry("scan.snapshot-id", "7");
 
@@ -98,7 +100,7 @@ class RESTApiPredictionTest {
                                         new PredictionStatus.TerminationDetails(
                                                 PredictionStatus.TerminationCode.SUCCESS, null)),
                                 7,
-                                "quality.qwen_vl",
+                                Identifier.create("quality", "qwen_vl"),
                                 new PredictionOutput(
                                         new PredictionSource("system", "prediction_results")),
                                 10L,
@@ -122,12 +124,32 @@ class RESTApiPredictionTest {
     }
 
     @Test
+    void testStructuredModelPreservesDots() throws Exception {
+        PredictionSpec spec =
+                new PredictionSpec(
+                        null,
+                        Identifier.create("quality.archive", "qwen.vl"),
+                        Collections.singletonMap("video", "content"),
+                        null,
+                        "Classify",
+                        null,
+                        Collections.emptyMap());
+        SubmitPredictionRequest request =
+                new SubmitPredictionRequest(Identifier.create("quality", "clips"), spec);
+        SubmitPredictionRequest decoded =
+                RESTApi.fromJson(RESTApi.toJson(request), SubmitPredictionRequest.class);
+
+        assertThat(decoded.getModel().toIdentifier())
+                .isEqualTo(Identifier.create("quality.archive", "qwen.vl"));
+    }
+
+    @Test
     void testSpecValidation() {
         assertThatThrownBy(
                         () ->
                                 new PredictionSpec(
                                         null,
-                                        "quality.qwen_vl",
+                                        Identifier.create("quality", "qwen_vl"),
                                         Collections.emptyMap(),
                                         null,
                                         "Classify",
@@ -140,7 +162,7 @@ class RESTApiPredictionTest {
                         () ->
                                 new PredictionSpec(
                                         null,
-                                        "quality.qwen_vl",
+                                        Identifier.create("quality", "qwen_vl"),
                                         Collections.singletonMap("video", "content"),
                                         Arrays.asList("clip_id", "clip_id"),
                                         "Classify",
@@ -153,7 +175,7 @@ class RESTApiPredictionTest {
                         () ->
                                 new PredictionSpec(
                                         null,
-                                        "quality.qwen_vl",
+                                        Identifier.create("quality", "qwen_vl"),
                                         Collections.singletonMap("video", "content"),
                                         null,
                                         "Classify",
@@ -169,7 +191,7 @@ class RESTApiPredictionTest {
                         () ->
                                 new PredictionSpec(
                                         null,
-                                        "quality.qwen_vl",
+                                        Identifier.create("quality", "qwen_vl"),
                                         Collections.singletonMap("video", "content"),
                                         null,
                                         "Classify",
@@ -209,7 +231,7 @@ class RESTApiPredictionTest {
         inputs.put("video", "content");
         return new PredictionSpec(
                 null,
-                "quality.qwen_vl",
+                Identifier.create("quality", "qwen_vl"),
                 inputs,
                 Collections.singletonList("clip_id"),
                 "Classify",
@@ -224,7 +246,7 @@ class RESTApiPredictionTest {
                 null,
                 new PredictionStatus(PredictionStatus.State.PENDING, null),
                 7,
-                "quality.qwen_vl",
+                Identifier.create("quality", "qwen_vl"),
                 null,
                 null,
                 null);

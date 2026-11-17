@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PredictionModel;
 import org.apache.paimon.catalog.PredictionSource;
 import org.apache.paimon.catalog.PredictionSpec;
 import org.apache.paimon.rest.RESTRequest;
@@ -60,13 +61,14 @@ public class SubmitPredictionRequest implements RESTRequest {
             @JsonProperty(FIELD_SOURCE) PredictionSource source,
             @Nullable @JsonProperty(FIELD_NAME) String name,
             @Nullable @JsonProperty(FIELD_IDEMPOTENCY_KEY) String idempotencyKey,
-            @JsonProperty(FIELD_MODEL) String model,
+            @JsonProperty(FIELD_MODEL) PredictionModel model,
             @JsonProperty(FIELD_INPUTS) Map<String, String> inputs,
             @Nullable @JsonProperty(FIELD_MERGE_KEY_COLUMNS) List<String> mergeKeyColumns,
             @JsonProperty(FIELD_INSTRUCTIONS) String instructions,
             @Nullable @JsonProperty(FIELD_WHERE) String where,
             @Nullable @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {
         checkArgument(source != null, "source must not be null");
+        checkArgument(model != null, "model must not be null");
         checkArgument(
                 idempotencyKey == null || !idempotencyKey.trim().isEmpty(),
                 "idempotencyKey must not be blank");
@@ -75,7 +77,13 @@ public class SubmitPredictionRequest implements RESTRequest {
                 idempotencyKey == null ? UUID.randomUUID().toString() : idempotencyKey;
         this.spec =
                 new PredictionSpec(
-                        name, model, inputs, mergeKeyColumns, instructions, where, options);
+                        name,
+                        model.toIdentifier(),
+                        inputs,
+                        mergeKeyColumns,
+                        instructions,
+                        where,
+                        options);
     }
 
     public SubmitPredictionRequest(Identifier source, PredictionSpec spec) {
@@ -83,7 +91,7 @@ public class SubmitPredictionRequest implements RESTRequest {
                 new PredictionSource(source),
                 spec.name(),
                 null,
-                spec.model(),
+                new PredictionModel(spec.model()),
                 spec.inputs(),
                 spec.mergeKeyColumns(),
                 spec.instructions(),
@@ -109,8 +117,8 @@ public class SubmitPredictionRequest implements RESTRequest {
     }
 
     @JsonGetter(FIELD_MODEL)
-    public String getModel() {
-        return spec.model();
+    public PredictionModel getModel() {
+        return new PredictionModel(spec.model());
     }
 
     @JsonGetter(FIELD_INPUTS)

@@ -33,7 +33,7 @@ public class Prediction {
     private final @Nullable String name;
     private final PredictionStatus status;
     private final long snapshotId;
-    private final String model;
+    private final Identifier model;
     private final @Nullable PredictionOutput output;
     private final @Nullable Long startTime;
     private final @Nullable Long endTime;
@@ -44,7 +44,7 @@ public class Prediction {
             @Nullable String name,
             PredictionStatus status,
             long snapshotId,
-            String model,
+            Identifier model,
             @Nullable PredictionOutput output,
             @Nullable Long startTime,
             @Nullable Long endTime) {
@@ -52,7 +52,7 @@ public class Prediction {
         checkArgument(source != null, "source must not be null");
         checkArgument(status != null, "status must not be null");
         checkArgument(snapshotId > 0, "snapshotId must be positive");
-        checkNonBlank(model, "model");
+        checkArgument(model != null, "model must not be null");
         checkOptionalNonNegative(startTime, "startTime");
         checkOptionalNonNegative(endTime, "endTime");
         this.predictionId = predictionId;
@@ -87,7 +87,7 @@ public class Prediction {
         return snapshotId;
     }
 
-    public String model() {
+    public Identifier model() {
         return model;
     }
 

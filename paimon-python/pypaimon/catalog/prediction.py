@@ -17,7 +17,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import optional_json_field
@@ -108,7 +108,7 @@ class PredictionStatus:
 class PredictionSpec:
     """Provider-neutral input for an asynchronous table prediction."""
 
-    model: str
+    model: Union[str, Identifier]
     inputs: Dict[str, str]
     instructions: str
     merge_key_columns: List[str] = field(default_factory=list)
@@ -117,7 +117,10 @@ class PredictionSpec:
     options: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
-        _nonblank(self.model, "model")
+        if isinstance(self.model, str):
+            self.model = Identifier.from_string(self.model)
+        if not isinstance(self.model, Identifier):
+            raise ValueError("model must be an Identifier or qualified name")
         _nonblank(self.instructions, "instructions")
         for value, name in (
                 (self.name, "name"),
@@ -162,7 +165,7 @@ class Prediction:
     source: Identifier
     status: PredictionStatus
     snapshot_id: int
-    model: str
+    model: Union[str, Identifier]
     name: Optional[str] = None
     output: Optional[PredictionOutput] = None
     start_time: Optional[int] = None
@@ -176,7 +179,10 @@ class Prediction:
             raise ValueError("status must be a PredictionStatus")
         if type(self.snapshot_id) is not int or self.snapshot_id <= 0:
             raise ValueError("snapshot_id must be a positive integer")
-        _nonblank(self.model, "model")
+        if isinstance(self.model, str):
+            self.model = Identifier.from_string(self.model)
+        if not isinstance(self.model, Identifier):
+            raise ValueError("model must be an Identifier or qualified name")
         if self.output is not None and not isinstance(
                 self.output, PredictionOutput):
             raise ValueError("output must be a PredictionOutput")

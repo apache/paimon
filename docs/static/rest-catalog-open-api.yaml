@@ -4701,6 +4701,13 @@ components:
       properties:
         database: {type: string, minLength: 1, maxLength: 128}
         table: {type: string, minLength: 1, maxLength: 128}
+    PredictionModel:
+      type: object
+      additionalProperties: false
+      required: [database, model]
+      properties:
+        database: {type: string, minLength: 1, maxLength: 128}
+        model: {type: string, minLength: 1, maxLength: 128}
     PredictionOutput:
       type: object
       minProperties: 1
@@ -4731,10 +4738,7 @@ components:
             Optional key reused for retries of one logical submission. SDKs generate
             one by default; requests without a key are independent submissions.
         model:
-          type: string
-          minLength: 1
-          maxLength: 256
-          description: Database-qualified model name.
+          $ref: '#/components/schemas/PredictionModel'
         inputs:
           type: object
           minProperties: 1
@@ -4783,7 +4787,8 @@ components:
         status:
           $ref: '#/components/schemas/PredictionStatus'
         snapshotId: {type: integer, format: int64, minimum: 1}
-        model: {type: string, minLength: 1, maxLength: 256}
+        model:
+          $ref: '#/components/schemas/PredictionModel'
         output:
           $ref: '#/components/schemas/PredictionOutput'
         startTime: {type: integer, format: int64, minimum: 0}

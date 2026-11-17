@@ -695,7 +695,7 @@ class RESTCatalog(Catalog):
                 SubmitPredictionRequest.from_spec(identifier, spec)).to_prediction()
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_MODEL:
-                raise ModelNotExistException(Identifier.from_string(spec.model)) from e
+                raise ModelNotExistException(spec.model) from e
             raise TableNotExistException(identifier) from e
         except NotImplementedException as e:
             raise NotImplementedError(

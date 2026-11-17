@@ -115,7 +115,7 @@ class RESTCatalogPredictionTest {
     private static PredictionSpec spec() {
         return new PredictionSpec(
                 "daily-quality",
-                "quality.qwen_vl",
+                Identifier.create("quality", "qwen_vl"),
                 Collections.singletonMap("video", "content"),
                 null,
                 "Classify",
@@ -136,7 +136,8 @@ class RESTCatalogPredictionTest {
         return "{\"predictionId\":\"prediction-1\",\"source\":{\"database\":\"quality\","
                 + "\"table\":\"clips\"},\"name\":\"daily-quality\",\"status\":{\"state\":\""
                 + status
-                + "\"},\"snapshotId\":7,\"model\":\"quality.qwen_vl\"}";
+                + "\"},\"snapshotId\":7,\"model\":{\"database\":\"quality\","
+                + "\"model\":\"qwen_vl\"}}";
     }
 
     private static String terminatedPredictionJson(String code) {
@@ -144,7 +145,8 @@ class RESTCatalogPredictionTest {
                 + "\"table\":\"clips\"},\"name\":\"daily-quality\","
                 + "\"status\":{\"state\":\"TERMINATED\",\"terminationDetails\":{\"code\":\""
                 + code
-                + "\"}},\"snapshotId\":7,\"model\":\"quality.qwen_vl\","
+                + "\"}},\"snapshotId\":7,\"model\":{\"database\":\"quality\","
+                + "\"model\":\"qwen_vl\"},"
                 + "\"output\":{\"table\":{"
                 + "\"database\":\"system\",\"table\":\"results\"}},"
                 + "\"startTime\":10,\"endTime\":20}";

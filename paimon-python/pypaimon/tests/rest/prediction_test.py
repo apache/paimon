@@ -27,6 +27,7 @@ from pypaimon.api.prediction import (
     GetPredictionResponse,
     ListPredictionsResponse,
     PredictionOutput as ApiPredictionOutput,
+    PredictionModel,
     PredictionSource,
     SubmitPredictionRequest,
 )
@@ -84,7 +85,7 @@ def _response(status=None, **changes):
         name="daily-quality",
         status=status,
         snapshot_id=7,
-        model="quality.qwen_vl",
+        model=PredictionModel("quality", "qwen_vl"),
     )
     values.update(changes)
     return GetPredictionResponse(**values)
@@ -108,6 +109,8 @@ class PredictionTest(unittest.TestCase):
         self.assertNotIn("outputSchema", body)
         self.assertEqual(
             {"database": "quality", "table": "clips"}, body["source"])
+        self.assertEqual(
+            {"database": "quality", "model": "qwen_vl"}, body["model"])
         self.assertNotIn("snapshotId", body)
         self.assertNotIn("tagName", body)
 
@@ -218,6 +221,18 @@ class PredictionTest(unittest.TestCase):
                 PredictionTerminationDetails(
                     PredictionTerminationCode.FAILED),
             )
+
+    def test_structured_model_preserves_dots(self):
+        request = SubmitPredictionRequest.from_spec(
+            Identifier.create("quality", "clips"),
+            _spec(model=Identifier.create("quality.archive", "qwen.vl")),
+        )
+        body = json.loads(JSON.to_json(request))
+
+        self.assertEqual(
+            {"database": "quality.archive", "model": "qwen.vl"},
+            body["model"],
+        )
 
     def test_table_submit_fixes_view_and_returns_waiter(self):
         raw = Mock(spec=FileStoreTable)

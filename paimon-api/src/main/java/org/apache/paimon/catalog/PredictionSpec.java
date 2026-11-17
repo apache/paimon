@@ -41,7 +41,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class PredictionSpec {
 
     private final @Nullable String name;
-    private final String model;
+    private final Identifier model;
     private final Map<String, String> inputs;
     private final List<String> mergeKeyColumns;
     private final String instructions;
@@ -50,14 +50,14 @@ public class PredictionSpec {
 
     public PredictionSpec(
             @Nullable String name,
-            String model,
+            Identifier model,
             Map<String, String> inputs,
             @Nullable List<String> mergeKeyColumns,
             String instructions,
             @Nullable String where,
             @Nullable Map<String, String> options) {
         checkOptionalNonBlank(name, "name");
-        checkNonBlank(model, "model");
+        checkArgument(model != null, "model must not be null");
         checkNonBlank(instructions, "instructions");
         checkOptionalNonBlank(where, "where");
         this.name = name;
@@ -82,7 +82,7 @@ public class PredictionSpec {
         return name;
     }
 
-    public String model() {
+    public Identifier model() {
         return model;
     }
 
