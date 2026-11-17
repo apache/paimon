@@ -116,7 +116,7 @@ jobs:
 
       - name: Publish RC to TestPyPI
         if: contains(github.ref_name, '-rc')
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: false
@@ -125,7 +125,7 @@ jobs:
 
       - name: Publish final release to PyPI
         if: ${{ !contains(github.ref_name, '-rc') }}
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist
           password: ${{ secrets.PYPI_API_TOKEN }}
