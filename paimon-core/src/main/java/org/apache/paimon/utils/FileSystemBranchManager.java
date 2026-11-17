@@ -239,22 +239,25 @@ public class FileSystemBranchManager implements BranchManager {
             if (!tryAppendFromBranch(branchName, earliestSnapshotId, lock)) {
                 replaceFromBranch(branchName, earliestSnapshotId, lock);
             }
-            snapshotManager.invalidateCache();
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
                             "Exception occurs when fast forward '%s' (directory in %s).",
                             branchName, BranchManager.branchPath(tablePath, branchName)),
                     e);
+        } finally {
+            // a failed fast-forward may have changed snapshot files too
+            snapshotManager.invalidateCache();
         }
     }
 
     /**
      * Fast-forwards by appending when the current branch is a prefix of the branch: its snapshots
      * from the branch's earliest one (or its own earliest, if later) to its latest are the
-     * branch's, and so are its schemas. Nothing is deleted and files are written in ascending id
-     * order, so a failure leaves the current branch at one of the branch's snapshots and a retry
-     * continues from there.
+     * branch's, and so are its schemas. No snapshot or schema is deleted and files are written in
+     * ascending id order, so a failure leaves the current branch at one of the branch's snapshots
+     * and a retry continues from there. Fails without changing anything if a snapshot to append is
+     * not listed.
      *
      * @return false if the current branch is not a prefix of the branch
      */
@@ -281,6 +284,7 @@ public class FileSystemBranchManager implements BranchManager {
                 || !sameSchemas(branchSchemaManager, branchSchemaIds)) {
             return false;
         }
+        checkNoGap(branchName, branchSizes.keySet(), latestId + 1, branchLatestId);
 
         long latestSchemaId = Collections.max(schemaManager.listAllIds());
         for (long schemaId : branchSchemaIds) {
@@ -374,9 +378,11 @@ public class FileSystemBranchManager implements BranchManager {
     }
 
     /**
-     * Replaces the current branch's snapshots and tags from the branch's earliest snapshot onwards,
-     * and its schemas, with the branch's. Schemas are replaced file by file instead of deleted up
-     * front, so a failure never leaves the remaining snapshots without their schemas.
+     * Replaces the current branch's snapshots and tags from the branch's earliest snapshot onwards
+     * with the branch's, writes the branch's schemas over its own one file at a time, deletes its
+     * other schemas from the schema of that snapshot onwards, and moves its EARLIEST hint to that
+     * snapshot. Snapshots below it are kept, even if their schema is replaced or deleted, and so
+     * are tags on them unless the branch has a tag of the same name.
      */
     private void replaceFromBranch(String branchName, long earliestSnapshotId, Lock lock)
             throws IOException {
@@ -385,8 +391,15 @@ public class FileSystemBranchManager implements BranchManager {
         long earliestSchemaId = branchSnapshotManager.snapshot(earliestSnapshotId).schemaId();
         // Fix what is published before copying anything, as the append path does: the branch's
         // snapshots are listed before its schemas, so every listed snapshot has its schema.
-        long branchLatestId = Collections.max(snapshotSizes(branchSnapshotManager).keySet());
+        Set<Long> branchIds = snapshotSizes(branchSnapshotManager).keySet();
+        long branchLatestId = Collections.max(branchIds);
         List<Long> branchSchemaIds = sorted(branchSchemaManager.listAllIds());
+        // also fails if the branch was rolled back below its earliest snapshot since it was read
+        checkNoGap(
+                branchName,
+                branchIds,
+                earliestSnapshotId,
+                Math.max(earliestSnapshotId, branchLatestId));
 
         // Delete tags first: a retry decides from snapshots and schemas alone whether to append,
         // which keeps main's tags, so the tags must be gone before either changes.
@@ -400,13 +413,14 @@ public class FileSystemBranchManager implements BranchManager {
         for (Path path : deletePaths) {
             delete(lock, path);
         }
-        // Main expired its own snapshots up to its EARLIEST hint; the branch's snapshots below
-        // that hint become main's. Move the hint before copying them, so that a retry after a
-        // failed copy, which appends the rest, finds it already moved.
+        // Main starts at the branch's earliest snapshot, as when the branch's hint was copied: the
+        // snapshots main keeps below it may be its own commits after the branch was created, or
+        // lie below a gap where the branch expired past main's latest. Move the hint before
+        // copying, so that a retry after a failed copy, which appends the rest, finds it moved.
         Long earliestHint =
                 HintFileUtils.readHint(
                         fileIO, HintFileUtils.EARLIEST, snapshotManager.snapshotDirectory());
-        if (earliestHint != null && earliestHint > earliestSnapshotId) {
+        if (earliestHint == null || earliestHint != earliestSnapshotId) {
             commitHint(lock, HintFileUtils.EARLIEST, earliestSnapshotId);
         }
 
@@ -460,6 +474,23 @@ public class FileSystemBranchManager implements BranchManager {
             }
         }
         return published;
+    }
+
+    /** Fails, before anything is changed, if the branch lacks one of the snapshots to copy. */
+    private static void checkNoGap(String branchName, Set<Long> listedIds, long fromId, long toId)
+            throws IOException {
+        for (long id = fromId; id <= toId; id++) {
+            if (!listedIds.contains(id)) {
+                throw new IOException(
+                        String.format(
+                                "Branch '%s' has no snapshot %s, so its snapshots %s to %s cannot"
+                                        + " be copied. Nothing was changed. Run the fast-forward"
+                                        + " again if the branch expired it or was rolled back"
+                                        + " meanwhile; otherwise the branch's snapshots have a"
+                                        + " gap.",
+                                branchName, id, fromId, toId));
+            }
+        }
     }
 
     /** Copies the branch's snapshots, failing on one whose schema main does not hold. */

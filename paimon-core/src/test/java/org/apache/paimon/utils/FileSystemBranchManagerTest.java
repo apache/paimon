@@ -48,6 +48,8 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -989,6 +991,141 @@ class FileSystemBranchManagerTest {
         assertThat(reloaded.snapshotManager().latestSnapshotId()).isEqualTo(4L);
         assertThat(readRows(reloaded))
                 .containsExactlyInAnyOrder("1,10,100", "2,20,200", "3,30,300", "4,40,400");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFastForwardFailsOnBranchSnapshotGap(boolean mainDiverged) throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        if (mainDiverged) {
+            commitRow(table, 5);
+            table.createTag("mtag", 3);
+        }
+        FileStoreTable branch = table.switchToBranch("b1");
+        branch.schemaManager().commitChanges(SchemaChange.addColumn("b_col", DataTypes.INT()));
+        commitWideRow(branch, 6);
+        // A gap above the branch's earliest snapshot, as an expire that failed to delete its first
+        // snapshot and then died can leave.
+        io.deleteQuietly(branch.snapshotManager().snapshotPath(4));
+
+        SnapshotManager main = table.snapshotManager();
+        List<Path> snapshots = main.snapshotPaths(id -> true);
+        List<Long> schemaIds = table.schemaManager().listAllIds();
+        List<String> tags = table.tagManager().allTagNames();
+        Long latestHint =
+                HintFileUtils.readHint(io, HintFileUtils.LATEST, main.snapshotDirectory());
+        Long earliestHint =
+                HintFileUtils.readHint(io, HintFileUtils.EARLIEST, main.snapshotDirectory());
+        List<String> rows = readRows(table);
+
+        // Fails before main is changed, on both paths: appending would have copied the branch's
+        // schema 2, and replacing main would have deleted its snapshots and tags from 2 on.
+        assertThatThrownBy(() -> table.fastForward("b1"))
+                .hasStackTraceContaining("Branch 'b1' has no snapshot 4");
+        FileStoreTable reloaded = FileStoreTableFactory.create(io, tablePath);
+        assertThat(reloaded.snapshotManager().snapshotPaths(id -> true))
+                .containsExactlyInAnyOrderElementsOf(snapshots);
+        assertThat(reloaded.schemaManager().listAllIds())
+                .containsExactlyInAnyOrderElementsOf(schemaIds);
+        assertThat(reloaded.tagManager().allTagNames()).containsExactlyInAnyOrderElementsOf(tags);
+        assertThat(HintFileUtils.readHint(io, HintFileUtils.LATEST, main.snapshotDirectory()))
+                .isEqualTo(latestHint);
+        assertThat(HintFileUtils.readHint(io, HintFileUtils.EARLIEST, main.snapshotDirectory()))
+                .isEqualTo(earliestHint);
+        assertThat(readRows(reloaded)).containsExactlyInAnyOrderElementsOf(rows);
+    }
+
+    @Test
+    void testReplaceFailsWhenBranchIsRolledBackBelowItsEarliest() throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        FileStoreTable branch = table.switchToBranch("b1");
+        commitRow(branch, 5);
+        expireAllButLatest(branch);
+        long branchEarliest = branch.snapshotManager().earliestSnapshotId();
+        assertThat(branchEarliest).isGreaterThan(2L);
+        SnapshotManager main = table.snapshotManager();
+        List<Path> snapshots = main.snapshotPaths(id -> true);
+        Long earliestHint =
+                HintFileUtils.readHint(io, HintFileUtils.EARLIEST, main.snapshotDirectory());
+
+        // Right after replacing main has read the branch's earliest snapshot, the branch is rolled
+        // back to tag2, below it, so the listing holds snapshot 2 only and nothing to copy.
+        io.afterRead(
+                branch.snapshotManager().snapshotPath(branchEarliest),
+                () -> table.switchToBranch("b1").rollbackTo("tag2"));
+        assertThatThrownBy(() -> table.fastForward("b1"))
+                .hasStackTraceContaining("Branch 'b1' has no snapshot " + branchEarliest);
+        assertThat(main.snapshotPaths(id -> true)).containsExactlyInAnyOrderElementsOf(snapshots);
+        assertThat(HintFileUtils.readHint(io, HintFileUtils.EARLIEST, main.snapshotDirectory()))
+                .isEqualTo(earliestHint);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testReplaceMovesEarliestHintPastKeptSnapshots(boolean mainHasNoEarliestHint)
+            throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        FileStoreTable branch = table.switchToBranch("b1");
+        commitRow(branch, 5);
+        expireAllButLatest(branch);
+        long branchEarliest = branch.snapshotManager().earliestSnapshotId();
+        assertThat(branchEarliest).isGreaterThan(3L);
+        if (mainHasNoEarliestHint) {
+            // as on a main that never ran an expire
+            Path snapshotDirectory = table.snapshotManager().snapshotDirectory();
+            io.deleteQuietly(new Path(snapshotDirectory, HintFileUtils.EARLIEST));
+            assertThat(HintFileUtils.readHint(io, HintFileUtils.EARLIEST, snapshotDirectory))
+                    .isNull();
+        }
+
+        // The branch expired past main's latest snapshot 2, so main is replaced and keeps its
+        // snapshots 1 and 2 below a gap. Main starts at the branch's earliest snapshot, so a
+        // lookup by time does not read into the gap.
+        table.fastForward("b1");
+        SnapshotManager main = FileStoreTableFactory.create(io, tablePath).snapshotManager();
+        assertThat(main.earliestSnapshotId()).isEqualTo(branchEarliest);
+        Snapshot latest = main.latestSnapshot();
+        assertThat(main.earlierOrEqualTimeMills(latest.timeMillis()).id()).isEqualTo(latest.id());
+        assertThat(readRows(FileStoreTableFactory.create(io, tablePath)))
+                .containsExactlyInAnyOrder(
+                        "1,10,100", "2,20,200", "3,30,300", "4,40,400", "5,50,500");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFailedFastForwardInvalidatesSnapshotCache(boolean leaseExpires) throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        createTableWithBranchAhead(io);
+        HeldFlagLockFactory lockFactory = new HeldFlagLockFactory();
+        FileStoreTable table = createTableWithLock(io, lockFactory);
+        commitRow(table, 5);
+        table.setSnapshotCache(Caffeine.newBuilder().build());
+        Snapshot mainSnapshot3 = table.snapshotManager().snapshot(3);
+
+        // Replacing main writes the branch's snapshots 2 and 3, then fails on snapshot 4: on a
+        // write error, or because the lease expired, which is not an IOException.
+        Path snapshotDirectory = table.snapshotManager().snapshotDirectory();
+        if (leaseExpires) {
+            AtomicInteger writes = new AtomicInteger();
+            io.watch(snapshotDirectory, "snapshot-");
+            io.afterWatchedWrite =
+                    () -> {
+                        if (writes.incrementAndGet() == 2) {
+                            lockFactory.expired.set(true);
+                        }
+                    };
+        } else {
+            io.failSnapshotWrite(snapshotDirectory, 2);
+        }
+        assertThatThrownBy(() -> table.fastForward("b1"))
+                .hasStackTraceContaining(leaseExpires ? "Lease expired" : "Injected write failure");
+
+        Snapshot branchSnapshot3 = table.switchToBranch("b1").snapshotManager().snapshot(3);
+        assertThat(branchSnapshot3).isNotEqualTo(mainSnapshot3);
+        assertThat(table.snapshotManager().snapshot(3)).isEqualTo(branchSnapshot3);
     }
 
     @Test
