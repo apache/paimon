@@ -21,6 +21,7 @@ import pyarrow as pa
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.execution.native.runtime import native_runtime_available
+from pypaimon.execution.native.table import _native_variant_write_supported
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
@@ -51,11 +52,17 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
             or table.options.file_format() != 'parquet'
             or table.options.video_frame_fields()):
         return None
+    # Rust 0.5.0 emits zero sequence bounds for ordinary bucketed append files.
+    # Java compaction needs advancing ranges to preserve their append order.
+    if not table.is_primary_key_table and table.bucket_mode() == BucketMode.HASH_FIXED:
+        return None
+    if not _native_variant_write_supported(table):
+        return None
     native_table = create_native_write_table(table)
     if native_table is None:
         return None
     if fixed_bucket:
-        builder = native_table.new_postpone_fixed_bucket_write_builder()._with_commit_user(commit_user)
+        builder = native_table.new_postpone_fixed_bucket_write_builder().with_commit_user(commit_user)
         if bucket_plan is not None:
             builder = builder.with_bucket_plan(bucket_plan.to_arrow(table))
         if static_partition is not None:
@@ -65,7 +72,7 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
     if stream:
         builder = native_table.new_stream_write_builder().with_commit_user(commit_user)
     else:
-        builder = native_table.new_batch_write_builder()._with_commit_user(commit_user)
+        builder = native_table.new_batch_write_builder().with_commit_user(commit_user)
         if static_partition is not None:
             builder = builder.with_overwrite(static_partition)
     if restore_snapshot_id is not None:

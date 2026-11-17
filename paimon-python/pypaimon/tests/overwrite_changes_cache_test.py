@@ -38,6 +38,7 @@ import pandas as pd
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.write.backend_dispatch import python_commit
 from pypaimon.execution.python.write.commit.overwrite_changes_provider import OverwriteChangesProvider
 
 
@@ -82,7 +83,7 @@ class OverwriteChangesCacheTest(unittest.TestCase):
         w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
         messages = w.prepare_commit()
 
-        fsc = c.file_store_commit
+        fsc = python_commit(c).file_store_commit
 
         # --- count provider full scans and delta probes (class-level spies) ---
         counts = {'full_scan': 0, 'probe': 0}
@@ -157,7 +158,7 @@ class OverwriteChangesCacheTest(unittest.TestCase):
         w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
         messages = w.prepare_commit()
 
-        fsc = c.file_store_commit
+        fsc = python_commit(c).file_store_commit
 
         counts = {'full_scan': 0, 'probe': 0}
         orig_full = OverwriteChangesProvider._full_scan_manifest_entries
@@ -221,7 +222,7 @@ class OverwriteChangesCacheTest(unittest.TestCase):
         # concurrent_fn(i) to advance the latest snapshot). Returns this commit's
         # own OverwriteChangesProvider so the caller can read its counters
         # (only this provider, not any concurrent writer's).
-        fsc = c.file_store_commit
+        fsc = python_commit(c).file_store_commit
         captured = {}
         orig_factory = fsc._overwrite_changes_provider
 

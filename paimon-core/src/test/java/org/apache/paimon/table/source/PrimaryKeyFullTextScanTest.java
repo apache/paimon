@@ -147,7 +147,7 @@ class PrimaryKeyFullTextScanTest {
         Snapshot snapshot = mock(Snapshot.class);
         when(snapshot.id()).thenReturn(11L);
         Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS, "content");
+        tableOptions.set(CoreOptions.GLOBAL_INDEX_FULL_TEXT_INDEX_COLUMNS, "content");
         when(table.coreOptions()).thenReturn(new CoreOptions(tableOptions));
         when(table.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "11")))
                 .thenReturn(table);

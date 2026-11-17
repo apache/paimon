@@ -19,12 +19,14 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import SchemaChange
 
 
 class SimpleTableTest(unittest.TestCase):
@@ -492,106 +494,58 @@ class SimpleTableTest(unittest.TestCase):
         self.assertEqual(result_sorted.column('v').to_pylist(), expected.column('v').to_pylist())
 
     def test_schema_evolution_tag_read(self):
-        # schema 0
         pa_schema = pa.schema([
             ('user_id', pa.int64()),
             ('item_id', pa.int64()),
             ('dt', pa.string())
         ])
         schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
-        self.catalog.create_table('default.test_0', schema, False)
-        table1 = self.catalog.get_table('default.test_0')
-        write_builder = table1.new_batch_write_builder()
-        # write 1
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        data1 = {
-            'user_id': [1, 2, 3, 4],
-            'item_id': [1001, 1002, 1003, 1004],
-            'dt': ['p1', 'p1', 'p2', 'p1'],
-        }
-        pa_table = pa.Table.from_pydict(data1, schema=pa_schema)
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-        # write 2
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        data1 = {
-            'user_id': [11, 22, 33, 44],
-            'item_id': [1001, 1002, 1003, 1004],
-            'dt': ['p1', 'p1', 'p2', 'p1'],
-        }
-        pa_table = pa.Table.from_pydict(data1, schema=pa_schema)
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-        # schema 1  add behavior column
-        pa_schema = pa.schema([
-            ('user_id', pa.int64()),
-            ('item_id', pa.int64()),
-            ('dt', pa.string()),
-            ('behavior', pa.string())
-        ])
-        schema2 = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
-        self.catalog.create_table('default.test_1', schema2, False)
-        table2 = self.catalog.get_table('default.test_1')
-        write_builder = table2.new_batch_write_builder()
-        # write 1
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        data2 = {
-            'user_id': [5, 6, 7, 8],
-            'item_id': [1005, 1006, 1007, 1008],
-            'dt': ['p2', 'p1', 'p2', 'p2'],
-            'behavior': ['e', 'f', 'g', 'h'],
-        }
-        pa_table = pa.Table.from_pydict(data2, schema=pa_schema)
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-        # write 2
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        data2 = {
-            'user_id': [55, 66, 77, 88],
-            'item_id': [1005, 1006, 1007, 1008],
-            'dt': ['p2', 'p1', 'p2', 'p2'],
-            'behavior': ['e', 'f', 'g', 'h'],
-        }
-        pa_table = pa.Table.from_pydict(data2, schema=pa_schema)
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
+        name = 'default.test_schema_evolution'
+        self.catalog.create_table(name, schema, False)
+        table = self.catalog.get_table(name)
+        expected = pa.Table.from_pydict({
+            'user_id': [5, 6, 7, 8, 55, 66, 77, 88],
+            'item_id': [1005, 1006, 1007, 1008, 1005, 1006, 1007, 1008],
+            'dt': ["p2", "p1", "p2", "p2", "p2", "p1", "p2", "p2"]
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        for data in (expected.slice(0, 4), expected.slice(4)):
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            try:
+                table_write.write_arrow(data)
+                table_commit.commit(table_write.prepare_commit())
+            finally:
+                table_write.close()
+                table_commit.close()
+        table.create_tag("tag2", snapshot_id=2)
 
-        # Create tag at snapshot 2
-        table1.create_tag("tag2", snapshot_id=2)
-        table2.create_tag("tag2", snapshot_id=2)
-        # When table2 read tag2, it will access table1's schema
-        table2.schema_manager = SchemaManager(table2.file_io, table1.table_path)
-        table_with_tag = table2.copy({CoreOptions.SCAN_TAG_NAME.key(): "tag2"})
+        # Evolve the same table and write newer data beyond the tagged snapshot.
+        self.catalog.alter_table(name, [SchemaChange.add_column('behavior', AtomicType('STRING'))])
+        table = self.catalog.get_table(name)
+        self.assertEqual(table.table_schema.id, 1)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        try:
+            table_write.write_arrow(pa.Table.from_pydict({
+                'user_id': [99],
+                'item_id': [1009],
+                'dt': ['p3'],
+                'behavior': ['new'],
+            }, schema=pa_schema.append(pa.field('behavior', pa.string()))))
+            table_commit.commit(table_write.prepare_commit())
+        finally:
+            table_write.close()
+            table_commit.close()
+
+        table_with_tag = table.copy({CoreOptions.SCAN_TAG_NAME.key(): "tag2"})
+        self.assertEqual(table_with_tag.table_schema.id, 0)
         read_builder = table_with_tag.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
 
         result = table_read.to_arrow(table_scan.plan().splits())
-
-        self.assertEqual(result.num_rows, 8)
-
-        expected_schema = pa.schema([
-            ('user_id', pa.int64()),
-            ('item_id', pa.int64()),
-            ('dt', pa.string())
-        ])
-        expected = pa.Table.from_pydict({
-            'user_id': [5, 6, 7, 8, 55, 66, 77, 88],
-            'item_id': [1005, 1006, 1007, 1008, 1005, 1006, 1007, 1008],
-            'dt': ["p2", "p1", "p2", "p2", "p2", "p1", "p2", "p2"]
-        }, schema=expected_schema)
 
         self.assertEqual(expected, result.sort_by('user_id'))
 
@@ -625,12 +579,26 @@ class SimpleTableTest(unittest.TestCase):
         snapshot_mgr = table.snapshot_manager()
         self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 5)
 
-        # Rollback to snapshot 3
+        changelog_mgr = table.changelog_manager()
+        for snapshot_id in (2, 5):
+            table.file_io.copy_file(snapshot_mgr.get_snapshot_path(snapshot_id),
+                                    changelog_mgr.long_lived_changelog_path(snapshot_id))
+        changelog_mgr.commit_long_lived_changelog_earliest_hint(2)
+        changelog_mgr.commit_long_lived_changelog_latest_hint(5)
+
+        # Retry a rollback after LATEST was advanced and a newer snapshot is missing.
+        table.file_io.overwrite_file_utf8(snapshot_mgr.latest_file, "3")
+        table.file_io.delete(snapshot_mgr.get_snapshot_path(4))
         table.rollback_to(3)
 
         self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 3)
         self.assertIsNone(snapshot_mgr.get_snapshot_by_id(4))
         self.assertIsNone(snapshot_mgr.get_snapshot_by_id(5))
+        self.assertTrue(changelog_mgr.long_lived_changelog_exists(2))
+        self.assertFalse(changelog_mgr.long_lived_changelog_exists(5))
+        self.assertEqual(changelog_mgr.latest_long_lived_changelog_id(), 2)
+        self.assertEqual(table.file_io.read_file_utf8(
+            f"{changelog_mgr.changelog_directory()}/LATEST"), "2")
 
     def test_table_rollback_to_tag(self):
         """Test table-level rollback to a specific tag."""
@@ -665,14 +633,81 @@ class SimpleTableTest(unittest.TestCase):
         self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 5)
 
         # Rollback to tag v3
-        table.rollback_to("v3")
+        with patch.object(type(tag_mgr), "delete_tag", side_effect=AssertionError(
+                "Rollback must delete tag files directly")):
+            table.rollback_to("v3")
 
         self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 3)
         # Tags with snapshot > 3 should be cleaned
         self.assertFalse(tag_mgr.tag_exists("v4"))
         self.assertFalse(tag_mgr.tag_exists("v5"))
-        # Tag v3 should still exist
-        self.assertTrue(tag_mgr.tag_exists("v3"))
+        self.assertEqual(sorted(tag_mgr.list_tags()), ["v1", "v2", "v3"])
+
+    def test_table_rollback_to_tag_after_snapshot_expired(self):
+        """Rolling back to a tag whose snapshot expired must move EARLIEST back to it."""
+        schema = Schema.from_pyarrow_schema(self.pa_schema)
+        self.catalog.create_table('default.test_rollback_expired_tag', schema, False)
+        table = self.catalog.get_table('default.test_rollback_expired_tag')
+
+        def write(k):
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            table_write.write_arrow(pa.Table.from_pydict(
+                {'pt': [1], 'k': [k], 'v': [k * 100]}, schema=self.pa_schema))
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        def read_k(options):
+            read_builder = table.copy(options).new_read_builder()
+            splits = read_builder.new_scan().plan().splits()
+            return sorted(read_builder.new_read().to_arrow(splits)['k'].to_pylist())
+
+        for k in range(1, 6):
+            write(k)
+        table.create_tag("v2", 2)
+
+        # Expire snapshots 1-4 the way snapshot expiration leaves the snapshot
+        # directory: their files are gone and EARLIEST points at snapshot 5.
+        # The tag keeps the metadata and data files of snapshot 2.
+        snapshot_mgr = table.snapshot_manager()
+        changelog_mgr = table.changelog_manager()
+        for snapshot_id in (3, 4):
+            table.file_io.copy_file(snapshot_mgr.get_snapshot_path(snapshot_id),
+                                    changelog_mgr.long_lived_changelog_path(snapshot_id))
+        changelog_mgr.commit_long_lived_changelog_earliest_hint(3)
+        for snapshot_id in range(1, 5):
+            table.file_io.delete(snapshot_mgr.get_snapshot_path(snapshot_id))
+        earliest_file = "{}/EARLIEST".format(snapshot_mgr.snapshot_dir)
+        table.file_io.overwrite_file_utf8(earliest_file, "5")
+
+        overwrite_hint = table.file_io.overwrite_file_utf8
+
+        def fail_earliest_hint(path, content):
+            if path == earliest_file:
+                raise OSError("EARLIEST write failed")
+            overwrite_hint(path, content)
+
+        with patch.object(table.file_io, "overwrite_file_utf8", side_effect=fail_earliest_hint):
+            with self.assertRaisesRegex(OSError, "EARLIEST write failed"):
+                table.rollback_to(2)
+
+        table.rollback_to("v2")
+        self.assertEqual(list(changelog_mgr.changelogs()), [])
+        self.assertIsNone(changelog_mgr.earliest_long_lived_changelog_id())
+        self.assertIsNone(changelog_mgr.latest_long_lived_changelog_id())
+        self.assertEqual(table.file_io.read_file_utf8(
+            f"{changelog_mgr.changelog_directory()}/LATEST"), "-1")
+        for k in range(6, 9):
+            write(k)
+
+        s2, s3, s5 = (snapshot_mgr.get_snapshot_by_id(i).time_millis for i in (2, 3, 5))
+        self.assertEqual(
+            read_k({'incremental-between-timestamp': '{},{}'.format(s2, s5)}), [6, 7, 8])
+        self.assertEqual(read_k({'scan.timestamp-millis': str(s3)}), [1, 2, 6])
+        self.assertEqual(table.file_io.read_file_utf8(earliest_file).strip(), "2")
+        self.assertEqual(snapshot_mgr.try_get_earliest_snapshot().id, 2)
 
     def test_table_rollback_to_nonexistent_snapshot(self):
         """Test that rollback to a non-existent snapshot raises ValueError."""

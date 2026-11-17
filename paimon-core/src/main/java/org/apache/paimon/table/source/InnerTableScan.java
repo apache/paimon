@@ -63,6 +63,29 @@ public interface InnerTableScan extends TableScan {
         return this;
     }
 
+    /**
+     * Replaces the physical partition filter with one generated solely for internal scan planning.
+     *
+     * <p>Internal filters select the inputs needed to execute a query, such as missing fallback
+     * partitions or chain snapshot anchors. The new filter is not intersected with the existing
+     * physical partition filter.
+     *
+     * <p>Existing user-filter authorization requirements are preserved. Columns referenced only by
+     * this internal filter are not added to authorization.
+     *
+     * <p>Use {@link #withPartitionFilter(PartitionPredicate)} for user query conditions, including
+     * those rewritten or pushed down during planning. Internal filters require explicit support
+     * from the implementation; the default implementation throws {@link
+     * UnsupportedOperationException}.
+     *
+     * @param partitionPredicate the replacement physical partition filter
+     * @return this scan
+     * @throws UnsupportedOperationException if internal partition filtering is not supported
+     */
+    default InnerTableScan withInternalPartitionFilter(PartitionPredicate partitionPredicate) {
+        throw new UnsupportedOperationException("Internal partition filters are not supported");
+    }
+
     default InnerTableScan withPartitionFilter(Predicate predicate) {
         return this;
     }

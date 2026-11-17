@@ -17,6 +17,7 @@
 
 """Python-planned file slices remain selectors when read with Native."""
 
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
 import json
 from contextlib import ExitStack
 from types import SimpleNamespace
@@ -45,7 +46,6 @@ from pypaimon.table.special_fields import SpecialFields
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 pytestmark = [pytest.mark.python_plan, pytest.mark.python_write, pytest.mark.python_commit]
@@ -85,7 +85,7 @@ def _table(catalog, tracked, deleted=False):
         files = plan.splits()[0].files
         vector = BitmapDeletionVector()
         vector.delete(0)
-        entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+        entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
             plan.splits()[0].partition, 0, {files[1].file_name: vector})
         commit = table.new_batch_write_builder().new_commit()
         try:
@@ -119,8 +119,10 @@ def _read(table, splits, native, projection, limit=2, predicate=None):
     read = builder.with_filter(predicate).new_read()
     with ExitStack() as guard:
         if native:
-            guard.enter_context(patch.object(
-                read, '_create_split_read', side_effect=AssertionError('Python sliced-reader fallback')))
+            guard.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python sliced-reader fallback')
+            ))
         return read.to_arrow(splits, parallelism=1)
 
 

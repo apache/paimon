@@ -89,7 +89,8 @@ def test_blob_setters_preserve_python_state_errors_without_replaying(tmp_path, s
             assert raised.value is error
         getattr(core, method).assert_called_once()
         assert writer._python_writer is None
-        assert getattr(writer, '_blob_' + ('consumer' if setter == 'consumer' else 'uri_reader_factory')) is previous
+        attribute = '_blob_' + ('consumer' if setter == 'consumer' else 'uri_reader_factory')
+        assert getattr(writer._execution, attribute) is previous
     finally:
         writer.close()
 
@@ -122,11 +123,11 @@ def test_core_rejection_does_not_change_live_blob_configuration(rest_catalog, se
             getattr(writer, method)(None)
         getattr(core, method).assert_called_once()
         if setter == 'factory':
-            getattr(core, method).assert_called_once_with(writer._blob_rows)
-            assert writer._blob_rows.fallback is previous
-            assert writer._blob_uri_reader_factory is previous
+            getattr(core, method).assert_called_once_with(writer._execution._blob_rows)
+            assert writer._execution._blob_rows.fallback is previous
+            assert writer._execution._blob_uri_reader_factory is previous
         else:
-            assert writer._blob_consumer is previous
+            assert writer._execution._blob_consumer is previous
     finally:
         writer.close()
 
@@ -170,7 +171,7 @@ def test_filtered_blob_batches_allow_configuration_and_real_writes_capture_it(re
             with pytest.raises(RuntimeError, match='before.*writ'):
                 writer.with_blob_uri_reader_factory(None)
             if native:
-                assert writer._blob_rows.fallback is factory
+                assert writer._execution._blob_rows.fallback is factory
             messages = writer.prepare_commit(7) if stream else writer.prepare_commit()
             commit.commit(messages, 7) if stream else commit.commit(messages)
         assert len(received) == 1

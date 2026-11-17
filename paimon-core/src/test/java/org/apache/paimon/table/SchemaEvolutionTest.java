@@ -39,6 +39,7 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
@@ -96,6 +97,39 @@ public class SchemaEvolutionTest {
         identifier = SchemaManager.identifierFromPath(tablePath.toString(), true);
         schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
         commitUser = UUID.randomUUID().toString();
+    }
+
+    @Test
+    public void testInWithNullAfterIntegerWidening() throws Exception {
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(DataTypes.INT()).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        ""));
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1));
+            write.write(GenericRow.of(2));
+            write.write(GenericRow.of(3));
+            write.write(GenericRow.of((Object) null));
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+
+        schemaManager.commitChanges(SchemaChange.updateColumnType("f0", DataTypes.BIGINT()));
+        table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withFilter(builder.in(0, Arrays.asList(1L, null, 3L)));
+        List<Long> values = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .executeFilter()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(row -> values.add(row.getLong(0)));
+        assertThat(values).containsExactlyInAnyOrder(1L, 3L);
     }
 
     @Test

@@ -28,6 +28,7 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.native.read.plan import NativeTableScan
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -79,12 +80,20 @@ class NativePlanIntegrationTest(unittest.TestCase):
         w.close()
         c.close()
 
+    def _python_table(self, name):
+        return self.cat.get_table('default.%s' % name).copy({
+            'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
+        })
+
     def _plan_and_read(self, name, native):
-        t = self.cat.get_table('default.%s' % name)
+        t = self._python_table(name)
         if native:
             t = t.copy({'scan.native-plan.enabled': 'true'})
         rb = t.new_read_builder()
-        plan = rb.new_scan().plan()
+        scan = rb.new_scan()
+        plan = scan.plan()
+        if not native:
+            self.assertFalse(scan._execution._is_native)
         rows = rb.new_read().to_arrow(plan.splits()).to_pylist()
         return plan.snapshot_id, sorted(rows, key=lambda r: r['k'])
 
@@ -104,7 +113,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
     @staticmethod
     def _native_rows(builder, plan):
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Python reader was used')):
             return builder.new_read().to_arrow(plan.splits()).to_pylist()
 
@@ -167,7 +176,9 @@ class NativePlanIntegrationTest(unittest.TestCase):
             {'scan.snapshot-id': None, 'scan.native-plan.enabled': 'true'})
         builder = native.new_read_builder()
         scan = builder.new_scan()
-        with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('native fallback')):
             plan = scan.plan()
         self.assertEqual(plan.snapshot_id, 2)
         self.assertEqual(sorted(builder.new_read().to_arrow(plan.splits()).to_pylist(),
@@ -206,7 +217,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         splits = [pickle.loads(pickle.dumps(split)) for split in plan.splits()]
 
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Python reader was used')):
             read = builder.new_read()
             rows = read.to_arrow(splits).to_pylist()
@@ -232,7 +243,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         scan = builder.new_scan()
         # Force the capability branch that motivates this bridge: Python owns
         # planning, while Rust still performs the physical read.
-        with patch.object(scan, '_native_plan_supported', return_value=False):
+        with patch.object(NativeTableScan, '_native_plan_supported', return_value=False):
             plan = scan.plan()
         self.assertTrue(plan.splits())
         self.assertTrue(all(
@@ -244,7 +255,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
                 wraps=native_split_from_python) as bridge, patch(
                     'pypaimon.execution.native.read.table_read.native_read',
                     wraps=native_read) as rust_read, patch(
-                        'pypaimon.read.table_read.TableRead._create_split_read',
+                        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                         side_effect=AssertionError('Python reader was used')):
             rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
 
@@ -268,11 +279,11 @@ class NativePlanIntegrationTest(unittest.TestCase):
         })
         builder = table.new_read_builder()
         scan = builder.new_scan().with_row_ranges([Range(1, 1)])
-        with patch.object(scan, '_native_plan_supported', return_value=False):
+        with patch.object(NativeTableScan, '_native_plan_supported', return_value=False):
             plan = scan.plan()
 
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Python reader was used')), patch(
                     'pypaimon.execution.native.read.table_read.native_read',
                     wraps=native_read) as rust_read:
@@ -358,7 +369,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         with patch('pypaimon.execution.native.read.table_read._prepare_native_read',
                    wraps=_prepare_native_read) as prepare, \
                 patch(
-                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                     side_effect=AssertionError('Python reader was used')):
             rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
 
@@ -373,7 +384,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         with patch('pypaimon.execution.native.read.table_read._prepare_native_read',
                    wraps=_prepare_native_read) as prepare, \
                 patch(
-                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                     side_effect=AssertionError('Python reader was used')):
             streamed = builder.new_read().to_arrow_batch_reader(
                 plan.splits()).read_all().to_pylist()
@@ -400,7 +411,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         builder = table.new_read_builder()
         plan = builder.new_scan().plan()
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Python reader was used')):
             native_read_instance = builder.new_read()
             native = sorted(
@@ -509,7 +520,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
                     projection)
                 plan = builder.new_scan().plan()
                 with patch(
-                        'pypaimon.read.table_read.TableRead._create_split_read',
+                        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                         side_effect=AssertionError(
                             'nested native read fell back to Python')):
                     actual = builder.new_read().to_arrow(
@@ -554,7 +565,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
             ['id', 'payload.score'])
         plan = builder.new_scan().plan()
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('nested PK native read fell back')):
             actual = sorted(
                 builder.new_read().to_arrow(plan.splits()).to_pylist(),
@@ -605,7 +616,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
             ['id', 'payload.score'])
         plan = builder.new_scan().plan()
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError(
                     'nested partial-update native read fell back')):
             actual = sorted(
@@ -681,7 +692,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         builder.with_filter(predicate)
         plan = builder.new_scan().plan()
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError(
                     'evolved nested native read fell back to Python')):
             actual = sorted(
@@ -700,7 +711,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
             ['payload.score', 'id']).with_limit(2)
         limited_plan = limited.new_scan().plan()
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError(
                     'limited nested native read fell back to Python')):
             limited_rows = limited.new_read().to_arrow(
@@ -722,7 +733,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
 
         def read(native, shard=None, slice_=None, limit=None):
             table = self.cat.get_table('default.interleaved_t').copy(
-                {'scan.native-plan.enabled': str(native).lower()})
+                {'scan.native-plan.enabled': str(native).lower(), 'read.native.enabled': 'false'})
             builder = table.new_read_builder()
             if limit is not None:
                 builder.with_limit(limit)
@@ -732,7 +743,9 @@ class NativePlanIntegrationTest(unittest.TestCase):
             if slice_ is not None:
                 scan.with_slice(*slice_)
             if native:
-                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native plan fell back')):
+                with patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                        side_effect=AssertionError('native plan fell back')):
                     plan = scan.plan()
             else:
                 plan = scan.plan()
@@ -930,7 +943,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         ))
 
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Python reader was used')):
             table_result = builder.new_read().to_arrow(
                 plan.splits(), parallelism=1, blob_parallelism=3)
@@ -986,7 +999,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         ))
 
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Python reader was used')):
             result = builder.new_read().to_arrow(
                 plan.splits(), parallelism=1, blob_parallelism=3)
@@ -1030,7 +1043,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         with patch(
                 'pypaimon.execution.native.read.table_read.native_read',
                 wraps=native_read) as native, patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Python reader used')):
             result = builder.new_read().to_arrow(
                 plan.splits(), parallelism=1)
@@ -1148,7 +1161,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
                     splits = builder.new_scan().plan().splits()
                     with patch('pypaimon.execution.native.read.table_read.native_read',
                                wraps=native_read) as native, patch(
-                            'pypaimon.read.table_read.TableRead._create_split_read',
+                            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                             side_effect=AssertionError('Python reader used')):
                         result = builder.new_read().to_arrow(splits)
                     native.assert_called_once()
@@ -1162,7 +1175,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
                 'blob-as-descriptor': 'true',
             }).new_read_builder()
             splits = builder.new_scan().plan().splits()
-            with patch('pypaimon.read.table_read.TableRead._create_split_read',
+            with patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                        side_effect=AssertionError('Python reader used')):
                 self.assertEqual(builder.new_read().to_arrow(splits).to_pydict(),
                                  {'id': [1], 'payload': [descriptor]})
@@ -1213,7 +1226,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
             with patch(
                     'pypaimon.execution.native.read.table_read.native_read',
                     wraps=native_read) as native, patch(
-                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                     side_effect=AssertionError('Python reader used')):
                 result = builder.new_read().to_arrow(plan.splits())
 
@@ -1256,7 +1269,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
                                 for split in plan.splits()))
             with patch('pypaimon.execution.native.read.table_read.native_read',
                        wraps=native_read) as native:
-                with patch('pypaimon.read.table_read.TableRead._create_split_read',
+                with patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                            side_effect=AssertionError('Python reader used')):
                     result = builder.new_read().to_arrow(plan.splits())
 
@@ -1298,7 +1311,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
                 with patch(
                         'pypaimon.execution.native.read.table_read.native_read',
                         wraps=native_read) as native, patch(
-                        'pypaimon.read.table_read.TableRead._create_split_read',
+                        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                         side_effect=AssertionError('Python reader was used')):
                     result = builder.new_read().to_arrow(plan.splits())
 
@@ -1325,9 +1338,10 @@ class NativePlanIntegrationTest(unittest.TestCase):
         scan = builder.new_scan().with_global_index_result(
             GlobalIndexResult.from_range(Range(1, 1)))
 
-        self.assertTrue(scan._native_plan_supported())
-        with patch.object(
-                scan.file_scanner, 'scan', side_effect=AssertionError("fallback")):
+        self.assertTrue(NativeTableScan(scan)._native_plan_supported())
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError("fallback")):
             plan = scan.plan()
         rows = self._native_rows(builder, plan)
 
@@ -1340,8 +1354,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
 
         empty_scan = builder.new_scan().with_global_index_result(
             GlobalIndexResult.create_empty())
-        with patch.object(
-                empty_scan.file_scanner, 'scan',
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
                 side_effect=AssertionError("fallback")):
             empty_plan = empty_scan.plan()
         self.assertEqual(empty_plan.splits(), [])
@@ -1356,7 +1370,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         for k in range(1, 4):
             self._write('filter_t', [{'k': k, 'v': 'v%d' % k}])
 
-        table = self.cat.get_table('default.filter_t')
+        table = self._python_table('filter_t')
         normal_builder = table.new_read_builder()
         predicate = normal_builder.new_predicate_builder().equal('k', 2)
         normal_builder.with_filter(predicate)
@@ -1383,7 +1397,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         for k in range(1, 4):
             self._write('limit_t', [{'k': k, 'v': 'v%d' % k}])
 
-        table = self.cat.get_table('default.limit_t')
+        table = self._python_table('limit_t')
         normal = table.new_read_builder().with_limit(1).new_scan().plan()
         native_builder = table.copy(
             {'scan.native-plan.enabled': 'true'}).new_read_builder().with_limit(1)
@@ -1402,7 +1416,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('travel_t', [{'k': 2, 'v': 'b'}])
         options = {'scan.snapshot-id': '1'}
 
-        normal_table = self.cat.get_table('default.travel_t').copy(options)
+        normal_table = self._python_table('travel_t').copy(options)
         normal_builder = normal_table.new_read_builder()
         normal_plan = normal_builder.new_scan().plan()
         normal_rows = normal_builder.new_read().to_arrow(
@@ -1425,7 +1439,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('split_t', [{'k': 1, 'v': 'a'}])
         self._write('split_t', [{'k': 2, 'v': 'b'}])
         options = {'source.split.target-size': '1b'}
-        normal_table = self.cat.get_table('default.split_t').copy(options)
+        normal_table = self._python_table('split_t').copy(options)
         native_table = normal_table.copy({'scan.native-plan.enabled': 'true'})
 
         normal = normal_table.new_read_builder().new_scan().plan()
@@ -1445,7 +1459,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('open_cost_t', [{'k': 1, 'v': 'a'}])
         self._write('open_cost_t', [{'k': 2, 'v': 'b'}])
         self._write('open_cost_t', [{'k': 3, 'v': 'c'}])
-        base_table = self.cat.get_table('default.open_cost_t')
+        base_table = self._python_table('open_cost_t')
         normal_table = base_table.copy({'source.split.open-file-cost': '64mb'})
         native_table = normal_table.copy({'scan.native-plan.enabled': 'true'})
 
@@ -1471,7 +1485,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
             'source.split.target-size': None,
             'source.split.open-file-cost': None,
         }
-        normal_table = self.cat.get_table('default.split_reset_t').copy(reset_options)
+        normal_table = self._python_table('split_reset_t').copy(reset_options)
         native_table = normal_table.copy({'scan.native-plan.enabled': 'true'})
 
         normal = normal_table.new_read_builder().new_scan().plan()
@@ -1519,7 +1533,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.cat.create_table(
             'default.ex_t', Schema.from_pyarrow_schema(self.schema), False)
         self._write('ex_t', [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
-        normal = self.cat.get_table('default.ex_t').new_read_builder().explain()
+        normal = self._python_table('ex_t').new_read_builder().explain()
         native = self.cat.get_table('default.ex_t').copy(
             {'scan.native-plan.enabled': 'true'}).new_read_builder().explain()
         self.assertFalse(normal.native_planned)
@@ -1563,7 +1577,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
     def test_empty_table_explain_preserves_native_metadata(self):
         self.cat.create_table(
             'default.empty_t', Schema.from_pyarrow_schema(self.schema), False)
-        normal = self.cat.get_table('default.empty_t').new_read_builder().explain()
+        normal = self._python_table('empty_t').new_read_builder().explain()
         native = self.cat.get_table('default.empty_t').copy(
             {'scan.native-plan.enabled': 'true'}).new_read_builder().explain()
 

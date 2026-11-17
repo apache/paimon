@@ -39,19 +39,29 @@ _ENGINES = [False, pytest.param(True, marks=[pytest.mark.native_plan, pytest.mar
 def _commit(table, messages, native=False):
     commit = table.new_batch_write_builder().new_commit()
     try:
-        if native:
-            with patch.object(commit.file_store_commit, 'commit', side_effect=AssertionError('Python fallback')):
+        row_id_update = any(file.first_row_id is not None for message in messages for file in message.new_files)
+        if native and not row_id_update:
+            with patch('pypaimon.execution.python.write.file_store_commit.FileStoreCommit.commit',
+                       side_effect=AssertionError('Python fallback')):
                 commit.commit(messages)
         else:
-            commit.commit(messages)
+            with patch('pypaimon.execution.native.write.native_commit.create_native_commit',
+                       side_effect=AssertionError('Row-ID publication requires Python validation')):
+                commit.commit(messages)
+            if native:
+                assert commit._native_commit is None
+                assert commit._python_commit is not None
     finally:
         commit.close()
 
 
 @pytest.mark.parametrize('native', _ENGINES)
-@pytest.mark.parametrize('evolution', ['rename', 'drop_readd', 'complete_row'])
+@pytest.mark.parametrize('evolution,stale_handle,keep_baseline', [
+    ('rename', False, True), ('drop_readd', False, True),
+    ('drop_readd', True, True), ('drop_readd', False, False), ('complete_row', False, True)])
 @pytest.mark.parametrize('action', ['THROW_ERROR', 'DROP_PARTITION_INDEX', 'IGNORE'])
-def test_commit_resolves_updated_index_columns_by_file_schema(native_rest_catalog, native, evolution, action):
+def test_commit_resolves_updated_index_columns_by_file_schema(
+        native_rest_catalog, native, evolution, stale_handle, keep_baseline, action):
     catalog = native_rest_catalog
     schema = pa.schema([('id', pa.int32()), ('value', pa.int32())])
     catalog.create_table('default.identity', Schema.from_pyarrow_schema(schema, options={
@@ -94,21 +104,39 @@ def test_commit_resolves_updated_index_columns_by_file_schema(native_rest_catalo
         messages[0].new_files[0].write_cols = None
     else:
         assert messages[0].new_files[0].schema_id == original.table_schema.id
-    target = latest.copy({'commit.native.enabled': str(native).lower()})
-    if action == 'THROW_ERROR' and evolution != 'drop_readd':
-        with pytest.raises(Exception, match='globally indexed columns'):
+    if not keep_baseline:
+        for message in messages:
+            message.check_from_snapshot = None
+    target = (original if stale_handle else latest).copy({'commit.native.enabled': str(native).lower()})
+    # Reject updates to removed field IDs even when a new field has the same name.
+    dropped_update = evolution == 'drop_readd'
+    if dropped_update or action == 'THROW_ERROR':
+        error = 'cannot restore a dropped field' if dropped_update else 'globally indexed columns'
+        with pytest.raises(Exception, match=error):
             _commit(target, messages, native)
         assert latest.snapshot_manager().get_latest_snapshot().id == before.id
+        expected_indexes = ['identity.index']
+        expected_value = None if dropped_update else 10
     else:
         _commit(target, messages, native)
         after = latest.snapshot_manager().get_latest_snapshot()
         assert after.id == before.id + 1
-        indexes = scan_global_index_entries(latest, after)
-        expected = [] if action == 'DROP_PARTITION_INDEX' and evolution != 'drop_readd' else ['identity.index']
-        assert [entry.index_file.file_name for entry in indexes] == expected
-        read = latest.new_read_builder()
-        rows = read.new_read().to_arrow(read.new_scan().plan().splits()).to_pydict()
-        assert rows == {'id': [1], index_field.name: [None if evolution == 'drop_readd' else 11]}
+        expected_indexes = [] if action == 'DROP_PARTITION_INDEX' else ['identity.index']
+        expected_value = 11
+    snapshot = latest.snapshot_manager().get_latest_snapshot()
+    indexes = scan_global_index_entries(latest, snapshot)
+    assert [entry.index_file.file_name for entry in indexes] == expected_indexes
+    read = latest.new_read_builder()
+    rows = read.new_read().to_arrow(read.new_scan().plan().splits()).to_pydict()
+    assert rows == {'id': [1], index_field.name: [expected_value]}
+    if dropped_update:
+        assert all(latest.file_io.exists(file.file_path) for message in messages for file in message.new_files)
+        commit = target.new_batch_write_builder().new_commit()
+        try:
+            commit.abort(messages)
+        finally:
+            commit.close()
+        assert all(not latest.file_io.exists(file.file_path) for message in messages for file in message.new_files)
 
 
 @pytest.mark.parametrize('native', _ENGINES)

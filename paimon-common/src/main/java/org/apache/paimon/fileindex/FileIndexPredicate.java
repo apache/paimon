@@ -23,8 +23,11 @@ import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.predicate.ArraysOverlap;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.In;
+import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
@@ -46,10 +49,13 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
+import static java.util.stream.Collectors.toList;
 import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
+import static org.apache.paimon.fileindex.FileIndexResult.SKIP;
 
 /** Utils to check secondary index (e.g. bloom filter) predicate. */
 public class FileIndexPredicate implements Closeable {
@@ -189,14 +195,25 @@ public class FileIndexPredicate implements Closeable {
                 return REMAIN;
             }
 
+            LeafFunction function = predicate.function();
+            List<Object> literals = predicate.literals();
+            if (literals.stream().anyMatch(Objects::isNull)) {
+                // Index readers do not expect a null literal. A null literal never matches a
+                // row: IN and ARRAYS_OVERLAP ignore it, and every other function is false on it.
+                if (function instanceof In || function instanceof ArraysOverlap) {
+                    literals = literals.stream().filter(Objects::nonNull).collect(toList());
+                    if (literals.isEmpty()) {
+                        return SKIP;
+                    }
+                } else {
+                    return SKIP;
+                }
+            }
             FileIndexResult compoundResult = REMAIN;
             FieldRef fieldRef = fieldRefOptional.get();
             for (FileIndexReader fileIndexReader : columnIndexReaders.get(fieldRef.name())) {
                 compoundResult =
-                        compoundResult.and(
-                                predicate
-                                        .function()
-                                        .visit(fileIndexReader, fieldRef, predicate.literals()));
+                        compoundResult.and(function.visit(fileIndexReader, fieldRef, literals));
 
                 if (!compoundResult.remain()) {
                     return compoundResult;

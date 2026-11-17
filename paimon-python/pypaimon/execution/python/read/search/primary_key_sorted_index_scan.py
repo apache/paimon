@@ -24,8 +24,8 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import _create_inner_readers
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.index.pk.primary_key_index_source_file import PrimaryKeyIndexSourceFile
-from pypaimon.index.pk.primary_key_index_source_policy import should_read
-from pypaimon.index.pksorted.pk_sorted_bucket_index_state import PkSortedBucketIndexState
+from pypaimon.execution.python.index.pk.primary_key_index_source_policy import should_read
+from pypaimon.execution.python.index.pksorted.pk_sorted_bucket_index_state import PkSortedBucketIndexState
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 

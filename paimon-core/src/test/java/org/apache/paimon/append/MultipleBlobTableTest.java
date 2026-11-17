@@ -45,6 +45,8 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -256,10 +258,12 @@ public class MultipleBlobTableTest extends TableTestBase {
         assertThat(delta.get(1)[1]).isEqualTo(blobBytes1);
     }
 
-    @Test
-    public void testProjectTwoBlobColumnsCoveringDifferentSubRanges() throws Exception {
-        // normal [0, 9], f2 over [0, 6] and f3 over [3, 9]: together the blob files cover the
-        // group, but each blob column covers only part of it.
+    @ParameterizedTest
+    @CsvSource({"0, 7, 3, 7", "2, 2, 6, 2"})
+    public void testProjectTwoBlobColumnsCoveringDifferentSubRanges(
+            int firstStart, int firstCount, int secondStart, int secondCount) throws Exception {
+        // Cover both overlapping backfills and disjoint backfills with gaps before, between and
+        // after the populated ranges. Each column must preserve its own values and NULLs.
         createTableDefault();
         RowType rowType = getTableDefault().rowType();
         BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
@@ -272,8 +276,8 @@ public class MultipleBlobTableTest extends TableTestBase {
             }
             commit.commit(write.prepareCommit());
         }
-        writeBlobColumn("f2", blobBytes1, 7, 0L);
-        writeBlobColumn("f3", blobBytes2, 7, 3L);
+        writeBlobColumn("f2", blobBytes1, firstCount, firstStart);
+        writeBlobColumn("f3", blobBytes2, secondCount, secondStart);
 
         ReadBuilder readBuilder =
                 getTableDefault()
@@ -282,8 +286,11 @@ public class MultipleBlobTableTest extends TableTestBase {
         List<byte[][]> rows = readBlobs(readBuilder, readBuilder.newScan().plan());
         assertThat(rows.size()).isEqualTo(10);
         for (int i = 0; i < 10; i++) {
-            assertThat(rows.get(i)[0]).isEqualTo(i <= 6 ? blobBytes1 : null);
-            assertThat(rows.get(i)[1]).isEqualTo(i >= 3 ? blobBytes2 : null);
+            assertThat(rows.get(i)[0])
+                    .isEqualTo(i >= firstStart && i < firstStart + firstCount ? blobBytes1 : null);
+            assertThat(rows.get(i)[1])
+                    .isEqualTo(
+                            i >= secondStart && i < secondStart + secondCount ? blobBytes2 : null);
         }
     }
 

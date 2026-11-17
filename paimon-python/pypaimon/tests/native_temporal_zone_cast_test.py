@@ -18,6 +18,7 @@
 """Existing temporal changes read natively from old REST Parquet files."""
 
 import os
+import time
 
 import pyarrow as pa
 import pytest
@@ -81,10 +82,47 @@ _VALUES = [0, -1, 1710037800123, 1730597400123, 1710055800123, 1730615400123, No
 def _zone():
     # Run non-UTC cases in separate processes so Native's cached system zone
     # and Python's libc zone are initialized under the same environment.
-    name = os.environ.get('TZ', 'UTC')
+    name = os.environ.get('TZ')
+    if name is None:
+        # TZ may be unset on a non-UTC host. The standard Linux/macOS link
+        # retains the IANA name; abbreviations such as CST are ambiguous.
+        name = os.path.realpath('/etc/localtime').partition('/zoneinfo/')[2]
+        if not name:
+            # GMT can also name London's winter offset, not a UTC zone.
+            name = 'UTC' if time.tzname[0] == 'UTC' else None
+    if name in ('Etc/UTC', 'Etc/GMT', 'GMT'):
+        name = 'UTC'
     if name not in _JAVA_CASTS:
         pytest.skip('Java golden values are defined for UTC, New York and Shanghai')
     return name
+
+
+@pytest.mark.parametrize('system_zone,expected', [
+    ('Asia/Shanghai', 'Asia/Shanghai'),
+    ('America/New_York', 'America/New_York'),
+    ('Etc/UTC', 'UTC'),
+])
+def test_zone_goldens_resolve_unset_tz_from_system_iana_name(monkeypatch, system_zone, expected):
+    monkeypatch.delenv('TZ', raising=False)
+    monkeypatch.setattr(os.path, 'realpath', lambda path: '/usr/share/zoneinfo/' + system_zone)
+    monkeypatch.setattr(time, 'tzname', ('CST', 'CST'))
+    assert _zone() == expected
+
+
+@pytest.mark.parametrize('zone,expected', [('America/New_York', 'America/New_York'), ('GMT', 'UTC')])
+def test_zone_goldens_prefer_explicit_process_tz(monkeypatch, zone, expected):
+    monkeypatch.setenv('TZ', zone)
+    monkeypatch.setattr(os.path, 'realpath', lambda path: '/usr/share/zoneinfo/Asia/Shanghai')
+    assert _zone() == expected
+
+
+@pytest.mark.parametrize('abbreviation', ['CST', 'GMT'])
+def test_zone_goldens_do_not_assume_utc_for_ambiguous_system_abbreviation(monkeypatch, abbreviation):
+    monkeypatch.delenv('TZ', raising=False)
+    monkeypatch.setattr(os.path, 'realpath', lambda path: path)
+    monkeypatch.setattr(time, 'tzname', (abbreviation, abbreviation))
+    with pytest.raises(pytest.skip.Exception):
+        _zone()
 
 
 def _case(operation):

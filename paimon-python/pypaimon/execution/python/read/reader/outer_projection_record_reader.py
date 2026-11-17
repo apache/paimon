@@ -25,9 +25,8 @@ partial-update / aggregation see the original sub-structure), and this
 wrapper extracts the user-visible flat columns afterwards.
 """
 
-from typing import Any, List, Optional
+from typing import Any, Iterable, List, Optional, Sequence, Set
 
-from pypaimon.read.reader.field_indices import project_top_level_field_indices
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.table.row.internal_row import InternalRow
@@ -62,11 +61,11 @@ class OuterProjectionRecordReader(RecordReader[InternalRow]):
         self._inner = inner
         self._flat_arity = len(name_paths)
         self._file_io = file_io
-        self._blob_field_indices = project_top_level_field_indices(
+        self._blob_field_indices = _project_top_level_field_indices(
             blob_field_indices, self._specs)
-        self._descriptor_field_indices = project_top_level_field_indices(
+        self._descriptor_field_indices = _project_top_level_field_indices(
             descriptor_field_indices, self._specs)
-        self._vector_field_indices = project_top_level_field_indices(
+        self._vector_field_indices = _project_top_level_field_indices(
             vector_field_indices, self._specs)
         self.file_io = self._file_io
         self.blob_field_indices = self._blob_field_indices
@@ -133,6 +132,21 @@ class _PathSpec:
     def __init__(self, top_idx: int, sub_names: List[str]):
         self.top_idx = top_idx
         self.sub_names = sub_names
+
+
+def _project_top_level_field_indices(
+    source_indices: Optional[Iterable[int]],
+    path_specs: Sequence[_PathSpec],
+) -> Optional[Set[int]]:
+    """Carry top-level field markers through this reader's resolved paths."""
+    if source_indices is None:
+        return None
+    source = set(source_indices)
+    return {
+        proj_pos
+        for proj_pos, spec in enumerate(path_specs)
+        if not spec.sub_names and spec.top_idx in source
+    }
 
 
 def _extract(row: InternalRow, spec: _PathSpec) -> Any:

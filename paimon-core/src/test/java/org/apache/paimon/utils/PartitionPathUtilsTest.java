@@ -72,6 +72,42 @@ class PartitionPathUtilsTest {
                 .containsExactly(entry("pt", rawValue));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"_x", ".tmp", "._y", "__hidden", ".", ".."})
+    void testValueOnlyHiddenPrefixRejectedAtWrite(String rawValue) {
+        // A value-only directory starting with '_' or '.' is hidden to scans (see isHiddenName), so
+        // writing it would silently drop the partition; the write path must reject it loudly.
+        assertThat(PartitionPathUtils.isHiddenName(rawValue)).isTrue();
+        assertThatThrownBy(
+                        () ->
+                                PartitionPathUtils.validatePartitionValueForWrite(
+                                        rawValue, true, "__DEFAULT_PARTITION__"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(rawValue);
+    }
+
+    @Test
+    void testValueOnlyDefaultPartitionNameIsAllowedAtWrite() {
+        // The configured default name starts with '_' yet scans un-hide exactly that name, so it
+        // must stay writable.
+        String defaultName = "__DEFAULT_PARTITION__";
+        PartitionPathUtils.validatePartitionValueForWrite(defaultName, true, defaultName);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2025", "a:b", "a b"})
+    void testVisibleValueOnlyValueAcceptedAtWrite(String rawValue) {
+        PartitionPathUtils.validatePartitionValueForWrite(rawValue, true, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"_x", ".tmp"})
+    void testKeyValueLayoutKeepsHiddenPrefixValuesAtWrite(String rawValue) {
+        // In a key=value layout the directory is 'pt=_x'; the leading char comes from the column
+        // name, not the value, so the directory is never hidden and the value stays writable.
+        PartitionPathUtils.validatePartitionValueForWrite(rawValue, false, null);
+    }
+
     @Test
     void testTrailingPartitionExtractionStopsAtTableBoundary() {
         Path partitionPath = new Path("file:///warehouse/env=prod/table/dt=20260718/hh=10");

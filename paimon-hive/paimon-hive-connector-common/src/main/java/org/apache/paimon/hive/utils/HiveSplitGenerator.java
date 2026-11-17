@@ -87,7 +87,14 @@ public class HiveSplitGenerator {
         // locations may contain multiple partitions
         for (String location : locationsToPlan(table, jobConf, locations)) {
             InnerTableScan scan;
-            if (tagToPartField != null) {
+            if (!location.startsWith(table.location().toString())) {
+                // The Hive location of the whole table, see locationsToPlan. It is not under the
+                // paimon location, so its path names no partition or tag.
+                scan = table.newScan();
+                if (predicates.size() > 0) {
+                    scan.withFilter(PredicateBuilder.and(predicates));
+                }
+            } else if (tagToPartField != null) {
                 // the location should be pruned by partition predicate
                 // we can extract tag name from location, and use time travel to scan
                 String tag = extractTagName(location, tagToPartField);

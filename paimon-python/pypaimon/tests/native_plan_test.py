@@ -22,6 +22,8 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 import pyarrow
+import pytest
+from pypaimon.execution.native.read.plan import NativeTableScan
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
 from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
@@ -86,6 +88,7 @@ def _scan(native_enabled, file_scanner):
     file_scanner.is_streaming = False
     file_scanner.skip_level0 = False
     file_scanner.only_read_real_buckets = False    # not postpone bucket
+    file_scanner._explicit_partition_filter = False
     scan.file_scanner = file_scanner
     scan.predicate = None
     scan.partition_predicate = None
@@ -208,6 +211,11 @@ class NativePlanTest(unittest.TestCase):
         builder.with_projection.assert_not_called()
 
     def setUp(self):
+        # Capability/FFI tests use a stub scanner as configuration and fallback
+        # storage. Public hook selection is covered with real scanner facades.
+        selected = patch('pypaimon.read.read_dispatch._python_scan_selected', return_value=False)
+        selected.start()
+        self.addCleanup(selected.stop)
         # Model an installed companion extension. Individual tests supply the
         # API objects they call through this module.
         fake_df = ModuleType('pypaimon_rust.datafusion')
@@ -289,14 +297,15 @@ class NativePlanTest(unittest.TestCase):
                 table.catalog_environment.catalog_loader = loader_type(context)
                 self.assertEqual(_resolved_schema_file_io_options(table), {})
 
-    def test_switch_defaults_off(self):
+    @pytest.mark.execution_defaults
+    def test_switch_defaults_on_and_can_be_disabled(self):
         defaults = CoreOptions(Options({}))
-        self.assertFalse(defaults.native_plan_enabled())
-        self.assertFalse(defaults.native_read_enabled())
-        self.assertTrue(
-            CoreOptions(Options({"scan.native-plan.enabled": "true"})).native_plan_enabled())
-        self.assertTrue(
-            CoreOptions(Options({"read.native.enabled": "true"})).native_read_enabled())
+        self.assertTrue(defaults.native_plan_enabled())
+        self.assertTrue(defaults.native_read_enabled())
+        self.assertFalse(
+            CoreOptions(Options({"scan.native-plan.enabled": "false"})).native_plan_enabled())
+        self.assertFalse(
+            CoreOptions(Options({"read.native.enabled": "false"})).native_read_enabled())
 
     def test_catalogless_standard_file_io_options_are_preserved(self):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
@@ -513,7 +522,7 @@ class NativePlanTest(unittest.TestCase):
             fs = Mock(partition_key_predicate=None)
             scan = _scan(True, fs)
             setattr(scan.table.catalog_environment.catalog_loader.context(), attr, object())
-            self.assertTrue(scan._native_plan_supported())
+            self.assertTrue(NativeTableScan(scan)._native_plan_supported())
 
     def test_plan_native_empty_preserves_snapshot_without_fallback(self):
         for snapshot_id in (None, 7):
@@ -1341,17 +1350,29 @@ class NativePlanTest(unittest.TestCase):
                     native.assert_called_once()
                     fs.scan.assert_not_called()
 
-    def test_incremental_range_is_forwarded_without_timestamp_reinterpretation(self):
+    def test_incremental_timestamp_options_are_resolved_in_core(self):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(True, fs)
         scan.table.options.options = Options({'incremental-between-timestamp': '100,200'})
         scan.table._applied_dynamic_options = {'incremental-between-timestamp': '100,200'}
-        scan._incremental_snapshot_range = (2, 4)
         with patch('pypaimon.execution.native.read.plan.native_plan',
                    return_value=Plan([], 4)) as native:
             self.assertEqual(scan.plan().snapshot_id, 4)
-        self.assertEqual(native.call_args[1]['incremental_range'], (2, 4))
+        self.assertNotIn('incremental_range', native.call_args[1])
         fs.scan.assert_not_called()
+
+    def test_incremental_selectors_use_python_planning(self):
+        for options in ({'incremental-between': '1,2'},
+                        {'incremental-between-timestamp': '100,200', 'incremental-between-scan-mode': 'changelog'},
+                        {'incremental-to-auto-tag': 'tag2'}):
+            with self.subTest(options=options):
+                fs = Mock(partition_key_predicate=None)
+                scan = _scan(True, fs)
+                scan.table.options.options = Options(options)
+                with patch('pypaimon.execution.native.read.plan.native_plan') as native:
+                    scan.plan()
+                native.assert_not_called()
+                fs.scan.assert_called_once()
 
     def test_native_plan_forwards_explicit_incremental_mode(self):
         table = _scan(True, Mock()).table
@@ -1375,16 +1396,15 @@ class NativePlanTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'incremental_range'):
             native_plan(table, incremental_mode='changelog')
 
-    def test_incremental_window_outside_snapshots_is_terminal_empty(self):
+    def test_empty_incremental_window_still_runs_core_planning(self):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(True, fs)
         scan.table.options.options = Options({'incremental-between-timestamp': '100,200'})
-        scan._incremental_snapshot_range = None
-        with patch('pypaimon.execution.native.read.plan.native_plan') as native:
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([])) as native:
             plan = scan.plan()
         self.assertEqual(plan.splits(), [])
         self.assertIsNone(plan.snapshot_id)
-        native.assert_not_called()
+        native.assert_called_once()
         fs.scan.assert_not_called()
 
     def test_primary_key_shard_and_limit_are_planned_in_rust(self):

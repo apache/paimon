@@ -60,7 +60,9 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
         if shard is not None:
             scan.with_shard(*shard)
         if native:
-            with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+            with patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('native fallback')):
                 plan = scan.plan()
         else:
             plan = scan.plan()
@@ -68,7 +70,7 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
             assert all(getattr(split, '_native_split', None) is not None
                        for split in plan.splits())
             read_guard = patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('dynamic-bucket native read fell back'))
         else:
             read_guard = ExitStack()
@@ -136,7 +138,9 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
                 builder.with_filter(pb.equal('p', partition))
             scan = builder.new_scan()
             if native:
-                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+                with patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                        side_effect=AssertionError('native fallback')):
                     plan = scan.plan()
             else:
                 plan = scan.plan()
@@ -148,7 +152,7 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
                 read = builder.new_read()
                 read.include_row_kind = True
                 with patch(
-                        'pypaimon.read.table_read.TableRead._create_split_read',
+                        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                         side_effect=AssertionError(
                             'dynamic incremental native read fell back')):
                     rows = read.to_arrow(plan.splits()).to_pylist()

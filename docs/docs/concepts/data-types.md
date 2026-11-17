@@ -25,12 +25,12 @@ under the License.
 # Data Types
 
 A data type describes the logical values a table field can hold. Use these types when defining a
-[schema](./spec/schema). The compute engine's SQL syntax and supported mappings can differ from
+[schema](./spec/schema.md). The compute engine's SQL syntax and supported mappings can differ from
 Paimon's type model.
 
-This reference describes logical types. See [File Format](./spec/fileformat) for their physical
-representation in each storage format, and [Flink DDL](../flink/sql-ddl) or
-[Spark DDL](../spark/sql-ddl) for engine-specific table definitions.
+This reference describes logical types. See [File Format](./spec/fileformat.md) for their physical
+representation in each storage format, and [Flink DDL](../flink/sql-ddl.md) or
+[Spark DDL](../spark/sql-ddl.md) for engine-specific table definitions.
 
 ## Logical Type Reference
 
@@ -95,5 +95,5 @@ Choose a type family:
 | Type | Description and constraints |
 | --- | --- |
 | <code>VARIANT</code> | Data type of semi-structured data.<br><br> Designed for storing any semi-structured data, including ARRAY, MAP, and scalar types. VARIANT can only store MAP types with keys of type STRING.<br><br> Note: Requires Flink 2.0+ and Spark 4.0+. |
-| <code>BLOB</code> | Data type of a binary large object.<br><br> Designed for storing large binary data such as images, videos, audio files, and other multimodal data. Unlike BYTES type which stores data inline, BLOB stores large binary data in separate files and maintains references to them, providing better performance for large objects.<br><br> Note: Requires 'row-tracking.enabled' and 'data-evolution.enabled' to be set to true. See <a href="../multimodal-table/blob">Blob Type</a> for details. |
-| <code>VECTOR&lt;t, n&gt;</code> | Data type of a fixed-length dense vector.<br><br> Paimon supports defining columns of type VECTOR&lt;t, n&gt;, where t is the element type and n is the vector dimension. t must be one of BOOLEAN, TINYINT, SMALLINT, INT, BIGINT, FLOAT, DOUBLE. n must have a value between 1 and 2,147,483,647 (both inclusive). If a vector value is not null, its elements cannot be null.<br><br> A VECTOR column cannot be used as a primary key column, a partition column, or for sorting.<br><br> Note: Dedicated vector file storage requires 'vector.file.format', 'row-tracking.enabled' and 'data-evolution.enabled'. See <a href="../multimodal-table/vector">Vector Storage</a> for details. |
+| <code>BLOB</code> | Data type of a binary large object.<br><br> Designed for storing large binary data such as images, videos, audio files, and other multimodal data. Unlike BYTES type which stores data inline, BLOB stores large binary data in separate files and maintains references to them, providing better performance for large objects.<br><br> Note: Managed BLOB storage in append tables requires 'row-tracking.enabled' and 'data-evolution.enabled' to be set to true. Primary-key managed BLOB storage does not require these options and has separate merge-engine and changelog requirements. See [BLOB storage for append tables](../multimodal-table/blob.mdx) and [BLOB storage for primary-key tables](../primary-key-table/blob-storage.md) for details. |
+| <code>VECTOR&lt;t, n&gt;</code> | Data type of a fixed-length dense vector.<br><br> Paimon supports defining columns of type VECTOR&lt;t, n&gt;, where t is the element type and n is the vector dimension. t must be one of BOOLEAN, TINYINT, SMALLINT, INT, BIGINT, FLOAT, DOUBLE. n must have a value between 1 and 2,147,483,647 (both inclusive). If a vector value is not null, its elements cannot be null.<br><br> A VECTOR column cannot be used as a primary key column, a partition column, or for sorting.<br><br> Note: Dedicated vector file storage requires 'vector.file.format', 'row-tracking.enabled' and 'data-evolution.enabled'. See [Vector Storage](../multimodal-table/vector.mdx) for details. |

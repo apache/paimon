@@ -18,6 +18,7 @@
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from pypaimon.common.options import Options
@@ -218,7 +219,7 @@ class KerberosHdfsTest(unittest.TestCase):
         env.pop("KRB5CCNAME", None)
         with patch.dict(os.environ, env, clear=True):
             with patch("os.path.exists", return_value=True):
-                with patch("os.getuid", return_value=1000):
+                with patch("os.getuid", return_value=1000, create=True):
                     path = PyArrowFileIO._get_ticket_cache_path()
                     self.assertEqual(path, "/tmp/krb5cc_1000")
 
@@ -308,6 +309,73 @@ class KerberosHdfsTest(unittest.TestCase):
                             file_io._initialize_hdfs_fs("hdfs", "namenode:8020")
                         self.assertIn("no ticket cache path",
                                       str(ctx.exception))
+
+
+class KerberosCachePortabilityTest(unittest.TestCase):
+
+    def test_no_uid_or_explicit_cache_returns_none(self):
+        from pypaimon.filesystem import _kerberos
+
+        system = SimpleNamespace(environ={}, path=MagicMock())
+        with patch.object(_kerberos, 'os', system):
+            self.assertIsNone(_kerberos.get_ticket_cache_path())
+        system.path.exists.assert_not_called()
+
+    def test_explicit_cache_does_not_require_uid(self):
+        from pypaimon.filesystem import _kerberos
+
+        for value, expected in [
+            ('FILE:C:/cache/ticket', 'C:/cache/ticket'),
+            ('C:/cache/ticket', 'C:/cache/ticket'),
+            ('MEMORY:ticket', 'MEMORY:ticket'),
+        ]:
+            with self.subTest(value=value):
+                system = SimpleNamespace(
+                    environ={'KRB5CCNAME': value}, path=MagicMock())
+                with patch.object(_kerberos, 'os', system):
+                    self.assertEqual(_kerberos.get_ticket_cache_path(), expected)
+                system.path.exists.assert_not_called()
+                self.assertEqual(system.environ, {'KRB5CCNAME': value})
+
+    def test_unix_default_cache_requires_existing_file(self):
+        from pypaimon.filesystem import _kerberos
+
+        for exists in [True, False]:
+            with self.subTest(exists=exists):
+                system = SimpleNamespace(
+                    environ={}, path=MagicMock(), getuid=MagicMock(return_value=1000))
+                system.path.exists.return_value = exists
+                with patch.object(_kerberos, 'os', system):
+                    self.assertEqual(_kerberos.get_ticket_cache_path(),
+                                     '/tmp/krb5cc_1000' if exists else None)
+                system.getuid.assert_called_once_with()
+                system.path.exists.assert_called_once_with('/tmp/krb5cc_1000')
+
+    def test_uid_errors_are_not_suppressed(self):
+        from pypaimon.filesystem import _kerberos
+
+        system = SimpleNamespace(
+            environ={}, path=MagicMock(), getuid=MagicMock(side_effect=OSError('uid failed')))
+        with patch.object(_kerberos, 'os', system):
+            with self.assertRaisesRegex(OSError, 'uid failed'):
+                _kerberos.get_ticket_cache_path()
+        system.path.exists.assert_not_called()
+
+    def test_native_keytab_without_cache_still_raises(self):
+        from pypaimon.filesystem import _kerberos
+        from pypaimon.filesystem.hdfs_native_file_io import HdfsNativeFileIO
+
+        file_io = HdfsNativeFileIO.__new__(HdfsNativeFileIO)
+        file_io.properties = Options({
+            'security.kerberos.login.principal': 'user@REALM',
+            'security.kerberos.login.keytab': '/test/user.keytab',
+        })
+        system = SimpleNamespace(environ={}, path=MagicMock())
+        with patch.object(_kerberos, 'os', system):
+            with patch.object(_kerberos, 'kerberos_login_from_keytab') as login:
+                with self.assertRaisesRegex(RuntimeError, 'no ticket cache path'):
+                    file_io._setup_kerberos()
+        login.assert_called_once_with('user@REALM', '/test/user.keytab')
 
 
 if __name__ == '__main__':

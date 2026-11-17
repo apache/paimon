@@ -25,8 +25,8 @@ import pyarrow.parquet as pq
 
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.write.table_update_by_row_id import (
-    TableUpdateByRowId,
+from pypaimon.execution.python.write.table_update_by_row_id import (
+    PythonTableUpdateByRowId as TableUpdateByRowId,
 )
 from pypaimon.execution.python.write.table_update_by_row_id import (
     _RowIdUpdateFileWriter,

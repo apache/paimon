@@ -25,9 +25,11 @@ from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.file_entry import FileEntry
-from pypaimon.table.special_fields import SpecialFields
+from pypaimon.schema.data_types import RowType
+from pypaimon.utils.file_store_path_factory import _escape_partition_component
 from pypaimon.utils.range import Range
 from pypaimon.utils.range_helper import RangeHelper
+from pypaimon.write.row_id_conflict import RowIdExistenceConflict, resolve_write_fields
 from pypaimon.execution.python.write.commit.commit_scanner import CommitScanner
 
 
@@ -53,7 +55,8 @@ class RowIdColumnConflictChecker:
         range_helper = RangeHelper(lambda f: f.row_id_range())
         groups = range_helper.merge_overlapping_ranges(files_with_row_id)
 
-        write_ranges = []
+        checker = cls([], schema_manager)
+        write_ranges = checker._write_ranges
         for group in groups:
             merged_from = min(f.first_row_id for f in group)
             merged_to = max(f.first_row_id + f.row_count - 1 for f in group)
@@ -61,12 +64,12 @@ class RowIdColumnConflictChecker:
 
             field_ids = set()
             for f in group:
-                cls._add_write_field_ids(field_ids, f, schema_manager)
+                field_ids.update(checker._write_field_ids(f))
 
             write_ranges.append(_WriteRange(merged_range, field_ids))
 
         write_ranges.sort(key=lambda wr: (wr.range.from_, wr.range.to))
-        return cls(write_ranges, schema_manager)
+        return checker
 
     def is_empty(self):
         return len(self._write_ranges) == 0
@@ -93,69 +96,29 @@ class RowIdColumnConflictChecker:
         return bisect.bisect_left(keys, target.from_)
 
     def _contains_any_write_field(self, field_ids, file):
-        if file.write_cols is None:
+        return not field_ids.isdisjoint(self._write_field_ids(file))
+
+    def _write_field_ids(self, file):
+        key = (file.schema_id, None if file.write_cols is None else tuple(file.write_cols))
+        if key not in self._field_id_cache:
             schema = self._schema_manager.get_schema(file.schema_id)
             if schema is None:
                 raise RuntimeError(f"Schema {file.schema_id} not found")
-            data_file_fields = (
-                schema.data_file_fields(None)
-                if hasattr(schema, 'data_file_fields')
-                else schema.fields
-            )
-            return any(
-                field.id in field_ids
-                for field in data_file_fields
-            )
-        for col_name in file.write_cols:
-            fid = self._field_id(file, col_name)
-            if fid is not None and fid in field_ids:
-                return True
-        return False
+            field_ids = set()
 
-    def _field_id(self, file, col_name):
-        if SpecialFields.is_system_field(col_name):
-            return None
-        name_to_id = self._field_id_by_name(file.schema_id)
-        fid = name_to_id.get(col_name)
-        if fid is None:
-            raise RuntimeError(
-                f"Column '{col_name}' not found in schema {file.schema_id}")
-        return fid
+            def add_leaf_ids(field):
+                # Whole ROW writes overlap every written child; sibling paths
+                # remain independent. ARRAY/MAP values are atomic, as in Java.
+                if isinstance(field.type, RowType):
+                    for child in field.type.fields:
+                        add_leaf_ids(child)
+                else:
+                    field_ids.add(field.id)
 
-    def _field_id_by_name(self, schema_id):
-        if schema_id not in self._field_id_cache:
-            schema = self._schema_manager.get_schema(schema_id)
-            if schema is None:
-                raise RuntimeError(f"Schema {schema_id} not found")
-            self._field_id_cache[schema_id] = {
-                field.name: field.id for field in schema.fields
-            }
-        return self._field_id_cache[schema_id]
-
-    @classmethod
-    def _add_write_field_ids(cls, field_ids, file, schema_manager):
-        if file.write_cols is None:
-            schema = schema_manager.get_schema(file.schema_id)
-            if schema is not None:
-                data_file_fields = (
-                    schema.data_file_fields(None)
-                    if hasattr(schema, 'data_file_fields')
-                    else schema.fields
-                )
-                for field in data_file_fields:
-                    if not SpecialFields.is_system_field(field.name):
-                        field_ids.add(field.id)
-        else:
-            name_to_id = {}
-            schema = schema_manager.get_schema(file.schema_id)
-            if schema is not None:
-                name_to_id = {field.name: field.id for field in schema.fields}
-            for col_name in file.write_cols:
-                if SpecialFields.is_system_field(col_name):
-                    continue
-                fid = name_to_id.get(col_name)
-                if fid is not None:
-                    field_ids.add(fid)
+            for field in resolve_write_fields(schema, file.write_cols):
+                add_leaf_ids(field)
+            self._field_id_cache[key] = field_ids
+        return self._field_id_cache[key]
 
 
 class _WriteRange:
@@ -163,23 +126,6 @@ class _WriteRange:
     def __init__(self, range_, field_ids):
         self.range = range_
         self.field_ids = field_ids
-
-
-class RowIdExistenceConflict(RuntimeError):
-    """A staged row-id file no longer matches the current base-file layout."""
-
-    def __init__(self, entry):
-        self.entry = entry
-        super().__init__(
-            "Row ID existence conflict: file '{}' references "
-            "firstRowId={}, rowCount={} in bucket {}, "
-            "but no matching file exists in the current snapshot. "
-            "The referenced file may have been rewritten by a "
-            "concurrent compaction or removed by an overwrite.".format(
-                entry.file.file_name,
-                entry.file.first_row_id,
-                entry.file.row_count,
-                entry.bucket))
 
 
 class ConflictDetection:
@@ -242,8 +188,9 @@ class ConflictDetection:
             if entry.kind == 1:
                 return RuntimeError(
                     "File deletion conflicts detected! Give up committing. "
-                    "Trying to delete file {} which is not previously added.".format(
-                        entry.file.file_name))
+                    "Trying to delete file {} which is not previously added "
+                    "(partition={}, bucket={}).".format(
+                        entry.file.file_name, self._partition_to_string(entry.partition), entry.bucket))
 
         conflict = self.check_bucket_num_conflicts(merged_entries)
         if conflict is not None:
@@ -294,6 +241,21 @@ class ConflictDetection:
             return conflict
 
         return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
+
+    def _partition_to_string(self, partition):
+        values = tuple(partition.values)
+        if not values:
+            return "<non-partitioned>"
+        try:
+            path_factory = self.table.path_factory()
+            partition_values = path_factory._canonical_partition(values)
+            return "/".join(
+                "{}={}".format(_escape_partition_component(key), _escape_partition_component(partition_values[i]))
+                for i, key in enumerate(path_factory.partition_keys)
+            )
+        except Exception:
+            # Formatting diagnostics must not hide the original commit conflict.
+            return str(values)
 
     @staticmethod
     def check_bucket_num_conflicts(entries):
@@ -488,6 +450,16 @@ class ConflictDetection:
     def check_row_id_existence(self, base_entries, delta_entries, next_row_id=None):
         if not self.data_evolution_enabled:
             return None
+
+        # File identity excludes row IDs. A DELETE must still describe the
+        # current ADD before identifier-based manifest merging cancels it.
+        deleted = {entry.identifier(): entry for entry in delta_entries if entry.kind == 1}
+        for current in base_entries:
+            stale = deleted.get(current.identifier()) if current.kind == 0 else None
+            if stale is not None and (
+                    current.file.first_row_id != stale.file.first_row_id
+                    or current.file.row_count != stale.file.row_count):
+                return RowIdExistenceConflict._from_delete(stale, current)
 
         if next_row_id is None:
             return None

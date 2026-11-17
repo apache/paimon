@@ -21,6 +21,7 @@ from pypaimon.api.api_response import GetTagResponse, PagedList, Partition
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
+from pypaimon.catalog.catalog_utils import check_not_branch, check_not_system_database, check_not_system_table
 from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 BranchNotExistException,
                                                 DatabaseAlreadyExistException,
@@ -86,6 +87,7 @@ class FileSystemCatalog(Catalog):
 
     def create_database(self, name: str, ignore_if_exists: bool,
                         properties: Optional[Dict[str, str]] = None) -> None:
+        check_not_system_database(name)
         try:
             self.get_database(name)
             if not ignore_if_exists:
@@ -97,6 +99,7 @@ class FileSystemCatalog(Catalog):
             self.file_io.mkdirs(path)
 
     def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
+        check_not_system_database(name)
         try:
             self.get_database(name)
         except DatabaseNotExistException:
@@ -189,6 +192,8 @@ class FileSystemCatalog(Catalog):
 
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        check_not_branch(identifier, "create_table")
+        check_not_system_table(identifier, "create_table")
         self.get_database(identifier.get_database_name())
         try:
             self.get_table(identifier)
@@ -229,6 +234,7 @@ class FileSystemCatalog(Catalog):
     ) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        check_not_system_table(identifier, "alter_table")
         try:
             self.get_table(identifier)
         except TableNotExistException:
@@ -253,6 +259,10 @@ class FileSystemCatalog(Catalog):
             source_identifier = Identifier.from_string(source_identifier)
         if not isinstance(target_identifier, Identifier):
             target_identifier = Identifier.from_string(target_identifier)
+        check_not_branch(source_identifier, "rename_table")
+        check_not_branch(target_identifier, "rename_table")
+        check_not_system_table(source_identifier, "rename_table")
+        check_not_system_table(target_identifier, "rename_table")
 
         # Verify source table exists
         try:
@@ -277,6 +287,8 @@ class FileSystemCatalog(Catalog):
     def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        check_not_branch(identifier, "drop_table")
+        check_not_system_table(identifier, "drop_table")
 
         # Check if table exists
         try:

@@ -29,6 +29,13 @@ under the License.
 
 This requires `torch` to be installed.
 
+For multi-worker loading, set `multiprocessing_context="spawn"` and create and
+iterate the DataLoader inside an `if __name__ == "__main__":` guarded entry
+point. Native row iteration uses multithreaded Polars; forking after a read can
+inherit locked worker state and hang. See the
+[Polars multiprocessing guide](https://docs.pola.rs/user-guide/misc/multiprocessing/).
+Define custom transforms and collators at module scope so workers can import them.
+
 You can read all the data into a `torch.utils.data.Dataset` or `torch.utils.data.IterableDataset`:
 
 ```python
@@ -40,6 +47,7 @@ dataloader = DataLoader(
     dataset,
     batch_size=2,
     num_workers=2,  # Concurrency to read data
+    multiprocessing_context="spawn",
     shuffle=False
 )
 
@@ -58,8 +66,62 @@ When the `streaming` parameter is true, it will iteratively read. When it is
 false, eligible data-evolution reads fetch each DataLoader batch lazily by row
 ID; other reads retain an Arrow table in memory for map-style access.
 
+In map-style mode, `__getitems__(indices)` preserves input order and repeated
+positions, including sampling with replacement. For example, `[2, 0, 2]`
+returns `[dataset[2], dataset[0], dataset[2]]`. DataLoader uses this batch
+interface for sampler output. Empty input returns an empty list; out-of-range
+positions raise `IndexError`. These indices are Dataset positions, not Paimon
+`_ROW_ID` values. To fetch an ordered batch of Paimon row IDs directly, use
+[`MultimodalTable.take_batch`](./multimodal-reading#row-ids).
+
 **`prefetch_concurrency`** (default: 1): In streaming row mode, controls
 reader threads per DataLoader worker. It has no effect in non-streaming mode.
+
+### Named nested projections
+
+Map-style datasets support named ROW fields and literal MAP-key projections,
+including projections mixed with top-level columns:
+
+```python
+read_builder = table.new_read_builder().with_projection({
+    "user_id": "id",
+    "city": "profile.city",
+    "source": "attributes['source']",
+})
+splits = read_builder.new_scan().plan().splits()
+dataset = read_builder.new_read().to_torch(splits, streaming=False, batch_format="row")
+sample = dataset[0]
+samples = dataset.__getitems__([2, 0, 2])
+```
+
+Each sample uses the specified aliases in projection order. These requests
+materialize their Arrow result in memory when the dataset is constructed,
+including on Data Evolution tables. Indexing preserves the requested order
+and duplicate indices. Values and supported reads follow `to_arrow`, including
+its table, format, and authorization restrictions.
+
+Map-style row datasets also support the existing float32 `variant_get` and
+`try_variant_get` projections, including mixtures with ordinary columns and
+nested paths:
+
+```python
+read_builder = table.new_read_builder().with_projection({
+    "user_id": "id",
+    "score": "try_variant_get(payload, '$.score', 'float')",
+})
+splits = read_builder.new_scan().plan().splits()
+dataset = read_builder.new_read().to_torch(splits, streaming=False, batch_format="row")
+sample = dataset[0]
+samples = dataset.__getitems__([2, 0, 2])
+```
+
+VARIANT extractions require a compatible Native reader. These requests
+materialize through `to_arrow` when the dataset is constructed, including on
+Data Evolution tables; they do not use lazy row-ID reads. Aliases, output order,
+repeated sources, extracted values and nulls follow the same Arrow request.
+`variant_get` cast errors propagate during construction, while `try_variant_get`
+returns null for failed casts. Initialization retains the Arrow result in memory.
+Batch formats (`"pyarrow"` and `"torch"`) still require `streaming=True`.
 
 ### Distributed Sharding
 
@@ -122,7 +184,8 @@ dataset = table_read.to_torch(
     batch_format="torch",
     batch_size=1024,
 )
-dataloader = DataLoader(dataset, batch_size=None, num_workers=2)
+dataloader = DataLoader(dataset, batch_size=None, num_workers=2,
+                        multiprocessing_context="spawn")
 
 for batch in dataloader:
     train(batch["features"], batch["label"])
@@ -156,7 +219,8 @@ dataset = table_read.to_torch(
     buffer_size=4096,
     max_buffer_input_splits=4,
 )
-loader = DataLoader(dataset, batch_size=None, num_workers=2)
+loader = DataLoader(dataset, batch_size=None, num_workers=2,
+                    multiprocessing_context="spawn")
 
 for epoch in range(10):
     dataset.set_epoch(epoch)
@@ -235,7 +299,8 @@ dataset = (
     )
 )
 
-loader = DataLoader(dataset, batch_size=32, num_workers=4, shuffle=True)
+loader = DataLoader(dataset, batch_size=32, num_workers=4, shuffle=True,
+                    multiprocessing_context="spawn")
 ```
 
 Each raw item contains scalar group/order keys, a list for every selected column,
@@ -320,6 +385,54 @@ physical file/split boundaries inside those episodes. If context has already
 been divided among ranks, use a local sampler instead of sharding it again
 with a world-size `DistributedSampler`; coordinate rank step counts separately.
 
+### Search hits as training samples and window anchors
+
+On data-evolution tables, vector, full-text, and hybrid queries can directly
+call `to_torch()` or `to_contiguous_window_dataset()`. Both resolve the search
+and its post-filtered row IDs eagerly, then read training values lazily from
+that same snapshot. Reusing the query creates a new Dataset at the next
+execution's snapshot; an existing Dataset keeps its original read view.
+
+```python
+hits = (
+    frames.search(query_embedding, column="embedding", tag_name="train-v1")
+    .pre_filter("task_id = 'pick'")
+    .where("eligible = true")
+    .select(["state", "image", "action"])
+    .limit(1000)
+)
+
+# Train on the matching rows, with ordinary scan().to_torch() options.
+rows = hits.to_torch(streaming=True)
+
+# Use the matching rows as anchors while retaining their surrounding frames.
+windows = hits.to_contiguous_window_dataset(
+    context_filter="task_id = 'pick'",
+    frame_offsets={"state": [-2, -1, 0], "action": list(range(16))},
+    boundary="pad",
+)
+```
+
+For search windows, `pre_filter()`, `where()`, and `limit()` select anchors;
+they do not restrict the context or truncate its groups. The context defaults
+to the entire captured snapshot. Use `context_filter` to restrict it to complete
+episodes for the task. A selected anchor outside that context raises
+`ValueError`. The search supplies `anchor_row_ids`, so passing a separate
+selection is rejected. Stride, boundary handling, per-column offsets,
+transforms, and adapters retain the scan window semantics described above.
+
+`select()` supplies the training projection; windows can override it with
+`columns`. `to_torch()` returns rows in scan order, or in its requested shuffle
+order. Windows retain group/order and stride order. Neither conversion accepts
+`with_score()` or `order_by_score()`. Batch vector queries via `search_vectors`
+return one Dataset per input query, in input-query order, with a shared
+snapshot and context index. The context is read, validated, and sorted once
+for the batch; each Dataset keeps its own anchor selection, read cache, and
+video decoders. The search execution options `execution`, `concurrency`, and
+`ray_remote_args` match `to_arrow()`; training reads use the local PyTorch
+Dataset and its DataLoader workers. Retain the snapshot's files for the whole
+training run, for example with `tag_name="train-v1"`.
+
 ### Resuming a CWD training run
 
 Install `torchdata>=0.11,<0.12` alongside your compatible PyTorch installation.
@@ -361,6 +474,7 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 
 loader_config = dict(batch_size=32, shuffle=True, drop_last=False,
                      num_workers=4, prefetch_factor=2,
+                     multiprocessing_context="spawn",
                      persistent_workers=True, in_order=True)
 # Include the application's preprocessing/normalization version in this contract.
 run_config = dict(loader=loader_config, preprocessing="train-v1", world_size=1,
@@ -473,7 +587,7 @@ Chunk shuffle is a scan planning feature for append tables, including
 Data Evolution append tables. For Data Evolution tables, chunk shuffle keeps
 row-id-aligned data files and sidecar files together while slicing by row-id
 range. Chunk shuffle should be used with file formats that **support random
-access**. Currently, the random-access file formats are Lance, Vortex, Row, and
+access**. Currently, the random-access file formats are Vortex, Row, and
 Blob. Primary-key tables and deletion-vector scans are not supported by
 `with_chunk_shuffle`.
 
@@ -506,6 +620,7 @@ dataloader = DataLoader(
     dataset,
     batch_size=32,
     num_workers=2,
+    multiprocessing_context="spawn",
     shuffle=False,
 )
 ```
@@ -546,6 +661,7 @@ dataloader = DataLoader(
     dataset,
     batch_size=32,
     num_workers=2,
+    multiprocessing_context="spawn",
     shuffle=False,
 )
 ```

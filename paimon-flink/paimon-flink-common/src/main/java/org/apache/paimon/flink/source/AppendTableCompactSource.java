@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.flink.sink.CompactionTaskTypeInfo;
@@ -40,6 +41,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Source for unaware-bucket Compaction.
@@ -90,14 +92,36 @@ public class AppendTableCompactSource extends AbstractNonCoordinatedSource<Appen
             extends AbstractNonCoordinatedSourceReader<AppendCompactTask> {
         private final AppendCompactCoordinator compactionCoordinator;
         private final long scanInterval;
+        private final DelayedAvailability availability;
 
         public CompactSourceReader(
                 FileStoreTable table,
                 boolean streaming,
                 PartitionPredicate partitions,
                 long scanInterval) {
+            this(
+                    table,
+                    streaming,
+                    partitions,
+                    scanInterval,
+                    new DelayedAvailability("append-compact-source-timer"));
+        }
+
+        @VisibleForTesting
+        CompactSourceReader(
+                FileStoreTable table,
+                boolean streaming,
+                PartitionPredicate partitions,
+                long scanInterval,
+                DelayedAvailability availability) {
             this.scanInterval = scanInterval;
+            this.availability = availability;
             compactionCoordinator = new AppendCompactCoordinator(table, streaming, partitions);
+        }
+
+        @Override
+        public CompletableFuture<Void> isAvailable() {
+            return availability.future();
         }
 
         @Override
@@ -114,9 +138,16 @@ public class AppendTableCompactSource extends AbstractNonCoordinatedSource<Appen
             }
 
             if (isEmpty) {
-                Thread.sleep(scanInterval);
+                availability.delay(scanInterval);
+                return InputStatus.NOTHING_AVAILABLE;
             }
             return InputStatus.MORE_AVAILABLE;
+        }
+
+        @Override
+        public void close() throws Exception {
+            availability.close();
+            super.close();
         }
     }
 

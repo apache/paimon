@@ -340,6 +340,8 @@ class HttpClient(RESTClient):
         try:
             body_str = JSON.to_json(body)
             auth_headers = _get_headers(path, "POST", None, body_str, rest_auth_function)
+            if not any(key.lower() == "content-type" for key in auth_headers):
+                auth_headers["Content-Type"] = "application/json"
             url = self._get_request_url(path, None)
             return self._execute_request("POST", url, data=body_str, headers=auth_headers, response_type=response_type)
         except RESTException as e:

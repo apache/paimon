@@ -31,15 +31,19 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link ExpirePartitionsAction}. */
 public class ExpirePartitionsActionITCase extends ActionITCaseBase {
@@ -188,6 +192,166 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
                         "+I[4, 2024-01-02, 01:00]");
 
         assertThat(actual).isEqualTo(expected);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,,true", ",true,true", "true,false,false", ",,false"})
+    public void testRetainLatestPartition(
+            String tableOption, String actionOption, boolean retainLatest) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        if (tableOption != null) {
+            options.put("partition.expiration-retain-latest", tableOption);
+        }
+        // Explicit action arguments must still override the table's strategy and formatter.
+        options.put("partition.expiration-strategy", "update-time");
+        options.put("partition.timestamp-formatter", "yyyy-MM-dd");
+        FileStoreTable table =
+                createFileStoreTable(
+                        ROW_TYPE,
+                        Collections.singletonList("dt"),
+                        Arrays.asList("k", "dt"),
+                        Collections.singletonList("k"),
+                        options);
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+        writeData(
+                rowData(
+                        BinaryString.fromString("1"),
+                        BinaryString.fromString("20010101"),
+                        BinaryString.fromString("01:00")));
+        assertThat(getData(tableName)).hasSize(1);
+
+        List<String> args =
+                new ArrayList<>(
+                        Arrays.asList(
+                                "expire_partitions",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--expiration_time",
+                                "1 d",
+                                "--timestamp_formatter",
+                                "yyyyMMdd",
+                                "--expire_strategy",
+                                "values-time"));
+        if (actionOption != null) {
+            args.add("--table_conf");
+            args.add("partition.expiration-retain-latest=" + actionOption);
+        }
+        ExpirePartitionsAction action = createAction(ExpirePartitionsAction.class, args);
+        for (int i = 0; i < 2; i++) {
+            action.executeLocally();
+            assertThat(getData(tableName)).hasSize(retainLatest ? 1 : 0);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testInheritExpirationStrategy(boolean useTableConf) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("partition.expiration-strategy", useTableConf ? "values-time" : "update-time");
+        prepareExpirationTable(options, Collections.singletonList("dt"));
+        Map<String, String> tableConf =
+                useTableConf
+                        ? Collections.singletonMap("partition.expiration-strategy", "update-time")
+                        : Collections.emptyMap();
+        expireWithOptions(tableConf, null, null);
+        assertThat(getData(tableName)).hasSize(1);
+        expireWithOptions(tableConf, "values-time", null);
+        assertThat(getData(tableName)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testInheritTimestampPattern(boolean useTableConf) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("partition.timestamp-pattern", useTableConf ? "$k" : "$dt");
+        prepareExpirationTable(options, Arrays.asList("k", "dt"));
+        Map<String, String> tableConf =
+                useTableConf
+                        ? Collections.singletonMap("partition.timestamp-pattern", "$dt")
+                        : Collections.emptyMap();
+        expireWithOptions(tableConf, null, "$k");
+        assertThat(getData(tableName)).hasSize(1);
+        expireWithOptions(tableConf, null, null);
+        assertThat(getData(tableName)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " "})
+    public void testExplicitBlankStrategyIsRejected(String strategy) throws Exception {
+        prepareExpirationTable(Collections.emptyMap(), Collections.singletonList("dt"));
+        assertThatThrownBy(() -> expireWithOptions(Collections.emptyMap(), strategy, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Unknown partitionExpireStrategy");
+        assertThat(getData(tableName)).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " "})
+    public void testExplicitBlankPatternDoesNotInherit(String pattern) throws Exception {
+        prepareExpirationTable(
+                Collections.singletonMap("partition.timestamp-pattern", "$dt"),
+                Collections.singletonList("dt"));
+        expireWithOptions(Collections.emptyMap(), null, pattern);
+        assertThat(getData(tableName)).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " "})
+    public void testExplicitBlankFormatterDoesNotInherit(String formatter) throws Exception {
+        prepareExpirationTable(
+                Collections.singletonMap("partition.timestamp-formatter", "yyyy-MM-dd"),
+                Collections.singletonList("dt"));
+        new ExpirePartitionsAction(
+                        database,
+                        tableName,
+                        Collections.singletonMap("warehouse", warehouse),
+                        Collections.emptyMap(),
+                        "7 d",
+                        formatter,
+                        null,
+                        null)
+                .executeLocally();
+        assertThat(getData(tableName)).hasSize(1);
+    }
+
+    private void prepareExpirationTable(Map<String, String> options, List<String> partitions)
+            throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        ROW_TYPE,
+                        partitions,
+                        Arrays.asList("k", "dt", "hm"),
+                        Collections.singletonList("hm"),
+                        options);
+        StreamWriteBuilder builder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = builder.newWrite();
+        commit = builder.newCommit();
+        writeData(
+                rowData(
+                        BinaryString.fromString("9999-01-01"),
+                        BinaryString.fromString("2000-01-01"),
+                        BinaryString.fromString("00:00")));
+        assertThat(getData(tableName)).hasSize(1);
+    }
+
+    private void expireWithOptions(Map<String, String> tableConf, String strategy, String pattern)
+            throws Exception {
+        new ExpirePartitionsAction(
+                        database,
+                        tableName,
+                        Collections.singletonMap("warehouse", warehouse),
+                        tableConf,
+                        "7 d",
+                        "yyyy-MM-dd",
+                        pattern,
+                        strategy)
+                .executeLocally();
     }
 
     private FileStoreTable prepareTable() throws Exception {

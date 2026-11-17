@@ -20,6 +20,10 @@ import json
 
 import pyarrow as pa
 
+from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.schema.column_directive_utils import VIDEO_FRAME_FIELD_DIRECTIVE
+
 
 _SCALAR_DTYPES = {
     "bool": pa.bool_(),
@@ -55,13 +59,13 @@ def _require_v3(info, source):
             % (source, version or None))
 
 
-def _schema_from_info(info):
+def _schema_from_info(info, legacy_vectors=False):
     features = info.get("features")
     if not isinstance(features, dict) or not features:
         raise ValueError("LeRobot metadata features must be a non-empty object.")
 
     return pa.schema([
-        _feature_field(name, feature)
+        _feature_field(name, feature, legacy_vectors)
         for name, feature in features.items()
     ])
 
@@ -124,7 +128,7 @@ def _description(field):
     return field.metadata.get(b"description", b"").decode("utf-8")
 
 
-def _feature_field(name, feature):
+def _feature_field(name, feature, legacy_vectors=False):
     if not isinstance(feature, dict):
         raise ValueError(
             "LeRobot feature %s metadata must be an object." % name)
@@ -143,7 +147,7 @@ def _feature_field(name, feature):
         if pa.types.is_string(scalar_type) and shape not in ((), (1,)):
             raise ValueError(
                 "LeRobot string feature %s must be scalar." % name)
-        arrow_type = _tensor_type(scalar_type, shape)
+        arrow_type = _tensor_type(scalar_type, shape, legacy_vectors)
     description = "LeRobot dtype=%s, shape=%s, names=%s" % (
         dtype,
         json.dumps(list(shape), separators=(",", ":")),
@@ -157,7 +161,7 @@ def _feature_field(name, feature):
     return pa.field(
         name,
         arrow_type,
-        nullable=False,
+        nullable=name == "subtask_index" or bool(feature.get("nullable", False)),
         metadata={b"description": description.encode("utf-8")},
     )
 
@@ -181,12 +185,56 @@ def _feature_shape(feature, name):
     return result
 
 
-def _tensor_type(scalar_type, shape):
+def _tensor_type(scalar_type, shape, legacy_vectors=False):
     if shape in ((), (1,)):
         return scalar_type
-    if len(shape) == 1:
-        return pa.list_(scalar_type, shape[0])
-    result = pa.list_(scalar_type, shape[-1])
-    for unused_size in reversed(shape[1:-1]):
+    result = pa.list_(scalar_type, shape[-1]) if legacy_vectors else scalar_type
+    for unused_size in (shape[:-1] if legacy_vectors else shape):
         result = pa.list_(result)
-    return pa.list_(result)
+    return result
+
+
+def _merge_schemas(schemas, schema_evolution=True, required=()):
+    """Merge top-level columns without promoting types or changing nested schemas."""
+    fields = {}
+    first_names = set(schemas[0].names)
+    for ordinal, schema in enumerate(schemas):
+        missing = set(required) - set(schema.names)
+        if missing:
+            raise ValueError("LeRobot source %d is missing required fields: %s."
+                             % (ordinal, sorted(missing)))
+        for field in schema:
+            if not schema_evolution and field.name not in first_names:
+                raise ValueError("LeRobot source %d adds field %s with schema_evolution disabled."
+                                 % (ordinal, field.name))
+            if field.name in fields and not fields[field.name].type.equals(field.type):
+                raise ValueError("LeRobot source %d has incompatible type for field %s: %s versus %s."
+                                 % (ordinal, field.name, field.type, fields[field.name].type))
+            fields.setdefault(field.name, field)
+    return pa.schema([
+        field.with_nullable(any(name not in schema.names or schema.field(name).nullable
+                                for schema in schemas))
+        for name, field in fields.items()
+    ], metadata=schemas[0].metadata)
+
+
+def _plan_schema_evolution(target_schema, incoming_schema, schema_evolution,
+                           required=(), video_fields=()):
+    """Validate an append and plan nullable column additions without changing types."""
+    # Compare the storage representation, including Arrow aliases for STRING/ARRAY.
+    incoming_schema = PyarrowFieldParser.from_paimon_schema(
+        PyarrowFieldParser.to_paimon_schema(incoming_schema))
+    merged = _merge_schemas([target_schema, incoming_schema], schema_evolution, required)
+    changes = []
+    for field in merged:
+        if field.name not in target_schema.names:
+            comment = _description(field) or None
+            if field.name in video_fields:
+                comment = VIDEO_FRAME_FIELD_DIRECTIVE + ("; " + comment if comment else "")
+            changes.append(SchemaChange.add_column(
+                field.name, PyarrowFieldParser.to_paimon_type(field.type, True),
+                comment=comment))
+        elif field.name not in required and field.nullable \
+                and not target_schema.field(field.name).nullable:
+            changes.append(SchemaChange.update_column_nullability(field.name, True))
+    return changes

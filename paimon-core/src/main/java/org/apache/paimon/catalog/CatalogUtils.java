@@ -154,6 +154,22 @@ public class CatalogUtils {
         }
     }
 
+    /**
+     * Rejects the operation on a lake-stream table: its identifier is what resolves the
+     * corresponding table in the Lakestream Store, and the store may still hold data that has not
+     * been tiered into Paimon.
+     */
+    public static void checkNotLakeStreamTable(Table table, Identifier identifier, String method) {
+        if (Options.fromMap(table.options()).get(CoreOptions.LAKE_STREAM_ENABLED)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot '%s' for lake-stream table '%s', the table identifier is used "
+                                    + "to resolve the corresponding table in the Lakestream Store. "
+                                    + "Please set '%s' to false first.",
+                            method, identifier, CoreOptions.LAKE_STREAM_ENABLED.key()));
+        }
+    }
+
     public static void validateCreateTable(Schema schema, boolean dataTokenEnabled) {
         Options options = Options.fromMap(schema.options());
         checkArgument(
@@ -173,6 +189,9 @@ public class CatalogUtils {
         SchemaValidation.validateQueryAuthTableType(
                 tableType, options.get(CoreOptions.QUERY_AUTH_ENABLED));
         for (DataField field : schema.fields()) {
+            checkArgument(
+                    field.generationExpression() == null || tableType == TableType.TABLE,
+                    "Generated columns are only supported for native Paimon tables.");
             validateDefaultValue(field.type(), field.defaultValue());
         }
     }

@@ -247,7 +247,8 @@ case class SparkPostponeCompactProcedure(
             split.dataFiles(),
             Collections.emptyList[DataFileMeta],
             Collections.emptyList[DataFileMeta]
-          )
+          ),
+          if (realTable.coreOptions().deletionVectorsEnabled()) Long.box(snapshotId) else null
         )
     }
 

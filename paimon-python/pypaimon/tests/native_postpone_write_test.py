@@ -82,8 +82,9 @@ def test_postpone_native_files_roll_and_preserve_replay_order(
             assert [(f.min_key.values, f.max_key.values) for f in files] == [([5], [2]), ([1], [1])]
             assert _file_rows(table, files) == data
             if native_commit:
-                with patch.object(commit.file_store_commit, 'commit',
-                                  side_effect=AssertionError('Python commit fallback')):
+                with patch('pypaimon.execution.python.write.file_store_commit.'
+                           'FileStoreCommit.commit',
+                           side_effect=AssertionError('Python commit fallback')):
                     commit.commit(messages, checkpoint) if stream else commit.commit(messages)
             else:
                 commit.commit(messages, checkpoint) if stream else commit.commit(messages)
@@ -116,8 +117,9 @@ def test_postpone_native_overwrite_and_abort(tmp_path, native_rest_catalog, nati
             assert _file_rows(table, files) == [(1, 'a', 20 if overwrite else 10, '+I')]
             all_files.extend(files)
             if native_commit:
-                with patch.object(commit.file_store_commit, 'commit',
-                                  side_effect=AssertionError('Python commit fallback')):
+                with patch('pypaimon.execution.python.write.file_store_commit.'
+                           'FileStoreCommit.commit',
+                           side_effect=AssertionError('Python commit fallback')):
                     commit.commit(messages)
             else:
                 commit.commit(messages)

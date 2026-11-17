@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -282,7 +283,8 @@ final class SchemaManagerUtils {
                                             rename.newName(),
                                             field.type(),
                                             field.description(),
-                                            field.defaultValue());
+                                            field.defaultValue(),
+                                            field.generationExpression());
                             newFields.set(i, newField);
                             return;
                         }
@@ -360,7 +362,8 @@ final class SchemaManagerUtils {
                                     field.name(),
                                     newFieldType,
                                     field.description(),
-                                    field.defaultValue());
+                                    field.defaultValue(),
+                                    field.generationExpression());
                         },
                         lazyIdentifier);
             } else if (change instanceof UpdateColumnNullability) {
@@ -391,7 +394,8 @@ final class SchemaManagerUtils {
                                             depth,
                                             update.fieldNames().length),
                                     field.description(),
-                                    field.defaultValue());
+                                    field.defaultValue(),
+                                    field.generationExpression());
                         },
                         lazyIdentifier);
             } else if (change instanceof UpdateColumnComment) {
@@ -410,7 +414,8 @@ final class SchemaManagerUtils {
                                         field.name(),
                                         field.type(),
                                         update.newDescription(),
-                                        field.defaultValue()),
+                                        field.defaultValue(),
+                                        field.generationExpression()),
                         lazyIdentifier);
             } else if (change instanceof UpdateColumnPosition) {
                 UpdateColumnPosition update = (UpdateColumnPosition) change;
@@ -428,7 +433,8 @@ final class SchemaManagerUtils {
                                     field.name(),
                                     field.type(),
                                     field.description(),
-                                    update.newDefaultValue());
+                                    update.newDefaultValue(),
+                                    field.generationExpression());
                         },
                         lazyIdentifier);
             } else if (change instanceof SchemaChange.DropPrimaryKey) {
@@ -462,6 +468,7 @@ final class SchemaManagerUtils {
                         newSchema.primaryKeys(),
                         newSchema.options(),
                         newSchema.comment());
+        SchemaValidation.validateGeneratedColumnEvolution(oldTableSchema, newTableSchema);
         SchemaValidation.validateTableSchema(newTableSchema);
         return newTableSchema;
     }
@@ -804,17 +811,17 @@ final class SchemaManagerUtils {
 
     static void assertNotUpdatingPrimaryKeyIndexColumn(
             TableSchema schema, String[] fieldNames, String operation) {
-        if (fieldNames.length > 1) {
+        if (fieldNames.length > 1 || schema.primaryKeys().isEmpty()) {
             return;
         }
         String fieldName = fieldNames[0];
         CoreOptions options = new CoreOptions(schema.options());
-        if (options.primaryKeyVectorIndexColumns().contains(fieldName)
-                || options.primaryKeyBTreeIndexColumns().contains(fieldName)
-                || options.primaryKeyBitmapIndexColumns().contains(fieldName)
-                || options.primaryKeyMultiValueIndexColumns().contains(fieldName)
-                || options.primaryKeyFMIndexColumns().contains(fieldName)
-                || options.primaryKeyFullTextIndexColumns().contains(fieldName)) {
+        if (VectorIndexOptions.columns(options.toConfiguration()).contains(fieldName)
+                || options.btreeIndexColumns().contains(fieldName)
+                || options.bitmapIndexColumns().contains(fieldName)
+                || options.multiValueIndexColumns().contains(fieldName)
+                || options.fmIndexColumns().contains(fieldName)
+                || options.fullTextIndexColumns().contains(fieldName)) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Cannot %s primary-key index column: [%s]", operation, fieldName));
@@ -888,7 +895,8 @@ final class SchemaManagerUtils {
                                 field.name(),
                                 wrapNewRowType(field.type(), nestedFields),
                                 field.description(),
-                                field.defaultValue()));
+                                field.defaultValue(),
+                                field.generationExpression()));
                 return;
             }
 

@@ -35,7 +35,7 @@ class SelectionTest(unittest.TestCase):
 
     def test_spark_keeps_common_docs_and_interoperability_tests(self):
         suites = self.suites(['paimon-spark/paimon-spark-common/src/main/scala/Change.scala'])
-        self.assertEqual(suites, {'core', 'spark3', 'spark4', 'e2e-flink1'})
+        self.assertEqual(suites, {'core', 'spark3', 'spark4', 'spark42', 'e2e-flink1'})
 
     def test_flink_keeps_hive_iceberg_and_both_e2e_versions(self):
         suites = self.suites(['paimon-flink/paimon-flink-common/src/main/java/Change.java'])
@@ -64,7 +64,7 @@ class SelectionTest(unittest.TestCase):
     def test_mixed_changes_take_union(self):
         self.assertEqual(self.suites(['docs/intro.md', 'paimon-spark/pom.xml',
                                       'paimon-flink/pom.xml']),
-                         {'core', 'spark3', 'spark4', 'flink1-common',
+                         {'core', 'spark3', 'spark4', 'spark42', 'flink1-common',
                           'flink1-connectors', 'flink2', 'e2e-flink1',
                           'e2e-flink2', 'iceberg'})
         result = plan.select(['paimon-python/setup.py', 'paimon-core/Change.java'])
@@ -104,7 +104,7 @@ class SelectionTest(unittest.TestCase):
                        plan.select(['.github/workflows/ci-java.yml']),
                        plan.select([], full=True)]:
             self.assertTrue(all(result[key] for key in ('java', 'python', 'docs', 'licensing')))
-            self.assertEqual(len(result['matrix']['include']), 13)
+            self.assertEqual(len(result['matrix']['include']), len(plan.SUITES))
 
     def test_empty_diff_does_not_run_expensive_jobs(self):
         result = plan.select([])
@@ -209,7 +209,7 @@ class GitDiffTest(unittest.TestCase):
         with patch('subprocess.check_output', side_effect=unavailable_diff):
             outputs, log = self.run_pr_plan(base, head)
         self.assertTrue(all(outputs[key] for key in ('java', 'python', 'docs', 'licensing')))
-        self.assertEqual(len(outputs['matrix']['include']), 13)
+        self.assertEqual(len(outputs['matrix']['include']), len(plan.SUITES))
         summary = Path('summary.md').read_text()
         self.assertIn('Full run (manual or unavailable diff).', summary)
         self.assertIn('Skipping changed-file size check', log)
@@ -220,7 +220,7 @@ class GitDiffTest(unittest.TestCase):
         base = self.git('rev-parse', 'HEAD')
         self.commit('paimon-spark/Change.scala', 'spark')
         outputs, _ = self.run_pr_plan(base, self.git('rev-parse', 'HEAD'))
-        self.assertEqual(len(outputs['matrix']['include']), 6)
+        self.assertEqual(len(outputs['matrix']['include']), 7)
 
         for path in ('docs/static/old image.png', 'docs/static/new image.png'):
             with self.subTest(path=path):
@@ -241,7 +241,7 @@ class GitDiffTest(unittest.TestCase):
         outputs = dict(line.split('=', 1) for line in Path('output.txt').read_text().splitlines())
         self.assertTrue(json.loads(outputs['java']))
         self.assertFalse(json.loads(outputs['python']))
-        self.assertEqual(len(json.loads(outputs['matrix'])['include']), 6)
+        self.assertEqual(len(json.loads(outputs['matrix'])['include']), 7)
         self.assertIn('Spark interoperability', Path('summary.md').read_text())
 
 

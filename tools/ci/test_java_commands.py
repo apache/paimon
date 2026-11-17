@@ -63,6 +63,9 @@ class MavenCommandsTest(unittest.TestCase):
         self.assertEqual(self.modules(self.commands('spark4', '2.13', 17)[1]),
                          {'org.apache.paimon:paimon-spark-' + version + '_2.13'
                           for version in ('ut', '4.0', '4.1')})
+        spark42 = self.commands('spark42', '2.13', 17)[1]
+        self.assertEqual(self.modules(spark42), {'org.apache.paimon:paimon-spark-4.2_2.13'})
+        self.assertIn('-Pflink1,spark42', spark42)
 
     def test_core_keeps_common_and_docs_tests_and_existing_jdk11_exclusion(self):
         for java in (8, 11):

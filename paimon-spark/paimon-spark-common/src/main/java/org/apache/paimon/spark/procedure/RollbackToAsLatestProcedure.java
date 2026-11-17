@@ -151,11 +151,7 @@ public class RollbackToAsLatestProcedure extends BaseProcedure {
                     } catch (Exception e) {
                         try {
                             if (createdRollbackTag != null && canDeleteCreatedTag) {
-                                tagManager.deleteTag(
-                                        createdRollbackTag,
-                                        store.newTagDeletion(),
-                                        store.snapshotManager(),
-                                        Collections.emptyList());
+                                tagManager.deleteTag(createdRollbackTag, Collections.emptyList());
                             }
                         } catch (Exception cleanupException) {
                             e.addSuppressed(cleanupException);

@@ -26,7 +26,7 @@ from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import _is_ltz_type, _normalize_ltz, _parse_type_precision_scale
 
 if TYPE_CHECKING:
-    from pypaimon.execution.python.write.external_path_provider import ExternalPathProvider
+    from pypaimon.common.external_path_provider import ExternalPathProvider
 
 
 def _is_null_or_whitespace_only(value) -> bool:
@@ -181,7 +181,11 @@ class FileStorePathFactory:
                 text = str((value - date(1970, 1, 1)).days)
             elif self.legacy_partition_name and type_name.startswith('TIMESTAMP'):
                 text = value.isoformat(timespec='minutes')
-                if value.second or value.microsecond:
+                nanos = getattr(value, 'nanosecond', 0)
+                if nanos:
+                    text = '{}.{:09d}'.format(
+                        value.isoformat(timespec='seconds'), value.microsecond * 1000 + nanos)
+                elif value.second or value.microsecond:
                     text = value.isoformat(timespec='microseconds' if value.microsecond else 'seconds')
                     if value.microsecond and value.microsecond % 1000 == 0:
                         text = text[:-3]
@@ -246,7 +250,7 @@ class FileStorePathFactory:
         if not self.external_paths:
             return None
 
-        from pypaimon.execution.python.write.external_path_provider import ExternalPathProvider
+        from pypaimon.common.external_path_provider import ExternalPathProvider
 
         relative_bucket_path = self.relative_bucket_path(partition, bucket, canonical_partition)
         return ExternalPathProvider.create(

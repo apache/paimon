@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence, Union
 
 import pyarrow as pa
 
@@ -23,6 +23,30 @@ from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import (inline_blob_value, require_columns, row_to_named_values, value_for_arrow)
+
+
+RowIdInput = Union[Sequence[int], pa.Array, pa.ChunkedArray]
+
+
+def normalize_row_ids(row_ids: RowIdInput):
+    """Validate IDs without turning Arrow buffers into Python objects.
+
+    Keep chunk boundaries for Native transport. Only integer Arrow layouts
+    have a row-ID identity; floating, Boolean and untyped NULL arrays must not
+    be silently converted. Existing sequence callers retain integer coercion.
+    """
+    if isinstance(row_ids, (pa.Array, pa.ChunkedArray)):
+        if not pa.types.is_integer(row_ids.type):
+            raise TypeError('_ROW_ID input must be an integer Arrow array')
+        if row_ids.null_count:
+            raise ValueError('_ROW_ID value must not be null.')
+        return row_ids.cast(pa.int64(), safe=True)
+    values = []
+    for row_id in row_ids:
+        if row_id is None:
+            raise ValueError('_ROW_ID value must not be null.')
+        values.append(int(row_id))
+    return values
 
 
 class RowIdUpdateInputMixin:

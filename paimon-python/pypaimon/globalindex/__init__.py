@@ -30,15 +30,6 @@ if sys.version_info[:2] < (3, 7):
         ScoreGetter,
     )
     from pypaimon.globalindex.global_index_meta import GlobalIndexMeta, GlobalIndexIOMeta
-    from pypaimon.execution.python.globalindex.global_index_evaluator import GlobalIndexEvaluator
-    from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
-        DataEvolutionGlobalIndexScanner,
-    )
-    from pypaimon.execution.python.globalindex.key_serializer import KeySerializer
-    from pypaimon.execution.python.globalindex.memory_slice_input import MemorySliceInput
-    from pypaimon.execution.python.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
-    from pypaimon.execution.python.globalindex.sorted_file_global_index_reader import SortedFileGlobalIndexReader
-    from pypaimon.execution.python.globalindex.sorted_file_meta_selector import SortedFileMetaSelector
     from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
     from pypaimon.globalindex.create_global_index import (
         GlobalIndexBuilder,
@@ -61,13 +52,6 @@ __all__ = [
     'ScoreGetter',
     'GlobalIndexMeta',
     'GlobalIndexIOMeta',
-    'GlobalIndexEvaluator',
-    'DataEvolutionGlobalIndexScanner',
-    'KeySerializer',
-    'MemorySliceInput',
-    'OffsetGlobalIndexReader',
-    'SortedFileGlobalIndexReader',
-    'SortedFileMetaSelector',
     'SortedIndexFileMeta',
     'GlobalIndexBuilder',
     'create_global_index',
@@ -87,17 +71,6 @@ _MODULE_BY_EXPORT = {
     'ScoreGetter': 'pypaimon.globalindex.vector_search_result',
     'GlobalIndexMeta': 'pypaimon.globalindex.global_index_meta',
     'GlobalIndexIOMeta': 'pypaimon.globalindex.global_index_meta',
-    'GlobalIndexEvaluator': 'pypaimon.execution.python.globalindex.global_index_evaluator',
-    'DataEvolutionGlobalIndexScanner':
-        'pypaimon.execution.python.globalindex.data_evolution_global_index_scanner',
-    'KeySerializer': 'pypaimon.execution.python.globalindex.key_serializer',
-    'MemorySliceInput': 'pypaimon.execution.python.globalindex.memory_slice_input',
-    'OffsetGlobalIndexReader':
-        'pypaimon.execution.python.globalindex.offset_global_index_reader',
-    'SortedFileGlobalIndexReader':
-        'pypaimon.execution.python.globalindex.sorted_file_global_index_reader',
-    'SortedFileMetaSelector':
-        'pypaimon.execution.python.globalindex.sorted_file_meta_selector',
     'SortedIndexFileMeta': 'pypaimon.globalindex.sorted_index_file_meta',
     'GlobalIndexBuilder': 'pypaimon.globalindex.create_global_index',
     'create_global_index': 'pypaimon.globalindex.create_global_index',

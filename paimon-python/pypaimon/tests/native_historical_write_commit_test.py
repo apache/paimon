@@ -43,8 +43,9 @@ def _commit_guard(commit, native):
     stack = ExitStack()
     if native:
         for method in ('commit', 'overwrite', 'truncate_table', 'drop_partitions'):
-            stack.enter_context(patch.object(commit.file_store_commit, method,
-                                             side_effect=AssertionError('Python commit fallback')))
+            stack.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                      'FileStoreCommit.' + method,
+                                      side_effect=AssertionError('Python commit fallback')))
     return stack
 
 

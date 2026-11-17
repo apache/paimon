@@ -18,13 +18,50 @@
 
 package org.apache.spark.sql.execution.shim
 
+import org.apache.paimon.spark.SparkCatalog
+import org.apache.paimon.spark.catalog.SparkBaseCatalog
+
 import org.apache.spark.sql.{SparkSession, Strategy}
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.analysis.ResolvedDBObjectName
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReplaceTableAsSelect, TableSpec}
+import org.apache.spark.sql.connector.catalog.CatalogV2Util
+import org.apache.spark.sql.execution.PaimonTableAsSelectHelper.supportsCatalog
 import org.apache.spark.sql.execution.SparkPlan
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Strategy, PaimonTableAsSelectWriteExec}
+
+import scala.collection.JavaConverters._
 
 case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession) extends Strategy {
 
-  override def apply(plan: LogicalPlan): Seq[SparkPlan] = Nil
+  import org.apache.spark.sql.connector.catalog.CatalogV2Implicits._
+
+  // Keep Spark's replacement planning and prepare the write after the target table is created.
+  override def apply(plan: LogicalPlan): Seq[SparkPlan] = {
+    plan match {
+      case ReplaceTableAsSelect(
+            ResolvedDBObjectName(catalog: SparkBaseCatalog, ident),
+            parts,
+            _,
+            tableSpec: TableSpec,
+            _,
+            _) if supportsCatalog(catalog, tableSpec.provider.orNull) =>
+        val properties = CatalogV2Util.convertTableProperties(tableSpec)
+        catalog match {
+          case paimon: SparkCatalog =>
+            paimon.checkPartitionedFormatTableCtas(
+              ident.asIdentifier,
+              tableSpec.provider.orNull,
+              parts.nonEmpty,
+              properties.asJava)
+          case _ =>
+        }
+        return new DataSourceV2Strategy(spark)
+          .apply(plan)
+          .map(exec => PaimonTableAsSelectWriteExec.prepare(exec))
+      case _ =>
+    }
+    Nil
+  }
 }
 
 case class PaimonReplaceTableStrategy(spark: SparkSession) extends Strategy {

@@ -48,7 +48,7 @@ class LookupMergeTreeCompactRewriterTest {
     void testVectorIndexForcesLevelZeroRewrite(CoreOptions.MergeEngine mergeEngine) {
         Options rawOptions = new Options();
         rawOptions.set(CoreOptions.MERGE_ENGINE, mergeEngine);
-        rawOptions.set(CoreOptions.PK_VECTOR_INDEX_COLUMNS, "embedding");
+        rawOptions.setString("pk-vector.index.columns", "embedding");
         CoreOptions options = new CoreOptions(rawOptions);
         LookupMergeTreeCompactRewriter<Object> rewriter =
                 new LookupMergeTreeCompactRewriter<>(

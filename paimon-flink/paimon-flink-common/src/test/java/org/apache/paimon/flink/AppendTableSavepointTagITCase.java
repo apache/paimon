@@ -43,7 +43,6 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -107,19 +106,10 @@ public class AppendTableSavepointTagITCase extends AbstractTestBase {
      * unlike an async savepoint, so the tag is created for the savepoint's own snapshot rather than
      * caught up by a later checkpoint. Both commit paths must still produce the same tag.
      *
-     * <p>Disabled for now: on the coordinator-commit path this is racy. The coordinator creates the
-     * tag asynchronously on its single-thread commit executor (notifyCheckpointComplete ->
-     * tagUpTo), but stop-with-savepoint terminates the job right after the savepoint, and the
-     * coordinator's {@code close()} calls {@code commitExecutor.shutdownNow()}, which can drop the
-     * not-yet-run tag task so the tag is silently lost. The classic operator path is unaffected
-     * because it tags synchronously. Re-enable once the coordinator drains pending commit/tag work
-     * on end-of-input shutdown (the follow-up PR that adds proper end-input handling to the
-     * coordinator).
+     * <p>On the coordinator-commit path the tag is created on the commit executor, which the
+     * coordinator drains on close. That can happen after the stop-with-savepoint future returns, so
+     * the tag must be polled for.
      */
-    // TODO: enable once the coordinator supports end-input handling (drains pending tag work).
-    @Disabled(
-            "Coordinator-commit stop-with-savepoint drops the async tag on shutdownNow; re-enable"
-                    + " after the coordinator end-input handling PR drains pending tag work")
     @ParameterizedTest(name = "coordinatorCommit = {0}")
     @ValueSource(booleans = {true, false})
     @Timeout(value = 180, unit = TimeUnit.SECONDS)

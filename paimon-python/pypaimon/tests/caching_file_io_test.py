@@ -26,6 +26,8 @@ import pickle
 import shutil
 import tempfile
 import threading
+import time
+import tracemalloc
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
@@ -136,6 +138,20 @@ class LocalDiskCacheManagerTest(unittest.TestCase):
         self.assertEqual(b"x" * 100, cache2.get_block("f", 0))
         self.assertEqual(b"y" * 200, cache2.get_block("f", 1))
 
+    def test_restart_with_changed_block_size_does_not_reuse_blocks(self):
+        # Blocks are sized by block_size, so a directory written with one size
+        # must never satisfy reads made with another.
+        cache1 = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=64)
+        cache1.put_block("f", 0, b"x" * 64)
+
+        for block_size in (32, 128, 256):
+            cache2 = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=block_size)
+            self.assertIsNone(cache2.get_block("f", 0))
+
+        # The original block stays readable for a manager using its own size.
+        cache3 = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=64)
+        self.assertEqual(b"x" * 64, cache3.get_block("f", 0))
+
     def test_cache_dir_created(self):
         new_dir = os.path.join(self.cache_dir, "sub", "deep")
         LocalDiskCacheManager(new_dir, 2 ** 63 - 1, block_size=64)
@@ -242,6 +258,25 @@ class CachingInputStreamTest(unittest.TestCase):
         result = stream.read(30)  # 90..120, spans blocks 0 and 1
         self.assertEqual(data[90:120], result)
 
+    def test_large_cached_read_uses_one_result_buffer(self):
+        block_size = 256 * 1024
+        data = b'x' * (32 * block_size)
+        cache = LocalMemoryCacheManager(len(data), block_size=block_size)
+        for i in range(32):
+            cache.put_block('test', i, data[i * block_size:(i + 1) * block_size])
+        for positioned in (False, True):
+            with self.subTest(positioned=positioned):
+                stream = CachingInputStream(self._make_file_io(data), 'test', cache)
+                tracemalloc.start()
+                try:
+                    result = (stream.read_at(len(data), 0) if positioned else stream.read())
+                    _, peak = tracemalloc.get_traced_memory()
+                finally:
+                    tracemalloc.stop()
+                self.assertEqual(data, result)
+                self.assertEqual(0 if positioned else len(data), stream.tell())
+                self.assertLess(peak, len(data) * 3 // 2)
+
     def test_cache_hit_avoids_remote_read(self):
         data = b"0123456789abcdef"
         cache = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=8)
@@ -258,6 +293,53 @@ class CachingInputStreamTest(unittest.TestCase):
         result = stream2.read()
         self.assertEqual(data, result)
         file_io2.new_input_stream.assert_not_called()
+
+    def test_concurrent_read_at_opens_one_remote_stream(self):
+        # read_at is documented as thread-safe and is called concurrently by
+        # the parallel readers, so a cold stream must be opened exactly once.
+        data = bytes(i % 251 for i in range(200000))
+        opened = []
+        lock = threading.Lock()
+
+        class _SeekOnlyStream(io.BytesIO):
+            def fileno(self):
+                raise OSError("no fileno")
+
+        file_io = MagicMock()
+        file_io.get_file_size.side_effect = lambda p: len(data)
+
+        def open_stream(path):
+            # Hold the opener briefly so concurrent misses overlap.
+            time.sleep(0.02)
+            stream = _SeekOnlyStream(data)
+            with lock:
+                opened.append(stream)
+            return stream
+
+        file_io.new_input_stream.side_effect = open_stream
+
+        cache = LocalMemoryCacheManager(2 ** 63 - 1, block_size=4096)
+        stream = CachingInputStream(file_io, "test.index", cache)
+        errors = []
+
+        def reader(offset):
+            try:
+                self.assertEqual(data[offset:offset + 100], stream.read_at(100, offset))
+            except Exception as error:  # noqa: B902 - surfaced through errors
+                errors.append(error)
+
+        threads = [threading.Thread(target=reader, args=(i * 7000,)) for i in range(16)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual([], errors)
+        self.assertEqual(1, len(opened))
+
+        # Closing the stream must leave no remote stream behind.
+        stream.close()
+        self.assertTrue(all(opened_stream.closed for opened_stream in opened))
 
     def test_read_empty(self):
         cache = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=8)
@@ -286,6 +368,114 @@ class CachingInputStreamTest(unittest.TestCase):
         self.assertEqual(data, result)
         # Verify block 1 is only 2 bytes
         self.assertEqual(b"ij", cache.get_block("test", 1))
+
+    def test_reads_stay_correct_after_block_size_change(self):
+        # A disk cache directory outlives the process, so reopening it with a
+        # different block-size must re-fetch rather than reuse stale blocks.
+        data = bytes(i % 251 for i in range(4096))
+        for first, second in [(64, 256), (256, 64), (128, 512)]:
+            with self.subTest(first=first, second=second):
+                cache_dir = tempfile.mkdtemp()
+                try:
+                    warm = LocalDiskCacheManager(cache_dir, 2 ** 63 - 1, block_size=first)
+                    CachingInputStream(self._make_file_io(data), "test", warm).read()
+
+                    cache = LocalDiskCacheManager(cache_dir, 2 ** 63 - 1, block_size=second)
+                    stream = CachingInputStream(self._make_file_io(data), "test", cache)
+                    self.assertEqual(data, stream.read())
+                    self.assertEqual(data[512:1024], stream.read_at(512, 512))
+                finally:
+                    shutil.rmtree(cache_dir, ignore_errors=True)
+
+    def test_coalesce_cold_blocks_and_preserve_cursor(self):
+        data = b"abcdefghijklmn"
+        cache = LocalMemoryCacheManager(1024, block_size=4)
+        stream = CachingInputStream(self._make_file_io(data), "test", cache)
+        stream.seek(2)
+        with patch.object(stream, '_read_remote', wraps=stream._read_remote) as remote:
+            self.assertEqual(data[1:13], stream.read_at(12, 1))
+            self.assertEqual(2, stream.tell())
+            remote.assert_called_once_with(0, 14)
+            self.assertEqual(data[2:], stream.read())
+            self.assertEqual(14, stream.tell())
+            self.assertEqual(1, remote.call_count)
+        self.assertEqual(b"mn", cache.get_block("test", 3))
+
+    def test_coalescing_does_not_download_cached_holes(self):
+        data = b"abcdefghijklmn"
+        cache = LocalMemoryCacheManager(1024, block_size=4)
+        cache.put_block("test", 1, data[4:8])
+        stream = CachingInputStream(self._make_file_io(data), "test", cache)
+        with patch.object(stream, '_read_remote', wraps=stream._read_remote) as remote:
+            self.assertEqual(data[1:], stream.read_at(13, 1))
+            self.assertEqual([(0, 4), (8, 6)], [c.args for c in remote.call_args_list])
+
+    def test_coalescing_bounds_blocks_and_bytes(self):
+        for block_size, blocks in [(4, 40), (1024 * 1024, 10), (9 * 1024 * 1024, 2)]:
+            with self.subTest(block_size=block_size):
+                data = b"x" * (block_size * blocks)
+                cache = LocalMemoryCacheManager(len(data), block_size=block_size)
+                stream = CachingInputStream(self._make_file_io(data), "test", cache)
+                with patch.object(stream, '_read_remote', wraps=stream._read_remote) as remote:
+                    self.assertEqual(data, stream.read())
+                    self.assertEqual(2, remote.call_count)
+                    self.assertEqual(len(data), sum(c.args[1] for c in remote.call_args_list))
+                    for call in remote.call_args_list:
+                        self.assertLessEqual(call.args[1], max(block_size, 8 * 1024 * 1024))
+
+    def test_coalesced_short_response_returns_uncached_prefix(self):
+        data = b"abcdefghijkl"
+        cache = LocalMemoryCacheManager(1024, block_size=4)
+        stream = CachingInputStream(self._make_file_io(data), "test", cache)
+        with patch.object(stream, '_read_remote', return_value=data[:-1]):
+            self.assertEqual(data[:-1], stream.read())
+        self.assertEqual(len(data) - 1, stream.tell())
+        for i in range(3):
+            self.assertIsNone(cache.get_block("test", i))
+        self.assertEqual(data[-1:], stream.read())
+        stream.seek(0)
+        self.assertEqual(data, stream.read())
+
+    def test_coalesced_short_response_stops_before_cached_hole(self):
+        data = b"abcdefghijkl"
+        cache = LocalMemoryCacheManager(1024, block_size=4)
+        cache.put_block("test", 2, data[8:12])
+        stream = CachingInputStream(self._make_file_io(data), "test", cache)
+        with patch.object(stream, '_read_remote', return_value=b"abc"):
+            self.assertEqual(b"abc", stream.read_at(12, 0))
+        self.assertEqual(0, stream.tell())
+        self.assertIsNone(cache.get_block("test", 0))
+
+    def test_coalesced_positioned_source(self):
+        data = b"abcdefghijkl"
+
+        class PositionedStream:
+            def __init__(self):
+                self.calls = []
+
+            def read_at(self, size, offset):
+                self.calls.append((size, offset))
+                return data[offset:offset + size]
+
+        source = PositionedStream()
+        file_io = self._make_file_io(data)
+        file_io.new_input_stream.side_effect = lambda p: source
+        stream = CachingInputStream(file_io, "test", LocalMemoryCacheManager(1024, block_size=4))
+        self.assertEqual(data[1:], stream.read_at(11, 1))
+        self.assertEqual([(12, 0)], source.calls)
+        self.assertEqual(0, stream.tell())
+
+    def test_coalesced_seek_source_handles_short_chunks(self):
+        data = b"abcdefghijkl"
+
+        class ShortChunkStream(io.BytesIO):
+            def read(self, size=-1):
+                return super().read(min(size, 3))
+
+        file_io = self._make_file_io(data)
+        file_io.new_input_stream.side_effect = lambda p: ShortChunkStream(data)
+        stream = CachingInputStream(file_io, "test", LocalMemoryCacheManager(1024, block_size=4))
+        self.assertEqual(data, stream.read())
 
 
 class CachingFileIOTest(unittest.TestCase):
@@ -381,6 +571,57 @@ class CachingFileIOTest(unittest.TestCase):
 
         result = caching_io.new_input_stream("global-index-uuid.index")
         self.assertNotIsInstance(result, CachingInputStream)
+
+    def test_structured_data_cache_preserves_existing_selectors(self):
+        from pypaimon.filesystem.caching_file_io import LocalMemoryCacheManager
+        from pypaimon.utils.file_type import FileType
+
+        for disk in (False, True):
+            for whitelist in ('meta,global-index', 'data', 'structured-data',
+                              'meta,global-index,structured-data', '*'):
+                for name in ('data.parquet', 'data.blob', 'data.orc', 'data.avro',
+                             'data.row', 'data.mosaic', 'data.vortex', 'data.lance',
+                             'data.video', 'data.unknown', 'data.parquet.index',
+                             'snapshot-1', 'snapshot-1.blob'):
+                    with self.subTest(disk=disk, whitelist=whitelist, name=name):
+                        with tempfile.TemporaryDirectory() as directory:
+                            cache = (LocalDiskCacheManager(directory, 1024, block_size=4) if disk
+                                     else LocalMemoryCacheManager(1024, block_size=4))
+                            delegate = self._make_delegate({name: b'abcdefgh'})
+                            caching_io = CachingFileIO(
+                                delegate, cache, FileType.parse_whitelist(whitelist))
+                            if whitelist == '*':
+                                cached = True
+                            elif whitelist == 'data':
+                                cached = name.startswith('data.') and not name.endswith('.index')
+                            elif whitelist == 'structured-data':
+                                cached = name in (
+                                    'data.parquet', 'data.orc', 'data.avro',
+                                    'data.row', 'data.mosaic')
+                            elif whitelist == 'meta,global-index,structured-data':
+                                cached = name in (
+                                    'data.parquet', 'data.orc', 'data.avro', 'data.row',
+                                    'data.mosaic', 'snapshot-1', 'snapshot-1.blob')
+                            else:
+                                cached = name.startswith('snapshot-')
+                            for _ in range(2):
+                                with caching_io.new_input_stream(name) as stream:
+                                    stream.seek(1)
+                                    self.assertEqual(b'bcdefg', stream.read(6))
+                            self.assertEqual(1 if cached else 2,
+                                             delegate.new_input_stream.call_count)
+                            if not cached:
+                                delegate.get_file_size.assert_not_called()
+
+    def test_data_whitelist_still_caches_blob(self):
+        from pypaimon.utils.file_type import FileType
+        delegate = self._make_delegate({"data.blob": b"abcdefgh"})
+        cache = LocalDiskCacheManager(self.cache_dir, 1024, block_size=4)
+        caching_io = CachingFileIO(delegate, cache, {FileType.DATA})
+        for _ in range(2):
+            with caching_io.new_input_stream("data.blob") as stream:
+                self.assertEqual(b"abcdefgh", stream.read())
+        delegate.new_input_stream.assert_called_once()
 
     def test_data_file_not_cached(self):
         data = b"data content"

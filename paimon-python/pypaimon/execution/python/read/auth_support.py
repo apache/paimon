@@ -29,7 +29,10 @@ def prune_scanner_by_auth(table, scanner, auth_result):
     predicate = scanner._user_predicate
     effective = exclude_predicate_with_fields(predicate, masked)
     if effective != scanner.predicate:
+        partition_key_predicate = scanner.partition_key_predicate
         scanner._set_predicate(effective)
+        if scanner._explicit_partition_filter:
+            scanner.partition_key_predicate = partition_key_predicate
     scanner.auth_partition_predicate = None
     scanner.auth_has_non_partition_filter = bool(
         predicate is not None and masked & predicate_field_names(predicate))

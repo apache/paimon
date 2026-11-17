@@ -20,31 +20,22 @@
 import pyarrow as pa
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+from pypaimon.execution.native.table import _native_variant_write_supported
 from pypaimon.execution.native.write.native_commit import create_native_write_table, from_native_commit_messages
 from pypaimon.execution.native.write.native_update import (
     _dictionary_value_type, _native_row_id_table, _native_update_columns_supported,
     _native_update_formats_supported, _supported_upsert_key_type,
 )
-
-
-def _callable_assignment(function, on_pairs):
-    from pypaimon.write.merge_transform import _merge_callable_input
-
-    def evaluate(batch):
-        return function(_merge_callable_input(batch, on_pairs))
-
-    return evaluate
+from pypaimon.execution.native.write.merge_transform import encode_merge_clause
 
 
 def create_native_merge_into(table, source, on, matched, not_matched, commit_user, commit_identifier):
     from pypaimon.write.merge_inputs import _is_self_merge, _is_table_like, _prepare
     from pypaimon.write.merge_inputs import _normalize_on, _union_update_cols
-    from pypaimon.write.merge_types import SourceColumnRef, TargetColumnRef, LiteralValue
-    from pypaimon.write.merge_condition import rewrite_condition
 
     target_keys, source_keys = _normalize_on(on)
     self_merge = _is_self_merge(table, source, target_keys, source_keys)
-    if not_matched and table.options.video_frame_fields():
+    if not_matched and (table.options.video_frame_fields() or not _native_variant_write_supported(table)):
         return None
     native_table = _native_row_id_table(table)
     if native_table is None:
@@ -81,7 +72,7 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
             if not _rest_catalog_supported(source) or not _native_query_auth_supported(source):
                 return None
             # A source is a read, not a write. Core obtains a fresh REST grant
-            # and requires it to be unrestricted, as Python plan_all_files does.
+            # and requires it to be unrestricted, as Python plan_all does.
             native_source = _native_table(source)
         else:
             native_source = create_native_write_table(source)
@@ -99,28 +90,12 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
         if source_type != target_type or not _supported_upsert_key_type(target_type):
             return None
 
-    def encode(clause):
-        values = []
-        for name, value in clause.spec.items():
-            if isinstance(value, SourceColumnRef):
-                values.append((name, 'source', value.column))
-            elif isinstance(value, TargetColumnRef):
-                values.append((name, 'target', value.column))
-            elif isinstance(value, LiteralValue):
-                values.append((name, 'literal', value.value))
-            elif callable(value) and not isinstance(value, type):
-                values.append((name, 'callable', _callable_assignment(
-                    value, list(zip(source_keys, target_keys)))))
-            else:
-                return None
-        condition = None if clause.condition is None else dict(sql=rewrite_condition(clause.condition))
-        return dict(assignments=values, condition=condition, delete=clause.delete)
-
-    encoded_matched = [encode(clause) for clause in matched]
-    encoded_not_matched = [encode(clause) for clause in not_matched]
+    on_pairs = list(zip(source_keys, target_keys))
+    encoded_matched = [encode_merge_clause(clause, on_pairs) for clause in matched]
+    encoded_not_matched = [encode_merge_clause(clause, on_pairs, not_matched=True) for clause in not_matched]
     if any(clause is None for clause in encoded_matched + encoded_not_matched):
         return None
-    builder = (native_table.new_batch_write_builder()._with_commit_user(commit_user)
+    builder = (native_table.new_batch_write_builder().with_commit_user(commit_user)
                if commit_identifier == BATCH_COMMIT_IDENTIFIER else
                native_table.new_stream_write_builder().with_commit_user(commit_user))
     writer = builder.new_update()

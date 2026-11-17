@@ -33,6 +33,7 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.QueryAuthSplit;
+import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
@@ -224,7 +225,8 @@ public class TableQueryAuthResult implements Serializable {
     }
 
     public TableScan.Plan convertPlan(TableScan.Plan plan) {
-        if (!hasRules()) {
+        // SnapshotNotExistPlan has no splits; stream consumers check for it by identity
+        if (!hasRules() || plan instanceof SnapshotNotExistPlan) {
             return plan;
         }
         List<Split> authSplits =

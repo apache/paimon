@@ -250,7 +250,8 @@ const sidebars = {
         "items": [
           "flink/sql-write",
           "flink/sql-query",
-          "flink/sql-lookup"
+          "flink/sql-lookup",
+          "flink/lake-stream"
         ]
       },
       {

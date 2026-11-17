@@ -1097,7 +1097,7 @@ public class TableCommitTest {
 
     @Test
     public void testStrictModeScanStateNotLeakedAcrossSnapshots() throws Exception {
-        // Regression test: the FileStoreScan used by StrictModeChecker is mutable.
+        // Regression test: the FileStoreScan used by snapshot conflict checks is mutable.
         // When the APPEND branch (for an earlier APPEND snapshot) calls
         // onlyReadRealBuckets(), the flag is latched on the shared scan instance and
         // must not leak into the later COMPACT/OVERWRITE branch, otherwise entries

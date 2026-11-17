@@ -24,8 +24,11 @@ from unittest.mock import Mock, patch
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.read.datasource.split_provider import (
     CatalogSplitProvider, PreResolvedSplitProvider)
+from pypaimon.read.read_type import OutputProjection
+from pypaimon.read.table_read import TableRead
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.read.stream_read_builder import StreamReadBuilder
 from pypaimon.execution.python.read.table_read import _RemainingRows
@@ -273,6 +276,20 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         # No nested paths derived; only names are stored.
         self.assertIsNone(rb._nested_name_paths())
 
+    def test_direct_read_elides_identity_but_retains_nested_adapter(self):
+        fields = [self.table.fields[2], self.table.fields[0]]
+        projection = OutputProjection([(field.name, [field.name]) for field in fields])
+        read = TableRead(self.table, None, fields, output_projection=projection)
+        batch = pa.record_batch([pa.array(['x']), pa.array([7], type=pa.int64())], names=['val', 'pk'])
+        self.assertIs(read._project_batch_to_output(batch), batch)
+
+        builder = self.table.new_read_builder().with_projection(['mv.latest_version'])
+        fields = builder.read_type()
+        projection = OutputProjection([('mv', ['mv'])])
+        read = TableRead(self.table, None, fields, output_projection=projection)
+        self.assertEqual(projection, read.output_projection)
+        self.assertEqual([['mv', 'latest_version']], read.nested_name_paths)
+
     def test_named_ordinary_columns_keep_aliases_without_native_read(self):
         read = self.table.new_read_builder().with_projection({
             'value': 'val', 'key': 'pk'}).new_read()
@@ -320,7 +337,7 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         self.assertEqual(
             expected, read.to_arrow_batch_reader(
                 splits, parallelism=1).read_all().to_pydict())
-        batches = read._read_one_split_to_batches(
+        batches = PythonTableRead(read)._read_one_split_to_batches(
             splits[0], read._output_arrow_schema(), _RemainingRows(None))
         self.assertEqual(expected, pa.Table.from_batches(batches).to_pydict())
 

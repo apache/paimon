@@ -71,10 +71,20 @@ public class IncrementalClusterStrategy {
         }
 
         if (runs.size() == 1 && runs.get(0).level() == maxLevel) {
-            long schemaId = runs.get(0).run().files().get(0).schemaId();
-            CoreOptions coreOptions = CoreOptions.fromMap(schemaManager.schema(schemaId).options());
-            // only one sorted run in the maxLevel with the same cluster key
-            if (coreOptions.clusteringColumns().equals(clusterKeys)) {
+            boolean allFilesHaveSameClusterKeys =
+                    runs.get(0).run().files().stream()
+                            .map(file -> file.schemaId())
+                            .distinct()
+                            .allMatch(
+                                    schemaId ->
+                                            CoreOptions.fromMap(
+                                                            schemaManager
+                                                                    .schema(schemaId)
+                                                                    .options())
+                                                    .clusteringColumns()
+                                                    .equals(clusterKeys));
+            // Only skip compaction when all files in the run have the same cluster keys.
+            if (allFilesHaveSameClusterKeys) {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug(
                             "only one sorted run in the maxLevel with the same cluster key, no need to compact");

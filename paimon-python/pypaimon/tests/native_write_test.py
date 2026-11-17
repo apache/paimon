@@ -57,10 +57,10 @@ def _rows(table):
         builder.new_scan().plan().splits()).to_pylist(), key=lambda row: row['id'])
 
 
-@pytest.mark.python_write
-def test_native_write_is_opt_in():
-    assert not CoreOptions(Options({})).native_write_enabled()
-    assert CoreOptions(Options({'write.native.enabled': 'true'})).native_write_enabled()
+@pytest.mark.execution_defaults
+def test_native_write_is_default_and_can_be_disabled():
+    assert CoreOptions(Options({})).native_write_enabled()
+    assert not CoreOptions(Options({'write.native.enabled': 'false'})).native_write_enabled()
 
 
 @pytest.mark.parametrize('streaming', [False, True])
@@ -175,7 +175,7 @@ def test_unavailable_vector_format_falls_back_before_accepting_data(native_rest_
     schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32(), 2))])
     native_rest_catalog.create_table('default.vectors', Schema.from_pyarrow_schema(schema, options={
         'write.native.enabled': 'true', 'row-tracking.enabled': 'true',
-        'data-evolution.enabled': 'true', 'vector.file.format': 'lance',
+        'data-evolution.enabled': 'true', 'vector.file.format': 'vortex',
     }), False)
     table = native_rest_catalog.get_table('default.vectors')
     builder = table.new_stream_write_builder() if streaming else table.new_batch_write_builder()
@@ -214,8 +214,9 @@ def test_escaped_partition_file_path_and_abort(tmp_path, native_rest_catalog, di
 
         commit = builder.new_commit()
         try:
-            with patch.object(commit.file_store_commit, 'abort',
-                              side_effect=AssertionError('Python fallback')):
+            with patch('pypaimon.execution.python.write.file_store_commit.'
+                       'FileStoreCommit.abort',
+                       side_effect=AssertionError('Python fallback')):
                 commit.abort(messages)
             assert not table.file_io.exists(file.file_path)
         finally:
@@ -254,8 +255,9 @@ def test_rest_native_write_and_commit(tmp_path, native_rest_catalog):
     commit = builder.new_commit()
     try:
         writer.write_arrow_batch(_batch([1, 2], ['a', 'b']))
-        with patch.object(commit.file_store_commit, 'commit',
-                          side_effect=AssertionError('Python commit fallback')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.commit',
+                   side_effect=AssertionError('Python commit fallback')):
             commit.commit(writer.prepare_commit())
         assert _rows(table) == [{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}]
         shard_rows = []
@@ -342,8 +344,9 @@ def test_writer_abort_preserves_native_commit_files(native_rest_catalog, failure
 
         proxy.commit.side_effect = publish
         with patch.object(commit, '_prepare_native_commit', return_value=(proxy, native_messages)), \
-                patch.object(commit.file_store_commit, 'commit',
-                             side_effect=AssertionError('Python commit fallback')):
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.commit',
+                      side_effect=AssertionError('Python commit fallback')):
             if failure:
                 with pytest.raises(RuntimeError, match='Native commit outcome is unknown'):
                     commit.commit(messages)
@@ -528,7 +531,7 @@ def test_uri_reader_factory_none_keeps_native_and_rejects_late_change(tmp_path):
     native.write_arrow_batch(_batch([2], ['a']))
     with pytest.raises(RuntimeError, match='before any write'):
         native.with_blob_uri_reader_factory(None)
-    with pytest.raises(ValueError, match='before any data is written'):
+    with pytest.raises(RuntimeError, match='before any write'):
         native.with_write_type(['id'])
     native.abort()
 

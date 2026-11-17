@@ -103,6 +103,7 @@ public class FlinkPrimaryKeyVectorReadTest {
         private final List<Integer> dispatchedBuckets = new ArrayList<>();
         private int operatorParallelism;
         private boolean createResultCalled;
+        private SearchParameters planParameters;
 
         private TestingFlinkPrimaryKeyVectorRead(List<BucketVectorSearchSplit> splits) {
             super(
@@ -135,14 +136,19 @@ public class FlinkPrimaryKeyVectorReadTest {
 
         @Override
         protected List<byte[]> executeBucketSearchGroups(
-                List<List<byte[]>> groups, int parallelism) {
+                List<List<byte[]>> groups, int parallelism, SearchParameters parameters) {
+            planParameters = parameters;
             operatorParallelism = parallelism;
             taskGroupSizes.addAll(groups.stream().map(List::size).collect(Collectors.toList()));
-            return groups.stream().map(this::executeBucketSearchGroup).collect(Collectors.toList());
+            return groups.stream()
+                    .map(group -> executeBucketSearchGroup(group, parameters))
+                    .collect(Collectors.toList());
         }
 
         @Override
-        protected SearchResult searchBuckets(List<BucketVectorSearchSplit> taskSplits) {
+        protected SearchResult searchBuckets(
+                List<BucketVectorSearchSplit> taskSplits, SearchParameters parameters) {
+            assertThat(parameters).isSameAs(planParameters);
             dispatchedBuckets.addAll(
                     taskSplits.stream()
                             .map(split -> split.dataSplit().bucket())
@@ -152,7 +158,10 @@ public class FlinkPrimaryKeyVectorReadTest {
 
         @Override
         protected GlobalIndexResult createResult(
-                PrimaryKeyVectorScan.Plan plan, PrimaryKeyVectorRead.SearchResult searchResult) {
+                PrimaryKeyVectorScan.Plan plan,
+                PrimaryKeyVectorRead.SearchResult searchResult,
+                SearchParameters parameters) {
+            assertThat(parameters).isSameAs(planParameters);
             assertThat(plan).isSameAs(primaryKeyPlan);
             assertThat(searchResult.indexedCandidates()).isEmpty();
             assertThat(searchResult.exactCandidates()).isEmpty();

@@ -110,7 +110,8 @@ def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]
         if p.method == 'between':
             if not p.literals or len(p.literals) < 2:
                 return []
-            return [Range(int(p.literals[0]), int(p.literals[1]))]
+            lower, upper = int(p.literals[0]), int(p.literals[1])
+            return [Range(lower, upper)] if lower <= upper else []
         return None
 
     return visit(predicate)
@@ -562,6 +563,7 @@ class FileScanner:
                 partition_filter=self.partition_key_predicate,
                 predicate=predicate,
                 snapshot=snapshot,
+                allow_composite=True,
             )
             if scanner is None:
                 return None
@@ -570,6 +572,9 @@ class FileScanner:
                 if evaluation is None:
                     return None
                 scalar_mode = self.table.options.scalar_index_search_mode()
+                coverage_args = {}
+                if evaluation.indexed_ranges is not None:
+                    coverage_args["indexed_ranges"] = evaluation.indexed_ranges
                 return _GlobalIndexPlanningResult(
                     evaluation.result,
                     scanner.unindexed_ranges(
@@ -577,9 +582,15 @@ class FileScanner:
                         search_mode=scalar_mode,
                         contributing_field_ids=(
                             evaluation.contributing_field_ids),
+                        **coverage_args,
                     ),
                 )
-        except Exception:
+        except Exception as error:
+            from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+                CompositeIndexReadError,
+            )
+            if isinstance(error, CompositeIndexReadError):
+                raise
             return None
 
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta],

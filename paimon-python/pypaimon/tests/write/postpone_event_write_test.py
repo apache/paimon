@@ -140,7 +140,7 @@ def test_python_postpone_prepare_failure_keeps_earlier_partition_owned(tmp_path,
     table, schema = make_table(tmp_path, partition_keys=['v'])
     writer = table.new_stream_write_builder().new_write()
     writer.write_arrow(pa.table({'id': [1, 2], 'v': [10, 20], 'op': ['+I', '+I']}, schema=schema))
-    writers = list(writer.file_store_write.data_writers.values())
+    writers = list(writer._execution.file_store_write.data_writers.values())
     assert len(writers) == 2
 
     def fail_prepare():

@@ -43,12 +43,16 @@ import org.apache.paimon.types.RowType;
 import dev.vortex.api.Expression;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -513,6 +517,205 @@ public class VortexPredicateConverterTest {
                         predicates);
         assertEquals(1, rows.size());
         assertEquals(0L, rows.get(0).getTimestamp(0, 0).getMillisecond());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFloatingPointValuePredicatesNotPushed(boolean isFloat) {
+        PredicateBuilder builder = new PredicateBuilder(floatingPointRowType(isFloat));
+        for (Predicate predicate : floatingPointPredicates(builder, isFloat)) {
+            try (Expression expression =
+                    VortexPredicateConverter.toVortexExpression(
+                            Collections.singletonList(predicate))) {
+                assertNull(expression, predicate.toString());
+            }
+        }
+
+        // Null checks do not compare floating-point values and remain safe to push down.
+        for (Predicate predicate : Arrays.asList(builder.isNull(1), builder.isNotNull(1))) {
+            try (Expression expression =
+                    VortexPredicateConverter.toVortexExpression(
+                            Collections.singletonList(predicate))) {
+                assertValidExpression(expression);
+            }
+        }
+
+        Predicate integer = builder.greaterThan(0, 3);
+        Predicate floating = builder.greaterThan(1, floatingPointNumber(isFloat, 0.0));
+        for (List<Predicate> children :
+                Arrays.asList(Arrays.asList(integer, floating), Arrays.asList(floating, integer))) {
+            try (Expression and =
+                            VortexPredicateConverter.toVortexExpression(
+                                    Collections.singletonList(PredicateBuilder.and(children)));
+                    Expression or =
+                            VortexPredicateConverter.toVortexExpression(
+                                    Collections.singletonList(PredicateBuilder.or(children)))) {
+                assertValidExpression(and);
+                assertNull(or);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFloatingPointPredicatesPreserveMatchingRows(
+            boolean isFloat, @TempDir java.nio.file.Path tempDir) throws Exception {
+        RowType rowType = floatingPointRowType(isFloat);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        List<Object> values =
+                Arrays.asList(
+                        floatingPointNumber(isFloat, Double.NEGATIVE_INFINITY),
+                        floatingPointNumber(isFloat, -12.5),
+                        floatingPointNumber(isFloat, -1.0),
+                        floatingPointNumber(isFloat, -0.0),
+                        floatingPointNumber(isFloat, 0.0),
+                        floatingPointNumber(isFloat, 1.0),
+                        floatingPointNumber(isFloat, 12.5),
+                        floatingPointNumber(isFloat, Double.POSITIVE_INFINITY),
+                        floatingPointNaN(isFloat, false, 0),
+                        floatingPointNaN(isFloat, false, 1),
+                        floatingPointNaN(isFloat, false, 0x1234),
+                        floatingPointNaN(isFloat, true, 1),
+                        floatingPointNaN(isFloat, true, 0x1234),
+                        null);
+        VortexFileFormat format =
+                new VortexFileFormatFactory()
+                        .create(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        FileIO fileIO = new LocalFileIO();
+        Path file = new Path(tempDir.resolve("floating_point_predicates.vortex").toUri());
+        try (FormatWriter writer =
+                ((SupportsDirectWrite) format.createWriterFactory(rowType))
+                        .create(fileIO, file, "")) {
+            for (int i = 0; i < values.size(); i++) {
+                writer.addElement(GenericRow.of(i, values.get(i)));
+            }
+        }
+
+        List<InternalRow> allRows =
+                readFloatingPointRows(format, rowType, fileIO, file, null, isFloat);
+        assertEquals(values.size(), allRows.size());
+        // Paimon considers all NaN signs and payloads equal, unlike Vortex comparisons.
+        assertEquals(
+                new TreeSet<>(Arrays.asList(8, 9, 10, 11, 12)),
+                matchingIds(allRows, builder.equal(1, floatingPointNaN(isFloat, true, 1))));
+
+        List<Predicate> predicates = floatingPointPredicates(builder, isFloat);
+        predicates.add(builder.isNull(1));
+        predicates.add(builder.isNotNull(1));
+        Predicate integer = builder.lessThan(0, 12);
+        Predicate floating = builder.greaterThan(1, floatingPointNumber(isFloat, 0.0));
+        predicates.add(integer);
+        for (List<Predicate> children :
+                Arrays.asList(Arrays.asList(integer, floating), Arrays.asList(floating, integer))) {
+            predicates.add(PredicateBuilder.and(children));
+            predicates.add(PredicateBuilder.or(children));
+        }
+        for (Predicate predicate : predicates) {
+            List<InternalRow> candidates =
+                    readFloatingPointRows(format, rowType, fileIO, file, predicate, isFloat);
+            Set<Integer> expected = matchingIds(allRows, predicate);
+            // The direct format reader supplies candidates; the caller applies the residual.
+            assertTrue(
+                    matchingIds(candidates, PredicateBuilder.alwaysTrue()).containsAll(expected),
+                    predicate.toString());
+            assertEquals(expected, matchingIds(candidates, predicate), predicate.toString());
+        }
+    }
+
+    private static RowType floatingPointRowType(boolean isFloat) {
+        return RowType.builder()
+                .field("id", DataTypes.INT())
+                .field("value", isFloat ? DataTypes.FLOAT() : DataTypes.DOUBLE())
+                .build();
+    }
+
+    private static List<Predicate> floatingPointPredicates(
+            PredicateBuilder builder, boolean isFloat) {
+        List<Predicate> predicates = new ArrayList<>();
+        // A finite literal is also unsafe: the column can contain a negative NaN.
+        for (Object literal :
+                Arrays.asList(
+                        floatingPointNumber(isFloat, 0.0),
+                        floatingPointNaN(isFloat, false, 0x1234),
+                        floatingPointNaN(isFloat, true, 1),
+                        null)) {
+            predicates.add(builder.equal(1, literal));
+            predicates.add(builder.notEqual(1, literal));
+            predicates.add(builder.greaterThan(1, literal));
+            predicates.add(builder.greaterOrEqual(1, literal));
+            predicates.add(builder.lessThan(1, literal));
+            predicates.add(builder.lessOrEqual(1, literal));
+        }
+        // Small memberships expand to comparisons; larger ones remain membership leaves.
+        for (int size : new int[] {1, 20, 21}) {
+            List<Object> literals = new ArrayList<>();
+            literals.add(floatingPointNaN(isFloat, true, 1));
+            for (int i = 1; i < size; i++) {
+                literals.add(floatingPointNumber(isFloat, i));
+            }
+            predicates.add(builder.in(1, literals));
+            predicates.add(builder.notIn(1, literals));
+        }
+        return predicates;
+    }
+
+    private static Object floatingPointNumber(boolean isFloat, double value) {
+        if (isFloat) {
+            return (float) value;
+        }
+        return value;
+    }
+
+    private static Object floatingPointNaN(boolean isFloat, boolean negative, int payload) {
+        if (isFloat) {
+            return Float.intBitsToFloat((negative ? 0xffc00000 : 0x7fc00000) | payload);
+        }
+        return Double.longBitsToDouble(
+                (negative ? 0xfff8000000000000L : 0x7ff8000000000000L) | payload);
+    }
+
+    private static Set<Integer> matchingIds(List<InternalRow> rows, Predicate predicate) {
+        Set<Integer> ids = new TreeSet<>();
+        for (InternalRow row : rows) {
+            if (predicate.test(row)) {
+                ids.add(row.getInt(0));
+            }
+        }
+        return ids;
+    }
+
+    private static List<InternalRow> readFloatingPointRows(
+            VortexFileFormat format,
+            RowType rowType,
+            FileIO fileIO,
+            Path file,
+            Predicate predicate,
+            boolean isFloat)
+            throws Exception {
+        List<Predicate> predicates =
+                predicate == null ? Collections.emptyList() : Collections.singletonList(predicate);
+        RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, predicates)
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null));
+        List<InternalRow> rows = new ArrayList<>();
+        try (RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
+            while (iterator.hasNext()) {
+                InternalRow row = iterator.next();
+                Object value = null;
+                if (!row.isNullAt(1)) {
+                    // Copy directly so a binary serializer cannot normalize NaN payloads.
+                    if (isFloat) {
+                        value = row.getFloat(1);
+                    } else {
+                        value = row.getDouble(1);
+                    }
+                }
+                rows.add(GenericRow.of(row.getInt(0), value));
+            }
+        }
+        return rows;
     }
 
     private List<InternalRow> roundTrip(

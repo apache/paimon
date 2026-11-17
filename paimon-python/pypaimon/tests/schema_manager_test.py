@@ -18,18 +18,23 @@
 import os
 import tempfile
 import unittest
+from copy import deepcopy
+from unittest.mock import patch
 
+from pypaimon import CatalogFactory
 from pypaimon.branch.branch_manager import BranchManager
+from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.file_io import FileIO
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.common.options.options import Options
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
-                                        MapType, RowType)
+                                        MapType, MultisetType, RowType, VectorType)
 from pypaimon.schema.schema import Schema
-from pypaimon.schema.schema_change import SetOption
+from pypaimon.schema.schema_change import RemoveOption, SchemaChange, SetOption
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class TestSchemaManagerBranch(unittest.TestCase):
@@ -212,36 +217,316 @@ class TestBlobPartitionValidation(unittest.TestCase):
                 ):
                     manager.create_table(schema)
 
-    def test_create_table_still_rejects_primary_key_map_blob(self):
-        manager = SchemaManager(
-            self.file_io,
-            f"{self.temp_dir}/test_db.db/pk_map_blob",
-        )
-        schema = Schema(
-            fields=[
-                DataField(0, "id", AtomicType("INT", False)),
-                DataField(
-                    1,
-                    "payload",
-                    MapType(
-                        True,
-                        AtomicType("STRING", False),
-                        AtomicType("BLOB"),
-                    ),
+    def test_create_primary_key_blob_tables(self):
+        blob_types = [
+            ("scalar", AtomicType("BLOB"), {}),
+            ("array", ArrayType(True, AtomicType("BLOB")), {}),
+            (
+                "map",
+                MapType(
+                    True,
+                    AtomicType("STRING", False),
+                    AtomicType("BLOB"),
                 ),
-            ],
-            primary_keys=["id"],
-            options={
-                "row-tracking.enabled": "true",
-                "data-evolution.enabled": "true",
-            },
-        )
+                {},
+            ),
+            (
+                "descriptor",
+                AtomicType("BLOB"),
+                {"blob-descriptor-field": "payload", "changelog-producer": "input"},
+            ),
+            (
+                "view",
+                AtomicType("BLOB"),
+                {"blob-view-field": "payload", "changelog-producer": "input"},
+            ),
+            (
+                "partial_update_ignore_retract",
+                AtomicType("BLOB"),
+                {
+                    "merge-engine": "partial-update",
+                    "fields.ts.sequence-group": "payload",
+                    "fields.payload.aggregate-function": "last_non_null_value",
+                    "fields.payload.ignore-retract": "true",
+                },
+            ),
+            (
+                "partial_update_ignore_delete",
+                AtomicType("BLOB"),
+                {
+                    "merge-engine": "partial-update",
+                    "fields.ts.sequence-group": "payload",
+                    "fields.payload.aggregate-function": "last_non_null_value",
+                    "partial-update.ignore-delete": "true",
+                },
+            ),
+            (
+                "partial_update_last_value",
+                AtomicType("BLOB"),
+                {
+                    "merge-engine": "partial-update",
+                    "fields.ts.sequence-group": "payload",
+                    "fields.payload.aggregate-function": "last_value",
+                },
+            ),
+            (
+                "partial_update_inline_blob_agg",
+                AtomicType("BLOB"),
+                {
+                    "merge-engine": "partial-update",
+                    "blob-descriptor-field": "payload",
+                    "fields.ts.sequence-group": "payload",
+                    "fields.payload.aggregate-function": "last_non_null_value",
+                },
+            ),
+        ]
+        for suffix, blob_type, extra_options in blob_types:
+            with self.subTest(kind=suffix):
+                manager = SchemaManager(
+                    self.file_io,
+                    f"{self.temp_dir}/test_db.db/pk_blob_{suffix}",
+                )
+                schema = Schema(
+                    fields=[
+                        DataField(0, "id", AtomicType("INT", False)),
+                        DataField(1, "ts", AtomicType("INT", False)),
+                        DataField(2, "payload", blob_type),
+                    ],
+                    primary_keys=["id"],
+                    options=extra_options,
+                )
+                table_schema = manager.create_table(schema)
+                self.assertEqual(table_schema.primary_keys, ["id"])
+                self.assertEqual(table_schema.fields[2].type, blob_type)
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "MAP<X, BLOB> type is not supported with primary key",
-        ):
-            manager.create_table(schema)
+    def test_create_primary_key_blob_table_validation(self):
+        cases = [
+            (
+                "row_tracking_with_pk",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "row-tracking.enabled": "true",
+                    "data-evolution.enabled": "true",
+                },
+                "Cannot define primary-key for row tracking table.",
+            ),
+            (
+                "video_frame_on_pk",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {"video-frame-field": "payload"},
+                "'video-frame-field' only supports append-only tables.",
+            ),
+            (
+                "managed_blob_in_pk",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "payload", AtomicType("BLOB", False)),
+                ],
+                ["id", "payload"],
+                {},
+                r"Managed BLOB fields cannot be primary keys: \['payload'\]\.",
+            ),
+            (
+                "managed_blob_in_bucket_key",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {"bucket-key": "payload"},
+                r"Managed BLOB fields cannot be bucket keys: \['payload'\]\.",
+            ),
+            (
+                "managed_blob_in_sequence_field",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {"sequence.field": "payload"},
+                r"Managed BLOB fields cannot be sequence fields: \['payload'\]\.",
+            ),
+            (
+                "inline_blob_in_pk",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "payload", AtomicType("BLOB", False)),
+                ],
+                ["id", "payload"],
+                {"blob-descriptor-field": "payload"},
+                "can not be part of primary keys",
+            ),
+            (
+                "inline_blob_in_bucket_key",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {"blob-view-field": "payload", "bucket-key": "payload"},
+                "can not be part of bucket keys",
+            ),
+            (
+                "managed_blob_invalid_merge_engine",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {"merge-engine": "aggregation"},
+                "Primary-key managed BLOB tables only support the deduplicate, "
+                "partial-update or first-row merge engine.",
+            ),
+            (
+                "managed_blob_invalid_changelog_producer",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {"changelog-producer": "input"},
+                "Primary-key managed BLOB tables only support changelog-producer 'none'.",
+            ),
+            (
+                "managed_blob_external_paths",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {"data-file.external-paths": "file:///tmp/ext"},
+                "Primary-key managed BLOB tables do not support 'data-file.external-paths'.",
+            ),
+            (
+                "managed_blob_pk_clustering_override",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {"pk-clustering-override": "true"},
+                "Primary-key managed BLOB tables do not support 'pk-clustering-override'.",
+            ),
+            (
+                "managed_blob_partial_update_retract_agg",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "ts", AtomicType("INT", False)),
+                    DataField(2, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "merge-engine": "partial-update",
+                    "fields.ts.sequence-group": "payload",
+                    "fields.payload.aggregate-function": "last_non_null_value",
+                },
+                r"Managed BLOB field 'payload' cannot use aggregate function 'last_non_null_value' "
+                r"because managed BLOB payloads are not retained in retract messages\. "
+                r"Set 'fields\.payload\.ignore-retract' to true to ignore retract messages\.",
+            ),
+            (
+                "managed_blob_partial_update_default_agg",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "ts", AtomicType("INT", False)),
+                    DataField(2, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "merge-engine": "partial-update",
+                    "fields.ts.sequence-group": "payload",
+                    "fields.default-aggregate-function": "last_non_null_value",
+                },
+                r"Managed BLOB field 'payload' cannot use aggregate function 'last_non_null_value' "
+                r"because managed BLOB payloads are not retained in retract messages\. "
+                r"Set 'fields\.payload\.ignore-retract' to true to ignore retract messages\.",
+            ),
+            (
+                "managed_blob_as_sequence_group_ordering_field",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "ts", AtomicType("INT", False)),
+                    DataField(2, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "merge-engine": "partial-update",
+                    "fields.payload.sequence-group": "ts",
+                },
+                r"Field 'payload' with type BLOB cannot be used as a sequence-group ordering "
+                r"field in option 'fields\.payload\.sequence-group'\.",
+            ),
+            (
+                "inline_blob_as_sequence_group_ordering_field",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "ts", AtomicType("INT", False)),
+                    DataField(2, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "merge-engine": "partial-update",
+                    "blob-descriptor-field": "payload",
+                    "fields.payload.sequence-group": "ts",
+                },
+                r"Field 'payload' with type BLOB cannot be used as a sequence-group ordering "
+                r"field in option 'fields\.payload\.sequence-group'\.",
+            ),
+            (
+                "pk_as_sequence_group_ordering_field",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "ts", AtomicType("INT", False)),
+                    DataField(2, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "merge-engine": "partial-update",
+                    "fields.id.sequence-group": "payload",
+                },
+                r"The sequence-group 'fields\.id\.sequence-group' contains primary key field "
+                r"'id', which is not allowed\. Primary key columns cannot be put in "
+                r"sequence-group\.",
+            ),
+            (
+                "pk_as_sequence_group_protected_field",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "ts", AtomicType("INT", False)),
+                    DataField(2, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "merge-engine": "partial-update",
+                    "fields.ts.sequence-group": "id,payload",
+                },
+                r"The sequence-group 'fields\.ts\.sequence-group' contains primary key field "
+                r"'id', which is not allowed\. Primary key columns cannot be put in "
+                r"sequence-group\.",
+            ),
+        ]
+
+        for name, fields, pks, opts, error_regex in cases:
+            with self.subTest(case=name):
+                manager = SchemaManager(
+                    self.file_io,
+                    f"{self.temp_dir}/test_db.db/pk_blob_invalid_{name}",
+                )
+                schema = Schema(
+                    fields=fields,
+                    primary_keys=pks,
+                    options=opts,
+                )
+                with self.assertRaisesRegex(ValueError, error_regex):
+                    manager.create_table(schema)
 
 
 class TestOptionValidation(unittest.TestCase):
@@ -293,6 +578,198 @@ class TestOptionValidation(unittest.TestCase):
 
         self.assertEqual(manager.latest().id, 0)
         self.assertNotIn(key, manager.latest().options)
+
+
+class TestAlterTableOptions(unittest.TestCase):
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.file_io = FileIO.get(self.temp_dir.name, Options({}))
+        self.manager = SchemaManager(self.file_io, self.temp_dir.name)
+
+    def _alter(self, options, changes, has_snapshots=True):
+        schema = TableSchema.from_schema(0, Schema(
+            fields=[DataField(0, "id", AtomicType("INT"))], options=options))
+        with patch.object(SnapshotManager, "get_latest_snapshot",
+                          return_value=object() if has_snapshots else None):
+            return self.manager._generate_table_schema(schema, changes).options
+
+    def _assert_rejected(self, options, changes, message):
+        with self.assertRaises(NotImplementedError) as ctx:
+            self._alter(options, changes)
+        self.assertEqual(str(ctx.exception), message)
+
+    def test_immutable_options(self):
+        for key in CoreOptions.IMMUTABLE_OPTIONS | {"bucket-function.provider"}:
+            with self.subTest(key=key):
+                old_value = "false" if key == "primary-key.nullable" else "old"
+                for options, change in [
+                    ({}, SetOption(key, "new")),
+                    ({key: old_value}, SetOption(key, "new")),
+                    ({}, RemoveOption(key)),
+                    ({key: old_value}, RemoveOption(key)),
+                ]:
+                    self._assert_rejected(options, [change], f"Change '{key}' is not supported yet.")
+                self.assertEqual(self._alter({key: old_value}, [SetOption(key, old_value)]), {key: old_value})
+
+    def test_bucket_changes(self):
+        for old_value, new_value, message in [
+            (None, "4", "Cannot change bucket when it is -1."),
+            (None, "-1", "Cannot change bucket when it is -1."),
+            ("-1", "4", "Cannot change bucket when it is -1."),
+            ("-1", "-01", "Cannot change bucket when it is -1."),
+            ("4", "-1", "Cannot change bucket to -1."),
+        ]:
+            with self.subTest(old=old_value, new=new_value):
+                options = {} if old_value is None else {"bucket": old_value}
+                self._assert_rejected(options, [SetOption("bucket", new_value)], message)
+        for options in [{}, {"bucket": "-1"}, {"bucket": "4"}]:
+            self._assert_rejected(options, [RemoveOption("bucket")], "Cannot reset bucket.")
+        for old_value, new_value in [
+            ("-1", "-1"), ("4", "8"), ("4", "+4"), ("-2", "4"),
+            ("4", "2147483647"), ("4", "-2147483648"), ("4", "\uff14"), ("4", "0" * 5000 + "4"),
+        ]:
+            self.assertEqual(
+                self._alter({"bucket": old_value}, [SetOption("bucket", new_value)]),
+                {"bucket": new_value})
+
+    def test_bucket_requires_java_integer(self):
+        for value in ["", "+", "invalid", " 4", "4 ", "4_0", "1.0", "2147483648", "-2147483649", "\U0001d7dc"]:
+            for old_value, new_value in [("4", value), (value, "4")]:
+                with self.subTest(old=old_value, new=new_value):
+                    with self.assertRaises(ValueError) as ctx:
+                        self._alter({"bucket": old_value}, [SetOption("bucket", new_value)])
+                    self.assertEqual(str(ctx.exception), f'For input string: "{value}"')
+
+    def test_deletion_vectors_changes(self):
+        key = "deletion-vectors.enabled"
+        for old_value, new_value in [(None, "true"), ("false", "true"), ("true", "false"), ("true", None)]:
+            for modifiable in [None, "false", "no"]:
+                options = {} if old_value is None else {key: old_value}
+                if modifiable is not None:
+                    options["deletion-vectors.modifiable"] = modifiable
+                message = (
+                    f"Cannot change deletion vectors mode from {old_value or 'false'} to {new_value or 'false'}. "
+                    "If modifying table deletion-vectors mode without full-compaction, "
+                    "this may result in data duplication. If you are confident, you can set table option "
+                    "'deletion-vectors.modifiable' = 'true' to allow deletion vectors modification.")
+                changes = [SetOption(key, new_value)]
+                if new_value == "false":
+                    changes.append(RemoveOption(key))
+                for change in changes:
+                    with self.subTest(old=old_value, new=new_value, modifiable=modifiable, change=change):
+                        self._assert_rejected(options, [change], message)
+        for old_value, new_value in [(None, "false"), ("false", "FALSE"), ("true", "TRUE")]:
+            options = {} if old_value is None else {key: old_value}
+            self.assertEqual(self._alter(options, [SetOption(key, new_value)])[key], new_value)
+        for options in [{}, {key: "false"}]:
+            self.assertEqual(self._alter(options, [RemoveOption(key)]), {})
+        for change in [SetOption(key, "true"), SetOption(key, "false"), RemoveOption(key)]:
+            for old_value in ["false", "true"]:
+                options = {key: old_value, "deletion-vectors.modifiable": "TRUE"}
+                result = self._alter(options, [change])
+                self.assertEqual(result.get(key), getattr(change, "value", None))
+
+    def test_options_cannot_be_disabled(self):
+        for key, message in [
+            ("ignore-delete", "Cannot change ignore-delete from true to false."),
+            ("ignore-update-before", "Cannot change ignore-update-before from true to false."),
+            ("data-evolution.nested-field.enabled",
+             "Cannot disable table option 'data-evolution.nested-field.enabled'."),
+        ]:
+            with self.subTest(key=key):
+                for change in [SetOption(key, "false"), SetOption(key, None), SetOption(key, "no"),
+                               RemoveOption(key)]:
+                    self._assert_rejected({key: "TRUE"}, [change], message)
+                for old_value in [None, "false", "true"]:
+                    options = {} if old_value is None else {key: old_value}
+                    self.assertEqual(self._alter(options, [SetOption(key, "true")]), {key: "true"})
+                for options in [{}, {key: "false"}]:
+                    self.assertEqual(self._alter(options, [RemoveOption(key)]), {})
+
+    def test_clustering_columns(self):
+        key = "clustering.columns"
+        for override in ["true", "false"]:
+            for old_value in [None, "id"]:
+                options = {"pk-clustering-override": override}
+                if old_value is not None:
+                    options[key] = old_value
+                self._assert_rejected(options, [SetOption(key, "name")],
+                                      "Cannot change clustering.columns when pk-clustering-override enabled.")
+                self._assert_rejected(options, [RemoveOption(key)],
+                                      "Cannot reset clustering.columns when pk-clustering-override enabled.")
+            self.assertEqual(self._alter(options, [SetOption(key, "id")]), options)
+        self.assertEqual(self._alter({}, [SetOption(key, "id")]), {key: "id"})
+        self.assertEqual(self._alter({key: "id"}, [RemoveOption(key)]), {})
+
+    def test_guards_require_snapshots(self):
+        for options, key, value in [
+            ({"bucket": "-1"}, "bucket", "4"),
+            ({"bucket": "4"}, "bucket", "-1"),
+            ({"deletion-vectors.enabled": "true"}, "deletion-vectors.enabled", "false"),
+            ({"ignore-delete": "true"}, "ignore-delete", "false"),
+            ({"ignore-update-before": "true"}, "ignore-update-before", "false"),
+            ({"data-evolution.nested-field.enabled": "true"}, "data-evolution.nested-field.enabled", "false"),
+            ({"pk-clustering-override": "true", "clustering.columns": "id"}, "clustering.columns", "name"),
+            ({"bucket-function.provider": "old"}, "bucket-function.provider", "new"),
+        ]:
+            with self.subTest(key=key):
+                self.assertEqual(self._alter(options, [SetOption(key, value)], False)[key], value)
+                self.assertNotIn(key, self._alter(options, [RemoveOption(key)], False))
+        for change in [SetOption("type", "format-table"), RemoveOption("type")]:
+            with self.assertRaisesRegex(NotImplementedError, "Change 'type' is not supported yet."):
+                self._alter({}, [change], False)
+
+    def test_checks_accept_native_option_values(self):
+        self.assertEqual(self._alter({"bucket": 2}, [SetOption("bucket", "4")]), {"bucket": "4"})
+        self.assertEqual(self._alter({"bucket": -1}, [SetOption("bucket", "-1")]), {"bucket": -1})
+        self.assertEqual(self._alter({"ignore-delete": True}, [SetOption("ignore-delete", "true")]),
+                         {"ignore-delete": "true"})
+        self.assertEqual(self._alter({"partition.default-name": True}, [SetOption("partition.default-name", "true")]),
+                         {"partition.default-name": "true"})
+        self.assertEqual(self._alter({"deletion-vectors.enabled": "yes"}, [SetOption("deletion-vectors.enabled", "1")]),
+                         {"deletion-vectors.enabled": "1"})
+        with self.assertRaisesRegex(NotImplementedError, "Cannot change deletion vectors mode"):
+            self._alter({"deletion-vectors.enabled": "false"}, [SetOption("deletion-vectors.enabled", "yes")])
+        dv = "deletion-vectors.enabled"
+        self.assertEqual(self._alter({dv: 1.0}, [SetOption(dv, "true")]), {dv: "true"})
+        self.assertEqual(self._alter({"ignore-update-before": "yes"}, [SetOption("ignore-update-before", "false")]),
+                         {"ignore-update-before": "false"})
+        self.assertEqual(self._alter({"merge-engine": "first-row"}, [SetOption("merge-engine", MergeEngine.FIRST_ROW)]),
+                         {"merge-engine": "first-row"})
+        with self.assertRaisesRegex(NotImplementedError, "Cannot change ignore-delete from true to false"):
+            self._alter({"ignore-delete": True}, [SetOption("ignore-delete", "false")])
+        options = {"deletion-vectors.modifiable": True}
+        self.assertEqual(self._alter(options, [SetOption("deletion-vectors.enabled", "true")]),
+                         {"deletion-vectors.modifiable": True, "deletion-vectors.enabled": "true"})
+
+    def test_checks_use_original_options(self):
+        key = "deletion-vectors.enabled"
+        modifiable = "deletion-vectors.modifiable"
+        for changes in [
+            [SetOption(modifiable, "true"), SetOption(key, "true")],
+            [SetOption(modifiable, "true"), RemoveOption(key)],
+        ]:
+            options = {key: "true"} if isinstance(changes[1], RemoveOption) else {}
+            with self.assertRaisesRegex(NotImplementedError, "Cannot change deletion vectors mode"):
+                self._alter(options, changes)
+        self.assertEqual(self._alter({modifiable: "true"}, [RemoveOption(modifiable), SetOption(key, "true")]),
+                         {key: "true"})
+        self.assertEqual(self._alter({}, [SetOption("ignore-delete", "true"), SetOption("ignore-delete", "false")]),
+                         {"ignore-delete": "false"})
+        self.assertEqual(self._alter({"bucket": "4"}, [SetOption("bucket", "8"), SetOption("bucket", "4")]),
+                         {"bucket": "4"})
+
+    def test_normalized_unchanged_options(self):
+        for options in [{}, {"type": "table"}, {"type": "TABLE"}]:
+            self.assertEqual(self._alter(options, [SetOption("type", "TaBlE")]), options)
+        schema = TableSchema.from_schema(0, Schema(
+            fields=[DataField(0, "id", AtomicType("INT"))], primary_keys=["id"], partition_keys=["id"]))
+        with patch.object(SnapshotManager, "get_latest_snapshot", return_value=object()):
+            result = self.manager._generate_table_schema(schema, [
+                SetOption("primary-key", " id, "), SetOption("partition", " id, ")])
+        self.assertEqual(result.options, schema.options)
 
 
 class TestRowTrackingValidation(unittest.TestCase):
@@ -384,6 +861,194 @@ class TestRowTrackingValidation(unittest.TestCase):
 
         self.assertEqual(manager.latest().id, 0)
         self.assertNotIn("row-tracking.enabled", manager.latest().options)
+
+
+class TestColumnAndKeyValidation(unittest.TestCase):
+    """create_table and alter_table reject the column and key lists Java's Schema rejects."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        warehouse = os.path.join(self.temp_dir, "warehouse")
+        self.catalog = CatalogFactory.create({"warehouse": warehouse})
+        self.catalog.create_database("default", True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @staticmethod
+    def _schema(names=("id", "dt"), partition_keys=None, primary_keys=None):
+        return Schema(
+            fields=[DataField(i, name, AtomicType("INT", False))
+                    for i, name in enumerate(names)],
+            partition_keys=partition_keys or [],
+            primary_keys=primary_keys or [],
+            options={"bucket": "1"} if primary_keys else {},
+        )
+
+    def test_create_table_rejects_key_that_is_not_a_column(self):
+        for kwargs, message in (
+                ({"partition_keys": ["dtt"]}, "should include all partition fields"),
+                ({"primary_keys": ["idd"]}, "should include all primary key constraint")):
+            with self.subTest(**kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    self.catalog.create_table("default.t", self._schema(**kwargs), False)
+                # Nothing is persisted, so the name can be used again.
+                with self.assertRaises(TableNotExistException):
+                    self.catalog.get_table("default.t")
+
+    def test_alter_table_rejects_rename_that_drops_a_primary_key(self):
+        self.catalog.create_table(
+            "default.t", self._schema(primary_keys=["id"]), False)
+        # Each rename maps the old key once, so the key becomes 'middle'.
+        with self.assertRaisesRegex(
+                RuntimeError, "should include all primary key constraint"):
+            self.catalog.alter_table("default.t", [
+                SchemaChange.rename_column("id", "middle"),
+                SchemaChange.rename_column("middle", "new_id"),
+            ], False)
+        table = self.catalog.get_table("default.t")
+        self.assertEqual(0, table.table_schema.id)
+        self.assertEqual(["id"], table.table_schema.primary_keys)
+
+        self.catalog.alter_table(
+            "default.t", [SchemaChange.rename_column("id", "new_id")], False)
+        self.assertEqual(
+            ["new_id"], self.catalog.get_table("default.t").table_schema.primary_keys)
+
+    def test_create_table_rejects_duplicates(self):
+        cases = [
+            ({"names": ("id", "id")}, "must not contain duplicate fields"),
+            ({"partition_keys": ["dt", "dt"]}, "Partition key constraint"),
+            ({"primary_keys": ["id", "id"]}, "Primary key constraint"),
+        ]
+        for kwargs, message in cases:
+            with self.subTest(**kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    self.catalog.create_table("default.t", self._schema(**kwargs), False)
+
+
+class TestExternalSchemaValidation(unittest.TestCase):
+
+    @staticmethod
+    def _schema(offset=0):
+        return Schema(
+            fields=[
+                DataField(offset + 9, 'id', AtomicType('INT', False), 'identifier', '0'),
+                DataField(offset + 20, 'pt', AtomicType('STRING', False)),
+                DataField(offset + 30, 'payload', MapType(
+                    True, RowType(False, [DataField(offset + 31, 'key', AtomicType('INT', False))]),
+                    ArrayType(True, MultisetType(False, RowType(True, [
+                        DataField(offset + 32, 'text', AtomicType('STRING'), 'nested value'),
+                    ]))))),
+                DataField(offset + 40, 'embedding', VectorType(True, AtomicType('FLOAT'), 3)),
+            ],
+            partition_keys=['pt'], primary_keys=['id', 'pt'],
+            options={'bucket': '1', 'file.format': 'parquet', 'owner': 'original'},
+        )
+
+    def test_accepts_different_field_ids_without_mutating_inputs(self):
+        existing, provided = self._schema(), self._schema(100)
+        before = deepcopy((existing, provided))
+
+        SchemaManager.check_schema_for_external_table(existing, provided)
+
+        self.assertEqual((existing, provided), before)
+
+    def test_accepts_omitted_definitions_and_owner_path_overrides(self):
+        existing = self._schema()
+        provided = Schema(options={'path': 'file:///registered', 'owner': 'new-owner'})
+
+        SchemaManager.check_schema_for_external_table(existing, provided)
+        SchemaManager.check_schema_for_external_table(
+            existing, Schema(options={'file.format': 'parquet'}))
+
+    def test_accepts_equivalent_logical_type_spellings(self):
+        cases = [
+            ('TIMESTAMP(6) WITH LOCAL TIME ZONE', 'TIMESTAMP_LTZ(6)'),
+            ('TIMESTAMP WITH LOCAL TIME ZONE', 'TIMESTAMP_LTZ(6)'),
+            ('TIMESTAMP_LTZ', 'TIMESTAMP(6) WITH LOCAL TIME ZONE'),
+            ('TIMESTAMP', 'TIMESTAMP(6)'),
+            ('TIMESTAMP(3) WITHOUT TIME ZONE', 'TIMESTAMP(3)'),
+            ('TIME', 'TIME(0)'),
+            ('TIME(3) WITHOUT TIME ZONE', 'TIME(3)'),
+            ('DECIMAL(12,2)', 'DECIMAL(12, 2)'),
+            ('NUMERIC(12)', 'DECIMAL(12, 0)'),
+            ('DEC', 'DECIMAL(10, 0)'),
+            ('DECIMAL', 'DECIMAL(10)'),
+            ('INTEGER', 'INT'),
+            ('DOUBLE PRECISION', 'DOUBLE'),
+            ('CHAR', 'CHAR(1)'),
+            ('VARCHAR', 'VARCHAR(1)'),
+            ('STRING', 'VARCHAR(2147483647)'),
+            ('BINARY', 'BINARY(1)'),
+            ('VARBINARY', 'VARBINARY(1)'),
+            ('BYTES', 'VARBINARY(2147483647)'),
+            (' decimal ( 12 , 02 ) ', 'DECIMAL(12, 2)'),
+        ]
+        for source, target in cases:
+            with self.subTest(source=source, target=target):
+                existing = Schema(fields=[DataField(7, 'value', AtomicType(source))])
+                provided = Schema(fields=[DataField(0, 'value', AtomicType(target))])
+                before = deepcopy((existing, provided))
+                SchemaManager.check_schema_for_external_table(existing, provided)
+                SchemaManager.check_schema_for_external_table(provided, existing)
+                self.assertEqual((existing, provided), before)
+
+    def test_rejects_different_logical_types(self):
+        cases = [
+            ('TIMESTAMP(6) WITH LOCAL TIME ZONE', 'TIMESTAMP_LTZ(3)'),
+            ('TIMESTAMP(6) WITH LOCAL TIME ZONE', 'TIMESTAMP_LTZ(5)'),
+            ('TIMESTAMP(6) WITH LOCAL TIME ZONE', 'TIMESTAMP(6)'),
+            ('DECIMAL(12, 2)', 'NUMERIC(12, 3)'),
+            ('DECIMAL(12, 0)', 'DECIMAL(13)'),
+            ('TIME', 'TIME(6)'),
+            ('VARCHAR', 'STRING'),
+            ('VARCHAR(10)', 'VARCHAR(11)'),
+            ('CHAR(10)', 'VARCHAR(10)'),
+            ('BINARY(10)', 'VARBINARY(10)'),
+            ('BYTES', 'BLOB'),
+        ]
+        for source, target in cases:
+            with self.subTest(source=source, target=target):
+                existing = Schema(fields=[DataField(7, 'value', AtomicType(source))])
+                provided = Schema(fields=[DataField(0, 'value', AtomicType(target))])
+                with self.assertRaisesRegex(ValueError, 'External table fields'):
+                    SchemaManager.check_schema_for_external_table(existing, provided)
+
+    def test_rejects_conflicting_fields(self):
+        cases = [
+            ('count', lambda s: s.fields.pop()),
+            ('order', lambda s: s.fields.reverse()),
+            ('name', lambda s: setattr(s.fields[0], 'name', 'other')),
+            ('type', lambda s: setattr(s.fields[0], 'type', AtomicType('BIGINT', False))),
+            ('nullable', lambda s: setattr(s.fields[0].type, 'nullable', True)),
+            ('description', lambda s: setattr(s.fields[0], 'description', 'changed')),
+            ('default', lambda s: setattr(s.fields[0], 'default_value', '1')),
+            ('map-key', lambda s: setattr(s.fields[2].type.key.fields[0], 'name', 'other')),
+            ('nested', lambda s: setattr(
+                s.fields[2].type.value.element.element.fields[0].type, 'nullable', False)),
+            ('vector-length', lambda s: setattr(s.fields[3].type, 'length', 4)),
+            ('vector-element', lambda s: setattr(s.fields[3].type, 'element', AtomicType('DOUBLE'))),
+        ]
+        for name, change in cases:
+            with self.subTest(change=name):
+                existing, provided = self._schema(), self._schema(100)
+                change(provided)
+                with self.assertRaisesRegex(ValueError, 'External table fields'):
+                    SchemaManager.check_schema_for_external_table(existing, provided)
+
+    def test_rejects_conflicting_keys_and_options(self):
+        cases = [
+            (Schema(partition_keys=['id']), 'partition keys'),
+            (Schema(primary_keys=['pt', 'id']), 'primary keys'),
+            (Schema(options={'file.format': 'orc'}), "option 'file.format'"),
+            (Schema(options={'new.option': 'value'}), "option 'new.option'"),
+        ]
+        for provided, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    SchemaManager.check_schema_for_external_table(self._schema(), provided)
 
 
 if __name__ == '__main__':

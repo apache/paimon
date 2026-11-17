@@ -25,7 +25,6 @@ import subprocess
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
 from itertools import islice
 from pathlib import PurePosixPath
 from typing import Any, Dict, Iterable, List, Optional
@@ -36,15 +35,13 @@ import pyarrow.fs as pafs
 from packaging.version import parse
 from pyarrow._fs import FileSystem
 
-from pypaimon.common.file_io import FileIO, create_temp_path
+from pypaimon.common.file_io import FileIO, create_temp_path, normalize_naive_datetimes
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options, SecurityOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem import oss_user_agent
 from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
-from pypaimon.schema.data_types import (AtomicType, DataField,
-                                        PyarrowFieldParser)
 
 
 def _pyarrow_lt_7():
@@ -111,7 +108,7 @@ class PyArrowFileIO(FileIO):
 
     def _set_pyarrow_version(self):
         self._pyarrow_gte_22 = parse(pyarrow.__version__) >= parse("22.0.0")
-        self._pyarrow_gte_8 = parse(pyarrow.__version__) >= parse("8.0.0")
+        self._pyarrow_gte_10 = parse(pyarrow.__version__) >= parse("10.0.0")
         # force_virtual_addressing landed in PyArrow 16; below it the OSS bucket
         # goes into endpoint_override, so keys must omit it (init + path share
         # this flag so they can't drift).
@@ -178,7 +175,8 @@ class PyArrowFileIO(FileIO):
             request_timeout: int = 60,
             connect_timeout: int = 60
     ) -> Dict[str, Any]:
-        if self._pyarrow_gte_8:
+        # S3 timeout arguments and retry strategies were added in Arrow 10.
+        if self._pyarrow_gte_10:
             config = {
                 'request_timeout': request_timeout,
                 'connect_timeout': connect_timeout
@@ -441,6 +439,10 @@ class PyArrowFileIO(FileIO):
 
     def new_input_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
+        if self._use_jindo:
+            # PyFileSystem's C facade erases PythonFile.read_at overrides.
+            # Keep the handler's NativeFile for exact Python range reads.
+            return self.filesystem.handler.open_input_file(path_str)
         return self.filesystem.open_input_file(path_str)
 
     def new_output_stream(self, path: str):
@@ -959,9 +961,7 @@ class PyArrowFileIO(FileIO):
                 record = {}
                 for col in records_dict.keys():
                     value = records_dict[col][i]
-                    if isinstance(value, datetime) and value.tzinfo is None:
-                        value = value.replace(tzinfo=timezone.utc)
-                    record[col] = value
+                    record[col] = normalize_naive_datetimes(value)
                 yield record
 
         records = record_generator()
@@ -989,25 +989,6 @@ class PyArrowFileIO(FileIO):
                 kwargs['codec_compression_level'] = zstd_level
             fastavro.writer(output_stream, avro_schema, records, codec=codec, **kwargs)
 
-    def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
-        try:
-            import lance
-
-            from pypaimon.execution.python.read.reader.lance_utils import (to_lance_specified)
-            file_path_for_lance, storage_options = to_lance_specified(self, path)
-
-            writer = lance.file.LanceFileWriter(
-                file_path_for_lance, data.schema, storage_options=storage_options, **kwargs)
-            try:
-                # Write all batches
-                for batch in data.to_batches():
-                    writer.write_batch(batch)
-            finally:
-                writer.close()
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
-
     def write_mosaic(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             import mosaic
@@ -1016,64 +997,6 @@ class PyArrowFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
-
-    def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
-        try:
-            import vortex
-            from vortex import store
-
-            from pypaimon.execution.python.read.reader.vortex_utils import (to_vortex_specified)
-            file_path_for_vortex, store_kwargs = to_vortex_specified(self, path)
-
-            if store_kwargs:
-                vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
-                vortex_store.write(vortex.array(data))
-            else:
-                from vortex._lib.io import write as vortex_write
-                vortex_write(vortex.array(data), file_path_for_vortex)
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
-
-    def write_row(self, path: str, data: pyarrow.Table, fields=None, zstd_level: int = 1, **kwargs):
-        try:
-            from pypaimon.execution.python.write.writer.format_row_writer import FormatRowWriter
-
-            if fields is None:
-                fields = PyarrowFieldParser.to_paimon_schema(data.schema)
-
-            with self.new_output_stream(path) as output_stream:
-                writer = FormatRowWriter(output_stream, fields, zstd_level=zstd_level)
-                writer.write_table(data)
-                writer.close()
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write row file {path}: {e}") from e
-
-    def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
-        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
-
-        try:
-            if data.num_columns != 1:
-                raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
-            field = data.schema[0]
-            if pyarrow.types.is_large_binary(field.type):
-                fields = [DataField(0, field.name, AtomicType("BLOB"))]
-            else:
-                paimon_type = PyarrowFieldParser.to_paimon_type(field.type, field.nullable)
-                fields = [DataField(0, field.name, paimon_type)]
-            records_dict = data.to_pydict()
-            num_rows = data.num_rows
-            field_name = fields[0].name
-            with self.new_output_stream(path) as output_stream:
-                writer = BlobFormatWriter(output_stream)
-                for i in range(num_rows):
-                    writer.write_value(records_dict[field_name][i], fields, self.uri_reader_factory)
-                writer.close()
-
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
 
     def to_filesystem_path(self, path: str) -> str:
         import re

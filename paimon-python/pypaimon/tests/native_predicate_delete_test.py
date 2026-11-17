@@ -22,9 +22,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.table_update import TableUpdate
 
 
 pytestmark = pytest.mark.native_plan
@@ -74,8 +74,8 @@ def _ids(table):
 
 def _core_only():
     stack = ExitStack()
-    for method in ('_delete_by_partition_filter', '_matched_delete_row_ids', '_delete_by_row_id'):
-        stack.enter_context(patch.object(TableUpdate, method, side_effect=AssertionError(
+    for method in ('_delete_by_partition_filter', '_matched_delete_row_ids', 'delete_by_row_id'):
+        stack.enter_context(patch.object(PythonTableUpdate, method, side_effect=AssertionError(
             'Python predicate deletion selected: ' + method)))
     return stack
 

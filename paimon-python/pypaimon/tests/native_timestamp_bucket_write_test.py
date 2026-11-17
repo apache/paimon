@@ -33,7 +33,6 @@ from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer, GenericRowSerializer
-from pypaimon.read.table_read import TableRead
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.write.write_dispatch import NativeTableWrite
 from pypaimon.execution.python.write.row_key_extractor import FixedBucketRowKeyExtractor
@@ -258,8 +257,9 @@ def test_timestamp_row_and_sliced_arrow_writes_agree_with_precomputed_java_bucke
         with ExitStack() as guards:
             if native:
                 guards.enter_context(patch.object(writer, '_switch_to_python', side_effect=AssertionError('fallback')))
-                guards.enter_context(patch.object(
-                    commit.file_store_commit, 'commit', side_effect=AssertionError('Python commit fallback')))
+                guards.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                           'FileStoreCommit.commit',
+                                           side_effect=AssertionError('Python commit fallback')))
             if row_input:
                 for value in values:
                     writer.write_row(GenericRow([value, 'original'], table.fields))
@@ -274,8 +274,9 @@ def test_timestamp_row_and_sliced_arrow_writes_agree_with_precomputed_java_bucke
         commit.close()
     with ExitStack() as guards:
         if native:
-            guards.enter_context(patch.object(
-                TableRead, '_create_split_read', side_effect=AssertionError('Python read fallback')))
+            guards.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')))
         read = table.new_read_builder()
         rows = {}
         for split in read.new_scan().plan().splits():

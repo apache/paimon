@@ -88,7 +88,10 @@ def _read(table, projection, predicate=None, limit=None, parallelism=1, streamin
         builder.with_limit(limit)
     splits = builder.new_scan().plan().splits() if splits is None else splits
     reader = builder.new_read()
-    with patch.object(reader, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python read fallback')
+    ):
         if streaming:
             with reader.to_arrow_batch_reader(splits, parallelism=parallelism, blob_parallelism=2) as batches:
                 return pa.Table.from_batches(list(batches), schema=batches.schema).to_pylist()
@@ -249,15 +252,18 @@ def test_streaming_pk_blob_row_kinds_resolve_only_selected_payload(tmp_path, pay
                    dict(id=2, tag=1, payload=missing, output=missing)])
     builder = table.new_stream_read_builder().with_projection(['id', 'payload'])
     scan = builder.new_streaming_scan()
-    if table.options.native_plan_enabled():
+    try:
         scan.restore(table.snapshot_manager().get_latest_snapshot().id)
         splits = scan.plan().splits()
-    else:
-        splits = scan._create_delta_plan(table.snapshot_manager().get_latest_snapshot()).splits()
+    finally:
+        scan.close()
     assert splits and all(split.is_streaming for split in splits)
     predicate = builder.new_predicate_builder().equal('payload', b'selected') if payload_filter else None
     reader = TableRead(table, predicate, builder.read_type(), include_row_kind=True, limit=1)
-    with patch.object(reader, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python read fallback')
+    ):
         assert reader.to_arrow(splits).to_pylist() == [
             {'_row_kind': '+I', 'id': 1, 'payload': b'selected'}]
 
@@ -273,11 +279,11 @@ def test_pk_row_kind_limit_is_global_across_snapshot_and_delta_splits(tmp_path):
     splits = table.new_read_builder().new_scan().plan().splits()
     _write(table, [dict(id=2, tag=1, payload=missing, output=missing, pt='b')])
     scan = table.new_stream_read_builder().new_streaming_scan()
-    if table.options.native_plan_enabled():
+    try:
         scan.restore(table.snapshot_manager().get_latest_snapshot().id)
         splits += scan.plan().splits()
-    else:
-        splits += scan._create_delta_plan(table.snapshot_manager().get_latest_snapshot()).splits()
+    finally:
+        scan.close()
     assert len(splits) == 2 and not splits[0].is_streaming and splits[1].is_streaming
     # Exercise the Rust quota directly: TableRead's outer truncation must not
     # conceal extra rows or payload reads in the core row-kind path.

@@ -204,7 +204,7 @@ def test_native_catalog_preserves_a_reconstructible_fuse_binding(tmp_path, mode,
     assert module.PaimonCatalog.call_args[0][0]['fuse.enabled'] == 'true'
 
 
-@pytest.mark.parametrize('transport', ['same-view', 'copy', 'pickle'])
+@pytest.mark.parametrize('transport', ['same-view', 'copy-before', 'copy', 'pickle'])
 def test_pinned_rest_view_reuses_core_snapshot_validation(guarded_table, transport):
     import pickle
     from pypaimon.execution.native.table import _native_table
@@ -217,7 +217,8 @@ def test_pinned_rest_view_reuses_core_snapshot_validation(guarded_table, transpo
                   side_effect=lambda table, native: native), \
             patch('pypaimon.execution.native.table._with_native_read_snapshot',
                   side_effect=lambda table, native: native):
-        native = _native_table(fixed)
+        first_view = fixed.copy({'read.batch-size': '64'}) if transport == 'copy-before' else fixed
+        native = _native_table(first_view)
         if transport == 'copy':
             fixed = fixed.copy({'read.batch-size': '64'})
         elif transport == 'pickle':
@@ -268,8 +269,10 @@ def test_authorized_python_and_serialized_splits_use_native_reader(guarded_table
                   for split in splits]
     assert all(getattr(split, '_native_split', None) is None for split in splits)
     builder = table.copy({'read.native.enabled': 'true'}).new_read_builder().with_projection(['id', 'value'])
-    with patch('pypaimon.read.table_read.TableRead._create_split_read',
-               side_effect=AssertionError('Native read fell back')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Native read fell back')
+    ):
         rows = builder.new_read().to_arrow(splits).sort_by([('id', 'ascending')]).to_pylist()
     assert rows == [{'id': 2, 'value': 'ABCABC'}, {'id': 3, 'value': ''}, {'id': 4, 'value': None}]
 
@@ -342,7 +345,7 @@ def test_native_write_plan_preserves_custom_authorization(guarded_table):
     with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([])) as planner, \
             patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True):
         with pytest.raises(TableNoPermissionException):
-            scan.plan_all_files()
+            scan.plan_all()
         planner.assert_not_called()
 
 

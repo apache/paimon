@@ -16,6 +16,7 @@
 # under the License.
 
 
+import itertools
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -48,8 +49,9 @@ class ResourcePathsTest(unittest.TestCase):
             paths.table("sales db", "orders/all"))
         self.assertEqual(
             "/v1/catalog%2Fid/databases/sales+db/table-details", paths.table_details("sales db"))
+        self.assertEqual("/v1/catalog%2Fid/tables/id/a%2Fb+c", paths.table_by_id("a/b c"))
 
-    def test_table_details_signature_matches_the_path_sent(self):
+    def test_signature_matches_the_path_sent(self):
         received = []
 
         class Handler(BaseHTTPRequestHandler):
@@ -74,22 +76,24 @@ class ResourcePathsTest(unittest.TestCase):
         token = DLFToken("test-ak", "test-sk", "test-token", None)
         paths = ResourcePaths("catalog~id")
 
+        builders = ((paths.table_details, "/v1/catalog~id/databases/{}/table-details"),
+                    (paths.table_by_id, "/v1/catalog~id/tables/id/{}"))
         for algorithm in ("default", "openapi-v4"):
             provider = DLFAuthProvider(uri, "cn-hangzhou", algorithm, token=token)
-            for database, encoded in (("sales~db", "sales~db"),
-                                      ("sales~ db/a+b*", "sales~+db%2Fa%2Bb*"),
-                                      ("sales%7Edb", "sales%257Edb")):
-                with self.subTest(algorithm=algorithm, database=database):
+            for (build, template), (name, encoded) in itertools.product(
+                    builders, (("sales~db", "sales~db"),
+                               ("sales~ db/a+b*", "sales~+db%2Fa%2Bb*"),
+                               ("sales%7Edb", "sales%257Edb"))):
+                with self.subTest(algorithm=algorithm, path=template, name=name):
                     signed = []
 
                     def sign(parameter):
                         signed.append(parameter.path)
                         return provider.merge_auth_header({}, parameter)
 
-                    client.get(paths.table_details(database), None, sign)
+                    client.get(build(name), None, sign)
                     path, headers = received[-1]
-                    self.assertEqual(
-                        "/v1/catalog~id/databases/{}/table-details".format(encoded), path)
+                    self.assertEqual(template.format(encoded), path)
                     expected = provider.signer.authorization(
                         RESTAuthParameter("GET", path, "", {}), token,
                         provider.extract_host(uri), headers)

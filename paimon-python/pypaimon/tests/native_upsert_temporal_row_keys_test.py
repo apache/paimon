@@ -26,12 +26,12 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.execution.native.write.native_update import NativeTableUpsert, _upsert_row_batches, create_native_upsert
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
 pytestmark = [pytest.mark.python_plan, pytest.mark.python_read,
@@ -130,8 +130,8 @@ def test_lossy_temporal_row_key_does_not_overwrite_existing_rows(
     fields = Schema.from_pyarrow_schema(pa.schema([('key', source_type), ('value', pa.int32())])).fields
     row = GenericRow([value, 99], fields)
     builder = target.new_stream_write_builder() if stream else target.new_batch_write_builder()
-    original = TableUpsertByKey._upsert_row_partition
-    with patch.object(TableUpsertByKey, '_upsert_row_partition', autospec=True, side_effect=original) as fallback:
+    original = PythonTableUpsert._upsert_row_partition
+    with patch.object(PythonTableUpsert, '_upsert_row_partition', autospec=True, side_effect=original) as fallback:
         update = builder.new_update().with_update_type(['value'])
         messages = update.upsert_by_key([row], ['key'], 17) if stream else update.upsert_by_key([row], ['key'])
         fallback.assert_called_once()
@@ -158,7 +158,7 @@ def test_exact_temporal_row_keys_keep_native_matching(native_rest_catalog, nativ
     fields = Schema.from_pyarrow_schema(pa.schema([('key', source_type), ('value', pa.int32())])).fields
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(TableUpsertByKey, '_upsert_row_partition',
+            stack.enter_context(patch.object(PythonTableUpsert, '_upsert_row_partition',
                                              side_effect=AssertionError('Exact temporal key fell back')))
         messages = target.new_batch_write_builder().new_update().with_update_type(['value']).upsert_by_key(
             [GenericRow([value, 99], fields)], ['key'])
@@ -185,8 +185,8 @@ def test_integer_row_keys_are_not_reinterpreted_as_existing_temporal_keys(native
     key_type, initial, source_type, value = _case(kind)
     latest, target = _tables(native_rest_catalog, key_type, initial, native, False)
     fields = Schema.from_pyarrow_schema(pa.schema([('key', source_type), ('value', pa.int32())])).fields
-    original = TableUpsertByKey._upsert_row_partition
-    with patch.object(TableUpsertByKey, '_upsert_row_partition', autospec=True, side_effect=original) as fallback:
+    original = PythonTableUpsert._upsert_row_partition
+    with patch.object(PythonTableUpsert, '_upsert_row_partition', autospec=True, side_effect=original) as fallback:
         messages = target.new_batch_write_builder().new_update().with_update_type(['value']).upsert_by_key(
             [GenericRow([value, 99], fields)], ['key'])
         fallback.assert_called_once()

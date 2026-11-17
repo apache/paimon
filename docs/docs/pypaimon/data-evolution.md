@@ -26,9 +26,10 @@ under the License.
 
 Data evolution lets you update selected columns while preserving the remaining
 columns and media payloads. This page covers the lower-level Python update and
-commit APIs; use [Multimodal Tables](./multimodal-tables#update) for the compact
-interface. See [Data Evolution](../multimodal-table/data-evolution) for the storage
-model.
+commit APIs; use [Multimodal Tables](./multimodal-tables#update) for compact row
+updates and [Column Enrichment](./multimodal-tables#column-enrichment) for label
+and feature backfills. See [Data Evolution](../multimodal-table/data-evolution)
+for the storage model.
 
 | You have… | Use |
 | --- | --- |
@@ -235,6 +236,12 @@ table_commit.close()
 If you already have `_ROW_ID` values, use `delete_by_row_id` to write deletion
 vectors directly. This follow-up deletes the first row from the fresh table
 above; use row IDs obtained from your target table in an existing dataset.
+
+The same method accepts an integer PyArrow `Array` or `ChunkedArray`, so a
+projected `_ROW_ID` column can be submitted without converting it to a Python
+list. NULL IDs and unsigned values outside the signed 64-bit range are rejected;
+duplicate IDs delete the row once. Native execution retains Arrow buffers and
+chunk boundaries through the Rust binding.
 
 ```python
 write_builder = table.new_batch_write_builder()

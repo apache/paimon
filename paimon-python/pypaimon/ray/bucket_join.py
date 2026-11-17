@@ -73,8 +73,6 @@ def _plan_splits_by_bucket(table_id, catalog_options, projection, expected_total
         raise ValueError(
             f"bucket_join needs {table_id} fully in bucket count {expected_total_buckets}, "
             f"but files exist under {sorted(stale)} (rescale in progress); rewrite first.")
-    # Reuse those entries: scan.plan() re-reads plan_files() (append/pk) otherwise.
-    fs.plan_files = lambda: entries
     by_bucket = {}
     for s in scan.plan().splits():
         by_bucket.setdefault(s.bucket, []).append(s)

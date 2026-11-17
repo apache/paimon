@@ -221,7 +221,7 @@ def test_dynamic_bucket_sequence_rejected_before_index_creation(
     builder = (table.new_stream_write_builder() if streaming
                else table.new_batch_write_builder())
     writer_class = StreamTableWrite if streaming else BatchTableWrite
-    with patch.object(table, 'create_row_key_extractor') as extractor:
+    with patch('pypaimon.execution.python.write.row_key_extractor.create_row_key_extractor') as extractor:
         with pytest.raises(error):
             if direct:
                 writer_class(table, 'test')

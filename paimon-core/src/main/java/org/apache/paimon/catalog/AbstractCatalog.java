@@ -49,6 +49,7 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.slf4j.Logger;
@@ -74,6 +75,7 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotLakeStreamTable;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
@@ -383,18 +385,17 @@ public abstract class AbstractCatalog implements Catalog {
         }
 
         Set<Path> externalPaths = new HashSet<>();
-        if (tableExistsInFileSystem(getTableLocation(identifier), DEFAULT_MAIN_BRANCH)) {
-            Table table = getTable(identifier);
-            if (table instanceof FileStoreTable) {
-                FileStoreTable fileStoreTable = (FileStoreTable) table;
-                List<Path> schemaExternalPaths =
-                        getSchemaExternalPaths(fileStoreTable.schemaManager().listAll());
-                externalPaths.addAll(schemaExternalPaths);
-                List<String> branches = fileStoreTable.branchManager().branches();
-                for (String branch : branches) {
-                    SchemaManager schemaManager =
-                            fileStoreTable.schemaManager().copyWithBranch(branch);
-                    externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
+        Path tablePath = getTableLocation(identifier);
+        if (tableExistsInFileSystem(tablePath, DEFAULT_MAIN_BRANCH)) {
+            TableType tableType = CoreOptions.fromMap(loadTableSchema(identifier).options()).type();
+            if (tableType == TableType.TABLE || tableType == TableType.MATERIALIZED_TABLE) {
+                // Cleanup only needs persisted metadata, even if runtime options are invalid.
+                FileIO tableFileIO = fileIO(tablePath);
+                SchemaManager schemaManager = new FileSystemSchemaManager(tableFileIO, tablePath);
+                externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
+                for (String branch : FileSystemBranchManager.branches(tableFileIO, tablePath)) {
+                    externalPaths.addAll(
+                            getSchemaExternalPaths(schemaManager.copyWithBranch(branch).listAll()));
                 }
             }
         }
@@ -476,14 +477,16 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
 
+        Table table;
         try {
-            getTable(fromTable);
+            table = getTable(fromTable);
         } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
             }
             throw new TableNotExistException(fromTable);
         }
+        checkNotLakeStreamTable(table, fromTable, "renameTable");
 
         try {
             getTable(toTable);
@@ -503,7 +506,8 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotSystemTable(identifier, "alterTable");
 
         try {
-            getTable(identifier);
+            // Validate the resulting schema, rather than the old runtime options.
+            loadTableSchema(identifier);
         } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
@@ -536,6 +540,7 @@ public abstract class AbstractCatalog implements Catalog {
             }
             throw e;
         }
+        checkNotLakeStreamTable(existing, identifier, "replaceTable");
 
         TableType targetTableType = Options.fromMap(newSchema.options()).get(TYPE);
         if (!(existing instanceof FileStoreTable) || !targetTableType.equals(TableType.TABLE)) {

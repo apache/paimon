@@ -28,12 +28,14 @@ import unittest
 import zlib
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.write.format_file_writer import write_blob_file
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
@@ -79,6 +81,20 @@ class MockFileIO:
         return self._file_io.new_input_stream(path)
 
 
+def counting_positional_stream(source):
+    def read_at(size, offset):
+        position = source.tell()
+        try:
+            source.seek(offset)
+            return source.read(size)
+        finally:
+            source.seek(position)
+
+    stream = MagicMock(wraps=source)
+    stream.read_at = MagicMock(side_effect=read_at)
+    return stream
+
+
 class CountingBlobFileIO(LocalFileIO):
     def __init__(self, root):
         super().__init__(root, Options({}))
@@ -90,7 +106,7 @@ class CountingBlobFileIO(LocalFileIO):
         return super().get_file_size(path)
 
     def new_input_stream(self, path):
-        stream = MagicMock(wraps=super().new_input_stream(path))
+        stream = counting_positional_stream(super().new_input_stream(path))
         stream.__enter__.return_value = stream
         stream.__exit__.side_effect = lambda *args: stream.close()
         self.streams.append(stream)
@@ -98,7 +114,7 @@ class CountingBlobFileIO(LocalFileIO):
 
     def counts(self):
         return (self.stat_count, len(self.streams),
-                sum(stream.read.call_count for stream in self.streams),
+                sum(stream.read.call_count + stream.read_at.call_count for stream in self.streams),
                 sum(stream.close.call_count for stream in self.streams))
 
 
@@ -1528,7 +1544,7 @@ class BlobTest(unittest.TestCase):
         self.assertIsNone(BlobDescriptor.parse_if_serialized(v1_shaped_inline))
         self.assertIsNone(BlobDescriptor.parse_if_serialized(b"tiny"))
 
-        video = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2, -1, 0)
+        video = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2)
         video_bytes = video.serialize()
         self.assertEqual(video_bytes, BlobDescriptor.deserialize(video_bytes).serialize())
         self.assertEqual(video, BlobDescriptor.parse_if_serialized(video_bytes))
@@ -1710,7 +1726,7 @@ class BlobTest(unittest.TestCase):
             pa.RecordBatch.from_arrays(
                 [pa.array([v1], type=pa.large_binary())], names=["payload"]))
 
-        video_bytes = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2, -1, 0).serialize()
+        video_bytes = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2).serialize()
         writer._validate_inline_stored_fields_input(
             pa.RecordBatch.from_arrays(
                 [pa.array([video_bytes], type=pa.large_binary())], names=["payload"]))
@@ -1804,7 +1820,7 @@ class BlobTest(unittest.TestCase):
 
         data = b"video-frame-payload"
         descriptor = VideoFrameDescriptor(
-            "file-backed/video.mp4", 0, len(data), 2, -1, 0)
+            "file-backed/video.mp4", 0, len(data), 2)
         file_io = self._token_aware_file_io(data)
         row = OffsetRow(
             (descriptor.serialize(),), 0, 1,
@@ -1831,7 +1847,7 @@ class BlobTest(unittest.TestCase):
 
         data = b"convert video blob"
         descriptor = VideoFrameDescriptor(
-            "file-backed/convert.mp4", 0, len(data), 2, -1, 0)
+            "file-backed/convert.mp4", 0, len(data), 2)
         file_io = self._token_aware_file_io(data)
         batch = RecordBatch.from_arrays(
             [pa.array([descriptor.serialize()], type=pa.large_binary())],
@@ -1937,6 +1953,9 @@ class BlobTest(unittest.TestCase):
             def __init__(self):
                 self.uri_reader_factory = FailingFactory()
                 self.opened_paths = []
+
+            def read_blobs_concurrent(self, blobs, parallelism):
+                return [blob.to_data() if blob is not None else None for blob in blobs]
 
             def new_input_stream(self, path):
                 self.opened_paths.append(path)
@@ -2783,6 +2802,9 @@ class BlobTest(unittest.TestCase):
         class _CatalogEnvironment:
             catalog_loader = _CatalogLoader()
 
+            def catalog_context(self):
+                return self.catalog_loader
+
         class _Table:
             options = CoreOptions(Options({
                 "blob-as-descriptor": "true",
@@ -2998,19 +3020,19 @@ class BlobTest(unittest.TestCase):
         reader = SimpleNamespace(blob_view_lookup=lookup)
         row = OffsetRow((view_bytes, view_bytes), 0, 2)
 
-        converted = table_read._serialize_blob_view_row_tuple(row, reader)
+        converted = PythonTableRead(table_read)._serialize_blob_view_row_tuple(row, reader)
 
         self.assertEqual(converted[0], view_bytes)
         self.assertEqual(converted[1], descriptor.serialize())
 
         table_read._blob_view_output_indices = ()
-        skipped = table_read._serialize_blob_view_row_tuple(
+        skipped = PythonTableRead(table_read)._serialize_blob_view_row_tuple(
             row, SimpleNamespace())
         self.assertEqual(skipped, (view_bytes, view_bytes))
 
         table_read._blob_view_output_indices = (1,)
         table_read._blob_as_descriptor = False
-        not_descriptor = table_read._serialize_blob_view_row_tuple(row, reader)
+        not_descriptor = PythonTableRead(table_read)._serialize_blob_view_row_tuple(row, reader)
         self.assertEqual(not_descriptor, (view_bytes, view_bytes))
 
     def test_offset_row_get_blob_v1_resolved_blob_view_field(self):
@@ -3251,7 +3273,7 @@ class BlobEndToEndTest(unittest.TestCase):
                 streams = []
 
                 def counted_open(path):
-                    stream = MagicMock(wraps=open_stream(path))
+                    stream = counting_positional_stream(open_stream(path))
                     streams.append(stream)
                     return stream
 
@@ -3270,7 +3292,8 @@ class BlobEndToEndTest(unittest.TestCase):
                             finally:
                                 reader.close()
                         results.append(descriptors)
-                        reads.append(sum(stream.read.call_count for stream in streams))
+                        reads.append(sum(stream.read.call_count + stream.read_at.call_count
+                                         for stream in streams))
                     self.assertEqual(reads, [34, expected_reads])
                     self.assertEqual(results[0], results[1])
                     self.assertLessEqual(cache.size_bytes, cache.max_size_bytes)
@@ -3365,7 +3388,7 @@ class BlobEndToEndTest(unittest.TestCase):
         blob_file_path = Path(self.temp_dir) / (blob_field_name + ".blob")
         blob_file_url = _to_url(blob_file_path)
         blob_files[blob_field_name] = blob_file_url
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
         self.assertTrue(file_io.exists(blob_file_url))
 
         # ========== Step 3: Read Data and Check Data ==========
@@ -3413,7 +3436,7 @@ class BlobEndToEndTest(unittest.TestCase):
         table = pa.table([blob_data], schema=schema)
         blob_file_path = Path(self.temp_dir) / (blob_field_name + "_inline.blob")
         blob_file_url = _to_url(blob_file_path)
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         counting_file_io = CountingFileIO(file_io)
         read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
@@ -3433,6 +3456,83 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertEqual(batch.column(0)[1].as_py(), b"world")
         self.assertEqual(counting_file_io.input_stream_count, 1)
         reader.close()
+
+    def test_blob_index_reads_exact_ranges_without_stream_read_ahead(self):
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "positional-index.blob")
+        self._write_single_blob(path, field, b"payload")
+        file_size = os.path.getsize(path)
+        with open(path, "rb") as input_file:
+            data = input_file.read()
+        index_size = struct.unpack('<I', data[-5:-1])[0]
+        file_io = CountingBlobFileIO(self.temp_dir)
+        reader = FormatBlobReader(file_io, path, [field.name], [field], None, True,
+                                  file_size=file_size)
+        try:
+            descriptor = BlobDescriptor.deserialize(reader.read_arrow_batch().column(0)[0].as_py())
+            self.assertEqual((path, 4, 7), (descriptor.uri, descriptor.offset, descriptor.length))
+            stream = file_io.streams[0]
+            self.assertEqual([call(5, file_size - 5),
+                              call(index_size, file_size - 5 - index_size)],
+                             stream.read_at.call_args_list)
+            stream.seek.assert_not_called()
+            stream.read.assert_not_called()
+            self.assertEqual(1, len(file_io.streams))
+        finally:
+            reader.close()
+        self.assertEqual(1, file_io.streams[0].close.call_count)
+
+    def test_blob_index_falls_back_for_streams_without_positional_reads(self):
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "stream-index.blob")
+        self._write_single_blob(path, field, b"payload")
+        with open(path, "rb") as input_file:
+            data = input_file.read()
+        stream = MagicMock(wraps=io.BytesIO(data))
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        with patch.object(file_io, 'new_input_stream', return_value=stream):
+            reader = FormatBlobReader(file_io, path, [field.name], [field], None, True,
+                                      file_size=len(data))
+            try:
+                descriptor = BlobDescriptor.deserialize(reader.read_arrow_batch().column(0)[0].as_py())
+                self.assertEqual((path, 4, 7), (descriptor.uri, descriptor.offset, descriptor.length))
+                self.assertEqual(2, stream.seek.call_count)
+                self.assertEqual(2, stream.read.call_count)
+            finally:
+                reader.close()
+        self.assertEqual(1, stream.close.call_count)
+
+    def test_blob_index_rejects_ranges_outside_the_file(self):
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+
+        class PositionalStream(io.BytesIO):
+            def read_at(self, length, offset):
+                if offset < 0:
+                    raise AssertionError("invalid offset must not reach the filesystem")
+                return self.getvalue()[offset:offset + length]
+
+        for content in (b"1234", struct.pack('<IB', 100, 1)):
+            with self.subTest(content=content):
+                stream = PositionalStream(content)
+                file_io = LocalFileIO(self.temp_dir, Options({}))
+                with patch.object(file_io, 'new_input_stream', return_value=stream):
+                    with self.assertRaisesRegex(IOError, "Invalid blob file"):
+                        FormatBlobReader(file_io, str(id(stream)) + ".blob", [field.name],
+                                         [field], None, True, file_size=len(content))
+                self.assertTrue(stream.closed)
+
+    def test_blob_index_falls_back_when_os_pread_is_unavailable(self):
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "local-index.blob")
+        self._write_single_blob(path, field, b"payload")
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        with patch.object(os, 'pread', None, create=True):
+            reader = FormatBlobReader(file_io, path, [field.name], [field], None, True)
+            try:
+                descriptor = BlobDescriptor.deserialize(reader.read_arrow_batch().column(0)[0].as_py())
+                self.assertEqual((path, 4, 7), (descriptor.uri, descriptor.offset, descriptor.length))
+            finally:
+                reader.close()
 
     def test_blob_reader_uses_provided_file_size(self):
         field = DataField(0, "blob_field", AtomicType("BLOB"))
@@ -3636,10 +3736,11 @@ class BlobEndToEndTest(unittest.TestCase):
                 def open_stream(file_path):
                     stream = original_open(file_path)
                     if failure == 'read':
-                        stream.read.side_effect = IOError("injected read failure")
+                        stream.read_at.side_effect = IOError("injected read failure")
                     elif failure == 'index':
-                        read = stream._mock_wraps.read
-                        stream.read.side_effect = lambda size: read(size) if size == 5 else read(size)[:-1]
+                        read_at = stream.read_at.side_effect
+                        stream.read_at.side_effect = lambda size, offset: (
+                            read_at(size, offset) if size == 5 else read_at(size, offset)[:-1])
                     return stream
 
                 with patch.object(file_io, 'new_input_stream', side_effect=open_stream):
@@ -3747,7 +3848,7 @@ class BlobEndToEndTest(unittest.TestCase):
         table = pa.table([blob_data], schema=schema)
         blob_file_path = Path(self.temp_dir) / "row_indices.blob"
         blob_file_url = _to_url(blob_file_path)
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
         reader = FormatBlobReader(
@@ -3781,7 +3882,7 @@ class BlobEndToEndTest(unittest.TestCase):
         table = pa.table([blob_data], schema=schema)
         blob_file_path = Path(self.temp_dir) / "row_indices_out_of_range.blob"
         blob_file_url = _to_url(blob_file_path)
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
         with self.assertRaises(IndexError) as context:
@@ -3827,7 +3928,7 @@ class BlobEndToEndTest(unittest.TestCase):
             GenericRowSerializer.to_bytes(array_row)
         self.assertIn("AtomicType", str(context.exception))
 
-        # Note: FileIO.write_blob validation for complex types is tested separately below
+        # Note: Python blob codec validation for complex types is tested separately below
 
         # ========== Test MultisetType(nullable=True, element_type=AtomicType("BLOB")) ==========
         multiset_fields = [
@@ -3869,8 +3970,8 @@ class BlobEndToEndTest(unittest.TestCase):
             GenericRowSerializer.to_bytes(map_row)
         self.assertIn("AtomicType", str(context.exception))
 
-        # ========== Test FileIO.write_blob validation for complex types ==========
-        # Test that FileIO.write_blob properly validates and rejects complex types
+        # ========== Test Python blob codec validation for complex types ==========
+        # Test that Python blob codec properly validates and rejects complex types
 
         # Create a table with multiple columns (should fail - blob format requires single column)
         multi_column_schema = pa.schema([
@@ -3887,16 +3988,16 @@ class BlobEndToEndTest(unittest.TestCase):
 
         # Should throw RuntimeError for multiple columns
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(multi_column_url, multi_column_table)
+            write_blob_file(file_io, multi_column_url, multi_column_table)
         self.assertIn("single column", str(context.exception))
 
-        # Test that FileIO.write_blob supports null values and round-trips correctly
+        # Test that Python blob codec supports null values and round-trips correctly
         null_schema = pa.schema([pa.field("blob_with_nulls", pa.large_binary())])
         null_table = pa.table([[b"data", None]], schema=null_schema)
 
         null_file = Path(self.temp_dir) / "null_data.blob"
         null_file_url = _to_url(null_file)
-        file_io.write_blob(null_file_url, null_table)
+        write_blob_file(file_io, null_file_url, null_table)
 
         null_read_fields = [DataField(0, "blob_with_nulls", AtomicType("BLOB"))]
         null_reader = FormatBlobReader(
@@ -3921,7 +4022,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         valid_blob_file = Path(self.temp_dir) / "valid_blob.blob"
         valid_blob_url = _to_url(valid_blob_file)
-        file_io.write_blob(valid_blob_url, valid_table)
+        write_blob_file(file_io, valid_blob_url, valid_table)
 
         # Try to read with complex type field definition - this should fail
         # because FormatBlobReader tries to create PyArrow schema with complex types
@@ -3968,7 +4069,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         header_test_file = Path(self.temp_dir) / "header_test.blob"
         header_test_url = _to_url(header_test_file)
-        file_io.write_blob(header_test_url, valid_table)
+        write_blob_file(file_io, header_test_url, valid_table)
 
         # Read the file and corrupt the header (last 5 bytes: index_length + version)
         with open(header_test_file, 'rb') as f:
@@ -4007,7 +4108,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         full_blob_file = Path(self.temp_dir) / "full_blob.blob"
         full_blob_url = _to_url(full_blob_file)
-        file_io.write_blob(full_blob_url, large_table)
+        write_blob_file(file_io, full_blob_url, large_table)
 
         # Read the full file and truncate it in the middle
         with open(full_blob_file, 'rb') as f:
@@ -4046,7 +4147,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         zero_blob_file = Path(self.temp_dir) / "zero_length.blob"
         zero_blob_url = _to_url(zero_blob_file)
-        file_io.write_blob(zero_blob_url, zero_table)
+        write_blob_file(file_io, zero_blob_url, zero_table)
 
         # Verify file was created
         self.assertTrue(file_io.exists(zero_blob_url))
@@ -4089,7 +4190,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         large_sim_file = Path(self.temp_dir) / "large_simulation.blob"
         large_sim_url = _to_url(large_sim_file)
-        file_io.write_blob(large_sim_url, large_sim_table)
+        write_blob_file(file_io, large_sim_url, large_sim_table)
 
         # Verify large file was written
         large_sim_size = file_io.get_file_size(large_sim_url)
@@ -4162,7 +4263,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         # Should reject multi-field table
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(multi_field_url, multi_field_table)
+            write_blob_file(file_io, multi_field_url, multi_field_table)
         self.assertIn("single column", str(context.exception))
 
         # Test that blob format rejects non-binary field types
@@ -4174,7 +4275,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         # Should reject non-binary field
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(non_binary_url, non_binary_table)
+            write_blob_file(file_io, non_binary_url, non_binary_table)
         # Should fail due to type conversion issues (non-binary field can't be converted to BLOB)
         self.assertTrue(
             "large_binary" in str(context.exception) or
@@ -4189,7 +4290,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         null_file = Path(self.temp_dir) / "with_nulls.blob"
         null_file_url = _to_url(null_file)
-        file_io.write_blob(null_file_url, null_table)
+        write_blob_file(file_io, null_file_url, null_table)
 
         null_read_fields = [DataField(0, "blob_with_null", AtomicType("BLOB"))]
         null_reader = FormatBlobReader(
@@ -4217,7 +4318,7 @@ class BlobEndToEndTest(unittest.TestCase):
         table = pa.table([[raw_bytes]], schema=schema)
 
         # Should be treated as plain bytes instead of descriptor bytes.
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         fields = [DataField(0, "payload", AtomicType("BLOB"))]
         reader = FormatBlobReader(
@@ -4272,7 +4373,7 @@ class BlobEndToEndTest(unittest.TestCase):
         # Write the blob file. The write path adaptively handles descriptor bytes.
         blob_file_path = Path(self.temp_dir) / "descriptor_blob.blob"
         blob_file_url = _to_url(blob_file_path)
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
         # Verify the blob file was created
         self.assertTrue(file_io.exists(blob_file_url))
         file_size = file_io.get_file_size(blob_file_url)
@@ -4647,6 +4748,8 @@ class BlobEndToEndTest(unittest.TestCase):
             blob_parallelism=4,
         )
 
+        # The reader has already fetched its footer/index; count payload ranges below.
+        range_reads.clear()
         batch = reader.read_arrow_batch()
 
         self.assertEqual(
@@ -4731,7 +4834,7 @@ class BlobEndToEndTest(unittest.TestCase):
             [pa.array([[b"one", None], None, [b"two"]], type=arrow_type)],
             schema=pa.schema([pa.field("blob_array", arrow_type)]),
         )
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         fields = [
             DataField(
@@ -5969,6 +6072,59 @@ class CapBlobParallelismTest(unittest.TestCase):
 class CoalesceRangesTest(unittest.TestCase):
     """read_ranges_coalesced merges same-file adjacent reads into fewer requests
     (JingsongLi's IO-merging suggestion) while returning identical bytes."""
+
+    def test_single_lane_runs_without_executor(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "data")
+            with open(path, "wb") as stream:
+                stream.write(b"0123456789")
+            file_io = LocalFileIO()
+            # Adjacent requests coalesce to one lane even with parallelism > 1.
+            for parallelism in (1, 8):
+                with self.subTest(parallelism=parallelism), patch(
+                        "concurrent.futures.ThreadPoolExecutor",
+                        side_effect=AssertionError("Unexpected executor")):
+                    ranges = [(path, 4, 2), (path, 2, 2)]
+                    self.assertEqual([b"45", b"23"],
+                                     file_io.read_ranges_coalesced(ranges, parallelism))
+                    views = file_io.read_ranges_coalesced_views(ranges, parallelism)
+                    self.assertEqual([b"45", b"23"], [bytes(view) for view in views])
+                    self.assertTrue(all(isinstance(view, memoryview) for view in views))
+                    with self.assertRaises(FileNotFoundError):
+                        file_io.read_ranges_coalesced(
+                            [(path + "-missing", 0, 1)], parallelism)
+
+    def test_single_lane_close_errors(self):
+        for parallelism in (1, 8):
+            for return_views in (False, True):
+                for fail_read in (False, True):
+                    with self.subTest(parallelism=parallelism,
+                                      return_views=return_views, fail_read=fail_read):
+                        read_error = IOError("read failed")
+                        close_error = IOError("close failed")
+                        stream = MagicMock(spec=["read_at", "close"])
+                        stream.read_at.return_value = b"2345"
+                        if fail_read:
+                            stream.read_at.side_effect = read_error
+                        stream.close.side_effect = close_error
+                        file_io = LocalFileIO()
+                        file_io.new_input_stream = MagicMock(return_value=stream)
+                        file_io.read_file_range = MagicMock()
+                        read = (file_io.read_ranges_coalesced_views if return_views
+                                else file_io.read_ranges_coalesced)
+                        # Both requests merge into one lane, regardless of parallelism.
+                        with patch("concurrent.futures.ThreadPoolExecutor",
+                                   side_effect=AssertionError("Unexpected executor")):
+                            with self.assertRaises(IOError) as raised:
+                                read([("blob", 4, 2), ("blob", 2, 2)], parallelism)
+                        self.assertIs(raised.exception,
+                                      read_error if fail_read else close_error)
+                        stream.read_at.assert_called_once_with(4, 2)
+                        stream.close.assert_called_once_with()
+                        file_io.read_file_range.assert_not_called()
 
     def test_coalesce_ranges_grouping(self):
         from pypaimon.common.file_io import _coalesce_ranges

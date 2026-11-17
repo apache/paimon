@@ -27,6 +27,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.read.table_read import TableRead
 from pypaimon.execution.python.read.table_read import _RemainingRows
 
@@ -248,7 +249,8 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
         if (os.cpu_count() or 1) < 2:
             self.skipTest("single-core runner: auto resolves to serial")
         with mock.patch.object(
-            read, '_to_arrow_parallel', wraps=read._to_arrow_parallel
+            PythonTableRead, '_to_arrow_parallel', autospec=True,
+            side_effect=PythonTableRead._to_arrow_parallel
         ) as spy:
             read.to_arrow(splits)
         spy.assert_called_once()
@@ -260,7 +262,7 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
     def test_method_arg_overrides_option_to_serial(self):
         # option=4 but caller passes 1: should disable parallelism.
         read = self.table_opt_4.new_read_builder().new_read()
-        with mock.patch.object(read, '_to_arrow_parallel') as patched:
+        with mock.patch.object(PythonTableRead, '_to_arrow_parallel') as patched:
             patched.side_effect = AssertionError(
                 "_to_arrow_parallel should not be called when arg=1 overrides option")
             splits = self._scan_splits(self.table_opt_4.new_read_builder())
@@ -272,7 +274,8 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
         read = self.table_opt_1.new_read_builder().new_read()
         splits = self._scan_splits(self.table_opt_1.new_read_builder())
         with mock.patch.object(
-            read, '_to_arrow_parallel', wraps=read._to_arrow_parallel
+            PythonTableRead, '_to_arrow_parallel', autospec=True,
+            side_effect=PythonTableRead._to_arrow_parallel
         ) as spy:
             result = read.to_arrow(splits, parallelism=4)
         spy.assert_called_once()
@@ -359,7 +362,7 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
         splits = self._scan_splits(rb)
         self.assertGreaterEqual(len(splits), 2)
 
-        original_create = TableRead._create_split_read
+        original_create = PythonTableRead._create_split_read
         call_counter = {'n': 0}
         lock = threading.Lock()
 
@@ -371,7 +374,7 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
                 raise RuntimeError("simulated reader failure")
             return original_create(self_, split, blob_parallelism)
 
-        with mock.patch.object(TableRead, '_create_split_read', flaky):
+        with mock.patch.object(PythonTableRead, '_create_split_read', flaky):
             read = rb.new_read()
             with self.assertRaises(RuntimeError) as ctx:
                 read.to_pandas(splits, parallelism=4)

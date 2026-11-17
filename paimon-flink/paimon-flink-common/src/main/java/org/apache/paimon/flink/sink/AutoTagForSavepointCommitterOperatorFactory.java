@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.utils.SerializableSupplier;
 import org.apache.paimon.utils.SnapshotManager;
@@ -48,8 +47,6 @@ public class AutoTagForSavepointCommitterOperatorFactory<CommitT, GlobalCommitT>
 
     private final SerializableSupplier<TagManager> tagManagerFactory;
 
-    private final SerializableSupplier<TagDeletion> tagDeletionFactory;
-
     private final SerializableSupplier<List<TagCallback>> callbacksSupplier;
 
     private final NavigableSet<Long> identifiersForTags;
@@ -60,13 +57,11 @@ public class AutoTagForSavepointCommitterOperatorFactory<CommitT, GlobalCommitT>
             CommitterOperatorFactory<CommitT, GlobalCommitT> commitOperatorFactory,
             SerializableSupplier<SnapshotManager> snapshotManagerFactory,
             SerializableSupplier<TagManager> tagManagerFactory,
-            SerializableSupplier<TagDeletion> tagDeletionFactory,
             SerializableSupplier<List<TagCallback>> callbacksSupplier,
             Duration tagTimeRetained) {
         this.commitOperatorFactory = commitOperatorFactory;
         this.tagManagerFactory = tagManagerFactory;
         this.snapshotManagerFactory = snapshotManagerFactory;
-        this.tagDeletionFactory = tagDeletionFactory;
         this.callbacksSupplier = callbacksSupplier;
         this.identifiersForTags = new TreeSet<>();
         this.tagTimeRetained = tagTimeRetained;
@@ -81,7 +76,6 @@ public class AutoTagForSavepointCommitterOperatorFactory<CommitT, GlobalCommitT>
                         commitOperatorFactory.createStreamOperator(parameters),
                         snapshotManagerFactory,
                         tagManagerFactory,
-                        tagDeletionFactory,
                         callbacksSupplier,
                         tagTimeRetained);
     }

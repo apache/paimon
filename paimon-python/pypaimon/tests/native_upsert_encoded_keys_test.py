@@ -26,11 +26,11 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.execution.native.write.native_update import (
     _native_upsert_key_compatible, _native_upsert_key_type_compatible, create_native_upsert,
 )
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
@@ -118,9 +118,9 @@ def _table(catalog, key_type, keys, native, guarded):
 
 def _native_only(stack, native):
     if native:
-        stack.enter_context(patch.object(TableUpsertByKey, '_upsert_partition',
+        stack.enter_context(patch.object(PythonTableUpsert, '_upsert_partition',
                                          side_effect=AssertionError('Python Arrow upsert fallback')))
-        stack.enter_context(patch.object(TableUpsertByKey, '_upsert_row_partition',
+        stack.enter_context(patch.object(PythonTableUpsert, '_upsert_row_partition',
                                          side_effect=AssertionError('Python Row upsert fallback')))
 
 

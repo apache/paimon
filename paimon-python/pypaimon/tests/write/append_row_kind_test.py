@@ -342,6 +342,44 @@ def test_pandas_partial_write_keeps_selected_named_index(tmp_path, native):
     assert source.index.tolist() == [42]
 
 
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.parametrize('buckets', [1, 2])
+@pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
+@pytest.mark.parametrize('input_', ['row', 'batch', 'table', 'pandas'])
+def test_partial_write_keeps_bucket_key_until_routing(tmp_path, buckets, stream, input_):
+    schema = pa.schema([('id', pa.int32()), ('payload', pa.int32()), ('pt', pa.string())])
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        schema, partition_keys=['pt'], options={
+            'bucket': str(buckets), 'bucket-key': 'id', 'write.native.enabled': 'false',
+            'commit.native.enabled': 'false', 'read.native.enabled': 'false',
+            'scan.native-plan.enabled': 'false',
+        }), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    writer.with_write_type(['payload'])
+    values = [dict(id=1, payload=10, pt='a'), dict(id=2, payload=20, pt='b')]
+    try:
+        _write(writer, table, schema, values, input_, True)
+        messages = writer.prepare_commit(1) if stream else writer.prepare_commit()
+        assert all(file.write_cols == ['payload'] for message in messages for file in message.new_files)
+        assert all(0 <= message.bucket < buckets for message in messages)
+        if stream:
+            commit.commit(messages, 1)
+        else:
+            commit.commit(messages)
+    finally:
+        writer.close()
+        commit.close()
+    read = table.new_read_builder()
+    actual = read.new_read().to_arrow(read.new_scan().plan().splits()).to_pylist()
+    assert sorted(actual, key=lambda row: row['payload']) == [
+        dict(id=None, payload=10, pt='a'), dict(id=None, payload=20, pt='b')]
+
+
 @pytest.mark.parametrize('columns', [['payload', 'id'], []])
 def test_partial_batch_projection_uses_columns_and_preserves_schema_metadata(columns):
     from unittest.mock import Mock

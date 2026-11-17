@@ -69,8 +69,12 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     @Nullable private Integer parallelism;
     private double writerCpu;
     @Nullable private MemorySize writerMemory;
+    @Nullable private MemorySize writerManagedMemory;
+    @Nullable private MemorySize writerOffHeapMemory;
     private double committerCpu;
     @Nullable private MemorySize committerMemory;
+    @Nullable private MemorySize committerManagedMemory;
+    @Nullable private MemorySize committerOffHeapMemory;
 
     // Paimon catalog used to check and create tables. There will be two
     //     places where this catalog is used. 1) in processing function,
@@ -111,8 +115,14 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         this.parallelism = options.get(FlinkConnectorOptions.SINK_PARALLELISM);
         this.writerCpu = options.get(FlinkConnectorOptions.SINK_WRITER_CPU);
         this.writerMemory = options.get(FlinkConnectorOptions.SINK_WRITER_MEMORY);
+        this.writerManagedMemory = options.get(FlinkConnectorOptions.SINK_WRITER_MANAGED_MEMORY);
+        this.writerOffHeapMemory = options.get(FlinkConnectorOptions.SINK_WRITER_OFFHEAP_MEMORY);
         this.committerCpu = options.get(FlinkConnectorOptions.SINK_COMMITTER_CPU);
         this.committerMemory = options.get(FlinkConnectorOptions.SINK_COMMITTER_MEMORY);
+        this.committerManagedMemory =
+                options.get(FlinkConnectorOptions.SINK_COMMITTER_MANAGED_MEMORY);
+        this.committerOffHeapMemory =
+                options.get(FlinkConnectorOptions.SINK_COMMITTER_OFFHEAP_MEMORY);
         this.commitUser = createCommitUser(options);
         return this;
     }
@@ -191,8 +201,12 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         database,
                         writerCpu,
                         writerMemory,
+                        writerManagedMemory,
+                        writerOffHeapMemory,
                         committerCpu,
                         committerMemory,
+                        committerManagedMemory,
+                        committerOffHeapMemory,
                         commitUser,
                         eagerInit,
                         tableFilter);

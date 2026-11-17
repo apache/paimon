@@ -28,6 +28,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.operation.ListUnexistingFiles;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -39,6 +40,8 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.util.OutputTag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -81,8 +84,11 @@ public class RemoveUnexistingFilesAction extends TableActionBase {
     private static final OutputTag<String> RESULT_SIDE_OUTPUT =
             new OutputTag<>("result-side-output", BasicTypeInfo.STRING_TYPE_INFO);
 
+    private static final Logger LOG = LoggerFactory.getLogger(RemoveUnexistingFilesAction.class);
+
     private boolean dryRun = false;
     @Nullable private Integer parallelism = null;
+    @Nullable private List<Map<String, String>> partitions = null;
 
     public RemoveUnexistingFilesAction(
             String databaseName, String tableName, Map<String, String> catalogConfig) {
@@ -99,15 +105,42 @@ public class RemoveUnexistingFilesAction extends TableActionBase {
         return this;
     }
 
+    public RemoveUnexistingFilesAction withPartitions(List<Map<String, String>> partitions) {
+        this.partitions = partitions;
+        return this;
+    }
+
     @Override
     public void build() throws Exception {
         buildDataStream();
     }
 
     public DataStream<String> buildDataStream() throws Exception {
-        FileStoreTable fileStoreTable = (FileStoreTable) table;
-        List<BinaryRow> binaryPartitions = fileStoreTable.newScan().listPartitions();
+        return buildDataStream(selectPartitions());
+    }
 
+    private List<BinaryRow> selectPartitions() throws Exception {
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        List<BinaryRow> allPartitions = fileStoreTable.newScan().listPartitions();
+        if (partitions == null) {
+            return allPartitions;
+        }
+        PartitionPredicate partitionPredicate =
+                ActionPartitionPredicate.create(
+                        fileStoreTable, partitions, null, "remove_unexisting_files");
+        List<BinaryRow> selected =
+                allPartitions.stream()
+                        .filter(partitionPredicate::test)
+                        .collect(Collectors.toList());
+        LOG.info(
+                "{} of {} partitions match the specified partitions.",
+                selected.size(),
+                allPartitions.size());
+        return selected;
+    }
+
+    private DataStream<String> buildDataStream(List<BinaryRow> binaryPartitions) {
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
         SingleOutputStreamOperator<byte[]> source =
                 StreamExecutionEnvironmentUtils.fromData(
                                 env,
@@ -124,7 +157,9 @@ public class RemoveUnexistingFilesAction extends TableActionBase {
                         new CommittableTypeInfo(),
                         new WorkerOperator(fileStoreTable));
         if (parallelism != null) {
-            worker = worker.setParallelism(Math.min(parallelism, binaryPartitions.size()));
+            worker =
+                    worker.setParallelism(
+                            Math.min(parallelism, Math.max(1, binaryPartitions.size())));
         }
 
         DataStream<String> result = worker.getSideOutput(RESULT_SIDE_OUTPUT);
@@ -142,7 +177,12 @@ public class RemoveUnexistingFilesAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
-        build();
+        List<BinaryRow> binaryPartitions = selectPartitions();
+        if (binaryPartitions.isEmpty()) {
+            LOG.info("No partition to check in table {}.", table.name());
+            return;
+        }
+        buildDataStream(binaryPartitions);
         env.execute("Remove Unexisting Files : " + table.name());
     }
 

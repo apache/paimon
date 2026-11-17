@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, List, Optional
 
 
@@ -41,20 +41,33 @@ class Plan:
         native_stats = self._native_stats
         if native_stats is not None:
             self._scan_stats = ScanStats.from_native(native_stats)
-            # Python can filter or limit splits after Native planning. Keep the
-            # actual planning work, but summarize the final returned selection.
-            files, data_bytes = 0, 0
-            for split in self._splits:
-                for file in split.files:
-                    files += 1
-                    data_bytes += max(0, file.file_size)
-            counters = self._scan_stats.planning_counters
-            counters.update(final_splits=len(self._splits), splits_after_limit=len(self._splits),
-                            final_files=files, planned_data_file_bytes=min(data_bytes, 2 ** 64 - 1))
-            if self._stats_limit is not None:
-                counters['limit'] = self._stats_limit
+            self._update_split_counters()
             self._native_stats = None
         return self._scan_stats
+
+    def _update_split_counters(self):
+        # Keep the actual planning work while describing the returned splits.
+        if self._scan_stats is None or self._scan_stats.planning_counters is None:
+            return
+        files, data_bytes = 0, 0
+        for split in self._splits:
+            for file in split.files:
+                files += 1
+                data_bytes += max(0, file.file_size)
+        counters = self._scan_stats.planning_counters
+        counters.update(final_splits=len(self._splits), splits_after_limit=len(self._splits),
+                        final_files=files, planned_data_file_bytes=min(data_bytes, 2 ** 64 - 1))
+        if self._stats_limit is not None:
+            counters['limit'] = self._stats_limit
+
+    def _with_splits(self, splits):
+        stats = self._scan_stats
+        if stats is not None:
+            counters = stats.planning_counters
+            stats = replace(stats, planning_counters=None if counters is None else dict(counters))
+        selected = replace(self, _splits=list(splits), _scan_stats=stats)
+        selected._update_split_counters()
+        return selected
 
     def __getstate__(self):
         # Native handles are process-local. Serialize counters as Python scalars.

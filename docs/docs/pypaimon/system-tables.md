@@ -35,7 +35,7 @@ catalog and read-builder APIs. The supported short names are:
 ## Basic Usage
 
 Reuse a single read builder for both the scan and the read so that any
-projection or limit set on it is honoured by both sides:
+filter, projection, or limit set on it is honoured by both sides:
 
 ```python
 from pypaimon import CatalogFactory
@@ -48,17 +48,29 @@ splits = read_builder.new_scan().plan().splits()
 print(read_builder.new_read().to_pandas(splits))
 ```
 
-`with_projection` and `with_limit` chain on the same builder:
+`with_projection`, `with_filter`, and `with_limit` chain on the same builder.
+The filter runs on the in-memory system table before projection and limit:
 
 ```python
+read_builder = snapshots.new_read_builder()
+predicate = read_builder.new_predicate_builder().startswith('commit_user', 'job-')
 read_builder = (
-    snapshots.new_read_builder()
+    read_builder
+    .with_filter(predicate)
     .with_projection(['snapshot_id', 'commit_user', 'commit_time'])
     .with_limit(10)
 )
 splits = read_builder.new_scan().plan().splits()
 arrow_table = read_builder.new_read().to_arrow(splits)
 ```
+
+Supported filters are equality and comparison (`equal`, `not_equal`,
+`less_than`, `less_or_equal`, `greater_than`, `greater_or_equal`,
+`between`, `not_between`), `is_in` / `is_not_in`, `is_null` /
+`is_not_null`, and `and_predicates` / `or_predicates`. On `STRING`
+columns, `startswith`, `endswith`, `contains`, and SQL `like` (`%`,
+`_`, and `\` escapes) are applied by an exact row match. `like` treats
+`_` as one character, including a newline.
 
 The returned object exposes the regular `Table` surface, so the same
 read builder works with `to_pandas`, `to_arrow`, `to_iterator`,
@@ -132,8 +144,8 @@ Manifest list for the latest snapshot.
 | `num_added_files`     | BIGINT NOT NULL |                               |
 | `num_deleted_files`   | BIGINT NOT NULL |                               |
 | `schema_id`           | BIGINT NOT NULL |                               |
-| `min_partition_stats` | STRING          | Placeholder (see Limitations) |
-| `max_partition_stats` | STRING          | Placeholder (see Limitations) |
+| `min_partition_stats` | STRING          | `{v1, v2}`; `NULL` for some partition types (see Limitations) |
+| `max_partition_stats` | STRING          | `{v1, v2}`; `NULL` for some partition types (see Limitations) |
 | `min_row_id`          | BIGINT          |                               |
 | `max_row_id`          | BIGINT          |                               |
 
@@ -196,8 +208,8 @@ Snapshot metadata for every tag.
 | `schema_id`     | BIGINT NOT NULL       |                                |
 | `commit_time`   | TIMESTAMP(3) NOT NULL |                                |
 | `record_count`  | BIGINT                |                                |
-| `create_time`   | TIMESTAMP(3)          | Currently emitted as `NULL`    |
-| `time_retained` | STRING                | Currently emitted as `NULL`    |
+| `create_time`   | TIMESTAMP(3)          | `NULL` when the tag has no retention metadata |
+| `time_retained` | STRING                | ISO-8601 duration, such as `PT24H`; `NULL` when unset |
 
 ### `$branches`
 
@@ -210,17 +222,22 @@ Every named branch with the branch directory's modification time.
 
 ## Limitations
 
-* **Predicate pushdown is not yet implemented.** Calling
-  `with_filter(...)` is accepted, but invoking `new_read()` later will
-  raise `NotImplementedError` rather than silently dropping the
-  predicate. Filter the resulting Arrow table / DataFrame on the
-  client side instead.
+* **Value comparisons on nested system-table columns are rejected.**
+  Columns such as `$files.write_cols` (`ARRAY`) have no PyArrow
+  comparison kernel. `with_filter` raises `NotImplementedError` for
+  equality, comparison, `in`, and string match on those columns.
+  `is_null` and `is_not_null` still apply. String match methods on a
+  non-string column also raise `NotImplementedError`.
 * **`min_partition_stats` / `max_partition_stats` in `$manifests`**
-  are emitted as `NULL`. PyPaimon does not yet ship a helper that casts
-  a partition row to its string form.
-* **`tag.time_retained` and `tag.create_time` are `NULL`.** PyPaimon's
-  `Tag` dataclass does not yet carry these fields — matching
-  `FileSystemCatalog.get_tag`'s current behaviour.
+  use the same `{v1, v2}` text as Java. An unpartitioned table renders
+  `{}`. The whole value stays `NULL` when any partition field is
+  `FLOAT`, `DOUBLE`, `TIMESTAMP_LTZ`, `BINARY`, `VARBINARY`, or
+  `BYTES`, because those casts are not stable across JVM versions and
+  Python.
+* **`$tags.create_time` and `$tags.time_retained` are `NULL` when the
+  tag was created without retention.** A tag created with
+  `time_retained` fills `create_time` and stores the duration as Java
+  `Duration` text (`1d` becomes `PT24H`).
 * **`branch.create_time` falls back to epoch 0** when the underlying
   store cannot provide an mtime (some remote object stores via
   `PyArrowFileIO`). Local filesystem catalogs always populate the

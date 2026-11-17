@@ -21,7 +21,7 @@ import pyarrow as pa
 
 from pypaimon.write.commit_message import CommitMessage
 
-from pypaimon.write.backend_dispatch import create_write
+from pypaimon.write.backend_dispatch import create_write, initialize_write
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.table_write import BatchTableWrite
 from pypaimon.write.write_builder import BatchWriteBuilder
@@ -54,48 +54,26 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
     """Batch writer which plans postpone rows before routing new partitions."""
 
     def __init__(self, table, commit_user, static_partition: Optional[dict] = None, bucket_plan=None):
-        self._python_execution().initialize(table, commit_user, static_partition, bucket_plan)
-        self.batch_committed = False
-
-    def _python_execution(self):
-        from pypaimon.execution.python.write.postpone_batch_table_write import PythonPostponeFixedBucketWrite
-        return PythonPostponeFixedBucketWrite(self)
-
-    def _create_file_store_write(self, commit_user):
-        return self._python_execution()._create_file_store_write(commit_user)
-
-    def _create_row_key_extractor(self, static_partition):
-        return self._python_execution()._create_row_key_extractor(static_partition)
-
-    def _write_partition_bucket_batch(self, partition, bucket, data):
-        return self._python_execution()._write_partition_bucket_batch(partition, bucket, data)
-
-    def _write_partition_bucket_row(self, partition, bucket, row, values_by_name):
-        return self._python_execution()._write_partition_bucket_row(partition, bucket, row, values_by_name)
-
-    def _buffer_input(self, data):
-        return self._python_execution()._buffer_input(data)
+        initialize_write(self, table, commit_user, static_partition,
+                         fixed_bucket=True, bucket_plan=bucket_plan)
 
     def write_arrow(self, table: pa.Table, bucket=None):
-        return self._python_execution().write_arrow(table, bucket)
+        return self._execution.write_arrow(table, bucket)
 
     def write_arrow_batch(self, data: pa.RecordBatch, bucket=None):
-        return self._python_execution().write_arrow_batch(data, bucket)
+        return self._execution.write_arrow_batch(data, bucket)
 
     def write_row(self, row):
-        return self._python_execution().write_row(row)
-
-    def _flush_pending_inputs(self):
-        return self._python_execution()._flush_pending_inputs()
+        return self._execution.write_row(row)
 
     def prepare_commit(self) -> List[CommitMessage]:
         return super().prepare_commit()
 
     def _distributed_write_options(self, *, overwrite=False):
-        return self._python_execution()._distributed_write_options(overwrite=overwrite)
+        return self._execution._distributed_write_options(overwrite=overwrite)
 
     def close(self):
-        return self._python_execution().close()
+        return self._execution.close()
 
     def abort(self):
-        return self._python_execution().abort()
+        return self._execution.abort()

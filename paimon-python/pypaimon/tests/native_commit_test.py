@@ -86,7 +86,9 @@ def _rows(table):
 
 
 def _must_not_fallback(commit, method='commit'):
-    return patch.object(commit.file_store_commit, method, side_effect=AssertionError('Python fallback'))
+    return patch('pypaimon.execution.python.write.file_store_commit.'
+                 'FileStoreCommit.' + method,
+                 side_effect=AssertionError('Python fallback'))
 
 
 def _seed(table):
@@ -99,10 +101,10 @@ def _seed(table):
         commit.close()
 
 
-@pytest.mark.python_commit
-def test_native_commit_is_opt_in():
-    assert not CoreOptions(Options({})).native_commit_enabled()
-    assert CoreOptions(Options({'commit.native.enabled': 'true'})).native_commit_enabled()
+@pytest.mark.execution_defaults
+def test_native_commit_is_default_and_can_be_disabled():
+    assert CoreOptions(Options({})).native_commit_enabled()
+    assert not CoreOptions(Options({'commit.native.enabled': 'false'})).native_commit_enabled()
 
 
 @pytest.mark.parametrize('backend', ['filesystem', 'path', 'jdbc'])
@@ -324,7 +326,9 @@ def test_native_abort_removes_uncommitted_files(tmp_path, native_rest_catalog, o
     assert files
     commit = builder.new_commit()
     try:
-        with patch.object(commit.file_store_commit, 'abort', side_effect=AssertionError('Python fallback')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.abort',
+                   side_effect=AssertionError('Python fallback')):
             commit.abort(messages)
         assert not any(path.exists() for path in files)
         assert table.snapshot_manager().get_latest_snapshot() is None
@@ -351,8 +355,9 @@ def test_python_written_escaped_partition_supports_native_abort(
 
     commit = builder.new_commit()
     try:
-        with patch.object(commit.file_store_commit, 'abort',
-                          side_effect=AssertionError('Python fallback')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.abort',
+                   side_effect=AssertionError('Python fallback')):
             commit.abort(messages)
         assert not table.file_io.exists(file.file_path)
         assert table.snapshot_manager().get_latest_snapshot() is None
@@ -393,9 +398,12 @@ def test_native_mutation_failure_never_falls_back_or_aborts(tmp_path, method, ov
     getattr(native, method).side_effect = OSError('outcome unknown')
     with patch('pypaimon.execution.native.write.native_commit.create_native_commit', return_value=native), \
             patch('pypaimon.execution.native.write.native_commit.to_native_commit_messages', return_value=['wire']), \
-            patch.object(commit.file_store_commit, 'commit') as fallback, \
-            patch.object(commit.file_store_commit, 'overwrite') as fallback_overwrite, \
-            patch.object(commit.file_store_commit, 'abort') as abort:
+            patch('pypaimon.execution.python.write.file_store_commit.'
+                  'FileStoreCommit.commit') as fallback, \
+            patch('pypaimon.execution.python.write.file_store_commit.'
+                  'FileStoreCommit.overwrite') as fallback_overwrite, \
+            patch('pypaimon.execution.python.write.file_store_commit.'
+                  'FileStoreCommit.abort') as abort:
         with pytest.raises(OSError, match='outcome unknown'):
             getattr(commit, method)(messages)
         fallback.assert_not_called()
@@ -430,7 +438,9 @@ def test_publication_response_loss_does_not_duplicate_or_delete_files(
     try:
         with patch('pypaimon.execution.native.write.native_commit.create_native_commit', return_value=proxy), \
                 _must_not_fallback(commit, 'overwrite' if overwrite else 'commit'), \
-                patch.object(commit.file_store_commit, 'abort', side_effect=AssertionError('abort')):
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.abort',
+                      side_effect=AssertionError('abort')):
             with pytest.raises(OSError, match='response lost'):
                 commit.commit(messages)
         assert table.snapshot_manager().get_latest_snapshot().id == 1
@@ -580,15 +590,20 @@ def test_missing_runtime_falls_back_without_reconstructing_table(
         resolve.assert_not_called()
 
 
-def test_preassigned_row_id_messages_use_native_validation(
-        tmp_path, native_rest_catalog):
+@pytest.mark.parametrize('write_cols', [None, ['id']])
+def test_preassigned_row_id_messages_keep_native_probes_but_use_python_publication(
+        tmp_path, native_rest_catalog, write_cols):
     table = _table(tmp_path, 'de', catalog=native_rest_catalog)
     assert native_messages_supported(table, [CommitMessage((), 0, [])])
     assert native_messages_supported(table, [CommitMessage((), 0, [], check_from_snapshot=7)])
     messages = _prepare(table.new_batch_write_builder(), [{'id': 1, 'pt': 'a'}])
     messages[0].new_files[0].first_row_id = 1
+    messages[0].new_files[0].write_cols = write_cols
     messages[0].check_from_snapshot = 7
     assert native_messages_supported(table, messages)
+    assert not native_messages_supported(table, messages, for_commit=True)
+    messages[0].check_from_snapshot = None
+    assert not native_messages_supported(table, messages, for_commit=True)
     assert not native_messages_supported(table, [CommitMessage((), 0, [], compact_after=[Mock()])])
 
 
@@ -616,9 +631,12 @@ def test_custom_manifest_target_uses_native_commit(tmp_path, native_rest_catalog
 
 def test_close_releases_python_resources_even_if_native_close_fails(tmp_path):
     commit = _table(tmp_path).new_batch_write_builder().new_commit()
+    from pypaimon.execution.python.write.table_commit import create_python_commit
+    commit._python_commit = create_python_commit(commit)
     commit._native_commit = Mock()
     commit._native_commit.close.side_effect = OSError('close failure')
-    with patch.object(commit.file_store_commit, 'close') as close:
+    with patch('pypaimon.execution.python.write.file_store_commit.'
+               'FileStoreCommit.close') as close:
         with pytest.raises(OSError, match='close failure'):
             commit.close()
         close.assert_called_once()
@@ -649,8 +667,10 @@ def test_native_callbacks_keep_python_context_and_allow_native_read(
             assert all(isinstance(entry, ManifestEntry) for entry in context.commit_entries)
             assert all(isinstance(entry.partition, GenericRow) for entry in context.commit_entries)
             # Re-enter Rust's runtime from the Python callback after publication.
-            with patch('pypaimon.read.table_read.TableRead._create_split_read',
-                       side_effect=AssertionError('callback read fell back')):
+            with patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('callback read fell back')
+            ):
                 calls.append((context, _rows(table)))
 
     commit = builder.new_commit()
@@ -718,7 +738,9 @@ def test_native_callback_recovery_and_error_preserve_files(
     try:
         with patch.object(RESTCatalogServer, '_table_commit_handle', publish_then_lose_response), \
                 _must_not_fallback(commit), \
-                patch.object(commit.file_store_commit, 'abort', side_effect=AssertionError('abort')):
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.abort',
+                      side_effect=AssertionError('abort')):
             if callback_fails:
                 with pytest.raises(LookupError, match='notification failed'):
                     commit.commit(messages)

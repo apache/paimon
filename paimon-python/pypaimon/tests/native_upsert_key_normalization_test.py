@@ -30,8 +30,8 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 from pypaimon.schema.data_types import PyarrowFieldParser
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
 pytestmark = pytest.mark.native_plan
@@ -123,7 +123,7 @@ def _upsert(table, source, native, stream, columns=('value',)):
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch.object(
-                TableUpsertByKey, '_upsert_partition', side_effect=AssertionError('Python key matching')))
+                PythonTableUpsert, '_upsert_partition', side_effect=AssertionError('Python key matching')))
         update = builder.new_update()
         if columns is not None:
             update.with_update_type(list(columns))

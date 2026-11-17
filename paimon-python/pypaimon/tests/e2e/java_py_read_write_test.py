@@ -41,11 +41,7 @@ else:
 
 
 def get_file_format_params():
-    # lance has no wheel on Python < 3.8.
-    if sys.version_info[:2] < (3, 8):
-        return [('parquet',), ('orc',), ('avro',)]
-    else:
-        return [('parquet',), ('orc',), ('avro',), ('lance',)]
+    return [('parquet',), ('orc',), ('avro',)]
 
 
 def match_query(terms, operator=None):
@@ -141,6 +137,26 @@ class JavaPyReadWriteTest(unittest.TestCase):
         commit.commit(writer.prepare_commit())
         writer.close()
         commit.close()
+
+    def test_py_write_bucketed_append_sequence(self):
+        # Six one-row commits to one bucket; testReadPythonBucketedAppendOrder
+        # compacts them with a Java write and checks the append order.
+        table_name = 'default.bucketed_append_order_python_to_java'
+        self.catalog.drop_table(table_name, True)
+        arrow_schema = pa.schema([('id', pa.int32()), ('seq', pa.int32())])
+        self.catalog.create_table(table_name, Schema.from_pyarrow_schema(
+            arrow_schema, options={'bucket': '1', 'bucket-key': 'id'}), False)
+        table = self.catalog.get_table(table_name)
+        for seq in range(6):
+            builder = table.new_batch_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(pa.Table.from_pydict(
+                    {'id': [1], 'seq': [seq]}, schema=arrow_schema))
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
 
     @parameterized.expand([
         (type_name, order, grouping)
@@ -265,32 +281,23 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
     @parameterized.expand(get_file_format_params())
     def test_py_write_read_pk_table(self, file_format):
-        # Lance format doesn't support timestamp, so exclude timestamp columns
-        if file_format == 'lance':
-            pa_schema = pa.schema([
-                ('id', pa.int32()),
-                ('name', pa.string()),
-                ('category', pa.string()),
-                ('value', pa.float64())
-            ])
-        else:
-            pa_schema = pa.schema([
-                ('id', pa.int32()),
-                ('name', pa.string()),
-                ('category', pa.string()),
-                ('value', pa.float64()),
-                ('ts', pa.timestamp('us')),
-                ('ts_ltz', pa.timestamp('us', tz='UTC')),
-                ('t', pa.time32('ms')),
-                ('metadata', pa.struct([
-                    pa.field('source', pa.string()),
-                    pa.field('created_at', pa.int64()),
-                    pa.field('location', pa.struct([
-                        pa.field('city', pa.string()),
-                        pa.field('country', pa.string())
-                    ]))
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('category', pa.string()),
+            ('value', pa.float64()),
+            ('ts', pa.timestamp('us')),
+            ('ts_ltz', pa.timestamp('us', tz='UTC')),
+            ('t', pa.time32('ms')),
+            ('metadata', pa.struct([
+                pa.field('source', pa.string()),
+                pa.field('created_at', pa.int64()),
+                pa.field('location', pa.struct([
+                    pa.field('city', pa.string()),
+                    pa.field('country', pa.string())
                 ]))
-            ])
+            ]))
+        ])
 
         table_name = f'default.mixed_test_pk_tablep_{file_format}'
         schema = Schema.from_pyarrow_schema(
@@ -316,33 +323,24 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.catalog.create_table(table_name, schema, False)
         table = self.catalog.get_table(table_name)
 
-        # Lance format doesn't support timestamp, so exclude timestamp columns
-        if file_format == 'lance':
-            initial_data = pd.DataFrame({
-                'id': [1, 2, 3, 4, 5, 6],
-                'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
-                'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
-                'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0]
-            })
-        else:
-            initial_data = pd.DataFrame({
-                'id': [1, 2, 3, 4, 5, 6],
-                'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
-                'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
-                'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
-                'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
-                'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True),
-                't': [datetime.time(0, 0, 1), datetime.time(0, 0, 2), datetime.time(0, 0, 3),
-                      datetime.time(0, 0, 4), datetime.time(0, 0, 5), datetime.time(0, 0, 6)],
-                'metadata': [
-                    {'source': 'store1', 'created_at': 1001, 'location': {'city': 'Beijing', 'country': 'China'}},
-                    {'source': 'store1', 'created_at': 1002, 'location': {'city': 'Shanghai', 'country': 'China'}},
-                    {'source': 'store2', 'created_at': 1003, 'location': {'city': 'Tokyo', 'country': 'Japan'}},
-                    {'source': 'store2', 'created_at': 1004, 'location': {'city': 'Seoul', 'country': 'Korea'}},
-                    {'source': 'store3', 'created_at': 1005, 'location': {'city': 'NewYork', 'country': 'USA'}},
-                    {'source': 'store3', 'created_at': 1006, 'location': {'city': 'London', 'country': 'UK'}}
-                ]
-            })
+        initial_data = pd.DataFrame({
+            'id': [1, 2, 3, 4, 5, 6],
+            'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
+            'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
+            'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
+            'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
+            'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True),
+            't': [datetime.time(0, 0, 1), datetime.time(0, 0, 2), datetime.time(0, 0, 3),
+                  datetime.time(0, 0, 4), datetime.time(0, 0, 5), datetime.time(0, 0, 6)],
+            'metadata': [
+                {'source': 'store1', 'created_at': 1001, 'location': {'city': 'Beijing', 'country': 'China'}},
+                {'source': 'store1', 'created_at': 1002, 'location': {'city': 'Shanghai', 'country': 'China'}},
+                {'source': 'store2', 'created_at': 1003, 'location': {'city': 'Tokyo', 'country': 'Japan'}},
+                {'source': 'store2', 'created_at': 1004, 'location': {'city': 'Seoul', 'country': 'Korea'}},
+                {'source': 'store3', 'created_at': 1005, 'location': {'city': 'NewYork', 'country': 'USA'}},
+                {'source': 'store3', 'created_at': 1006, 'location': {'city': 'London', 'country': 'UK'}}
+            ]
+        })
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
@@ -357,7 +355,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table_read = read_builder.new_read()
         result = table_read.to_pandas(table_scan.plan().splits())
         print(f"Format: {file_format}, Result:\n{result}")
-        self.assertEqual(initial_data.to_dict(), result.to_dict())
+        # Primary-key scans across partitions and buckets have no global row order.
+        self.assertEqual(initial_data.to_dict(), result.sort_values('id').reset_index(drop=True).to_dict())
 
         from pypaimon.execution.python.write.row_key_extractor import FixedBucketRowKeyExtractor
         expected_bucket_first_row = 2
@@ -384,19 +383,18 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Verify data
         self.assertEqual(len(res), 7)
-        if file_format != "lance":
-            self.assertEqual(table.fields[4].type.type, "TIMESTAMP(6)")
-            self.assertEqual(table.fields[5].type.type, "TIMESTAMP(6) WITH LOCAL TIME ZONE")
-            self.assertEqual(table.fields[6].type.type, "TIME(0)")
-            self.assertEqual(table.fields[7].type.type, "BINARY(20)")
-            from pypaimon.schema.data_types import RowType
-            self.assertIsInstance(table.fields[8].type, RowType)
-            metadata_fields = table.fields[8].type.fields
-            self.assertEqual(len(metadata_fields), 3)
-            self.assertEqual(metadata_fields[0].name, 'source')
-            self.assertEqual(metadata_fields[1].name, 'created_at')
-            self.assertEqual(metadata_fields[2].name, 'location')
-            self.assertIsInstance(metadata_fields[2].type, RowType)
+        self.assertEqual(table.fields[4].type.type, "TIMESTAMP(6)")
+        self.assertEqual(table.fields[5].type.type, "TIMESTAMP(6) WITH LOCAL TIME ZONE")
+        self.assertEqual(table.fields[6].type.type, "TIME(0)")
+        self.assertEqual(table.fields[7].type.type, "BINARY(20)")
+        from pypaimon.schema.data_types import RowType
+        self.assertIsInstance(table.fields[8].type, RowType)
+        metadata_fields = table.fields[8].type.fields
+        self.assertEqual(len(metadata_fields), 3)
+        self.assertEqual(metadata_fields[0].name, 'source')
+        self.assertEqual(metadata_fields[1].name, 'created_at')
+        self.assertEqual(metadata_fields[2].name, 'location')
+        self.assertIsInstance(metadata_fields[2].type, RowType)
         
         # Data order may vary due to partitioning/bucketing, so compare as sets
         expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef', 'Tofu'}
@@ -408,7 +406,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(len(tofu_row), 1)
         self.assertTrue(pd.isna(tofu_row['category'].iloc[0]))
 
-        if file_format != "lance" and 'bin_data' in res.columns:
+        if 'bin_data' in res.columns:
             apple_row = res[res['name'] == 'Apple']
             self.assertEqual(apple_row['bin_data'].iloc[0], b'apple_bin_data')
             carrot_row = res[res['name'] == 'Carrot']
@@ -1367,10 +1365,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(jieba_and_row_ids, [3])
 
     def test_read_lumina_vector_index(self):
-        """Test reading a Lumina vector index built by Java (orc and lance formats)."""
+        """Test reading a Lumina vector index built by Java in ORC format."""
         test_cases = [('default.test_lumina_vector', 'orc')]
-        if sys.version_info[:2] != (3, 6):
-            test_cases.append(('default.test_lumina_vector_lance', 'lance'))
         for table_name, label in test_cases:
             with self.subTest(file_format=label):
                 table = self.catalog.get_table(table_name)
@@ -1909,7 +1905,6 @@ class JavaPyReadWriteTest(unittest.TestCase):
         update.with_read_projection(['f0'])
         update.with_update_type(['f2'])
         upd = update.new_shard_updator(shard_num=0, total_shard_count=3)
-        print(f"Shard 0 row_ranges: {[(r[1].from_, r[1].to) for r in upd.row_ranges]}")
 
         reader = upd.arrow_reader()
         import pyarrow as pa

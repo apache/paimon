@@ -273,6 +273,18 @@ under the License.
             <td>Sink committer memory to control heap memory of global committer.</td>
         </tr>
         <tr>
+            <td><h5>sink.committer-offheap-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Task off-heap memory resource budget for the committer slot sharing group. Must be positive and requires sink.committer-memory.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.committer-managed-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Managed memory resource budget for the committer slot sharing group. Must be positive and requires sink.committer-memory.</td>
+        </tr>
+        <tr>
             <td><h5>sink.committer-operator-chaining</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
@@ -369,10 +381,22 @@ under the License.
             <td>Sink writer cpu to control cpu cores of writer.</td>
         </tr>
         <tr>
+            <td><h5>sink.writer-managed-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Managed memory resource budget for the writer slot sharing group. Must be positive and requires sink.writer-memory. This does not enable sink.use-managed-memory-allocator or change the allocation weight sink.managed.writer-buffer-memory. The actual writer buffer size depends on the slot's allocated resources and managed memory consumers.</td>
+        </tr>
+        <tr>
             <td><h5>sink.writer-memory</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
             <td>Sink writer memory to control heap memory of writer.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.writer-offheap-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Task off-heap memory resource budget for the writer slot sharing group. Must be positive and requires sink.writer-memory.</td>
         </tr>
         <tr>
             <td><h5>sink.writer-refresh-detectors</h5></td>

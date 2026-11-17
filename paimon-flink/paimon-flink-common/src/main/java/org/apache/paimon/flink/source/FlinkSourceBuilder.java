@@ -217,20 +217,68 @@ public class FlinkSourceBuilder {
         return readBuilder.dropStats();
     }
 
-    private DataStream<RowData> buildStaticFileSource() {
-        Options options = Options.fromMap(table.options());
-        return toDataStream(
-                new StaticFileStoreSource(
-                        createReadBuilder(projectedRowType()),
-                        limit,
-                        options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
-                        options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
-                        dynamicPartitionFilteringInfo,
-                        outerProject(),
-                        SplitWeightUtils.splitWeightFunc(options),
-                        null,
-                        options.get(CoreOptions.BLOB_AS_DESCRIPTOR),
-                        skipPreloadTargetSnapshot));
+    private Source<RowData, ?, ?> createSource() {
+        checkConsumerId();
+        if (sourceBounded == null) {
+            throw new IllegalArgumentException(
+                    "Cannot determine boundedness of source: please provide the "
+                            + "StreamExecutionEnvironment via env() or specify sourceBounded().");
+        }
+
+        if (sourceBounded) {
+            if (PostponeMergeOnRead.usesCustomSource(table)) {
+                throw new UnsupportedOperationException(
+                        "Postpone merge-on-read relies on a custom multi-operator topology, "
+                                + "please use build() instead.");
+            }
+            if (conf.get(FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION)) {
+                throw new UnsupportedOperationException(
+                        "scan.dedicated-split-generation relies on a monitor topology, "
+                                + "please use build() instead.");
+            }
+            Options options = Options.fromMap(table.options());
+            return new StaticFileStoreSource(
+                    createReadBuilder(projectedRowType()),
+                    limit,
+                    options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
+                    options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
+                    dynamicPartitionFilteringInfo,
+                    outerProject(),
+                    SplitWeightUtils.splitWeightFunc(options),
+                    null,
+                    options.get(CoreOptions.BLOB_AS_DESCRIPTOR),
+                    skipPreloadTargetSnapshot);
+        }
+
+        TableScanUtils.streamingReadingValidate(table);
+        if (conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_ENABLED)) {
+            throw new UnsupportedOperationException(
+                    "Checkpoint align mode requires validation against the environment, "
+                            + "please use build() instead.");
+        }
+        if (conf.contains(CoreOptions.CONSUMER_ID)
+                && conf.get(CoreOptions.CONSUMER_CONSISTENCY_MODE)
+                        == CoreOptions.ConsumerMode.EXACTLY_ONCE) {
+            throw new UnsupportedOperationException(
+                    "Exactly-once consumer mode relies on a monitor topology, "
+                            + "please use build() instead.");
+        }
+        return new ContinuousFileStoreSource(
+                createReadBuilder(projectedRowType()),
+                table.options(),
+                limit,
+                unordered,
+                outerProject());
+    }
+
+    private void checkConsumerId() {
+        if (conf.contains(CoreOptions.CONSUMER_ID)
+                && !conf.contains(CoreOptions.CONSUMER_EXPIRATION_TIME)) {
+            throw new IllegalArgumentException(
+                    "You need to configure 'consumer.expiration-time' (ALTER TABLE) and restart your write job for it"
+                            + " to take effect, when you need consumer-id feature. This is to prevent consumers from leaving"
+                            + " too many snapshots that could pose a risk to the file system.");
+        }
     }
 
     private @Nullable DataStream<RowData> buildPostponeMergeSource() {
@@ -330,16 +378,6 @@ public class FlinkSourceBuilder {
         return conf.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM);
     }
 
-    private DataStream<RowData> buildContinuousFileSource() {
-        return toDataStream(
-                new ContinuousFileStoreSource(
-                        createReadBuilder(projectedRowType()),
-                        table.options(),
-                        limit,
-                        unordered,
-                        outerProject()));
-    }
-
     private DataStream<RowData> buildAlignedContinuousFileSource() {
         assertStreamingConfigurationForAlignMode(env);
         return toDataStream(
@@ -418,18 +456,75 @@ public class FlinkSourceBuilder {
         return result;
     }
 
+    /**
+     * Build a {@link Source} for APIs requiring a plain source instance, such as Flink's {@code
+     * HybridSource}. Different from {@link #build()}, no {@link StreamExecutionEnvironment} is
+     * required: boundedness is either inferred from the environment set via {@link
+     * #env(StreamExecutionEnvironment)} or must be specified with {@link #sourceBounded(boolean)}.
+     *
+     * <p>When a Paimon bounded source is the first (historical) segment of a {@code HybridSource}
+     * in a streaming job, {@code sourceBounded(true)} must be set explicitly, because {@link
+     * #env(StreamExecutionEnvironment)} infers unboundedness from a streaming environment.
+     *
+     * <p>Example:
+     *
+     * <pre>{@code
+     * Source<RowData, ?, ?> bounded =
+     *         new FlinkSourceBuilder(table).sourceBounded(true).buildSource();
+     * HybridSource<RowData> hybrid =
+     *         HybridSource.builder(bounded)
+     *                 .addSource(
+     *                         context ->
+     *                                 new FlinkSourceBuilder(table)
+     *                                         .sourceBounded(false)
+     *                                         .buildSource(),
+     *                         Boundedness.CONTINUOUS_UNBOUNDED)
+     *                 .build();
+     *
+     * // env is the StreamExecutionEnvironment the job runs on
+     * env.fromSource(
+     *         hybrid,
+     *         WatermarkStrategy.noWatermarks(),
+     *         "hybrid",
+     *         InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(table.rowType())));
+     * }</pre>
+     *
+     * <p>The second (streaming) segment is created when {@code HybridSource} switches to it, and
+     * its start position is resolved at that moment. There is no hand-off with the bounded segment:
+     * {@code scan.mode=latest} reads only newer changes, so changes committed after the bounded
+     * segment planned its splits but before the switch are skipped; the default {@code latest-full}
+     * re-reads the whole table first, so nothing is lost but the bounded segment's data is
+     * duplicated.
+     *
+     * <p>Only the default static and continuous scan paths are supported; postpone merge-on-read,
+     * {@code scan.dedicated-split-generation}, {@code source.checkpoint-align.enabled} and
+     * exactly-once consumer mode rely on other topologies and require {@link #build()}. The
+     * exception is postpone merge-on-read with {@code scan.mode=compacted-full}, which reads
+     * through the static path.
+     *
+     * <p>{@link #sourceName(String)}, {@link #watermarkStrategy(WatermarkStrategy)}, {@link
+     * #sourceParallelism(Integer)} and the uid suffix option are ignored by this method; apply the
+     * source name and the watermark strategy in your {@code env.fromSource(...)} call, and the
+     * parallelism and uid on the resulting {@code DataStreamSource}. A job that relies on the uid
+     * suffix for state compatibility will not restore from state when switching to this method.
+     *
+     * <p>{@code HybridSource} does not implement {@code ResultTypeQueryable}, so the type
+     * information must be passed to {@code env.fromSource(...)} explicitly, for example {@code
+     * InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(rowType))} where {@code rowType} is
+     * {@code table.rowType()}, or the projected row type if {@code projection(...)} is used. Note
+     * that {@code InternalTypeInfo} is a Flink internal API with no public alternative for {@code
+     * RowData} type information.
+     */
+    public Source<RowData, ?, ?> buildSource() {
+        return new PaimonDataStreamSource<>(createSource(), table);
+    }
+
     /** Build source {@link DataStream} with {@link RowData}. */
     public DataStream<RowData> build() {
         if (env == null) {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
-        if (conf.contains(CoreOptions.CONSUMER_ID)
-                && !conf.contains(CoreOptions.CONSUMER_EXPIRATION_TIME)) {
-            throw new IllegalArgumentException(
-                    "You need to configure 'consumer.expiration-time' (ALTER TABLE) and restart your write job for it"
-                            + " to take effect, when you need consumer-id feature. This is to prevent consumers from leaving"
-                            + " too many snapshots that could pose a risk to the file system.");
-        }
+        checkConsumerId();
 
         if (sourceBounded && PostponeMergeOnRead.configured(table)) {
             DataStream<RowData> mergeSource = buildPostponeMergeSource();
@@ -442,7 +537,7 @@ public class FlinkSourceBuilder {
             if (conf.get(FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION)) {
                 return buildDedicatedSplitGenSource(true);
             }
-            return buildStaticFileSource();
+            return toDataStream(createSource());
         }
         TableScanUtils.streamingReadingValidate(table);
 
@@ -459,7 +554,7 @@ public class FlinkSourceBuilder {
                         == CoreOptions.ConsumerMode.EXACTLY_ONCE) {
             return buildDedicatedSplitGenSource(false);
         } else {
-            return buildContinuousFileSource();
+            return toDataStream(createSource());
         }
     }
 

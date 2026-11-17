@@ -23,6 +23,31 @@ import pyarrow.compute as pc
 from pypaimon.schema.data_types import ArrayType, MapType, PyarrowFieldParser, RowType
 
 
+def parquet_storage_schema(schema):
+    """Represent vectors as variable-size lists while preserving Arrow metadata.
+
+    Paimon carries vector dimensions in its table schema. PyArrow cannot
+    reliably restore nullable fixed-size lists from Parquet's Arrow metadata.
+    """
+    def physical_type(data_type):
+        if pa.types.is_struct(data_type):
+            return pa.struct([field.with_type(physical_type(field.type)) for field in data_type])
+        if (pa.types.is_list(data_type) or pa.types.is_large_list(data_type)
+                or pa.types.is_fixed_size_list(data_type)):
+            field = data_type.value_field.with_type(physical_type(data_type.value_type))
+            return pa.large_list(field) if pa.types.is_large_list(data_type) else pa.list_(field)
+        if pa.types.is_map(data_type):
+            sorted_keys = data_type == pa.map_(data_type.key_field, data_type.item_field, keys_sorted=True)
+            return pa.map_(
+                data_type.key_field.with_type(physical_type(data_type.key_type)),
+                data_type.item_field.with_type(physical_type(data_type.item_type)),
+                keys_sorted=sorted_keys)
+        return data_type
+
+    return pa.schema([field.with_type(physical_type(field.type)) for field in schema],
+                     metadata=schema.metadata)
+
+
 def _read_arrow_type(data_type):
     if isinstance(data_type, RowType):
         return pa.struct([pa.field(field.name, _read_arrow_type(field.type)) for field in data_type.fields])

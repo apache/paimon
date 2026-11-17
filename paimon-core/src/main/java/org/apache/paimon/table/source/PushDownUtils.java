@@ -25,6 +25,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeCasts;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DoubleType;
@@ -92,7 +93,8 @@ public class PushDownUtils {
      * split to carry a min and a max for each column, or to hold only nulls in that column. A file
      * written with {@code stats-mode} {@code counts} for the column is listed in its {@code
      * valueStatsCols} but has no min and max, and {@link DataSplit#minValue} could not tell it
-     * apart from a column that is null in every row.
+     * apart from a column that is null in every row. A file written before an order-breaking change
+     * of the column type, such as STRING to INT, does not qualify either.
      */
     public static boolean minmaxAvailable(
             Split split, Set<String> columns, RowType rowType, SimpleStatsEvolutions evolutions) {
@@ -107,11 +109,13 @@ public class PushDownUtils {
                 if (file.rowCount() == 0) {
                     continue;
                 }
+                SimpleStatsEvolution evolution = evolutions.getOrCreate(file.schemaId());
+                if (!evolvedMinMaxAvailable(evolution, field)) {
+                    return false;
+                }
                 SimpleStatsEvolution.Result stats =
-                        evolutions
-                                .getOrCreate(file.schemaId())
-                                .evolution(
-                                        file.valueStats(), file.rowCount(), file.valueStatsCols());
+                        evolution.evolution(
+                                file.valueStats(), file.rowCount(), file.valueStatsCols());
                 Object min = InternalRowUtils.get(stats.minValues(), fieldIndex, field.type());
                 Object max = InternalRowUtils.get(stats.maxValues(), fieldIndex, field.type());
                 if (min != null && max != null) {
@@ -127,6 +131,25 @@ public class PushDownUtils {
             }
         }
         return true;
+    }
+
+    /**
+     * Whether the min and max of {@code field} kept by the files that {@code evolution} reads still
+     * bound the field's values. Stats evolution casts min and max separately to the current type.
+     * Implicit casts between min/max types only widen numbers and keep their order; explicit casts
+     * may not: as strings '100' sorts before '2', and INT to TINYINT turns 200 into -56. Unlike
+     * filter literals in {@code CastExecutors#castLiteralsWithEvolution}, nothing is cast back to
+     * the old type here, as the bounds take the same cast as the rows.
+     */
+    static boolean evolvedMinMaxAvailable(SimpleStatsEvolution evolution, DataField field) {
+        RowType dataRowType = evolution.dataRowType();
+        if (!dataRowType.containsField(field.id())) {
+            // written before the field was added, so the file holds only nulls for it
+            return true;
+        }
+        DataType dataType = dataRowType.getField(field.id()).type().copy(true);
+        return minmaxAvailable(dataType)
+                && DataTypeCasts.supportsCast(dataType, field.type().copy(true), false);
     }
 
     public static boolean tightBoundsAvailable(Split split) {

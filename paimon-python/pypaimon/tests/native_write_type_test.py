@@ -27,6 +27,7 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.python.write.row_key_extractor import create_row_key_extractor
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.write.write_dispatch import NativeTableWrite
@@ -60,9 +61,13 @@ def _rows(table):
     return builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('value').to_pylist()
 
 
-def _native_only(stack, writer, use_native):
-    assert isinstance(writer, NativeTableWrite) == use_native
-    if use_native:
+def _check_writer(stack, writer, use_native):
+    assert writer.table.options.native_write_enabled() == use_native
+    # Rust 0.5.0 cannot retain bucketed append sequence ranges. Keep the
+    # Native preference enabled while verifying its pre-write Python selection.
+    native_selected = use_native and writer.table.options.bucket() == -1
+    assert isinstance(writer, NativeTableWrite) == native_selected
+    if native_selected:
         stack.enter_context(patch.object(writer, '_switch_to_python', side_effect=AssertionError('Python fallback')))
 
 
@@ -90,7 +95,7 @@ def test_upstream_bucket_subset_omits_hash_columns_without_leaking_full_input(
     writer = builder.new_write()
     try:
         with ExitStack() as stack:
-            _native_only(stack, writer, use_native)
+            _check_writer(stack, writer, use_native)
             writer.with_write_type(columns)
             with pytest.raises(ValueError, match='missing.*not in table schema|Column.*missing'):
                 writer.with_write_type(['missing'])
@@ -121,7 +126,7 @@ def test_partial_upstream_groups_reject_invalid_buckets_and_mixed_partitions(res
     data = pa.table({'value': [42, 43], 'pt': [7, 8]})
     try:
         with ExitStack() as stack:
-            _native_only(stack, writer, use_native)
+            _check_writer(stack, writer, use_native)
             writer.with_write_type(['value', 'pt'])
             before = _files(table)
             for bucket in (-1, 4):
@@ -152,7 +157,7 @@ def test_complete_reordered_append_type_keeps_field_identity_and_copies_column_n
     writer = builder.new_write()
     try:
         with ExitStack() as stack:
-            _native_only(stack, writer, use_native)
+            _check_writer(stack, writer, use_native)
             writer.with_write_type(columns)
             columns.reverse()
             writer.write_arrow(data)
@@ -173,13 +178,13 @@ def test_full_input_routes_before_projecting_unwritten_routing_fields(
     data = pa.Table.from_pylist([
         dict(id=1, pt=7, value=42), dict(id=None, pt=None, value=43),
     ], schema=_SCHEMA)
-    partitions, bucket_ids = table.create_row_key_extractor().extract_partition_bucket_batch(data.to_batches()[0])
+    partitions, bucket_ids = create_row_key_extractor(table).extract_partition_bucket_batch(data.to_batches()[0])
     expected_buckets = dict(zip(partitions, bucket_ids))
     builder = table.new_batch_write_builder()
     writer = builder.new_write()
     try:
         with ExitStack() as stack:
-            _native_only(stack, writer, use_native)
+            _check_writer(stack, writer, use_native)
             writer.with_write_type(list(columns))
             before = _files(table)
             writer.write_arrow(data.slice(0, 0))
@@ -210,12 +215,12 @@ def test_rows_route_with_unwritten_columns_without_requiring_other_fields(
     values = dict(id=1, pt=7, value=42, unwritten=blob if unwritten_blob else 999)
     row = GenericRow([values[name] for name in names], [fields[name] for name in names])
     full_input = pa.Table.from_pylist([dict(values, unwritten=None)], schema=schema).to_batches()[0]
-    _, buckets = table.create_row_key_extractor().extract_partition_bucket_batch(full_input)
+    _, buckets = create_row_key_extractor(table).extract_partition_bucket_batch(full_input)
     builder = table.new_batch_write_builder()
     writer = builder.new_write()
     try:
         with ExitStack() as stack:
-            _native_only(stack, writer, use_native)
+            _check_writer(stack, writer, use_native)
             writer.with_write_type(['value'])
             writer.write_row(row)
             messages = _finish(builder, writer)
@@ -244,7 +249,7 @@ def test_upstream_bucket_partial_overwrite_preserves_other_partitions(rest_catal
     writer = builder.new_write()
     try:
         with ExitStack() as stack:
-            _native_only(stack, writer, use_native)
+            _check_writer(stack, writer, use_native)
             writer.with_write_type(['value', 'pt'])
             writer.write_arrow(pa.table({'value': [42], 'pt': [7]}), bucket=2)
             messages = _finish(builder, writer)

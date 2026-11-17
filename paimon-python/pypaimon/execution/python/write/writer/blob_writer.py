@@ -20,6 +20,9 @@ import uuid
 import pyarrow as pa
 from typing import Optional, Tuple, Dict
 
+from pypaimon.execution.python.write.format_file_writer import (
+    write_blob_file
+)
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.table.row.blob import (
@@ -208,7 +211,7 @@ class BlobWriter(AppendOnlyDataWriter):
         self.file_count += 1
         file_path = self._generate_file_path(file_name)
 
-        self.file_io.write_blob(file_path, data)
+        write_blob_file(self.file_io, file_path, data)
 
         file_size = self.file_io.get_file_size(file_path)
 
@@ -248,8 +251,13 @@ class BlobWriter(AppendOnlyDataWriter):
             max_value_stats = [None]
             value_null_counts = [0]
 
-        min_seq = self.sequence_generator.current - row_count
-        max_seq = self.sequence_generator.current - 1
+        if self.options.data_evolution_enabled(False):
+            # Like Java, every rolled file starts at 0, so commit assigns the
+            # snapshot id to all of them.
+            min_seq, max_seq = self._append_file_sequence_range(row_count)
+        else:
+            min_seq = self.sequence_generator.current - row_count
+            max_seq = self.sequence_generator.current - 1
         self.sequence_generator.start = self.sequence_generator.current
 
         self.committed_files.append(DataFileMeta.create(

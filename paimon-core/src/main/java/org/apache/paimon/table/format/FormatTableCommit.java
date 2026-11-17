@@ -728,7 +728,7 @@ public class FormatTableCommit implements BatchTableCommit {
         return partitionSpec;
     }
 
-    private static Path buildPartitionPath(
+    private Path buildPartitionPath(
             String location,
             Map<String, String> partitionSpec,
             boolean formatTablePartitionOnlyValueInPath,
@@ -751,6 +751,10 @@ public class FormatTableCommit implements BatchTableCommit {
                 throw new RuntimeException("partitionSpec does not contain key: " + key);
             }
         }
+        // Fail loudly on value-only partition values that a scan would hide ('_'/'.') rather than
+        // silently dropping the partition; the configured default partition name is exempt.
+        PartitionPathUtils.validatePartitionSpecForWrite(
+                orderedSpec.values(), formatTablePartitionOnlyValueInPath, defaultPartName);
         return new Path(
                 location,
                 PartitionPathUtils.generatePartitionPathUtil(

@@ -82,8 +82,10 @@ def _read(table, splits, native, projection, predicate=None, limit=None):
     reader = builder.new_read()
     with ExitStack() as guard:
         if native:
-            guard.enter_context(patch.object(
-                reader, '_create_split_read', side_effect=AssertionError('Python partition-BLOB read fallback')))
+            guard.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python partition-BLOB read fallback')
+            ))
         return reader.to_arrow(splits, parallelism=1)
 
 

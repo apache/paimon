@@ -487,8 +487,7 @@ public class FMGlobalIndexTest {
                                 str("")),
                         0);
         byte[] actual =
-                Files.readAllBytes(
-                        java.nio.file.Paths.get(actualFiles.get(0).filePath().toUri().getPath()));
+                Files.readAllBytes(java.nio.file.Paths.get(actualFiles.get(0).filePath().toUri()));
         byte[] fixture =
                 Base64.getMimeDecoder()
                         .decode(

@@ -92,14 +92,18 @@ class SortedIndexFileMetaTest {
     }
 
     @Test
-    void testLegacyOnlyNulls() {
+    void testLegacyAmbiguousNullBounds() {
         SortedIndexFileMeta meta =
                 SortedIndexFileMeta.deserialize(legacyMetaBytes(new byte[0], new byte[0], true));
 
         assertThat(meta.getFirstKey()).isNull();
         assertThat(meta.getLastKey()).isNull();
         assertThat(meta.hasNulls()).isTrue();
-        assertThat(meta.onlyNulls()).isTrue();
+        assertThat(meta.onlyNulls()).isFalse();
+        assertThat(meta.hasAmbiguousNullBounds()).isTrue();
+        assertThat(meta.serialize())
+                .containsExactly(legacyMetaBytes(new byte[0], new byte[0], true));
+        assertThat(roundTrip(meta).hasAmbiguousNullBounds()).isTrue();
     }
 
     @Test

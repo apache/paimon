@@ -130,7 +130,9 @@ def test_partition_specs_parse_declared_types(rest_catalog, use_native, operatio
     try:
         if use_native:
             method = 'drop_partitions' if operation == 'truncate' else 'overwrite'
-            guard = patch.object(commit.file_store_commit, method, side_effect=AssertionError('Python fallback'))
+            guard = patch('pypaimon.execution.python.write.file_store_commit.'
+                          'FileStoreCommit.' + method,
+                          side_effect=AssertionError('Python fallback'))
         else:
             guard = patch.object(commit, '_prepare_native_commit', return_value=None)
         with guard:

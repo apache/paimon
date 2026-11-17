@@ -52,14 +52,14 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests bucket metadata when Spark reads chain splits, including query authorization. */
+/** Tests partition and bucket metadata when Spark reads chain splits with query authorization. */
 public class SparkChainTableMetadataTest {
 
-    @ParameterizedTest
+    @ParameterizedTest(name = "queryAuth={0}")
     @ValueSource(booleans = {false, true})
-    public void testBucketMetadata(boolean queryAuth, @TempDir Path warehouse) throws Exception {
+    public void testPartitionAndBucketMetadata(boolean queryAuth, @TempDir Path warehouse)
+            throws Exception {
         try (SparkSession spark = createSparkSession(warehouse, queryAuth)) {
             spark.sql("CREATE DATABASE spark_test.chain_metadata");
             spark.sql("USE spark_test.chain_metadata");
@@ -123,21 +123,38 @@ public class SparkChainTableMetadataTest {
                                 spark.sql("SELECT id, __paimon_bucket FROM T" + predicate)
                                         .collectAsList())
                         .containsExactlyInAnyOrderElementsOf(visibleBucketRows);
-                // Partition metadata on chain and authorized splits is a separate concern.
-                for (String query :
-                        Arrays.asList(
-                                "SELECT id, __paimon_partition, __paimon_bucket FROM T" + predicate,
-                                "SELECT id FROM T"
-                                        + predicate
-                                        + " AND __paimon_partition.dt = '"
-                                        + dt
-                                        + "'")) {
-                    assertThatThrownBy(() -> spark.sql(query).collectAsList())
-                            .rootCause()
-                            .isInstanceOf(UnsupportedOperationException.class)
-                            .hasMessageContaining(
-                                    "Partition metadata is only supported for DataSplit");
-                }
+                assertThat(
+                                spark.sql(
+                                                "SELECT id, __paimon_partition, __paimon_bucket FROM T"
+                                                        + predicate)
+                                        .collectAsList())
+                        .containsExactlyInAnyOrderElementsOf(
+                                visibleBucketRows.stream()
+                                        .map(
+                                                row ->
+                                                        RowFactory.create(
+                                                                row.getInt(0),
+                                                                RowFactory.create(dt),
+                                                                row.getInt(1)))
+                                        .collect(Collectors.toList()));
+                assertThat(
+                                spark.sql("SELECT __paimon_partition.dt FROM T" + predicate)
+                                        .collectAsList())
+                        .containsExactlyInAnyOrderElementsOf(
+                                Collections.nCopies(
+                                        visibleBucketRows.size(), RowFactory.create(dt)));
+                assertThat(
+                                spark.sql(
+                                                "SELECT id FROM T"
+                                                        + predicate
+                                                        + " AND __paimon_partition.dt = '"
+                                                        + dt
+                                                        + "'")
+                                        .collectAsList())
+                        .containsExactlyInAnyOrderElementsOf(
+                                visibleBucketRows.stream()
+                                        .map(row -> RowFactory.create(row.getInt(0)))
+                                        .collect(Collectors.toList()));
 
                 for (int bucket = 0; bucket < 2; bucket++) {
                     final int selectedBucket = bucket;

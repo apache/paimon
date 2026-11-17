@@ -611,6 +611,25 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
     }
   }
 
+  test("Paimon pushDown: IN with a NULL literal on a file-indexed column") {
+    Seq("range-bitmap", "bsi", "bitmap").foreach {
+      indexType =>
+        withTable("T") {
+          sql(s"""
+                 |CREATE TABLE T (id INT, v STRING)
+                 |TBLPROPERTIES ('file-index.$indexType.columns' = 'id', 'file-index.in-manifest-threshold' = '1 kb')
+                 |""".stripMargin)
+          sql("INSERT INTO T VALUES (1, 'a'), (NULL, 'b'), (3, 'c')")
+
+          checkAnswer(sql("SELECT v FROM T WHERE id IN (1, NULL)"), Row("a") :: Nil)
+          checkAnswer(sql("SELECT v FROM T WHERE id NOT IN (1, NULL)"), Nil)
+          checkAnswer(
+            sql("SELECT v FROM T WHERE id IN (3, NULL) OR id IS NULL ORDER BY v"),
+            Row("b") :: Row("c") :: Nil)
+        }
+    }
+  }
+
   test("Paimon pushDown: TopN for append-only tables") {
     assume(gteqSpark3_3)
     spark.sql("""

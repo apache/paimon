@@ -20,9 +20,11 @@ package org.apache.paimon.bucket;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.types.RowType;
 
 import java.io.Serializable;
+import java.util.Optional;
 
 /** Bucket function. */
 public interface BucketFunction extends Serializable {
@@ -30,6 +32,22 @@ public interface BucketFunction extends Serializable {
     int bucket(BinaryRow row, int numBuckets);
 
     static BucketFunction create(CoreOptions options, RowType bucketKeyType) {
+        Optional<String> provider = options.bucketFunctionProvider();
+        if (provider.isPresent()) {
+            ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+            if (classLoader == null) {
+                classLoader = BucketFunction.class.getClassLoader();
+            }
+            BucketFunction function =
+                    FactoryUtil.discoverFactory(
+                                    classLoader, BucketFunctionFactory.class, provider.get())
+                            .create(bucketKeyType, options.toConfiguration());
+            if (function == null) {
+                throw new IllegalArgumentException(
+                        "Bucket function provider '" + provider.get() + "' returned null.");
+            }
+            return function;
+        }
         CoreOptions.BucketFunctionType type = options.bucketFunctionType();
         return create(type, bucketKeyType);
     }

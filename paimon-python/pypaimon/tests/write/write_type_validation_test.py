@@ -67,7 +67,7 @@ def test_invalid_write_type_preserves_prior_configuration_without_staging_files(
         batch = pa.record_batch([pa.array([10, 20], pa.int32())], names=['value'])
         writer.write_arrow(batch)
         if backend == 'python':
-            assert writer.file_store_write.write_cols == ['value']
+            assert writer._execution.file_store_write.write_cols == ['value']
             messages = writer.prepare_commit()
             assert [(file.row_count, file.write_cols) for message in messages for file in message.new_files] == [
                 (2, ['value'])]

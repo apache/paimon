@@ -83,9 +83,11 @@ class _VindexReaderExecution:
 
 
 def build_global_index(request, partition_filter, *, execution="local", concurrency=None, ray_remote_args=None):
-    if execution == "local" and request._table.options.native_write_enabled():
+    if request._table.options.native_write_enabled():
         from pypaimon.execution.native.write.native_index_build import build_native_global_index
-        messages = build_native_global_index(request, partition_filter)
+        messages = build_native_global_index(
+            request, partition_filter, execution=execution, concurrency=concurrency,
+            ray_remote_args=ray_remote_args)
         if messages is not None:
             return messages
     from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
@@ -102,3 +104,16 @@ def build_global_index_drop(request, partition_filter):
             return messages
     from pypaimon.execution.python.globalindex.drop_global_index import build_global_index_drop as execute
     return execute(request, partition_filter)
+
+
+def build_native_vector_index_shard(table, shard):
+    from pypaimon.execution.native.write.native_index_build import build_native_index_shard
+    return build_native_index_shard(table, shard)
+
+
+def create_python_scalar_index_scanner(table, *, predicate, snapshot):
+    """Open the scalar scanner after Python lookup execution was selected."""
+    from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+        DataEvolutionGlobalIndexScanner,
+    )
+    return DataEvolutionGlobalIndexScanner.create(table, predicate=predicate, snapshot=snapshot)

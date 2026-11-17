@@ -41,7 +41,7 @@ def _validate_scan_mode(table):
     has_watermark = options.contains(CoreOptions.SCAN_WATERMARK)
     has_timestamp_millis = options.contains(CoreOptions.SCAN_TIMESTAMP_MILLIS)
     has_timestamp = options.contains(CoreOptions.SCAN_TIMESTAMP)
-    has_incremental = options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
+    incremental_keys = [key for key in CoreOptions.INCREMENTAL_SCAN_KEYS if options.contains_key(key)]
     has_file_creation_time = options.contains(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS)
     has_creation_time = options.contains(CoreOptions.SCAN_CREATION_TIME_MILLIS)
 
@@ -58,8 +58,7 @@ def _validate_scan_mode(table):
         present_keys.append(CoreOptions.SCAN_TIMESTAMP_MILLIS.key())
     if has_timestamp:
         present_keys.append(CoreOptions.SCAN_TIMESTAMP.key())
-    if has_incremental:
-        present_keys.append(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key())
+    present_keys.extend(incremental_keys)
     if has_file_creation_time:
         present_keys.append(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key())
     if has_creation_time:
@@ -101,11 +100,11 @@ def _validate_scan_mode(table):
                 "scan.version, scan.snapshot-id, scan.tag-name, or scan.watermark is set."
             )
     elif mode == StartupMode.INCREMENTAL:
-        allowed = {CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()}
-        if not has_incremental:
+        allowed = set(CoreOptions.INCREMENTAL_SCAN_KEYS)
+        if len(incremental_keys) != 1:
             raise ValueError(
-                "scan.mode is 'incremental' but "
-                "incremental-between-timestamp is not set."
+                "must set only one key in [incremental-between,incremental-between-timestamp,incremental-to-auto-tag] "
+                "when you use incremental for scan.mode"
             )
     elif mode in (StartupMode.LATEST_FULL, StartupMode.LATEST):
         allowed = set()
@@ -140,16 +139,16 @@ def _parse_incremental_timestamp_window(value):
     return start, end
 
 
-def resolve_scan_snapshot_range(table):
-    """Validate public scan inputs and resolve incremental snapshot boundaries.
-
-    This is metadata selection shared by both planners. Manifest readers and
-    execution resources are created only by the selected backend.
-    """
+def validate_scan_options(table):
+    """Validate public scan inputs without opening snapshot metadata."""
     from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 
     _validate_scan_mode(table)
     options = table.options.options
+    if options.contains(CoreOptions.INCREMENTAL_TO_AUTO_TAG):
+        raise NotImplementedError("incremental-to-auto-tag is not supported in pypaimon.")
+    if options.contains(CoreOptions.INCREMENTAL_BETWEEN):
+        table.options.incremental_between()
     has_time_travel = any(options.contains_key(key) for key in SCAN_KEYS)
     if not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
         return None
@@ -157,28 +156,5 @@ def resolve_scan_snapshot_range(table):
         raise ValueError(
             "incremental-between-timestamp cannot be used together with "
             "point-in-time scan options: %s" % SCAN_KEYS)
-    start_timestamp, end_timestamp = _parse_incremental_timestamp_window(
+    return _parse_incremental_timestamp_window(
         options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP))
-    snapshot_manager = table.snapshot_manager()
-    latest_snapshot = snapshot_manager.get_latest_snapshot()
-    earliest_snapshot = snapshot_manager.try_get_earliest_snapshot() if latest_snapshot is not None else None
-    if earliest_snapshot is None or latest_snapshot is None:
-        return None
-    if start_timestamp > end_timestamp:
-        raise ValueError(
-            "Ending timestamp %s should be >= starting timestamp %s."
-            % (end_timestamp, start_timestamp))
-    if (start_timestamp == end_timestamp or start_timestamp > latest_snapshot.time_millis
-            or end_timestamp < earliest_snapshot.time_millis):
-        return None
-
-    starting_snapshot = snapshot_manager.earlier_or_equal_time_mills(start_timestamp)
-    earliest_snapshot = snapshot_manager.try_get_earliest_snapshot()
-    if starting_snapshot is None or (earliest_snapshot and earliest_snapshot.time_millis > start_timestamp):
-        start_id = earliest_snapshot.id - 1 if earliest_snapshot else -1
-    else:
-        start_id = starting_snapshot.id
-    end_snapshot = snapshot_manager.earlier_or_equal_time_mills(end_timestamp)
-    latest_snapshot = snapshot_manager.get_latest_snapshot()
-    end_id = end_snapshot.id if end_snapshot else (latest_snapshot.id if latest_snapshot else -1)
-    return start_id, end_id

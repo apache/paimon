@@ -25,6 +25,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import Move, SchemaChange
@@ -432,14 +433,14 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         schema_manager.commit(TableSchema.from_schema(schema_id=0, schema=schema))
         schema_manager.commit(TableSchema.from_schema(schema_id=1, schema=schema2))
         # scan filter for schema evolution
-        latest_snapshot = table1.new_read_builder().new_scan().file_scanner.snapshot_manager.get_latest_snapshot()
+        latest_snapshot = table1.snapshot_manager().get_latest_snapshot()
         table2.table_path = table1.table_path
         new_read_buidler = table2.new_read_builder()
         predicate_builder = new_read_buidler.new_predicate_builder()
         predicate = predicate_builder.less_than('user_id', 3)
         new_scan = new_read_buidler.with_filter(predicate).new_scan()
-        manifest_files = new_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
-        entries = new_scan.file_scanner.read_manifest_entries(manifest_files)
+        manifest_files = PythonTableScan(new_scan)._file_scanner().manifest_list_manager.read_all(latest_snapshot)
+        entries = PythonTableScan(new_scan)._file_scanner().read_manifest_entries(manifest_files)
         self.assertEqual(1, len(entries))  # verify scan filter success for schema evolution
 
     @pytest.mark.python_plan

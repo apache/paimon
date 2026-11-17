@@ -41,8 +41,8 @@ class ShardUpdateValidationTest(unittest.TestCase):
                     update = update_type(table, 'writer').with_update_type([])
                     with patch('pypaimon.write.update_dispatch.prepare_native_write_operation',
                                side_effect=AssertionError('Prepared a backend for invalid columns')) as prepare, \
-                            patch.object(update, '_new_python_shard_updator',
-                                         side_effect=AssertionError('Created a Python shard updater')) as python:
+                            patch('pypaimon.write.backend_dispatch.create_python_shard_updator',
+                                  side_effect=AssertionError('Created a Python shard updater')) as python:
                         with self.assertRaisesRegex(ValueError, 'Shard update columns must not be empty'):
                             update.new_shard_updator(0, 1)
                     prepare.assert_not_called()
@@ -615,7 +615,7 @@ class ShardTableUpdatorTest(unittest.TestCase):
             % actual_columns
         )
 
-    def test_shard_update_passes_allow_rollback_true(self):
+    def test_shard_update_enables_conflict_detection(self):
         table_schema = pa.schema([
             ('a', pa.int32()),
             ('b', pa.int32()),
@@ -624,7 +624,7 @@ class ShardTableUpdatorTest(unittest.TestCase):
             table_schema,
             options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}
         )
-        name = self._create_unique_table_name('rollback')
+        name = self._create_unique_table_name('conflict_detection')
         self.catalog.create_table(name, schema, False)
         table = self.catalog.get_table(name)
 
@@ -664,11 +664,6 @@ class ShardTableUpdatorTest(unittest.TestCase):
             tc2.commit(commit_messages)
             tc2.close()
 
-        self.assertTrue(
-            captured_args.get('allow_rollback', False),
-            "Row-id-check commits must pass allow_rollback=True so that "
-            "concurrent COMPACT snapshots can be rolled back on conflict."
-        )
         self.assertTrue(
             captured_args.get('detect_conflicts', False),
             "Row-id-check commits must enable conflict detection."

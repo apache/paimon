@@ -30,7 +30,8 @@ from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.execution.native.write.native_update import NativeShardTableUpdator
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
+from pypaimon.write.backend_dispatch import native_row_id_update_selected
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
@@ -91,7 +92,7 @@ def _update(table, operation, stream, native):
     update = builder.new_update().with_update_type(['value'])
     kwargs = dict(commit_identifier=37) if stream else {}
     changed = pa.table({'_ROW_ID': [0], 'value': [11]})
-    guard = patch.object(TableUpdateByRowId, 'update_columns',
+    guard = patch.object(PythonTableUpdateByRowId, 'update_columns',
                          side_effect=AssertionError('Python historical update fallback')) if native else ExitStack()
     with guard:
         if operation == 'row_id':
@@ -100,6 +101,7 @@ def _update(table, operation, stream, native):
             return update.update_by_arrow_batches_with_row_id(iter([changed]), **kwargs)
         if operation == 'incremental':
             updater = update.new_update_by_row_id(**kwargs)
+            assert native_row_id_update_selected(updater) == native
             return updater.update_columns(changed, ['value'])
         if operation == 'predicate':
             predicate = table.new_read_builder().new_predicate_builder().equal('id', 1)
@@ -182,9 +184,10 @@ def _append_mutation(table, native, operation, only_matched=False, stream=False)
                     schema=pa.schema([('id', pa.int32()), ('value', pa.int32()), ('keep', pa.int32())]))
     with ExitStack() as stack:
         if native:
-            for method in ('pypaimon.write.table_upsert_by_key.TableUpsertByKey._upsert_partition',
-                           'pypaimon.write.table_upsert_by_key.TableUpsertByKey._upsert_row_partition',
-                           'pypaimon.execution.python.write.merge_into._build_tables'):
+            for method in (
+                    'pypaimon.execution.python.write.table_upsert_by_key.PythonTableUpsert._upsert_partition',
+                    'pypaimon.execution.python.write.table_upsert_by_key.PythonTableUpsert._upsert_row_partition',
+                    'pypaimon.execution.python.write.merge_into._build_tables'):
                 stack.enter_context(patch(method, side_effect=AssertionError('Python historical mutation fallback')))
         if operation == 'upsert':
             return update.upsert_by_arrow_with_key(data, ['id'], **kwargs)
@@ -268,8 +271,20 @@ def test_historical_partial_files_keep_original_field_ids(native_rest_catalog, n
             assert file.schema_id == historical.table_schema.id
             if message.check_from_snapshot is not None:
                 assert file.write_cols == ['value']
+    if change == 'drop_readd':
+        # Both writer backends publish through the Python committer here.
+        # Reject the entire commit, including new rows from upsert/merge.
+        before = latest.snapshot_manager().get_latest_snapshot()
+        with pytest.raises(RuntimeError, match='cannot restore a dropped field'):
+            _commit(historical, messages)
+        assert latest.snapshot_manager().get_latest_snapshot().id == before.id
+        assert _rows(latest) == {
+            'id': [1, 2, 3, 4], 'value': [None, None, None, 40],
+            'keep': [100, 200, 300, 400], 'extra': [None, None, 999, 1000]}
+        assert all(latest.file_io.exists(file.file_path) for message in messages for file in message.new_files)
+        return
     _commit(historical, messages)
-    values = [None, None, None, 40] if change == 'drop_readd' else [11, 20, 30, 2 ** 40 if change == 'widen' else 40]
+    values = [11, 20, 30, 2 ** 40 if change == 'widen' else 40]
     expected = {
         'id': [1, 2, 3, 4], value_name: values, 'keep': [100, 200, 300, 400],
         'extra': [None, None, 999, 1000]}
@@ -277,7 +292,7 @@ def test_historical_partial_files_keep_original_field_ids(native_rest_catalog, n
         # A second row with logical key 4 is new to snapshot 1 and receives a
         # fresh physical row ID, even though latest already contains key 4.
         expected['id'].append(4)
-        expected[value_name].append(None if change == 'drop_readd' else 40)
+        expected[value_name].append(40)
         expected['keep'].append(400)
         expected['extra'].append(None)
     assert _rows(latest) == expected

@@ -21,6 +21,7 @@ The first attempt full-scans the changed partitions; later retries reuse that
 base and read only the incremental changes since (read_incremental_changes).
 """
 
+from pypaimon.write.backend_dispatch import python_commit
 import os
 import shutil
 import tempfile
@@ -28,8 +29,10 @@ import unittest
 
 import pandas as pd
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.write.commit_message import CommitMessage
 
 
 class OverwriteCommitConflictTest(unittest.TestCase):
@@ -79,12 +82,45 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         w = wb.new_write()
         tc = wb.new_commit()
         w.write_pandas(pd.DataFrame({'f0': [1], 'f1': [f1_val]}))
-        cfsc = tc.file_store_commit
+        cfsc = python_commit(tc).file_store_commit
         orig_try = cfsc._try_commit
         cfsc._try_commit = lambda commit_kind, *a, **k: orig_try("COMPACT", *a, **k)
         tc.commit(w.prepare_commit())
         w.close()
         tc.close()
+
+    @pytest.mark.python_commit
+    def test_repeated_file_delete_reports_partition_and_bucket(self):
+        builder = self.table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_pandas(pd.DataFrame({'f0': [3], 'f1': ['delete-me']}))
+            messages = writer.prepare_commit()
+            commit.commit(messages)
+        finally:
+            writer.close()
+            commit.close()
+
+        self.assertEqual(len(messages), 1)
+        original = messages[0]
+        deletion = CommitMessage(
+            original.partition, original.bucket, [], deleted_files=original.new_files)
+        first = builder.new_commit()
+        try:
+            first.commit([deletion])
+        finally:
+            first.close()
+
+        second = builder.new_commit()
+        try:
+            with self.assertRaises(RuntimeError) as raised:
+                second.commit([deletion])
+            message = str(raised.exception)
+            self.assertIn("File deletion conflicts detected", message)
+            self.assertIn(original.new_files[0].file_name, message)
+            self.assertIn("partition=f0=3, bucket={}".format(original.bucket), message)
+        finally:
+            second.close()
 
     def test_conflict_scan_runs_once_not_once_per_retry(self):
         K = 3
@@ -95,7 +131,7 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
         messages = w.prepare_commit()
 
-        fsc = c.file_store_commit
+        fsc = python_commit(c).file_store_commit
         counts = {'full_scan': 0, 'incremental': 0}
         orig_full = fsc.commit_scanner.read_all_entries_from_changed_partitions
         orig_incr = fsc.commit_scanner.read_incremental_changes
@@ -150,7 +186,7 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
         messages = w.prepare_commit()
 
-        fsc = c.file_store_commit
+        fsc = python_commit(c).file_store_commit
         full_scans = {'n': 0}
         incr_lengths = []
         captured = []
@@ -221,7 +257,7 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
         messages = w.prepare_commit()
 
-        fsc = c.file_store_commit
+        fsc = python_commit(c).file_store_commit
         full_scans = {'n': 0}
         incr_results = []
         orig_full = fsc.commit_scanner.read_all_entries_from_changed_partitions
@@ -295,7 +331,7 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
         messages = w.prepare_commit()
 
-        fsc = c.file_store_commit
+        fsc = python_commit(c).file_store_commit
         captured = []
         orig_check = fsc.conflict_detection.check_conflicts
         orig_full = fsc.commit_scanner.read_all_entries_from_changed_partitions

@@ -107,7 +107,8 @@ public class ParquetUtil {
     public static ParquetReadOptions.Builder getParquetReadOptionsBuilder(Options options) {
         PlainParquetConfiguration parquetConfiguration =
                 new PlainParquetConfiguration(options.toMap());
-        return ParquetReadOptions.builder(parquetConfiguration);
+        return ParquetReadOptions.builder(parquetConfiguration)
+                .withCodecFactory(new ParquetCodecFactory(parquetConfiguration, 0));
     }
 
     static void assertStatsClass(

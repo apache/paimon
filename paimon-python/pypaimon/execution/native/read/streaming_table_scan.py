@@ -141,6 +141,9 @@ class StreamTableScan:
         if generation != self._generation:
             raise RuntimeError("stream scan was restored during planning")
 
+    def cancel_prefetch(self):
+        """Native plans frames on demand, with no speculative frame to cancel."""
+
     def close(self):
         """Stop polling without acknowledging a plan still owned by the caller."""
         self._closed = True

@@ -29,7 +29,7 @@ from pypaimon.table.source.search_types import (
     PrimaryKeyFullTextScanPlan, PrimaryKeyFullTextSearchSplit,
     PrimaryKeyVectorScanPlan, PrimaryKeyVectorSearchSplit,
 )
-from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
+from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult, PrimaryKeySearchPosition
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message_serializer import _index_from_row, _index_row
 
@@ -136,8 +136,16 @@ def _capture_builder(builder):
 
 
 def _result(table, value, primary_key):
-    return (PrimaryKeyScoredResult._from_native(table, value)
-            if primary_key else DictBasedScoredIndexResult(value.row_ids()))
+    if not primary_key:
+        return DictBasedScoredIndexResult(value.row_ids())
+    result = PrimaryKeyScoredResult.__new__(PrimaryKeyScoredResult)
+    result._snapshot_id = value.snapshot_id() or 0
+    result._positions = tuple(PrimaryKeySearchPosition(*position) for position in value.positions())
+    result._splits = tuple(deserialize_split_v1(
+        split, _partition_fields(table), table.trimmed_primary_keys_fields)
+        for split in value.splits())
+    result._native_result = value
+    return result
 
 
 class NativeSearchScan:

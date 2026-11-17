@@ -20,7 +20,7 @@ package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.Snapshot
 import org.apache.paimon.Snapshot.CommitKind
-import org.apache.paimon.append.dataevolution.{DataEvolutionCompactTask, DataEvolutionNormalCompactTask}
+import org.apache.paimon.append.dataevolution.DataEvolutionNormalCompactTask
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
 import org.apache.paimon.format.blob.BlobFileFormat
@@ -36,7 +36,7 @@ import org.apache.paimon.spark.commands.CompactRowIdRangeIndex
 import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessageImpl
-import org.apache.paimon.table.source.{DataSplit, EndOfScanException, IncrementalSplit}
+import org.apache.paimon.table.source.{DataSplit, IncrementalSplit}
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.utils.Range
 
@@ -1803,6 +1803,49 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: compact partitions keep leading zeros of string values") {
+    def checkCompactedPartition(
+        hhType: String,
+        hhValues: Seq[String],
+        partitions: String,
+        expectedFileCounts: Seq[Row]): Unit = {
+      withTable("T") {
+        spark.sql(s"""
+                     |CREATE TABLE T (id INT, hh $hhType)
+                     |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                     |PARTITIONED BY (hh)
+                     |""".stripMargin)
+        hhValues.foreach {
+          hh =>
+            spark.sql(s"INSERT INTO T VALUES (1, $hh)")
+            spark.sql(s"INSERT INTO T VALUES (2, $hh)")
+        }
+        checkAnswer(
+          spark.sql(
+            s"CALL sys.compact(table => 'T', partitions => '$partitions', options => 'compaction.min.file-num=2')"),
+          Row(true) :: Nil)
+        checkAnswer(
+          spark.sql("SELECT partition, count(*) FROM `T$files` GROUP BY partition"),
+          expectedFileCounts)
+      }
+    }
+
+    // an unquoted value of a string partition is kept as written
+    checkCompactedPartition(
+      "STRING",
+      Seq("'08'", "'8'"),
+      "hh=08",
+      Row("{08}", 1L) :: Row("{8}", 2L) :: Nil)
+    // a quoted value of a string partition is still unquoted
+    checkCompactedPartition(
+      "STRING",
+      Seq("'08'", "'8'"),
+      "hh=\"08\"",
+      Row("{08}", 1L) :: Row("{8}", 2L) :: Nil)
+    // a numeric partition still matches by value
+    checkCompactedPartition("INT", Seq("8", "9"), "hh=08", Row("{8}", 1L) :: Row("{9}", 2L) :: Nil)
+  }
+
   test("Paimon Procedure: compact with invalid partition key") {
     withTable("T") {
       spark.sql(s"""
@@ -1815,6 +1858,117 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         spark.sql("CALL sys.compact(table => 'T', partitions => 'pt=2024-01-01')")
       }
       Assertions.assertThat(e.getMessage.contains("Partition keys [pt] are invalid"))
+    }
+  }
+
+  test("Paimon Procedure: finish the last compact batch without chasing concurrent appends") {
+    for (candidateFilesPerBatch <- Seq(1, 2, 3)) {
+      withTable("T") {
+        sql("""
+              |CREATE TABLE T (id INT, pt STRING)
+              |TBLPROPERTIES (
+              |  'bucket' = '-1',
+              |  'file.format' = 'avro',
+              |  'write-only' = 'true',
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true',
+              |  'compaction.min.file-num' = '2')
+              |PARTITIONED BY (pt)
+              |""".stripMargin)
+        sql("INSERT INTO T VALUES (1, 'p0')")
+        sql("INSERT INTO T VALUES (2, 'p0')")
+        val table = loadTable("T")
+        val beforeSnapshot = lastSnapshotId(table)
+        val attempts = new AtomicInteger()
+
+        CompactProcedure.executeDataEvolutionCompaction(
+          table,
+          null,
+          null,
+          null,
+          new JavaSparkContext(spark.sparkContext),
+          spark,
+          Int.box(candidateFilesPerBatch),
+          _ => {
+            assert(attempts.incrementAndGet() == 1, "Compacted concurrent appends after scan ended")
+            sql("INSERT INTO T VALUES (3, 'p1')")
+            sql("INSERT INTO T VALUES (4, 'p1')")
+          }
+        )
+
+        assert(attempts.get() == 1)
+        assert(lastSnapshotId(table) == beforeSnapshot + 3)
+        checkAnswer(
+          sql("SELECT partition, count(*) FROM `T$files` GROUP BY partition"),
+          Seq(Row("{p0}", 1L), Row("{p1}", 2L)))
+        checkAnswer(
+          sql("SELECT id, pt FROM T"),
+          Seq(Row(1, "p0"), Row(2, "p0"), Row(3, "p1"), Row(4, "p1")))
+      }
+    }
+  }
+
+  test("Paimon Procedure: continue a compact batch below its limit when more ranges remain") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, pt STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'file.format' = 'avro',
+            |  'write-only' = 'true',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'compaction.min.file-num' = '2')
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 'p0')")
+      sql("INSERT INTO T VALUES (2, 'p0')")
+      sql("INSERT INTO T VALUES (3, 'p1')")
+      sql("INSERT INTO T VALUES (4, 'p1')")
+      val table = loadTable("T")
+      val beforeSnapshot = lastSnapshotId(table)
+
+      CompactProcedure.executeDataEvolutionCompaction(
+        table,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        Int.box(3))
+
+      assert(lastSnapshotId(table) == beforeSnapshot + 2)
+      checkAnswer(
+        sql("SELECT partition, count(*) FROM `T$files` GROUP BY partition"),
+        Seq(Row("{p0}", 1L), Row("{p1}", 1L)))
+      checkAnswer(
+        sql("SELECT id, pt FROM T"),
+        Seq(Row(1, "p0"), Row(2, "p0"), Row(3, "p1"), Row(4, "p1")))
+    }
+  }
+
+  test("Paimon Procedure: finish an empty final rewrite batch") {
+    withTable("T") {
+      val table = createCompactMergeRaceTable()
+      val snapshot = table.latestSnapshot().get()
+      val rounds = new AtomicInteger()
+      val planner: java.util.function.Function[Snapshot, DataEvolutionRewriteExecutor.PlanResult] =
+        planningSnapshot => {
+          assert(planningSnapshot.id() == snapshot.id())
+          val round = rounds.incrementAndGet()
+          assert(round <= 2, "Replanned after an empty final batch")
+          new DataEvolutionRewriteExecutor.PlanResult(util.Collections.emptyList(), round == 2)
+        }
+
+      DataEvolutionRewriteExecutor.execute(
+        table,
+        snapshot,
+        planner,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        _ => fail("Committed an empty rewrite batch"))
+
+      assert(rounds.get() == 2)
+      assert(lastSnapshotId(table) == snapshot.id())
     }
   }
 
@@ -1884,6 +2038,73 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       checkAnswer(
         sql("SELECT id, value, pt FROM T ORDER BY id, pt"),
         (0 until 100).flatMap(id => Seq("p0", "p1").map(pt => Row(id, s"value-$id", pt))))
+    }
+  }
+
+  test("Paimon Procedure: data evolution vector compaction does not recompact rolled output") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, embedding ARRAY<FLOAT>)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'vector.file.format' = 'parquet',
+            |  'vector-field' = 'embedding',
+            |  'field.embedding.vector-dim' = '2',
+            |  'vector-compaction.enabled' = 'true',
+            |  'compaction.min.file-num' = '2')
+            |""".stripMargin)
+      for (start <- Seq(0, 1250)) {
+        sql(s"""
+               |INSERT INTO T SELECT /*+ REPARTITION(1) */
+               |CAST(id AS INT), array(CAST(id AS FLOAT), 0.0f) FROM range($start, ${start + 1250})
+               |""".stripMargin)
+      }
+      // Non-overlapping files are only rewritten when small; overlap them with an update.
+      sql("""
+            |MERGE INTO T USING (SELECT CAST(id AS INT) AS id FROM range(0, 1250)) S
+            |ON T.id = S.id
+            |WHEN MATCHED THEN UPDATE SET T.embedding = array(CAST(S.id AS FLOAT), 0.0f)
+            |""".stripMargin)
+      sql("ALTER TABLE T SET TBLPROPERTIES ('vector.target-file-size' = '1 b')")
+
+      def vectorRanges(): Seq[Range] = loadTable("T")
+        .newSnapshotReader()
+        .read()
+        .dataSplits()
+        .asScala
+        .flatMap(_.dataFiles().asScala)
+        .filter(_.fileName().contains(".vector."))
+        .map(_.nonNullRowIdRange())
+        .sortBy(_.from)
+        .toSeq
+      assert(
+        vectorRanges() == Seq(new Range(0, 1249), new Range(0, 1249), new Range(1250, 2499)),
+        vectorRanges())
+
+      val table = loadTable("T")
+      val beforeSnapshot = lastSnapshotId(table)
+      val attempts = new AtomicInteger()
+      CompactProcedure.executeDataEvolutionCompaction(
+        table,
+        null,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        null,
+        _ => assert(attempts.incrementAndGet() <= 1, "Recompacted this invocation's output")
+      )
+
+      assert(lastSnapshotId(table) == beforeSnapshot + 1)
+      // The rolling writer checks the target size every 1000 rows.
+      assert(
+        vectorRanges() == Seq(new Range(0, 999), new Range(1000, 1999), new Range(2000, 2499)),
+        vectorRanges())
+      checkAnswer(
+        sql("SELECT id, embedding[0] FROM T ORDER BY id"),
+        (0 until 2500).map(id => Row(id, id.toFloat)))
     }
   }
 
@@ -2103,19 +2324,20 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       assert(normalFiles.size == 2)
       val stagedTask = new DataEvolutionNormalCompactTask(
         BinaryRow.EMPTY_ROW,
-        normalFiles.asJava
+        normalFiles.asJava,
+        util.Collections.emptyList[Range](),
+        false
       )
       val taskSnapshot = table.latestSnapshot().get()
       val planned = new AtomicBoolean(false)
       val rewriter = new DataEvolutionCompactMergeConflictRewriter(table, relation)
 
-      val planner: java.util.function.Function[Snapshot, util.List[DataEvolutionCompactTask]] =
+      val planner: java.util.function.Function[Snapshot, DataEvolutionRewriteExecutor.PlanResult] =
         _ => {
-          if (planned.compareAndSet(false, true)) {
-            util.Collections.singletonList(stagedTask)
-          } else {
-            throw new EndOfScanException()
-          }
+          assert(planned.compareAndSet(false, true), "Replanned after the final batch")
+          new DataEvolutionRewriteExecutor.PlanResult(
+            util.Collections.singletonList(stagedTask),
+            true)
         }
       val configurer: DataEvolutionRewriteExecutor.CommitConfigurer =
         _ => {
@@ -2196,7 +2418,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
       val stagedTask = new DataEvolutionNormalCompactTask(
         BinaryRow.EMPTY_ROW,
-        normalFiles.asJava
+        normalFiles.asJava,
+        util.Collections.emptyList[Range](),
+        false
       )
       val stagedUser = "staged-compact"
       val stagedMessage = stagedTask.doCompact(table, stagedUser)
@@ -2210,7 +2434,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
       val concurrentTask = new DataEvolutionNormalCompactTask(
         BinaryRow.EMPTY_ROW,
-        normalDataFiles(table).asJava
+        normalDataFiles(table).asJava,
+        util.Collections.emptyList[Range](),
+        false
       )
       val concurrentUser = "concurrent-compact"
       val concurrentMessage = concurrentTask.doCompact(table, concurrentUser)
@@ -2268,7 +2494,12 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       val normalFiles = normalDataFiles(table)
       assert(normalFiles.size == 2)
 
-      val stagedTask = new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, normalFiles.asJava)
+      val stagedTask = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalFiles.asJava,
+        util.Collections.emptyList[Range](),
+        false
+      )
       val stagedMessage = stagedTask.doCompact(table, "staged-compact")
       val baseSnapshot = table.latestSnapshot().get()
 
@@ -2334,7 +2565,12 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       val normalFiles = normalDataFiles(table)
       assert(normalFiles.size == 2)
 
-      val stagedTask = new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, normalFiles.asJava)
+      val stagedTask = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalFiles.asJava,
+        util.Collections.emptyList[Range](),
+        false
+      )
       val stagedMessage = stagedTask.doCompact(table, "staged-compact")
       val baseSnapshot = table.latestSnapshot().get()
 
@@ -2386,19 +2622,20 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       assert(normalFiles.size == 2)
       val stagedTask = new DataEvolutionNormalCompactTask(
         BinaryRow.EMPTY_ROW,
-        normalFiles.asJava
+        normalFiles.asJava,
+        util.Collections.emptyList[Range](),
+        false
       )
       val taskSnapshot = table.latestSnapshot().get()
       val planned = new AtomicBoolean(false)
       val rewriter = new DataEvolutionCompactMergeConflictRewriter(table, relation)
 
-      val planner: java.util.function.Function[Snapshot, util.List[DataEvolutionCompactTask]] =
+      val planner: java.util.function.Function[Snapshot, DataEvolutionRewriteExecutor.PlanResult] =
         _ => {
-          if (planned.compareAndSet(false, true)) {
-            util.Collections.singletonList(stagedTask)
-          } else {
-            throw new EndOfScanException()
-          }
+          assert(planned.compareAndSet(false, true), "Replanned after the final batch")
+          new DataEvolutionRewriteExecutor.PlanResult(
+            util.Collections.singletonList(stagedTask),
+            true)
         }
       val configurer: DataEvolutionRewriteExecutor.CommitConfigurer =
         _ => {
@@ -2412,7 +2649,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             case 1 =>
               val concurrentTask = new DataEvolutionNormalCompactTask(
                 BinaryRow.EMPTY_ROW,
-                normalDataFiles(table).asJava
+                normalDataFiles(table).asJava,
+                util.Collections.emptyList[Range](),
+                false
               )
               val compactUser = "concurrent-compact"
               val compactMessage = concurrentTask.doCompact(table, compactUser)
@@ -2649,7 +2888,8 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         }
       )
 
-      Assertions.assertThat(attempts.get()).isEqualTo(4)
+      // The third attempt commits the final batch; do not recompact the rebased outputs.
+      Assertions.assertThat(attempts.get()).isEqualTo(3)
       Assertions.assertThat(firstRetryFiles.nonEmpty).isTrue
       checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 12), Row(2, 20)))
     }

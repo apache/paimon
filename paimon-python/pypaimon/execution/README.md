@@ -41,6 +41,9 @@ Keep this boundary when adding or moving code:
 
 ```text
 pypaimon/
+  common/
+    arrow_predicate.py          Standalone Arrow predicate and transform helpers
+    external_path_provider.py   Shared external file placement strategies
   read/                         Public read/scan APIs, Arrow output and explain
     read_dispatch.py            Read/scan selection across the two backends
     read_support.py             Shared output, schema and reader ownership
@@ -51,12 +54,13 @@ pypaimon/
     write_dispatch.py           Writer coordination and safe pre-write switching
     update_dispatch.py          Update/upsert/delete/MERGE coordination
     input_adapter.py            Pandas transport and distributed input conversion
-    merge_condition.py          Shared MERGE condition parsing and validation
+    merge_condition.py          Shared MERGE condition parsing and Arrow batch filtering
     merge_transform.py          Shared Arrow assignments and callable inputs
     ray_datasink.py              Ray worker writes and coordinator commits
   globalindex/                  Public index contracts and backend coordination
     index_dispatch.py           Index selection and Vindex resource ownership
     vindex_input.py             Python SDK/Native callback streams and ownership
+  index/                        Shared index metadata, definitions and input routing
   table/source/
     search_dispatch.py          Search selection and transported-plan coordination
   table/system/                 SystemSplit metadata and common Arrow output
@@ -64,19 +68,18 @@ pypaimon/
     vector_index_build.py       Ray index tasks, shard workers and failure draining
   execution/
     python/
-      casting/                  Old-file array casts and executable-cast probes
+      casting/                  Old-file array value casts
       map_blob_key_serializer.py Physical MAP BLOB key encoding for readers/writers
       read/                     File scanners/readers and merge execution
         search/                 Vector/text/hybrid search and Python factories
         blob_view_lookup.py     Upstream Blob descriptor planning, loading and resolution
         interval_partition.py   Primary-key sorted-run grouping
-        predicate_json_parser.py Authorization row-filter and masking execution
         map_shared_shredding.py Physical MAP decoding and selected-column pruning
         variant_shredding.py    Physical VARIANT reconstruction and shredding
       deletionvectors/          DV bitmap codecs, file I/O and deleted-row filtering
       write/                    File writers, committers and update execution
-        external_path_provider.py Per-writer external file placement strategies
       globalindex/              Index file codecs, readers, writers and build algorithms
+      index/                    Primary-key index source selection and sorted-index grouping
       merge_engine_dispatch.py  Python merge-function selection
     native/
       runtime.py                Lazy SDK discovery and process safety
@@ -88,7 +91,7 @@ pypaimon/
 ## Public APIs and dependencies
 
 Corresponding Paimon APIs keep configuration, validation and explicit delegation;
-they do not inherit either backend. Public method signatures, defaults, class
+they do not inherit either backend. Documented public method signatures, defaults, class
 paths and supported subclass/instance hooks remain stable. Shared input/result
 contracts include schemas, predicates, plans, splits and commit messages.
 
@@ -96,27 +99,87 @@ Neither backend imports the other. Native adapters do not construct or retain
 Python executors. Python implementations do not load the optional Native SDK
 just because it is installed. Planning, reading, writing and committing retain
 independent options; shared plans and commit messages connect those stages.
-Explicit access to an existing Python scanner/router/committer property selects
-that implementation. Ordinary configuration and metadata inspection do not.
+The public `TableScan.file_scanner`, `AsyncStreamingTableScan` and
+`StreamTableScan` are backend-neutral facades, including direct construction.
+Accessing file configuration does not construct a Python scanner. File plans
+require unrestricted whole-table authorization because they expose raw file
+metadata. Internal writer metadata restoration uses the selected executor's
+private scanner and retains its write authorization boundary.
+
+Direct `TableUpdateByRowId`, `TableDeleteByRowId` and `ShardTableUpdator`
+construction also selects one execution backend before loading target files.
+Direct `TableWrite`, batch/stream writers and postpone fixed-bucket writers
+use the same selection boundary as builders while retaining their public class
+and subclass hooks. Writer resources and update executors are created in
+`write/backend_dispatch.py`; the public classes only delegate to the selected
+implementation. Python-only nested writers use explicit Python factories.
+An operation that selected Python keeps its nested update/delete writers and
+writer-owned metadata restoration in Python, including MERGE actions and
+dynamic-bucket HASH validation. A committer that selected Python retains it
+for subsequent rounds even if later messages could use Native. Private schema,
+routing and rewrite algorithms
+call their executor's helpers; public method overrides and user callbacks remain
+public hooks. Broadcast file indexes retain their captured snapshot and are
+consumed by the explicitly selected Python workers without per-worker rescans.
+Python Blob View and search readers keep their internal source reads and scans
+in Python, including captured snapshot views. Public table copies only share
+resource containers; backend caches are allocated by the backend that uses them.
+Hybrid queries that select Python keep their default route planning, child
+execution and rank fusion in Python. Explicit subclass and instance hooks retain
+their original owners; standalone public route and rank calls still select their
+own backend. This also applies when hooks call `super()` or saved public methods;
+the query and its route workers retain Python selection until each call exits.
+Scan selection, including LeRobot's indexed-read preference, belongs
+to `read_dispatch`; public scans do not mirror private Native capability methods.
+Each scan retains its selected executor until its configuration changes. The
+Python executor owns its private file scanner and applies public file-level
+configuration. Installing, replacing or removing scanner execution hooks
+invalidates that executor; explicit instance and subclass hooks select Python
+before any Native capability probe and run after authorization.
+The Python executor also compares captured requests before reusing its scanner,
+so in-place changes to range containers refresh planning without selecting a
+different backend or retaining an earlier authorization scope.
+Scanner hooks delegate base calls to the current Python scanner, preserving its
+snapshot and statistics when nested hooks change configuration. Unchanged query
+scopes reuse their grant and wrap the plan once. Adding protected filter fields
+requires a new grant; explicit raw-file calls still require whole-table permission.
+
+Postpone bucket metadata is writer state. Native obtains it from the Core write
+builder, preserving per-file layout validation and write authorization without
+adding SELECT requirements. Shared input statistics and bucket arithmetic stay
+outside either backend.
+
+Manifest-source and follow-up-scanner callbacks belong to Python execution
+internals. Public scanner configuration selects the existing snapshot, delta
+or changelog strategies without accepting custom scanner callbacks.
+Public writers and committers do not expose file writers, key extractors or
+file committers. Inspecting an unknown attribute never initializes another
+backend. Backend-owned schemas, routing and file state remain on the selected
+executor; public table/user/partition configuration stays on the facade.
 
 Deletion-vector codecs, file loading and row filtering belong to Python
 execution, corresponding to Rust Core's deletion-vector implementation.
 `DeletionFile` and `DeletionVectorMeta` remain shared metadata in `table/source`
 and `index`; importing or transporting them does not load either backend.
 
+Primary-key index source selection, payload eligibility and sorted-index coverage
+planning belong to `execution/python/index`. Index definitions, source metadata
+and their wire formats remain in `index`, shared with public builders and Native
+adapters. Native index planning performs source selection and grouping in Rust.
+
 Arrow read schemas and logical type-change rules stay in `schema`. Shared
 numeric, calendar and metadata text helpers stay in `utils`; Native read and
 commit adapters use them without importing Python cast executors. Array value
-conversion and the local schema manager's executable-cast probe belong to
-Python execution. The schema manager delegates that probe lazily when validating
-a local type change. Python commit partition-spec parsing also belongs to its
+conversion belongs to Python execution. The schema manager validates local
+type changes using the shared static executable-cast rules. Python commit
+partition-spec parsing also belongs to its
 executor; Native commits pass the spec to Rust.
 
 Physical MAP/VARIANT codecs and Blob View resolution belong to Python
 execution. Public value objects, schema/spec parsing and selected-key metadata
-stay in `data`. MERGE condition evaluation and first-matching-clause selection
-also belong to Python execution; callable transport, SQL rewriting and shared
-Arrow assignment adapters stay in `write`.
+stay in `data`. Table MERGE action selection belongs to the selected backend.
+Standalone Arrow condition filtering, SQL rewriting, callable transport and
+shared Arrow assignment adapters stay in `write`.
 
 Dynamic bucket HASH index publication and writer-owned pending state belong
 to the Python writer. The shared input bucket assigner remains in `index`:
@@ -124,18 +187,21 @@ distributed producers use it to route inputs before either backend writes.
 `input_routing` and `bucket_planning` similarly serve both backends' input
 protocols without retaining a file writer or publishing data.
 
-External-path round-robin, weighted selection and entropy directories belong
-to Python write execution. Shared path factories retain configuration and
-existing-file resolution, loading a provider only when Python allocates a new
-file. MAP BLOB key serializers implement the physical file format and are
+External-path round-robin, weighted selection and entropy directories are shared
+path utilities in `common`. Shared path factories retain configuration and
+existing-file resolution, loading a provider when a caller allocates a new file.
+MAP BLOB key serializers implement the physical file format and are
 shared within the Python backend. Generic URI/FileIO contracts, resource
 caches and integer codecs stay in `common`; Native Blob inputs also use the
-URI reader contract.
+URI reader contract. FileIO supplies streams and locations. Physical Row, Blob
+and Vortex codec construction belongs to the selected Python executor, rather
+than to format-specific FileIO convenience methods.
 
-Authorization row-filter and column-mask evaluation belongs to Python read
-execution. JSON field-reference extraction and rule/schema validation remain
-shared. The public authorization result creates a Python filter lazily when
-explicitly requested; Native reads pass the original rules to Rust.
+Standalone Arrow predicate and transform helpers live in `common/arrow_predicate`.
+JSON field-reference extraction and rule/schema validation remain independent
+of that Arrow evaluator. The public authorization result creates an Arrow
+filter lazily when explicitly requested without selecting either backend.
+Python readers use the shared evaluator; Native reads pass the original rules to Rust.
 
 Framework adapters keep their actual implementation in their original modules,
 including their public class identities, serialization and worker closures.
@@ -160,6 +226,8 @@ raw and primary-key splits keep their own fields and index metadata. The Native
 adapter translates ordinary Python plans into these values, including plans
 made by Python scans or sent to another process. Existing snapshot and index
 metadata codecs are private adapters, rather than a public JSON plan protocol.
+Native primary-key result conversion also stays in the Native adapter; shared
+scored results keep only their metadata, validation and ownership contract.
 Readers own the table, schema, query and filter. Native selection is retained
 after transport, and source subsets never add missing indexes or raw ranges.
 For Native, a plan without a captured snapshot must have no sources and never
@@ -193,11 +261,12 @@ Message conversion happens during preparation; publication uses the selected
 executor's prepared messages. Batch/stream binding details stay in the Native
 adapter, and overwrite details stay in each backend.
 
-Both batch scanners expose `plan(auth_result=None)`, `plan_all_files()` and
+Both batch scanners expose `plan(auth_result=None)`, `plan_all()` and
 `scan_with_stats(auth_result=None)`. Both readers expose `read_rows(splits)` and
 `read_batches(splits, schema, parallelism=None, blob_parallelism=1,
 ordered=False)`. Output materialization and Python parallel-read helpers are
-separate from this execution protocol.
+separate from this execution protocol. Native read adaptation calls its own
+helpers directly; TableRead does not mirror private Native methods.
 
 Writer executors take an explicit identifier in `prepare_commit(identifier)`.
 The public batch facade exposes only `prepare_commit()`, with a one-time guard;
@@ -235,7 +304,9 @@ preserve the configured changelog sequence.
 Both shard updaters expose `arrow_reader()`, `update_by_arrow_batch(data)`,
 `prepare_commit()` and `close()`. They track actual visible row IDs, require a
 complete read/update cycle before preparation and preserve prepared files when
-closed. This matters when deletion vectors hide physical rows.
+closed. This matters when deletion vectors hide physical rows. The selected
+executor owns the reader, writer, pending batches and read/update cycle state;
+the public facade only delegates these operations.
 
 Python executors bind an explicit public context and retain its instance hooks;
 Native adapters own Rust handles. The context is not copied or hidden behind a

@@ -25,9 +25,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.write.table_update import TableUpdate
 
 
 pytestmark = pytest.mark.native_plan
@@ -108,10 +108,12 @@ def _read(table, predicate, native_plan, native_read, projection=('id',)):
     reader = builder.new_read()
     with ExitStack() as stack:
         if native_read:
-            stack.enter_context(patch.object(reader, '_native_fallback',
-                                             side_effect=AssertionError('Python read fallback')))
-            stack.enter_context(patch.object(reader, '_create_split_read',
-                                             side_effect=AssertionError('Python split reader')))
+            stack.enter_context(patch('pypaimon.read.read_dispatch.native_read_fallback',
+                                      side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python split reader')
+            ))
         rows = reader.to_arrow(plan.splits(), parallelism=1).to_pylist()
     return sorted(rows, key=lambda row: row['id'])
 
@@ -146,7 +148,7 @@ def test_decimal_predicates_select_the_same_rows_for_updates_and_deletes(tmp_pat
     with ExitStack() as stack:
         if native:
             for method in ['_build_predicate_update_table', '_matched_delete_row_ids']:
-                stack.enter_context(patch.object(TableUpdate, method,
+                stack.enter_context(patch.object(PythonTableUpdate, method,
                                                  side_effect=AssertionError('Python matching fallback')))
         if operation == 'delete':
             messages = update.delete_by_predicate(predicate, 19) if stream else update.delete_by_predicate(predicate)

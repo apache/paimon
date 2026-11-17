@@ -61,11 +61,20 @@ modules = [
     'pypaimon.schema.arrow_schema', 'pypaimon.schema.data_type_casts',
     'pypaimon.schema.schema_manager', 'pypaimon.utils.file_store_path_factory',
     'pypaimon.table.system.files_table', 'pypaimon.common.predicate_json_parser',
+    'pypaimon.common.transform_schema', 'pypaimon.common.arrow_predicate',
+    'pypaimon.common.external_path_provider',
     'pypaimon.common.uri_reader', 'pypaimon.common.blob_index_cache',
     'pypaimon.common.delta_varint_compressor', 'pypaimon.common.file_io',
 ]
 for name in modules:
     importlib.import_module(name)
+
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
+factory = FileStorePathFactory(
+    '/warehouse', ['p'], '__DEFAULT_PARTITION__', 'parquet', 'data-', 'changelog-',
+    False, False, 'zstd', external_paths=['/external'], external_path_strategy='round-robin')
+provider = factory.create_external_path_provider(('x',), 0, canonical_partition=True)
+assert provider.get_next_external_data_path('data.parquet') == '/external/p=x/bucket-0/data.parquet'
 assert not any(name == 'pypaimon.execution' or name.startswith('pypaimon.execution.')
                for name in sys.modules)
 """

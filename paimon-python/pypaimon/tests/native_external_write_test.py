@@ -96,8 +96,10 @@ def _read(table, planner, reader, snapshot=None):
     read = builder.new_read()
     with ExitStack() as stack:
         if reader:
-            stack.enter_context(patch.object(read, '_create_split_read',
-                                             side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         result = read.to_arrow(plan.splits())
     return sorted(result.to_pylist(), key=lambda row: row['id'])
 

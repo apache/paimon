@@ -22,8 +22,10 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -112,6 +114,102 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         Row.of(1, 11, 111, 1111),
                         Row.of(2, 22, 222, 2222),
                         Row.of(4, null, null, null));
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testLookupJoinDeletionPropagationAfterCompaction(boolean fullCompaction)
+            throws Exception {
+        sql(
+                "CREATE TABLE AGG_DIM (i INT PRIMARY KEY NOT ENFORCED, cnt BIGINT) WITH ("
+                        + "'merge-engine' = 'aggregation', "
+                        + "'fields.cnt.aggregate-function' = 'sum', "
+                        + "'aggregation.remove-record-on-delete' = 'true', "
+                        + "'force-lookup' = 'true', "
+                        + "'changelog-producer' = 'none', "
+                        + "'lookup.cache' = 'full', "
+                        + "'continuous.discovery-interval' = '1 ms')");
+        sql("INSERT INTO AGG_DIM VALUES (1, 10), (2, 20)");
+
+        String query =
+                "SELECT T.i, D.cnt FROM T LEFT JOIN AGG_DIM FOR SYSTEM_TIME AS OF T.proctime AS D "
+                        + "ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (1), (2)");
+        assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 10L), Row.of(2, 20L));
+
+        if (fullCompaction) {
+            // keep the delete in level 0, then a full compaction drops the row, which then
+            // only exists in the files before the compaction
+            sql("ALTER TABLE AGG_DIM SET ('write-only' = 'true')");
+            sql("DELETE FROM AGG_DIM WHERE i = 1");
+            // wait for the compaction job
+            tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+            sql("CALL sys.compact(`table` => 'default.AGG_DIM')");
+            assertThat(sql("SELECT level, record_count FROM `AGG_DIM$files`"))
+                    .containsExactly(Row.of(5, 1L));
+        } else {
+            // the delete job compacts into an intermediate level and keeps the delete record
+            sql("DELETE FROM AGG_DIM WHERE i = 1");
+        }
+        Thread.sleep(2000); // wait compact-delta refresh
+
+        sql("INSERT INTO T VALUES (1), (2)");
+        assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, null), Row.of(2, 20L));
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"full", "memory"})
+    public void testLookupJoinBySecondaryKeyAfterKeyOnlyDelete(String cacheMode) throws Exception {
+        sql(
+                "CREATE TABLE SEC_DIM (k INT PRIMARY KEY NOT ENFORCED, f1 INT, f2 INT) WITH ("
+                        + "'merge-engine' = 'partial-update', "
+                        + "'fields.f2.sequence-group' = 'f1', "
+                        + "'partial-update.remove-record-on-sequence-group' = 'f2', "
+                        + "'force-lookup' = 'true', "
+                        + "'changelog-producer' = 'none', "
+                        + "'lookup.cache' = '%s', "
+                        + "'continuous.discovery-interval' = '1 ms')",
+                cacheMode);
+        sql("INSERT INTO SEC_DIM VALUES (1, 11, 1)");
+
+        String query =
+                "SELECT T.i, D.k, D.f2 FROM T LEFT JOIN SEC_DIM FOR SYSTEM_TIME AS OF T.proctime AS D "
+                        + "ON T.i = D.f1";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (11)");
+        assertThat(iterator.collect(1)).containsExactly(Row.of(11, 1, 1));
+
+        // a sequence-group delete that carries no value of the join key f1
+        String dataId =
+                TestValuesTableFactory.registerData(
+                        Collections.singletonList(Row.ofKind(RowKind.DELETE, 1, null, 2)));
+        sEnv.executeSql(
+                String.format(
+                        "CREATE TEMPORARY TABLE SEC_DELETE (k INT, f1 INT, f2 INT) WITH ("
+                                + "'connector' = 'values', 'bounded' = 'true', "
+                                + "'data-id' = '%s', 'changelog-mode' = 'I,D')",
+                        dataId));
+        sEnv.executeSql("INSERT INTO SEC_DIM SELECT * FROM SEC_DELETE").await();
+        // the delete record is kept in an intermediate level, so the refresh reads it
+        assertThat(sql("SELECT level, record_count FROM `SEC_DIM$files`"))
+                .containsExactlyInAnyOrder(Row.of(4, 1L), Row.of(5, 1L));
+        Thread.sleep(2000); // wait compact-delta refresh
+
+        sql("INSERT INTO T VALUES (11)");
+        assertThat(iterator.collect(1)).containsExactly(Row.of(11, null, null));
+
+        // reinsert the key with another value of f1
+        sql("INSERT INTO SEC_DIM VALUES (1, 22, 3)");
+        Thread.sleep(2000); // wait compact-delta refresh
+
+        sql("INSERT INTO T VALUES (11), (22)");
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(Row.of(11, null, null), Row.of(22, 1, 3));
         iterator.close();
     }
 

@@ -31,6 +31,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -121,6 +122,37 @@ public class IncrementalDeltaStartingScannerTest extends ScannerTestBase {
                         anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "The specified scan snapshotId range [1, 5] is out of available snapshotId range [1, 4]."));
+    }
+
+    @Test
+    public void testRowDeduplicateIgnoreFieldsWithSpaces() throws Exception {
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS.key(),
+                                "a, b"));
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.compact(binaryRow(1), 0, false);
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // only the ignored field b changes
+        write.write(rowData(1, 10, 500L));
+        write.compact(binaryRow(1), 0, false);
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.close();
+        commit.close();
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(4);
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(INCREMENTAL_BETWEEN.key(), "2,4");
+        dynamicOptions.put(INCREMENTAL_BETWEEN_SCAN_MODE.key(), "changelog");
+        List<Split> splits = table.copy(dynamicOptions).newScan().plan().splits();
+        assertThat(getResult(table.newRead(), splits)).isEmpty();
     }
 
     private void writeDataToTable() throws Exception {

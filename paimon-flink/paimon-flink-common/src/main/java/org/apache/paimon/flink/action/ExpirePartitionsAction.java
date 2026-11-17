@@ -55,10 +55,16 @@ public class ExpirePartitionsAction extends TableActionBase implements LocalActi
         }
         table = table.copy(tableConfig);
         this.expirationTime = expirationTime;
-        map = new HashMap<>();
-        map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
-        map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
-        map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
+        map = new HashMap<>(table.options());
+        if (expireStrategy != null) {
+            map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
+        }
+        if (timestampFormatter != null) {
+            map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
+        }
+        if (timestampPattern != null) {
+            map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
+        }
     }
 
     @Override

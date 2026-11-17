@@ -77,7 +77,14 @@ case class PaimonFunctionLookup(catalogManager: CatalogManager) extends LookupCa
   }
 
   def isSparkBuiltInFunction(funcIdent: FunctionIdentifier): Boolean = {
-    catalogManager.v1SessionCatalog.isBuiltinFunction(funcIdent)
+    val catalog = catalogManager.v1SessionCatalog
+    val method = catalog.getClass.getMethods.find(_.getName == "isBuiltinFunction").get
+    val argument = if (method.getParameterTypes.head == classOf[String]) {
+      funcIdent.funcName
+    } else {
+      funcIdent
+    }
+    method.invoke(catalog, argument).asInstanceOf[Boolean]
   }
 
   def isSparkTmpFunc(funcIdent: FunctionIdentifier): Boolean = {

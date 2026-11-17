@@ -27,10 +27,12 @@ class ResourcePaths:
     V1 = "v1"
     DATABASES = "databases"
     TABLES = "tables"
+    ID = "id"
     TABLE_DETAILS = "table-details"
     PARTITIONS = "partitions"
     FUNCTIONS = "functions"
     FUNCTION_DETAILS = "function-details"
+    MODELS = "models"
     TAGS = "tags"
     BRANCHES = "branches"
     FORWARD = "forward"
@@ -69,6 +71,11 @@ class ResourcePaths:
     def table(self, database_name: str, table_name: str) -> str:
         return ("{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                 self.TABLES, RESTUtil.encode_string(table_name)))
+
+    def table_by_id(self, table_id: str) -> str:
+        # Keep '~' raw, as in table_details.
+        table_id = urllib.parse.quote_plus(table_id, safe="*~", errors="replace")
+        return "{}/{}/{}/{}".format(self.base_path, self.TABLES, self.ID, table_id)
 
     def table_details(self, database_name: str) -> str:
         database_name = urllib.parse.quote_plus(database_name, safe="*~", errors="replace")
@@ -111,6 +118,19 @@ class ResourcePaths:
     def function(self, database_name: str, function_name: str) -> str:
         return "{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                                        self.FUNCTIONS, RESTUtil.encode_string(function_name))
+
+    def models(self, database_name: str) -> str:
+        return "{}/{}/{}/{}".format(
+            self.base_path,
+            self.DATABASES,
+            RESTUtil.encode_string(database_name),
+            self.MODELS,
+        )
+
+    def model(self, database_name: str, model_name: str) -> str:
+        return "{}/{}".format(
+            self.models(database_name), RESTUtil.encode_string(model_name)
+        )
 
     def tags(self, database_name: str, table_name: str) -> str:
         return "{}/{}/{}/{}/{}/{}".format(

@@ -127,8 +127,4 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         execution = copy(self)
         execution._options = dict(self._options)
         execution._query_vectors = [copy(vector) for vector in self._query_vectors]
-        return create_vector_read(execution, execution._new_python_batch_vector_read, batch=True)
-
-    def _new_python_batch_vector_read(self):
-        from pypaimon.execution.python.read.search.factories import new_batch_vector_read
-        return new_batch_vector_read(self)
+        return create_vector_read(execution, batch=True)

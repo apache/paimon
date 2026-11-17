@@ -23,7 +23,8 @@ class PythonPostponeBucketPlanner(PostponeBucketPlanning):
 
     @staticmethod
     def _load_bucket_metadata(table):
-        scan = table.new_read_builder().new_scan().file_scanner
+        from pypaimon.execution.python.read.table_scan import PythonTableScan
+        scan = PythonTableScan(table.new_read_builder().new_scan())._file_scanner()
         manifest_files, _ = scan.manifest_scanner()
         entries = scan.manifest_file_manager.read_entries_parallel(
             manifest_files,

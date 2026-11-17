@@ -18,7 +18,7 @@
 import pyarrow as pa
 import pytest
 
-from pypaimon.write.table_update import BatchTableUpdate
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
 
 
 WRAPPERS = [
@@ -59,16 +59,16 @@ def test_predicate_assignment_struct_cast(wrap_type, wrap_value, chunked, projec
 
     if projection == "reordered":
         with pytest.raises(ValueError, match="struct fields must match in order"):
-            BatchTableUpdate._assignment_to_array(values, target, 2)
+            PythonTableUpdate._assignment_to_array(values, target, 2)
     else:
         try:
             expected = values.cast(target).to_pylist()
         except (pa.ArrowNotImplementedError, pa.ArrowTypeError) as error:
             # Older Arrow versions reject unsupported STRUCT field projections.
             with pytest.raises(type(error)) as raised:
-                BatchTableUpdate._assignment_to_array(values, target, 2)
+                PythonTableUpdate._assignment_to_array(values, target, 2)
             assert str(raised.value) == str(error)
             return
-        result = BatchTableUpdate._assignment_to_array(values, target, 2)
+        result = PythonTableUpdate._assignment_to_array(values, target, 2)
         assert result.type == target
         assert result.to_pylist() == expected

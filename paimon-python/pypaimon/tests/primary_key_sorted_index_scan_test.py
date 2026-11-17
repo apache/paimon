@@ -28,7 +28,7 @@ from pypaimon.index.pk.primary_key_index_definition import (
     PrimaryKeyIndexDefinition, PrimaryKeyIndexFamily)
 from pypaimon.index.pk.primary_key_index_source_file import PrimaryKeyIndexSourceFile
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
-from pypaimon.index.pksorted.pk_sorted_bucket_index_state import PkSortedBucketIndexState
+from pypaimon.execution.python.index.pksorted.pk_sorted_bucket_index_state import PkSortedBucketIndexState
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.read.split import DataSplit
 from pypaimon.schema.data_types import AtomicType, DataField

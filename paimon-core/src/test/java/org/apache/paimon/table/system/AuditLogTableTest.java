@@ -115,7 +115,7 @@ public class AuditLogTableTest extends TableTestBase {
                                 .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
                                 .option(CoreOptions.BUCKET.key(), "1")
                                 .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
-                                .option(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "score")
+                                .option(CoreOptions.GLOBAL_INDEX_BTREE_INDEX_COLUMNS.key(), "score")
                                 .build());
         FileStoreTable dataTable = FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
         write(dataTable, ioManager, GenericRow.of(1, 10));

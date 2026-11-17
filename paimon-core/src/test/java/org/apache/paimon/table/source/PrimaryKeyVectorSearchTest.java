@@ -26,21 +26,32 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
+import static java.util.stream.Collectors.toList;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** End-to-end tests for bucket-local primary-key vector search. */
@@ -49,6 +60,74 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
     @Override
     protected Schema schemaDefault() {
         return vectorSchema("deduplicate", true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"legacy", "index-column", "index-columns"})
+    void testTypedConfigurationReachesWritesAndRawFallback(String declaration) throws Exception {
+        Schema base = schemaDefault();
+        Map<String, String> options = new HashMap<>(base.options());
+        options.put("vector-index.search-mode", "full");
+        String type = TestVectorGlobalIndexerFactory.IDENTIFIER;
+        options.remove("global-index." + type + ".index-columns");
+        options.remove("fields.embedding.index-options");
+        if (declaration.equals("legacy")) {
+            options.put("pk-vector.index.columns", "embedding");
+            options.put("fields.embedding.pk-vector.index.type", type);
+            options.put("fields.embedding.pk-vector.index.options", "{\"metric\":\"l2\"}");
+        } else {
+            options.put("global-index." + type + "." + declaration, "embedding");
+            options.put("fields.embedding.index-options", "{\"metric\":\"l2\"}");
+        }
+        catalog.createTable(
+                identifier(),
+                new Schema(
+                        base.fields(),
+                        base.partitionKeys(),
+                        base.primaryKeys(),
+                        options,
+                        base.comment()),
+                false);
+        FileStoreTable table = getTableDefault();
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[] {3, 0})),
+                GenericRow.of(2, BinaryVector.fromPrimitiveArray(new float[] {1, 0})),
+                GenericRow.of(3, BinaryVector.fromPrimitiveArray(new float[] {2, 0})));
+
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVector(new float[] {0, 0})
+                        .withLimit(1);
+        PrimaryKeyVectorScan.Plan indexed =
+                (PrimaryKeyVectorScan.Plan) builder.newVectorScan().scan();
+        List<Split> dataSplits = new ArrayList<>();
+        for (VectorSearchSplit split : indexed.splits()) {
+            BucketVectorSearchSplit bucket = (BucketVectorSearchSplit) split;
+            assertThat(bucket.payloadFiles()).isNotEmpty();
+            assertThat(bucket.payloadFiles()).allMatch(payload -> payload.indexType().equals(type));
+            dataSplits.add(bucket.dataSplit());
+        }
+        assertThat(readIds(table, builder.newVectorRead().read(indexed))).containsExactly(2);
+
+        PrimaryKeyVectorScan.Plan raw =
+                PrimaryKeyVectorScan.plan(
+                        indexed.snapshotId(), dataSplits, Collections.emptyList());
+        GlobalIndexResult rawResult = builder.newVectorRead().read(raw);
+        assertThat(readIds(table, rawResult)).containsExactly(2);
+        assertThat(((PrimaryKeyVectorResult) rawResult).splits().get(0).scores())
+                .containsExactly(0.5F);
+        List<GlobalIndexResult> batch =
+                table.newBatchVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVectors(new float[][] {{0, 0}, {4, 0}})
+                        .withLimit(1)
+                        .newBatchVectorRead()
+                        .readBatch(raw);
+        assertThat(readIds(table, batch.get(0))).containsExactly(2);
+        assertThat(readIds(table, batch.get(1))).containsExactly(1);
     }
 
     private Schema vectorSchema(String mergeEngine, boolean deletionVectorsEnabled) {
@@ -67,17 +146,226 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
                         .option(
                                 CoreOptions.DELETION_VECTORS_ENABLED.key(),
                                 Boolean.toString(deletionVectorsEnabled))
-                        .option(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding")
                         .option(
-                                "fields.embedding.pk-vector.index.type",
-                                TestVectorGlobalIndexerFactory.IDENTIFIER)
-                        .option("fields.embedding.pk-vector.distance.metric", "l2")
+                                "global-index."
+                                        + TestVectorGlobalIndexerFactory.IDENTIFIER
+                                        + ".index-columns",
+                                "embedding")
+                        .option("fields.embedding.index-options", "{\"metric\":\"l2\"}")
                         .option("test.vector.dimension", "2")
                         .option("test.vector.metric", "l2");
         if (reverseScore) {
             builder.option("test.vector.reverse-score", "true");
         }
         return builder.build();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void testIndependentVectorIndexesSurviveReopenAndCompaction(int buildParallelism)
+            throws Exception {
+        catalog.createTable(
+                identifier(), multipleVectorSchema(2, "l2", "l2", buildParallelism), false);
+        FileStoreTable table = getTableDefault();
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, vector(1, 0), vector(9, 0)),
+                GenericRow.of(2, vector(2, 0), vector(8, 0)));
+        write(
+                table,
+                ioManager,
+                GenericRow.of(3, vector(8, 0), vector(2, 0)),
+                GenericRow.of(4, vector(9, 0), vector(1, 0)));
+        compact(table, BinaryRow.EMPTY_ROW, 0, ioManager, true);
+        assertMultipleVectorPayloads(table);
+
+        // Identical algorithms and dimensions must not cause one field's payload to serve another.
+        FileStoreTable reopened = getTableDefault();
+        assertThat(searchIds(reopened, "image_embedding", new float[] {0, 0}, 1))
+                .containsExactly(1);
+        assertThat(searchIds(reopened, "text_embedding", new float[] {0, 0}, 1)).containsExactly(4);
+
+        // A new writer restores both indexes before replacing their source files.
+        write(
+                reopened,
+                ioManager,
+                GenericRow.of(1, vector(10, 0), vector(0.5f, 0)),
+                GenericRow.of(2, null, vector(7, 0)),
+                GenericRow.of(3, vector(8, 0), null),
+                GenericRow.ofKind(RowKind.DELETE, 4, vector(9, 0), vector(1, 0)));
+        compact(reopened, BinaryRow.EMPTY_ROW, 0, ioManager, true);
+        assertMultipleVectorPayloads(reopened);
+
+        FileStoreTable restored = getTableDefault();
+        assertThat(searchIds(restored, "image_embedding", new float[] {0, 0}, 1))
+                .containsExactly(3);
+        assertThat(searchIds(restored, "text_embedding", new float[] {0, 0}, 1)).containsExactly(1);
+        assertThat(searchIds(restored, "image_embedding", new float[] {0, 0}, 10))
+                .containsExactlyInAnyOrder(1, 3);
+        assertThat(searchIds(restored, "text_embedding", new float[] {0, 0}, 10))
+                .containsExactlyInAnyOrder(1, 2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void testIndependentVectorIndexesWithDifferentDimensionsAndMetrics(int buildParallelism)
+            throws Exception {
+        catalog.createTable(
+                identifier(), multipleVectorSchema(3, "l2", "cosine", buildParallelism), false);
+        FileStoreTable table = getTableDefault();
+        write(table, ioManager, GenericRow.of(1, vector(1, 0), vector(1, 1, 0)));
+        write(table, ioManager, GenericRow.of(2, vector(2, 0), vector(10, 0, 0)));
+        compact(table, BinaryRow.EMPTY_ROW, 0, ioManager, true);
+        assertMultipleVectorPayloads(table);
+
+        FileStoreTable reopened = getTableDefault();
+        assertThat(searchIds(reopened, "image_embedding", new float[] {0, 0}, 1))
+                .containsExactly(1);
+        // Cosine ranks id 2 first, whereas L2 would rank id 1 first for this field.
+        assertThat(searchIds(reopened, "text_embedding", new float[] {1, 0, 0}, 1))
+                .containsExactly(2);
+
+        List<GlobalIndexResult> results =
+                reopened.newBatchVectorSearchBuilder()
+                        .withVectorColumn("text_embedding")
+                        .withVectors(new float[][] {{1, 0, 0}, {0, 1, 0}})
+                        .withLimit(1)
+                        .executeBatchLocal();
+        assertThat(results).hasSize(2);
+        assertThat(readIds(reopened, results.get(0))).containsExactly(2);
+        assertThat(readIds(reopened, results.get(1))).containsExactly(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void testCompactionBackfillsAddedVectorIndexWithoutNewData(int buildParallelism)
+            throws Exception {
+        Schema schema = multipleVectorSchema(2, "l2", "l2", buildParallelism);
+        schema.options()
+                .put(
+                        "global-index."
+                                + TestVectorGlobalIndexerFactory.IDENTIFIER
+                                + ".index-columns",
+                        "image_embedding");
+        catalog.createTable(identifier(), schema, false);
+        FileStoreTable original = getTableDefault();
+        write(original, ioManager, GenericRow.of(1, vector(1, 0), vector(9, 0)));
+        write(original, ioManager, GenericRow.of(2, vector(9, 0), vector(1, 0)));
+        compact(original, BinaryRow.EMPTY_ROW, 0, ioManager, true);
+        List<IndexFileMeta> originalPayloads = vectorPayloads(original);
+        assertThat(originalPayloads).hasSize(1);
+        assertThat(originalPayloads.get(0).globalIndexMeta().indexFieldId())
+                .isEqualTo(original.rowType().getField("image_embedding").id());
+
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.setOption(
+                                "global-index."
+                                        + TestVectorGlobalIndexerFactory.IDENTIFIER
+                                        + ".index-columns",
+                                "image_embedding,text_embedding")),
+                false);
+        FileStoreTable reopened = getTableDefault();
+        assertThat(searchIds(reopened, "image_embedding", new float[] {0, 0}, 1))
+                .containsExactly(1);
+        assertThat(searchIds(reopened, "text_embedding", new float[] {0, 0}, 1)).isEmpty();
+
+        // A fresh compactor must discover the coverage gap even without a data-file transition.
+        BatchWriteBuilder writeBuilder = reopened.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.withIOManager(ioManager);
+            write.compact(BinaryRow.EMPTY_ROW, 0, true);
+            List<CommitMessage> messages = write.prepareCommit();
+            assertThat(messages).hasSize(1);
+            CommitMessageImpl message = (CommitMessageImpl) messages.get(0);
+            assertThat(message.newFilesIncrement().newFiles()).isEmpty();
+            assertThat(message.compactIncrement().compactBefore()).isEmpty();
+            assertThat(message.compactIncrement().compactAfter()).isEmpty();
+            assertThat(message.newFilesIncrement().newIndexFiles())
+                    .extracting(payload -> payload.globalIndexMeta().indexFieldId())
+                    .containsExactly(reopened.rowType().getField("text_embedding").id());
+            assertThat(message.newFilesIncrement().deletedIndexFiles()).isEmpty();
+            assertThat(message.compactIncrement().deletedIndexFiles()).isEmpty();
+            commit.commit(messages);
+        }
+
+        FileStoreTable restored = getTableDefault();
+        assertMultipleVectorPayloads(restored);
+        List<IndexFileMeta> completedPayloads = vectorPayloads(restored);
+        assertThat(completedPayloads)
+                .extracting(IndexFileMeta::fileName)
+                .contains(originalPayloads.get(0).fileName());
+        assertThat(searchIds(restored, "image_embedding", new float[] {0, 0}, 1))
+                .containsExactly(1);
+        assertThat(searchIds(restored, "text_embedding", new float[] {0, 0}, 1)).containsExactly(2);
+
+        compact(restored, BinaryRow.EMPTY_ROW, 0, ioManager, true);
+        assertThat(vectorPayloads(getTableDefault()))
+                .extracting(IndexFileMeta::fileName)
+                .containsExactlyInAnyOrderElementsOf(
+                        completedPayloads.stream().map(IndexFileMeta::fileName).collect(toList()));
+    }
+
+    private Schema multipleVectorSchema(
+            int textDimension, String imageMetric, String textMetric, int buildParallelism) {
+        return Schema.newBuilder()
+                .column("id", DataTypes.INT())
+                .column("image_embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()))
+                .column("text_embedding", DataTypes.VECTOR(textDimension, DataTypes.FLOAT()))
+                .primaryKey("id")
+                .option(
+                        CoreOptions.PK_INDEX_BUILD_PARALLELISM.key(),
+                        String.valueOf(buildParallelism))
+                .option(CoreOptions.BUCKET.key(), "1")
+                .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                .option(
+                        "global-index."
+                                + TestVectorGlobalIndexerFactory.IDENTIFIER
+                                + ".index-columns",
+                        "image_embedding,text_embedding")
+                .option("fields.image_embedding.distance.metric", imageMetric)
+                .option("fields.text_embedding.distance.metric", textMetric)
+                .option("fields.image_embedding.vector-index.search-mode", "fast")
+                .option("fields.text_embedding.vector-index.search-mode", "fast")
+                .build();
+    }
+
+    private static BinaryVector vector(float... values) {
+        return BinaryVector.fromPrimitiveArray(values);
+    }
+
+    private static void assertMultipleVectorPayloads(FileStoreTable table) {
+        List<IndexFileMeta> payloads = vectorPayloads(table);
+        assertThat(payloads)
+                .extracting(payload -> payload.globalIndexMeta().indexFieldId())
+                .containsExactlyInAnyOrder(
+                        table.rowType().getField("image_embedding").id(),
+                        table.rowType().getField("text_embedding").id());
+        assertThat(payloads)
+                .extracting(IndexFileMeta::indexType)
+                .containsOnly(TestVectorGlobalIndexerFactory.IDENTIFIER);
+        assertThat(payloads).extracting(IndexFileMeta::fileName).doesNotHaveDuplicates();
+    }
+
+    private static List<IndexFileMeta> vectorPayloads(FileStoreTable table) {
+        return table.store()
+                .newIndexFileHandler()
+                .scanSourceIndexes(
+                        table.store().snapshotManager().latestSnapshot(), BinaryRow.EMPTY_ROW, 0);
+    }
+
+    private static List<Integer> searchIds(
+            FileStoreTable table, String field, float[] query, int limit) throws Exception {
+        return readIds(
+                table,
+                table.newVectorSearchBuilder()
+                        .withVectorColumn(field)
+                        .withVector(query)
+                        .withLimit(limit)
+                        .executeLocal());
     }
 
     @Test
@@ -118,6 +406,52 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
         assertThat(readIds(table, factorOne)).containsExactly(3);
         assertThat(((PrimaryKeyVectorResult) factorOne).splits().get(0).scores())
                 .containsExactly(0.1F);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testReadsIndexTypeFromSnapshotEntries(boolean refine) throws Exception {
+        catalog.createTable(identifier(), vectorSchema("deduplicate", true, true), false);
+        FileStoreTable table = getTableDefault();
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[] {1, 0})),
+                GenericRow.of(2, BinaryVector.fromPrimitiveArray(new float[] {2, 0})),
+                GenericRow.of(3, BinaryVector.fromPrimitiveArray(new float[] {3, 0})));
+
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                "global-index." + TestVectorGlobalIndexerFactory.IDENTIFIER + ".index-columns", "");
+        options.put("global-index.future-vector.index-columns", "embedding");
+        // Query parameters must follow the persisted algorithm, including on the batch path.
+        Map<String, String> searchOptions = new HashMap<>();
+        searchOptions.put("future-vector.refine_factor", "invalid");
+        if (refine) {
+            searchOptions.put(TestVectorGlobalIndexerFactory.IDENTIFIER + ".refine_factor", "3");
+        }
+        FileStoreTable readTable = table.copy(options);
+
+        GlobalIndexResult result =
+                readTable
+                        .newVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVector(new float[] {0, 0})
+                        .withLimit(1)
+                        .withOptions(searchOptions)
+                        .executeLocal();
+        assertThat(readIds(table, result)).containsExactly(refine ? 1 : 3);
+
+        List<GlobalIndexResult> batch =
+                readTable
+                        .newBatchVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVectors(new float[][] {{0, 0}})
+                        .withLimit(1)
+                        .withOptions(searchOptions)
+                        .executeBatchLocal();
+        assertThat(batch).hasSize(1);
+        assertThat(readIds(table, batch.get(0))).containsExactly(refine ? 1 : 3);
     }
 
     @Test
@@ -217,12 +551,13 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
                         .primaryKey("id")
                         .option(CoreOptions.BUCKET.key(), "1")
                         .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
-                        .option(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "score")
-                        .option(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding")
+                        .option(CoreOptions.GLOBAL_INDEX_BTREE_INDEX_COLUMNS.key(), "score")
                         .option(
-                                "fields.embedding.pk-vector.index.type",
-                                TestVectorGlobalIndexerFactory.IDENTIFIER)
-                        .option("fields.embedding.pk-vector.distance.metric", "l2")
+                                "global-index."
+                                        + TestVectorGlobalIndexerFactory.IDENTIFIER
+                                        + ".index-columns",
+                                "embedding")
+                        .option("fields.embedding.index-options", "{\"metric\":\"l2\"}")
                         .option("test.vector.dimension", "2")
                         .option("test.vector.metric", "l2")
                         .build();

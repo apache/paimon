@@ -117,7 +117,7 @@ def test_native_evolution_updates_use_typed_partition_values(tmp_path, partition
     rows = [dict(id=i, p=value, value=i) for i, value in enumerate(values)]
     _write(table, schema, rows, stream)
     # Fail if the Python update planner or file writer takes over the operation.
-    with patch('pypaimon.write.table_update.BatchTableUpdate._build_predicate_update_table',
+    with patch('pypaimon.execution.python.write.table_update.PythonTableUpdate._build_predicate_update_table',
                side_effect=AssertionError('Python row-ID update')):
         builder = table.new_batch_write_builder()
         messages = builder.new_update().update_by_predicate(None, {'value': 99})

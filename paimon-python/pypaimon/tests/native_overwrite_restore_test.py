@@ -55,9 +55,9 @@ def _write(builder, data, native, overwrite=False):
         messages = writer.prepare_commit()
         with ExitStack() as guards:
             if native:
-                guards.enter_context(patch.object(
-                    commit.file_store_commit, 'overwrite' if overwrite else 'commit',
-                    side_effect=AssertionError('Python commit fallback')))
+                guards.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                           'FileStoreCommit.' + ('overwrite' if overwrite else 'commit'),
+                                           side_effect=AssertionError('Python commit fallback')))
             commit.commit(messages)
         return messages
     finally:

@@ -71,6 +71,22 @@ class TableNoPermissionException(CatalogException):
         super().__init__(f"No permission to access table {identifier.get_full_name()}")
 
 
+class TableIdNotExistException(CatalogException):
+    """Table id not exist exception"""
+
+    def __init__(self, table_id: str):
+        self.table_id = table_id
+        super().__init__(f"Table id {table_id} does not exist")
+
+
+class TableIdNoPermissionException(CatalogException):
+    """Table id no permission exception"""
+
+    def __init__(self, table_id: str):
+        self.table_id = table_id
+        super().__init__(f"No permission to access table id {table_id}")
+
+
 class ViewNotExistException(CatalogException):
     """View not exist exception"""
 
@@ -101,6 +117,22 @@ class FunctionAlreadyExistException(CatalogException):
     def __init__(self, identifier: Identifier):
         self.identifier = identifier
         super().__init__(f"Function {identifier.get_full_name()} already exists")
+
+
+class ModelNotExistException(CatalogException):
+    """Model not exist exception"""
+
+    def __init__(self, identifier: Identifier):
+        self.identifier = identifier
+        super().__init__(f"Model {identifier.get_full_name()} does not exist")
+
+
+class ModelAlreadyExistException(CatalogException):
+    """Model already exist exception"""
+
+    def __init__(self, identifier: Identifier):
+        self.identifier = identifier
+        super().__init__(f"Model {identifier.get_full_name()} already exists")
 
 
 class ColumnNotExistException(CatalogException):

@@ -146,11 +146,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         from pypaimon.table.source.search_dispatch import create_full_text_scan
         reject_search_under_query_auth(self._table)
         self._primary_key_full_text_definition()
-        return create_full_text_scan(self, copy(self)._new_python_full_text_scan)
-
-    def _new_python_full_text_scan(self):
-        from pypaimon.execution.python.read.search.factories import new_full_text_scan
-        return new_full_text_scan(self)
+        return create_full_text_scan(self, copy(self))
 
     def new_full_text_read(self) -> FullTextRead:
         from pypaimon.table.source.search_dispatch import create_full_text_read
@@ -170,11 +166,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
                     "Primary-key full-text search only supports the FAST "
                     "full-text index search mode; FULL and DETAIL require "
                     "merge-aware logical-row fallback.")
-        return create_full_text_read(self, copy(self)._new_python_full_text_read)
-
-    def _new_python_full_text_read(self):
-        from pypaimon.execution.python.read.search.factories import new_full_text_read
-        return new_full_text_read(self)
+        return create_full_text_read(self, copy(self))
 
     def _text_columns(self):
         if self._query is None:
@@ -190,8 +182,9 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
     def _primary_key_full_text_definition(self):
         text_column = self._text_columns()[0]
         core = CoreOptions(Options(dict(self._table.table_schema.options)))
-        if (core.data_evolution_enabled()
-                or not core.primary_key_full_text_index_columns()):
+        if (not getattr(self._table.table_schema, 'primary_keys', None)
+                or core.data_evolution_enabled()
+                or not core.full_text_index_columns()):
             return None
         for definition in PrimaryKeyIndexDefinitions.create(
                 self._table.table_schema).definitions:

@@ -192,6 +192,11 @@ public class HiveSplitGeneratorTest {
         jobConf.setBoolean(HiveSplitGenerator.HIVE_PARTITIONED, false);
         assertThat(HiveSplitGenerator.generateSplits(table, jobConf, 1)).hasSize(2);
 
+        // A warehouse path that happens to look like a partition does not filter the table.
+        jobConf.set(FileInputFormat.INPUT_DIR, "/hive/" + PLAIN_PARTITION_DIR + "/warehouse/t");
+        assertThat(HiveSplitGenerator.generateSplits(table, jobConf, 1)).hasSize(2);
+        jobConf.set(FileInputFormat.INPUT_DIR, "/hive/warehouse/somewhere-else");
+
         // All Hive partitions share that location, which names no partition. Planning it would
         // read every partition once for each Hive partition. Hive decides this, not the
         // metastore.partitioned-table option, which a session can override.

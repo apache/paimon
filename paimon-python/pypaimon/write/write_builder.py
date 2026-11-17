@@ -55,8 +55,14 @@ class WriteBuilder(ABC):
         self.restore_snapshot_id = snapshot_id
         return self
 
-    def _with_commit_user(self, commit_user: str):
-        """Reuse the identity of an existing write or commit operation."""
+    def with_commit_user(self, commit_user: str):
+        """Set the identity shared by new writers, updates and committers.
+
+        The default is a generated UUID. Reuse the same identity when restoring
+        a stream application, and use different identities for independent
+        applications. Configure it before creating operations; existing
+        operations retain the identity they were created with.
+        """
         self.commit_user = commit_user
         return self
 
@@ -114,11 +120,11 @@ def _new_update_by_row_id(
 
     if commit_identifier == BATCH_COMMIT_IDENTIFIER:
         return (table.new_batch_write_builder()
-                ._with_commit_user(commit_user)
+                .with_commit_user(commit_user)
                 .new_update()
                 .new_update_by_row_id(_precomputed_files_info))
     return (table.new_stream_write_builder()
-            ._with_commit_user(commit_user)
+            .with_commit_user(commit_user)
             .new_update()
             .new_update_by_row_id(
                 commit_identifier, _precomputed_files_info))

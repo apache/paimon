@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Authorization metadata validation does not select a read executor."""
+"""Authorization metadata and standalone Arrow filters do not select an executor."""
 
 import subprocess
 import sys
@@ -26,6 +26,8 @@ def test_authorization_fields_validate_without_loading_either_execution_backend(
 import importlib.abc
 import json
 import sys
+from datetime import datetime
+import pyarrow as pa
 
 class RejectExecution(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
@@ -59,6 +61,25 @@ result.validate_read_type(fields, fields)
 assert result.get_extra_fields([fields[1]], fields) == [fields[0]]
 assert TableQueryAuthResult(None, None).extract_row_filter() is None
 assert TableQueryAuthResult([], None).extract_row_filter() is None
+assert 'pypaimon.common.arrow_predicate' not in sys.modules
+
+batch = pa.RecordBatch.from_pydict({
+    'event_time': pa.array([datetime(2026, 1, 2), datetime(2025, 1, 2)], type=pa.timestamp('ms')),
+    'secret': ['first', 'second'],
+})
+assert result.extract_row_filter()(batch).to_pylist() == [True, False]
+cast = json.dumps({
+    'kind': 'LEAF', 'function': 'EQUAL', 'literals': ['42'],
+    'transform': {'name': 'CAST', 'fieldRef': {'name': 'value', 'type': 'INT'}, 'type': 'STRING'},
+})
+assert TableQueryAuthResult([cast], None).extract_row_filter()(
+    pa.RecordBatch.from_pydict({'value': [42, 43]})).to_pylist() == [True, False]
+like = json.dumps({
+    'kind': 'LEAF', 'function': 'LIKE', 'literals': ['a%'],
+    'transform': {'name': 'FIELD_REF', 'fieldRef': {'name': 'value', 'type': 'STRING'}},
+})
+assert TableQueryAuthResult([like], None).extract_row_filter()(
+    pa.RecordBatch.from_pydict({'value': ['abc', 'xyz']})).to_pylist() == [True, False]
 
 try:
     TableQueryAuthResult([year_filter('missing')], None).validate_against_schema(fields)

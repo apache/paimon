@@ -989,7 +989,7 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         for file_meta in all_files:
             self.assertTrue(table.file_io.exists(self._file_path(file_meta)))
 
-        data_writer = next(iter(writer.file_store_write.data_writers.values()))
+        data_writer = next(iter(writer._execution.file_store_write.data_writers.values()))
         with patch.object(
                 data_writer, '_close_current_writers',
                 side_effect=RuntimeError("Close error")):

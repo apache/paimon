@@ -52,10 +52,13 @@ def _rows(table, native):
     builder = table.copy({'scan.native-plan.enabled': str(native).lower(),
                           'read.native.enabled': str(native).lower()}).new_read_builder()
     # Java first-row scans hide un-compacted L0 files; a write scan includes them.
-    splits = builder.new_scan().plan_all_files().splits()
+    splits = builder.new_scan().plan_all().splits()
     reader = builder.new_read()
     if native:
-        with patch.object(reader, '_create_split_read', side_effect=AssertionError('fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('fallback')
+        ):
             rows = reader.to_arrow(splits).to_pylist()
     else:
         rows = reader.to_arrow(splits).to_pylist()
@@ -69,8 +72,9 @@ def _commit(commit, messages, native_commit=False, checkpoint=None):
         else:
             commit.commit(messages, checkpoint)
     if native_commit:
-        with patch.object(commit.file_store_commit, 'commit',
-                          side_effect=AssertionError('Python commit fallback')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.commit',
+                   side_effect=AssertionError('Python commit fallback')):
             publish()
     else:
         publish()
@@ -224,7 +228,10 @@ def test_cross_partition_internal_row_kinds_and_migration_deletes(tmp_path):
         read = builder.new_read()
         read.include_row_kind = True
         if native:
-            with patch.object(read, '_create_split_read', side_effect=AssertionError('fallback')):
+            with patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('fallback')
+            ):
                 rows = read.to_arrow(plan.splits(), parallelism=1).to_pylist()
         else:
             rows = read.to_arrow(plan.splits(), parallelism=1).to_pylist()

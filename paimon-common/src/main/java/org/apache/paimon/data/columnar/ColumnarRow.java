@@ -259,6 +259,11 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
                 "ColumnarRowData do not support hashCode, please hash fields one by one!");
     }
 
+    @Override
+    public String toString() {
+        return getClass().getName() + "@" + Integer.toHexString(super.hashCode());
+    }
+
     public ColumnarRow copy(ColumnVector[] vectors) {
         VectorizedColumnBatch vectorizedColumnBatchCopy = vectorizedColumnBatch.copy(vectors);
         ColumnarRow columnarRow = new ColumnarRow(vectorizedColumnBatchCopy, rowId);

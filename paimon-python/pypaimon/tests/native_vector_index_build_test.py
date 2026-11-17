@@ -137,8 +137,7 @@ def test_native_search_filters_live_null_vectors_with_deletion_vectors(rest_cata
     result = (_native_table(table).new_vector_search_builder().with_vector_column('embedding')
               .with_query_vector([1., 1.]).with_limit(64).with_options(options).execute())
     assert sorted(result.row_ids()) == [1, 4]
-    # Python table-level planning also uses the core low-level index reader,
-    # avoiding the third-party scalar FFI's fixed-result-length restriction.
+    # Python table-level reads use the batch ABI for short filtered results.
     _assert_ids(table, [1, 4], kind)
 
 
@@ -304,9 +303,13 @@ def test_invalid_build_parallelism_is_rejected_before_writing_files(rest_catalog
 def test_all_null_build_does_not_instantiate_native_training(rest_catalog, kind):
     catalog, _ = rest_catalog
     table = _table(catalog, [None] * 4)
-    options = {kind + '.dimension': '2', kind + '.distance.metric': 'invalid'}
+    # Metric resolution precedes scanning; these invalid training parameters
+    # instead prove that an all-null shard never instantiates a trainer.
+    options = {kind + '.dimension': '2', kind + '.distance.metric': 'l2'}
     if kind != 'diskann':
         options[kind + '.nlist'] = '0'
+    else:
+        options['diskann.build-preset'] = 'invalid'
     assert _build(table, kind, options) == []
     classic = table.copy({'write.native.enabled': 'false'})
     assert GlobalIndexBuilder(classic, 'embedding', index_type=kind, options=options).build() == []

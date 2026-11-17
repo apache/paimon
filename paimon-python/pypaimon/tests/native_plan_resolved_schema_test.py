@@ -87,8 +87,9 @@ def _read(table, native, predicate=None, projection=None):
         from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
         from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
         with ExitStack() as stack:
-            stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('native fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('native fallback')))
             stack.enter_context(patch.object(table.schema_manager, 'latest',
                                              side_effect=AssertionError('schema reload')))
             if (type(table.catalog_environment.catalog_loader) is not RESTCatalogLoader
@@ -105,7 +106,7 @@ def _read(table, native, predicate=None, projection=None):
         assert all(getattr(split, '_native_split', None) is not None
                    for split in plan.splits())
         read_guard = patch(
-            'pypaimon.read.table_read.TableRead._create_split_read',
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
             side_effect=AssertionError('resolved-schema native read fell back'))
     else:
         read_guard = ExitStack()

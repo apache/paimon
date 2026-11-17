@@ -87,6 +87,24 @@ public class ParquetVectorUpdaterFactory {
         return paimonType.accept(UpdaterFactoryVisitor.INSTANCE).apply(descriptor);
     }
 
+    /**
+     * Whether the INT64 values of a timestamp column are stored in the unit that Paimon's compact
+     * timestamp vector holds (milliseconds for precision up to 3, microseconds otherwise). If not,
+     * the raw values must be converted and therefore cannot be lazily decoded from the dictionary.
+     */
+    static boolean isNativeTimestampUnit(ColumnDescriptor descriptor, int precision) {
+        LogicalTypeAnnotation annotation = descriptor.getPrimitiveType().getLogicalTypeAnnotation();
+        if (!(annotation instanceof LogicalTypeAnnotation.TimestampLogicalTypeAnnotation)) {
+            return true;
+        }
+        LogicalTypeAnnotation.TimeUnit nativeUnit =
+                precision <= 3
+                        ? LogicalTypeAnnotation.TimeUnit.MILLIS
+                        : LogicalTypeAnnotation.TimeUnit.MICROS;
+        return ((LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) annotation).getUnit()
+                == nativeUnit;
+    }
+
     interface UpdaterFactory extends Function<ColumnDescriptor, ParquetVectorUpdater> {}
 
     private static class UpdaterFactoryVisitor implements DataTypeVisitor<UpdaterFactory> {

@@ -92,7 +92,10 @@ public class DataEvolutionBlobCompactTask extends DataEvolutionCompactTask {
                         .rawConvertible(false)
                         .build();
         RecordReader<InternalRow> reader =
-                store.newDataEvolutionRead().withReadType(blobWriteType).createReader(dataSplit);
+                store.newDataEvolutionRead()
+                        .withKeepBlobPlaceholders()
+                        .withReadType(blobWriteType)
+                        .createReader(dataSplit);
         FileWriter<InternalRow, DataFileMeta> writer =
                 createBlobFileWriter(table, options, blobWriteType, blobField.name(), pathFactory);
 

@@ -18,7 +18,7 @@
 """Authorization helpers shared by scan and read entry points."""
 
 from pypaimon.read.push_down_utils import predicate_field_names
-from pypaimon.read.query_auth_split import resolve_auth_result
+from pypaimon.read.query_auth_split import query_auth_columns, resolve_auth_result
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -50,14 +50,22 @@ def validate_auth_rules(table, auth_result, latest_fields=None):
     return latest_fields
 
 
-def authorize(table, query_auth_fn, read_type, predicate=None, partition_predicate=None):
-    if query_auth_fn is None:
-        return None
+def _authorization_fields(table):
     fields = table.fields
     if table.options.row_tracking_enabled():
         fields = SpecialFields.row_type_with_row_tracking(fields)
+    return {field.name for field in fields}
+
+
+def authorization_columns(table, read_type, predicate=None, partition_predicate=None):
+    return query_auth_columns(read_type, predicate, partition_predicate, _authorization_fields(table))
+
+
+def authorize(table, query_auth_fn, read_type, predicate=None, partition_predicate=None):
+    if query_auth_fn is None:
+        return None
     auth_result = resolve_auth_result(query_auth_fn, read_type, predicate, partition_predicate,
-                                      {field.name for field in fields})
+                                      _authorization_fields(table))
     if auth_result is not None:
         validate_auth_rules(table, auth_result)
         if partition_predicate is not None and auth_result.column_masking:

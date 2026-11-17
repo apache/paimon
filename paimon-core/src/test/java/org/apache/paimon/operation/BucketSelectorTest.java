@@ -18,7 +18,9 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.BucketFunctionType;
+import org.apache.paimon.bucket.TestBucketFunctionFactory;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.BucketFilter;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -30,6 +32,7 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -58,6 +61,26 @@ public class BucketSelectorTest {
 
         Set<Integer> selected = selectedBuckets(selector, BinaryRow.EMPTY_ROW, NUM_BUCKETS);
         assertThat(selected).hasSize(1);
+    }
+
+    @Test
+    public void testCustomProviderIsUsedByPredicatePruning() {
+        RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "k", DataTypes.INT()));
+        RowType partType = RowType.of();
+        Predicate predicate = new PredicateBuilder(rowType).equal(0, 5);
+        CoreOptions options =
+                new CoreOptions(
+                        Collections.singletonMap(
+                                CoreOptions.BUCKET_FUNCTION_PROVIDER.key(),
+                                TestBucketFunctionFactory.IDENTIFIER));
+
+        BucketSelector selector =
+                new BucketSelector(predicate, options, rowType, partType, rowType);
+
+        assertThat(selectedBuckets(selector, BinaryRow.EMPTY_ROW, NUM_BUCKETS))
+                .containsExactly(NUM_BUCKETS - 1);
+        assertThat(selector.mayContain(0, NUM_BUCKETS - 2, NUM_BUCKETS)).isFalse();
+        assertThat(selector.mayContain(NUM_BUCKETS - 1, NUM_BUCKETS - 1, NUM_BUCKETS)).isTrue();
     }
 
     @Test

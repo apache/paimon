@@ -30,13 +30,8 @@ class _PaimonTableFrameReader:
     def __init__(self, frames_table, *, columns):
         self._table, self.snapshot_id, splits = _indexed_read_table(
             frames_table, columns)
-        options = self._table.options.options
-        if not any(options.contains(option) for option in (
-                CoreOptions.READ_NATIVE_ENABLED, CoreOptions.SCAN_NATIVE_PLAN_ENABLED)):
-            from pypaimon.execution.native.runtime import native_runtime_available
-            if native_runtime_available():
-                self._table = self._table.copy_without_time_travel({
-                    CoreOptions.READ_NATIVE_ENABLED.key(): "true"})
+        from pypaimon.read.read_dispatch import configure_indexed_read
+        self._table = configure_indexed_read(self._table)
         snapshot = self._table.snapshot_manager().get_snapshot_by_id(
             self.snapshot_id)
         self._table = self._table._copy_with_snapshot(snapshot)
@@ -46,26 +41,43 @@ class _PaimonTableFrameReader:
             self._table, snapshot, splits, projection=columns)
 
     def read_indices(self, indices, columns):
+        return self._read_predicate(
+            _index_predicate(self._table, indices), columns, indices=indices)
+
+    def read_keys(self, keys, columns):
+        """Read source-local frame keys without scanning whole datasets."""
+        from pypaimon.common.predicate_builder import PredicateBuilder
+
+        by_dataset = {}
+        for dataset_id, index in keys:
+            by_dataset.setdefault(dataset_id, []).append(index)
+        builder = self._table.new_read_builder().new_predicate_builder()
+        predicate = PredicateBuilder.or_predicates([
+            PredicateBuilder.and_predicates([
+                builder.equal("dataset_id", dataset_id),
+                builder.is_in("index", indices),
+            ])
+            for dataset_id, indices in by_dataset.items()
+        ])
+        projection = list(columns)
+        for name in ("dataset_id", "index"):
+            if name not in projection:
+                projection.append(name)
+        return self._read_predicate(predicate, projection)
+
+    def _read_predicate(self, predicate, columns, indices=None):
         builder = self._table.new_read_builder().with_projection(columns)
-        if (self._table.options.native_plan_enabled()
-                or self._table.options.native_read_enabled()):
-            from pypaimon.execution.native.runtime import native_runtime_available
-            if native_runtime_available():
-                # Keep lookup predicates in the native plan and residual read.
-                builder.with_filter(_index_predicate(self._table, indices))
-                scan = builder.new_scan()
-                if scan._native_plan_supported():
-                    # Authorized scans must retain the complete planning path.
-                    if scan._query_auth_fn is not None or self._table.options.query_auth_enabled:
-                        return builder.new_read().to_arrow(scan.plan().splits())
-                    plan = scan._try_native_plan()
-                    if plan is not None:
-                        return builder.new_read().to_arrow(plan.splits())
-                builder = self._table.new_read_builder().with_projection(columns)
-        splits, needs_filter = self._locator.locate(indices)
+        from pypaimon.read.read_dispatch import plan_indexed_read
+        builder.with_filter(predicate)
+        plan = plan_indexed_read(builder.new_scan())
+        if plan is not None:
+            return builder.new_read().to_arrow(plan.splits())
+        builder = self._table.new_read_builder().with_projection(columns)
+        splits, needs_filter = (
+            self._locator.locate(indices) if indices is not None
+            else self._locator.locate_predicate(predicate))
         if needs_filter:
-            builder = builder.with_filter(
-                _index_predicate(self._table, indices))
+            builder = builder.with_filter(predicate)
         return builder.new_read().to_arrow(splits)
 
     def close(self):
@@ -97,9 +109,11 @@ class _FrameLocator:
         self._split_range_index = SplitRangeIndex(self._split_ranges)
 
     def locate(self, indices):
+        return self.locate_predicate(_index_predicate(self._table, indices))
+
+    def locate_predicate(self, predicate):
         """Return narrowed splits and whether rows still need filtering."""
         self._ensure_process()
-        predicate = _index_predicate(self._table, indices)
         try:
             scanner = self._index_scanner(predicate)
         except Exception as error:
@@ -154,8 +168,8 @@ class _FrameLocator:
 
     def _index_scanner(self, predicate):
         if not self._scanner_initialized:
-            from pypaimon.globalindex import DataEvolutionGlobalIndexScanner
-            self._scanner = DataEvolutionGlobalIndexScanner.create(
+            from pypaimon.globalindex.index_dispatch import create_python_scalar_index_scanner
+            self._scanner = create_python_scalar_index_scanner(
                 self._table,
                 predicate=predicate,
                 snapshot=self._snapshot,

@@ -22,6 +22,7 @@ import pyarrow
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.read.explain import ExplainResult
 from pypaimon.read.push_down_utils import predicate_field_names, predicate_matches_physical_names
 from pypaimon.read.table_read import ROW_KIND_COLUMN, TableRead
@@ -83,6 +84,13 @@ def _normalize_sql_literals(expression: str) -> str:
     return ''.join(normalized)
 
 
+def _normalize_filter(predicate: Union[str, Predicate], fields: List[DataField]) -> Optional[Predicate]:
+    """Parse a SQL-like WHERE string into a Predicate; pass a Predicate through."""
+    if isinstance(predicate, str):
+        return parse_where_clause(predicate, fields)
+    return predicate
+
+
 class _ReadPredicateBuilder(PredicateBuilder):
 
     def __init__(self, fields, unsupported_fields, paths=None):
@@ -116,8 +124,15 @@ class ReadBuilder:
         self._partition_filter: Optional[Predicate] = None
         self._limit: Optional[int] = None
 
-    def with_filter(self, predicate: Predicate) -> 'ReadBuilder':
-        self._predicate = predicate
+    def with_filter(self, predicate: Union[str, Predicate]) -> 'ReadBuilder':
+        """Set the row filter from a Predicate or a SQL-like WHERE string.
+
+        A string is parsed against the table schema. Supported syntax:
+        ``=, !=, <>, <, <=, >, >=, IS [NOT] NULL, [NOT] IN, [NOT] BETWEEN,
+        LIKE`` combined with ``AND``/``OR`` and parentheses; see
+        :mod:`pypaimon.common.where_parser`. An empty string clears the filter.
+        """
+        self._predicate = _normalize_filter(predicate, self.table.fields)
         return self
 
     def with_partition_filter(self, partition_filter: Optional[Predicate]) -> 'ReadBuilder':

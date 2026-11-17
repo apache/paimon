@@ -18,10 +18,8 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.Tag;
-import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import java.util.List;
@@ -52,16 +50,11 @@ public class SavepointTagUtils {
             TagManager tagManager,
             String commitUser,
             long commitIdentifier,
-            TagDeletion tagDeletion,
-            SnapshotManager snapshotManager,
             List<TagCallback> callbacks) {
         String tagName = tagNameOf(commitIdentifier);
         tagManager
                 .get(tagName)
                 .filter(tag -> isSavepointTagFor(tag, commitUser, commitIdentifier))
-                .ifPresent(
-                        ignored ->
-                                tagManager.deleteTag(
-                                        tagName, tagDeletion, snapshotManager, callbacks));
+                .ifPresent(ignored -> tagManager.deleteTag(tagName, callbacks));
     }
 }

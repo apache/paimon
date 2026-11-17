@@ -136,7 +136,7 @@ class TableQueryAuthResult:
     def extract_row_filter(self) -> Optional[Callable[[pa.RecordBatch], pa.Array]]:
         if not self.filter:
             return None
-        from pypaimon.execution.python.read.predicate_json_parser import parse_predicate_to_batch_filter
+        from pypaimon.common.arrow_predicate import parse_predicate_to_batch_filter
 
         if len(self.filter) == 1:
             return parse_predicate_to_batch_filter(self.filter[0])

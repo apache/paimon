@@ -80,13 +80,15 @@ def read(table, native, predicate=None, shard=None, limit=None, result=None, ran
     if ranges is not None:
         scan.with_row_ranges(ranges)
     if native:
-        with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('native fallback')):
             plan = scan.plan()
     else:
         plan = scan.plan()
     if native:
         read_guard = patch(
-            'pypaimon.read.table_read.TableRead._create_split_read',
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
             side_effect=AssertionError('expanded native read fell back'))
     else:
         read_guard = ExitStack()
@@ -261,7 +263,8 @@ def test_scored_result_requires_a_score_for_each_selected_row(catalog, native):
     write(table, [{'id': 1}], schema)
     result = ScoredGlobalIndexResult.create(
         GlobalIndexResult.from_range(Range(0, 0)).results(), lambda _: None)
-    builder = table.copy({'scan.native-plan.enabled': str(native).lower()}).new_read_builder()
+    builder = table.copy({'scan.native-plan.enabled': str(native).lower(),
+                          'read.native.enabled': str(native).lower()}).new_read_builder()
     with pytest.raises(ValueError, match='score'):
         builder.new_scan().with_global_index_result(result).plan()
 

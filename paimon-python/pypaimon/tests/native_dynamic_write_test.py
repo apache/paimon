@@ -73,7 +73,10 @@ def _rows(table, native):
     splits = builder.new_scan().plan().splits()
     reader = builder.new_read()
     if native:
-        with patch.object(reader, '_create_split_read', side_effect=AssertionError('fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('fallback')
+        ):
             rows = reader.to_arrow(splits).to_pylist()
     else:
         rows = reader.to_arrow(splits).to_pylist()
@@ -141,8 +144,9 @@ def test_stream_dynamic_index_checkpoints(tmp_path, native_rest_catalog, native_
             adds = [entry for m in messages for entry in m.index_adds]
             assert len(adds) == (0 if checkpoint == 2 else 1)
             if native_commit:
-                with patch.object(commit.file_store_commit, 'commit',
-                                  side_effect=AssertionError('Python commit fallback')):
+                with patch('pypaimon.execution.python.write.file_store_commit.'
+                           'FileStoreCommit.commit',
+                           side_effect=AssertionError('Python commit fallback')):
                     commit.commit(messages, checkpoint)
             else:
                 commit.commit(messages, checkpoint)

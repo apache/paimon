@@ -20,8 +20,10 @@
 
 def format_timestamp(value, precision, nanos=None):
     """Keep significant fraction digits, with declared precision as a minimum."""
+    if nanos is None:
+        nanos = value.microsecond * 1000 + getattr(value, 'nanosecond', 0)
     return format_timestamp_parts(value.year, value.month, value.day, value.hour, value.minute,
-                                  value.second, value.microsecond * 1000 if nanos is None else nanos, precision)
+                                  value.second, nanos, precision)
 
 
 def format_timestamp_parts(year, month, day, hour, minute, second, nanos, precision):

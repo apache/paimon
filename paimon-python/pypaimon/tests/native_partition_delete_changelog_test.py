@@ -24,11 +24,11 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.execution.native.write.native_update import create_native_predicate_delete, create_native_update
-from pypaimon.write.table_update import TableUpdate
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
@@ -91,7 +91,7 @@ def test_input_changelog_partition_delete_keeps_other_partitions(native_rest_cat
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch.object(
-                TableUpdate, '_delete_by_partition_filter', side_effect=AssertionError('Python delete fallback')))
+                PythonTableUpdate, '_delete_by_partition_filter', side_effect=AssertionError('Python delete fallback')))
         messages = builder.new_update().delete_by_predicate(predicate)
     assert [tuple(message.partition) for message in messages] == [('a',)]
     assert sum(len(message.deleted_files) for message in messages) == 1

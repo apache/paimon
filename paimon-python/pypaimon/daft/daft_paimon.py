@@ -296,7 +296,7 @@ def _write_table(
         return prepared.write_sink(commit_sink)
 
     if bucket_mode == BucketMode.HASH_DYNAMIC:
-        latest_snapshot = table.snapshot_manager().get_latest_snapshot()
+        latest_snapshot = None if mode == 'overwrite' else table.snapshot_manager().get_latest_snapshot()
         base_snapshot_id = (
             latest_snapshot.id if latest_snapshot is not None else 0
         )

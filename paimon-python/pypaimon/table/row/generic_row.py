@@ -455,8 +455,11 @@ class GenericRowSerializer:
             field_fixed_offset = null_bits_size_in_bytes + i * 8
 
             if value is None:
-                cls._set_null_bit(fixed_part, 0, i)
-                struct.pack_into('<q', fixed_part, field_fixed_offset, 0)
+                null_data = cls._serialize_null_field(
+                    fixed_part, field_fixed_offset, i, field.type,
+                    fixed_part_size + current_variable_offset)
+                variable_part_data.append(null_data)
+                current_variable_offset += len(null_data)
                 continue
 
             if not isinstance(field.type, AtomicType):
@@ -486,8 +489,11 @@ class GenericRowSerializer:
                 d = value if isinstance(value, Decimal) else Decimal(str(value))
                 unscaled_value, overflow = _decimal_to_unscaled_with_check(d, precision, scale)
                 if overflow:
-                    cls._set_null_bit(fixed_part, 0, i)
-                    struct.pack_into('<q', fixed_part, field_fixed_offset, 0)
+                    null_data = cls._serialize_null_field(
+                        fixed_part, field_fixed_offset, i, field.type,
+                        fixed_part_size + current_variable_offset)
+                    variable_part_data.append(null_data)
+                    current_variable_offset += len(null_data)
                     continue
 
             if is_non_compact_timestamp:
@@ -565,6 +571,23 @@ class GenericRowSerializer:
         row_data = bytes(fixed_part) + b''.join(variable_part_data)
         arity_prefix = struct.pack('>i', arity)
         return arity_prefix + row_data
+
+    @classmethod
+    def _serialize_null_field(cls, fixed_part, field_offset, index, data_type, variable_offset):
+        cls._set_null_bit(fixed_part, 0, index)
+        reserved_size = 0
+        if isinstance(data_type, AtomicType):
+            type_name = data_type.type.upper()
+            if type_name.startswith(('DECIMAL', 'NUMERIC')):
+                if _parse_type_precision_scale(data_type)[0] > 18:
+                    reserved_size = 16
+            elif type_name.startswith('TIMESTAMP'):
+                if _parse_type_precision_scale(data_type)[0] > 3:
+                    reserved_size = 8
+        # Java reserves updateable space even for NULL noncompact values and
+        # keeps its cursor in the fixed slot, with a zero length or nanos word.
+        struct.pack_into('<q', fixed_part, field_offset, variable_offset << 32 if reserved_size else 0)
+        return b'\x00' * reserved_size
 
     @classmethod
     def _calculate_bit_set_width_in_bytes(cls, arity: int) -> int:

@@ -24,7 +24,7 @@ from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.pk.primary_key_index_source_meta import (
     PrimaryKeyIndexSourceMeta)
-from pypaimon.index.pk.primary_key_index_source_policy import (
+from pypaimon.execution.python.index.pk.primary_key_index_source_policy import (
     should_read as _should_read_source)
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
@@ -47,6 +47,8 @@ class PrimaryKeyFullTextScan(FullTextScan):
             return PrimaryKeyFullTextScanPlan(0, [])
 
         scan_table = table_at_snapshot(self._table, snapshot)
+        scan_table = scan_table.copy_without_time_travel({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         builder = scan_table.new_read_builder()
         if self._partition_filter is not None:
             builder = builder.with_partition_filter(self._partition_filter)

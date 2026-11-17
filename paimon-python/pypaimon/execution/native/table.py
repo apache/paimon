@@ -27,14 +27,32 @@ from pypaimon.common.options.config import CatalogOptions, FuseOptions, OssOptio
 from pypaimon.common.options.options_utils import OptionsUtils
 
 
+def _native_variant_write_supported(table, columns=None):
+    """Rust 0.5.0 omits Java-required field IDs inside shredded VARIANTs."""
+    if not table.options.variant_shredding_schema():
+        return True
+    from pypaimon.schema.data_types import AtomicType
+
+    names = set(table.field_names if columns is None else columns)
+    return not any(field.name in names and isinstance(field.type, AtomicType) and field.type.type == 'VARIANT'
+                   for field in table.fields)
+
+
 def _native_blob_view_supported(table, read_names) -> bool:
-    """Resolve Blob views natively only with the REST catalog environment."""
+    """Resolve Blob views natively only when Python itself can resolve them."""
     if (not (table.options.blob_view_fields() & set(read_names))
             or not table.options.blob_view_resolve_enabled()):
         return True
-    loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
-    # Python also leaves view structs unresolved without a loader.
-    return loader is None or _catalog_metastore(loader) == 'rest'
+    environment = getattr(table, 'catalog_environment', None)
+    loader = getattr(environment, 'catalog_loader', None)
+    if loader is not None:
+        return _catalog_metastore(loader) == 'rest'
+    # A catalogless resolved table has no context to resolve views, so native and
+    # Python both retain the view struct values. If a catalog context is retained
+    # without a loader, Python can resolve through it but Rust from_resolved_schema
+    # cannot, so fall back.
+    catalog_context = getattr(environment, 'catalog_context', None)
+    return catalog_context() is None if callable(catalog_context) else True
 
 
 def _partition_fields(table):
@@ -66,7 +84,15 @@ def _option_value_to_string(value) -> str:
     """
     if isinstance(value, bool):
         return 'true' if value else 'false'
+    if isinstance(value, (list, tuple, dict)):
+        return json.dumps(value)
     return OptionsUtils.convert_to_string(value)
+
+
+def _options_to_native(options) -> dict:
+    """Encode all effective options for Rust; None represents an unset option."""
+    return {str(key): _option_value_to_string(value)
+            for key, value in options.items() if value is not None}
 
 
 def _catalog_options(table) -> dict:
@@ -137,8 +163,7 @@ def _resolved_schema_file_io_options(table) -> Optional[dict]:
 def _resolved_schema_json(table) -> str:
     """Preserve all effective table options as strings for Rust."""
     from pypaimon.common.json_util import JSON
-    options = {str(key): _option_value_to_string(value)
-               for key, value in table.table_schema.options.items() if value is not None}
+    options = _options_to_native(table.table_schema.options)
     if 'query-auth.enabled' in options:
         # Preserve Python's effective policy. Forwarding an enabled spelling
         # such as "on" unchanged would disable authorization in Rust.
@@ -276,7 +301,8 @@ def _native_table(table):
             and _catalog_metastore(table.catalog_environment.catalog_loader) == 'rest'):
         from pypaimon.common.json_util import JSON
         environment = table.catalog_environment
-        cache = vars(table).setdefault('_native_pinned_table_cache', _NativeRestTableCache())
+        resources = vars(table).setdefault('_pinned_read_resources', {})
+        cache = resources.setdefault('native_table', _NativeRestTableCache())
         key = (table.table_path, table.identifier.get_full_name(), table.file_io,
                environment.uuid, environment.rest_table_response,
                tuple(sorted(_catalog_options(table).items())),

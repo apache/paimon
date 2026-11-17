@@ -63,7 +63,7 @@ final class DataEvolutionRewriteExecutor {
     static void execute(
             FileStoreTable table,
             Snapshot initialSnapshot,
-            Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner,
+            Function<Snapshot, PlanResult> taskPlanner,
             JavaSparkContext javaSparkContext,
             SparkSession sparkSession,
             CommitConfigurer commitConfigurer) {
@@ -80,7 +80,7 @@ final class DataEvolutionRewriteExecutor {
     static void execute(
             FileStoreTable table,
             Snapshot initialSnapshot,
-            Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner,
+            Function<Snapshot, PlanResult> taskPlanner,
             JavaSparkContext javaSparkContext,
             SparkSession sparkSession,
             CommitConfigurer commitConfigurer,
@@ -99,7 +99,7 @@ final class DataEvolutionRewriteExecutor {
     static void execute(
             FileStoreTable table,
             Snapshot initialSnapshot,
-            Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner,
+            Function<Snapshot, PlanResult> taskPlanner,
             JavaSparkContext javaSparkContext,
             SparkSession sparkSession,
             CommitConfigurer commitConfigurer,
@@ -109,17 +109,21 @@ final class DataEvolutionRewriteExecutor {
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         Snapshot preparationSnapshot = initialSnapshot;
         int round = 0;
+        boolean scanFinished = false;
         try {
-            while (true) {
-                List<DataEvolutionCompactTask> compactionTasks =
-                        taskPlanner.apply(preparationSnapshot);
+            while (!scanFinished) {
+                PlanResult plan = taskPlanner.apply(preparationSnapshot);
+                List<DataEvolutionCompactTask> compactionTasks = plan.tasks();
+                // Finish the last batch before stopping, without chasing a newer snapshot.
+                scanFinished = plan.scanFinished();
                 round++;
                 if (compactionTasks.isEmpty()) {
                     LOG.info(
                             "No data evolution rewrite task planned in round {} for table {}, "
-                                    + "continue to scan the next batch.",
+                                    + "scan finished {}.",
                             round,
-                            table.fullName());
+                            table.fullName(),
+                            scanFinished);
                     continue;
                 }
                 boolean containsMaterializeDeletion =
@@ -393,6 +397,25 @@ final class DataEvolutionRewriteExecutor {
             messages.add(serializer.deserialize(serializer.getVersion(), serializedMessage));
         }
         return messages;
+    }
+
+    static final class PlanResult {
+
+        private final List<DataEvolutionCompactTask> tasks;
+        private final boolean scanFinished;
+
+        PlanResult(List<DataEvolutionCompactTask> tasks, boolean scanFinished) {
+            this.tasks = tasks;
+            this.scanFinished = scanFinished;
+        }
+
+        List<DataEvolutionCompactTask> tasks() {
+            return tasks;
+        }
+
+        boolean scanFinished() {
+            return scanFinished;
+        }
     }
 
     @FunctionalInterface

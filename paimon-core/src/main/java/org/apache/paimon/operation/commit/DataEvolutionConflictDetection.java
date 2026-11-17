@@ -412,7 +412,10 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                                         + "have encountered conflicts, data files: "
                                         + dataFileGroup.stream()
                                                 .map(this::fileEntryToString)
-                                                .collect(Collectors.toList())));
+                                                .collect(Collectors.toList()),
+                                dataFileGroup.stream()
+                                        .map(FileEntry::identifier)
+                                        .collect(Collectors.toList())));
             }
         }
         return Optional.empty();

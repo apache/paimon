@@ -58,10 +58,14 @@ from pypaimon.api.api_response import (ConfigResponse, CreatePartitionsResponse,
                                        ListTagsResponse,
                                        PagedList, Partition,
                                        RESTResponse, ErrorResponse)
+from pypaimon.api.model import (CreateModelRequest, GetModelResponse,
+                                ListModelsResponse)
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 BranchNotExistException,
+                                                ColumnAlreadyExistException,
+                                                ColumnNotExistException,
                                                 DatabaseNoPermissionException,
                                                 DatabaseNotExistException,
                                                 TableNoPermissionException,
@@ -69,6 +73,8 @@ from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 TableAlreadyExistException,
                                                 FunctionNotExistException,
                                                 FunctionAlreadyExistException,
+                                                ModelAlreadyExistException,
+                                                ModelNotExistException,
                                                 DefinitionAlreadyExistException,
                                                 DefinitionNotExistException,
                                                 TagNotExistException,
@@ -79,6 +85,8 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.api.typedef import RESTAuthParameter
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.time_utils import (duration_to_iso8601,
+                                        local_datetime_to_system_zone_millis)
 from pypaimon.management.column_mask import ColumnMask
 from pypaimon.management.data_policy import DataPolicy
 from pypaimon.management.list_permissions_request import ListPermissionsRequest
@@ -92,7 +100,7 @@ from pypaimon.management.resource_type import ResourceType
 from pypaimon.management.row_filter import RowFilter
 from pypaimon import Schema
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField, DataType, DataTypeParser, MapType,
-                                        MultisetType, RowType, VectorType)
+                                        MultisetType, RowType, VectorType, current_highest_field_id)
 from pypaimon.schema.schema_change import Actions, SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
@@ -903,8 +911,7 @@ class RESTCatalogServer:
         self.table_latest_snapshot_store: Dict[str, str] = {}
         self.table_partitions_store: Dict[str, List] = {}
         self.function_store: Dict[str, Dict] = {}  # key: "db.func_name", value: GetFunctionResponse-like dict
-        # Tag store: key = full table name, value = {tag_name: GetTagResponse}.
-        self.tag_store: Dict[str, Dict[str, GetTagResponse]] = {}
+        self.model_store: Dict[str, GetModelResponse] = {}
         # Branch store: key = full table name, value = set of branch names.
         self.branch_store: Dict[str, set] = {}
         self.no_permission_databases: List[str] = []
@@ -1088,7 +1095,7 @@ class RESTCatalogServer:
                 else:
                     destination_table_dir.parent.mkdir(parents=True, exist_ok=True)
                     source_table_dir.rename(destination_table_dir)
-                for store in (self.table_metadata_store, self.branch_store, self.tag_store,
+                for store in (self.table_metadata_store, self.branch_store,
                               self.table_latest_snapshot_store, self.table_partitions_store):
                     if source_name in store:
                         store[destination_name] = store.pop(source_name)
@@ -1103,6 +1110,9 @@ class RESTCatalogServer:
                                  self.resource_paths.grant_permission(),
                                  self.resource_paths.revoke_permission()):
                 return self._permissions_handle(method, resource_path, data, parameters)
+
+            if method == "GET" and resource_path.startswith(self.resource_paths.table_by_id("")):
+                return self._table_by_id_handle(resource_path)
 
             database = resource_path.split("/")[4]
             # Database-specific endpoints
@@ -1138,6 +1148,8 @@ class RESTCatalogServer:
                         return self._tables_handle(method, data, database_name, parameters)
                     elif resource_type == ResourcePaths.FUNCTIONS:
                         return self._functions_handle(method, data, database_name, parameters)
+                    elif resource_type == ResourcePaths.MODELS:
+                        return self._models_handle(method, data, database_name, parameters)
                     elif resource_type == ResourcePaths.FUNCTION_DETAILS:
                         return self._function_details_handle(database_name, parameters)
 
@@ -1153,6 +1165,8 @@ class RESTCatalogServer:
                         return self._table_partitions_handle(method, data, identifier, parameters)
                     elif resource_type == ResourcePaths.FUNCTIONS:
                         return self._function_handle(method, data, identifier)
+                    elif resource_type == ResourcePaths.MODELS:
+                        return self._model_handle(method, identifier)
 
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
@@ -1198,6 +1212,16 @@ class RESTCatalogServer:
                 ErrorResponse.RESOURCE_TYPE_FUNCTION, e.identifier.get_full_name(), str(e), 409
             )
             return self._mock_response(response, 409)
+        except ModelNotExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_MODEL, e.identifier.get_object_name(), str(e), 404
+            )
+            return self._mock_response(response, 404)
+        except ModelAlreadyExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_MODEL, e.identifier.get_object_name(), str(e), 409
+            )
+            return self._mock_response(response, 409)
         except TagNotExistException as e:
             response = ErrorResponse(
                 ErrorResponse.RESOURCE_TYPE_TAG, e.tag, str(e), 404
@@ -1228,6 +1252,16 @@ class RESTCatalogServer:
                 ErrorResponse.RESOURCE_TYPE_DEFINITION, e.name, str(e), 404
             )
             return self._mock_response(response, 404)
+        except ColumnNotExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_COLUMN, e.column, str(e), 404
+            )
+            return self._mock_response(response, 404)
+        except ColumnAlreadyExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_COLUMN, e.column, str(e), 409
+            )
+            return self._mock_response(response, 409)
         except ValueError as e:
             response = ErrorResponse(None, None, str(e), 400)
             return self._mock_response(response, 400)
@@ -1277,14 +1311,14 @@ class RESTCatalogServer:
             elif operation == ResourcePaths.PARTITIONS:
                 return self._table_partitions_handle(method, data, lookup_identifier, parameters)
             elif operation == ResourcePaths.TAGS:
-                return self._tags_handle(method, data, lookup_identifier, parameters)
+                return self._tags_handle(method, data, lookup_identifier, parameters, branch_part)
             elif operation == ResourcePaths.BRANCHES:
                 return self._branches_handle(method, data, lookup_identifier)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
         elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.TAGS:
             tag_name = RESTUtil.decode_string(path_parts[4])
-            return self._tag_handle(method, lookup_identifier, tag_name)
+            return self._tag_handle(method, lookup_identifier, tag_name, branch_part)
         elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.BRANCHES:
             branch_name = RESTUtil.decode_string(path_parts[4])
             return self._branch_handle(method, lookup_identifier, branch_name)
@@ -1619,6 +1653,49 @@ class RESTCatalogServer:
             return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
+    # ======================= Model Handlers =================================
+
+    def _models_handle(self, method: str, data: str, database_name: str,
+                       parameters: Dict[str, str]) -> Tuple[str, int]:
+        """Handle database-scoped model list and create operations."""
+        if method == "GET":
+            models = [
+                response for key, response in self.model_store.items()
+                if Identifier.from_string(key).get_database_name() == database_name
+            ]
+            page = self._build_paged_entities(
+                models, self._get_max_results(parameters), parameters.get(PAGE_TOKEN))
+            return self._mock_response(
+                ListModelsResponse(page.elements, page.next_page_token), 200)
+
+        if method == "POST":
+            request = CreateModelRequest.from_dict(json.loads(data))
+            identifier = Identifier.create(database_name, request.name)
+            key = identifier.get_full_name()
+            if key in self.model_store:
+                raise ModelAlreadyExistException(identifier)
+            response = GetModelResponse(
+                name=request.name,
+                definition=request.definition,
+                comment=request.comment,
+            )
+            self.model_store[key] = response
+            return self._mock_response(response, 200)
+
+        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _model_handle(self, method: str, identifier: Identifier) -> Tuple[str, int]:
+        """Handle individual model get and drop operations."""
+        key = identifier.get_full_name()
+        if key not in self.model_store:
+            raise ModelNotExistException(identifier)
+        if method == "GET":
+            return self._mock_response(self.model_store[key], 200)
+        if method == "DELETE":
+            del self.model_store[key]
+            return self._mock_response("", 200)
+        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
     def _function_details_handle(self, database_name: str,
                                  parameters: Dict[str, str]) -> Tuple[str, int]:
         """Handle function details listing."""
@@ -1784,34 +1861,35 @@ class RESTCatalogServer:
     # ======================= Tag Handlers ====================================
 
     def _tags_handle(self, method: str, data: str, identifier: Identifier,
-                     parameters: Dict[str, str]) -> Tuple[str, int]:
+                     parameters: Dict[str, str], branch: Optional[str] = None) -> Tuple[str, int]:
         """Handle the table-scoped tags collection (POST create / GET list-paged)."""
-        if identifier.get_full_name() not in self.table_metadata_store:
-            raise TableNotExistException(identifier)
+        table = self._get_file_table(identifier, branch)
+        # Share tag files with clients using FileStoreTable directly.
+        tags = table.tag_manager()
 
         if method == "POST":
             request = JSON.from_json(data, CreateTagRequest)
-            store = self.tag_store.setdefault(identifier.get_full_name(), {})
-            if request.tag_name in store:
+            if tags.tag_exists(request.tag_name):
                 raise TagAlreadyExistException(request.tag_name)
-            snapshot = self._resolve_tag_snapshot(identifier, request.snapshot_id)
-            store[request.tag_name] = GetTagResponse(
-                tag_name=request.tag_name,
-                snapshot=snapshot,
-                tag_create_time=int(time.time() * 1000),
-                tag_time_retained=request.time_retained,
-            )
+            snapshots = table.snapshot_manager()
+            snapshot = (snapshots.get_latest_snapshot() if request.snapshot_id is None
+                        else snapshots.get_snapshot_by_id(request.snapshot_id))
+            if snapshot is None:
+                return self._mock_response(ErrorResponse(
+                    ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
+                    None if request.snapshot_id is None else str(request.snapshot_id), "", 404), 404)
+            tags.create_tag(snapshot, request.tag_name, time_retained=request.time_retained)
             return self._mock_response("", 200)
 
         if method == "GET":
-            tags = list(self.tag_store.get(identifier.get_full_name(), {}).keys())
+            names = tags.list_tags()
             tag_name_prefix = parameters.get(TAG_NAME_PREFIX)
             if tag_name_prefix:
-                tags = [t for t in tags if t.startswith(tag_name_prefix)]
-            if tags:
+                names = [name for name in names if name.startswith(tag_name_prefix)]
+            if names:
                 max_results = self._get_max_results(parameters)
                 page_token = parameters.get(PAGE_TOKEN)
-                paged = self._build_paged_entities(tags, max_results, page_token)
+                paged = self._build_paged_entities(names, max_results, page_token)
                 response = ListTagsResponse(
                     tags=paged.elements, next_page_token=paged.next_page_token)
             else:
@@ -1821,39 +1899,28 @@ class RESTCatalogServer:
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
     def _tag_handle(self, method: str, identifier: Identifier,
-                    tag_name: str) -> Tuple[str, int]:
+                    tag_name: str, branch: Optional[str] = None) -> Tuple[str, int]:
         """Handle a single tag (GET / DELETE)."""
-        if identifier.get_full_name() not in self.table_metadata_store:
-            raise TableNotExistException(identifier)
-        store = self.tag_store.get(identifier.get_full_name(), {})
+        tags = self._get_file_table(identifier, branch).tag_manager()
 
         if method == "GET":
-            if tag_name not in store:
+            tag = tags.get(tag_name)
+            if tag is None:
                 raise TagNotExistException(tag_name)
-            return self._mock_response(store[tag_name], 200)
+            response = GetTagResponse(
+                tag_name=tag_name,
+                snapshot=tag.trim_to_snapshot(),
+                tag_create_time=(None if tag.tag_create_time is None
+                                 else local_datetime_to_system_zone_millis(tag.tag_create_time)),
+                tag_time_retained=(None if tag.tag_time_retained is None
+                                   else duration_to_iso8601(tag.tag_time_retained)),
+            )
+            return self._mock_response(response, 200)
         if method == "DELETE":
-            if tag_name not in store:
+            if not tags.delete_tag(tag_name):
                 raise TagNotExistException(tag_name)
-            del store[tag_name]
             return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
-
-    def _resolve_tag_snapshot(self, identifier: Identifier,
-                              snapshot_id: Optional[int]):
-        """Look up the snapshot to embed in GetTagResponse.
-
-        When ``snapshot_id`` is None, fall back to the table's latest snapshot.
-        Mirrors Java behavior of ``TagManager`` resolving the latest snapshot
-        when no explicit id is supplied.
-        """
-        try:
-            table = self._get_file_table(identifier)
-            snapshot_manager = table.snapshot_manager()
-            if snapshot_id is None:
-                return snapshot_manager.get_latest_snapshot()
-            return snapshot_manager.get_snapshot_by_id(snapshot_id)
-        except Exception:
-            return None
 
     # ======================= Branch Handlers ================================
 
@@ -1878,11 +1945,11 @@ class RESTCatalogServer:
             metadata = self.table_metadata_store[identifier.get_full_name()]
             schema_id, snapshot = metadata.schema.id, None
             if request.from_tag is not None:
-                tags = self.tag_store.get(identifier.get_full_name(), {})
-                if request.from_tag not in tags:
+                tag = self._get_file_table(identifier).tag_manager().get(request.from_tag)
+                if tag is None:
                     raise TagNotExistException(request.from_tag)
-                snapshot = tags[request.from_tag].snapshot
-                schema_id = schema_id if snapshot is None else snapshot.schema_id
+                snapshot = tag.trim_to_snapshot()
+                schema_id = snapshot.schema_id
             if self._restricted(identifier, metadata):
                 raise ValueError("Tables with data policies or column permissions cannot have branches.")
             manager = self._schema_manager(identifier)
@@ -1983,6 +2050,9 @@ class RESTCatalogServer:
                 self._drop_table_access(self._table_identifier(name), self.table_metadata_store.pop(name))
                 self.table_latest_snapshot_store.pop(name, None)
                 self.table_partitions_store.pop(name, None)
+            for name in [name for name in self.model_store
+                         if Identifier.from_string(name).get_database_name() == database_name]:
+                del self.model_store[name]
             self._remove_permissions(lambda resource: resource.get_database() == database_name)
             return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
@@ -2002,11 +2072,20 @@ class RESTCatalogServer:
                 create_table = JSON.from_json(data, CreateTableRequest)
                 if create_table.identifier.get_full_name() in self.table_metadata_store:
                     raise TableAlreadyExistException(create_table.identifier)
+                options = create_table.schema.options
+                external = PATH in options and options.get(TYPE, 'table').strip().lower() == 'table'
+                schema_id = 0
+                if external:
+                    latest = SchemaManager(self._get_file_io(), options[PATH]).latest()
+                    if latest is not None:
+                        schema_id = latest.id
                 table_metadata = self._create_table_metadata(
-                    create_table.identifier, 0, create_table.schema, str(uuid.uuid4()), False
+                    create_table.identifier, schema_id, create_table.schema, str(uuid.uuid4()), external
                 )
                 self.table_metadata_store.update({create_table.identifier.get_full_name(): table_metadata})
                 self.table_identifiers[create_table.identifier.get_full_name()] = create_table.identifier
+                if external:
+                    return self._mock_response("", 200)
                 table_dir = (
                     Path(self.data_path) / self.warehouse / database_name /
                     create_table.identifier.get_object_name() / 'schema'
@@ -2028,6 +2107,8 @@ class RESTCatalogServer:
                 identifier, (response_identifier or identifier).get_branch_name())
             table_path = (f'file://{self.data_path}/{self.warehouse}/'
                           f'{identifier.get_database_name()}/{identifier.get_object_name()}')
+            if table_metadata.is_external:
+                table_path = table_metadata.schema.options.get(PATH, table_path)
             schema = table_metadata.schema.to_schema()
             response = self.mock_table(
                 response_identifier or identifier, table_metadata, table_path, schema)
@@ -2053,6 +2134,17 @@ class RESTCatalogServer:
             return self._mock_response("", 200)
 
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _table_by_id_handle(self, resource_path: str) -> Tuple[str, int]:
+        table_id = RESTUtil.decode_string(resource_path.rsplit("/", 1)[-1])
+        for full_name, table_metadata in self.table_metadata_store.items():
+            if str(table_metadata.uuid) == table_id:
+                identifier = self._table_identifier(full_name)
+                if full_name in self.no_permission_tables:
+                    raise TableNoPermissionException(identifier)
+                return self._table_handle("GET", "", identifier)
+        return self._mock_response(
+            ErrorResponse(ErrorResponse.RESOURCE_TYPE_TABLE, table_id, "Table not exist.", 404), 404)
 
     def _table_query_auth_handle(self, method, data, identifier):
         if method != "POST":
@@ -2308,6 +2400,8 @@ class RESTCatalogServer:
         table_path = (
             f'file://{self.data_path}/{self.warehouse}/'
             f'{identifier.get_database_name()}/{identifier.get_object_name()}')
+        if table_metadata.is_external:
+            table_path = table_schema.options.get(PATH, table_path)
 
         table_identifier = Identifier.create(
             identifier.get_database_name(), identifier.get_table_name(), branch=branch)
@@ -2589,7 +2683,7 @@ class RESTCatalogServer:
             version=TableSchema.CURRENT_VERSION,
             id=schema_id,
             fields=schema.fields,
-            highest_field_id=len(schema.fields) - 1,
+            highest_field_id=current_highest_field_id(schema.fields),
             partition_keys=schema.partition_keys,
             primary_keys=schema.primary_keys,
             options=options,
@@ -2718,6 +2812,7 @@ class RESTCatalogServer:
                    schema: Schema) -> GetTableResponse:
         return GetTableResponse(
             id=str(table_metadata.uuid),
+            database=identifier.get_database_name(),
             name=identifier.get_object_name(),
             path=path,
             is_external=table_metadata.is_external,

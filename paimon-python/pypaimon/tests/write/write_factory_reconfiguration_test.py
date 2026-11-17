@@ -26,6 +26,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.execution.native.runtime import native_runtime_available
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.schema.data_types import PyarrowFieldParser
 
 pytestmark = [pytest.mark.python_plan, pytest.mark.python_read,
               pytest.mark.python_write, pytest.mark.python_commit]
@@ -57,7 +58,8 @@ def _table(tmp_path, native, precomputed=False, unwritten_not_null=False, blob=F
 
 def _write(writer, table, rows, mode='arrow', columns=None):
     columns = columns if columns is not None else table.field_names
-    schema = pa.schema([writer.table_pyarrow_schema.field(name) for name in columns])
+    table_schema = PyarrowFieldParser.from_paimon_schema(table.fields)
+    schema = pa.schema([table_schema.field(name) for name in columns])
     data = pa.Table.from_pylist([{name: row[name] for name in columns} for row in rows], schema=schema)
     if mode == 'row':
         fields = [table.field_dict[name] for name in columns]
@@ -213,7 +215,7 @@ def test_failed_bucket_creation_does_not_fix_write_type(tmp_path):
     table = _table(tmp_path, False)
     writer = table.new_batch_write_builder().new_write().with_write_type(['value', 'pt'])
     try:
-        store = writer.file_store_write
+        store = writer._execution.file_store_write
         with patch.object(store, '_create_data_writer', side_effect=OSError('cannot create writer')):
             with pytest.raises(OSError, match='cannot create writer'):
                 _write(writer, table, [{'id': 1, 'value': 10, 'pt': 'old'}])
@@ -230,7 +232,7 @@ def test_requested_write_columns_are_distinct_from_optimized_physical_metadata(t
     table = _table(tmp_path, False)
     writer = table.new_batch_write_builder().new_write().with_write_type(['pt', 'id'])
     try:
-        store = writer.file_store_write
+        store = writer._execution.file_store_write
         optimized = Mock(write_cols=['id'])
         with patch.object(store, '_create_data_writer', return_value=optimized):
             _write(writer, table, [{'id': 1, 'value': 10, 'pt': 'old'}])
@@ -266,8 +268,8 @@ def test_first_row_encoding_failure_does_not_fix_write_type(tmp_path, backend, b
             writer.write_row(GenericRow(list(values.values()), [table.field_dict[name] for name in values]))
         assert not list(tmp_path.rglob('*.parquet')) and not list(tmp_path.rglob('*.blob'))
         if backend == 'python':
-            assert writer.file_store_write.data_writers == {}
-            assert not writer.file_store_write._ever_written
+            assert writer._execution.file_store_write.data_writers == {}
+            assert not writer._execution.file_store_write._ever_written
         else:
             core.write_arrow.assert_not_called()
             assert not writer._written
@@ -371,8 +373,8 @@ def test_inline_blob_conversion_failure_does_not_fix_write_type(tmp_path, backen
             writer.write_row(GenericRow([value, 'old'], [table.field_dict[name] for name in ['payload', 'pt']]))
         assert not list(tmp_path.rglob('*.parquet')) and not list(tmp_path.rglob('*.blob'))
         if backend == 'python':
-            assert writer.file_store_write.data_writers == {}
-            assert not writer.file_store_write._ever_written
+            assert writer._execution.file_store_write.data_writers == {}
+            assert not writer._execution.file_store_write._ever_written
         else:
             core.write_arrow.assert_not_called()
             assert not writer._written
@@ -399,7 +401,7 @@ def test_inline_blob_wire_validation_failure_keeps_write_type_fixed(tmp_path, in
         with pytest.raises(ValueError, match='blob-%s-field' % inline):
             writer.write_row(GenericRow([b'invalid wire bytes', 'old'],
                                         [table.field_dict[name] for name in ['payload', 'pt']]))
-        assert writer.file_store_write._ever_written
+        assert writer._execution.file_store_write._ever_written
         assert writer.with_write_type(['payload', 'pt']) is writer
         with pytest.raises(RuntimeError, match='before any write'):
             writer.with_write_type(['value', 'pt'])

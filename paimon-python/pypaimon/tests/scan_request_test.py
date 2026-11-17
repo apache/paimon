@@ -61,7 +61,6 @@ def _scan():
     scan.limit = 10
     scan.partition_predicate = None
     scan._read_type = [DataField(0, 'pt', AtomicType('INT'))]
-    scan._incremental_snapshot_range = (2, 4)
     return scan
 
 
@@ -86,17 +85,16 @@ def test_request_recaptures_external_configuration_and_authorization_changes():
     assert not before.auth_has_non_partition_filter and after.auth_has_non_partition_filter
     assert (after.idx_of_this_subtask, after.number_of_para_subtasks) == (1, 3)
     assert len(before.read_type) == 1 and len(after.read_type) == 2
-    assert after.incremental_snapshot_range == (2, 4)
 
 
 def test_native_prepare_observes_the_latest_public_scanner_configuration():
     scan = _scan()
     with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([], 7)) as native:
-        assert scan._try_native_plan().snapshot_id == 7
+        assert NativeTableScan(scan).plan().snapshot_id == 7
         assert native.call_args[1]['row_ranges'] == [(1, 3)]
         scan.file_scanner._row_ranges = []
         scan.file_scanner.idx_of_this_subtask, scan.file_scanner.number_of_para_subtasks = 1, 3
-        assert scan._try_native_plan().snapshot_id == 7
+        assert NativeTableScan(scan).plan().snapshot_id == 7
         assert native.call_args[1]['row_ranges'] == []
         assert native.call_args[1]['row_position_shard'] == (1, 3)
 

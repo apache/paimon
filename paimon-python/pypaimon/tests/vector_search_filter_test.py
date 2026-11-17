@@ -423,7 +423,7 @@ class GlobalIndexLiveRowFilterTest(unittest.TestCase):
             file_io = object()
 
             def copy_without_time_travel(self_inner, options):
-                calls["copy_options"] = options
+                calls.setdefault("copy_options", {}).update(options)
                 return self_inner
 
             def new_read_builder(self_inner):
@@ -500,6 +500,9 @@ class GlobalIndexLiveRowFilterTest(unittest.TestCase):
             _copy_with_snapshot = FileStoreTable._copy_with_snapshot
             options = _Options()
             file_io = object()
+
+            def copy_without_time_travel(self_inner, options):
+                return self_inner
 
             def new_read_builder(self_inner):
                 return _Builder()
@@ -1333,6 +1336,15 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual(["embedding", "_ROW_ID"], raw_calls["projection"])
         self.assertEqual([0], sorted(list(result.results())))
 
+        table.options = CoreOptions(Options({'fields.embedding.index-options': '{"refine_factor":3,"metric":"l2"}'}))
+        captured_limits.clear()
+        with mock.patch('pypaimon.execution.python.read.search.vector_search_read._create_vector_reader',
+                        side_effect=_fake_create):
+            result = (VectorSearchBuilderImpl(table).with_vector_column('embedding')
+                      .with_query_vector([0.0]).with_limit(1).execute_local())
+        self.assertEqual([3], captured_limits)
+        self.assertEqual([0], sorted(list(result.results())))
+
     def test_refine_factor_one_reranks_without_expanding_candidates(self):
         from pypaimon.globalindex.vector_search_result import (
             DictBasedScoredIndexResult,
@@ -1820,6 +1832,7 @@ class VectorSearchFilterTest(unittest.TestCase):
 
     def test_scan_threads_builder_options_to_raw_split_index_type(self):
         from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+        from pypaimon.table.source.batch_vector_search_builder import BatchVectorSearchBuilderImpl
 
         class _Snapshots:
             def get_latest_snapshot(self_inner):
@@ -1834,20 +1847,19 @@ class VectorSearchFilterTest(unittest.TestCase):
         _patch_snapshot(self, [])
         self._travel_patch.stop()
 
-        splits = (
-            VectorSearchBuilderImpl(table)
-            .with_vector_column("embedding")
-            .with_query_vector([1.0, 0.0, 0.0, 0.0])
-            .with_limit(3)
-            .with_option("index-type", "ivf-flat")
-            .new_vector_search_scan()
-            .scan()
-            .splits()
-        )
-
-        raw = [s for s in splits if isinstance(s, RawVectorSearchSplit)]
-        self.assertEqual(1, len(raw))
-        self.assertEqual("ivf-flat", raw[0].index_type)
+        for key, value in (
+                ('global-index.ivf-flat.index-columns', 'embedding'),
+                ('global-index.ivf-flat.index-column', 'embedding'),
+                ('fields.embedding.pk-vector.index.type', 'ivf-flat')):
+            for batch in (False, True):
+                with self.subTest(key=key, batch=batch):
+                    builder = (BatchVectorSearchBuilderImpl(table).with_query_vectors([[1.0, 0.0, 0.0, 0.0]])
+                               if batch else VectorSearchBuilderImpl(table).with_query_vector([1.0, 0.0, 0.0, 0.0]))
+                    splits = (builder.with_vector_column("embedding").with_limit(3).with_option(key, value)
+                              .new_vector_search_scan().scan().splits())
+                    raw = [s for s in splits if isinstance(s, RawVectorSearchSplit)]
+                    self.assertEqual(1, len(raw))
+                    self.assertEqual("ivf-flat", raw[0].index_type)
 
     def test_scan_excludes_composite_btree_when_filter_hits_extra_field(self):
         id_name_index = _entry(None, field_id=2, index_type="btree",
@@ -3140,7 +3152,9 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         planned_table = _StubTable(fields=[embedding_field], entries=[])
         _install_raw_vector_read_builder(table, "embedding", {1: [1.0]})
         _install_raw_vector_read_builder(planned_table, "embedding", {0: [1.0]})
-        table.copy_without_time_travel = mock.Mock(return_value=planned_table)
+        table.copy_without_time_travel = mock.Mock(side_effect=lambda options: (
+            planned_table if CoreOptions.SCAN_SNAPSHOT_ID.key() in options
+            else _StubTable.copy_without_time_travel(table, options)))
         split = RawVectorSearchSplit([Range(0, 1)], [], "ivf-flat")
         reader = DataEvolutionVectorRead(
             table,
@@ -3153,7 +3167,8 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         table.copy_without_time_travel.reset_mock()
         result = reader.read([split])
 
-        table.copy_without_time_travel.assert_not_called()
+        table.copy_without_time_travel.assert_called_once_with({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         self.assertEqual([1], sorted(list(result.results())))
 
     def test_read_batch_does_not_reuse_snapshot_from_previous_plan(self):
@@ -3167,7 +3182,9 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         planned_table = _StubTable(fields=[embedding_field], entries=[])
         _install_raw_vector_read_builder(table, "embedding", {1: [1.0]})
         _install_raw_vector_read_builder(planned_table, "embedding", {0: [1.0]})
-        table.copy_without_time_travel = mock.Mock(return_value=planned_table)
+        table.copy_without_time_travel = mock.Mock(side_effect=lambda options: (
+            planned_table if CoreOptions.SCAN_SNAPSHOT_ID.key() in options
+            else _StubTable.copy_without_time_travel(table, options)))
         split = RawVectorSearchSplit([Range(0, 1)], [], "ivf-flat")
         reader = BatchVectorSearchReadImpl(
             table,
@@ -3180,7 +3197,8 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         table.copy_without_time_travel.reset_mock()
         results = reader.read_batch([split])
 
-        table.copy_without_time_travel.assert_not_called()
+        table.copy_without_time_travel.assert_called_once_with({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         self.assertEqual([1], sorted(list(results[0].results())))
 
     def test_read_plan_clears_conflicting_time_travel_options(self):
@@ -3579,6 +3597,7 @@ class BatchVectorSearchTest(unittest.TestCase):
                        file_name="vec.index",
                        row_range_start=0, row_range_end=2)
         table = _StubTable(fields=[embedding_field], entries=[entry])
+        table.options = CoreOptions(Options({'fields.embedding.index-options': '{"refine_factor":2,"metric":"l2"}'}))
         _patch_snapshot(self, [entry])
         raw_calls = _install_raw_vector_read_builder(
             table, "embedding", {0: [10.0], 1: [0.0], 2: [5.0]})
@@ -3610,7 +3629,6 @@ class BatchVectorSearchTest(unittest.TestCase):
                 .with_vector_column("embedding")
                 .with_query_vectors([[0.0], [20.0]])
                 .with_limit(1)
-                .with_option("ivf.refine_factor", "2")
                 .execute_batch_local()
             )
 

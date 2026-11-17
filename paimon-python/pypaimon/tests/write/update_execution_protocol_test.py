@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Bound update execution retains public hooks and preparation boundaries."""
+"""Bound update execution retains public methods and preparation boundaries."""
 
 import subprocess
 import sys
@@ -70,71 +70,56 @@ def _values(table):
     return read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id').to_pydict()
 
 
-def test_bound_update_uses_live_configuration_and_public_predicate_hooks(table):
+def test_bound_update_uses_live_configuration_and_callable_assignments(table):
     built = []
 
-    class PublicUpdate(BatchTableUpdate):
-        def _build_predicate_update_table(self, assignments, matched):
-            built.append(matched.to_pydict())
-            return super()._build_predicate_update_table(assignments, matched)
+    def assignment(matched):
+        built.append(matched.to_pydict())
+        return pa.compute.add(matched['value'], 1)
 
-    update = PublicUpdate(table, 'public-update')
+    update = BatchTableUpdate(table, 'public-update')
     update.with_update_type(['value'])
     _commit(table, update.update_by_arrow_with_row_id(pa.table({'_ROW_ID': [0], 'value': [11]})))
     update.with_update_type(['id'])
     _commit(table, update.update_by_arrow_with_row_id(pa.table({'_ROW_ID': [1], 'id': [3]})))
     predicate = update.new_predicate_builder().equal('id', 3)
     _commit(table, update.update_by_predicate(
-        predicate, {'value': lambda matched: pa.compute.add(matched['value'], 1)}, read_columns=['value']))
+        predicate, {'value': assignment}, read_columns=['value']))
     assert built == [{'value': [20], '_ROW_ID': [1]}]
     assert _values(table) == {'id': [1, 3], 'value': [11, 21]}
 
 
-def test_bound_row_id_execution_retains_public_state_and_write_hook(table):
-    written = []
-
-    class PublicRowIdUpdate(TableUpdateByRowId):
-        def _write_by_first_row_id(self, data, column_names, blob_object_columns=None):
-            written.append((list(column_names), data['_ROW_ID'].to_pylist()))
-            return super()._write_by_first_row_id(data, column_names, blob_object_columns)
-
-    update = PublicRowIdUpdate(table, 'row-id-update', BATCH_COMMIT_IDENTIFIER)
-    assert update.first_row_ids == [0]
+def test_bound_row_id_execution_owns_file_routing_and_committable_state(table):
+    update = TableUpdateByRowId(table, 'row-id-update', BATCH_COMMIT_IDENTIFIER)
     messages = update.update_columns(pa.table({'_ROW_ID': [0], 'value': [33]}), ['value'])
     assert messages is update.commit_messages
-    assert written == [(['value'], [0])]
+    assert not hasattr(update, 'first_row_ids')
+    assert not hasattr(update, '_write_by_first_row_id')
     _commit(table, messages)
     assert _values(table) == {'id': [1, 2], 'value': [33, 20]}
 
 
-def test_bound_delete_keeps_public_message_hook_and_committable_result(table):
-    deleted = []
-
-    class PublicDelete(TableDeleteByRowId):
-        def _build_commit_message(self, partition, bucket, file_positions, snapshot_id):
-            deleted.append(sum(len(positions) for positions in file_positions.values()))
-            return super()._build_commit_message(partition, bucket, file_positions, snapshot_id)
-
-    delete = PublicDelete(table)
+def test_bound_delete_owns_anchor_routing_and_committable_result(table):
+    delete = TableDeleteByRowId(table)
     messages = delete.delete([0, 0])
-    assert delete.file_io is table.file_io
-    assert deleted == [1]
+    assert not hasattr(delete, '_build_commit_message')
+    assert not hasattr(delete, '_write_deletion_vector_index')
     _commit(table, messages)
     assert _values(table) == {'id': [2], 'value': [20]}
 
 
 @pytest.mark.parametrize('rows', [False, True])
-def test_prepared_python_upsert_keeps_public_partition_hooks(table, rows):
+def test_prepared_python_upsert_keeps_public_input_methods(table, rows):
     visited = []
 
     class PublicUpsert(TableUpsertByKey):
-        def _upsert_partition(self, data, keys, partition_spec, update_cols):
+        def upsert(self, data, keys, update_cols=None):
             visited.append(('arrow', data.num_rows))
-            return super()._upsert_partition(data, keys, partition_spec, update_cols)
+            return super().upsert(data, keys, update_cols)
 
-        def _upsert_row_partition(self, row_items, keys, partition_spec, update_cols):
+        def upsert_rows(self, row_items, keys, update_cols=None):
             visited.append(('rows', len(row_items)))
-            return super()._upsert_row_partition(row_items, keys, partition_spec, update_cols)
+            return super().upsert_rows(row_items, keys, update_cols)
 
     update = PublicUpsert(table, 'upsert', BATCH_COMMIT_IDENTIFIER)
     data = [{'id': 1, 'value': 12}, {'id': 3, 'value': 30}]

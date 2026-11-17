@@ -151,6 +151,9 @@ public class CastExecutors {
                             (CastExecutor<Number, Number>) castRule.create(predicateType, dataType);
                     List<Object> newLiterals = new ArrayList<>(literals.size());
                     for (Object literal : literals) {
+                        if (literal == null) {
+                            return Optional.empty();
+                        }
                         Number literalNumber = (Number) literal;
                         Number newLiteralNumber = castExecutor.cast(literalNumber);
                         // Ignore if any literal is overflowed.

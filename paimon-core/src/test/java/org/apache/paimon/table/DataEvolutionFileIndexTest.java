@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.ForceSingleBatchReader;
+import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -39,7 +40,9 @@ import org.apache.paimon.fileindex.bitmap.ApplyBitmapIndexRecordReader;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
 import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
@@ -79,6 +82,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -610,6 +614,58 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
 
         Predicate filter = equalAnyF1(50, 51, 52, 53, 54, 55);
         assertRow(assertSingleRow(readAfterDeletingDataFiles(table, filter, null)), 50);
+    }
+
+    @Test
+    public void testMergedGroupResolvesRowSidecarOncePerFile() throws Exception {
+        RowSidecarStatusCountingFileIO fileIO = new RowSidecarStatusCountingFileIO();
+        catalog =
+                new FileSystemCatalog(
+                        fileIO,
+                        new Path(tempPath.toUri().toString(), "counting-row-sidecar-status"));
+        catalog.createDatabase(database, true);
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("merged_row_sidecar_status", options);
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+
+        fileIO.rowSidecarStatusReads.clear();
+        assertRow(assertSingleRow(readWithFilter(table, equalAnyF1(50))), 50);
+        assertThat(fileIO.rowSidecarStatusReads).hasSize(2);
+        assertThat(fileIO.rowSidecarStatusReads.values()).containsOnly(1);
+    }
+
+    @Test
+    public void testMissingFieldsReaderResolvesRowSidecarOnce() throws Exception {
+        RowSidecarStatusCountingFileIO fileIO = new RowSidecarStatusCountingFileIO();
+        catalog =
+                new FileSystemCatalog(
+                        fileIO,
+                        new Path(tempPath.toUri().toString(), "counting-missing-field-status"));
+        catalog.createDatabase(database, true);
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("missing_field_row_sidecar_status", options);
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), Collections.emptyMap());
+        catalog.alterTable(
+                identifier(table.name()), SchemaChange.addColumn("f3", DataTypes.STRING()), false);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        RowType readType = latest.rowType().project("f3");
+        ReadBuilder readBuilder =
+                latest.newReadBuilder()
+                        .withReadType(readType)
+                        .withRowRanges(Collections.singletonList(new Range(50L, 50L)));
+        fileIO.rowSidecarStatusReads.clear();
+        List<InternalRow> rows =
+                collect(readBuilder.newRead(), readBuilder.newScan().plan(), readType);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).isNullAt(0)).isTrue();
+        assertThat(fileIO.rowSidecarStatusReads).hasSize(1);
+        assertThat(fileIO.rowSidecarStatusReads.values()).containsOnly(1);
     }
 
     @Test
@@ -1619,6 +1675,19 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
                         + CoreOptions.COLUMNS,
                 column);
         return options;
+    }
+
+    private static class RowSidecarStatusCountingFileIO extends LocalFileIO {
+
+        private final Map<String, Integer> rowSidecarStatusReads = new HashMap<>();
+
+        @Override
+        public FileStatus getFileStatus(Path path) throws IOException {
+            if (path.getName().endsWith(".row")) {
+                rowSidecarStatusReads.merge(path.getName(), 1, Integer::sum);
+            }
+            return super.getFileStatus(path);
+        }
     }
 
     @ParameterizedTest

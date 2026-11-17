@@ -155,7 +155,7 @@ paimon table alter DATABASE.TABLE [--ignore-if-not-exists] SUBCOMMAND [OPTIONS]
 Set a table option (key-value pair):
 
 ```shell
-paimon table alter mydb.users set-option -k snapshot.num-retained-max -v 10
+paimon table alter mydb.users set-option -k snapshot.num-retained.max -v 10
 ```
 
 ### Remove Option
@@ -163,7 +163,7 @@ paimon table alter mydb.users set-option -k snapshot.num-retained-max -v 10
 Remove a table option:
 
 ```shell
-paimon table alter mydb.users remove-option -k snapshot.num-retained-max
+paimon table alter mydb.users remove-option -k snapshot.num-retained.max
 ```
 
 ### Add Column

@@ -21,6 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.TestHiveMetastore;
 
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.net.URL;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -185,7 +187,10 @@ public class SparkGenericCatalogWithHiveTest {
     @Test
     public void testHiveCatalogOptions(@TempDir java.nio.file.Path tempDir) throws IOException {
         Path warehousePath = new Path("file:" + tempDir.toString());
-        SparkSession spark =
+        URL hiveSiteLocation = HiveConf.getHiveSiteLocation();
+        boolean loadMetastoreConfig = HiveConf.isLoadMetastoreConfig();
+        boolean loadHiveServer2Config = HiveConf.isLoadHiveServer2Config();
+        try (SparkSession spark =
                 SparkSession.builder()
                         .config("spark.sql.catalog.spark_catalog.hive-conf-dir", "nonExistentPath")
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
@@ -198,13 +203,15 @@ public class SparkGenericCatalogWithHiveTest {
                                 "spark.sql.extensions",
                                 "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
                         .master("local[2]")
-                        .getOrCreate();
-
-        assertThatThrownBy(() -> spark.sql("CREATE DATABASE my_db"))
-                .rootCause()
-                .isInstanceOf(FileNotFoundException.class)
-                .hasMessageContaining("nonExistentPath");
-
-        spark.close();
+                        .getOrCreate()) {
+            assertThatThrownBy(() -> spark.sql("CREATE DATABASE my_db"))
+                    .rootCause()
+                    .isInstanceOf(FileNotFoundException.class)
+                    .hasMessageContaining("nonExistentPath");
+        } finally {
+            HiveConf.setHiveSiteLocation(hiveSiteLocation);
+            HiveConf.setLoadMetastoreConfig(loadMetastoreConfig);
+            HiveConf.setLoadHiveServer2Config(loadHiveServer2Config);
+        }
     }
 }

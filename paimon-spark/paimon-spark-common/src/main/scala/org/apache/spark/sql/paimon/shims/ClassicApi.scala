@@ -34,6 +34,10 @@ trait ClassicApi {
 
   def createDataset(sparkSession: SparkSession, logicalPlan: LogicalPlan): Dataset[Row]
 
+  def createDiskCachedDataset(
+      sparkSession: SparkSession,
+      logicalPlan: LogicalPlan): (Dataset[Row], () => Unit)
+
   def prepareExecutedPlan(spark: SparkSession, logicalPlan: LogicalPlan): SparkPlan
 
   def recacheByPlan(spark: SparkSession, plan: LogicalPlan): Unit

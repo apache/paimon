@@ -70,6 +70,7 @@ public class SparkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
         if (splits.size() < parallelism * 2) {
             return super.read(plan);
         }
+        SearchParameters parameters = searchParameters(splits);
 
         List<byte[]> serializedSplits = new ArrayList<>(splits.size());
         for (BucketVectorSearchSplit split : splits) {
@@ -87,7 +88,8 @@ public class SparkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
                         taskSplits.add(deserializeSplit(bytes));
                     }
                     try {
-                        return InstantiationUtil.serializeObject(searchBuckets(taskSplits));
+                        return InstantiationUtil.serializeObject(
+                                searchBuckets(taskSplits, parameters));
                     } catch (IOException e) {
                         throw new RuntimeException(
                                 "Failed to serialize primary-key vector candidates.", e);
@@ -98,7 +100,8 @@ public class SparkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
         for (byte[] groupResult : groupResults) {
             searchResults.add(deserializeSearchResult(groupResult));
         }
-        return createResult(primaryKeyPlan, mergeSearchResults(searchResults));
+        return createResult(
+                primaryKeyPlan, mergeSearchResults(searchResults, parameters), parameters);
     }
 
     protected int sparkParallelism() {

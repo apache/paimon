@@ -26,5 +26,5 @@ class PostponeBucketPlanner(PostponeBucketPlanning):
 
     @staticmethod
     def _load_bucket_metadata(table):
-        from pypaimon.execution.python.write.postpone_bucket import PythonPostponeBucketPlanner
-        return PythonPostponeBucketPlanner._load_bucket_metadata(table)
+        from pypaimon.write.backend_dispatch import load_postpone_bucket_metadata
+        return load_postpone_bucket_metadata(table)

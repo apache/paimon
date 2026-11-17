@@ -23,7 +23,7 @@ from unittest.mock import Mock, patch
 
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.read.plan import Plan
-from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
 from pypaimon.snapshot.snapshot import Snapshot
 
 

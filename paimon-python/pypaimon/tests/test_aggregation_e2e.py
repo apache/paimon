@@ -297,7 +297,7 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             writer_class = StreamTableWrite if streaming else BatchTableWrite
             # A rejected writer must never create the bucket index maintainer,
             # including callers that construct TableWrite directly.
-            with patch.object(table, 'create_row_key_extractor') as extractor:
+            with patch('pypaimon.execution.python.write.row_key_extractor.create_row_key_extractor') as extractor:
                 for create in (builder.new_write, lambda: writer_class(table, 'test')):
                     with self.subTest(streaming=streaming, create=create):
                         with self.assertRaisesRegex(

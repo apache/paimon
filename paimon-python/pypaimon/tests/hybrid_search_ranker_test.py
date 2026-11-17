@@ -47,6 +47,57 @@ def _rank(limit, ranker, results):
 
 class HybridSearchRankerTest(unittest.TestCase):
 
+    def test_rankers_compare_external_scores_as_java_floats(self):
+        # ScoreGetter returns float: these distinct Python values are equal in
+        # Java, so the smaller row ID wins every ranker's Top-K boundary tie.
+        route = _route_result(1.0, {1: 1000000000.0, 2: 1000000001.0})
+        for ranker, expected_score in (
+                (RRF_RANKER, 0.016393441706895828),
+                (WEIGHTED_SCORE_RANKER, 1.0),
+                (MRR_RANKER, 1.0)):
+            with self.subTest(ranker=ranker):
+                ranked = _rank(1, ranker, [route])
+                self.assertEqual({1}, set(ranked.results()))
+                self.assertEqual(expected_score, ranked.score_getter()(1))
+
+    def test_route_validates_weights_after_java_float_conversion(self):
+        for weight in (1e39, 1e-46, 3.4028236e38):
+            for full_text in (False, True):
+                with self.subTest(weight=weight, full_text=full_text):
+                    with self.assertRaisesRegex(ValueError, "Weight must be finite and positive"):
+                        if full_text:
+                            HybridSearchRoute.full_text_route('text', '{}', 1, weight)
+                        else:
+                            HybridSearchRoute.vector_route('embedding', [1.0], 1, weight)
+
+        for weight, expected in (
+                (0.1, 0.10000000149011612),
+                (1e-45, 1.401298464324817e-45),
+                (3.4028235e38, 3.4028234663852886e38)):
+            with self.subTest(weight=weight):
+                vector = HybridSearchRoute.vector_route('embedding', [1.0], 1, weight)
+                text = HybridSearchRoute.full_text_route('text', '{}', 1, weight)
+                self.assertEqual(expected, vector.weight)
+                self.assertEqual(expected, text.weight)
+
+    def test_rankers_round_normalization_and_accumulation_as_java_floats(self):
+        routes = [_route_result(0.1, {1: 0.0, 2: 0.1, 3: 0.3}),
+                  _route_result(0.2, {1: 0.3, 2: 0.2, 3: 0.1}),
+                  _route_result(0.3, {1: 0.1, 2: 0.2, 3: 0.3})]
+        # Java float operations, including each per-route addition, determine
+        # these exact scores; rounding just the final Python sum is different.
+        for ranker, expected in (
+                (RRF_RANKER, {1: 0.009627895429730415, 2: 0.009677419438958168,
+                              3: 0.009731980040669441}),
+                (WEIGHTED_SCORE_RANKER, {1: 0.20000000298023224, 2: 0.28333330154418945,
+                                         3: 0.4000000059604645}),
+                (MRR_RANKER, {1: 0.3333333432674408, 2: 0.30000001192092896,
+                              3: 0.46666669845581055})):
+            with self.subTest(ranker=ranker):
+                ranked = _rank(3, ranker, routes)
+                self.assertEqual(expected, {row_id: ranked.score_getter()(row_id)
+                                            for row_id in ranked.results()})
+
     def test_weighted_score_normalizes_heterogeneous_route_scales(self):
         # Vector-like route (bounded ~[0, 1]) and BM25-like route (unbounded, larger).
         vector_route = _route_result(5.0, {1: 0.95, 2: 0.10})

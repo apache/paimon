@@ -19,7 +19,7 @@
 """Unit tests for the Ray pre-shuffle helper in pypaimon/ray/shuffle.py.
 
 These tests exercise the helper in isolation: the bucket-key UDF (with a
-stub extractor), the collision-safe column name picker, the
+stub router), the collision-safe column name picker, the
 large-type coercion, and the bucket-mode dispatch in
 ``maybe_apply_repartition``. Ray-based end-to-end behaviour is covered
 in ``pypaimon/tests/ray_repartition_test.py``.
@@ -53,17 +53,14 @@ maybe_apply_repartition = _SHUFFLE.maybe_apply_repartition
 class BucketUdfTest(unittest.TestCase):
     """The bucket-key UDF appends a deterministic int32 column."""
 
-    def _make_extractor(self, buckets_per_row):
-        extractor = MagicMock()
-        extractor.extract_partition_bucket_batch.return_value = (
-            [() for _ in buckets_per_row],
-            list(buckets_per_row),
-        )
-        return extractor
+    def _make_router(self, buckets_per_row):
+        router = MagicMock(spec=["route"])
+        router.route.return_value = pa.array(buckets_per_row, type=pa.int32())
+        return router
 
     def test_appends_int32_bucket_column(self):
-        extractor = self._make_extractor([0, 1, 0])
-        udf = _make_bucket_udf(extractor, BUCKET_KEY_COL)
+        router = self._make_router([0, 1, 0])
+        udf = _make_bucket_udf(router, BUCKET_KEY_COL)
         batch = pa.table({"id": [10, 11, 12]})
 
         out = udf(batch)
@@ -73,24 +70,24 @@ class BucketUdfTest(unittest.TestCase):
         self.assertEqual(out.column(BUCKET_KEY_COL).to_pylist(), [0, 1, 0])
 
     def test_empty_batch_appends_empty_column(self):
-        extractor = self._make_extractor([])
-        udf = _make_bucket_udf(extractor, BUCKET_KEY_COL)
+        router = self._make_router([])
+        udf = _make_bucket_udf(router, BUCKET_KEY_COL)
         batch = pa.table({"id": pa.array([], type=pa.int32())})
 
         out = udf(batch)
 
         self.assertEqual(out.num_rows, 0)
         self.assertEqual(out.column_names, ["id", BUCKET_KEY_COL])
-        # The extractor is short-circuited on empty input — we don't pay
+        # The router is short-circuited on empty input — we don't pay
         # the cost of combining empty chunks just to call into it.
-        extractor.extract_partition_bucket_batch.assert_not_called()
+        router.route.assert_not_called()
 
-    def test_multichunk_batch_combines_before_extracting(self):
+    def test_multichunk_batch_combines_before_routing(self):
         # Two record batches in the same table — the UDF must combine
-        # before calling the extractor, otherwise the extractor sees
+        # before calling the router, otherwise the router sees
         # half the rows.
-        extractor = self._make_extractor([0, 1, 2, 3])
-        udf = _make_bucket_udf(extractor, BUCKET_KEY_COL)
+        router = self._make_router([0, 1, 2, 3])
+        udf = _make_bucket_udf(router, BUCKET_KEY_COL)
         rb1 = pa.record_batch({"id": [1, 2]})
         rb2 = pa.record_batch({"id": [3, 4]})
         batch = pa.Table.from_batches([rb1, rb2])
@@ -99,8 +96,9 @@ class BucketUdfTest(unittest.TestCase):
 
         self.assertEqual(out.num_rows, 4)
         self.assertEqual(out.column(BUCKET_KEY_COL).to_pylist(), [0, 1, 2, 3])
-        # Extractor is called exactly once with all four rows.
-        call = extractor.extract_partition_bucket_batch.call_args
+        # Router is called exactly once with all four rows.
+        router.route.assert_called_once()
+        call = router.route.call_args
         passed_batch = call.args[0]
         self.assertEqual(passed_batch.num_rows, 4)
 

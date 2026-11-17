@@ -31,7 +31,7 @@ class RESTCatalogTest(RESTBaseTest):
         """Test table rollback to snapshot and tag."""
         table_name = "default.table_for_rollback"
         pa_schema = pa.schema([('col1', pa.int32())])
-        schema = Schema.from_pyarrow_schema(pa_schema)
+        schema = Schema.from_pyarrow_schema(pa_schema, options={"write-only": "true"})
         self.rest_catalog.create_table(table_name, schema, False)
         table = self.rest_catalog.get_table(table_name)
         identifier = Identifier.from_string(table_name)
@@ -159,11 +159,15 @@ class RESTCatalogTest(RESTBaseTest):
         self.assertIn("default.no_such_table", str(context.exception))
         self.assertIn("does not exist", str(context.exception))
 
+    def test_table_operations_reject_branch_and_system_tables(self):
+        from pypaimon.tests.catalog_table_guard_test import assert_table_guards
+        assert_table_guards(self, self.rest_catalog, 'guard_db')
+
     def test_table_rollback_to_snapshot(self):
         """Test table-level rollback_to_snapshot via FileStoreTable."""
         table_name = "default.table_level_rollback_snapshot"
         pa_schema = pa.schema([('col1', pa.int32())])
-        schema = Schema.from_pyarrow_schema(pa_schema)
+        schema = Schema.from_pyarrow_schema(pa_schema, options={"write-only": "true"})
         self.rest_catalog.create_table(table_name, schema, False)
         table = self.rest_catalog.get_table(table_name)
 
@@ -192,7 +196,7 @@ class RESTCatalogTest(RESTBaseTest):
         """Test table-level rollback_to_tag via FileStoreTable."""
         table_name = "default.table_level_rollback_tag"
         pa_schema = pa.schema([('col1', pa.int32())])
-        schema = Schema.from_pyarrow_schema(pa_schema)
+        schema = Schema.from_pyarrow_schema(pa_schema, options={"write-only": "true"})
         self.rest_catalog.create_table(table_name, schema, False)
         table = self.rest_catalog.get_table(table_name)
 
@@ -335,11 +339,77 @@ class RESTCatalogTest(RESTBaseTest):
         self.assertIn("no_such_table_for_snapshot", str(context.exception))
         self.assertIn("does not exist", str(context.exception))
 
+    def test_get_table_by_id(self):
+        from pypaimon.catalog.catalog_exception import (TableIdNoPermissionException,
+                                                        TableIdNotExistException)
+        from pypaimon.execution.native.table import _resolved_rest_table_response
+        # a dotted database name must come back unchanged
+        identifier = Identifier.create("test.table_db", "get_table_by_id")
+        self.rest_catalog.create_database(identifier.get_database_name(), False)
+        pa_schema = pa.schema([('col1', pa.int32())])
+        self.rest_catalog.create_table(identifier, Schema.from_pyarrow_schema(pa_schema), False)
+        table = self.rest_catalog.get_table(identifier)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa.Table.from_pydict({'col1': [1]}, schema=pa_schema))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        table_id = table.catalog_environment.uuid
+        table_by_id = self.rest_catalog.get_table_by_id(table_id)
+        self.assertEqual(table_by_id.catalog_environment.uuid, table_id)
+        self.assertEqual(table_by_id.identifier.get_database_name(), "test.table_db")
+        self.assertEqual(table_by_id.identifier.get_table_name(), "get_table_by_id")
+        self.assertEqual(table_by_id.table_path, table.table_path)
+        # native readers can reuse the response
+        self.assertIsNotNone(_resolved_rest_table_response(table_by_id))
+        read_builder = table_by_id.new_read_builder()
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        self.assertEqual(result.column('col1').to_pylist(), [1])
+
+        with self.assertRaises(TableIdNotExistException):
+            self.rest_catalog.get_table_by_id("missing_table_id")
+        self.server.add_no_permission_table(identifier)
+        with self.assertRaises(TableIdNoPermissionException):
+            self.rest_catalog.get_table_by_id(table_id)
+
+    def test_alter_table_column_errors(self):
+        from pypaimon.catalog.catalog_exception import (ColumnAlreadyExistException,
+                                                        ColumnNotExistException,
+                                                        TableNotExistException)
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+        identifier = "default.alter_table_column_errors"
+        pa_schema = pa.schema([('col1', pa.int32())])
+        self.rest_catalog.create_table(identifier, Schema.from_pyarrow_schema(pa_schema), False)
+
+        with self.assertRaises(ColumnNotExistException) as context:
+            self.rest_catalog.alter_table(identifier, [SchemaChange.drop_column('missing')])
+        self.assertIn("missing", str(context.exception))
+        with self.assertRaises(ColumnAlreadyExistException) as context:
+            self.rest_catalog.alter_table(identifier, [SchemaChange.add_column('col1', AtomicType('INT'))])
+        self.assertIn("col1", str(context.exception))
+
+        missing = "default.no_such_table"
+        with self.assertRaises(TableNotExistException):
+            self.rest_catalog.alter_table(missing, [SchemaChange.drop_column('col1')])
+        self.rest_catalog.alter_table(missing, [SchemaChange.drop_column('col1')], True)
+
+    def test_create_table_in_missing_database(self):
+        from pypaimon.catalog.catalog_exception import DatabaseNotExistException
+        pa_schema = pa.schema([('col1', pa.int32())])
+        with self.assertRaises(DatabaseNotExistException) as context:
+            self.rest_catalog.create_table(
+                "no_such_db.table", Schema.from_pyarrow_schema(pa_schema), False)
+        self.assertIn("no_such_db", str(context.exception))
+
     def test_catalog_load_snapshot_after_rollback(self):
         """Test load_snapshot returns correct snapshot after rollback."""
         table_name = "default.table_load_snapshot_after_rollback"
         pa_schema = pa.schema([('col1', pa.int32())])
-        schema = Schema.from_pyarrow_schema(pa_schema)
+        schema = Schema.from_pyarrow_schema(pa_schema, options={"write-only": "true"})
         self.rest_catalog.create_table(table_name, schema, False)
         table = self.rest_catalog.get_table(table_name)
         identifier = Identifier.from_string(table_name)

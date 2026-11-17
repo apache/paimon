@@ -291,6 +291,19 @@ public class PaimonShreddingUtilsTest {
                                                         BinaryString.fromString("Apache Paimon"));
                                             }
                                         })));
+
+        // cast struct to map whose key is NOT NULL
+        fields[0] =
+                buildFieldsToExtract(
+                        new MapType(DataTypes.STRING().notNull(), DataTypes.STRING()),
+                        "$.object",
+                        castArgs,
+                        variantSchema);
+        Map<BinaryString, BinaryString> expectedMap = new HashMap<>();
+        expectedMap.put(BinaryString.fromString("age"), BinaryString.fromString("3"));
+        expectedMap.put(BinaryString.fromString("name"), BinaryString.fromString("Apache Paimon"));
+        assertThat(assembleVariantStruct(castShredded(v, variantSchema), variantSchema, fields))
+                .isEqualTo(GenericRow.of(new GenericMap(expectedMap)));
     }
 
     @Test

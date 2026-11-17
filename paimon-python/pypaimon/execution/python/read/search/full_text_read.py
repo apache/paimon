@@ -24,6 +24,8 @@ from concurrent.futures import wait
 from io import BytesIO
 from typing import Dict, List
 
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.globalindex.full_text_search import FullTextSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -282,7 +284,9 @@ class DataEvolutionFullTextRead(FullTextRead):
         ).top_k(self._limit)
 
     def _read_raw_rows(self, raw_row_ranges):
-        read_builder = self._table.new_read_builder()
+        read_table = self._table.copy_without_time_travel({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
+        read_builder = read_table.new_read_builder()
         if self._partition_filter is not None:
             read_builder = read_builder.with_partition_filter(self._partition_filter)
 
@@ -307,7 +311,7 @@ class DataEvolutionFullTextRead(FullTextRead):
 
         writer = FullTextIndexWriter(
             NativeFullTextIndexOptions.from_options(
-                _raw_search_options(self._table)).to_native_options())
+                _raw_search_options(self._table, self._text_columns[0].name)).to_native_options())
         indexed = False
         try:
             for row_id, text in zip(row_ids, texts):
@@ -402,14 +406,15 @@ def _search_raw_full_text(index_bytes, row_range_start, query, limit, include_ro
         reader.close()
 
 
-def _raw_search_options(table):
+def _raw_search_options(table, column):
     table_options = getattr(getattr(table, "options", None), "options", None)
     if table_options is not None:
         options = dict(table_options.to_map())
     else:
         options = dict(getattr(getattr(table, "table_schema", None), "options", {}) or {})
-    options["full-text.searcher-pool.max-size"] = "0"
-    return options
+    resolved = CoreOptions(Options(options)).global_index_options("full-text", column).to_map()
+    resolved["full-text.searcher-pool.max-size"] = "0"
+    return resolved
 
 
 def _materialize_text(value) -> str:

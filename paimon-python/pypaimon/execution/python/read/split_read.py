@@ -17,6 +17,7 @@
 
 import os
 from abc import ABC, abstractmethod
+from copy import copy
 from functools import partial
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -72,7 +73,6 @@ from pypaimon.execution.python.read.reader.filter_record_batch_reader import Fil
 from pypaimon.execution.python.read.reader.limited_record_reader import LimitedRecordBatchReader, LimitedRecordReader
 from pypaimon.execution.python.read.reader.row_range_filter_record_reader import RowIdFilterRecordBatchReader
 from pypaimon.execution.python.read.reader.format_blob_reader import FormatBlobReader
-from pypaimon.execution.python.read.reader.format_lance_reader import FormatLanceReader
 from pypaimon.execution.python.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.execution.python.read.reader.format_row_reader import FormatRowReader
 from pypaimon.execution.python.read.reader.format_mosaic_reader import FormatMosaicReader
@@ -244,6 +244,9 @@ class SplitRead(ABC):
         else:
             return predicate_for_physical_fields(self.predicate, self.table.fields)
 
+    def _assigns_row_id(self) -> bool:
+        return any(f.name == SpecialFields.ROW_ID.name for f in self.read_fields)
+
     def _has_row_tracking_predicate(self) -> bool:
         return (self.table.options.row_tracking_enabled()
                 and self.predicate is not None
@@ -273,7 +276,11 @@ class SplitRead(ABC):
         ) = self._get_fields_and_predicate(file.schema_id, read_fields)
         if (file.file_name in self.deletion_file_readers
                 or (for_merge_read and self.row_ranges is not None)
-                or physical_row_ranges is not None):
+                or physical_row_ranges is not None
+                # A shard range and _ROW_ID values are counted on the rows the
+                # format reader returns, so it must not filter them either.
+                or shard_range is not None
+                or self._assigns_row_id()):
             # DVs and indexed PK ranges refer to physical file positions.
             # Filtering or skipping row groups here would renumber those rows.
             # Apply the residual predicate after position selection and merging.
@@ -329,7 +336,6 @@ class SplitRead(ABC):
             row_index_formats = (CoreOptions.FILE_FORMAT_BLOB,
                                  CoreOptions.FILE_FORMAT_VIDEO,
                                  CoreOptions.FILE_FORMAT_VORTEX,
-                                 CoreOptions.FILE_FORMAT_LANCE,
                                  CoreOptions.FILE_FORMAT_ROW)
             if file_format in row_index_formats:
                 row_indices = [
@@ -408,15 +414,6 @@ class SplitRead(ABC):
                                              blob_parallelism=blob_parallelism,
                                              file_size=file.file_size,
                                              index_cache=self.table.catalog_environment.blob_index_cache())
-        elif file_format == CoreOptions.FILE_FORMAT_LANCE:
-            if has_nested:
-                raise NotImplementedError(
-                    "Nested-field projection is not supported on Lance files")
-            ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
-            format_reader = FormatLanceReader(self.table.file_io, file_path, ordered_read_fields,
-                                              read_arrow_predicate, batch_size=batch_size,
-                                              row_indices=row_indices,
-                                              shard_range=shard_range)
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
             if has_nested:
                 raise NotImplementedError(
@@ -482,7 +479,7 @@ class SplitRead(ABC):
         elif file_format in ('json', 'csv'):
             raise NotImplementedError(
                 f"Reading '{file_format}' format is not yet supported in Python SDK. "
-                f"Supported formats: parquet, orc, avro, lance, vortex, mosaic, blob, row.")
+                f"Supported formats: parquet, orc, avro, vortex, mosaic, blob, row.")
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
@@ -508,8 +505,7 @@ class SplitRead(ABC):
         # starting from shard_range[0], so _ROW_ID must be offset accordingly.
         effective_first_row_id = file.first_row_id
         if (shard_range is not None and file.first_row_id is not None
-                and file_format in (
-                    CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE)):
+                and file_format == CoreOptions.FILE_FORMAT_VORTEX):
             effective_first_row_id = file.first_row_id + shard_range[0]
 
         if for_merge_read:
@@ -559,8 +555,7 @@ class SplitRead(ABC):
                 reader, row_range_base, effective_row_ranges)
 
         # For formats without native shard support, wrap with ShardBatchReader
-        if shard_range is not None and file_format not in (
-                CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE):
+        if shard_range is not None and file_format != CoreOptions.FILE_FORMAT_VORTEX:
             reader = ShardBatchReader(reader, shard_range[0], shard_range[1])
 
         return reader
@@ -1075,6 +1070,10 @@ class RawFileSplitRead(SplitRead):
                      or predicate_field_names(self.predicate).intersection(self.table.partition_keys)
                      or self.deletion_file_readers
                      or self._physical_row_ranges
+                     # file_reader_supplier does not push the predicate into
+                     # shard reads or reads that assign _ROW_ID.
+                     or isinstance(self.split, SlicedSplit)
+                     or self._assigns_row_id()
                      or any(file.schema_id != self.table.table_schema.id
                             for file in self.split.files))):
             reader = FilterRecordBatchReader(
@@ -1732,9 +1731,11 @@ class DataEvolutionSplitRead(SplitRead):
                     ): r]
                     file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
                 else:
-                    # Create concatenated reader for multiple files
+                    # Lazy readers must keep this bunch's projection after
+                    # self.read_fields is restored to the full projection.
+                    bunch_reader = copy(self)
                     suppliers = [
-                        partial(self._create_file_reader, file=file,
+                        partial(bunch_reader._create_file_reader, file=file,
                                 read_fields=read_field_names,
                                 deletion_vector=deletion_vector) for file in bunch.files()
                     ]
@@ -1746,6 +1747,21 @@ class DataEvolutionSplitRead(SplitRead):
             if row_offsets[i] == -1:
                 if not field.type.nullable:
                     raise ValueError(f"Field {field} is not null but can't find any file contains it.")
+
+        if not any(reader is not None for reader in file_record_readers):
+            # A projection of newly added columns still has one NULL per live
+            # row. Use a normal file's row IDs as the cardinality anchor, without
+            # reading unrelated BLOBs, and retain range/deletion filtering.
+            anchor = next(file for file in need_merge_files
+                          if not DataFileMeta.is_blob_file(file.file_name)
+                          and not DataFileMeta.is_vector_file(file.file_name))
+            saved_fields = self.read_fields
+            try:
+                self.read_fields = [SpecialFields.ROW_ID]
+                file_record_readers[0] = self._create_file_reader(
+                    anchor, [SpecialFields.ROW_ID.name], deletion_vector)
+            finally:
+                self.read_fields = saved_fields
 
         # Bunch readers use runtime nullability after schema evolution. Keep
         # the same nested types when assembling their columns into one batch.

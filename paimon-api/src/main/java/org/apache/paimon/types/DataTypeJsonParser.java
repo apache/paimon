@@ -70,7 +70,16 @@ public final class DataTypeJsonParser {
         if (defaultValueNode != null) {
             defaultValue = defaultValueNode.asText();
         }
-        return new DataField(id, name, type, description, defaultValue);
+        JsonNode generationExpression = json.get("generationExpression");
+        return new DataField(
+                id,
+                name,
+                type,
+                description,
+                defaultValue,
+                generationExpression == null || generationExpression.isNull()
+                        ? null
+                        : generationExpression.asText());
     }
 
     public static DataType parseDataType(JsonNode json) {

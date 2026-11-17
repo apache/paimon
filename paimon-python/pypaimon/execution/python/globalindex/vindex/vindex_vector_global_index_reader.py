@@ -59,12 +59,8 @@ class PythonVindexVectorGlobalIndexReader(VindexReaderResources, GlobalIndexRead
         params = _search_params(self._search_params_type, options, effective_k)
         filter_bytes = _filter_bytes(include_row_ids)
 
-        if n == 1:
-            ids, distances = self._reader.search(
-                queries[0], params, filter_bytes=filter_bytes)
-            return [_result_from_scores(ids, distances, self._metadata.metric)]
-
         if hasattr(self._reader, "search_batch"):
+            # The batch ABI pads short results; the scalar ABI requires exactly K.
             batch_result = self._reader.search_batch(
                 np.ascontiguousarray(queries),
                 params,

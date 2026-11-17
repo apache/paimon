@@ -82,21 +82,6 @@ class PrimaryKeyScoredResult(GlobalIndexSplitResult):
         state.pop('_native_result', None)
         return state
 
-    @classmethod
-    def _from_native(cls, table, result):
-        """Wrap core GlobalIndexResult; retain it for direct native scan handoff."""
-        from pypaimon.execution.native.table import (_partition_fields)
-        from pypaimon.read.split_serializer import deserialize_split_v1
-
-        value = cls.__new__(cls)
-        value._snapshot_id = result.snapshot_id() or 0
-        value._positions = tuple(PrimaryKeySearchPosition(*position) for position in result.positions())
-        value._splits = tuple(deserialize_split_v1(
-            split, _partition_fields(table), table.trimmed_primary_keys_fields)
-            for split in result.splits())
-        value._native_result = result
-        return value
-
 
 def _materialize(source_splits, positions, snapshot_id):
     sources = {}

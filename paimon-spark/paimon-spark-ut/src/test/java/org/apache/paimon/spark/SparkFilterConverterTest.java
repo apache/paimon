@@ -264,6 +264,23 @@ public class SparkFilterConverterTest {
     }
 
     @Test
+    public void testEqualNullSafeNaN() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "f", new FloatType()),
+                                new DataField(1, "d", new DoubleType())));
+        SparkFilterConverter converter = new SparkFilterConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        EqualNullSafe eqNaNFloat = EqualNullSafe.apply("f", Float.NaN);
+        assertThat(converter.convert(eqNaNFloat)).isEqualTo(builder.isNaN(0));
+
+        EqualNullSafe eqNaNDouble = EqualNullSafe.apply("d", Double.NaN);
+        assertThat(converter.convert(eqNaNDouble)).isEqualTo(builder.isNaN(1));
+    }
+
+    @Test
     public void testIgnoreFailure() {
         List<DataField> dataFields = new ArrayList<>();
         dataFields.add(new DataField(0, "id", new FloatType()));

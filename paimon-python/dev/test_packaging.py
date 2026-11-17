@@ -119,9 +119,11 @@ class PackagingTest(unittest.TestCase):
         self.assertFalse(any(name.startswith("pypaimon/tests/")
                              for name in names))
         self.assertFalse(any(name.endswith((".so", ".pyd", ".jar")) for name in names))
-        for name in ("pypaimon/sample/data/data.jsonl", "pypaimon/_version.py"):
-            self.assertIn(name, names)
+        self.assertIn("pypaimon/_version.py", names)
         execution_files = (
+            "pypaimon/common/transform_schema.py",
+            "pypaimon/filesystem/vortex_utils.py",
+            "pypaimon/execution/python/write/format_file_writer.py",
             "pypaimon/table/source/search_execution.py",
             "pypaimon/ray/search_execution.py",
             "pypaimon/execution/native/read/search_execution.py",
@@ -129,14 +131,14 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/execution/python/read/search/distributed_vector_search.py",
             "pypaimon/execution/python/read/search/distributed_full_text_search.py",
             "pypaimon/execution/python/map_blob_key_serializer.py",
-            "pypaimon/execution/python/write/external_path_provider.py",
-            "pypaimon/execution/python/read/predicate_json_parser.py",
+            "pypaimon/execution/python/globalindex/ray_index_build.py",
+            "pypaimon/common/external_path_provider.py",
+            "pypaimon/common/arrow_predicate.py",
             "pypaimon/execution/python/read/blob_view_lookup.py",
             "pypaimon/execution/python/read/interval_partition.py",
             "pypaimon/execution/python/read/map_shared_shredding.py",
             "pypaimon/execution/python/read/variant_shredding.py",
             "pypaimon/execution/python/write/dynamic_bucket.py",
-            "pypaimon/execution/python/write/merge_condition.py",
             "pypaimon/execution/python/write/merge_transform.py",
             "pypaimon/schema/data_type_casts.py",
             "pypaimon/utils/numeric_utils.py",
@@ -144,7 +146,6 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/utils/temporal_string.py",
             "pypaimon/utils/row_to_string.py",
             "pypaimon/execution/python/casting/__init__.py",
-            "pypaimon/execution/python/casting/data_type_casts.py",
             "pypaimon/execution/python/casting/schema_evolution.py",
             "pypaimon/execution/python/casting/decimal_cast.py",
             "pypaimon/execution/python/casting/temporal_cast.py",
@@ -189,6 +190,9 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/execution/python/globalindex/btree/block_handle.py",
             "pypaimon/execution/python/globalindex/block_compression.py",
             "pypaimon/execution/python/globalindex/key_serializer.py",
+            "pypaimon/execution/python/index/pk/primary_key_index_source_policy.py",
+            "pypaimon/execution/python/index/pksorted/pk_sorted_bucket_index_state.py",
+            "pypaimon/execution/python/index/pksorted/pk_sorted_index_group.py",
             "pypaimon/execution/python/globalindex/vindex/vindex_vector_global_index_reader.py",
             "pypaimon/execution/python/write/table_write.py",
             "pypaimon/execution/python/write/table_commit.py",
@@ -201,7 +205,6 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/execution/native/read/vindex_reader.py",
             "pypaimon/execution/native/write/native_write.py",
             "pypaimon/execution/native/write/native_commit.py",
-            "pypaimon/execution/native/write/bucket_metadata.py",
             "pypaimon/execution/native/write/postpone_bucket.py",
             "pypaimon/read/blob_read_support.py",
             "pypaimon/read/scan_request.py",
@@ -209,7 +212,7 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/globalindex/vindex_reader.py",
             "pypaimon/write/bucket_planning.py",
             "pypaimon/write/commit_options.py",
-            "pypaimon/write/input_routing.py",
+            "pypaimon/execution/python/write/input_routing.py",
         )
         for name in execution_files:
             self.assertIn(name, names)
@@ -217,7 +220,9 @@ class PackagingTest(unittest.TestCase):
             if name.startswith("pypaimon/execution/") and name.endswith(".py"):
                 self.assertIn(name.split("/")[2], ("python", "native", "__init__.py"))
         internal_aliases = (
-            "pypaimon/common/external_path_provider.py",
+            "pypaimon/execution/python/write/external_path_provider.py",
+            "pypaimon/execution/python/read/predicate_json_parser.py",
+            "pypaimon/execution/python/write/merge_condition.py",
             "pypaimon/common/map_blob_key_serializer.py",
             "pypaimon/utils/blob_view_lookup.py",
             "pypaimon/read/interval_partition.py",
@@ -254,6 +259,9 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/globalindex/btree_format/block_handle.py",
             "pypaimon/globalindex/bitmap/bitmap_index_writer.py",
             "pypaimon/globalindex/block_compression.py",
+            "pypaimon/index/pk/primary_key_index_source_policy.py",
+            "pypaimon/index/pksorted/pk_sorted_bucket_index_state.py",
+            "pypaimon/index/pksorted/pk_sorted_index_group.py",
         )
         for name in internal_aliases:
             self.assertNotIn(name, names)
@@ -318,28 +326,22 @@ class PackagingTest(unittest.TestCase):
                 self.assertEqual(supports_1_0_10, "1.0.10" in active[0].specifier)
                 self.assertNotIn("2.0", active[0].specifier)
 
-    def test_python_ci_dependencies_do_not_pull_native_sql(self):
-        resolve = runpy.run_path(str(self.source / "dev/install.py"))["resolve_group"]
-        extras = self.config["project"]["optional-dependencies"]
-
-        def dependencies(group):
-            pending = list(resolve(self.config["dependency-groups"], group))
-            names, expanded = set(), set()
-            while pending:
-                requirement = Requirement(pending.pop())
-                names.add(canonicalize_name(requirement.name))
-                if canonicalize_name(requirement.name) == "pypaimon":
-                    for extra in requirement.extras - expanded:
-                        pending.extend(extras[extra])
-                        expanded.add(extra)
-            return names
-
-        # Follow local extras too: the Rust extension previously entered the
-        # ordinary Python and Torch environments indirectly through [sql].
-        for group in ("torch", "python-tests", "legacy"):
-            with self.subTest(group=group):
-                self.assertNotIn("pypaimon-rust", dependencies(group))
-        self.assertIn("pypaimon-rust", dependencies("dev"))
+    def test_native_runtime_installed_by_default_on_supported_python(self):
+        _, metadata, _ = wheel_contents(self.wheel)
+        native = [Requirement(value) for value in metadata.get_all("Requires-Dist")
+                  if canonicalize_name(Requirement(value).name) == "pypaimon-rust"]
+        for python_version in ("3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.13"):
+            with self.subTest(python=python_version):
+                environment = default_environment()
+                environment.update(python_version=python_version,
+                                   python_full_version=python_version + ".0", extra="")
+                active = [requirement for requirement in native
+                          if requirement.marker is None or requirement.marker.evaluate(environment)]
+                supported = Version(python_version) >= Version("3.10")
+                self.assertEqual(1 if supported else 0, len(active))
+                if supported:
+                    self.assertNotIn("0.4.0", active[0].specifier)
+                    self.assertIn("0.5.0", active[0].specifier)
 
     def test_dev_group_reuses_product_extras(self):
         resolve = runpy.run_path(str(self.source / "dev/install.py"))["resolve_group"]

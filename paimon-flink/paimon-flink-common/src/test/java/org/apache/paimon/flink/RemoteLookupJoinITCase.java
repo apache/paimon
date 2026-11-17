@@ -274,7 +274,8 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
                         message.partition(),
                         message.bucket(),
                         Collections.emptyList(),
-                        message.newFilesIncrement().newFiles());
+                        message.newFilesIncrement().newFiles(),
+                        table.snapshotManager().latestSnapshot().id());
             }
 
             @Override

@@ -330,7 +330,7 @@ public class TableSchema implements Serializable {
         return copy(nonDedicatedFields);
     }
 
-    private TableSchema copy(List<DataField> projectedFields) {
+    public TableSchema copy(List<DataField> projectedFields) {
         return new TableSchema(
                 version,
                 id,

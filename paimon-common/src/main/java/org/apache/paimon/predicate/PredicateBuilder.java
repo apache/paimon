@@ -651,6 +651,14 @@ public class PredicateBuilder {
                 .collect(Collectors.toList());
     }
 
+    /** Excludes the predicates that reference any of the fields. */
+    public static List<Predicate> excludePredicateReferencingFields(
+            List<Predicate> predicates, Set<String> fields) {
+        return predicates.stream()
+                .filter(f -> Collections.disjoint(PredicateVisitor.collectFieldNames(f), fields))
+                .collect(Collectors.toList());
+    }
+
     @Nullable
     public static Predicate partition(
             Map<String, String> map, RowType rowType, String defaultPartValue) {

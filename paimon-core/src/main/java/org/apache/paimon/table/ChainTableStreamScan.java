@@ -40,6 +40,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.source.snapshot.StartingContext;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChainPartitionProjector;
 import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.Filter;
@@ -121,6 +122,8 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     private int shardCount = -1;
 
     @Nullable private Filter<Integer> bucketFilter;
+
+    @Nullable private RowType readType;
 
     /** Maximum number of retries when race condition is detected during position capture. */
     private static final int MAX_RACE_RETRIES = 3;
@@ -268,6 +271,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
             pinnedSnapshot = chainGroupReadTable.wrapped.copy(pinnedOptions(snapshotLatestId));
             DataTableScan partitionListingScan =
                     pinnedSnapshot.newScan().withoutAuthPartitionPushdown();
+            partitionListingScan.withReadType(readType);
             for (BinaryRow partition : partitionListingScan.listPartitions()) {
                 Object groupKey = toGroupKey(partition);
                 BinaryRow existingLatest = latestChainPartitionPerGroup.get(groupKey);
@@ -287,7 +291,10 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         Map<BinaryRow, List<DataSplit>> snapshotSplitsByPartition;
         if (!latestPartitions.isEmpty() && pinnedSnapshot != null) {
             DataTableScan snapshotScan = pinnedSnapshot.newScan().withoutAuthPartitionPushdown();
-            snapshotScan.withPartitionFilter(latestPartitions);
+            // Selecting the latest snapshot per group is internal to the streaming starting scan.
+            snapshotScan.withInternalPartitionFilter(
+                    PartitionPredicate.fromMultiple(
+                            chainGroupReadTable.schema().logicalPartitionType(), latestPartitions));
             applyPredicatesShardAndBucket(snapshotScan);
             snapshotSplitsByPartition = groupByPartition(snapshotScan);
         } else {
@@ -537,6 +544,14 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     }
 
     @Override
+    public InnerTableScan withReadType(@Nullable RowType readType) {
+        this.readType = readType;
+        batchScan.withReadType(readType);
+        deltaStreamScan.withReadType(readType);
+        return this;
+    }
+
+    @Override
     public InnerTableScan withFilter(Predicate predicate) {
         if (predicate == null) {
             return this;
@@ -620,10 +635,11 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     }
 
     /**
-     * Applies all previously set predicates, shard, and bucket filter to a newly created scan. Used
-     * for the pinned delta scan in {@link #planStarting()}.
+     * Applies the read type, predicates, shard, and bucket filter to a newly created scan in {@link
+     * #planStarting()}.
      */
     private void applyPredicatesShardAndBucket(DataTableScan scan) {
+        scan.withReadType(readType);
         for (Predicate p : predicates) {
             scan.withFilter(p);
         }
