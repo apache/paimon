@@ -67,6 +67,11 @@ object PaimonUtils {
     SparkShimLoader.shim.classicApi.createDataset(sparkSession, logicalPlan)
   }
 
+  /** Runs failure cleanup on interruption too, preserving the original exception. */
+  def withFailureCleanup[T](block: => T)(cleanup: => Unit): T = {
+    SparkUtils.tryWithSafeFinallyAndFailureCallbacks(block)(catchBlock = cleanup)
+  }
+
   /** Creates a command-local disk cache, retaining AQE; the caller must invoke its cleanup. */
   def createDiskCachedDataset(
       sparkSession: SparkSession,

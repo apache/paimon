@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.{DataTypes, VectorType}
+import org.apache.paimon.utils.ExceptionUtils
 
 import org.apache.spark.sql.{AnalysisException, Row}
 import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionsException
@@ -44,7 +45,11 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
       val e1 = intercept[Exception] {
         sql("""INSERT INTO T VALUES (1, "a"), (2, "b"), (null, "c")""")
       }
-      Assertions.assertTrue(e1.getMessage().contains("value appeared in non-nullable field"))
+      assert(
+        ExceptionUtils
+          .findThrowableWithMessage(e1, "value appeared in non-nullable field")
+          .isPresent,
+        ExceptionUtils.stringifyException(e1))
 
       sql("""INSERT INTO T VALUES (1, "a"), (2, "b"), (3, null)""")
       checkAnswer(
