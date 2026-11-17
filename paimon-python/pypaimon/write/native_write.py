@@ -21,8 +21,7 @@ from importlib import import_module
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import MergeEngine
-from pypaimon.schema.arrow_schema import (
-    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.native_commit import (
@@ -71,7 +70,7 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
     if native_table is None:
         return None
     if fixed_bucket:
-        builder = native_table.new_postpone_fixed_bucket_write_builder().with_commit_user(commit_user)
+        builder = native_table.new_postpone_fixed_bucket_write_builder()._with_commit_user(commit_user)
         if bucket_plan is not None:
             builder = builder.with_bucket_plan(bucket_plan.to_arrow(table))
         if static_partition is not None:
@@ -81,7 +80,7 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
     if stream:
         builder = native_table.new_stream_write_builder().with_commit_user(commit_user)
     else:
-        builder = native_table.new_batch_write_builder().with_commit_user(commit_user)
+        builder = native_table.new_batch_write_builder()._with_commit_user(commit_user)
         if static_partition is not None:
             builder = builder.with_overwrite(static_partition)
     if restore_snapshot_id is not None:
@@ -214,9 +213,6 @@ class NativeTableWrite:
         self._native_writer.write_arrow(data, bucket)
 
     def _prepare_native_arrow_data(self, data):
-        data = normalize_arrow_strings(data)
-        target = self._table_schema if data.schema.names == self._table_schema.names else self._schema
-        data = normalize_arrow_write_nullability(data, target)
         if self._write_cols is not None and arrow_schemas_compatible(
                 data.schema, self._table_schema, check_top_level_nullability=False,
                 allow_binary_compatibility=True):
@@ -230,7 +226,7 @@ class NativeTableWrite:
                 "Input schema isn't consistent with table schema and write cols. "
                 f"Input schema is: {data.schema} Table schema is: {self._schema} "
                 f"Write cols is: {self._write_cols}")
-        return data
+        return normalize_arrow_strings(data)
 
     def write_pandas(self, dataframe):
         if self._python_writer is not None:

@@ -59,7 +59,7 @@ def create_native_update(table, commit_user, columns):
     if native_table is None:
         return None
     writer = (native_table.new_batch_write_builder()
-              .with_commit_user(commit_user)
+              ._with_commit_user(commit_user)
               .new_update())
     if columns is not None:
         writer.with_update_type(columns)
@@ -77,7 +77,7 @@ def create_native_update_by_row_id(table, commit_user, commit_identifier):
     if native_table is None:
         return None
     if commit_identifier == BATCH_COMMIT_IDENTIFIER:
-        writer = (native_table.new_batch_write_builder().with_commit_user(commit_user)
+        writer = (native_table.new_batch_write_builder()._with_commit_user(commit_user)
                   .new_update().new_update_by_row_id())
     else:
         writer = (native_table.new_stream_write_builder().with_commit_user(commit_user)
@@ -154,7 +154,7 @@ def create_native_upsert(table, commit_user, data, keys, columns):
                    for name in data.column_names)):
         return None
     writer = (native_table.new_batch_write_builder()
-              .with_commit_user(commit_user)
+              ._with_commit_user(commit_user)
               .new_update()
               .with_update_type(columns))
     return NativeTableUpsert(table, writer, keys, data)
@@ -174,7 +174,7 @@ def create_native_predicate_update(table, commit_user, predicate, columns=None):
         # reading and callback execution belong to the core operation below.
         native_table.new_read_builder().with_filter(native_predicate)
     writer = (native_table.new_batch_write_builder()
-              .with_commit_user(commit_user).new_update())
+              ._with_commit_user(commit_user).new_update())
     return NativePredicateTableUpdate(table, writer, native_predicate)
 
 
@@ -204,7 +204,7 @@ def create_native_delete(table, commit_user):
     if native_table is None:
         return None
     writer = (native_table.new_batch_write_builder()
-              .with_commit_user(commit_user)
+              ._with_commit_user(commit_user)
               .new_update())
     return NativeBatchTableUpdate(table, writer)
 

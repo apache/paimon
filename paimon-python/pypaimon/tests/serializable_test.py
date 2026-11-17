@@ -24,7 +24,6 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory
-from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon import Schema
 
 
@@ -55,7 +54,7 @@ class SerializableTest(unittest.TestCase):
             'item_id': [1001, 1002, 1003, 1004, 1005, 1007, 1008],
             'behavior': ['a', 'b-new', 'c', None, 'e', 'g', 'h'],
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
-        }, schema=read_arrow_schema(Schema.from_pyarrow_schema(cls.pk_pa_schema).fields))
+        }, schema=cls.pk_pa_schema)
 
     @classmethod
     def tearDownClass(cls):

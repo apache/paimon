@@ -25,7 +25,6 @@ from contextlib import contextmanager
 from unittest.mock import Mock, patch
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.schema.arrow_schema import read_arrow_schema
 import pyarrow as pa
 import pytest
 from parameterized import parameterized
@@ -103,8 +102,7 @@ class TableWriteTest(unittest.TestCase):
             commit.close()
         actual = self._read_sorted(table, [('id', 'ascending')])
         self.assertEqual(actual.to_pylist(), expected)
-        expected_schema = read_arrow_schema(Schema.from_pyarrow_schema(arrow_schema(pa.string())).fields)
-        self.assertEqual(actual.schema.remove_metadata(), expected_schema)
+        self.assertEqual(actual.schema.remove_metadata(), arrow_schema(pa.string()))
 
     @classmethod
     def setUpClass(cls):
@@ -230,7 +228,6 @@ class TableWriteTest(unittest.TestCase):
     def _mock_table_write(partitions, buckets):
         table_write = object.__new__(TableWrite)
         table_write.table = Mock(is_primary_key_table=False)
-        table_write.table_pyarrow_schema = pa.schema([('id', pa.int64()), ('payload', pa.binary())])
         table_write._validate_pyarrow_schema = Mock()
         table_write.row_key_extractor = Mock()
         table_write.file_store_write = Mock()
@@ -306,7 +303,6 @@ class TableWriteTest(unittest.TestCase):
         })
         table_write = object.__new__(TableWrite)
         table_write.table = Mock(is_primary_key_table=False)
-        table_write.table_pyarrow_schema = pa.schema([('id', pa.int64()), ('payload', pa.binary())])
         table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock()
         table_write.row_key_extractor = Mock()
@@ -332,7 +328,6 @@ class TableWriteTest(unittest.TestCase):
         })
         table_write = object.__new__(TableWrite)
         table_write.table = Mock(is_primary_key_table=False)
-        table_write.table_pyarrow_schema = pa.schema([('id', pa.int64()), ('payload', pa.binary())])
         table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock()
         table_write.row_key_extractor = Mock()
@@ -566,7 +561,7 @@ class TableWriteTest(unittest.TestCase):
             'item_id': [1001, 1002],
             'behavior': ['a', 'b'],
             'dt': ['p1', 'p2'],
-        }, schema=read_arrow_schema(table.fields))
+        }, schema=self.pk_pa_schema)
         sort_keys = [('user_id', 'ascending'), ('dt', 'ascending')]
         self.assertEqual(
             expected.sort_by(sort_keys), self._read_sorted(table, sort_keys))
@@ -596,7 +591,7 @@ class TableWriteTest(unittest.TestCase):
             'item_id': [1001, 1002],
             'behavior': ['a', 'b'],
             'dt': ['p1', 'p2'],
-        }, schema=read_arrow_schema(table.fields))
+        }, schema=self.pk_pa_schema)
         sort_keys = [('user_id', 'ascending'), ('dt', 'ascending')]
         self.assertEqual(
             expected.sort_by(sort_keys), self._read_sorted(table, sort_keys))
@@ -776,7 +771,7 @@ class TableWriteTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         actual = table_read.to_arrow(splits).sort_by('user_id')
-        self.assertEqual(self.pk_expected.cast(read_arrow_schema(table.fields)), actual)
+        self.assertEqual(self.pk_expected, actual)
 
     def test_postpone_read_write(self):
         table = self._create_postpone_table(
@@ -830,7 +825,7 @@ class TableWriteTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         actual = table_read.to_arrow(splits)
-        self.assertEqual(expect.cast(read_arrow_schema(table.fields)), actual)
+        self.assertEqual(expect, actual)
 
     def test_postpone_file_store_write_validates_runtime_bucket_count(self):
         from pypaimon.write.file_store_write import (
@@ -1891,7 +1886,7 @@ class TableWriteTest(unittest.TestCase):
         actual = table_read.to_arrow(splits)
         sort_keys = [('user_id', 'ascending'), ('dt', 'ascending')]
         self.assertEqual(
-            self.pk_expected.cast(read_arrow_schema(table.fields)).sort_by(sort_keys),
+            self.pk_expected.sort_by(sort_keys),
             actual.sort_by(sort_keys),
         )
 

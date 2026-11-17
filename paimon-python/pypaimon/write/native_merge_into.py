@@ -79,31 +79,25 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
         if source_type != target_type or not _supported_upsert_key_type(target_type):
             return None
 
-    from pypaimon_rust.datafusion import MergeAssignment, WhenMatched, WhenNotMatched
-
-    def encode(clause, not_matched=False):
-        values = {}
+    def encode(clause):
+        values = []
         for name, value in clause.spec.items():
             if isinstance(value, SourceColumnRef):
-                values[name] = MergeAssignment.source_column(value.column)
+                values.append((name, 'source', value.column))
             elif isinstance(value, TargetColumnRef):
-                values[name] = MergeAssignment.target_column(value.column)
+                values.append((name, 'target', value.column))
             elif isinstance(value, LiteralValue):
-                values[name] = MergeAssignment.literal(value.value)
+                values.append((name, 'literal', value.value))
             else:
                 return None
-        condition = None if clause.condition is None else rewrite_condition(clause.condition)
-        if not_matched:
-            return WhenNotMatched(values, condition)
-        if clause.delete:
-            return WhenMatched.delete(condition)
-        return WhenMatched.update(values, condition)
+        condition = None if clause.condition is None else dict(sql=rewrite_condition(clause.condition))
+        return dict(assignments=values, condition=condition, delete=clause.delete)
 
     encoded_matched = [encode(clause) for clause in matched]
-    encoded_not_matched = [encode(clause, not_matched=True) for clause in not_matched]
+    encoded_not_matched = [encode(clause) for clause in not_matched]
     if any(clause is None for clause in encoded_matched + encoded_not_matched):
         return None
-    builder = (native_table.new_batch_write_builder().with_commit_user(commit_user)
+    builder = (native_table.new_batch_write_builder()._with_commit_user(commit_user)
                if commit_identifier == BATCH_COMMIT_IDENTIFIER else
                native_table.new_stream_write_builder().with_commit_user(commit_user))
     writer = builder.new_update()

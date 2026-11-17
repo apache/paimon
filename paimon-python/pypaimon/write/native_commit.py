@@ -65,7 +65,7 @@ def create_native_commit(table, commit_user, overwrite_partition=None):
         return None
     if overwrite_partition is not None:
         return (native_table.new_batch_write_builder()
-                .with_commit_user(commit_user)
+                ._with_commit_user(commit_user)
                 .with_overwrite(overwrite_partition).new_commit())
     # Append commits use the stream committer with the Python writer's identity;
     # Python enforces each mode's lifecycle and empty-commit rules.

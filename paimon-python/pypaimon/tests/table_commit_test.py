@@ -96,7 +96,6 @@ class TestTableCommit(unittest.TestCase):
     def test_empty_append_snapshot_is_opt_in_and_can_be_tagged(self):
         import pyarrow as pa
         import pypaimon.multimodal as pmm
-        from pypaimon.schema.arrow_schema import read_arrow_schema
 
         with TemporaryDirectory(prefix="paimon-empty-commit-") as warehouse:
             connection = pmm.connect(options={"warehouse": warehouse})
@@ -127,7 +126,7 @@ class TestTableCommit(unittest.TestCase):
             table.raw_table.create_tag("empty")
             tagged = table.scan(tag_name="empty").to_arrow()
             self.assertEqual(0, tagged.num_rows)
-            self.assertEqual(read_arrow_schema(table.raw_table.fields), tagged.schema)
+            self.assertEqual(schema, tagged.schema)
 
             table.add([{"feature": "state_imu_body"}])
             table.add(empty)

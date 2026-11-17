@@ -24,7 +24,6 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.common.options.core_options import CoreOptions
 
 
@@ -49,7 +48,7 @@ class PkReaderTest(unittest.TestCase):
             'item_id': [1001, 1002, 1003, 1004, 1005, 1007, 1008],
             'behavior': ['a', 'b-new', 'c', None, 'e', 'g', 'h'],
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
-        }, schema=read_arrow_schema(Schema.from_pyarrow_schema(cls.pa_schema).fields))
+        }, schema=cls.pa_schema)
 
     @classmethod
     def tearDownClass(cls):
@@ -277,7 +276,7 @@ class PkReaderTest(unittest.TestCase):
             'item_id': [1001, 1002, 1003, 1004, 1005, 1007, 1008],
             'behavior': ['a', 'b-new', 'c', None, 'e', 'g', 'h'],
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
-        }, schema=read_arrow_schema(table.fields))
+        }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
     def test_nullable_primary_key(self):
@@ -482,7 +481,7 @@ class PkReaderTest(unittest.TestCase):
             'item_id': [1001, 1002, 1002, 1003, 1004, 1005, 1007, 1008],
             'behavior': ['a', 'b', 'b-new', 'c', None, 'e', 'g', 'h'],
             'dt': ['p1', 'p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
-        }, schema=read_arrow_schema(table.fields))
+        }, schema=self.pa_schema)
         self.assertEqual(expected, actual)
         # test 3
         table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): str(t1) + ',' + str(t2)})
@@ -493,7 +492,7 @@ class PkReaderTest(unittest.TestCase):
             "item_id": [1002, 1005, 1007, 1008],
             "behavior": ["b-new", "e", "g", "h"],
             "dt": ["p1", "p2", "p1", "p2"]
-        }, schema=read_arrow_schema(table.fields))
+        }, schema=self.pa_schema)
         self.assertEqual(expected, actual)
 
     def test_incremental_read_multi_snapshots(self):
@@ -531,7 +530,7 @@ class PkReaderTest(unittest.TestCase):
             'item_id': [1000 + i for i in range(11, 21)],
             'behavior': [f'snap{i}' for i in range(11, 21)],
             'dt': ['p1' if i % 2 == 1 else 'p2' for i in range(11, 21)],
-        }, schema=read_arrow_schema(table.fields)).sort_by('user_id')
+        }, schema=self.pa_schema).sort_by('user_id')
         self.assertEqual(expected, actual)
 
     def test_manifest_creation_time_timestamp(self):
