@@ -131,6 +131,21 @@ final class ThriftCompactReader {
         }
     }
 
+    /**
+     * Skips a varint without materializing its value. Byte-scanning is the same as {@link
+     * #readVarint()} (compact varints force a full pass anyway), but the value accumulation and
+     * bit-shift bookkeeping are dropped — only the continuation bit and the 10-byte length guard
+     * are checked. Used by the skip paths that only need to advance the cursor.
+     */
+    private void skipVarint() throws IOException {
+        for (int i = 0; i < 10; i++) {
+            if ((readByte() & 0x80) == 0) {
+                return;
+            }
+        }
+        throw new IOException("malformed varint in parquet footer");
+    }
+
     private long zigzag(long v) {
         return (v >>> 1) ^ -(v & 1);
     }
@@ -244,7 +259,7 @@ final class ThriftCompactReader {
             case I16:
             case I32:
             case I64:
-                readVarint();
+                skipVarint();
                 return;
             case DOUBLE:
                 skipBytes(8);
@@ -323,7 +338,7 @@ final class ThriftCompactReader {
             case I16:
             case I32:
             case I64:
-                readVarint();
+                skipVarint();
                 break;
             case DOUBLE:
                 skipBytes(8);

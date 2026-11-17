@@ -672,16 +672,32 @@ public final class SelectiveFooterParser {
                         meta = readColumnMetaData();
                         break;
                     case 4: // offset_index_offset
-                        chunk.setOffset_index_offset(in.readI64());
+                        if (meta != null) {
+                            chunk.setOffset_index_offset(in.readI64());
+                        } else {
+                            in.skip(type);
+                        }
                         break;
                     case 5: // offset_index_length
-                        chunk.setOffset_index_length(in.readI32());
+                        if (meta != null) {
+                            chunk.setOffset_index_length(in.readI32());
+                        } else {
+                            in.skip(type);
+                        }
                         break;
                     case 6: // column_index_offset
-                        chunk.setColumn_index_offset(in.readI64());
+                        if (meta != null) {
+                            chunk.setColumn_index_offset(in.readI64());
+                        } else {
+                            in.skip(type);
+                        }
                         break;
                     case 7: // column_index_length
-                        chunk.setColumn_index_length(in.readI32());
+                        if (meta != null) {
+                            chunk.setColumn_index_length(in.readI32());
+                        } else {
+                            in.skip(type);
+                        }
                         break;
                     case 8: // crypto_metadata
                     case 9: // encrypted_column_metadata
