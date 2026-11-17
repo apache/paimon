@@ -29,14 +29,6 @@ from pypaimon.write.commit_message_serializer import (
 )
 
 
-def with_native_commit_user(builder, commit_user):
-    """Support public Rust builder APIs and the revision pinned by release-2.1."""
-    method = getattr(builder, 'with_commit_user', None)
-    if method is None:
-        method = builder._with_commit_user
-    return method(commit_user)
-
-
 def native_commit_available() -> bool:
     """Whether the optional Rust bindings are installed."""
     try:
@@ -72,7 +64,8 @@ def create_native_commit(table, commit_user, overwrite_partition=None):
     if native_table is None:
         return None
     if overwrite_partition is not None:
-        return (with_native_commit_user(native_table.new_batch_write_builder(), commit_user)
+        return (native_table.new_batch_write_builder()
+                .with_commit_user(commit_user)
                 .with_overwrite(overwrite_partition).new_commit())
     # Append commits use the stream committer with the Python writer's identity;
     # Python enforces each mode's lifecycle and empty-commit rules.
