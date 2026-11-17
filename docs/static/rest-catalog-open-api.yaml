@@ -196,7 +196,7 @@ paths:
       operationId: getPrediction
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: predictionId, in: path, required: true, schema: {type: string, minLength: 1}}
+        - {name: predictionId, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 64}}
       responses:
         "200":
           description: Prediction metadata
@@ -217,7 +217,7 @@ paths:
         unchanged.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: predictionId, in: path, required: true, schema: {type: string, minLength: 1}}
+        - {name: predictionId, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 64}}
       responses:
         "200":
           description: Latest prediction metadata
@@ -4699,8 +4699,8 @@ components:
       additionalProperties: false
       required: [database, table]
       properties:
-        database: {type: string, minLength: 1}
-        table: {type: string, minLength: 1}
+        database: {type: string, minLength: 1, maxLength: 128}
+        table: {type: string, minLength: 1, maxLength: 128}
     PredictionOutput:
       type: object
       minProperties: 1
@@ -4721,26 +4721,31 @@ components:
         name:
           type: string
           minLength: 1
+          maxLength: 128
           description: Optional non-unique label.
         idempotencyKey:
           type: string
           minLength: 1
+          maxLength: 128
           description: SDK-generated key reused for retries of one logical submission.
         model:
           type: string
           minLength: 1
+          maxLength: 256
           description: Database-qualified model name.
         inputs:
           type: object
           minProperties: 1
+          propertyNames: {type: string, minLength: 1, maxLength: 128}
           additionalProperties:
             type: string
             minLength: 1
+            maxLength: 1024
           description: Model input-to-column mappings.
         mergeKeyColumns:
           type: array
           uniqueItems: true
-          items: {type: string, minLength: 1}
+          items: {type: string, minLength: 1, maxLength: 128}
           description: >-
             Stable source columns used when table primary keys or row IDs are unavailable.
             Omit to let the server derive identity; without stable identity the prediction
@@ -4748,14 +4753,19 @@ components:
         instructions:
           type: string
           minLength: 1
+          maxLength: 1048576
           description: Natural-language guidance for the prediction.
         where:
           type: string
           minLength: 1
+          maxLength: 1048576
         options:
           type: object
+          propertyNames: {type: string, minLength: 1, maxLength: 128}
           additionalProperties:
             type: string
+            minLength: 1
+            maxLength: 1024
           description: >-
             Paimon dynamic options. Use scan.snapshot-id or scan.tag-name for time
             travel; the two options are mutually exclusive.
@@ -4764,14 +4774,14 @@ components:
       additionalProperties: false
       required: [predictionId, source, status, snapshotId, model]
       properties:
-        predictionId: {type: string, minLength: 1}
+        predictionId: {type: string, minLength: 1, maxLength: 64}
         source:
           $ref: '#/components/schemas/PredictionSource'
-        name: {type: string, minLength: 1}
+        name: {type: string, minLength: 1, maxLength: 128}
         status:
           $ref: '#/components/schemas/PredictionStatus'
         snapshotId: {type: integer, format: int64, minimum: 1}
-        model: {type: string, minLength: 1}
+        model: {type: string, minLength: 1, maxLength: 256}
         output:
           $ref: '#/components/schemas/PredictionOutput'
         startTime: {type: integer, format: int64, minimum: 0}
