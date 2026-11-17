@@ -19,7 +19,6 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.PredictionModel;
 import org.apache.paimon.catalog.PredictionSource;
 import org.apache.paimon.catalog.PredictionSpec;
 import org.apache.paimon.rest.RESTRequest;
@@ -61,7 +60,7 @@ public class SubmitPredictionRequest implements RESTRequest {
             @JsonProperty(FIELD_SOURCE) PredictionSource source,
             @Nullable @JsonProperty(FIELD_NAME) String name,
             @Nullable @JsonProperty(FIELD_IDEMPOTENCY_KEY) String idempotencyKey,
-            @JsonProperty(FIELD_MODEL) PredictionModel model,
+            @JsonProperty(FIELD_MODEL) Identifier model,
             @JsonProperty(FIELD_INPUTS) Map<String, String> inputs,
             @Nullable @JsonProperty(FIELD_MERGE_KEY_COLUMNS) List<String> mergeKeyColumns,
             @JsonProperty(FIELD_INSTRUCTIONS) String instructions,
@@ -77,13 +76,7 @@ public class SubmitPredictionRequest implements RESTRequest {
                 idempotencyKey == null ? UUID.randomUUID().toString() : idempotencyKey;
         this.spec =
                 new PredictionSpec(
-                        name,
-                        model.toIdentifier(),
-                        inputs,
-                        mergeKeyColumns,
-                        instructions,
-                        where,
-                        options);
+                        name, model, inputs, mergeKeyColumns, instructions, where, options);
     }
 
     public SubmitPredictionRequest(Identifier source, PredictionSpec spec) {
@@ -91,7 +84,7 @@ public class SubmitPredictionRequest implements RESTRequest {
                 new PredictionSource(source),
                 spec.name(),
                 null,
-                new PredictionModel(spec.model()),
+                spec.model(),
                 spec.inputs(),
                 spec.mergeKeyColumns(),
                 spec.instructions(),
@@ -117,8 +110,8 @@ public class SubmitPredictionRequest implements RESTRequest {
     }
 
     @JsonGetter(FIELD_MODEL)
-    public PredictionModel getModel() {
-        return new PredictionModel(spec.model());
+    public Identifier getModel() {
+        return spec.model();
     }
 
     @JsonGetter(FIELD_INPUTS)

@@ -53,24 +53,6 @@ class PredictionSource:
 
 
 @dataclass
-class PredictionModel:
-    database: str
-    model: str
-
-    def __post_init__(self):
-        _nonblank(self.database, "database")
-        _nonblank(self.model, "model")
-
-    @classmethod
-    def from_identifier(cls, identifier: Identifier) -> "PredictionModel":
-        return cls(
-            identifier.get_database_name(), identifier.get_object_name())
-
-    def to_identifier(self) -> Identifier:
-        return Identifier.create(self.database, self.model)
-
-
-@dataclass
 class PredictionOutput:
     table: Optional[PredictionSource] = optional_json_field(
         "table", "non_null")
@@ -98,7 +80,7 @@ class PredictionOutput:
 @dataclass
 class SubmitPredictionRequest(RESTRequest):
     source: PredictionSource
-    model: PredictionModel
+    model: Identifier
     inputs: Dict[str, str]
     instructions: str
     merge_key_columns: Optional[List[str]] = optional_json_field(
@@ -110,8 +92,8 @@ class SubmitPredictionRequest(RESTRequest):
     options: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
-        if not isinstance(self.model, PredictionModel):
-            raise ValueError("model must be a PredictionModel")
+        if not isinstance(self.model, Identifier):
+            raise ValueError("model must be an Identifier")
         _nonblank(self.instructions, "instructions")
         for value, field_name in (
                 (self.name, "name"),
@@ -129,7 +111,7 @@ class SubmitPredictionRequest(RESTRequest):
                 self.merge_key_columns, "merge_key_columns")
         self.options = _copy_string_mapping(self.options, "options", False)
         PredictionSpec(
-            model=self.model.to_identifier(),
+            model=self.model,
             inputs=self.inputs,
             instructions=self.instructions,
             merge_key_columns=self.merge_key_columns or [],
@@ -145,7 +127,7 @@ class SubmitPredictionRequest(RESTRequest):
         return cls(
             source=PredictionSource.from_identifier(source),
             name=spec.name,
-            model=PredictionModel.from_identifier(spec.model),
+            model=spec.model,
             inputs=spec.inputs,
             instructions=spec.instructions,
             merge_key_columns=spec.merge_key_columns or None,
@@ -167,7 +149,7 @@ class GetPredictionResponse(RESTResponse):
     source: PredictionSource = None
     status: PredictionStatus = None
     snapshot_id: int = json_field("snapshotId", default=0)
-    model: PredictionModel = None
+    model: Identifier = None
     name: Optional[str] = optional_json_field("name", "non_null")
     output: Optional[PredictionOutput] = optional_json_field(
         "output", "non_null")
@@ -187,7 +169,7 @@ class GetPredictionResponse(RESTResponse):
             status=PredictionStatus.from_dict(data.get("status")),
             snapshot_id=data.get("snapshotId"),
             model=(
-                PredictionModel(**data.get("model"))
+                Identifier(**data.get("model"))
                 if isinstance(data.get("model"), dict)
                 else data.get("model")
             ),
@@ -205,7 +187,7 @@ class GetPredictionResponse(RESTResponse):
             name=self.name,
             status=self.status,
             snapshot_id=self.snapshot_id,
-            model=self.model.to_identifier(),
+            model=self.model,
             output=(self.output.to_catalog_output()
                     if self.output is not None else None),
             start_time=self.start_time,

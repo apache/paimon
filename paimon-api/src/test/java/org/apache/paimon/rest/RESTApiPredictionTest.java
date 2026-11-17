@@ -67,7 +67,7 @@ class RESTApiPredictionTest {
                 .containsEntry("table", "clips");
         assertThat((Map<String, Object>) requestMap.get("model"))
                 .containsEntry("database", "quality")
-                .containsEntry("model", "qwen_vl");
+                .containsEntry("object", "qwen_vl");
         assertThat((Map<String, Object>) requestMap.get("options"))
                 .containsEntry("scan.snapshot-id", "7");
 
@@ -139,8 +139,7 @@ class RESTApiPredictionTest {
         SubmitPredictionRequest decoded =
                 RESTApi.fromJson(RESTApi.toJson(request), SubmitPredictionRequest.class);
 
-        assertThat(decoded.getModel().toIdentifier())
-                .isEqualTo(Identifier.create("quality.archive", "qwen.vl"));
+        assertThat(decoded.getModel()).isEqualTo(Identifier.create("quality.archive", "qwen.vl"));
     }
 
     @Test

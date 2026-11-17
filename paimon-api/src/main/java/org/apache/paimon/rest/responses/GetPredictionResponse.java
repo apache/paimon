@@ -18,8 +18,8 @@
 
 package org.apache.paimon.rest.responses;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.Prediction;
-import org.apache.paimon.catalog.PredictionModel;
 import org.apache.paimon.catalog.PredictionOutput;
 import org.apache.paimon.catalog.PredictionSource;
 import org.apache.paimon.catalog.PredictionStatus;
@@ -42,7 +42,7 @@ public class GetPredictionResponse implements RESTResponse {
     private final @Nullable String name;
     private final PredictionStatus status;
     private final long snapshotId;
-    private final PredictionModel model;
+    private final Identifier model;
     private final @Nullable PredictionOutput output;
     private final @Nullable Long startTime;
     private final @Nullable Long endTime;
@@ -54,7 +54,7 @@ public class GetPredictionResponse implements RESTResponse {
             @Nullable @JsonProperty("name") String name,
             @JsonProperty("status") PredictionStatus status,
             @JsonProperty("snapshotId") long snapshotId,
-            @JsonProperty("model") PredictionModel model,
+            @JsonProperty("model") Identifier model,
             @Nullable @JsonProperty("output") PredictionOutput output,
             @Nullable @JsonProperty("startTime") Long startTime,
             @Nullable @JsonProperty("endTime") Long endTime) {
@@ -76,7 +76,7 @@ public class GetPredictionResponse implements RESTResponse {
                 prediction.name(),
                 prediction.status(),
                 prediction.snapshotId(),
-                new PredictionModel(prediction.model()),
+                prediction.model(),
                 prediction.output(),
                 prediction.startTime(),
                 prediction.endTime());
@@ -110,7 +110,7 @@ public class GetPredictionResponse implements RESTResponse {
     }
 
     @JsonGetter("model")
-    public PredictionModel getModel() {
+    public Identifier getModel() {
         return model;
     }
 
@@ -137,14 +137,6 @@ public class GetPredictionResponse implements RESTResponse {
 
     public Prediction toPrediction() {
         return new Prediction(
-                predictionId,
-                source,
-                name,
-                status,
-                snapshotId,
-                model.toIdentifier(),
-                output,
-                startTime,
-                endTime);
+                predictionId, source, name, status, snapshotId, model, output, startTime, endTime);
     }
 }

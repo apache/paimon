@@ -137,7 +137,7 @@ class RESTCatalogPredictionTest {
                 + "\"table\":\"clips\"},\"name\":\"daily-quality\",\"status\":{\"state\":\""
                 + status
                 + "\"},\"snapshotId\":7,\"model\":{\"database\":\"quality\","
-                + "\"model\":\"qwen_vl\"}}";
+                + "\"object\":\"qwen_vl\"}}";
     }
 
     private static String terminatedPredictionJson(String code) {
@@ -146,7 +146,7 @@ class RESTCatalogPredictionTest {
                 + "\"status\":{\"state\":\"TERMINATED\",\"terminationDetails\":{\"code\":\""
                 + code
                 + "\"}},\"snapshotId\":7,\"model\":{\"database\":\"quality\","
-                + "\"model\":\"qwen_vl\"},"
+                + "\"object\":\"qwen_vl\"},"
                 + "\"output\":{\"table\":{"
                 + "\"database\":\"system\",\"table\":\"results\"}},"
                 + "\"startTime\":10,\"endTime\":20}";

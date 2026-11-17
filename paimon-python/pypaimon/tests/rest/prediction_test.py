@@ -27,7 +27,6 @@ from pypaimon.api.prediction import (
     GetPredictionResponse,
     ListPredictionsResponse,
     PredictionOutput as ApiPredictionOutput,
-    PredictionModel,
     PredictionSource,
     SubmitPredictionRequest,
 )
@@ -85,7 +84,7 @@ def _response(status=None, **changes):
         name="daily-quality",
         status=status,
         snapshot_id=7,
-        model=PredictionModel("quality", "qwen_vl"),
+        model=Identifier.create("quality", "qwen_vl"),
     )
     values.update(changes)
     return GetPredictionResponse(**values)
@@ -110,7 +109,7 @@ class PredictionTest(unittest.TestCase):
         self.assertEqual(
             {"database": "quality", "table": "clips"}, body["source"])
         self.assertEqual(
-            {"database": "quality", "model": "qwen_vl"}, body["model"])
+            {"database": "quality", "object": "qwen_vl"}, body["model"])
         self.assertNotIn("snapshotId", body)
         self.assertNotIn("tagName", body)
 
@@ -230,7 +229,7 @@ class PredictionTest(unittest.TestCase):
         body = json.loads(JSON.to_json(request))
 
         self.assertEqual(
-            {"database": "quality.archive", "model": "qwen.vl"},
+            {"database": "quality.archive", "object": "qwen.vl"},
             body["model"],
         )
 
