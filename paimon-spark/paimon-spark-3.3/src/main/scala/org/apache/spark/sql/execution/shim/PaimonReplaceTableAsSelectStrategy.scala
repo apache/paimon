@@ -44,7 +44,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession) extends Strat
             _,
             tableSpec: TableSpec,
             _,
-            _) if supportsCatalog(catalog, tableSpec) =>
+            _) if supportsCatalog(catalog, tableSpec.provider.orNull) =>
         val properties = CatalogV2Util.convertTableProperties(tableSpec)
         catalog match {
           case paimon: SparkCatalog =>

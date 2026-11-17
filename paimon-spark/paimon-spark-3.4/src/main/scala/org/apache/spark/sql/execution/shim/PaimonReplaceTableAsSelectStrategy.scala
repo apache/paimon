@@ -49,7 +49,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
           tableSpec: TableSpec,
           options,
           orCreate,
-          analyzedQuery) if supportsCatalog(catalog, tableSpec) =>
+          analyzedQuery) if supportsCatalog(catalog, tableSpec.provider.orNull) =>
       assert(analyzedQuery.isDefined)
       // For V1 saveAsTable + overwrite on an existing table, rewrite to
       // OverwriteByExpression to preserve table definition.
@@ -129,7 +129,7 @@ case class PaimonReplaceTableStrategy(spark: SparkSession)
           schemaOrColumns,
           parts,
           tableSpec: TableSpec,
-          orCreate) if supportsCatalog(catalog, tableSpec) =>
+          orCreate) if supportsCatalog(catalog, tableSpec.provider.orNull) =>
       val columns =
         SparkShimLoader.shim.toReplaceTableColumns(
           replace.tableSchema,

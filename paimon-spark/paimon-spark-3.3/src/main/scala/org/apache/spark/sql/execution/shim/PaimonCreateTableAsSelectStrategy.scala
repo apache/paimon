@@ -76,7 +76,7 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
           _,
           tableSpec: TableSpec,
           _,
-          _) if supportsCatalog(catalog, tableSpec) =>
+          _) if supportsCatalog(catalog, tableSpec.provider.orNull) =>
       new DataSourceV2Strategy(spark)
         .apply(create)
         .map(exec => PaimonTableAsSelectWriteExec.prepare(exec))
