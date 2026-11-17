@@ -1716,7 +1716,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         result = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
-        self.assertFalse(result.schema.field('payloads').type.item_field.nullable)
         self.assertEqual(
             {
                 row['id']: None if row['payloads'] is None else dict(row['payloads'])
@@ -1739,7 +1738,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[('bad', None)]], type=nullable_map_type),
         }, schema=incompatible_schema)
         incompatible_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent"):
+        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent|non-nullable"):
             incompatible_writer.write_arrow(incompatible_data)
         incompatible_writer.abort()
 
@@ -1787,9 +1786,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         result = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
-        self.assertFalse(
-            result.schema.field('payloads').type.value_field.nullable
-        )
         self.assertEqual(
             {
                 row['id']: row['payloads']
@@ -1812,7 +1808,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[b'bad', None]], type=nullable_array_type),
         }, schema=incompatible_schema)
         incompatible_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent"):
+        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent|[Nn]on-nullable"):
             incompatible_writer.write_arrow(incompatible_data)
         incompatible_writer.abort()
 

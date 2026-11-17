@@ -42,8 +42,9 @@ from pypaimon.read.read_type import (adapter_output_paths, extract_array, output
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.schema.data_types import (
-    DataField, MapType, PyarrowFieldParser, is_blob_file_field, is_map_blob_type)
+    DataField, MapType, is_blob_file_field, is_map_blob_type)
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.utils.arrow_utils import zero_column_batch
 
@@ -460,7 +461,7 @@ class TableRead:
         return projected if predicate_field_names(self.predicate) & extra_names else adapter
 
     def _output_arrow_schema(self):
-        return output_schema(PyarrowFieldParser.from_paimon_schema(self.read_type), self.output_projection)
+        return output_schema(read_arrow_schema(self.read_type), self.output_projection)
 
     @staticmethod
     def _apply_output_projection_to_schema(schema, projection):
@@ -831,7 +832,7 @@ class TableRead:
     def _flatten_native_nested_batch(self, batch, schema):
         _, paths = self._reader_adapter()
         arrays = [extract_array(batch, path) for path in paths]
-        fields = list(PyarrowFieldParser.from_paimon_schema(self._adapter_read_type))
+        fields = list(read_arrow_schema(self._adapter_read_type))
         if self.include_row_kind:
             arrays.insert(0, batch.column(ROW_KIND_COLUMN))
             fields.insert(0, batch.schema.field(ROW_KIND_COLUMN))
@@ -1139,12 +1140,13 @@ class TableRead:
             yield from self._convert_rows_to_arrow_batches_with_row_kind(
                 row_tuples, row_kinds, schema)
             return
-        physical_schema = PyarrowFieldParser.from_paimon_schema(self._adapter_read_type)
+        physical_schema = read_arrow_schema(self._adapter_read_type)
         if self.include_row_kind:
             physical_schema = self._add_row_kind_to_schema(physical_schema)
         for batch in self._convert_rows_to_arrow_batches_with_row_kind(
                 row_tuples, row_kinds, physical_schema):
-            yield self._project_batch_to_output(batch)
+            yield self._try_to_pad_batch_by_schema(
+                self._project_batch_to_output(batch), schema, allow_type_cast=True)
 
     def _convert_rows_to_arrow_batches_with_row_kind(
         self,
@@ -1838,7 +1840,7 @@ class TableRead:
 
         needs_convert_back = False
         if not isinstance(reader, RecordBatchReader):
-            schema = PyarrowFieldParser.from_paimon_schema(effective_read_type)
+            schema = read_arrow_schema(effective_read_type)
             reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=self.include_row_kind)
             if getattr(reader, 'blob_field_indices', None) is None:
                 from pypaimon.read.reader.field_indices import (

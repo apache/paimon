@@ -22,6 +22,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 from pyarrow import RecordBatch
 
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.common.file_io import FileIO
 from pypaimon.utils.arrow_utils import zero_column_batch
 from pypaimon.data.map_shared_shredding import (
@@ -198,7 +199,7 @@ class DataFileBatchReader(RecordBatchReader):
         self._file_data_field_map = {
             field.name: field for field in source_fields
         }
-        self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
+        self.schema_map = {field.name: field for field in read_arrow_schema(fields)}
         self.row_tracking_enabled = row_tracking_enabled
         self.first_row_id = first_row_id
         self.row_id_offsets = row_id_offsets

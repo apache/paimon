@@ -19,15 +19,46 @@
 
 import pyarrow as pa
 
+from pypaimon.schema.data_types import ArrayType, MapType, PyarrowFieldParser, RowType
 
-def _normalize_string_type(data_type):
+
+def _read_arrow_type(data_type):
+    if isinstance(data_type, RowType):
+        return pa.struct([pa.field(field.name, _read_arrow_type(field.type)) for field in data_type.fields])
+    if isinstance(data_type, ArrayType):
+        return pa.list_(pa.field('element', _read_arrow_type(data_type.element)))
+    if isinstance(data_type, MapType):
+        return pa.map_(pa.field('key', _read_arrow_type(data_type.key), nullable=False),
+                       pa.field('value', _read_arrow_type(data_type.value)))
+    return PyarrowFieldParser.from_paimon_type(data_type)
+
+
+def read_arrow_schema(fields):
+    """Use runtime NULL transport without changing logical write constraints.
+
+    Preserve the legacy schema when the optional native runtime is absent.
+    Construct the schema locally, as on master, so Python-only types such as
+    VECTOR do not need to pass through the Rust schema JSON parser.
+    """
+    try:
+        from pypaimon_rust.data import normalize_array_for_write  # noqa: F401
+    except ImportError:
+        return PyarrowFieldParser.from_paimon_schema(fields)
+    return pa.schema([pa.field(field.name, _read_arrow_type(field.type)) for field in fields])
+
+
+def _normalize_string_type(data_type, ignore_child_nullability=False):
+    def child(field):
+        field = field.with_type(_normalize_string_type(field.type, ignore_child_nullability))
+        return field.with_nullable(True) if ignore_child_nullability else field
+
     if pa.types.is_large_string(data_type):
         return pa.string()
     if pa.types.is_struct(data_type):
-        return pa.struct([field.with_type(_normalize_string_type(field.type)) for field in data_type])
+        return pa.struct([child(field) for field in data_type])
     if (pa.types.is_list(data_type) or pa.types.is_large_list(data_type)
             or pa.types.is_fixed_size_list(data_type)):
-        field = data_type.value_field.with_type(_normalize_string_type(data_type.value_type))
+        field = child(data_type.value_field)
         if pa.types.is_large_list(data_type):
             return pa.large_list(field)
         if pa.types.is_fixed_size_list(data_type):
@@ -38,13 +69,14 @@ def _normalize_string_type(data_type):
         # includes the sorting flag. Preserve it along with the child fields.
         sorted_keys = data_type == pa.map_(data_type.key_field, data_type.item_field, keys_sorted=True)
         return pa.map_(
-            data_type.key_field.with_type(_normalize_string_type(data_type.key_type)),
-            data_type.item_field.with_type(_normalize_string_type(data_type.item_type)),
+            data_type.key_field.with_type(_normalize_string_type(data_type.key_type, ignore_child_nullability)),
+            child(data_type.item_field),
             keys_sorted=sorted_keys)
     return data_type
 
 
-def arrow_schemas_compatible(source, target, check_top_level_nullability=True, allow_binary_compatibility=False):
+def arrow_schemas_compatible(source, target, check_top_level_nullability=True, allow_binary_compatibility=False,
+                             check_nested_nullability=True):
     """Compare ordered fields, ignoring metadata and STRING offset width.
 
     The writer opts into its existing top-level nullability and binary /
@@ -55,7 +87,9 @@ def arrow_schemas_compatible(source, target, check_top_level_nullability=True, a
     for actual, expected in zip(source, target):
         if check_top_level_nullability and actual.nullable != expected.nullable:
             return False
-        if actual.type == expected.type or _normalize_string_type(actual.type) == _normalize_string_type(expected.type):
+        if (actual.type == expected.type
+                or _normalize_string_type(actual.type, not check_nested_nullability)
+                == _normalize_string_type(expected.type, not check_nested_nullability)):
             continue
         if allow_binary_compatibility and all(
                 pa.types.is_binary(t) or pa.types.is_fixed_size_binary(t)
@@ -63,6 +97,32 @@ def arrow_schemas_compatible(source, target, check_top_level_nullability=True, a
             continue
         return False
     return True
+
+
+def normalize_arrow_write_nullability(data, target):
+    """Validate read-result NULLs in core before restoring writer child fields."""
+    try:
+        from pypaimon_rust.data import normalize_array_for_write
+    except ImportError:
+        return data
+    options = dict(check_top_level_nullability=False, allow_binary_compatibility=True)
+    if (arrow_schemas_compatible(data.schema, target, **options)
+            or not arrow_schemas_compatible(data.schema, target, check_nested_nullability=False, **options)):
+        return data
+    arrays, fields = [], []
+    for column, field, expected in zip(data.columns, data.schema, target):
+        if column.type != expected.type:
+            if isinstance(column, pa.ChunkedArray):
+                column = pa.chunked_array(
+                    [normalize_array_for_write(chunk, expected.type) for chunk in column.chunks], type=expected.type)
+            else:
+                column = normalize_array_for_write(column, expected.type)
+        arrays.append(column)
+        fields.append(field.with_type(column.type))
+    schema = pa.schema(fields, metadata=data.schema.metadata)
+    if isinstance(data, pa.RecordBatch):
+        return pa.RecordBatch.from_arrays(arrays, schema=schema)
+    return pa.Table.from_arrays(arrays, schema=schema)
 
 
 def normalize_arrow_strings(data):
