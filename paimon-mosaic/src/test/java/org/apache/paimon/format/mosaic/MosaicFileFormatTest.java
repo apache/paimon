@@ -28,6 +28,7 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -95,6 +96,47 @@ class MosaicFileFormatTest {
     void testValidateDataFieldsMapSupported() {
         MosaicFileFormat format = createFormat();
         RowType rowType = DataTypes.ROW(DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
+        format.validateDataFields(rowType);
+    }
+
+    @Test
+    void testValidateDataFieldsTimestampPrecisionZeroUnsupported() {
+        MosaicFileFormat format = createFormat();
+        for (RowType rowType :
+                Arrays.asList(
+                        DataTypes.ROW(DataTypes.TIMESTAMP(0)),
+                        DataTypes.ROW(DataTypes.ARRAY(DataTypes.TIMESTAMP(0))))) {
+            assertThatThrownBy(() -> format.validateDataFields(rowType))
+                    .isInstanceOf(UnsupportedOperationException.class)
+                    .hasMessage(
+                            "Mosaic file format does not support type TIMESTAMP(0), "
+                                    + "use TIMESTAMP(3) instead");
+        }
+        for (RowType rowType :
+                Arrays.asList(
+                        DataTypes.ROW(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0)),
+                        DataTypes.ROW(
+                                DataTypes.MAP(
+                                        DataTypes.STRING(),
+                                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0))))) {
+            assertThatThrownBy(() -> format.validateDataFields(rowType))
+                    .isInstanceOf(UnsupportedOperationException.class)
+                    .hasMessage(
+                            "Mosaic file format does not support type "
+                                    + "TIMESTAMP(0) WITH LOCAL TIME ZONE, "
+                                    + "use TIMESTAMP(3) WITH LOCAL TIME ZONE instead");
+        }
+    }
+
+    @Test
+    void testValidateDataFieldsTimestampPositivePrecisionSupported() {
+        MosaicFileFormat format = createFormat();
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.TIMESTAMP(1),
+                        DataTypes.TIMESTAMP(9),
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(1),
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9));
         format.validateDataFields(rowType);
     }
 

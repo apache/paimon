@@ -215,11 +215,24 @@ public class MosaicFileFormat extends FileFormat {
 
         @Override
         public Void visit(TimestampType timestampType) {
+            // Precision 0 maps to the Arrow SECOND time unit, which the native
+            // mosaic writer cannot open a file with.
+            if (timestampType.getPrecision() == 0) {
+                throw new UnsupportedOperationException(
+                        "Mosaic file format does not support type TIMESTAMP(0), "
+                                + "use TIMESTAMP(3) instead");
+            }
             return null;
         }
 
         @Override
         public Void visit(LocalZonedTimestampType localZonedTimestampType) {
+            if (localZonedTimestampType.getPrecision() == 0) {
+                throw new UnsupportedOperationException(
+                        "Mosaic file format does not support type "
+                                + "TIMESTAMP(0) WITH LOCAL TIME ZONE, "
+                                + "use TIMESTAMP(3) WITH LOCAL TIME ZONE instead");
+            }
             return null;
         }
 
