@@ -103,6 +103,32 @@ public class HistoryPartitionClusterTest {
         assertThat(historyPartitionCluster).isNull();
     }
 
+    @Test
+    public void testNoHistoryPartitionsDoesNotClusterActivePartition() throws Exception {
+        FileStoreTable table =
+                createTable(
+                        Collections.singletonMap(
+                                CoreOptions.CLUSTERING_HISTORY_PARTITION_IDLE_TIME.key(), "365d"),
+                        Collections.singletonList("f2"));
+        writeOnce(
+                table,
+                GenericRow.of(
+                        1, 1, BinaryString.fromString("pt1"), BinaryString.fromString("test")));
+        writeOnce(
+                table,
+                GenericRow.of(
+                        1, 1, BinaryString.fromString("pt2"), BinaryString.fromString("test")));
+
+        IncrementalClusterManager manager =
+                new IncrementalClusterManager(
+                        table,
+                        PartitionPredicate.fromMultiple(
+                                RowType.of(DataTypes.STRING()),
+                                Collections.singletonList(BinaryRow.singleColumn("pt1"))));
+        assertThat(manager.createCompactUnits(true).keySet())
+                .containsExactly(BinaryRow.singleColumn("pt1"));
+    }
+
     protected FileStoreTable createTable(
             Map<String, String> customOptions, List<String> partitionKeys) throws Exception {
         Map<String, String> options = new HashMap<>();

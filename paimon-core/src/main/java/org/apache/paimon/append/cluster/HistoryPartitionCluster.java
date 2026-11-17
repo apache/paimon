@@ -39,6 +39,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -143,6 +144,10 @@ public class HistoryPartitionCluster {
                         .sorted(Comparator.comparingLong(PartitionEntry::lastFileCreationTime))
                         .map(PartitionEntry::partition)
                         .collect(Collectors.toList());
+
+        if (historyPartitions.isEmpty()) {
+            return Collections.emptyMap();
+        }
 
         // read dataFileMeta for history partitions
         List<DataSplit> historyDataSplits =
