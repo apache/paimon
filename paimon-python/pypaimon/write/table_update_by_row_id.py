@@ -667,25 +667,23 @@ class TableUpdateByRowId:
         return merged_table, blob_columns
 
     def _normalize_write_data(self, data):
-        # DE reads relax nested nullability. Restore and validate the declared
-        # write types at the writer boundary, including untouched input batches.
         write_schema = PyarrowFieldParser.from_paimon_schema(
             [self.table.field_dict[name] for name in data.schema.names])
-        normalized = normalize_arrow_write_nullability(data, write_schema)
-        # Reads relax field nullability for schema evolution. A projected
-        # update must still enforce the declared write type, as Java's
-        # TableWrite.withWriteType does for every selected output column.
-        for field, column in zip(write_schema, normalized.columns):
+        # Validate visible children against the declared write constraints.
+        # Keep the input nested types for Parquet: hidden NULL children under
+        # a NULL parent are legal and still need nullable transport fields.
+        normalize_arrow_write_nullability(data, write_schema)
+        for field, column in zip(write_schema, data.columns):
             self._check_write_not_null(field.name, column.null_count > 0)
-        if any(actual.nullable != expected.nullable
-               for actual, expected in zip(normalized.schema, write_schema)):
-            fields = [actual.with_nullable(expected.nullable)
-                      for actual, expected in zip(normalized.schema, write_schema)]
-            schema = pa.schema(fields, metadata=normalized.schema.metadata)
-            if isinstance(normalized, pa.RecordBatch):
-                return pa.RecordBatch.from_arrays(normalized.columns, schema=schema)
-            return pa.Table.from_arrays(normalized.columns, schema=schema)
-        return normalized
+        fields = [pa.field(actual.name, actual.type, nullable=expected.nullable,
+                           metadata=expected.metadata)
+                  for actual, expected in zip(data.schema, write_schema)]
+        schema = pa.schema(fields, metadata=write_schema.metadata)
+        if data.schema.equals(schema, check_metadata=True):
+            return data
+        if isinstance(data, pa.RecordBatch):
+            return pa.RecordBatch.from_arrays(data.columns, schema=schema)
+        return pa.Table.from_arrays(data.columns, schema=schema)
 
     def _check_write_not_null(self, column_name, has_null):
         if not self.table.field_dict[column_name].type.nullable and has_null:

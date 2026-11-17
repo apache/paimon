@@ -181,3 +181,46 @@ def test_de_column_group_merge_uses_runtime_nested_schema(tmp_path, native_write
         assert result['value'].to_pylist() == values
         assert result['untouched'].to_pylist() == [10, 11, 12, 13]
         assert table.fields[1].to_dict() == field_before
+
+
+@pytest.mark.parametrize('native_write', [False, True])
+def test_partial_row_update_preserves_hidden_null_children(tmp_path, native_write):
+    pytest.importorskip('pypaimon_rust.data')
+    from pypaimon.tests.native_nested_update_test import _table
+    data_type = pa.struct([pa.field('value', pa.int32(), nullable=False)])
+    table, _ = _table(tmp_path, data_type, native_write)
+    seed = table.new_batch_write_builder()
+    writer, commit = seed.new_write(), seed.new_commit()
+    try:
+        writer.write_arrow(pa.Table.from_pylist(
+            [{'id': i, 'value': None, 'untouched': i + 10} for i in range(4, 8)],
+            schema=read_arrow_schema(table.fields)))
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    fields_before = [field.to_dict() for field in table.fields]
+    builder = table.new_batch_write_builder()
+    updater = builder.new_update().with_update_type(['value'])
+    changes = pa.table({'_ROW_ID': pa.array([5], type=pa.int64()),
+                        'value': pa.array([{'value': 7}], type=data_type)})
+    messages = updater.update_by_arrow_with_row_id(changes)
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages)
+    finally:
+        commit.close()
+    for native_read in (False, True):
+        copy = table.copy({'read.native.enabled': str(native_read).lower(),
+                           'scan.native-plan.enabled': str(native_read).lower()})
+        reader = copy.new_read_builder()
+        result = reader.new_read().to_arrow(reader.new_scan().plan().splits()).sort_by('id')
+        assert result['value'].to_pylist() == [None] * 5 + [{'value': 7}, None, None]
+        assert result['untouched'].to_pylist() == list(range(10, 18))
+    assert [field.to_dict() for field in table.fields] == fields_before
+    snapshot = table.snapshot_manager().get_latest_snapshot().id
+    bad = pa.table({'_ROW_ID': pa.array([5], type=pa.int64()),
+                    'value': pa.array([{'value': None}], type=pa.struct([('value', pa.int32())]))})
+    with pytest.raises((ValueError, TypeError), match='[Nn]ull'):
+        table.new_batch_write_builder().new_update().with_update_type(['value']).update_by_arrow_with_row_id(bad)
+    assert table.snapshot_manager().get_latest_snapshot().id == snapshot
