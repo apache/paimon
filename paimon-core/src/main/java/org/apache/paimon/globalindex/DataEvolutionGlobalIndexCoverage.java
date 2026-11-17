@@ -70,13 +70,17 @@ public class DataEvolutionGlobalIndexCoverage {
             if (!DataEvolutionGlobalIndexScanner.isIndexInSchema(table.rowType(), indexFile)) {
                 continue;
             }
-            // Single-field coverage belongs to single-field index definitions. Multi-field
-            // query paths supply their actual coverage explicitly.
-            if (meta.extraFieldIds() != null && meta.extraFieldIds().length > 0) {
+            // Composite keys do not imply independent coverage for each of their columns.
+            if (meta.extraFieldIds() != null
+                    && meta.extraFieldIds().length > 0
+                    && !GlobalIndexerFactoryUtils.supportsGroupedIndexScalarQueries(
+                            indexFile.indexType())) {
                 continue;
             }
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
-            addCoverage(meta.indexFieldId(), range);
+            for (int fieldId : meta.getIndexedFieldIds()) {
+                addCoverage(fieldId, range);
+            }
         }
     }
 

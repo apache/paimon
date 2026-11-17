@@ -157,11 +157,27 @@ public class GlobalIndexEvaluator implements Closeable {
     private CompletableFuture<Optional<Evaluation>> visitFieldAsync(
             FieldRef fieldRef,
             Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> visitor) {
+        return visitFieldWithCompletenessAsync(
+                fieldRef,
+                reader ->
+                        visitor.apply(reader)
+                                .thenApply(
+                                        result ->
+                                                result.map(
+                                                        value ->
+                                                                new GlobalIndexPredicateResult(
+                                                                        value, true))));
+    }
+
+    private CompletableFuture<Optional<Evaluation>> visitFieldWithCompletenessAsync(
+            FieldRef fieldRef,
+            Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexPredicateResult>>>
+                    visitor) {
         int fieldId = rowType.getField(fieldRef.name()).id();
         Collection<GlobalIndexReader> readers =
                 indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
 
-        List<CompletableFuture<Optional<GlobalIndexResult>>> readerFutures =
+        List<CompletableFuture<Optional<GlobalIndexPredicateResult>>> readerFutures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
             readerFutures.add(visitor.apply(reader));
@@ -171,26 +187,37 @@ public class GlobalIndexEvaluator implements Closeable {
                 .thenApply(
                         v -> {
                             Optional<GlobalIndexResult> compoundResult = Optional.empty();
-                            for (CompletableFuture<Optional<GlobalIndexResult>> f : readerFutures) {
-                                Optional<GlobalIndexResult> childResult = f.join();
+                            boolean fullyEvaluated = false;
+                            for (CompletableFuture<Optional<GlobalIndexPredicateResult>> f :
+                                    readerFutures) {
+                                Optional<GlobalIndexPredicateResult> childResult = f.join();
                                 if (!childResult.isPresent()) {
                                     continue;
                                 }
+                                // One complete alternative index suffices for this predicate.
+                                // Intersecting safe candidates cannot invalidate that proof.
+                                fullyEvaluated |= childResult.get().fullyEvaluated();
                                 if (compoundResult.isPresent()) {
                                     compoundResult =
                                             Optional.of(
-                                                    compoundResult.get().and(childResult.get()));
+                                                    compoundResult
+                                                            .get()
+                                                            .and(childResult.get().result()));
                                 } else {
-                                    compoundResult = childResult;
+                                    compoundResult = Optional.of(childResult.get().result());
                                 }
                                 if (compoundResult.get().results().isEmpty()) {
                                     break;
                                 }
                             }
-                            return compoundResult.map(
-                                    result ->
+                            return compoundResult.isPresent()
+                                    ? Optional.of(
                                             new Evaluation(
-                                                    result, Collections.singleton(fieldId), null));
+                                                    compoundResult.get(),
+                                                    Collections.singleton(fieldId),
+                                                    null,
+                                                    fullyEvaluated))
+                                    : Optional.empty();
                         });
     }
 
@@ -225,10 +252,10 @@ public class GlobalIndexEvaluator implements Closeable {
                     LeafPredicate upper = isLowerBound(first) ? second : first;
                     FieldRef field = first.fieldRefOptional().get();
                     range =
-                            visitFieldAsync(
+                            visitFieldWithCompletenessAsync(
                                     field,
                                     reader ->
-                                            reader.visitRange(
+                                            reader.visitRangeWithCompleteness(
                                                     field,
                                                     lower.literals().get(0),
                                                     upper.literals().get(0),
@@ -271,6 +298,11 @@ public class GlobalIndexEvaluator implements Closeable {
     private Optional<Evaluation> combineResults(
             List<Optional<Evaluation>> results, CompoundPredicate predicate) {
         Set<Integer> contributingFieldIds = new HashSet<>();
+        // Field coverage is insufficient: a > 0 AND isNaN(a) still contributes field a even
+        // when the reader declines isNaN. Track every child, including before an empty shortcut.
+        boolean fullyEvaluated =
+                results.stream()
+                        .allMatch(child -> child.isPresent() && child.get().fullyEvaluated());
         if (predicate.function() instanceof Or) {
             GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
             for (Optional<Evaluation> child : results) {
@@ -280,7 +312,8 @@ public class GlobalIndexEvaluator implements Closeable {
                 compoundResult = compoundResult.or(child.get().result());
                 contributingFieldIds.addAll(child.get().contributingFieldIds());
             }
-            return Optional.of(new Evaluation(compoundResult, contributingFieldIds, null));
+            return Optional.of(
+                    new Evaluation(compoundResult, contributingFieldIds, null, fullyEvaluated));
         } else {
             Optional<GlobalIndexResult> compoundResult = Optional.empty();
             for (Optional<Evaluation> child : results) {
@@ -297,7 +330,8 @@ public class GlobalIndexEvaluator implements Closeable {
                     break;
                 }
             }
-            return compoundResult.map(result -> new Evaluation(result, contributingFieldIds, null));
+            return compoundResult.map(
+                    result -> new Evaluation(result, contributingFieldIds, null, fullyEvaluated));
         }
     }
 
@@ -309,12 +343,15 @@ public class GlobalIndexEvaluator implements Closeable {
         private final GlobalIndexResult result;
         private final Set<Integer> contributingFieldIds;
         @Nullable private final List<Range> coveredRanges;
+        private final boolean fullyEvaluated;
 
         Evaluation(
                 GlobalIndexResult result,
                 Collection<Integer> contributingFieldIds,
-                @Nullable List<Range> coveredRanges) {
+                @Nullable List<Range> coveredRanges,
+                boolean fullyEvaluated) {
             this.result = result;
+            this.fullyEvaluated = fullyEvaluated;
             this.coveredRanges =
                     coveredRanges == null
                             ? null
@@ -334,6 +371,14 @@ public class GlobalIndexEvaluator implements Closeable {
 
         public Set<Integer> contributingFieldIds() {
             return contributingFieldIds;
+        }
+
+        /**
+         * Whether all necessary predicates were evaluated within the reported coverage. This does
+         * not prove full row-range coverage or exactness of candidate-only index operators.
+         */
+        public boolean fullyEvaluated() {
+            return fullyEvaluated;
         }
     }
 

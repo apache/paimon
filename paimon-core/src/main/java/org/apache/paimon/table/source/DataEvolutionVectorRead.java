@@ -84,6 +84,9 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
 
     protected ScoredGlobalIndexResult readIndexed(
             List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
+        // Keep the caller's indexer for the first definition so its persisted metric is also
+        // available to Flink/Spark callers when they subsequently search raw splits.
+        List<GlobalIndexer> globalIndexers = createGlobalIndexers(splits, globalIndexer);
         List<RoaringNavigableMap64> preFilters = preFilters(splits);
         String indexType = vectorIndexType(splits);
         int searchLimit = indexedSearchLimit(indexType);
@@ -99,7 +102,7 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
             IndexVectorSearchSplit split = splits.get(i);
             futures.add(
                     eval(
-                            globalIndexer,
+                            globalIndexers.get(i),
                             indexPathFactory,
                             split.rowRangeStart(),
                             split.rowRangeEnd(),
@@ -120,6 +123,9 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
             }
         }
         return maybeRerankIndexedResult(
-                ScoredGlobalIndexResult.merge(results), indexType, globalIndexer, vector);
+                ScoredGlobalIndexResult.merge(results),
+                indexType,
+                metricIndexer(globalIndexers),
+                vector);
     }
 }
