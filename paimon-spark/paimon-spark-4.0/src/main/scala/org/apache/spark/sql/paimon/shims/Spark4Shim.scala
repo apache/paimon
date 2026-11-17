@@ -34,7 +34,7 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, SubstituteUnresolvedOrdinals}
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression, Literal, MetadataAttribute}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, ColumnDefinition, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
@@ -85,6 +85,16 @@ class Spark4Shim extends SparkShim {
 
   override def createCustomResolution(spark: SparkSession): Rule[LogicalPlan] = {
     Spark4ResolutionRules(spark)
+  }
+
+  override def resolveUpdateMetadata(assignments: Seq[Assignment]): Seq[Assignment] = {
+    assignments.map {
+      case a @ Assignment(attr: Attribute, _)
+          if MetadataAttribute.isValid(attr.metadata) &&
+            !MetadataAttribute.isPreservedOnUpdate(attr) =>
+        a.copy(value = Literal(null, attr.dataType))
+      case a => a
+    }
   }
 
   override def createSparkInternalRow(rowType: RowType): SparkInternalRow = {

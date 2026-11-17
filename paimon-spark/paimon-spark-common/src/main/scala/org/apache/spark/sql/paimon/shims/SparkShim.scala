@@ -60,6 +60,9 @@ trait SparkShim {
 
   def createCustomResolution(spark: SparkSession): Rule[LogicalPlan]
 
+  // Spark 4 can invalidate metadata values when a row is updated. Spark 3 preserves them.
+  def resolveUpdateMetadata(assignments: Seq[Assignment]): Seq[Assignment] = assignments
+
   def createSparkInternalRow(rowType: RowType): SparkInternalRow
 
   def createSparkInternalRowWithBlob(
