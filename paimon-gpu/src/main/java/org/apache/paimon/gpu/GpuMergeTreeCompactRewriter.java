@@ -57,6 +57,8 @@ final class GpuMergeTreeCompactRewriter extends AbstractCompactRewriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(GpuMergeTreeCompactRewriter.class);
 
+    private static final long MAX_SEQUENCE = Long.MAX_VALUE >> 1;
+
     private final CompactRewriter fallback;
     private final KeyValueFileWriterFactory writerFactory;
     private final KvLayout layout;
@@ -128,6 +130,16 @@ final class GpuMergeTreeCompactRewriter extends AbstractCompactRewriter {
                                 dropDelete,
                                 KvLayout.codec(options.fileCompression()));
                 counters.device(rows, summary.rows(), System.nanoTime() - t0);
+                if (summary.ties()) {
+                    // Not a failure: which tied row Paimon keeps is its readers' order.
+                    for (Path path : written) {
+                        io.deleteQuietly(path);
+                    }
+                    String tie = "rows of a key with equal sequence numbers and kinds";
+                    LOG.debug("Compaction on the CPU: {}", tie);
+                    counters.cpu(tie);
+                    return fallback.rewrite(outputLevel, dropDelete, sections);
+                }
                 check(files, rows, summary);
                 if (summary.rows() == 0) {
                     io.deleteQuietly(output);
@@ -156,6 +168,10 @@ final class GpuMergeTreeCompactRewriter extends AbstractCompactRewriter {
             }
             if (file.externalPath().isPresent()) {
                 return "external path";
+            }
+            // The device folds the row kind into the sequence number, doubling it.
+            if (file.minSequenceNumber() < 0 || file.maxSequenceNumber() > MAX_SEQUENCE) {
+                return "sequence numbers outside [0, 2^62)";
             }
         }
         for (List<SortedRun> section : sections) {

@@ -38,8 +38,39 @@ final class CompactKernels {
     static final int P_SIZE = 5;
 
     /**
-     * One byte a sorted position: 1 when its row is the last of its key (highest sequence number)
-     * and, when deletes are dropped, is not a retraction (UPDATE_BEFORE 1, DELETE 3).
+     * Folds whether a row adds into its sequence number, {@code 2 * sequence + 1} for an addition
+     * and {@code 2 * sequence} for a retraction (UPDATE_BEFORE 1, DELETE 3), so that the sort over
+     * keys and sequence numbers puts a retraction before an addition with the same sequence number,
+     * as Paimon's merge readers do. The caller keeps sequence numbers in [0, 2^62).
+     */
+    static void foldKind(KernelContext context, IntArray params, LongArray longs, IntArray ints) {
+        int row = context.globalIdx;
+        if (row < params.get(P_ROWS)) {
+            int slot = params.get(P_KEYS) * params.get(P_CAPACITY) + row;
+            int kind = ints.get(row);
+            long add = 1;
+            if (kind == 1 || kind == 3) {
+                add = 0;
+            }
+            longs.set(slot, longs.get(slot) * 2 + add);
+        }
+    }
+
+    /** Restores the sequence numbers {@link #foldKind} folded. */
+    static void unfoldKind(KernelContext context, IntArray params, LongArray longs) {
+        int row = context.globalIdx;
+        if (row < params.get(P_ROWS)) {
+            int slot = params.get(P_KEYS) * params.get(P_CAPACITY) + row;
+            longs.set(slot, longs.get(slot) >> 1);
+        }
+    }
+
+    /**
+     * One byte a sorted position: 1 when its row is the last of its key (highest sequence number,
+     * an addition after a retraction of the same number) and, when deletes are dropped, is not a
+     * retraction (UPDATE_BEFORE 1, DELETE 3). Two rows of a key with the same sequence number and
+     * kind set {@code ties}: Paimon keeps whichever its readers happen to order last, and the
+     * compaction is left to it.
      */
     static void markSurvivors(
             KernelContext context,
@@ -47,7 +78,8 @@ final class CompactKernels {
             IntArray order,
             LongArray longs,
             IntArray ints,
-            ByteArray mask) {
+            ByteArray mask,
+            IntArray ties) {
         int p = context.globalIdx;
         int rows = params.get(P_ROWS);
         int capacity = params.get(P_CAPACITY);
@@ -67,6 +99,10 @@ final class CompactKernels {
                     }
                     if (same == 1) {
                         keep = 0;
+                        int sequence = keys * capacity;
+                        if (longs.get(sequence + row) == longs.get(sequence + next)) {
+                            ties.set(0, 1);
+                        }
                     }
                 }
                 if (keep == 1 && params.get(P_DROP_DELETE) == 1) {

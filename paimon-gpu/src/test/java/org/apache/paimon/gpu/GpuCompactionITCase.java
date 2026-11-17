@@ -127,12 +127,137 @@ public class GpuCompactionITCase {
         }
     }
 
+    /**
+     * Two writers opened on the same empty bucket before either commits both write sequence number
+     * 0. Paimon's merge readers then order an equal sequence number's retraction before its
+     * addition, so the addition survives whichever file comes first.
+     */
+    @Test
+    public void testEqualSequenceNumbersKeepTheInsertBeforeADelete() throws Exception {
+        assertEqualSequenceNumbersKeepTheAddition(RowKind.INSERT, RowKind.DELETE);
+    }
+
+    @Test
+    public void testEqualSequenceNumbersKeepTheInsertAfterADelete() throws Exception {
+        assertEqualSequenceNumbersKeepTheAddition(RowKind.DELETE, RowKind.INSERT);
+    }
+
+    @Test
+    public void testEqualSequenceNumbersKeepTheUpdateAfter() throws Exception {
+        assertEqualSequenceNumbersKeepTheAddition(RowKind.UPDATE_BEFORE, RowKind.UPDATE_AFTER);
+    }
+
+    private void assertEqualSequenceNumbersKeepTheAddition(RowKind first, RowKind second)
+            throws Exception {
+        java.nio.file.Path cpuDir = tempDir.resolve("cpu");
+        java.nio.file.Path gpuDir = tempDir.resolve("gpu");
+        FileStoreTable cpu = createTable(cpuDir, Collections.emptyMap());
+        writeConcurrently(
+                cpu,
+                GenericRow.ofKind(first, 1L, 10, 1.0, 0L, 1, BinaryString.fromString("a")),
+                GenericRow.ofKind(second, 1L, 10, 1.0, 0L, 1, BinaryString.fromString("a")));
+        copy(cpuDir, gpuDir);
+        FileStoreTable gpu = load(gpuDir);
+
+        try (GpuCompactRewriterFactory factory = new GpuCompactRewriterFactory(gpu)) {
+            compact(cpu, null, true);
+            compact(gpu, factory, true);
+            assertThat(rows(load(cpuDir))).containsExactly("1|10|1.0|0|1|a");
+            assertSame(cpu, gpu);
+            assertThat(factory.stats())
+                    .doesNotContain("device batches=0")
+                    .contains("cpu compactions=0");
+        }
+    }
+
+    /**
+     * Two additions of one key with the same sequence number: which one Paimon keeps depends on its
+     * readers' order, so the device hands the compaction to Paimon's rewriter.
+     */
+    @Test
+    public void testEqualSequenceNumbersAndKindsRunOnTheCpu() throws Exception {
+        java.nio.file.Path cpuDir = tempDir.resolve("cpu");
+        java.nio.file.Path gpuDir = tempDir.resolve("gpu");
+        FileStoreTable cpu = createTable(cpuDir, Collections.emptyMap());
+        writeConcurrently(
+                cpu,
+                GenericRow.of(1L, 10, 1.0, 0L, 1, BinaryString.fromString("a")),
+                GenericRow.of(1L, 20, 2.0, 0L, 2, BinaryString.fromString("b")));
+        copy(cpuDir, gpuDir);
+        FileStoreTable gpu = load(gpuDir);
+
+        try (GpuCompactRewriterFactory factory = new GpuCompactRewriterFactory(gpu)) {
+            compact(cpu, null, true);
+            compact(gpu, factory, true);
+            assertSame(cpu, gpu);
+            assertThat(factory.stats()).contains("cpu compactions=1").contains("equal");
+        }
+    }
+
+    /**
+     * With {@code sequence.snapshot-ordering}, Paimon's readers order rows by the snapshot that
+     * committed their file, not by the sequence numbers in the file; the device does not take such
+     * tables. Writer A's row has sequence number 2 and commits first; writer B's has 0 and commits
+     * second, so B's value wins.
+     */
+    @Test
+    public void testSnapshotSequenceOrderingRunsOnTheCpu() throws Exception {
+        java.nio.file.Path cpuDir = tempDir.resolve("cpu");
+        java.nio.file.Path gpuDir = tempDir.resolve("gpu");
+        FileStoreTable cpu =
+                createTable(cpuDir, Collections.singletonMap("sequence.snapshot-ordering", "true"));
+        try (TableWriteImpl<?> a = cpu.newWrite("a");
+                TableWriteImpl<?> b = cpu.newWrite("b")) {
+            for (int i = 0; i < 3; i++) {
+                a.write(GenericRow.of(1L, 10, 1.0, 0L, 1, BinaryString.fromString("a")));
+            }
+            b.write(GenericRow.of(1L, 20, 2.0, 0L, 2, BinaryString.fromString("b")));
+            commit(cpu, a);
+            commit(cpu, b);
+        }
+        copy(cpuDir, gpuDir);
+        FileStoreTable gpu = load(gpuDir);
+
+        try (GpuCompactRewriterFactory factory = new GpuCompactRewriterFactory(gpu)) {
+            compact(cpu, null, true);
+            compact(gpu, factory, true);
+            assertThat(rows(load(cpuDir))).containsExactly("1|20|2.0|0|2|b");
+            assertSame(cpu, gpu);
+            assertThat(factory.stats()).contains("device batches=0");
+        }
+    }
+
+    /** Writes each row from its own writer, both opened before either commits. */
+    private void writeConcurrently(FileStoreTable table, InternalRow first, InternalRow second)
+            throws Exception {
+        try (TableWriteImpl<?> a = table.newWrite("a");
+                TableWriteImpl<?> b = table.newWrite("b")) {
+            a.write(first);
+            b.write(second);
+            commit(table, a);
+            commit(table, b);
+        }
+    }
+
+    private void commit(FileStoreTable table, TableWriteImpl<?> write) throws Exception {
+        long id = ++commitId;
+        try (TableCommitImpl commit = table.newCommit("test")) {
+            commit.commit(id, write.prepareCommit(true, id));
+        }
+    }
+
     private FileStoreTable createTable(java.nio.file.Path dir) throws Exception {
+        return createTable(dir, Collections.emptyMap());
+    }
+
+    private FileStoreTable createTable(java.nio.file.Path dir, Map<String, String> extra)
+            throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put("bucket", Integer.toString(BUCKETS));
         options.put("file.format", "parquet");
         options.put("file.compression", "zstd");
         options.put("write-only", "true");
+        options.putAll(extra);
         RowType rowType =
                 RowType.of(
                         new DataType[] {

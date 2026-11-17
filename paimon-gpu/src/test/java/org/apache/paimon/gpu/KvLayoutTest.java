@@ -78,7 +78,8 @@ public class KvLayoutTest {
         "file.format,orc,parquet",
         "file.compression,lz4,file.compression",
         "data-file.thin-mode,true,thin-mode",
-        "file-index.bloom-filter.columns,qty,file-index"
+        "file-index.bloom-filter.columns,qty,file-index",
+        "sequence.snapshot-ordering,true,sequence.snapshot-ordering"
     })
     public void testRefusesTablesItCannotCompactExactly(String key, String value, String reason) {
         Options options = new Options();

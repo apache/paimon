@@ -51,6 +51,7 @@ final class DeviceCompactor implements AutoCloseable {
         private final long retractions;
         private final long[] minKey;
         private final long[] maxKey;
+        private final boolean ties;
 
         Summary(
                 int rows,
@@ -58,8 +59,10 @@ final class DeviceCompactor implements AutoCloseable {
                 long maxSequence,
                 long retractions,
                 long[] minKey,
-                long[] maxKey) {
+                long[] maxKey,
+                boolean ties) {
             this.rows = rows;
+            this.ties = ties;
             this.minSequence = minSequence;
             this.maxSequence = maxSequence;
             this.retractions = retractions;
@@ -89,6 +92,11 @@ final class DeviceCompactor implements AutoCloseable {
 
         long[] maxKey() {
             return maxKey;
+        }
+
+        /** Whether two rows of a key had the same sequence number and kind. */
+        boolean ties() {
+            return ties;
         }
     }
 
@@ -186,6 +194,7 @@ final class DeviceCompactor implements AutoCloseable {
         final long[] settings = new long[4];
         final IntArray params = new IntArray(CompactKernels.P_SIZE);
         final IntArray count = new IntArray(1);
+        final IntArray ties = new IntArray(1);
         final LongArray groupMin;
         final LongArray groupMax;
         final IntArray groupRetract;
@@ -221,7 +230,7 @@ final class DeviceCompactor implements AutoCloseable {
 
             TaskGraph graph =
                     new TaskGraph("paimon")
-                            .transferToDevice(DataTransferMode.EVERY_EXECUTION, params)
+                            .transferToDevice(DataTransferMode.EVERY_EXECUTION, params, ties)
                             .transferToDevice(
                                     DataTransferMode.FIRST_EXECUTION,
                                     spec,
@@ -273,7 +282,8 @@ final class DeviceCompactor implements AutoCloseable {
                         valid,
                         layout.readColumns.length);
             }
-            graph.libraryTask("sort", Cudf::sortedOrderLongs, sortSize, longs, capacity, order)
+            graph.task("fold", CompactKernels::foldKind, context, params, longs, ints)
+                    .libraryTask("sort", Cudf::sortedOrderLongs, sortSize, longs, capacity, order)
                     .task(
                             "mark",
                             CompactKernels::markSurvivors,
@@ -282,7 +292,9 @@ final class DeviceCompactor implements AutoCloseable {
                             order,
                             longs,
                             ints,
-                            mask)
+                            mask,
+                            ties)
+                    .task("unfold", CompactKernels::unfoldKind, context, params, longs)
                     .libraryTask(
                             "select",
                             Cudf::selectedIndices,
@@ -349,10 +361,11 @@ final class DeviceCompactor implements AutoCloseable {
                             groupMin,
                             groupMax,
                             groupRetract,
-                            edges);
+                            edges,
+                            ties);
 
             GridScheduler grids = new GridScheduler();
-            for (String task : new String[] {"mark", "gather", "summarize"}) {
+            for (String task : new String[] {"fold", "mark", "unfold", "gather", "summarize"}) {
                 WorkerGrid1D grid = new WorkerGrid1D(capacity);
                 grid.setLocalWork(CompactKernels.GROUP, 1, 1);
                 grids.addWorkerGrid("paimon." + task, grid);
@@ -377,6 +390,7 @@ final class DeviceCompactor implements AutoCloseable {
             params.set(CompactKernels.P_CAPACITY, capacity);
             params.set(CompactKernels.P_DROP_DELETE, dropDelete ? 1 : 0);
             params.set(CompactKernels.P_OUTPUTS, layout.numericOutputs);
+            ties.set(0, 0);
             execution.execute();
 
             int written = count.get(0);
@@ -395,7 +409,7 @@ final class DeviceCompactor implements AutoCloseable {
                 first[c] = edges.get(c);
                 last[c] = edges.get(layout.keyCount + c);
             }
-            return new Summary(written, min, max, retract, first, last);
+            return new Summary(written, min, max, retract, first, last, ties.get(0) != 0);
         }
 
         @Override

@@ -259,6 +259,11 @@ final class KvLayout {
         if (!options.sequenceField().isEmpty()) {
             return "sequence.field";
         }
+        if (options.snapshotSequenceOrdering()) {
+            // Paimon's readers order such files by the snapshot that committed them; the device
+            // reads the sequence numbers in the files.
+            return "sequence.snapshot-ordering";
+        }
         if (options.ignoreDelete()) {
             return "ignore-delete";
         }
