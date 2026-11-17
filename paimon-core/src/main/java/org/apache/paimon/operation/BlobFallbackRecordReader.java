@@ -120,6 +120,29 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                     .add(file);
         }
 
+        // Disjoint files cannot supply competing versions of the same row. Read them as a
+        // single group even when their sequence numbers differ, rather than advancing one
+        // full logical range (including placeholders) per sequence number for every output row.
+        if (sequenceGroups.size() > 1) {
+            List<DataFileMeta> sortedFiles = new ArrayList<>(files);
+            sortedFiles.sort(comparingLong(DataFileMeta::nonNullFirstRowId));
+            boolean disjoint = true;
+            for (int i = 1; i < sortedFiles.size(); i++) {
+                if (sortedFiles.get(i - 1).nonNullRowIdRange().to
+                        >= sortedFiles.get(i).nonNullFirstRowId()) {
+                    disjoint = false;
+                    break;
+                }
+            }
+            if (disjoint) {
+                long maxSeq = sequenceGroups.keySet().iterator().next();
+                sequenceGroups.clear();
+                // The group sequence is only used for synthetic gaps. Actual rows retain their
+                // file sequence, and unresolved placeholders still become null (or are kept).
+                sequenceGroups.put(maxSeq, sortedFiles);
+            }
+        }
+
         for (Map.Entry<Long, List<DataFileMeta>> entry : sequenceGroups.entrySet()) {
             // within each group, sort by first row id
             List<DataFileMeta> groupFiles = entry.getValue();
