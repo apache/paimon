@@ -4714,7 +4714,7 @@ components:
     SubmitPredictionRequest:
       type: object
       additionalProperties: false
-      required: [source, idempotencyKey, model, inputs, instructions]
+      required: [source, model, inputs, instructions]
       properties:
         source:
           $ref: '#/components/schemas/PredictionSource'
@@ -4727,7 +4727,9 @@ components:
           type: string
           minLength: 1
           maxLength: 128
-          description: SDK-generated key reused for retries of one logical submission.
+          description: >-
+            Optional key reused for retries of one logical submission. SDKs generate
+            one by default; requests without a key are independent submissions.
         model:
           type: string
           minLength: 1
