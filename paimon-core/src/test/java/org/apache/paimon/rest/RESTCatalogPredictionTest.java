@@ -55,8 +55,8 @@ class RESTCatalogPredictionTest {
             RecordedRequest submit = server.takeRequest(10, TimeUnit.SECONDS);
             assertThat(submit.getPath()).isEqualTo("/v1/catalog/predictions");
             Map<String, Object> request = RESTApi.fromJson(submit.getBody().readUtf8(), Map.class);
-            assertThat(request.get("idempotencyKey")).isInstanceOf(String.class);
-            assertThat((String) request.get("idempotencyKey")).isNotBlank();
+            assertThat(request.get("idempotencyToken")).isInstanceOf(String.class);
+            assertThat((String) request.get("idempotencyToken")).isNotBlank();
             assertThat(request)
                     .doesNotContainKeys("resultColumns", "mergeKeyColumns", "outputSchema");
             assertThat((Map<String, Object>) request.get("source"))

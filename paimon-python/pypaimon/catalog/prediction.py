@@ -115,7 +115,7 @@ class PredictionSpec:
     name: Optional[str] = None
     where: Optional[str] = None
     options: Dict[str, str] = field(default_factory=dict)
-    idempotency_key: Optional[str] = None
+    idempotency_token: Optional[str] = None
 
     def __post_init__(self):
         if isinstance(self.model, str):
@@ -128,10 +128,14 @@ class PredictionSpec:
         for value, name in (
                 (self.name, "name"),
                 (self.where, "where"),
-                (self.idempotency_key, "idempotency_key"),
+                (self.idempotency_token, "idempotency_token"),
         ):
             if value is not None:
                 _nonblank(value, name)
+        if (self.idempotency_token is not None
+                and len(self.idempotency_token) > 64):
+            raise ValueError(
+                "idempotency_token must not exceed 64 characters")
         self.inputs = _copy_string_mapping(self.inputs, "inputs", True)
         self.merge_key_columns = _copy_string_list(
             self.merge_key_columns, "merge_key_columns")

@@ -43,7 +43,7 @@ public class SubmitPredictionRequest implements RESTRequest {
 
     private static final String FIELD_NAME = "name";
     private static final String FIELD_SOURCE = "source";
-    private static final String FIELD_IDEMPOTENCY_KEY = "idempotencyKey";
+    private static final String FIELD_IDEMPOTENCY_TOKEN = "idempotencyToken";
     private static final String FIELD_MODEL = "model";
     private static final String FIELD_INPUTS = "inputs";
     private static final String FIELD_MERGE_KEY_COLUMNS = "mergeKeyColumns";
@@ -51,7 +51,7 @@ public class SubmitPredictionRequest implements RESTRequest {
     private static final String FIELD_WHERE = "where";
     private static final String FIELD_OPTIONS = "options";
 
-    private final String idempotencyKey;
+    private final String idempotencyToken;
     private final PredictionSource source;
     private final PredictionSpec spec;
 
@@ -59,7 +59,7 @@ public class SubmitPredictionRequest implements RESTRequest {
     public SubmitPredictionRequest(
             @JsonProperty(FIELD_SOURCE) PredictionSource source,
             @Nullable @JsonProperty(FIELD_NAME) String name,
-            @Nullable @JsonProperty(FIELD_IDEMPOTENCY_KEY) String idempotencyKey,
+            @Nullable @JsonProperty(FIELD_IDEMPOTENCY_TOKEN) String idempotencyToken,
             @JsonProperty(FIELD_MODEL) Identifier model,
             @JsonProperty(FIELD_INPUTS) Map<String, String> inputs,
             @Nullable @JsonProperty(FIELD_MERGE_KEY_COLUMNS) List<String> mergeKeyColumns,
@@ -69,11 +69,14 @@ public class SubmitPredictionRequest implements RESTRequest {
         checkArgument(source != null, "source must not be null");
         checkArgument(model != null, "model must not be null");
         checkArgument(
-                idempotencyKey == null || !idempotencyKey.trim().isEmpty(),
-                "idempotencyKey must not be blank");
+                idempotencyToken == null || !idempotencyToken.trim().isEmpty(),
+                "idempotencyToken must not be blank");
+        checkArgument(
+                idempotencyToken == null || idempotencyToken.length() <= 64,
+                "idempotencyToken must not exceed 64 characters");
         this.source = source;
-        this.idempotencyKey =
-                idempotencyKey == null ? UUID.randomUUID().toString() : idempotencyKey;
+        this.idempotencyToken =
+                idempotencyToken == null ? UUID.randomUUID().toString() : idempotencyToken;
         this.spec =
                 new PredictionSpec(
                         name,
@@ -83,14 +86,14 @@ public class SubmitPredictionRequest implements RESTRequest {
                         instructions,
                         where,
                         options,
-                        idempotencyKey);
+                        idempotencyToken);
     }
 
     public SubmitPredictionRequest(Identifier source, PredictionSpec spec) {
         this(
                 new PredictionSource(source),
                 spec.name(),
-                spec.idempotencyKey(),
+                spec.idempotencyToken(),
                 spec.model(),
                 spec.inputs(),
                 spec.mergeKeyColumns(),
@@ -111,9 +114,9 @@ public class SubmitPredictionRequest implements RESTRequest {
         return spec.name();
     }
 
-    @JsonGetter(FIELD_IDEMPOTENCY_KEY)
-    public String getIdempotencyKey() {
-        return idempotencyKey;
+    @JsonGetter(FIELD_IDEMPOTENCY_TOKEN)
+    public String getIdempotencyToken() {
+        return idempotencyToken;
     }
 
     @JsonGetter(FIELD_MODEL)

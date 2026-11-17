@@ -86,8 +86,8 @@ class SubmitPredictionRequest(RESTRequest):
     merge_key_columns: Optional[List[str]] = optional_json_field(
         "mergeKeyColumns", "non_null")
     name: Optional[str] = optional_json_field("name", "non_null")
-    idempotency_key: Optional[str] = optional_json_field(
-        "idempotencyKey", "non_null")
+    idempotency_token: Optional[str] = optional_json_field(
+        "idempotencyToken", "non_null")
     where: Optional[str] = optional_json_field("where", "non_null")
     options: Dict[str, str] = field(default_factory=dict)
 
@@ -101,10 +101,13 @@ class SubmitPredictionRequest(RESTRequest):
         ):
             if value is not None:
                 _nonblank(value, field_name)
-        if self.idempotency_key is None:
-            self.idempotency_key = uuid.uuid4().hex
+        if self.idempotency_token is None:
+            self.idempotency_token = uuid.uuid4().hex
         else:
-            _nonblank(self.idempotency_key, "idempotency_key")
+            _nonblank(self.idempotency_token, "idempotency_token")
+            if len(self.idempotency_token) > 64:
+                raise ValueError(
+                    "idempotency_token must not exceed 64 characters")
         self.inputs = _copy_string_mapping(self.inputs, "inputs", True)
         if self.merge_key_columns is not None:
             self.merge_key_columns = _copy_string_list(
@@ -131,7 +134,7 @@ class SubmitPredictionRequest(RESTRequest):
             inputs=spec.inputs,
             instructions=spec.instructions,
             merge_key_columns=spec.merge_key_columns or None,
-            idempotency_key=spec.idempotency_key,
+            idempotency_token=spec.idempotency_token,
             where=spec.where,
             options=spec.options,
         )

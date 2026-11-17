@@ -46,10 +46,10 @@ class RESTApiPredictionTest {
         SubmitPredictionRequest request =
                 new SubmitPredictionRequest(Identifier.create("quality", "clips"), spec());
         Map<String, Object> requestMap = RESTApi.fromJson(RESTApi.toJson(request), Map.class);
-        assertThat(requestMap.get("idempotencyKey")).isInstanceOf(String.class);
-        assertThat((String) requestMap.get("idempotencyKey")).isNotBlank();
-        assertThat(RESTApi.fromJson(RESTApi.toJson(request), Map.class).get("idempotencyKey"))
-                .isEqualTo(requestMap.get("idempotencyKey"));
+        assertThat(requestMap.get("idempotencyToken")).isInstanceOf(String.class);
+        assertThat((String) requestMap.get("idempotencyToken")).isNotBlank();
+        assertThat(RESTApi.fromJson(RESTApi.toJson(request), Map.class).get("idempotencyToken"))
+                .isEqualTo(requestMap.get("idempotencyToken"));
         assertThat(requestMap)
                 .containsEntry("instructions", "Classify")
                 .doesNotContainKeys(
@@ -141,7 +141,7 @@ class RESTApiPredictionTest {
                 RESTApi.fromJson(RESTApi.toJson(request), SubmitPredictionRequest.class);
 
         assertThat(decoded.getModel()).isEqualTo(Identifier.create("quality.archive", "qwen.vl"));
-        assertThat(decoded.getIdempotencyKey()).isEqualTo("retry-1");
+        assertThat(decoded.getIdempotencyToken()).isEqualTo("retry-1");
     }
 
     @Test
@@ -218,6 +218,20 @@ class RESTApiPredictionTest {
                                         null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("model database");
+
+        assertThatThrownBy(
+                        () ->
+                                new PredictionSpec(
+                                        null,
+                                        Identifier.create("quality", "qwen_vl"),
+                                        Collections.singletonMap("video", "content"),
+                                        null,
+                                        "Classify",
+                                        null,
+                                        Collections.emptyMap(),
+                                        String.join("", Collections.nCopies(65, "x"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("64 characters");
     }
 
     @Test

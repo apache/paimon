@@ -47,7 +47,7 @@ public class PredictionSpec {
     private final String instructions;
     private final @Nullable String where;
     private final Map<String, String> options;
-    private final @Nullable String idempotencyKey;
+    private final @Nullable String idempotencyToken;
 
     public PredictionSpec(
             @Nullable String name,
@@ -57,21 +57,24 @@ public class PredictionSpec {
             String instructions,
             @Nullable String where,
             @Nullable Map<String, String> options,
-            @Nullable String idempotencyKey) {
+            @Nullable String idempotencyToken) {
         checkOptionalNonBlank(name, "name");
         checkArgument(model != null, "model must not be null");
         checkNonBlank(model.getDatabaseName(), "model database");
         checkNonBlank(model.getObjectName(), "model object");
         checkNonBlank(instructions, "instructions");
         checkOptionalNonBlank(where, "where");
-        checkOptionalNonBlank(idempotencyKey, "idempotencyKey");
+        checkOptionalNonBlank(idempotencyToken, "idempotencyToken");
+        checkArgument(
+                idempotencyToken == null || idempotencyToken.length() <= 64,
+                "idempotencyToken must not exceed 64 characters");
         this.name = name;
         this.model = model;
         this.inputs = copyStringMap(inputs, "inputs", true);
         this.mergeKeyColumns = copyOptionalStringList(mergeKeyColumns, "mergeKeyColumns");
         this.instructions = instructions;
         this.where = where;
-        this.idempotencyKey = idempotencyKey;
+        this.idempotencyToken = idempotencyToken;
         this.options =
                 options == null ? Collections.emptyMap() : copyStringMap(options, "options", false);
         CoreOptions coreOptions = new CoreOptions(this.options);
@@ -114,8 +117,8 @@ public class PredictionSpec {
     }
 
     @Nullable
-    public String idempotencyKey() {
-        return idempotencyKey;
+    public String idempotencyToken() {
+        return idempotencyToken;
     }
 
     private static Map<String, String> copyStringMap(

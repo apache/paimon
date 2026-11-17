@@ -96,10 +96,10 @@ class PredictionTest(unittest.TestCase):
         request = SubmitPredictionRequest.from_spec(
             Identifier.create("quality", "clips"), _spec())
         body = json.loads(JSON.to_json(request))
-        self.assertTrue(body["idempotencyKey"])
+        self.assertTrue(body["idempotencyToken"])
         self.assertEqual(
-            body["idempotencyKey"],
-            json.loads(JSON.to_json(request))["idempotencyKey"],
+            body["idempotencyToken"],
+            json.loads(JSON.to_json(request))["idempotencyToken"],
         )
         self.assertNotIn("resultColumns", body)
         self.assertNotIn("mergeKeyColumns", body)
@@ -126,12 +126,12 @@ class PredictionTest(unittest.TestCase):
             Identifier.create("quality", "clips"),
             _spec(
                 merge_key_columns=["clip_id"],
-                idempotency_key="retry-1",
+                idempotency_token="retry-1",
             ),
         )
         keyed_body = json.loads(JSON.to_json(keyed))
         self.assertEqual(["clip_id"], keyed_body["mergeKeyColumns"])
-        self.assertEqual("retry-1", keyed_body["idempotencyKey"])
+        self.assertEqual("retry-1", keyed_body["idempotencyToken"])
 
         response = JSON.from_json(
             JSON.to_json(_response()), GetPredictionResponse)
@@ -212,6 +212,7 @@ class PredictionTest(unittest.TestCase):
                 "scan.tag-name": "v1",
             }),
             dict(options={"parallelism": 2}),
+            dict(idempotency_token="x" * 65),
         ]
         for changes in invalid:
             with self.subTest(changes=changes), self.assertRaises(ValueError):
@@ -252,7 +253,7 @@ class PredictionTest(unittest.TestCase):
             model="quality.qwen_vl",
             inputs={"video": "content"},
             instructions="Classify",
-            idempotency_key="retry-1",
+            idempotency_token="retry-1",
         )
 
         self.assertIsInstance(waiter, PredictionWait)
@@ -260,7 +261,7 @@ class PredictionTest(unittest.TestCase):
         sent = catalog.submit_prediction.call_args[0][1]
         self.assertEqual({"scan.snapshot-id": "7"}, sent.options)
         self.assertEqual([], sent.merge_key_columns)
-        self.assertEqual("retry-1", sent.idempotency_key)
+        self.assertEqual("retry-1", sent.idempotency_token)
         raw.new_read_builder.assert_not_called()
 
     def test_table_queries_return_metadata_and_cancel_returns_waiter(self):
@@ -399,7 +400,7 @@ class PredictionTest(unittest.TestCase):
                 {"database": "a/b", "table": "clip table"},
                 calls[-1][2]["source"],
             )
-            self.assertTrue(calls[-1][2]["idempotencyKey"])
+            self.assertTrue(calls[-1][2]["idempotencyToken"])
             self.assertNotIn("mergeKeyColumns", calls[-1][2])
 
             page = catalog.list_predictions(
