@@ -122,6 +122,8 @@ data commit.
 
 Existing conflict checks apply, including concurrent partial-column updates
 overlapping the old file row ranges referenced by deletion vectors.
+Changing the RowID mapping of a referenced anchor after preparation (for example,
+with `reassign_row_id`) also rejects the stale replacement.
 A conflict requires replanning the operation;
 the procedure does not automatically retry the logical replacement. Atomic
 visibility does not enforce business-key uniqueness against concurrent appends

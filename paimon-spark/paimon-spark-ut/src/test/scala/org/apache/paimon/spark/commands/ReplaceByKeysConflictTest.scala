@@ -41,19 +41,16 @@ class ReplaceByKeysConflictTest extends PaimonSparkTestBase {
           |""".stripMargin)
   }
 
-  private def command(filter: Option[String] = None): ReplaceByKeysCommand = {
+  private def command(
+      filter: Option[String] = None,
+      sourceQuery: String = "SELECT 1 AS id, 'replacement' AS value"): ReplaceByKeysCommand = {
     val relation = spark
       .table("target")
       .queryExecution
       .analyzed
       .collect { case r: DataSourceV2Relation => r }
       .head
-    ReplaceByKeysCommand(
-      loadTable("target"),
-      relation,
-      "SELECT 1 AS id, 'replacement' AS value",
-      Seq("id"),
-      filter)
+    ReplaceByKeysCommand(loadTable("target"), relation, sourceQuery, Seq("id"), filter)
   }
 
   private def commit(messages: Seq[CommitMessage], snapshotId: Long): Unit = {
@@ -107,6 +104,63 @@ class ReplaceByKeysConflictTest extends PaimonSparkTestBase {
       sql("UPDATE target SET value='concurrent' WHERE id=2")
       commit(messages, snapshotId)
       checkAnswer(sql("SELECT * FROM target"), Seq(Row(1, "replacement"), Row(2, "concurrent")))
+    }
+  }
+
+  private def createPartitionedTarget(): Unit = {
+    sql("""
+          |CREATE TABLE target (id INT, value STRING, pt STRING) PARTITIONED BY (pt)
+          |TBLPROPERTIES ('data-evolution.enabled'='true','row-tracking.enabled'='true',
+          | 'deletion-vectors.enabled'='true','write-only'='true')
+          |""".stripMargin)
+    sql("INSERT INTO target VALUES (1,'old','a')")
+    sql("INSERT INTO target VALUES (9,'other','b')")
+    sql("INSERT INTO target VALUES (2,'third','a')")
+  }
+
+  Seq(true, false).foreach {
+    reassignFirst =>
+      test(s"replacement rejects anchor reassignment with reassignFirst=$reassignFirst") {
+        withTable("target") {
+          createPartitionedTarget()
+          val (messages, snapshotId) =
+            command(sourceQuery = "SELECT 1 AS id, 'replacement' AS value, 'a' AS pt")
+              .prepare(spark)
+          def reassign(): Unit = {
+            val result = sql("CALL sys.reassign_row_id(table => 'target')").collect()
+            assert(result.head.getString(0).startsWith("Success."))
+          }
+          if (reassignFirst) reassign()
+          sql("UPDATE target SET id=8, value='concurrent' WHERE pt='a' AND id=1")
+          if (!reassignFirst) reassign()
+          val afterUpdate = loadTable("target").snapshotManager().latestSnapshot().id()
+          val failure = intercept[RuntimeException](commit(messages, snapshotId))
+          val causes = Iterator.iterate[Throwable](failure)(_.getCause).takeWhile(_ != null)
+          assert(
+            causes.exists(
+              e => Option(e.getMessage).exists(_.contains(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE))))
+          assert(loadTable("target").snapshotManager().latestSnapshot().id() == afterUpdate)
+          checkAnswer(
+            sql("SELECT * FROM target"),
+            Seq(Row(8, "concurrent", "a"), Row(9, "other", "b"), Row(2, "third", "a")))
+        }
+      }
+  }
+
+  test("replacement permits reassignment and updates in an unrelated partition") {
+    withTable("target") {
+      createPartitionedTarget()
+      val (messages, snapshotId) =
+        command(sourceQuery = "SELECT 9 AS id, 'replacement' AS value, 'b' AS pt")
+          .prepare(spark)
+      val result =
+        sql("CALL sys.reassign_row_id(table => 'target', partitions => 'pt=a')").collect()
+      assert(result.head.getString(0).startsWith("Success."))
+      sql("UPDATE target SET id=8, value='concurrent' WHERE pt='a' AND id=1")
+      commit(messages, snapshotId)
+      checkAnswer(
+        sql("SELECT * FROM target"),
+        Seq(Row(8, "concurrent", "a"), Row(9, "replacement", "b"), Row(2, "third", "a")))
     }
   }
 

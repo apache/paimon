@@ -479,17 +479,22 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         }
 
         // A deletion vector has no data-file increment, but deletes every column of its rows.
-        RowRangeIndex deletedRowRanges =
+        List<SimpleFileEntry> deletedFiles =
                 rowIdConflictCheckStrategy() == DataEvolutionDmlRowIdConflictCheck.INSTANCE
-                        ? deletionVectorRowRanges(baseEntries, deltaIndexEntries)
-                        : RowRangeIndex.create(Collections.emptyList());
-        if ((conflictChecker == null || conflictChecker.isEmpty())
-                && deletedRowRanges.ranges().isEmpty()) {
+                        ? deletionVectorDataFiles(baseEntries, deltaIndexEntries)
+                        : Collections.emptyList();
+        if ((conflictChecker == null || conflictChecker.isEmpty()) && deletedFiles.isEmpty()) {
             return Optional.empty();
         }
 
+        Snapshot checkSnapshot = snapshotManager.snapshot(rowIdCheckFromSnapshot);
+        if (deletionVectorRowIdsChanged(checkSnapshot, deletedFiles)) {
+            return Optional.of(
+                    new RuntimeException(ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE));
+        }
+        RowRangeIndex deletedRowRanges = rowRangeIndex(deletedFiles, false);
         List<BinaryRow> changedPartitions = changedPartitions(deltaEntries, deltaIndexEntries);
-        Long checkNextRowId = snapshotManager.snapshot(rowIdCheckFromSnapshot).nextRowId();
+        Long checkNextRowId = checkSnapshot.nextRowId();
         checkState(
                 checkNextRowId != null,
                 "Next row id cannot be null for snapshot %s.",
@@ -528,7 +533,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         return Optional.empty();
     }
 
-    private RowRangeIndex deletionVectorRowRanges(
+    private List<SimpleFileEntry> deletionVectorDataFiles(
             List<SimpleFileEntry> baseEntries, List<IndexManifestEntry> deltaIndexEntries) {
         Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> previousFiles = new HashMap<>();
         for (IndexManifestEntry entry : deltaIndexEntries) {
@@ -558,14 +563,47 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                 }
             }
         }
-        List<Range> ranges = new ArrayList<>();
+        List<SimpleFileEntry> files = new ArrayList<>();
         for (SimpleFileEntry entry : baseEntries) {
-            Set<String> files = deletedFiles.get(Pair.of(entry.partition(), entry.bucket()));
-            if (entry.firstRowId() != null && files != null && files.contains(entry.fileName())) {
-                ranges.add(entry.nonNullRowIdRange());
+            Set<String> names = deletedFiles.get(Pair.of(entry.partition(), entry.bucket()));
+            if (entry.firstRowId() != null && names != null && names.contains(entry.fileName())) {
+                files.add(entry);
             }
         }
-        return RowRangeIndex.create(ranges);
+        return files;
+    }
+
+    private boolean deletionVectorRowIdsChanged(
+            Snapshot checkSnapshot, List<SimpleFileEntry> deletedFiles) {
+        if (deletedFiles.isEmpty()) {
+            return false;
+        }
+        // Metadata-only reassignment keeps physical files and publishes no data-file delta.
+        // Historical updates cannot be checked against the anchors' reassigned row ranges.
+        // Compare physical identities, not identifiers that may include relocated DV files.
+        Map<Pair<BinaryRow, Integer>, Map<String, Range>> currentRanges = new HashMap<>();
+        Set<String> names = new HashSet<>();
+        Set<BinaryRow> partitions = new HashSet<>();
+        for (SimpleFileEntry entry : deletedFiles) {
+            currentRanges
+                    .computeIfAbsent(
+                            Pair.of(entry.partition(), entry.bucket()), key -> new HashMap<>())
+                    .put(entry.fileName(), entry.nonNullRowIdRange());
+            names.add(entry.fileName());
+            partitions.add(entry.partition());
+        }
+        for (SimpleFileEntry entry :
+                commitScanner()
+                        .readAllEntriesFromDataFiles(
+                                checkSnapshot, new ArrayList<>(partitions), names)) {
+            Map<String, Range> files =
+                    currentRanges.get(Pair.of(entry.partition(), entry.bucket()));
+            Range current = files == null ? null : files.remove(entry.fileName());
+            if (current != null && !current.equals(entry.nonNullRowIdRange())) {
+                return true;
+            }
+        }
+        return currentRanges.values().stream().anyMatch(files -> !files.isEmpty());
     }
 
     private DeletionFile deletionFile(IndexManifestEntry entry, DeletionVectorMeta meta) {
