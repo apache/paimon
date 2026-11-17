@@ -67,7 +67,6 @@ final class ThriftCompactReader {
     }
 
     private final byte[] buf;
-    private final int offset;
     private final int limit;
     private int pos;
 
@@ -81,7 +80,6 @@ final class ThriftCompactReader {
 
     ThriftCompactReader(byte[] buf, int offset, int limit) {
         this.buf = buf;
-        this.offset = offset;
         this.limit = limit;
         this.pos = offset;
     }
@@ -299,8 +297,8 @@ final class ThriftCompactReader {
 
     /**
      * Skips a map value: a varint size, then — only when non-empty — a single byte carrying the key
-     * and value types in its two nibbles (high key, low value). The shared wire byte is decoded here
-     * into separate named values so callers never see a fused representation.
+     * and value types in its two nibbles (high key, low value). The shared wire byte is decoded
+     * here into separate named values so callers never see a fused representation.
      */
     private void skipMap() throws IOException {
         long size = readVarint();
