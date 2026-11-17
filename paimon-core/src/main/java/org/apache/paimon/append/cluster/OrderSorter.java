@@ -80,7 +80,8 @@ public class OrderSorter extends Sorter {
 
         @Override
         public InternalRow apply(InternalRow value) {
-            return keyProjection.apply(value).copy();
+            // The sort buffer serializes this view before the next projection.
+            return keyProjection.apply(value);
         }
     }
 }
