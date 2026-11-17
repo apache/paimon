@@ -49,8 +49,6 @@ public class SubmitPredictionRequest implements RESTRequest {
     private static final String FIELD_MERGE_KEY_COLUMNS = "mergeKeyColumns";
     private static final String FIELD_INSTRUCTIONS = "instructions";
     private static final String FIELD_WHERE = "where";
-    private static final String FIELD_SNAPSHOT_ID = "snapshotId";
-    private static final String FIELD_TAG_NAME = "tagName";
     private static final String FIELD_OPTIONS = "options";
 
     private final String idempotencyKey;
@@ -67,9 +65,7 @@ public class SubmitPredictionRequest implements RESTRequest {
             @Nullable @JsonProperty(FIELD_MERGE_KEY_COLUMNS) List<String> mergeKeyColumns,
             @JsonProperty(FIELD_INSTRUCTIONS) String instructions,
             @Nullable @JsonProperty(FIELD_WHERE) String where,
-            @Nullable @JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId,
-            @Nullable @JsonProperty(FIELD_TAG_NAME) String tagName,
-            @Nullable @JsonProperty(FIELD_OPTIONS) Map<String, Object> options) {
+            @Nullable @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {
         checkArgument(source != null, "source must not be null");
         checkArgument(
                 idempotencyKey == null || !idempotencyKey.trim().isEmpty(),
@@ -79,15 +75,7 @@ public class SubmitPredictionRequest implements RESTRequest {
                 idempotencyKey == null ? UUID.randomUUID().toString() : idempotencyKey;
         this.spec =
                 new PredictionSpec(
-                        name,
-                        model,
-                        inputs,
-                        mergeKeyColumns,
-                        instructions,
-                        where,
-                        snapshotId,
-                        tagName,
-                        options);
+                        name, model, inputs, mergeKeyColumns, instructions, where, options);
     }
 
     public SubmitPredictionRequest(Identifier source, PredictionSpec spec) {
@@ -100,8 +88,6 @@ public class SubmitPredictionRequest implements RESTRequest {
                 spec.mergeKeyColumns(),
                 spec.instructions(),
                 spec.where(),
-                spec.snapshotId(),
-                spec.tagName(),
                 spec.options());
     }
 
@@ -150,22 +136,8 @@ public class SubmitPredictionRequest implements RESTRequest {
         return spec.where();
     }
 
-    @Nullable
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonGetter(FIELD_SNAPSHOT_ID)
-    public Long getSnapshotId() {
-        return spec.snapshotId();
-    }
-
-    @Nullable
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonGetter(FIELD_TAG_NAME)
-    public String getTagName() {
-        return spec.tagName();
-    }
-
     @JsonGetter(FIELD_OPTIONS)
-    public Map<String, Object> getOptions() {
+    public Map<String, String> getOptions() {
         return spec.options();
     }
 

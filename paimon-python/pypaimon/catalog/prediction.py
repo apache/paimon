@@ -17,10 +17,11 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import optional_json_field
+from pypaimon.common.options.core_options import CoreOptions
 
 
 class PredictionState(str, Enum):
@@ -113,9 +114,7 @@ class PredictionSpec:
     merge_key_columns: List[str] = field(default_factory=list)
     name: Optional[str] = None
     where: Optional[str] = None
-    snapshot_id: Optional[int] = None
-    tag_name: Optional[str] = None
-    options: Dict[str, Any] = field(default_factory=dict)
+    options: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         _nonblank(self.model, "model")
@@ -123,21 +122,25 @@ class PredictionSpec:
         for value, name in (
                 (self.name, "name"),
                 (self.where, "where"),
-                (self.tag_name, "tag_name"),
         ):
             if value is not None:
                 _nonblank(value, name)
-        if self.snapshot_id is not None and (
-                type(self.snapshot_id) is not int or self.snapshot_id <= 0):
-            raise ValueError("snapshot_id must be a positive integer")
-        if self.snapshot_id is not None and self.tag_name is not None:
-            raise ValueError("snapshot_id and tag_name are mutually exclusive")
         self.inputs = _copy_string_mapping(self.inputs, "inputs", True)
         self.merge_key_columns = _copy_string_list(
             self.merge_key_columns, "merge_key_columns")
-        if not isinstance(self.options, dict):
-            raise ValueError("options must be a mapping")
-        self.options = dict(self.options)
+        self.options = _copy_string_mapping(self.options, "options", False)
+        snapshot_id = self.options.get(CoreOptions.SCAN_SNAPSHOT_ID.key())
+        tag_name = self.options.get(CoreOptions.SCAN_TAG_NAME.key())
+        if snapshot_id is not None:
+            try:
+                if int(snapshot_id) <= 0:
+                    raise ValueError
+            except ValueError:
+                raise ValueError(
+                    "scan.snapshot-id must be a positive integer")
+        if snapshot_id is not None and tag_name is not None:
+            raise ValueError(
+                "scan.snapshot-id and scan.tag-name are mutually exclusive")
 
 
 @dataclass

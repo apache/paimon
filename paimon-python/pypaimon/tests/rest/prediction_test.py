@@ -109,6 +109,16 @@ class PredictionTest(unittest.TestCase):
         self.assertEqual(
             {"database": "quality", "table": "clips"}, body["source"])
         self.assertNotIn("snapshotId", body)
+        self.assertNotIn("tagName", body)
+
+        versioned = SubmitPredictionRequest.from_spec(
+            Identifier.create("quality", "clips"),
+            _spec(options={"scan.tag-name": "training"}),
+        )
+        versioned_body = json.loads(JSON.to_json(versioned))
+        self.assertEqual(
+            {"scan.tag-name": "training"}, versioned_body["options"])
+        self.assertNotIn("tagName", versioned_body)
 
         keyed = SubmitPredictionRequest.from_spec(
             Identifier.create("quality", "clips"),
@@ -190,8 +200,12 @@ class PredictionTest(unittest.TestCase):
             dict(merge_key_columns=["id", "id"]),
             dict(merge_key_columns="id"),
             dict(instructions=" "),
-            dict(snapshot_id=0),
-            dict(snapshot_id=1, tag_name="v1"),
+            dict(options={"scan.snapshot-id": "0"}),
+            dict(options={
+                "scan.snapshot-id": "1",
+                "scan.tag-name": "v1",
+            }),
+            dict(options={"parallelism": 2}),
         ]
         for changes in invalid:
             with self.subTest(changes=changes), self.assertRaises(ValueError):
@@ -223,8 +237,7 @@ class PredictionTest(unittest.TestCase):
         self.assertIsInstance(waiter, PredictionWait)
         self.assertEqual("prediction-1", waiter.prediction_id)
         sent = catalog.submit_prediction.call_args[0][1]
-        self.assertEqual(7, sent.snapshot_id)
-        self.assertIsNone(sent.tag_name)
+        self.assertEqual({"scan.snapshot-id": "7"}, sent.options)
         self.assertEqual([], sent.merge_key_columns)
         raw.new_read_builder.assert_not_called()
 

@@ -89,9 +89,7 @@ class SubmitPredictionRequest(RESTRequest):
     idempotency_key: Optional[str] = optional_json_field(
         "idempotencyKey", "non_null")
     where: Optional[str] = optional_json_field("where", "non_null")
-    snapshot_id: Optional[int] = optional_json_field("snapshotId", "non_null")
-    tag_name: Optional[str] = optional_json_field("tagName", "non_null")
-    options: Dict[str, Any] = field(default_factory=dict)
+    options: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         for value, field_name in (
@@ -102,7 +100,6 @@ class SubmitPredictionRequest(RESTRequest):
         for value, field_name in (
                 (self.name, "name"),
                 (self.where, "where"),
-                (self.tag_name, "tag_name"),
         ):
             if value is not None:
                 _nonblank(value, field_name)
@@ -110,18 +107,20 @@ class SubmitPredictionRequest(RESTRequest):
             self.idempotency_key = uuid.uuid4().hex
         else:
             _nonblank(self.idempotency_key, "idempotency_key")
-        if self.snapshot_id is not None and (
-                type(self.snapshot_id) is not int or self.snapshot_id <= 0):
-            raise ValueError("snapshot_id must be a positive integer")
-        if self.snapshot_id is not None and self.tag_name is not None:
-            raise ValueError("snapshot_id and tag_name are mutually exclusive")
         self.inputs = _copy_string_mapping(self.inputs, "inputs", True)
         if self.merge_key_columns is not None:
             self.merge_key_columns = _copy_string_list(
                 self.merge_key_columns, "merge_key_columns")
-        if not isinstance(self.options, dict):
-            raise ValueError("options must be a mapping")
-        self.options = dict(self.options)
+        self.options = _copy_string_mapping(self.options, "options", False)
+        PredictionSpec(
+            model=self.model,
+            inputs=self.inputs,
+            instructions=self.instructions,
+            merge_key_columns=self.merge_key_columns or [],
+            name=self.name,
+            where=self.where,
+            options=self.options,
+        )
 
     @classmethod
     def from_spec(
@@ -135,8 +134,6 @@ class SubmitPredictionRequest(RESTRequest):
             instructions=spec.instructions,
             merge_key_columns=spec.merge_key_columns or None,
             where=spec.where,
-            snapshot_id=spec.snapshot_id,
-            tag_name=spec.tag_name,
             options=spec.options,
         )
 

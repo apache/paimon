@@ -120,8 +120,6 @@ class RESTCatalogPredictionTest {
                 null,
                 "Classify",
                 null,
-                null,
-                null,
                 Collections.emptyMap());
     }
 

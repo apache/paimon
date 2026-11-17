@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.Experimental;
 
 import javax.annotation.Nullable;
@@ -30,7 +31,12 @@ import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Provider-neutral specification for an asynchronous prediction over a table snapshot. */
+/**
+ * Provider-neutral specification for an asynchronous prediction over a table snapshot.
+ *
+ * <p>{@code options} uses Paimon dynamic table option names. Time travel uses {@code
+ * scan.snapshot-id} or {@code scan.tag-name}.
+ */
 @Experimental
 public class PredictionSpec {
 
@@ -40,9 +46,7 @@ public class PredictionSpec {
     private final List<String> mergeKeyColumns;
     private final String instructions;
     private final @Nullable String where;
-    private final @Nullable Long snapshotId;
-    private final @Nullable String tagName;
-    private final Map<String, Object> options;
+    private final Map<String, String> options;
 
     public PredictionSpec(
             @Nullable String name,
@@ -51,30 +55,26 @@ public class PredictionSpec {
             @Nullable List<String> mergeKeyColumns,
             String instructions,
             @Nullable String where,
-            @Nullable Long snapshotId,
-            @Nullable String tagName,
-            @Nullable Map<String, Object> options) {
+            @Nullable Map<String, String> options) {
         checkOptionalNonBlank(name, "name");
         checkNonBlank(model, "model");
         checkNonBlank(instructions, "instructions");
         checkOptionalNonBlank(where, "where");
-        checkOptionalNonBlank(tagName, "tagName");
-        checkArgument(snapshotId == null || snapshotId > 0, "snapshotId must be positive");
-        checkArgument(
-                snapshotId == null || tagName == null,
-                "snapshotId and tagName are mutually exclusive");
         this.name = name;
         this.model = model;
         this.inputs = copyStringMap(inputs, "inputs", true);
         this.mergeKeyColumns = copyOptionalStringList(mergeKeyColumns, "mergeKeyColumns");
         this.instructions = instructions;
         this.where = where;
-        this.snapshotId = snapshotId;
-        this.tagName = tagName;
         this.options =
-                options == null
-                        ? Collections.emptyMap()
-                        : Collections.unmodifiableMap(new LinkedHashMap<>(options));
+                options == null ? Collections.emptyMap() : copyStringMap(options, "options", false);
+        CoreOptions coreOptions = new CoreOptions(this.options);
+        Long snapshotId = coreOptions.scanSnapshotId();
+        String tagName = coreOptions.scanTagName();
+        checkArgument(snapshotId == null || snapshotId > 0, "scan.snapshot-id must be positive");
+        checkArgument(
+                snapshotId == null || tagName == null,
+                "scan.snapshot-id and scan.tag-name are mutually exclusive");
     }
 
     @Nullable
@@ -103,17 +103,7 @@ public class PredictionSpec {
         return where;
     }
 
-    @Nullable
-    public Long snapshotId() {
-        return snapshotId;
-    }
-
-    @Nullable
-    public String tagName() {
-        return tagName;
-    }
-
-    public Map<String, Object> options() {
+    public Map<String, String> options() {
         return options;
     }
 

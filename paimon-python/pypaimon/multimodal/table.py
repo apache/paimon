@@ -123,6 +123,9 @@ class MultimodalTable:
             options=None):
         """Submit an asynchronous prediction without reading rows locally.
 
+        ``options`` uses Paimon dynamic table option names. Time travel uses
+        ``scan.snapshot-id`` or ``scan.tag-name``.
+
         The returned waiter exposes the prediction ID immediately. Calling
         ``result()`` is optional and intended for interactive clients; durable
         workflows should persist the ID and observe the prediction
@@ -137,15 +140,30 @@ class MultimodalTable:
                 "Prediction requires a Paimon file store table")
         table_options = self.raw_table.options.options.to_map()
         allowed = {"scan.snapshot-id", "scan.tag-name"}
+        prediction_options = dict(options or {})
         unsupported = [
             key for key in table_options
             if (key.startswith("scan.") or key.startswith("incremental-"))
             and key not in allowed
         ]
+        unsupported.extend([
+            key for key in prediction_options
+            if (key.startswith("scan.") or key.startswith("incremental-"))
+            and key not in allowed
+        ])
         if unsupported:
             raise ValueError(
                 "Prediction does not support scan options: {}".format(
                     unsupported))
+        for key in allowed:
+            table_value = table_options.get(key)
+            if table_value is None:
+                continue
+            request_value = prediction_options.get(key)
+            if request_value is not None and request_value != table_value:
+                raise ValueError(
+                    "Conflicting prediction option: {}".format(key))
+            prediction_options[key] = table_value
         spec = PredictionSpec(
             name=name,
             model=model,
@@ -154,9 +172,7 @@ class MultimodalTable:
             merge_key_columns=(
                 [] if merge_key_columns is None else merge_key_columns),
             where=where,
-            snapshot_id=self.raw_table.options.scan_snapshot_id(),
-            tag_name=self.raw_table.options.scan_tag_name(),
-            options=options or {},
+            options=prediction_options,
         )
         prediction = self.catalog.submit_prediction(
             self.raw_table.identifier, spec)

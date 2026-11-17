@@ -4752,17 +4752,13 @@ components:
         where:
           type: string
           minLength: 1
-        snapshotId:
-          type: integer
-          format: int64
-          minimum: 1
-        tagName:
-          type: string
-          minLength: 1
         options:
           type: object
-          additionalProperties: true
-      description: snapshotId and tagName are mutually exclusive.
+          additionalProperties:
+            type: string
+          description: >-
+            Paimon dynamic options. Use scan.snapshot-id or scan.tag-name for time
+            travel; the two options are mutually exclusive.
     GetPredictionResponse:
       type: object
       additionalProperties: false
