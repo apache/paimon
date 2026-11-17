@@ -321,8 +321,10 @@ the shard size and the backend integer limit. For example, Top-K 10 normally req
 candidates. Batch execution may split large inputs into memory-bounded chunks; every query
 still runs ANN once. Post-filtering may return fewer than Top-K rows, including zero even
 when matches exist outside the candidates. Increasing the factor trades more ANN/scalar
-work for more candidates. There are no retries or automatic raw scans of indexed ranges.
-Raw work outside vector coverage still follows the configured index search modes.
+work for more candidates. Post-filtering does not retry or scan raw data to fill Top-K.
+Raw work outside vector coverage still follows the configured index search modes. When a
+scalar index can evaluate the predicate but covers only some rows, scalar `full`/`detail`
+modes also plan raw scans for its uncovered rows.
 
 Build a BTree index for frequently used metadata filters, such as `category`, `tenant_id`,
 or `event_time`, to restrict candidate row IDs before ANN.

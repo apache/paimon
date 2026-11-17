@@ -163,8 +163,8 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
     /**
      * Prefer an exact scalar pre-filter. If it cannot be evaluated, retain index work for one ANN
-     * query followed by exact candidate filtering. Only automatically planned scalar gaps can be
-     * removed from raw work; explicit raw sources retain their requested exact scoring.
+     * query followed by exact candidate filtering. Raw sources retain their requested exact
+     * scoring.
      */
     protected void prepareSplits(
             List<? extends VectorSearchSplit> splits,
@@ -182,28 +182,6 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             return;
         }
         postFiltering = true;
-        List<Range> indexed = new ArrayList<>();
-        for (IndexVectorSearchSplit split : indexSplits) {
-            indexed.add(new Range(split.rowRangeStart(), split.rowRangeEnd()));
-        }
-        List<RawVectorSearchSplit> retained = new ArrayList<>();
-        for (RawVectorSearchSplit raw : rawSplits) {
-            if (!raw.automatic()) {
-                retained.add(raw);
-                continue;
-            }
-            List<Range> ranges = new ArrayList<>();
-            for (Range range : raw.rowRanges()) {
-                ranges.addAll(range.exclude(indexed));
-            }
-            if (!ranges.isEmpty()) {
-                retained.add(
-                        new RawVectorSearchSplit(
-                                ranges, raw.scalarIndexFiles(), raw.indexType(), true));
-            }
-        }
-        rawSplits.clear();
-        rawSplits.addAll(retained);
     }
 
     protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {

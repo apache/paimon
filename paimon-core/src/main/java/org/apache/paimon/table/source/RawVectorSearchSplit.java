@@ -46,29 +46,15 @@ public class RawVectorSearchSplit extends VectorSearchSplit {
 
     private final List<Range> rowRanges;
     @Nullable private final String indexType;
-    private final boolean automatic;
     private transient List<IndexFileMeta> scalarIndexFiles;
 
     public RawVectorSearchSplit(
             List<Range> rowRanges,
             List<IndexFileMeta> scalarIndexFiles,
             @Nullable String indexType) {
-        this(rowRanges, scalarIndexFiles, indexType, false);
-    }
-
-    RawVectorSearchSplit(
-            List<Range> rowRanges,
-            List<IndexFileMeta> scalarIndexFiles,
-            @Nullable String indexType,
-            boolean automatic) {
         this.rowRanges = Collections.unmodifiableList(new ArrayList<>(rowRanges));
         this.scalarIndexFiles = Collections.unmodifiableList(new ArrayList<>(scalarIndexFiles));
         this.indexType = indexType;
-        this.automatic = automatic;
-    }
-
-    boolean automatic() {
-        return automatic;
     }
 
     public List<Range> rowRanges() {
@@ -110,15 +96,14 @@ public class RawVectorSearchSplit extends VectorSearchSplit {
             return false;
         }
         RawVectorSearchSplit that = (RawVectorSearchSplit) o;
-        return automatic == that.automatic
-                && Objects.equals(rowRanges, that.rowRanges)
+        return Objects.equals(rowRanges, that.rowRanges)
                 && Objects.equals(scalarIndexFiles, that.scalarIndexFiles)
                 && Objects.equals(indexType, that.indexType);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(rowRanges, scalarIndexFiles, indexType, automatic);
+        return Objects.hash(rowRanges, scalarIndexFiles, indexType);
     }
 
     @Override
