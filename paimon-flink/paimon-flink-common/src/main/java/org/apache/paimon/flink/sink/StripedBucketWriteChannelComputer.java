@@ -125,13 +125,19 @@ public class StripedBucketWriteChannelComputer extends RowDataChannelComputer {
             stripe = keyStripe(extractor.trimmedPrimaryKey());
         } else {
             // Round-robin per bucket so a bucket spreads across its writers even when the bucket
-            // key
-            // has low cardinality (a hash of the bucket key would pin all such rows to one writer).
+            // key has low cardinality (a hash of the bucket key would pin all such rows to one
+            // writer).
             stripe = Math.floorMod(stripeCounters[bucket]++, numStripes);
         }
         // Widen to long so that bucket * numStripes cannot overflow for large bucket counts
         long bucketSlot = (long) bucket * numStripes + stripe;
-        int startChannel = ChannelComputer.startChannel(partition, numChannels);
+        // Multi-stripe append omits the partition rotation: startChannel(partition) would advance
+        // in step with the shared per-bucket counter on interleaved partitions and cancel the
+        // round-robin. Single-stripe and primary-key routing keep the rotation.
+        int startChannel =
+                (!hasPrimaryKey && numStripes > 1)
+                        ? 0
+                        : ChannelComputer.startChannel(partition, numChannels);
         return (int) ((startChannel + bucketSlot) % numChannels);
     }
 

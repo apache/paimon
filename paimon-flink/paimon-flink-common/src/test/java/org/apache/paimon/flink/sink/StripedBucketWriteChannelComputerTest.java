@@ -372,6 +372,39 @@ public class StripedBucketWriteChannelComputerTest {
         }
     }
 
+    @Test
+    public void testAppendPartitionInterleavingDoesNotCancelRoundRobin() throws Exception {
+        int numBuckets = 1;
+        int numStripes = 2;
+        int numChannels = 2;
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "k", "v"});
+        TableSchema schema =
+                createSchema(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Collections.emptyList(),
+                        numBuckets,
+                        Collections.singletonMap("bucket-key", "k"));
+
+        StripedBucketWriteChannelComputer computer =
+                new StripedBucketWriteChannelComputer(schema, numStripes);
+        computer.setup(numChannels);
+
+        // alternate two partitions of the same bucket with a fixed bucket key; the partition
+        // rotation must not cancel the per-bucket round-robin and pin every row to one channel
+        Set<Integer> channels = new HashSet<>();
+        for (int i = 0; i < 8000; i++) {
+            InternalRow row = GenericRow.of(i % 2, 7, i);
+            int channel = computer.channel(row);
+            assertThat(channel).isBetween(0, numChannels - 1);
+            channels.add(channel);
+        }
+        assertThat(channels).hasSize(numChannels);
+    }
+
     private Map<Integer, Set<Integer>> groupByBucket(
             TableSchema schema, List<InternalRow> input, int writesPerBucket, int numChannels) {
         StripedBucketWriteChannelComputer computer =
