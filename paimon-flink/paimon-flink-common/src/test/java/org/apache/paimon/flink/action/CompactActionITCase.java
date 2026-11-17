@@ -25,10 +25,13 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaChange;
@@ -56,6 +59,8 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -78,6 +83,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.utils.CommonTestUtils.waitUtil;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /** IT cases for {@link CompactAction}. */
 public class CompactActionITCase extends CompactActionITCaseBase {
@@ -1043,6 +1049,100 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         }
 
         assertThat(value).isEqualTo(30000);
+    }
+
+    @ParameterizedTest(name = "useSql = {0}")
+    @ValueSource(booleans = {true, false})
+    @Timeout(60)
+    public void testDataEvolutionTableCompactWithPartitionIdleTime(boolean useSql)
+            throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+        tableOptions.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        tableOptions.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        DataFileMetaSerializer serializer = new DataFileMetaSerializer();
+        int creationTimeIndex = DataFileMeta.SCHEMA.getFieldIndex(DataFileMeta.CREATION_TIME);
+        int commitId = 0;
+        // Write each partition consecutively so its two files have adjacent row IDs.
+        for (int k = 1; k <= 3; k++) {
+            for (int i = 0; i < 2; i++) {
+                write.write(rowData(k, i, 0, BinaryString.fromString("test")));
+                List<CommitMessage> messages = write.prepareCommit(true, commitId);
+                // Only partition 2 has a recently created file in the planning snapshot.
+                if (k != 2 || i == 0) {
+                    for (CommitMessage message : messages) {
+                        ((CommitMessageImpl) message)
+                                .newFilesIncrement()
+                                .newFiles()
+                                .replaceAll(
+                                        file -> {
+                                            GenericRow meta = (GenericRow) serializer.toRow(file);
+                                            meta.setField(
+                                                    creationTimeIndex,
+                                                    Timestamp.fromEpochMillis(0));
+                                            return serializer.fromRow(meta);
+                                        });
+                    }
+                }
+                commit.commit(commitId++, messages);
+            }
+        }
+
+        if (useSql) {
+            TableEnvironment tEnv =
+                    tableEnvironmentBuilder()
+                            .batchMode()
+                            .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                            .build();
+            tEnv.executeSql(
+                    String.format(
+                            "CREATE CATALOG PAIMON WITH ('type' = 'paimon', 'warehouse' = '%s')",
+                            warehouse));
+            tEnv.useCatalog("PAIMON");
+            String compactSql =
+                    "CALL sys.compact(`table` => '%s.%s', partition_idle_time => '1h', `where` => '%s')";
+            tEnv.executeSql(String.format(compactSql, database, tableName, "k <= 2"));
+            tEnv.executeSql(String.format(compactSql, database, tableName, "k = 2"));
+        } else {
+            CompactAction action =
+                    createAction(
+                            CompactAction.class,
+                            "compact",
+                            "--warehouse",
+                            warehouse,
+                            "--database",
+                            database,
+                            "--table",
+                            tableName,
+                            "--partition",
+                            "k=1",
+                            "--partition",
+                            "k=2",
+                            "--partition_idle_time",
+                            "1h");
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().batchMode().build();
+            action.withStreamExecutionEnvironment(env).build();
+
+            // The new file must not affect eligibility for the snapshot selected at build time.
+            write.write(rowData(1, 2, 0, BinaryString.fromString("test")));
+            commit.commit(commitId, write.prepareCommit(true, commitId));
+            env.execute();
+        }
+
+        checkLatestSnapshot(table, useSql ? 7 : 8, Snapshot.CommitKind.COMPACT);
+        assertThat(table.newSnapshotReader().partitionEntries())
+                .extracting(entry -> entry.partition().getInt(0), PartitionEntry::fileCount)
+                .containsExactlyInAnyOrder(tuple(1, useSql ? 1L : 2L), tuple(2, 2L), tuple(3, 2L));
     }
 
     @Test
